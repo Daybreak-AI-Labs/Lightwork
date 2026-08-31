@@ -906,6 +906,25 @@ def unseal_to_text(blob: bytes) -> str:
     return unseal(blob).decode("utf-8", errors="replace")
 
 
+def encrypt(text: str) -> bytes:
+    """Encrypt one UTF-8 field using the active at-rest/tenant key boundary.
+
+    This small compatibility surface is intentionally typed and delegates to
+    :func:`seal_text`; it does not add a second ciphertext format or weaken the
+    fail-closed behavior of :func:`seal`.
+    """
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    return seal_text(text)
+
+
+def decrypt(blob: bytes) -> str:
+    """Decrypt one field produced by :func:`encrypt` as UTF-8 text."""
+    if not isinstance(blob, bytes):
+        raise TypeError("blob must be bytes")
+    return unseal_to_text(blob)
+
+
 # --- TEXT-column helpers ---------------------------------------------------
 # Seal a string into a single TEXT-storable token so a sensitive SQLite column
 # (TEXT affinity) can hold ciphertext with no schema change. A value without the

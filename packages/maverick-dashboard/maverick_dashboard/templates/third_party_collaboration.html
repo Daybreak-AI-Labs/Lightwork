@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Third-Party Collaboration - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .tpc-grid { display:grid; grid-template-columns:minmax(20rem,1fr) minmax(24rem,2fr);
+              gap:var(--space-4); }
+  .tpc-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .tpc-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .tpc-stack textarea { min-height:19rem; font-family:var(--font-mono); }
+  .tpc-output { min-height:24rem; max-height:54rem; overflow:auto; white-space:pre-wrap;
+                word-break:break-word; }
+  .tpc-warning { border:2px solid var(--warning); padding:var(--space-3);
+                 border-radius:8px; background:var(--surface-2); }
+  .tpc-danger { border-color:var(--danger); }
+  @media (max-width:900px) { .tpc-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Third-Party Collaboration</h1>
+<p>Issue assessment invitations, govern vendor drafts and final submissions,
+  rotate or revoke credentials, request follow-up, and preserve retention evidence.</p>
+<div class="tpc-warning">
+  <strong>Invitation credentials are disclosed once.</strong> Copy the returned
+  credential into an approved delivery channel. Lightwork does not email it,
+  prove the respondent's real-world identity, upload document bytes, run malware
+  scans, or independently verify respondent attestations on this surface.
+</div>
+
+{% if not third_party_collaboration_enabled %}
+<section class="panel">
+  <h2>Collaboration portal disabled</h2>
+  <p>Enable the third-party parent, lifecycle, and
+    <code>[third_party_management.lifecycle.portal]</code> gates explicitly.
+    The external portal also requires a deployment-owned public-reference
+    resolver and rate limiter.</p>
+</section>
+{% else %}
+<p><button class="btn" id="tpc-load-status" type="button">Load status</button>
+  <button class="btn" id="tpc-list" type="button">List invitations</button></p>
+<div class="tpc-grid">
+  <section class="panel tpc-stack">
+    <h2>Governed operator workbench</h2>
+    <p>Tenant and actor come only from the authenticated dashboard session.
+      Unknown fields, raw files, credentials, provider decisions, and scoring
+      rules are rejected.</p>
+    <label>Operation
+      <select id="tpc-operation">
+        <option value="issue" data-method="POST" data-path="/invitations">Issue invitation</option>
+        <option value="get" data-method="GET" data-path="/invitations/{invitation_id}">Get invitation</option>
+        <option value="rotate" data-method="POST" data-path="/invitations/{invitation_id}/rotate">Rotate credential</option>
+        <option value="revoke" data-method="POST" data-path="/invitations/{invitation_id}/revoke">Revoke invitation</option>
+        <option value="follow-up" data-method="POST" data-path="/invitations/{invitation_id}/follow-up">Request follow-up</option>
+        <option value="reopen" data-method="POST" data-path="/invitations/{invitation_id}/follow-up/reopen">Reopen follow-up</option>
+        <option value="legal-hold" data-method="POST" data-path="/invitations/{invitation_id}/legal-hold">Set legal hold</option>
+        <option value="purge" data-method="POST" data-path="/purge">Purge expired retained payloads</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Verify integrity</option>
+      </select>
+    </label>
+    <label>Path values as JSON
+      <input class="input" id="tpc-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="tpc-body">{}</textarea>
+    </label>
+    <div class="tpc-warning tpc-danger">
+      <label><input id="tpc-confirm" type="checkbox">
+        I reviewed the exact assessment, respondent assignment, question scope,
+        revision, retention, notice, artifact policy, and requested state change.</label>
+    </div>
+    <button class="btn btn--primary" id="tpc-submit" type="button">Run operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <p class="muted">A returned invitation credential is sensitive and cannot be
+      recovered from Lightwork after this response.</p>
+    <pre class="tpc-output" id="tpc-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/third-party/collaboration";
+  var operation = document.getElementById("tpc-operation");
+  var pathValues = document.getElementById("tpc-path-values");
+  var body = document.getElementById("tpc-body");
+  var confirmation = document.getElementById("tpc-confirm");
+  var output = document.getElementById("tpc-output");
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() { return operation.options[operation.selectedIndex]; }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      if (typeof values[key] !== "string" || !values[key]) {
+        throw new Error("Missing string path value: " + key);
+      }
+      return encodeURIComponent(values[key]);
+    });
+  }
+  function rejectsAuthoritySelectors(payload) {
+    return ["tenant", "tenant_id", "actor", "actor_ref", "token", "credential",
+            "provider_decision", "risk_score", "risk_rules", "content", "bytes"]
+      .some(function (key) { return Object.prototype.hasOwnProperty.call(payload, key); });
+  }
+  async function run(method, path, payload) {
+    var options = {method:method, headers:{"Accept":"application/json"}, cache:"no-store"};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var text = await response.text();
+    var result;
+    try { result = text ? JSON.parse(text) : {}; } catch (_error) { result = {detail:text}; }
+    show({status:response.status, ok:response.ok, result:result});
+  }
+  document.getElementById("tpc-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  document.getElementById("tpc-list").addEventListener("click", function () {
+    run("GET", "/invitations?limit=100", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", function () { confirmation.checked = false; });
+  document.getElementById("tpc-submit").addEventListener("click", function () {
+    try {
+      var route = selectedRoute();
+      var values = JSON.parse(pathValues.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      if (rejectsAuthoritySelectors(payload)) {
+        throw new Error("Tenant, actor, credential, provider decision, score, rules, and raw bytes are never accepted.");
+      }
+      if (route.dataset.method !== "GET" && !confirmation.checked) {
+        throw new Error("Confirm the governed state change before continuing.");
+      }
+      run(route.dataset.method, buildPath(route.dataset.path, values), payload)
+        .catch(function (error) { show(String(error)); });
+    } catch (error) { show(String(error)); }
+  });
+}());
+</script>
+{% endif %}
+{% endblock %}

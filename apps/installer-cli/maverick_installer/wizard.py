@@ -15,6 +15,7 @@ v0.1.1 additions (council UX feedback):
   - Preflight: Python version, write perms, optional docker check
   - API key validation: pings Anthropic with the entered key before save
 """
+
 from __future__ import annotations
 
 import os
@@ -49,27 +50,37 @@ console = Console()
 
 # Channel catalog: (id, label, env_vars_needed)
 CHANNELS: list[tuple[str, str, list[str]]] = [
-    ("telegram", "Telegram bot (free, easiest)",        ["TELEGRAM_BOT_TOKEN"]),
-    ("discord",  "Discord bot (Gateway WS)",            ["DISCORD_BOT_TOKEN"]),
-    ("slack",    "Slack (Socket Mode)",                 ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]),
-    ("signal",   "Signal (via signal-cli)",             []),
-    ("email",    "Email (IMAP/SMTP, stdlib only)",      ["EMAIL_USER", "EMAIL_APP_PASSWORD"]),
-    ("matrix",   "Matrix (federated)",                  ["MATRIX_ACCESS_TOKEN"]),
-    ("bluesky",  "Bluesky (AT Protocol)",               ["BLUESKY_HANDLE", "BLUESKY_PASSWORD"]),
-    ("mastodon", "Mastodon (any instance)",             ["MASTODON_ACCESS_TOKEN"]),
-    ("irc",      "IRC (channels + DMs)",                 []),
+    ("telegram", "Telegram bot (free, easiest)", ["TELEGRAM_BOT_TOKEN"]),
+    ("discord", "Discord bot (Gateway WS)", ["DISCORD_BOT_TOKEN"]),
+    ("slack", "Slack (Socket Mode)", ["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]),
+    ("signal", "Signal (via signal-cli)", []),
+    ("email", "Email (IMAP/SMTP, stdlib only)", ["EMAIL_USER", "EMAIL_APP_PASSWORD"]),
+    ("matrix", "Matrix (federated)", ["MATRIX_ACCESS_TOKEN"]),
+    ("bluesky", "Bluesky (AT Protocol)", ["BLUESKY_HANDLE", "BLUESKY_PASSWORD"]),
+    ("mastodon", "Mastodon (any instance)", ["MASTODON_ACCESS_TOKEN"]),
+    ("irc", "IRC (channels + DMs)", []),
     # Voice API key is provider-specific (VAPI/RETELL/BLAND), resolved in the
     # voice block below; only the webhook token is static here.
-    ("voice",    "Voice (Vapi/Retell/Bland)",            ["VAPI_WEBHOOK_TOKEN"]),
-    ("whatsapp", "WhatsApp (Twilio, needs webhook)",    ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]),
-    ("whatsapp_cloud", "WhatsApp (Meta Cloud API, needs webhook)",
-     ["WHATSAPP_CLOUD_ACCESS_TOKEN", "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
-      "WHATSAPP_CLOUD_VERIFY_TOKEN", "WHATSAPP_CLOUD_APP_SECRET"]),
-    ("sms",      "SMS (Twilio, needs webhook)",         ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]),
-    ("imessage", "iMessage (macOS only)",               []),
-    ("threads",  "Threads (Meta, polling)",              ["THREADS_ACCESS_TOKEN", "THREADS_USER_ID"]),
-    ("rcs",      "RCS (Google RBM, approved agents only)",
-     ["RCS_AGENT_ID", "RCS_SERVICE_ACCOUNT_JSON", "RCS_WEBHOOK_TOKEN"]),
+    ("voice", "Voice (Vapi/Retell/Bland)", ["VAPI_WEBHOOK_TOKEN"]),
+    ("whatsapp", "WhatsApp (Twilio, needs webhook)", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]),
+    (
+        "whatsapp_cloud",
+        "WhatsApp (Meta Cloud API, needs webhook)",
+        [
+            "WHATSAPP_CLOUD_ACCESS_TOKEN",
+            "WHATSAPP_CLOUD_PHONE_NUMBER_ID",
+            "WHATSAPP_CLOUD_VERIFY_TOKEN",
+            "WHATSAPP_CLOUD_APP_SECRET",
+        ],
+    ),
+    ("sms", "SMS (Twilio, needs webhook)", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]),
+    ("imessage", "iMessage (macOS only)", []),
+    ("threads", "Threads (Meta, polling)", ["THREADS_ACCESS_TOKEN", "THREADS_USER_ID"]),
+    (
+        "rcs",
+        "RCS (Google RBM, approved agents only)",
+        ["RCS_AGENT_ID", "RCS_SERVICE_ACCOUNT_JSON", "RCS_WEBHOOK_TOKEN"],
+    ),
 ]
 
 
@@ -79,8 +90,14 @@ CHANNELS: list[tuple[str, str, list[str]]] = [
 # and imessage is macOS-only and needs Full Disk Access. Offering them in
 # the default checkbox is dishonest: users pick them, then hit a dead end.
 # Gate them behind an explicit opt-in (see pick_channels).
-EXPERIMENTAL_CHANNELS: set[str] = {"whatsapp", "whatsapp_cloud", "sms", "imessage",
-                                   "threads", "rcs"}
+EXPERIMENTAL_CHANNELS: set[str] = {
+    "whatsapp",
+    "whatsapp_cloud",
+    "sms",
+    "imessage",
+    "threads",
+    "rcs",
+}
 
 
 # Ordered advanced-flow steps, mirroring the pick_* sequence in run().
@@ -165,6 +182,7 @@ def _safe_float(s: str, *, default: float) -> float:
 
 # ---------- prompt primitives ----------
 
+
 def _ask(question: Any) -> Any:
     """Run a questionary prompt, treating a ``None`` answer as an abort.
 
@@ -186,7 +204,7 @@ def _q_select(message: str, choices: list[str], default: str | None = None) -> s
         print(message)
         for i, c in enumerate(choices):
             marker = "*" if default == c else " "
-            print(f"  {marker} {i+1}) {c}")
+            print(f"  {marker} {i + 1}) {c}")
         while True:
             choice = input("> ").strip()
             if not choice and default:
@@ -220,7 +238,7 @@ def _q_checkbox(message: str, choices: list[str], default: list[str] | None = No
         print(f"{message} (comma-separated numbers, blank = none)")
         for i, c in enumerate(choices):
             marker = "*" if default and c in default else " "
-            print(f"  {marker} {i+1}) {c}")
+            print(f"  {marker} {i + 1}) {c}")
         raw = input("> ").strip()
         if not raw:
             return default or []
@@ -233,7 +251,8 @@ def _q_checkbox(message: str, choices: list[str], default: list[str] | None = No
     default_set = set(default or [])
     q_choices: Any = (
         [questionary.Choice(c, checked=c in default_set) for c in choices]
-        if default_set else choices
+        if default_set
+        else choices
     )
     return _ask(questionary.checkbox(message, choices=q_choices))
 
@@ -248,6 +267,7 @@ def _q_confirm(message: str, default: bool = True) -> bool:
 
 
 # ---------- preflight ----------
+
 
 def preflight() -> bool:
     """Check the environment before asking any questions.
@@ -281,7 +301,9 @@ def preflight() -> bool:
         try:
             subprocess.run(
                 ["docker", "version"],
-                capture_output=True, timeout=5, check=True,
+                capture_output=True,
+                timeout=5,
+                check=True,
             )
             console.print("[green]✓[/green] Docker is running")
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -291,14 +313,14 @@ def preflight() -> bool:
             )
     else:
         console.print(
-            "[yellow]![/yellow] Docker not installed "
-            "(only matters if you pick the docker sandbox)"
+            "[yellow]![/yellow] Docker not installed (only matters if you pick the docker sandbox)"
         )
 
     return all_ok
 
 
 # ---------- validators ----------
+
 
 def _validate_anthropic_key(key: str) -> tuple[bool, str]:
     """Ping Anthropic with the key. Returns (ok, message).
@@ -364,25 +386,33 @@ def _validate_openai_compat_key(key: str, base_url: str, label: str) -> tuple[bo
 
 def _validate_moonshot_key(key: str) -> tuple[bool, str]:
     return _validate_openai_compat_key(
-        key, "https://api.moonshot.ai/v1", "Moonshot",
+        key,
+        "https://api.moonshot.ai/v1",
+        "Moonshot",
     )
 
 
 def _validate_deepseek_key(key: str) -> tuple[bool, str]:
     return _validate_openai_compat_key(
-        key, "https://api.deepseek.com/v1", "DeepSeek",
+        key,
+        "https://api.deepseek.com/v1",
+        "DeepSeek",
     )
 
 
 def _validate_xai_key(key: str) -> tuple[bool, str]:
     return _validate_openai_compat_key(
-        key, "https://api.x.ai/v1", "xAI",
+        key,
+        "https://api.x.ai/v1",
+        "xAI",
     )
 
 
 def _validate_gemini_key(key: str) -> tuple[bool, str]:
     return _validate_openai_compat_key(
-        key, "https://generativelanguage.googleapis.com/v1beta/openai/", "Gemini",
+        key,
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "Gemini",
     )
 
 
@@ -399,11 +429,11 @@ def _validation_marker(ok: bool, msg: str) -> str:
 
 _VALIDATORS = {
     "ANTHROPIC_API_KEY": _validate_anthropic_key,
-    "OPENAI_API_KEY":    _validate_openai_key,
-    "MOONSHOT_API_KEY":  _validate_moonshot_key,
-    "DEEPSEEK_API_KEY":  _validate_deepseek_key,
-    "XAI_API_KEY":       _validate_xai_key,
-    "GEMINI_API_KEY":    _validate_gemini_key,
+    "OPENAI_API_KEY": _validate_openai_key,
+    "MOONSHOT_API_KEY": _validate_moonshot_key,
+    "DEEPSEEK_API_KEY": _validate_deepseek_key,
+    "XAI_API_KEY": _validate_xai_key,
+    "GEMINI_API_KEY": _validate_gemini_key,
     # Channel tokens validated when 'maverick serve' starts (less time-critical).
 }
 
@@ -416,6 +446,7 @@ _VALIDATION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 
 def _key_fingerprint(env_name: str, key: str) -> str:
     import hashlib
+
     digest = hashlib.sha256(f"{env_name}\x00{key}".encode()).hexdigest()
     return digest[:32]
 
@@ -423,6 +454,7 @@ def _key_fingerprint(env_name: str, key: str) -> str:
 def _load_validation_cache() -> dict[str, Any]:
     try:
         import json as _json
+
         return _json.loads(VALIDATION_CACHE_PATH.read_text())
     except (OSError, ValueError):
         return {}
@@ -430,6 +462,7 @@ def _load_validation_cache() -> dict[str, Any]:
 
 def _save_validation_cache(cache: dict[str, Any]) -> None:
     import json as _json
+
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         VALIDATION_CACHE_PATH.write_text(_json.dumps(cache, default=str))
@@ -444,6 +477,7 @@ def _save_validation_cache(cache: dict[str, Any]) -> None:
 def _cached_validation(env_name: str, key: str) -> tuple[bool, str] | None:
     """Return cached (ok, msg) if the same key was validated within the TTL."""
     import time as _time
+
     if not key.strip():
         return None
     cache = _load_validation_cache()
@@ -459,6 +493,7 @@ def _cached_validation(env_name: str, key: str) -> tuple[bool, str] | None:
 
 def _remember_validation(env_name: str, key: str, ok: bool, msg: str) -> None:
     import time as _time
+
     if not key.strip():
         return
     cache = _load_validation_cache()
@@ -472,54 +507,64 @@ def _remember_validation(env_name: str, key: str, ok: bool, msg: str) -> None:
 
 # ---------- error UI ----------
 
+
 def show_bad_key_error(env_name: str, msg: str) -> None:
     """Council UX seat error screen #1: provider rejected the key."""
     console.print()
-    console.print(Panel.fit(
-        f"[bold]That {env_name.split('_')[0].title()} key didn't work.[/bold]\n\n"
-        f"{msg}\n\n"
-        "Common causes:\n"
-        "  1. Typo (the secret is long; copy/paste, don't retype).\n"
-        "  2. The key was deleted from your account.\n"
-        "  3. Billing isn't set up on the provider.",
-        border_style="red",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]That {env_name.split('_')[0].title()} key didn't work.[/bold]\n\n"
+            f"{msg}\n\n"
+            "Common causes:\n"
+            "  1. Typo (the secret is long; copy/paste, don't retype).\n"
+            "  2. The key was deleted from your account.\n"
+            "  3. Billing isn't set up on the provider.",
+            border_style="red",
+        )
+    )
 
 
 def show_network_error(provider: str, exception_type: str) -> None:
     """Council UX seat error screen #2: validator couldn't reach the provider."""
     console.print()
-    console.print(Panel.fit(
-        f"[bold]Couldn't reach {provider} to check the key ({exception_type}).[/bold]\n\n"
-        "Usually a network block or proxy. Your key is saved either way;\n"
-        "if it's wrong the first goal you run will say so.",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Couldn't reach {provider} to check the key ({exception_type}).[/bold]\n\n"
+            "Usually a network block or proxy. Your key is saved either way;\n"
+            "if it's wrong the first goal you run will say so.",
+            border_style="yellow",
+        )
+    )
 
 
 def show_install_failure(exc: BaseException) -> None:
     """Council UX seat error screen #3: catch-all for unexpected setup failures."""
     console.print()
-    console.print(Panel.fit(
-        "[bold]Setup hit a problem and stopped.[/bold]\n\n"
-        f"{type(exc).__name__}: {exc}\n\n"
-        "Nothing was changed. Try again, or report the issue with the\n"
-        "diagnostic output of [bold]maverick doctor[/bold].",
-        border_style="red",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]Setup hit a problem and stopped.[/bold]\n\n"
+            f"{type(exc).__name__}: {exc}\n\n"
+            "Nothing was changed. Try again, or report the issue with the\n"
+            "diagnostic output of [bold]maverick doctor[/bold].",
+            border_style="red",
+        )
+    )
 
 
 # ---------- wizard steps ----------
 
+
 def welcome() -> None:
-    console.print(Panel.fit(
-        "[bold]Lightwork installer[/bold]\n\n"
-        "Next you'll pick a setup mode: a quick consumer flow (a few\n"
-        "questions, safe defaults) or advanced (configure every model,\n"
-        "channel, safety level, and budget). Re-run any time with\n"
-        "[bold]maverick init[/bold].",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]Lightwork installer[/bold]\n\n"
+            "Next you'll pick a setup mode: a quick consumer flow (a few\n"
+            "questions, safe defaults) or advanced (configure every model,\n"
+            "channel, safety level, and budget). Re-run any time with\n"
+            "[bold]maverick init[/bold].",
+            border_style="cyan",
+        )
+    )
 
 
 def pick_deployment() -> str:
@@ -534,6 +579,7 @@ def pick_deployment() -> str:
     default = None
     try:
         from maverick.config import get_deployment
+
         prior = get_deployment().get("type", "")
         default = next((c for c in choices if c.split()[0] == prior), None)
     except Exception:  # pragma: no cover -- never block the wizard
@@ -612,9 +658,21 @@ def pick_models_per_role(providers: list[str]) -> dict[str, str]:
 # IDs can drive the agent and spend budget. The wizard must collect it or
 # the channel refuses to start. See maverick_channels.base.is_allowed.
 _ALLOWLIST_CHANNELS = {
-    "telegram", "discord", "slack", "signal", "email",
-    "matrix", "bluesky", "mastodon", "irc", "imessage", "sms", "whatsapp",
-    "whatsapp_cloud", "threads", "rcs",
+    "telegram",
+    "discord",
+    "slack",
+    "signal",
+    "email",
+    "matrix",
+    "bluesky",
+    "mastodon",
+    "irc",
+    "imessage",
+    "sms",
+    "whatsapp",
+    "whatsapp_cloud",
+    "threads",
+    "rcs",
 }
 _ALLOWLIST_HINT = {
     "telegram": "numeric Telegram user IDs",
@@ -650,9 +708,7 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
         cfg["app_token"] = "${SLACK_APP_TOKEN}"
         cfg["bot_token"] = "${SLACK_BOT_TOKEN}"
     elif ch_id == "signal":
-        cfg["phone_number"] = _q_text(
-            "  Signal phone number (e.g., +12345550199)", default=""
-        )
+        cfg["phone_number"] = _q_text("  Signal phone number (e.g., +12345550199)", default="")
     elif ch_id == "email":
         cfg["imap_host"] = _q_text("  IMAP server", default="imap.gmail.com")
         cfg["smtp_host"] = _q_text("  SMTP server", default="smtp.gmail.com")
@@ -672,14 +728,21 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
         cfg["poll_interval"] = 60
     elif ch_id == "mastodon":
         cfg["instance"] = _q_text(
-            "  Mastodon instance URL", default="https://mastodon.social",
+            "  Mastodon instance URL",
+            default="https://mastodon.social",
         )
         cfg["access_token"] = "${MASTODON_ACCESS_TOKEN}"
         cfg["poll_interval"] = 30
     elif ch_id == "voice":
-        provider = (_q_text(
-            "  Voice provider (vapi, retell, bland)", default="vapi",
-        ).strip().lower() or "vapi")
+        provider = (
+            _q_text(
+                "  Voice provider (vapi, retell, bland)",
+                default="vapi",
+            )
+            .strip()
+            .lower()
+            or "vapi"
+        )
         cfg["provider"] = provider
         key_env = {
             "vapi": "VAPI_API_KEY",
@@ -694,27 +757,26 @@ def _channel_base_cfg(ch_id: str, envs: set[str]) -> dict[str, Any]:
         # Inbound webhook auth is Vapi-shaped today; keep the token ref.
         cfg["webhook_token"] = "${VAPI_WEBHOOK_TOKEN}"
         cfg["phone_number"] = _q_text(
-            "  Phone number (E.164, optional)", default="",
+            "  Phone number (E.164, optional)",
+            default="",
         )
         cfg["assistant_id"] = _q_text(
-            "  Assistant/agent ID (optional)", default="",
+            "  Assistant/agent ID (optional)",
+            default="",
         )
         cfg["port"] = _safe_int(
-            _q_text("  Webhook port", default="8770"), default=8770,
+            _q_text("  Webhook port", default="8770"),
+            default=8770,
         )
     elif ch_id == "whatsapp":
         cfg["account_sid"] = "${TWILIO_ACCOUNT_SID}"
         cfg["auth_token"] = "${TWILIO_AUTH_TOKEN}"
-        cfg["from_number"] = _q_text(
-            "  WhatsApp 'from' (e.g., whatsapp:+14155238886)", default=""
-        )
+        cfg["from_number"] = _q_text("  WhatsApp 'from' (e.g., whatsapp:+14155238886)", default="")
         cfg["port"] = _safe_int(_q_text("  Webhook port", default="8765"), default=8765)
     elif ch_id == "sms":
         cfg["account_sid"] = "${TWILIO_ACCOUNT_SID}"
         cfg["auth_token"] = "${TWILIO_AUTH_TOKEN}"
-        cfg["from_number"] = _q_text(
-            "  SMS 'from' number (e.g., +14155551234)", default=""
-        )
+        cfg["from_number"] = _q_text("  SMS 'from' number (e.g., +14155551234)", default="")
         cfg["port"] = _safe_int(_q_text("  Webhook port", default="8766"), default=8766)
     elif ch_id == "imessage":
         cfg["poll_interval"] = 5
@@ -727,8 +789,7 @@ def _channel_allowlist(ch_id: str, cfg: dict[str, Any]) -> None:
     if ch_id in _ALLOWLIST_CHANNELS:
         hint = _ALLOWLIST_HINT.get(ch_id, "sender IDs")
         raw_ids = _q_text(
-            f"  Allowed senders, comma-separated ({hint}) — "
-            "only these can drive the agent",
+            f"  Allowed senders, comma-separated ({hint}) — only these can drive the agent",
             default="",
         )
         ids = _csv_list(raw_ids)
@@ -736,9 +797,7 @@ def _channel_allowlist(ch_id: str, cfg: dict[str, Any]) -> None:
             cfg["allowed_user_ids"] = ids
         else:
             env_name = (
-                "IRC_ALLOWED_ACCOUNTS"
-                if ch_id == "irc"
-                else ch_id.upper() + "_ALLOWED_USER_IDS"
+                "IRC_ALLOWED_ACCOUNTS" if ch_id == "irc" else ch_id.upper() + "_ALLOWED_USER_IDS"
             )
             console.print(
                 "  [yellow]No allowlist set — this channel will refuse "
@@ -747,8 +806,7 @@ def _channel_allowlist(ch_id: str, cfg: dict[str, Any]) -> None:
             )
     elif ch_id == "voice":
         raw = _q_text(
-            "  Allowed caller numbers (E.164, comma-separated; "
-            "blank = any authenticated caller)",
+            "  Allowed caller numbers (E.164, comma-separated; blank = any authenticated caller)",
             default="",
         )
         callers = _csv_list(raw)
@@ -766,9 +824,7 @@ def pick_channels(deployment: str) -> tuple[dict[str, dict[str, Any]], set[str]]
         ):
             return {}, set()
     elif deployment == "phone":
-        console.print(
-            "[bold]Phone-companion mode:[/bold] pick the channels your phone will use.\n"
-        )
+        console.print("[bold]Phone-companion mode:[/bold] pick the channels your phone will use.\n")
 
     selectable = [c for c in CHANNELS if c[0] not in EXPERIMENTAL_CHANNELS]
     if _q_confirm(
@@ -859,8 +915,7 @@ def pick_signed_skills() -> dict[str, Any]:
         default=False,
     )
     require_catalog = _q_confirm(
-        "  Require a verified signature for catalog installs (even with no "
-        "trusted keys above)?",
+        "  Require a verified signature for catalog installs (even with no trusted keys above)?",
         default=False,
     )
     return {
@@ -875,14 +930,16 @@ def pick_budget() -> dict[str, Any]:
     console.print("[dim]Per-run caps. Edit later in ~/.maverick/config.toml.[/dim]")
     budget: dict[str, Any] = {
         "max_dollars": _safe_float(
-            _q_text("  Max $ per run", default="5.0"), default=5.0,
+            _q_text("  Max $ per run", default="5.0"),
+            default=5.0,
         ),
         "max_wall_seconds": _safe_float(
             _q_text("  Max wall-clock seconds per run", default="3600"),
             default=3600.0,
         ),
         "max_tool_calls": _safe_int(
-            _q_text("  Max tool calls per run", default="500"), default=500,
+            _q_text("  Max tool calls per run", default="500"),
+            default=500,
         ),
     }
     # Billing-grade accounting is the safe default. Preserve an explicit false
@@ -1059,11 +1116,14 @@ def pick_ekko() -> dict[str, Any]:
     ):
         return {"enable": False}
 
-    requested_apps = _csv_list(_q_text(
-        "  Canonical applications Ekko may observe (for example excel, "
-        "powerpoint, chrome; blank = deny all)",
-        default="",
-    ), lower=True)[:128]
+    requested_apps = _csv_list(
+        _q_text(
+            "  Canonical applications Ekko may observe (for example excel, "
+            "powerpoint, chrome; blank = deny all)",
+            default="",
+        ),
+        lower=True,
+    )[:128]
     from maverick.work_discovery import KNOWN_APPS
 
     allowed_apps = [app for app in requested_apps if app in KNOWN_APPS]
@@ -1092,15 +1152,45 @@ def pick_ekko() -> dict[str, Any]:
     if capture_level not in {"application_metadata", "guided"}:
         capture_level = "application_metadata"
 
-    retention_days = max(2, min(30, _safe_int(_q_text(
-        "  Raw event retention in days (2-30)", default="14",
-    ), default=14)))
-    min_occurrences = max(2, min(100, _safe_int(_q_text(
-        "  Repetitions before Ekko suggests a process (2-100)", default="3",
-    ), default=3)))
-    min_distinct_days = max(2, min(retention_days, _safe_int(_q_text(
-        "  Distinct days required for a suggestion (2-30)", default="2",
-    ), default=2)))
+    retention_days = max(
+        2,
+        min(
+            30,
+            _safe_int(
+                _q_text(
+                    "  Raw event retention in days (2-30)",
+                    default="14",
+                ),
+                default=14,
+            ),
+        ),
+    )
+    min_occurrences = max(
+        2,
+        min(
+            100,
+            _safe_int(
+                _q_text(
+                    "  Repetitions before Ekko suggests a process (2-100)",
+                    default="3",
+                ),
+                default=3,
+            ),
+        ),
+    )
+    min_distinct_days = max(
+        2,
+        min(
+            retention_days,
+            _safe_int(
+                _q_text(
+                    "  Distinct days required for a suggestion (2-30)",
+                    default="2",
+                ),
+                default=2,
+            ),
+        ),
+    )
     return {
         "enable": True,
         "retention_days": retention_days,
@@ -1199,8 +1289,9 @@ def pick_flows() -> dict[str, Any]:
         "the dashboard needs its externally-reachable base URL. Leave blank to "
         "skip -- approvals then happen from the dashboard.[/dim]"
     )
-    url = _q_text("Public base URL for approval links (e.g. https://ops.acme.com)",
-                  default="").strip()
+    url = _q_text(
+        "Public base URL for approval links (e.g. https://ops.acme.com)", default=""
+    ).strip()
     if url:
         out["public_url"] = url
     console.print(
@@ -1209,14 +1300,16 @@ def pick_flows() -> dict[str, Any]:
         "its own bad changes. Off by default; surfaced proposals + human apply "
         "work without it.[/dim]"
     )
-    if _q_confirm("Let flows self-correct (autonomous revert of a regressed rewrite)?",
-                  default=False):
+    if _q_confirm(
+        "Let flows self-correct (autonomous revert of a regressed rewrite)?", default=False
+    ):
         out["auto_evolve"] = True
         # Full autonomy: also APPLY a proposal forward (soften a failing action to
         # an agent), not just revert. Strictly opt-in on top of self-correction,
         # since a bad apply is auto-reverted only if the revert side is on.
-        if _q_confirm("Also let flows autonomously APPLY a learned rewrite (not just revert)?",
-                      default=False):
+        if _q_confirm(
+            "Also let flows autonomously APPLY a learned rewrite (not just revert)?", default=False
+        ):
             out["auto_apply"] = True
     return out
 
@@ -1259,8 +1352,7 @@ def pick_knowledge() -> dict[str, Any]:
     ).split()[0]
     out["store"] = store
     if store == "pgvector":
-        dsn = _q_text("  pgvector DSN (blank = MAVERICK_KNOWLEDGE_DSN env)",
-                      default="").strip()
+        dsn = _q_text("  pgvector DSN (blank = MAVERICK_KNOWLEDGE_DSN env)", default="").strip()
         if dsn:
             out["dsn"] = dsn
     elif store == "qdrant":
@@ -1285,8 +1377,7 @@ def pick_oauth_vault() -> dict[str, Any]:
         "files, no cross-tenant readability). Recommended for hosted/multi-"
         "tenant deploys. OFF by default.[/dim]"
     )
-    return {"vault": _q_confirm("Seal OAuth tokens in the per-tenant vault?",
-                                default=False)}
+    return {"vault": _q_confirm("Seal OAuth tokens in the per-tenant vault?", default=False)}
 
 
 def pick_governed_connectors() -> dict[str, Any]:
@@ -1300,6 +1391,7 @@ def pick_governed_connectors() -> dict[str, Any]:
     """
     try:
         from maverick.governed_rest import available_rest_connectors
+
         choices = available_rest_connectors()
     except Exception:  # pragma: no cover -- never block the wizard
         choices = ["salesforce", "servicenow"]
@@ -1312,15 +1404,18 @@ def pick_governed_connectors() -> dict[str, Any]:
     )
     if not _q_confirm("Enable governed system-of-record connectors?", default=False):
         return {"enable": False}
-    selected = [c for c in choices
-                if _q_confirm(f"  Register {c} as a governed connector?", default=False)]
+    selected = [
+        c for c in choices if _q_confirm(f"  Register {c} as a governed connector?", default=False)
+    ]
     # Standing approver of record: when these connectors are wrapped in the live
     # tool path, a write is approval-gated against this identity (the agent can't
     # self-approve). Blank = writes are previewed but refused until an operator
     # commits them out of band.
     approver = _q_text(
         "  Approver of record for governed writes (blank = refuse agent writes "
-        "without out-of-band approval):", default="").strip()
+        "without out-of-band approval):",
+        default="",
+    ).strip()
     # Restore points: one read-only GET before an in-place update, so the write
     # carries a real undo instead of an asserted one. Without it every update is
     # irreversible and routes to a human -- safe, but nothing ever earns
@@ -1330,10 +1425,13 @@ def pick_governed_connectors() -> dict[str, Any]:
         "them (one read-only GET), so the write ships a genuine undo. Off = "
         "every update is treated as irreversible.[/dim]"
     )
-    restore_points = _q_confirm(
-        "  Capture restore points before in-place updates?", default=True)
-    return {"enable": True, "connectors": selected, "approver": approver,
-            "restore_points": restore_points}
+    restore_points = _q_confirm("  Capture restore points before in-place updates?", default=True)
+    return {
+        "enable": True,
+        "connectors": selected,
+        "approver": approver,
+        "restore_points": restore_points,
+    }
 
 
 def pick_durable() -> dict[str, Any]:
@@ -1373,10 +1471,259 @@ def pick_assessments() -> dict[str, Any]:
         "discovery stays inert until a source is connected.[/dim]"
     )
     discovery = _q_confirm("Enable assessment doc discovery?", default=True)
-    learn = _q_confirm("Enable assessment learning (suggest from past "
-                       "assessments)?", default=True)
-    ops = _q_confirm("Enable the privacy ops record types (DPA review, AI "
-                     "registry, RoPA, DSAR tracker)?", default=True)
+    learn = _q_confirm("Enable assessment learning (suggest from past assessments)?", default=True)
+    ops = _q_confirm(
+        "Enable the privacy ops record types (DPA review, AI registry, RoPA, DSAR tracker)?",
+        default=True,
+    )
+    consent_preferences = _q_confirm(
+        "Enable consumer Consent & Preferences records, receipts, tracker "
+        "governance, and fail-closed enforcement?",
+        default=False,
+    )
+    consent_product: dict[str, Any] | None = None
+    consent_publishing = False
+    consent_public_api = False
+    consent_identity = False
+    consent_trust_center = False
+    if consent_preferences:
+        consent_publishing = _q_confirm(
+            "Enable versioned property, policy, notice, translation, and publication governance?",
+            default=True,
+        )
+        consent_public_api = consent_publishing and _q_confirm(
+            "Enable the external consumer consent API? Property/origin "
+            "bindings are still required before it serves traffic.",
+            default=False,
+        )
+        consent_identity = consent_public_api and _q_confirm(
+            "Enable verified consumer identity federation and one-time "
+            "cross-domain/device pairing? OIDC keys and subject-digest custody "
+            "must still be injected by the deployment.",
+            default=False,
+        )
+        consent_identity_config: dict[str, Any] | None = None
+        if consent_identity:
+            consent_identity_config = {
+                "enable": True,
+                "issuer": _q_text(
+                    "  Consumer OIDC issuer (exact signed iss value)",
+                    default="",
+                ).strip(),
+                "audience": _q_text(
+                    "  Consumer OIDC audience (exact app/API audience)",
+                    default="",
+                ).strip(),
+                "jwks_origin": _q_text(
+                    "  Pinned HTTPS JWKS origin (origin only; keys are injected at runtime)",
+                    default="",
+                ).strip(),
+                "token_ttl_seconds": 600,
+            }
+        consent_scanner = _q_confirm(
+            "Enable scheduled website tracker scanning? Only properties "
+            "explicitly enrolled by the privacy owner are eligible.",
+            default=False,
+        )
+        consent_scan_scheduler = consent_scanner and _q_confirm(
+            "Run the bounded consent scan scheduler automatically with the "
+            "dashboard? Enrolled schedules remain the only work authority.",
+            default=False,
+        )
+        consent_scan_notice_proposals = consent_scanner and _q_confirm(
+            "Enable independently reviewed scan-to-cookie/privacy disclosure "
+            "metadata proposals? This creates structured local proposals only; "
+            "it does not generate legal copy or publish a notice or site change.",
+            default=False,
+        )
+        consent_signals = _q_confirm(
+            "Enable GPC and DNT signal interpretation?",
+            default=True,
+        )
+        consent_adtech_standards = _q_confirm(
+            "Enable advertising interoperability (GPP, TCF, and Google "
+            "Consent Mode) after its conformance vectors are installed?",
+            default=False,
+        )
+        consent_delivery = _q_confirm(
+            "Enable downstream preference delivery? Destinations remain "
+            "disabled until separately enrolled.",
+            default=False,
+        )
+        consent_analytics = _q_confirm(
+            "Enable privacy-safe aggregate consent analytics?",
+            default=False,
+        )
+        consent_experiments = _q_confirm(
+            "Enable privacy-preserving consent A/B experiments? Legal signals, "
+            "required purposes, accessibility, and symmetry of choice remain "
+            "non-experimental safety floors.",
+            default=False,
+        )
+        consent_profile_data = _q_confirm(
+            "Enable governed volunteered profile data and progressive consent "
+            "journeys? Values remain closed-schema and purpose-bound; raw free "
+            "text and protected-trait inference are not supported.",
+            default=False,
+        )
+        consent_trust_center = consent_public_api and _q_confirm(
+            "Enable the unified consumer Trust Center? It requires separately "
+            "approved capability grants before consumer data is shown.",
+            default=False,
+        )
+        consent_product = {
+            "enable": True,
+            "publishing": {
+                "enable": consent_publishing,
+                "require_signed_publications": True,
+            },
+            "public_api": {"enable": consent_public_api},
+            **(
+                {"identity": consent_identity_config}
+                if consent_identity_config is not None
+                else {}
+            ),
+            "scanner": {
+                "enable": consent_scanner,
+                "notice_proposals": {"enable": consent_scan_notice_proposals},
+                "scheduler": {
+                    "enable": consent_scan_scheduler,
+                    "poll_seconds": 60,
+                    "enqueue_limit": 100,
+                    "claim_limit": 4,
+                    "tenant_limit": 1_000,
+                },
+            },
+            "standards": {
+                "gpc": consent_signals,
+                "dnt": consent_signals,
+                "gpp": consent_adtech_standards,
+                "tcf": consent_adtech_standards,
+                "google_consent_mode": consent_adtech_standards,
+            },
+            "delivery": {"enable": consent_delivery},
+            "analytics": {"enable": consent_analytics},
+            "experiments": {"enable": consent_experiments},
+            "profile_data": {"enable": consent_profile_data},
+            "trust_center": {"enable": consent_trust_center},
+        }
+    privacy_data_discovery = _q_confirm(
+        "Enable Privacy Automation structured and unstructured personal-data "
+        "discovery? Sources remain inert until separately enrolled and provider "
+        "adapters are attached.",
+        default=False,
+    )
+    privacy_regulatory_intelligence = _q_confirm(
+        "Enable Privacy Automation regulatory research, collections, alerts, "
+        "comparisons, and cited reports? No proprietary corpus is bundled; "
+        "sources remain unavailable until separately licensed and enrolled.",
+        default=False,
+    )
+    privacy_rights_orchestration = _q_confirm(
+        "Enable provider-neutral Privacy Automation rights-request orchestration? "
+        "Raw subject references are HMACed; callbacks remain worker intent with "
+        "no provider transport or response delivery.",
+        default=False,
+    )
+    privacy_rights_consumer_delivery = privacy_rights_orchestration and _q_confirm(
+        "Enable one-time consumer delivery for closed, redacted rights-response "
+        "packages? Delivery still requires an enrolled server authority.",
+        default=False,
+    )
+    privacy_rights_consumer_intake = (
+        privacy_rights_orchestration
+        and consent_publishing
+        and consent_public_api
+        and consent_trust_center
+        and _q_confirm(
+            "Enable authenticated consumer privacy-rights intake in the Trust "
+            "Center? Requests remain profile-bound, identity evidence is "
+            "independently resolved, and provider retrieval/deletion stays "
+            "disabled until separately authorized.",
+            default=False,
+        )
+    )
+    privacy_ott_ctv_rights = (
+        privacy_rights_orchestration
+        and consent_identity
+        and consent_trust_center
+        and _q_confirm(
+            "Enable the selector-free OTT/CTV service-client rights bridge? "
+            "This is a local access/deletion control path only; it provides no "
+            "native provider SDK, live deletion, or estate-completeness proof.",
+            default=False,
+        )
+    )
+    privacy_notice_governance = _q_confirm(
+        "Enable governed Privacy Automation notice approvals and publication "
+        "intents? Notice content stays external and publication remains local "
+        "worker intent with no site, app, or consent-provider write.",
+        default=False,
+    )
+    data_use_governance = _q_confirm(
+        "Enable the Data Use Governance authority and policy compiler? "
+        "Provider writes remain disabled until a native provider is enrolled.",
+        default=False,
+    )
+    data_use_native: dict[str, Any] | None = None
+    data_use_provider_audit = False
+    data_use_provider_audit_scheduler = False
+    if data_use_governance and _q_confirm(
+        "Configure a native Snowflake or Databricks enforcement runtime? "
+        "This enables external writes only after a binding is enrolled and an "
+        "authorized decision is explicitly applied.",
+        default=False,
+    ):
+        native_provider = _q_select(
+            "Native data provider",
+            ["snowflake", "databricks"],
+            default="snowflake",
+        )
+        native_origin = _q_text(
+            f"Exact HTTPS {native_provider} account/workspace origin",
+            default=(
+                "https://account.snowflakecomputing.com"
+                if native_provider == "snowflake"
+                else "https://workspace.cloud.databricks.com"
+            ),
+        ).strip()
+        native_secret_ref = _q_text(
+            "Secret-provider reference containing the bearer token (for example "
+            "$LIGHTWORK_DATA_USE_PROVIDER_TOKEN)",
+            default="$LIGHTWORK_DATA_USE_PROVIDER_TOKEN",
+        ).strip()
+        native_revision = _safe_int(
+            _q_text(
+                "Credential authority revision (increment on rotation)",
+                default="1",
+            ),
+            default=1,
+        )
+        data_use_native = {
+            "provider": native_provider,
+            "section": {
+                "enable": True,
+                "origin": native_origin,
+                "credential_secret_ref": native_secret_ref,
+                "credential_revision": max(1, native_revision),
+                "timeout_seconds": 10,
+                "max_response_bytes": 65_536,
+            },
+        }
+        data_use_provider_audit = _q_confirm(
+            "Enable native provider audit-log ingestion and last-mile "
+            "reconciliation? Provider writes will then require a current, "
+            "independently enrolled read capability and use the built-in typed "
+            "audit transport; audit-log completeness and live provider acceptance "
+            "remain separate.",
+            default=False,
+        )
+        if data_use_provider_audit:
+            data_use_provider_audit_scheduler = _q_confirm(
+                "Run the bounded cross-tenant provider-audit recovery and "
+                "reconciliation scheduler in this dashboard process?",
+                default=False,
+            )
     console.print()
     console.print(
         "[dim]Vendor-paper review compares a vendor's own DPA or privacy "
@@ -1388,8 +1735,9 @@ def pick_assessments() -> dict[str, Any]:
         "uses your template language verbatim -- no model sees the "
         "contract.[/dim]"
     )
-    draft = _q_confirm("Let a model re-word your standard clauses to match "
-                       "vendor drafting?", default=True)
+    draft = _q_confirm(
+        "Let a model re-word your standard clauses to match vendor drafting?", default=True
+    )
     console.print()
     console.print(
         "[dim]When a vendor signs YOUR paper, Lightwork drafts your template "
@@ -1397,8 +1745,9 @@ def pick_assessments() -> dict[str, Any]:
         "filled in red for counsel to verify. Your legal entity name goes on "
         "the party line; leave blank to keep a red placeholder.[/dim]"
     )
-    org_name = _q_text("Legal entity name for drafted agreements (blank = "
-                       "placeholder)", default="").strip()
+    org_name = _q_text(
+        "Legal entity name for drafted agreements (blank = placeholder)", default=""
+    ).strip()
     console.print()
     console.print(
         "[dim]The entity graph links your records into one lineage: every "
@@ -1409,8 +1758,7 @@ def pick_assessments() -> dict[str, Any]:
         "Derived and read-only: it is rebuilt from your records and never "
         "stores anything they don't say.[/dim]"
     )
-    graph = _q_confirm("Enable the entity graph (lineage & dossier queries)?",
-                       default=True)
+    graph = _q_confirm("Enable the entity graph (lineage & dossier queries)?", default=True)
     out: dict[str, Any] = {}
     if not discovery:
         out["doc_discovery"] = False
@@ -1418,6 +1766,83 @@ def pick_assessments() -> dict[str, Any]:
         out["learn"] = False
     if not ops:
         out["privacy_ops"] = False
+    if consent_product is not None:
+        out["consent_preferences"] = consent_product
+    if (
+        privacy_data_discovery
+        or privacy_regulatory_intelligence
+        or privacy_rights_orchestration
+        or privacy_rights_consumer_delivery
+        or privacy_rights_consumer_intake
+        or privacy_ott_ctv_rights
+        or privacy_notice_governance
+    ):
+        out["privacy_automation"] = {
+            "enable": True,
+            "data_discovery": {"enable": privacy_data_discovery},
+            "regulatory_intelligence": {
+                "enable": privacy_regulatory_intelligence,
+            },
+            "rights_orchestration": {
+                "enable": privacy_rights_orchestration,
+            },
+            "rights_consumer_delivery": {
+                "enable": privacy_rights_consumer_delivery,
+            },
+            "rights_consumer_intake": {
+                "enable": privacy_rights_consumer_intake,
+                "request_ttl_seconds": 86_400,
+                "retention_seconds": 31_536_000,
+                "max_active_requests": 1_000,
+                "max_active_requests_per_subject": 25,
+            },
+            "ott_ctv_rights": {
+                "enable": privacy_ott_ctv_rights,
+            },
+            "notice_governance": {
+                "enable": privacy_notice_governance,
+            },
+        }
+    if data_use_governance:
+        data_use_product: dict[str, Any] = {
+            "enable": True,
+            "compiler": {"enable": True},
+        }
+        if data_use_native is not None:
+            data_use_product["enforcement"] = {
+                "enable": True,
+                "require_four_eyes": True,
+                "max_attempts": 3,
+                "retry_base_seconds": 30,
+                "retry_max_seconds": 300,
+            }
+            data_use_product[str(data_use_native["provider"])] = data_use_native["section"]
+            provider_audit_config: dict[str, Any] = {
+                "enable": data_use_provider_audit,
+                "audit_window_seconds": (
+                    14_400
+                    if data_use_provider_audit and data_use_native["provider"] == "snowflake"
+                    else 3_600
+                ),
+                "retention_seconds": 31_536_000,
+                "max_attempts": 5,
+                "cursor_overlap_seconds": 300,
+                "max_pages_per_read": 20,
+                "scheduler": {
+                    "enable": data_use_provider_audit_scheduler,
+                    "poll_seconds": 60,
+                    "claim_limit": 10,
+                    "tenant_limit": 1_000,
+                    "lease_seconds": 120,
+                    "event_limit": 100,
+                    "retry_backoff_seconds": 30,
+                    "purge_limit": 100,
+                },
+            }
+            if data_use_provider_audit and data_use_native["provider"] == "snowflake":
+                provider_audit_config["snowflake_latency_watermark_seconds"] = 10_800
+            data_use_product["provider_audit"] = provider_audit_config
+        out["data_use_governance"] = data_use_product
     if not draft:
         out["paper_review_use_model"] = False
     if org_name:
@@ -1442,6 +1867,13 @@ def pick_security_suite() -> dict[str, Any]:
         "defensively scans Lightwork's signed telemetry; the environment "
         "hunter reads configured customer telemetry. Hunters are OFF until "
         "enabled. Approved response execution is a separate opt-in.[/dim]"
+    )
+    customer_sandbox_lifecycle = _q_confirm(
+        "Enable the global-admin managed customer sandbox tenant-copy control "
+        "plane? It copies only a closed safe configuration projection into a "
+        "separate isolated local sandbox workspace; production data and credentials are "
+        "never copied.",
+        default=False,
     )
     security_ops = _q_confirm(
         "Enable Security & GRC records and readiness workspace?", default=True
@@ -1537,6 +1969,85 @@ def pick_security_suite() -> dict[str, Any]:
         "evidence-staleness tracking? Packs do not certify compliance.",
         default=False,
     )
+    policy_publication_links = _q_confirm(
+        "Enable Tech Risk & Compliance evergreen public/private policy links? "
+        "Publication remains review-gated; private capabilities, expiry, "
+        "revocation, and scheduled changes fail closed.",
+        default=False,
+    )
+    compliance_scoping = _q_confirm(
+        "Enable local Tech Risk & Compliance questionnaire scoping? Closed "
+        "rules use opaque references and independent review; no licensed "
+        "framework text, legal advice, discovery, or certification is included.",
+        default=False,
+    )
+    compliance_scope_actions = compliance_scoping and _q_confirm(
+        "Enable deterministic control and evidence-task plans from independently "
+        "finalized compliance scopes? Plans use reviewed opaque mapping catalogs, "
+        "four-eyes approval, and a separately injected local apply callback; no "
+        "licensed framework text or provider write is included.",
+        default=False,
+    )
+    continuous_evidence = _q_confirm(
+        "Enable Tech Risk & Compliance continuous evidence collection? The "
+        "built-in collector is local and digest-only; external estates require "
+        "separately approved collectors, credentials, and acceptance.",
+        default=False,
+    )
+    continuous_evidence_scheduler = continuous_evidence and _q_confirm(
+        "Enable the continuous-evidence scheduler with leased retries, recovery, "
+        "and bounded tenant processing?",
+        default=False,
+    )
+    ai_evidence_analysis = _q_confirm(
+        "Enable bounded multimodal AI Evidence Analysis for PDF, JPEG/PNG, "
+        "Excel, and text evidence? Results remain evidence-pinned drafts with "
+        "transparent scoring and mandatory human review, never compliance or "
+        "legal conclusions.",
+        default=False,
+    )
+    if ai_evidence_analysis:
+        evidence_gateway = True
+    third_party_intelligence = _q_confirm(
+        "Enable the provider-neutral Third-Party Management intelligence, "
+        "screening, continuous-monitoring, EDD, exchange, and bounded "
+        "low-risk workflow plane? Commercial feeds remain inert until "
+        "separately licensed and enrolled.",
+        default=False,
+    )
+    third_party_intelligence_providers = third_party_intelligence and _q_confirm(
+        "Enable the bounded third-party intelligence provider runtime for "
+        "RiskRecon, SecurityScorecard, and HackNotice? Licensed credentials and "
+        "live provider acceptance remain separate deployment requirements.",
+        default=False,
+    )
+    third_party_intelligence_scheduler = third_party_intelligence_providers and _q_confirm(
+        "Enable scheduled third-party provider collection with retries, "
+        "revocation handling, and tenant-bounded processing?",
+        default=False,
+    )
+    third_party_lifecycle = _q_confirm(
+        "Enable provider-neutral conditional third-party assessments, lifecycle "
+        "transitions, and governed offboarding? Callbacks remain local intent; "
+        "no transport worker or provider write is included.",
+        default=False,
+    )
+    third_party_collaboration_portal = third_party_lifecycle and _q_confirm(
+        "Enable the external third-party collaboration portal for invitation-"
+        "bound assessments, attestations, evidence manifests, and follow-up? "
+        "No email transport, raw document ingestion, or model-authored answer "
+        "is enabled by this setting.",
+        default=False,
+    )
+    governance_agents = _q_confirm(
+        "Enable the packaged Breach Response, Privacy Risk Assessment, Program "
+        "Copilot, Knowledgebase Governance, and Third-Party Risk agents? Agent "
+        "outputs remain evidence-bound recommendations and all mutations require "
+        "separate human approval.",
+        default=False,
+    )
+    if governance_agents:
+        evidence_gateway = True
     ai_regulatory_feed = _q_confirm(
         "Enable the governed AI regulatory-change bridge? It maps cited alerts "
         "to reviewed policy/evidence impacts and requires Finance Operations plus "
@@ -1596,6 +2107,38 @@ def pick_security_suite() -> dict[str, Any]:
         "runtime receipts? Raw runtime content is never persisted by this plane.",
         default=False,
     )
+    ai_cloud_agent_governance = _q_confirm(
+        "Enable named AWS Bedrock, Azure AI Foundry, and Google Vertex AI agent "
+        "inventory, observability, and policy-enforcement intents? This enables "
+        "the required inventory, policy, and runtime-guardrail authorities but "
+        "does not install credentials or claim provider writes.",
+        default=False,
+    )
+    databricks_ai_security_framework = False
+    if ai_cloud_agent_governance:
+        ai_inventory = True
+        ai_policy_management = True
+        ai_runtime_guardrails = True
+        databricks_ai_security_framework = _q_confirm(
+            "Enable the content-free, versioned Databricks AI Security Framework "
+            "mapping pack? It requires human activation and does not include "
+            "licensed framework prose or certification.",
+            default=False,
+        )
+        if databricks_ai_security_framework:
+            policy_packs = True
+    ai_governance_loop = (
+        ai_inventory
+        and ai_dynamic_risk
+        and ai_policy_management
+        and ai_runtime_guardrails
+        and _q_confirm(
+            "Enable the durable AI governance closed loop that correlates "
+            "inventory, risk, policy, control, monitoring, escalation, and "
+            "evidence? It remains digest-only and performs no provider mutation.",
+            default=False,
+        )
+    )
     ai_explainability = _q_confirm(
         "Enable governed, digest-only native/SHAP/LIME/Captum/Alibi and "
         "counterfactual explanation receipts with exact model binding and "
@@ -1645,6 +2188,7 @@ def pick_security_suite() -> dict[str, Any]:
         default=False,
     )
     ai_media_provenance_c2patool = False
+    ai_media_provenance_c2patool_sha256 = ""
     if ai_media_provenance:
         ai_media_provenance_c2patool = _q_confirm(
             "Select the separately installed c2patool verification adapter? "
@@ -1652,6 +2196,26 @@ def pick_security_suite() -> dict[str, Any]:
             "material are never generated by the installer.",
             default=False,
         )
+        if ai_media_provenance_c2patool:
+            candidate = (
+                _q_text(
+                    "  Independently approved c2patool executable SHA-256 "
+                    "(64 lowercase hex; blank leaves the adapter unselected)",
+                    default="",
+                )
+                .strip()
+                .lower()
+            )
+            if len(candidate) == 64 and all(
+                character in "0123456789abcdef" for character in candidate
+            ):
+                ai_media_provenance_c2patool_sha256 = candidate
+            else:
+                ai_media_provenance_c2patool = False
+                console.print(
+                    "[yellow]c2patool verification remains unselected until an "
+                    "exact reviewed executable SHA-256 is supplied.[/yellow]"
+                )
     ai_identity_governance_connectors = _q_confirm(
         "Enable bounded read-only Entra, Okta, and Purview identity/data-governance "
         "snapshots? Provider tenant IDs, secret references, and endpoints remain "
@@ -1659,6 +2223,11 @@ def pick_security_suite() -> dict[str, Any]:
         default=False,
     )
     ai_identity_governance_scheduler = False
+    ai_identity_governance_controls = False
+    ai_identity_change_coupling = False
+    ai_identity_federation = False
+    ai_identity_conditional_access = False
+    ai_identity_purview_writeback = False
     if ai_identity_governance_connectors:
         ai_identity_governance_scheduler = _q_confirm(
             "Enable the bounded identity-governance scheduler supervisor? "
@@ -1666,6 +2235,35 @@ def pick_security_suite() -> dict[str, Any]:
             "until separately configured.",
             default=False,
         )
+        ai_identity_governance_controls = _q_confirm(
+            "Prepare the separately gated identity control plane? Every "
+            "control remains independently disabled until selected, configured, "
+            "and accepted against test tenants.",
+            default=False,
+        )
+        if ai_identity_governance_controls:
+            ai_identity_change_coupling = _q_confirm(
+                "Enable digest-only identity-change coupling to dynamic risk and "
+                "alerts? Sink wiring and replay acceptance remain required.",
+                default=False,
+            )
+            ai_identity_federation = _q_confirm(
+                "Enable pseudonymous Entra/Okta agent-principal federation? "
+                "Provider trust and test-tenant acceptance remain required.",
+                default=False,
+            )
+            if ai_identity_federation:
+                ai_identity_conditional_access = _q_confirm(
+                    "Enable fresh conditional-access enforcement for federated "
+                    "agent principals? Provider policy acceptance remains required.",
+                    default=False,
+                )
+                ai_identity_purview_writeback = _q_confirm(
+                    "Enable default-deny Purview classification writeback for "
+                    "federated agent principals? This is a mutating control and "
+                    "requires separate test-tenant consent.",
+                    default=False,
+                )
     if (
         portfolio_risk
         or policy_packs
@@ -1695,9 +2293,7 @@ def pick_security_suite() -> dict[str, Any]:
     threat_hunt = _q_confirm(
         "Enable the defensive Lightwork platform threat hunter?", default=False
     )
-    env_hunt = _q_confirm(
-        "Enable the defensive customer-environment threat hunter?", default=False
-    )
+    env_hunt = _q_confirm("Enable the defensive customer-environment threat hunter?", default=False)
     response_execution = False
     connectors: dict[str, dict[str, bool]] = {}
     enrichment_sources: list[str] = []
@@ -1729,16 +2325,24 @@ def pick_security_suite() -> dict[str, Any]:
             list(connector_labels),
             default=[],
         )
-        push_labels = _q_checkbox(
-            "Allow API push ingestion for which selected connector types?",
-            selected_labels,
-            default=[],
-        ) if selected_labels else []
-        pivot_labels = _q_checkbox(
-            "Allow bounded read-only investigation pivots for which selected connectors?",
-            selected_labels,
-            default=[],
-        ) if selected_labels else []
+        push_labels = (
+            _q_checkbox(
+                "Allow API push ingestion for which selected connector types?",
+                selected_labels,
+                default=[],
+            )
+            if selected_labels
+            else []
+        )
+        pivot_labels = (
+            _q_checkbox(
+                "Allow bounded read-only investigation pivots for which selected connectors?",
+                selected_labels,
+                default=[],
+            )
+            if selected_labels
+            else []
+        )
         connectors = {
             name: {
                 "enable": label in selected_labels,
@@ -1759,13 +2363,16 @@ def pick_security_suite() -> dict[str, Any]:
             30,
             min(
                 3600,
-                int(_safe_float(
-                    _q_text("Hunter poll interval (seconds)", default="300"),
-                    default=300.0,
-                )),
+                int(
+                    _safe_float(
+                        _q_text("Hunter poll interval (seconds)", default="300"),
+                        default=300.0,
+                    )
+                ),
             ),
         )
     result = {
+        "customer_sandbox_lifecycle": customer_sandbox_lifecycle,
         "security_ops": security_ops,
         "evidence_graph": evidence_graph,
         "model_risk_assurance": model_risk_assurance,
@@ -1778,6 +2385,62 @@ def pick_security_suite() -> dict[str, Any]:
         "ai_vendor_risk_portal": ai_vendor_risk_portal,
         "portfolio_risk": portfolio_risk,
         "policy_packs": policy_packs,
+        "governance_agents": governance_agents,
+        "ai_evidence_analysis": ai_evidence_analysis,
+        "tech_risk_compliance": {
+            "enable": (
+                policy_publication_links
+                or compliance_scoping
+                or compliance_scope_actions
+                or continuous_evidence
+            ),
+            "policy_publication_links": {"enable": policy_publication_links},
+            "scoping": {"enable": compliance_scoping},
+            "scope_actions": {"enable": compliance_scope_actions},
+            "continuous_evidence": {
+                "enable": continuous_evidence,
+                "enabled_collectors": ["local_soc2_v1"] if continuous_evidence else [],
+                "scheduler": {
+                    "enable": continuous_evidence_scheduler,
+                    "poll_seconds": 60,
+                    "enqueue_limit": 50,
+                    "claim_limit": 10,
+                    "tenant_limit": 1_000,
+                    "lease_seconds": 120,
+                    "retry_backoff_seconds": 30,
+                },
+            },
+        },
+        "third_party_management": {
+            "enable": third_party_intelligence or third_party_lifecycle,
+            "intelligence": {
+                "enable": third_party_intelligence,
+                "providers": {
+                    "enable": third_party_intelligence_providers,
+                    "enabled_providers": (
+                        ["riskrecon", "securityscorecard", "hacknotice"]
+                        if third_party_intelligence_providers
+                        else []
+                    ),
+                    "timeout_seconds": 20,
+                    "scheduler": {
+                        "enable": third_party_intelligence_scheduler,
+                        "poll_seconds": 900,
+                    },
+                },
+            },
+            "lifecycle": {
+                "enable": third_party_lifecycle,
+                "portal": {
+                    "enable": third_party_collaboration_portal,
+                    "invitation_ttl_seconds": 86_400,
+                    "retention_seconds": 31_536_000,
+                    "max_messages": 100,
+                    "max_artifacts": 20,
+                    "max_artifact_bytes": 10_485_760,
+                },
+            },
+        },
         "ai_regulatory_feed": ai_regulatory_feed,
         "red_team_assurance": red_team_assurance,
         "eu_ai_incidents": eu_ai_incidents,
@@ -1788,6 +2451,9 @@ def pick_security_suite() -> dict[str, Any]:
         "ai_dynamic_risk": ai_dynamic_risk,
         "ai_policy_management": ai_policy_management,
         "ai_runtime_guardrails": ai_runtime_guardrails,
+        "ai_cloud_agent_governance": ai_cloud_agent_governance,
+        "databricks_ai_security_framework": databricks_ai_security_framework,
+        "ai_governance_loop": ai_governance_loop,
         "ai_explainability": ai_explainability,
         "ai_conformity_workflow": ai_conformity_workflow,
         "ai_insurability": ai_insurability,
@@ -1797,8 +2463,14 @@ def pick_security_suite() -> dict[str, Any]:
         "ai_discovery_sensors": ai_discovery_sensors,
         "ai_media_provenance": ai_media_provenance,
         "ai_media_provenance_c2patool": ai_media_provenance_c2patool,
+        "ai_media_provenance_c2patool_sha256": (ai_media_provenance_c2patool_sha256),
         "ai_identity_governance_connectors": ai_identity_governance_connectors,
         "ai_identity_governance_scheduler": ai_identity_governance_scheduler,
+        "ai_identity_governance_controls": ai_identity_governance_controls,
+        "ai_identity_change_coupling": ai_identity_change_coupling,
+        "ai_identity_federation": ai_identity_federation,
+        "ai_identity_conditional_access": ai_identity_conditional_access,
+        "ai_identity_purview_writeback": ai_identity_purview_writeback,
         "threat_hunt": threat_hunt,
         "env_hunt": env_hunt,
         "response_execution": response_execution,
@@ -1829,11 +2501,11 @@ def pick_value() -> dict[str, Any]:
     if not _q_confirm("Set your human-cost assumptions now?", default=True):
         return {}
     rate = _safe_float(
-        _q_text("  Fully-loaded human hourly rate ($/hour)", default="75"),
-        default=75.0)
+        _q_text("  Fully-loaded human hourly rate ($/hour)", default="75"), default=75.0
+    )
     hours = _safe_float(
-        _q_text("  Human hours one comparable task takes", default="2"),
-        default=2.0)
+        _q_text("  Human hours one comparable task takes", default="2"), default=2.0
+    )
     return {"hourly_rate": max(0.0, rate), "hours_per_task": max(0.0, hours)}
 
 
@@ -1860,19 +2532,26 @@ def pick_finance() -> dict[str, Any]:
     regimes = _q_checkbox(
         "Compliance regimes to enforce (strictest-wins union):",
         [
-            "sox", "coso", "gaap", "pci", "glba", "aml", "sec", "irs",
-            "dora", "basel_iii", "ifrs_17",
+            "sox",
+            "coso",
+            "gaap",
+            "pci",
+            "glba",
+            "aml",
+            "sec",
+            "irs",
+            "dora",
+            "basel_iii",
+            "ifrs_17",
         ],
         default=["sox", "gaap"],
     )
     require_human_above = _safe_float(
-        _q_text("  Pause money movement above $ (DoA threshold; 0 = pause all)",
-                default="5000"),
+        _q_text("  Pause money movement above $ (DoA threshold; 0 = pause all)", default="5000"),
         default=5000.0,
     )
     deny_above = _safe_float(
-        _q_text("  Hard-deny money movement above $ (0 = no hard ceiling)",
-                default="0"),
+        _q_text("  Hard-deny money movement above $ (0 = no hard ceiling)", default="0"),
         default=0.0,
     )
     require_fresh = _q_confirm(
@@ -1892,7 +2571,8 @@ def pick_finance() -> dict[str, Any]:
     operations: dict[str, Any] = {"operations_enable": operations_enable}
     if operations_enable:
         operations["federal_register_enable"] = _q_confirm(
-            "  Poll the official Federal Register API?", default=True,
+            "  Poll the official Federal Register API?",
+            default=True,
         )
         operations["texas_register_enable"] = _q_confirm(
             "  Poll the official Texas Register RSS and queue each issue for review?",
@@ -1903,23 +2583,39 @@ def pick_finance() -> dict[str, Any]:
             ["finance", "money_transmitter", "insurance_producer", "lending"],
             default=["finance", "money_transmitter", "insurance_producer"],
         )
-        regulatory_minutes = max(5, min(10_080, _safe_int(
-            _q_text("  Regulatory feed poll interval (minutes)", default="60"),
-            default=60,
-        )))
-        control_hours = max(1, min(744, _safe_int(
-            _q_text("  Finance-to-GRC control test interval (hours)", default="24"),
-            default=24,
-        )))
-        operations.update({
-            "regulatory_poll_seconds": regulatory_minutes * 60,
-            "control_test_interval_seconds": control_hours * 3600,
-            "anomaly_enable": True,
-            "sanctions_max_age_hours": 72,
-            "control_owner": _q_text(
-                "  Finance control/evidence owner", default="Finance Control Owner",
-            ).strip() or "Finance Control Owner",
-        })
+        regulatory_minutes = max(
+            5,
+            min(
+                10_080,
+                _safe_int(
+                    _q_text("  Regulatory feed poll interval (minutes)", default="60"),
+                    default=60,
+                ),
+            ),
+        )
+        control_hours = max(
+            1,
+            min(
+                744,
+                _safe_int(
+                    _q_text("  Finance-to-GRC control test interval (hours)", default="24"),
+                    default=24,
+                ),
+            ),
+        )
+        operations.update(
+            {
+                "regulatory_poll_seconds": regulatory_minutes * 60,
+                "control_test_interval_seconds": control_hours * 3600,
+                "anomaly_enable": True,
+                "sanctions_max_age_hours": 72,
+                "control_owner": _q_text(
+                    "  Finance control/evidence owner",
+                    default="Finance Control Owner",
+                ).strip()
+                or "Finance Control Owner",
+            }
+        )
     return {
         "enable": True,
         "regimes": regimes,
@@ -1954,11 +2650,11 @@ def pick_oidc() -> dict[str, Any]:
         default="",
     ).strip()
     audience = _q_text(
-        "  Audience (your app's client_id / API audience)", default="",
+        "  Audience (your app's client_id / API audience)",
+        default="",
     ).strip()
     jwks_uri = _q_text(
-        "  JWKS URI (the IdP's signing-key endpoint, "
-        "e.g. https://example.okta.com/oauth2/v1/keys)",
+        "  JWKS URI (the IdP's signing-key endpoint, e.g. https://example.okta.com/oauth2/v1/keys)",
         default="",
     ).strip()
     result: dict[str, Any] = {
@@ -1981,13 +2677,16 @@ def pick_oidc() -> dict[str, Any]:
     )
     if _q_confirm("  Also enable the built-in browser login flow?", default=False):
         client_id = _q_text(
-            "    OAuth client_id (this dashboard's registered client)", default="",
+            "    OAuth client_id (this dashboard's registered client)",
+            default="",
         ).strip()
         client_secret = _q_text(
-            "    OAuth client_secret", default="",
+            "    OAuth client_secret",
+            default="",
         ).strip()
         redirect_uri = _q_text(
-            "    Redirect URI (must be <dashboard-url>/auth/callback)", default="",
+            "    Redirect URI (must be <dashboard-url>/auth/callback)",
+            default="",
         ).strip()
         session_secret = _q_text(
             "    Session-signing secret (a long random string; keep it secret)",
@@ -2143,11 +2842,13 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "compaction_strategy": _q_select(
             "  Compaction strategy? (default = simple shrink)",
-            ["default     - keep recent + trim big tool outputs",
-             "learned     - LLM summary, self-tuning prompt picker",
-             "multimodal  - stub heavy image/audio blocks to text",
-             "streaming   - incremental running summary (long chats)",
-             "graph       - entity-relation digest"],
+            [
+                "default     - keep recent + trim big tool outputs",
+                "learned     - LLM summary, self-tuning prompt picker",
+                "multimodal  - stub heavy image/audio blocks to text",
+                "streaming   - incremental running summary (long chats)",
+                "graph       - entity-relation digest",
+            ],
             default="default     - keep recent + trim big tool outputs",
         ).split()[0],
         "reflexion": _q_confirm(
@@ -2551,7 +3252,7 @@ def pick_advanced() -> dict[str, Any]:
             "Client/tenant id for THIS deployment (one Lightwork per enterprise "
             "client). All data (world DB, audit, memory, fleet) is isolated under "
             "this id — leave blank only for a personal/single-user install. "
-            "Letters/digits/._- e.g. \"acme-corp\".",
+            'Letters/digits/._- e.g. "acme-corp".',
             default="",
         ),
         "enterprise": _q_confirm(
@@ -2613,6 +3314,13 @@ def pick_advanced() -> dict[str, Any]:
             "rewritten or deleted (S3 Object-Lock for regulator-grade WORM, or a "
             "local read-only mirror). Run `maverick audit worm push` (e.g. nightly "
             "cron). Defaults to a local mirror; edit [audit.worm] for S3.",
+            default=False,
+        ),
+        "unified_audit": _q_confirm(
+            "Project all six governance suites into one tenant-bound signed audit "
+            "view? Each source stays authoritative while a bounded, digest-only "
+            "projection exposes explicit coverage, lag, retry, revocation and "
+            "integrity status. This also enables audit signing. OFF by default.",
             default=False,
         ),
         "saml": _q_confirm(
@@ -2719,8 +3427,7 @@ def pick_advanced() -> dict[str, Any]:
             "  Trusted peer insight pubkeys (comma-separated hex Ed25519)",
             default="",
         )
-        advanced["insight_pubkeys"] = [k.strip() for k in raw.split(",")
-                                       if k.strip()]
+        advanced["insight_pubkeys"] = [k.strip() for k in raw.split(",") if k.strip()]
     # Autonomous self-correction only makes sense once flows are on. Human apply
     # + surfaced proposals work without it; this governs whether the loop may
     # UNDO a change on its own.
@@ -2736,7 +3443,9 @@ def pick_advanced() -> dict[str, Any]:
     if advanced.get("flows"):
         flows_url = _q_text(
             "  Public base URL for flow approval links (e.g. https://ops.acme.com; "
-            "blank = approve from the dashboard)", default="").strip()
+            "blank = approve from the dashboard)",
+            default="",
+        ).strip()
         if flows_url:
             advanced["flows_public_url"] = flows_url
     if advanced.get("external_agents"):
@@ -2754,80 +3463,116 @@ def pick_advanced() -> dict[str, Any]:
     ):
         corpus = _q_text(
             "  Eval-corpus path for the live A/B (lets a scheduled pass actually "
-            "promote; blank = dry pass)", default="").strip()
+            "promote; blank = dry pass)",
+            default="",
+        ).strip()
         if corpus:
             advanced["self_harness_eval_corpus"] = corpus
             # A live A/B spends real provider dollars unattended, so cap it by
             # default; explicit 0 opts out.
-            advanced["self_harness_eval_budget"] = max(0.0, _safe_float(_q_text(
-                "    Spend cap per auto-evaluated cycle, in dollars (0 = uncapped)",
-                default="5"), default=5.0))
-        if _q_confirm(
-            "    Mine and scope guidance per department (domain)?", default=False):
+            advanced["self_harness_eval_budget"] = max(
+                0.0,
+                _safe_float(
+                    _q_text(
+                        "    Spend cap per auto-evaluated cycle, in dollars (0 = uncapped)",
+                        default="5",
+                    ),
+                    default=5.0,
+                ),
+            )
+        if _q_confirm("    Mine and scope guidance per department (domain)?", default=False):
             advanced["self_harness_bucket_domain"] = True
         advanced["self_harness_semantic_mining"] = _q_confirm(
             "    Semantic mining? Cluster failures by embedding similarity when "
-            "embeddings are available (else deterministic Jaccard).", default=False)
+            "embeddings are available (else deterministic Jaccard).",
+            default=False,
+        )
         advanced["self_harness_efficacy_review"] = _q_confirm(
             "    Efficacy review? Re-measure each line's live A/B lift every cycle "
-            "and demote dead weight (needs the eval corpus above).", default=False)
+            "and demote dead weight (needs the eval corpus above).",
+            default=False,
+        )
         advanced["self_harness_canary"] = _q_confirm(
             "    Canary rollout? Stage each newly learned line on probation and "
-            "graduate or pull it from real run outcomes.", default=False)
+            "graduate or pull it from real run outcomes.",
+            default=False,
+        )
         advanced["self_harness_auto_run"] = _q_confirm(
             "    Auto-run? Run the governed learning cycle for every role model "
-            "as part of `maverick dream` (no second cron entry).", default=True)
+            "as part of `maverick dream` (no second cron entry).",
+            default=True,
+        )
         advanced["self_harness_metamorphic"] = _q_confirm(
             "    Metamorphic validation? Paraphrase held-out cases and require a "
             "candidate's lift to survive the rewording (needs the live A/B).",
-            default=False)
+            default=False,
+        )
         advanced["self_harness_relapse"] = _q_confirm(
             "    Relapse watch? Put a learned line back on probation when half "
-            "or more of its recent run outcomes are failures.", default=False)
+            "or more of its recent run outcomes are failures.",
+            default=False,
+        )
         advanced["self_harness_calibrate_judge"] = _q_confirm(
             "    Judge calibration? Feed the evaluation judge's verdicts into "
             "the verifier-drift freeze so a drifting judge pauses learning.",
-            default=False)
+            default=False,
+        )
         advanced["self_harness_transfer_auto"] = _q_confirm(
             "    Nightly cross-model transfer? Try each model's proven guidance "
             "on the rest of the fleet (gated, on probation, one-shot per pair).",
-            default=False)
+            default=False,
+        )
         harvest_mode = _q_select(
             "    Corpus bootstrapping from run history?",
-            ["off     - don't harvest",
-             "propose - stage mined cases for your review",
-             "auto    - merge mined cases straight into the corpus"],
-            default="off     - don't harvest").split()[0]
+            [
+                "off     - don't harvest",
+                "propose - stage mined cases for your review",
+                "auto    - merge mined cases straight into the corpus",
+            ],
+            default="off     - don't harvest",
+        ).split()[0]
         if harvest_mode in ("propose", "auto"):
             advanced["self_harness_corpus_harvest"] = harvest_mode
         # Both nightly paths ride the dream beat: without auto_run (or, for
         # harvesting, a corpus) they are configured but never executed --
         # say so NOW, not silently at 3am.
         if not advanced.get("self_harness_auto_run") and (
-                advanced.get("self_harness_transfer_auto")
-                or harvest_mode in ("propose", "auto")):
+            advanced.get("self_harness_transfer_auto") or harvest_mode in ("propose", "auto")
+        ):
             console.print(
                 "    [yellow]Note: nightly transfer/harvesting only run when "
                 "auto-run is on -- enable it above (or run them manually via "
-                "`maverick self-harness transfer` / `corpus harvest`).[/yellow]")
+                "`maverick self-harness transfer` / `corpus harvest`).[/yellow]"
+            )
         if harvest_mode in ("propose", "auto") and not corpus:
             console.print(
                 "    [yellow]Note: corpus bootstrapping needs the eval-corpus "
-                "path above; without one the harvest is a no-op.[/yellow]")
+                "path above; without one the harvest is a no-op.[/yellow]"
+            )
         store_pick = _q_select(
             "    Learning-store backend?",
-            ["files - per-host JSON under ~/.maverick (default)",
-             "world - shared world database (a multi-host fleet learns as one)"],
+            [
+                "files - per-host JSON under ~/.maverick (default)",
+                "world - shared world database (a multi-host fleet learns as one)",
+            ],
             default="files - per-host JSON under ~/.maverick (default)",
         ).split()[0]
         if store_pick == "world":
             advanced["self_harness_store"] = "world"
-        advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
-            "    Candidate lines per weakness (best-of-N; 1 = single)",
-            default="1"), default=1))
-        advanced["self_harness_retire_days"] = max(0, _safe_int(_q_text(
-            "    Auto-retire lines unused this many days (0 = never)",
-            default="0"), default=0))
+        advanced["self_harness_candidates"] = max(
+            1,
+            _safe_int(
+                _q_text("    Candidate lines per weakness (best-of-N; 1 = single)", default="1"),
+                default=1,
+            ),
+        )
+        advanced["self_harness_retire_days"] = max(
+            0,
+            _safe_int(
+                _q_text("    Auto-retire lines unused this many days (0 = never)", default="0"),
+                default=0,
+            ),
+        )
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
     # `maverick tax prepare` / `maverick tax update`.
@@ -2836,32 +3581,29 @@ def pick_advanced() -> dict[str, Any]:
         "channel? (new tax law as a content release, not a code release)",
         default=False,
     ):
-        advanced["tax_update_url"] = _q_text(
-            "  Constants update URL", default="").strip()
+        advanced["tax_update_url"] = _q_text("  Constants update URL", default="").strip()
         raw = _q_text(
             "  Trusted publisher pubkeys (comma-separated hex Ed25519)",
             default="",
         )
-        advanced["tax_pubkeys"] = [k.strip() for k in raw.split(",")
-                                   if k.strip()]
+        advanced["tax_pubkeys"] = [k.strip() for k in raw.split(",") if k.strip()]
     # Regulated-deployment posture: data-residency region + a compliance
     # disclosure line. These map to the independent [residency]/[compliance]
     # scalar tables a regulated deployment needs; previously only hand-editable.
     # (Action-level [governance] guards stay config-only: they share the
     # [governance] table the finance step already owns.)
     if _q_confirm(
-        "  Set regulated-deployment knobs (data residency, compliance "
-        "disclosure)?",
+        "  Set regulated-deployment knobs (data residency, compliance disclosure)?",
         default=False,
     ):
         region = _q_text(
-            "  Data-residency region (e.g. us / eu / us-east-1; blank = none)",
-            default="").strip()
+            "  Data-residency region (e.g. us / eu / us-east-1; blank = none)", default=""
+        ).strip()
         if region:
             advanced["residency_region"] = region
         disclosure = _q_text(
-            "  Compliance disclosure line shown to users (blank = none)",
-            default="").strip()
+            "  Compliance disclosure line shown to users (blank = none)", default=""
+        ).strip()
         if disclosure:
             advanced["compliance_disclosure_text"] = disclosure
     # OIDC SSO is a string-bearing toggle (issuer/audience/jwks_uri), so it has
@@ -2870,8 +3612,7 @@ def pick_advanced() -> dict[str, Any]:
     advanced["oidc"] = pick_oidc()
     # Department (job-function) scoping only bites once sign-in is on, so it is
     # offered right after — writes under [dashboard]. Returns {} when declined.
-    advanced["department_access"] = pick_department_access(
-        bool(advanced["oidc"].get("enabled")))
+    advanced["department_access"] = pick_department_access(bool(advanced["oidc"].get("enabled")))
     return advanced
 
 
@@ -2913,26 +3654,29 @@ def pick_department_access(sso_enabled: bool) -> dict[str, Any]:
         "not Legal. OFF by default (everyone sees every department); you can "
         "always assign per-user access later on the dashboard Users page.[/dim]"
     )
-    if not _q_confirm("Restrict users to specific departments by default?",
-                      default=False):
+    if not _q_confirm("Restrict users to specific departments by default?", default=False):
         return {}
     result: dict[str, Any] = {
-        "default_suites": _split_csv(_q_text(
-            "  Departments a new user may use until granted more (comma-separated "
-            "suite keys, e.g. finance,tax; blank = none)", default="")),
+        "default_suites": _split_csv(
+            _q_text(
+                "  Departments a new user may use until granted more (comma-separated "
+                "suite keys, e.g. finance,tax; blank = none)",
+                default="",
+            )
+        ),
     }
     console.print(
         "[dim]Optional: if your IdP pushes groups via SCIM, map a group to a "
         "role and/or departments so access follows team membership. Enter one "
         "'Group Name = value' per line; blank line to finish.[/dim]"
     )
-    if _q_confirm("  Map IdP (SCIM) groups to roles/departments now?",
-                  default=False):
+    if _q_confirm("  Map IdP (SCIM) groups to roles/departments now?", default=False):
         roles = _collect_group_pairs(
-            "    Group -> role (e.g. Finance Team=operator)", csv_value=False)
+            "    Group -> role (e.g. Finance Team=operator)", csv_value=False
+        )
         suites = _collect_group_pairs(
-            "    Group -> departments (e.g. Finance Team=finance,tax)",
-            csv_value=True)
+            "    Group -> departments (e.g. Finance Team=finance,tax)", csv_value=True
+        )
         if roles:
             result["group_roles"] = roles
         if suites:
@@ -2949,7 +3693,9 @@ def _docker_available() -> bool:
     try:
         subprocess.run(
             ["docker", "version"],
-            capture_output=True, timeout=2, check=True,
+            capture_output=True,
+            timeout=2,
+            check=True,
         )
         return True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
@@ -3009,6 +3755,7 @@ def pick_sandbox() -> dict[str, Any]:
 
 # ---------- new wizard steps (council parity pass) ----------
 
+
 def pick_web_search() -> tuple[bool, list[str]]:
     """Enable web search + pick a default backend. Returns (enabled, env_vars_needed)."""
     if not _q_confirm(
@@ -3028,10 +3775,10 @@ def pick_web_search() -> tuple[bool, list[str]]:
     )
     backend = pick.split()[0]
     envs = {
-        "tavily":  ["TAVILY_API_KEY"],
-        "brave":   ["BRAVE_API_KEY"],
+        "tavily": ["TAVILY_API_KEY"],
+        "brave": ["BRAVE_API_KEY"],
         "serpapi": ["SERPAPI_API_KEY"],
-        "ddg":     [],
+        "ddg": [],
     }[backend]
     os.environ["MAVERICK_SEARCH_BACKEND"] = backend  # picked up by web_search tool
     return True, envs
@@ -3080,6 +3827,7 @@ def pick_plugins() -> list[str]:
     discovered: set[str] = set()
     try:
         from maverick.plugins import _entry_points  # type: ignore[attr-defined]
+
         for group in (
             "maverick.tools",
             "maverick.channels",
@@ -3098,8 +3846,7 @@ def pick_plugins() -> list[str]:
         return []
     console.print()
     console.print(
-        "[bold]Plugins discovered via entry_points:[/bold] "
-        + ", ".join(sorted(discovered))
+        "[bold]Plugins discovered via entry_points:[/bold] " + ", ".join(sorted(discovered))
     )
     if not _q_confirm(
         "Enable any of these? (allow-listed for security; skip is safe)",
@@ -3198,8 +3945,8 @@ def pick_rate_limits(channels: dict[str, Any]) -> dict[str, str]:
     proposed = [
         ("web_search", "10/60"),
         ("http_fetch", "30/60"),
-        ("shell",      "30/60"),
-        ("mcp_*",      "60/60"),
+        ("shell", "30/60"),
+        ("mcp_*", "60/60"),
     ]
     for name, spec_default in proposed:
         spec = _q_text(
@@ -3219,9 +3966,11 @@ def pick_retention() -> dict[str, int]:
     ):
         return {}
     return {
-        "audit_days":    _safe_int(_q_text("  Audit log retention days",   default="90"),  default=90),
-        "episodes_days": _safe_int(_q_text("  Episode retention days",     default="365"), default=365),
-        "events_days":   _safe_int(_q_text("  Goal-event retention days",  default="180"), default=180),
+        "audit_days": _safe_int(_q_text("  Audit log retention days", default="90"), default=90),
+        "episodes_days": _safe_int(_q_text("  Episode retention days", default="365"), default=365),
+        "events_days": _safe_int(
+            _q_text("  Goal-event retention days", default="180"), default=180
+        ),
     }
 
 
@@ -3294,9 +4043,11 @@ def pick_notifications() -> tuple[dict[str, Any], list[str]]:
         return ({"backend": "ntfy", "topic": topic}, []) if topic else ({}, [])
     if backend == "pushover":
         return (
-            {"backend": "pushover",
-             "user_key": "${PUSHOVER_USER_KEY}",
-             "app_token": "${PUSHOVER_APP_TOKEN}"},
+            {
+                "backend": "pushover",
+                "user_key": "${PUSHOVER_USER_KEY}",
+                "app_token": "${PUSHOVER_APP_TOKEN}",
+            },
             ["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"],
         )
     if backend == "slack":
@@ -3392,6 +4143,7 @@ def pick_connectors() -> dict[str, str]:
     """
     try:
         from maverick.tools.enterprise_connectors import connector_catalog
+
         entries = connector_catalog()
     except Exception as e:  # maverick-core not importable / catalog moved
         console.print(f"[yellow]Connector catalog unavailable: {e}[/yellow]")
@@ -3427,9 +4179,7 @@ def pick_connectors() -> dict[str, str]:
             current = os.environ.get(env_name, "")
             if is_secret:
                 masked = (current[:4] + "...") if current else "(none)"
-                val = _q_secret(
-                    f"    {env_name} [current: {masked}] (blank = keep current)"
-                )
+                val = _q_secret(f"    {env_name} [current: {masked}] (blank = keep current)")
                 if not val and current:
                     val = current
             else:
@@ -3486,6 +4236,7 @@ def collect_api_keys(providers: list[str], channel_envs: set[str]) -> dict[str, 
 
 # ---------- write + verify ----------
 
+
 def _toml_str(v: Any) -> str:
     """Render a value as a TOML basic string with proper escaping.
 
@@ -3531,7 +4282,7 @@ def pick_a2a() -> tuple[dict[str, Any], list[str]]:
         "task endpoint at /a2a/v1 (on `maverick dashboard`). Budget is clamped "
         "to operator caps; a bearer token is required. A2A goals run under a "
         "tool ceiling (max_risk=medium by default -- edit [a2a].max_risk to "
-        "tighten to \"low\" or open to \"high\"/\"none\").[/dim]"
+        'tighten to "low" or open to "high"/"none").[/dim]'
     )
     return {"enabled": True, "max_risk": "medium"}, ["MAVERICK_A2A_TOKEN"]
 
@@ -3605,13 +4356,16 @@ def pick_suites() -> dict[str, bool]:
     Returns a ``suite -> bool`` map for the ``[suites]`` config table (empty when
     the operator keeps the default, so the kernel enables every suite)."""
     console.print()
-    console.print("[bold]Agent suites[/bold] — the business functions the agent "
-                  "factory can spawn (finance, operations, legal, ...).")
-    console.print("[dim]All enabled by default. A disabled suite's agents can't be "
-                  "spawned. Editable later in ~/.maverick/config.toml under "
-                  "[suites].[/dim]")
-    if not _q_confirm("  Customize which suites are enabled? (No = keep all on)",
-                      default=False):
+    console.print(
+        "[bold]Agent suites[/bold] — the business functions the agent "
+        "factory can spawn (finance, operations, legal, ...)."
+    )
+    console.print(
+        "[dim]All enabled by default. A disabled suite's agents can't be "
+        "spawned. Editable later in ~/.maverick/config.toml under "
+        "[suites].[/dim]"
+    )
+    if not _q_confirm("  Customize which suites are enabled? (No = keep all on)", default=False):
         return {}
     out: dict[str, bool] = {}
     for key, label in AGENT_SUITES:
@@ -3628,28 +4382,34 @@ def pick_license() -> dict[str, Any]:
     Returns a config map for ``[license]`` (empty when the operator keeps the
     fail-open default, so nothing is emitted and nothing gates)."""
     console.print()
-    console.print("[bold]Licensing[/bold] — enforce paid-feature entitlements "
-                  "(Gold/Platinum features, add-on suites like fleet).")
-    console.print("[dim]Fail-open by default: the kernel runs with no license. "
-                  "Turn enforcement on only for a licensed production deployment. "
-                  "A missing/expired license never stops the core — only paid "
-                  "add-ons gate off. Editable later under [license] in "
-                  "~/.maverick/config.toml.[/dim]")
-    if not _q_confirm("  Enforce paid-feature entitlements on this deployment?",
-                      default=False):
+    console.print(
+        "[bold]Licensing[/bold] — enforce paid-feature entitlements "
+        "(Gold/Platinum features, add-on suites like fleet)."
+    )
+    console.print(
+        "[dim]Fail-open by default: the kernel runs with no license. "
+        "Turn enforcement on only for a licensed production deployment. "
+        "A missing/expired license never stops the core — only paid "
+        "add-ons gate off. Editable later under [license] in "
+        "~/.maverick/config.toml.[/dim]"
+    )
+    if not _q_confirm("  Enforce paid-feature entitlements on this deployment?", default=False):
         return {}
     out: dict[str, Any] = {"enforce": True}
-    path = _q_text("    Signed license file path (blank = ~/.maverick/license.json)",
-                   default="")
+    path = _q_text("    Signed license file path (blank = ~/.maverick/license.json)", default="")
     if path.strip():
         out["license_file"] = path.strip()
-    pub = _q_text("    Trusted publisher pubkey(s), comma-separated hex "
-                  "(blank = keys embedded in the build)", default="")
+    pub = _q_text(
+        "    Trusted publisher pubkey(s), comma-separated hex (blank = keys embedded in the build)",
+        default="",
+    )
     keys = _csv_list(pub, lower=True)
     if keys:
         out["publisher_pubkeys"] = keys
-    api = _q_text("    Entitlement API URL for connected refresh "
-                  "(blank = offline license file only)", default="")
+    api = _q_text(
+        "    Entitlement API URL for connected refresh (blank = offline license file only)",
+        default="",
+    )
     if api.strip():
         out["api_url"] = api.strip()
         # The API token is a secret: reference an env var, never inline it
@@ -3658,8 +4418,9 @@ def pick_license() -> dict[str, Any]:
         # Near-instant propagation: the dashboard polls the API on this
         # interval so an upgrade issued in the vendor console lights up
         # without a redeploy. 0 disables; the kernel floors it at 30s.
-        interval = _q_text("    Auto-refresh interval in seconds "
-                           "(blank = 60, 0 = manual refresh only)", default="")
+        interval = _q_text(
+            "    Auto-refresh interval in seconds (blank = 60, 0 = manual refresh only)", default=""
+        )
         if interval.strip():
             try:
                 out["refresh_interval_seconds"] = int(interval.strip())
@@ -3858,14 +4619,42 @@ def _cfg_durable(durable: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _append_nested_product_config(
+    lines: list[str],
+    section: str,
+    values: dict[str, Any],
+) -> None:
+    def append_table(path: str, table: dict[str, Any]) -> None:
+        lines.extend(("", f"[{path}]"))
+        for key, value in table.items():
+            if not isinstance(value, dict):
+                _emit_kv(lines, key, value)
+        for subsystem, nested in table.items():
+            if isinstance(nested, dict):
+                append_table(f"{path}.{subsystem}", nested)
+
+    append_table(section, values)
+
+
 def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if not assessments:
         return []
     # Assessment assists + privacy ops are default-on; write tables only when
     # the operator opted OUT of something (write-only-on-divergence).
-    body = {k: v for k, v in assessments.items()
-            if k not in ("privacy_ops", "paper_review_use_model",
-                         "paper_review_org", "entity_graph")}
+    body = {
+        k: v
+        for k, v in assessments.items()
+        if k
+        not in (
+            "privacy_ops",
+            "privacy_automation",
+            "consent_preferences",
+            "data_use_governance",
+            "paper_review_use_model",
+            "paper_review_org",
+            "entity_graph",
+        )
+    }
     lines: list[str] = []
     if body:
         lines += ["", "[assessments]"]
@@ -3874,8 +4663,19 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if "privacy_ops" in assessments:
         lines += ["", "[privacy_ops]"]
         _emit_kv(lines, "enable", assessments["privacy_ops"])
-    if "paper_review_use_model" in assessments \
-            or "paper_review_org" in assessments:
+    consent = assessments.get("consent_preferences")
+    if consent is True:
+        lines += ["", "[consent_preferences]"]
+        _emit_kv(lines, "enable", True)
+    elif isinstance(consent, dict):
+        _append_nested_product_config(lines, "consent_preferences", consent)
+    data_use = assessments.get("data_use_governance")
+    if isinstance(data_use, dict):
+        _append_nested_product_config(lines, "data_use_governance", data_use)
+    privacy_automation = assessments.get("privacy_automation")
+    if isinstance(privacy_automation, dict):
+        _append_nested_product_config(lines, "privacy_automation", privacy_automation)
+    if "paper_review_use_model" in assessments or "paper_review_org" in assessments:
         lines += ["", "[paper_review]"]
         if "paper_review_use_model" in assessments:
             _emit_kv(lines, "use_model", assessments["paper_review_use_model"])
@@ -3902,27 +4702,61 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "snowflake_cortex",
         "vertex_ai",
     }
-    inventory_connectors = list(dict.fromkeys(
-        str(value).strip().lower()
-        for value in (security_suite.get("inventory_connectors") or [])
-        if str(value).strip().lower() in allowed_inventory_connectors
-    ))
-    rendered_inventory_connectors = ", ".join(
-        _toml_str(value) for value in inventory_connectors
+    inventory_connectors = list(
+        dict.fromkeys(
+            str(value).strip().lower()
+            for value in (security_suite.get("inventory_connectors") or [])
+            if str(value).strip().lower() in allowed_inventory_connectors
+        )
     )
+    governance_agents_enabled = bool(security_suite.get("governance_agents", False))
+    evidence_analysis_enabled = bool(security_suite.get("ai_evidence_analysis", False))
+    cloud_agent_governance_enabled = bool(
+        security_suite.get("ai_cloud_agent_governance", False)
+    )
+    databricks_framework_enabled = bool(
+        cloud_agent_governance_enabled
+        and security_suite.get("databricks_ai_security_framework", False)
+    )
+    if cloud_agent_governance_enabled:
+        inventory_connectors = list(
+            dict.fromkeys(
+                [*inventory_connectors, "bedrock", "azure_ai_foundry", "vertex_ai"]
+            )
+        )
+    rendered_inventory_connectors = ", ".join(_toml_str(value) for value in inventory_connectors)
     vendor_portal_enabled = bool(
         security_suite.get("ai_vendor_risk", False)
         and security_suite.get("ai_vendor_risk_portal", False)
     )
+    c2patool_executable_sha256 = (
+        str(security_suite.get("ai_media_provenance_c2patool_sha256", "")).strip().lower()
+    )
+    c2patool_digest_valid = len(c2patool_executable_sha256) == 64 and all(
+        character in "0123456789abcdef" for character in c2patool_executable_sha256
+    )
     c2patool_verification_enabled = bool(
         security_suite.get("ai_media_provenance", False)
         and security_suite.get("ai_media_provenance_c2patool", False)
+        and c2patool_digest_valid
     )
     identity_scheduler_enabled = bool(
         security_suite.get("ai_identity_governance_connectors", False)
         and security_suite.get("ai_identity_governance_scheduler", False)
     )
+    identity_controls_enabled = bool(
+        security_suite.get("ai_identity_governance_connectors", False)
+        and security_suite.get("ai_identity_governance_controls", False)
+    )
+    identity_federation_enabled = bool(
+        identity_controls_enabled and security_suite.get("ai_identity_federation", False)
+    )
     lines = [
+        "",
+        "[customer_sandbox_lifecycle]",
+        "enable = "
+        f"{'true' if security_suite.get('customer_sandbox_lifecycle', False) else 'false'}",
+        "source_revision = 1",
         "",
         "[security_ops]",
         f"enable = {'true' if security_suite.get('security_ops', True) else 'false'}",
@@ -3934,18 +4768,17 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         f"enable = {'true' if security_suite.get('evidence_graph', False) else 'false'}",
         "",
         "[model_risk_assurance]",
-        "enable = "
-        f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
         "gate_promotions = "
         f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
         "",
         "[evidence_gateway]",
         "enable = "
-        f"{'true' if security_suite.get('evidence_gateway', False) else 'false'}",
+        f"{'true' if security_suite.get('evidence_gateway', False) or governance_agents_enabled or evidence_analysis_enabled else 'false'}",
         "",
         "[ai_inventory]",
         "enable = "
-        f"{'true' if security_suite.get('ai_inventory', False) else 'false'}",
+        f"{'true' if security_suite.get('ai_inventory', False) or cloud_agent_governance_enabled else 'false'}",
         f"connectors = [{rendered_inventory_connectors}]",
         "page_cap = 100",
         "record_cap = 5000",
@@ -3955,25 +4788,37 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "poll_seconds = 900",
         "",
         "[ai_vendor_risk]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_vendor_risk', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_vendor_risk', False) else 'false'}",
         f"portal_enable = {'true' if vendor_portal_enabled else 'false'}",
         "",
         "[portfolio_risk]",
-        "enable = "
-        f"{'true' if security_suite.get('portfolio_risk', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('portfolio_risk', False) else 'false'}",
         "",
         "[policy_packs]",
         "enable = "
-        f"{'true' if security_suite.get('policy_packs', False) else 'false'}",
+        f"{'true' if security_suite.get('policy_packs', False) or databricks_framework_enabled else 'false'}",
+        "",
+        "[governance_agents]",
+        f"enable = {'true' if governance_agents_enabled else 'false'}",
+        'enabled_agents = ["breach_response", "privacy_risk_assessment", "program_copilot", "knowledgebase_governance", "third_party_risk"]',
+        "max_context_items = 100",
+        "max_context_bytes = 1048576",
+        "max_output_bytes = 262144",
+        "retention_seconds = 31536000",
+        "",
+        "[ai_evidence_analysis]",
+        f"enable = {'true' if evidence_analysis_enabled else 'false'}",
+        'enabled_media_types = ["pdf", "jpeg", "png", "xlsx", "text"]',
+        "max_artifact_bytes = 52428800",
+        "max_artifacts_per_case = 20",
+        "max_extracted_text_bytes = 1048576",
+        "retention_seconds = 31536000",
         "",
         "[ai_regulatory_feed]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_regulatory_feed', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_regulatory_feed', False) else 'false'}",
         "",
         "[red_team_assurance]",
-        "enable = "
-        f"{'true' if security_suite.get('red_team_assurance', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('red_team_assurance', False) else 'false'}",
         'commitment_secret_ref = "MAVERICK_RED_TEAM_COMMITMENT_KEY"',
         "max_cases = 12",
         "max_response_bytes = 65536",
@@ -3982,13 +4827,11 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "scheduler_poll_seconds = 30",
         "",
         "[eu_ai_incidents]",
-        "enable = "
-        f"{'true' if security_suite.get('eu_ai_incidents', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('eu_ai_incidents', False) else 'false'}",
         "authorities = []",
         "",
         "[grc_outbound_sync]",
-        "enable = "
-        f"{'true' if security_suite.get('grc_outbound_sync', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('grc_outbound_sync', False) else 'false'}",
         'targets = ["servicenow_irm", "archer"]',
         "max_attempts_per_revision = 8",
         "",
@@ -4003,16 +4846,13 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "max_response_bytes = 262144",
         "",
         "[ai_literacy]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_literacy', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_literacy', False) else 'false'}",
         "",
         "[ai_business_intake]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_business_intake', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_business_intake', False) else 'false'}",
         "",
         "[ai_cost_roi]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_cost_roi', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_cost_roi', False) else 'false'}",
         "collector_poll_seconds = 86400",
         "collector_lookback_days = 1",
         "",
@@ -4037,50 +4877,61 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "enable = false",
         "",
         "[ai_dynamic_risk]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_dynamic_risk', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_dynamic_risk', False) else 'false'}",
         "",
         "[ai_policy_management]",
         "enable = "
-        f"{'true' if security_suite.get('ai_policy_management', False) else 'false'}",
+        f"{'true' if security_suite.get('ai_policy_management', False) or cloud_agent_governance_enabled else 'false'}",
         "",
         "[ai_runtime_guardrails]",
         "enable = "
-        f"{'true' if security_suite.get('ai_runtime_guardrails', False) else 'false'}",
+        f"{'true' if security_suite.get('ai_runtime_guardrails', False) or cloud_agent_governance_enabled else 'false'}",
+        "",
+        "[ai_cloud_agent_governance]",
+        f"enable = {'true' if cloud_agent_governance_enabled else 'false'}",
+        'enabled_providers = ["aws_bedrock", "azure_ai_foundry", "google_vertex_ai"]',
+        f"databricks_framework_enable = {'true' if databricks_framework_enabled else 'false'}",
+        "max_records_per_sync = 10000",
+        "max_events_per_batch = 5000",
+        "retention_seconds = 31536000",
+        "",
+        "[ai_governance_loop]",
+        f"enable = {'true' if security_suite.get('ai_governance_loop', False) else 'false'}",
+        "poll_seconds = 300",
+        "batch_size = 100",
+        "lease_seconds = 120",
+        "max_attempts = 5",
+        "retry_base_seconds = 30",
+        "max_lag_seconds = 900",
         "",
         "[ai_explainability]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_explainability', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_explainability', False) else 'false'}",
         "",
         "[ai_conformity_workflow]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_conformity_workflow', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_conformity_workflow', False) else 'false'}",
         "",
         "[ai_insurability]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_insurability', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_insurability', False) else 'false'}",
         "",
         "[ai_regulated_verticals]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_regulated_verticals', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_regulated_verticals', False) else 'false'}",
         "",
         "[ai_bank_mrm]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_bank_mrm', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_bank_mrm', False) else 'false'}",
         "",
         "[ai_benchmark_exchange]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_benchmark_exchange', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_benchmark_exchange', False) else 'false'}",
         "",
         "[ai_discovery_sensors]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_discovery_sensors', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_discovery_sensors', False) else 'false'}",
         "",
         "[ai_media_provenance]",
-        "enable = "
-        f"{'true' if security_suite.get('ai_media_provenance', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_media_provenance', False) else 'false'}",
         *(
-            ['verification_adapter = "c2patool"']
+            [
+                'verification_adapter = "c2patool"',
+                f"c2patool_executable_sha256 = {_toml_str(c2patool_executable_sha256)}",
+            ]
             if c2patool_verification_enabled
             else []
         ),
@@ -4144,9 +4995,30 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "max_snapshot_items = 5000",
         "max_delta_digests = 256",
         "",
-        "[model_improvement]",
+        "[ai_identity_governance_connectors.controls]",
+        f"enable = {'true' if identity_controls_enabled else 'false'}",
+        "",
+        "[ai_identity_governance_connectors.controls.change_coupling]",
         "enable = "
-        f"{'true' if security_suite.get('model_improvement', False) else 'false'}",
+        f"{'true' if identity_controls_enabled and security_suite.get('ai_identity_change_coupling', False) else 'false'}",
+        "dynamic_risk = "
+        f"{'true' if identity_controls_enabled and security_suite.get('ai_identity_change_coupling', False) else 'false'}",
+        "alerts = "
+        f"{'true' if identity_controls_enabled and security_suite.get('ai_identity_change_coupling', False) else 'false'}",
+        "",
+        "[ai_identity_governance_connectors.controls.federation]",
+        f"enable = {'true' if identity_federation_enabled else 'false'}",
+        "",
+        "[ai_identity_governance_connectors.controls.conditional_access]",
+        "enable = "
+        f"{'true' if identity_federation_enabled and security_suite.get('ai_identity_conditional_access', False) else 'false'}",
+        "",
+        "[ai_identity_governance_connectors.controls.purview_writeback]",
+        "enable = "
+        f"{'true' if identity_federation_enabled and security_suite.get('ai_identity_purview_writeback', False) else 'false'}",
+        "",
+        "[model_improvement]",
+        f"enable = {'true' if security_suite.get('model_improvement', False) else 'false'}",
         "allow_hosted = "
         f"{'true' if security_suite.get('allow_hosted_training', False) else 'false'}",
         "allow_cross_tenant = false",
@@ -4164,11 +5036,11 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         f"poll_seconds = {max(30, min(3600, int(security_suite.get('poll_seconds', 300))))}",
     ]
     enrichment_sources = security_suite.get("enrichment_sources") or []
-    enrichment_sources = list(dict.fromkeys(
-        str(value).strip().lower()
-        for value in enrichment_sources
-        if str(value).strip()
-    ))
+    enrichment_sources = list(
+        dict.fromkeys(
+            str(value).strip().lower() for value in enrichment_sources if str(value).strip()
+        )
+    )
     for name in enrichment_sources:
         lines += [
             "",
@@ -4204,6 +5076,12 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
             f"push_enable = {'true' if push_enabled is True else 'false'}",
             f"pivot_enable = {'true' if pivot_enabled is True else 'false'}",
         ]
+    tech_risk_compliance = security_suite.get("tech_risk_compliance")
+    if isinstance(tech_risk_compliance, dict):
+        _append_nested_product_config(lines, "tech_risk_compliance", tech_risk_compliance)
+    third_party_management = security_suite.get("third_party_management")
+    if isinstance(third_party_management, dict):
+        _append_nested_product_config(lines, "third_party_management", third_party_management)
     return lines
 
 
@@ -4347,9 +5225,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             lines.extend(["", f"[{section}]", "enable = false"])
     # Advanced reasoning toggles -> the kernel's config sections. Each is
     # off unless the wizard wrote it, matching the modules' own defaults.
-    if (advanced.get("cost_aware") or advanced.get("verify_ensemble")
-            or advanced.get("energy_aware")
-            or advanced.get("autonomy_gate")):
+    if (
+        advanced.get("cost_aware")
+        or advanced.get("verify_ensemble")
+        or advanced.get("energy_aware")
+        or advanced.get("autonomy_gate")
+    ):
         lines.append("")
         lines.append("[routing]")
         # Constrain routing features enabled by the wizard to the providers
@@ -4450,8 +5331,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # factory_learning=false when the user opts out.
     declined_factory = "factory_learning" in advanced and not advanced.get("factory_learning")
     has_learning_policy = any(
-        key in advanced
-        for key in ("causal_promotion", "factory_learning", "evaluator_evolution")
+        key in advanced for key in ("causal_promotion", "factory_learning", "evaluator_evolution")
     )
     if has_learning_policy or advanced.get("signed_approval"):
         lines.append("")
@@ -4554,7 +5434,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[consequence]")
         lines.append("# Ground learning in REAL downstream outcomes: a recorded consequence")
         lines.append("# (invoice paid, ticket reopened) overrides the model's self-graded")
-        lines.append("# proxy reward, so the data engine learns from reality (maverick.consequence).")
+        lines.append(
+            "# proxy reward, so the data engine learns from reality (maverick.consequence)."
+        )
         lines.append("enable = true")
     if advanced.get("earned_autonomy"):
         lines.append("")
@@ -4655,10 +5537,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         # (data_dir('audit','keys')/<key_id>.pub). expires_at/not_before (epoch
         # seconds) and revoked support key rotation/revocation.
         lines.append("# agents = [")
-        lines.append('#   { id = "vega", pubkey = "<64-hex Ed25519>", '
-                     'direction = "both", allow_tools = ["read_file", '
-                     '"http_fetch"], max_risk = "medium", max_dollars = 2.0, '
-                     'max_wall_seconds = 600, data_scopes = ["support"] },')
+        lines.append(
+            '#   { id = "vega", pubkey = "<64-hex Ed25519>", '
+            'direction = "both", allow_tools = ["read_file", '
+            '"http_fetch"], max_risk = "medium", max_dollars = 2.0, '
+            'max_wall_seconds = 600, data_scopes = ["support"] },'
+        )
         lines.append("# ]")
     if advanced.get("anonymous_logs"):
         lines.append("")
@@ -4678,13 +5562,28 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         # first start or pre-tenancy (NULL-tenant) rows become invisible:
         #   maverick tenant rls-preflight         # ownership + legacy-row check
         #   maverick tenant backfill --tenant ID  # assign pre-tenancy NULL rows
-        lines.append("# Run `maverick tenant rls-preflight` + `maverick tenant "
-                     "backfill` before first start (see docs/multi-tenancy.md).")
+        lines.append(
+            "# Run `maverick tenant rls-preflight` + `maverick tenant "
+            "backfill` before first start (see docs/multi-tenancy.md)."
+        )
         lines.append("rls = true")
-    if advanced.get("audit_sign"):
+    if advanced.get("audit_sign") or advanced.get("unified_audit"):
         lines.append("")
         lines.append("[audit]")
         lines.append("sign = true")
+    if advanced.get("unified_audit"):
+        lines.append("")
+        lines.append("[audit.unified]")
+        lines.append("# Fixed completeness floor: AI Governance, Consent & Preferences,")
+        lines.append("# Data Use Governance, Privacy Automation, Tech Risk & Compliance,")
+        lines.append("# and Third-Party Management. Sources cannot be removed in config.")
+        lines.append("enable = true")
+        lines.append("page_size = 100")
+        lines.append("lease_seconds = 120")
+        lines.append("max_lag_seconds = 300")
+        lines.append("max_attempts = 5")
+        lines.append("retry_backoff_seconds = 30")
+        lines.append("poll_seconds = 60")
     if advanced.get("audit_worm"):
         lines.append("")
         # WORM export of closed audit day-files. Defaults to a local read-only
@@ -4949,23 +5848,25 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         # opted into that flow (so a bearer-only OIDC config is unchanged).
         # The kernel's login_enabled() additionally gates the routes.
         for key in (
-            "client_id", "client_secret", "redirect_uri", "session_secret",
+            "client_id",
+            "client_secret",
+            "redirect_uri",
+            "session_secret",
         ):
             val = oidc.get(key)
             if val:
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
-    if isinstance(dept, dict) and (dept.get("default_suites")
-                                   or dept.get("group_roles")
-                                   or dept.get("group_suites")):
+    if isinstance(dept, dict) and (
+        dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
+    ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
         # turn IdP (SCIM) team membership into a role / department grant.
         lines.append("")
         lines.append("[dashboard]")
         if dept.get("default_suites"):
-            lines.append("# Departments a signed-in user may use until an admin "
-                         "grants more.")
+            lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
         # Group names contain spaces, so the TOML key must be a quoted string
         # ("Finance Team" = ...), not the bare key _emit_kv would render.
@@ -5039,8 +5940,9 @@ def _cfg_plugins(
     return lines
 
 
-def _cfg_security(tool_acl: dict[str, Any] | None, autofix: bool,
-                  dual_approval: bool = False) -> list[str]:
+def _cfg_security(
+    tool_acl: dict[str, Any] | None, autofix: bool, dual_approval: bool = False
+) -> list[str]:
     if not (tool_acl or autofix or dual_approval):
         return []
     lines = ["", "[security]"]
@@ -5074,7 +5976,7 @@ def _cfg_rate_limits(rate_limits: dict[str, str] | None) -> list[str]:
         key = name if name.replace("_", "").isalnum() else f'"{name}"'
         # spec is free-text ("N/seconds"); escape via _toml_str so a stray
         # quote/backslash can't corrupt the config the wizard writes.
-        lines.append(f'{key} = {_toml_str(spec)}')
+        lines.append(f"{key} = {_toml_str(spec)}")
     return lines
 
 
@@ -5335,8 +6237,11 @@ def write_config(
     lines += _cfg_registries("mcp_registries", mcp_registries)
     lines += _cfg_registries("template_registries", template_registries)
     lines += _cfg_plugins(plugins, plugin_grant, plugin_enforce, ts_plugins)
-    lines += _cfg_security(tool_acl, bool((advanced or {}).get("security_autofix")),
-                           dual_approval=bool((advanced or {}).get("dual_approval")))
+    lines += _cfg_security(
+        tool_acl,
+        bool((advanced or {}).get("security_autofix")),
+        dual_approval=bool((advanced or {}).get("dual_approval")),
+    )
     lines += _cfg_rate_limits(rate_limits)
     lines += _cfg_table("retention", retention)
     lines += _cfg_table("analytics", analytics)
@@ -5363,6 +6268,7 @@ def smoke_test() -> bool:
     console.print("[dim]Running smoke test...[/dim]")
     try:
         from maverick.config import load_config
+
         cfg = load_config()
         assert cfg.get("sandbox", {}).get("backend"), "sandbox backend missing"
         console.print("[green]✓[/green] Config readable")
@@ -5372,15 +6278,19 @@ def smoke_test() -> bool:
 
     try:
         import maverick_shield  # noqa: F401
+
         console.print("[green]✓[/green] Lightwork Shield available")
     except ImportError:
         console.print("[yellow]⚠[/yellow] maverick-shield not installed (safety will be disabled)")
 
     try:
         import anthropic  # noqa: F401
+
         console.print("[green]✓[/green] Anthropic SDK available")
     except ImportError:
-        console.print("[yellow]⚠[/yellow] anthropic not installed; install with: pip install anthropic")
+        console.print(
+            "[yellow]⚠[/yellow] anthropic not installed; install with: pip install anthropic"
+        )
 
     return True
 
@@ -5392,6 +6302,7 @@ def _save_partial(state: dict[str, Any]) -> None:
     """Persist wizard progress so --resume can pick up later."""
     try:
         import json as _json
+
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         PARTIAL_STATE_PATH.write_text(_json.dumps(state, default=str))
         os.chmod(PARTIAL_STATE_PATH, 0o600)
@@ -5405,6 +6316,7 @@ def _load_partial() -> dict[str, Any] | None:
         return None
     try:
         import json as _json
+
         return _json.loads(PARTIAL_STATE_PATH.read_text())
     except (OSError, ValueError):
         return None
@@ -5428,9 +6340,7 @@ def run_fast() -> int:
     """
     welcome()
     if not preflight():
-        console.print(
-            "[red]Preflight failed.[/red] Fix the issues above and re-run."
-        )
+        console.print("[red]Preflight failed.[/red] Fix the issues above and re-run.")
         return 1
     console.print(
         "[bold]Fast setup:[/bold] using safe defaults. "
@@ -5477,8 +6387,14 @@ def run_fast() -> int:
     if os.environ.get("ANTHROPIC_API_KEY"):
         keys["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
     write_config(
-        providers, role_models, channels, safety, budget,
-        sandbox, keys, capabilities,
+        providers,
+        role_models,
+        channels,
+        safety,
+        budget,
+        sandbox,
+        keys,
+        capabilities,
         tool_acl={"denied_tools": denied_tools},
     )
     # smoke_test() returns a bool and it was discarded, so `maverick init
@@ -5488,23 +6404,27 @@ def run_fast() -> int:
     # installer whose success means nothing.
     if not smoke_test():
         console.print()
-        console.print(Panel.fit(
-            "[bold red]Fast setup failed its smoke test.[/bold red]\n\n"
-            "The config was written, but the checks above did not pass, so "
-            "this install is not ready to run.\n"
-            "Fix the failures listed above, then re-run "
-            "[bold]maverick init --fast[/bold] (or `maverick doctor`).",
-            border_style="red",
-        ))
+        console.print(
+            Panel.fit(
+                "[bold red]Fast setup failed its smoke test.[/bold red]\n\n"
+                "The config was written, but the checks above did not pass, so "
+                "this install is not ready to run.\n"
+                "Fix the failures listed above, then re-run "
+                "[bold]maverick init --fast[/bold] (or `maverick doctor`).",
+                border_style="red",
+            )
+        )
         return 1
     console.print()
-    console.print(Panel.fit(
-        "[bold green]Fast setup finished.[/bold green]\n\n"
-        "Try: [bold]maverick start \"hello\"[/bold]\n"
-        "(If ANTHROPIC_API_KEY wasn't set, edit ~/.maverick/.env first.)\n"
-        "[dim]The maverick command is also available as lightwork.[/dim]",
-        border_style="green",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold green]Fast setup finished.[/bold green]\n\n"
+            'Try: [bold]maverick start "hello"[/bold]\n'
+            "(If ANTHROPIC_API_KEY wasn't set, edit ~/.maverick/.env first.)\n"
+            "[dim]The maverick command is also available as lightwork.[/dim]",
+            border_style="green",
+        )
+    )
     return 0
 
 
@@ -5520,13 +6440,15 @@ def pick_mode() -> str:
     user can opt straight into the full wizard.
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold]How do you want to set this up?[/bold]\n\n"
-        "  consumer  Four questions, safe defaults. About a minute.\n"
-        "  express   A few questions, then turn ON all safe features.\n"
-        "  advanced  Pick every model, channel, safety level, budget.",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]How do you want to set this up?[/bold]\n\n"
+            "  consumer  Four questions, safe defaults. About a minute.\n"
+            "  express   A few questions, then turn ON all safe features.\n"
+            "  advanced  Pick every model, channel, safety level, budget.",
+            border_style="cyan",
+        )
+    )
     pick = _q_select(
         "Pick a mode:",
         [
@@ -5631,11 +6553,11 @@ def write_consumer_config(
     if backend == "local":
         denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
     write_config(
-        ["anthropic"],             # providers
-        {},                        # role_models -> kernel defaults
-        {},                        # channels -> none in consumer mode
+        ["anthropic"],  # providers
+        {},  # role_models -> kernel defaults
+        {},  # channels -> none in consumer mode
         {
-            "profile": "strict",          # strictest shield
+            "profile": "strict",  # strictest shield
             "block_threshold": "medium",  # block medium+ threats
             "scan_input": True,
             "scan_tool_calls": True,
@@ -5669,23 +6591,26 @@ def run_consumer() -> int:
     """Four-question consumer flow. Writes a minimal config with
     consumer-grade safe defaults, then prints a one-line demo command."""
     console.print()
-    console.print(Panel.fit(
-        "[bold]Lightwork setup[/bold]\n\n"
-        "Five quick questions. About a minute. You can change anything later\n"
-        "by running [bold]maverick init[/bold] again.",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]Lightwork setup[/bold]\n\n"
+            "Five quick questions. About a minute. You can change anything later\n"
+            "by running [bold]maverick init[/bold] again.",
+            border_style="cyan",
+        )
+    )
 
     if not preflight():
-        console.print(
-            "[red]Setup can't continue.[/red] Fix the issues above and try again."
-        )
+        console.print("[red]Setup can't continue.[/red] Fix the issues above and try again.")
         return 1
 
-    user_name = _q_text(
-        "What should we call you?",
-        default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
-    ).strip() or "you"
+    user_name = (
+        _q_text(
+            "What should we call you?",
+            default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
+        ).strip()
+        or "you"
+    )
 
     profile = pick_governance_profile()
 
@@ -5700,7 +6625,10 @@ def run_consumer() -> int:
 
     try:
         write_consumer_config(
-            user_name=user_name, keys=keys, workdir=workdir, budget=budget,
+            user_name=user_name,
+            keys=keys,
+            workdir=workdir,
+            budget=budget,
             profile=profile,
         )
     except Exception as e:
@@ -5714,22 +6642,26 @@ def run_consumer() -> int:
     # seconds even on cold connections.
     console.print()
     if keys:
-        console.print(Panel.fit(
-            f"[bold green]Setup complete, {user_name}.[/bold green]\n\n"
-            "Try your first goal:\n"
-            f"  [bold]maverick start \"{CONSUMER_DEMO_GOAL}\" --model {CONSUMER_DEMO_MODEL}[/bold]\n\n"
-            "Then:\n"
-            "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-            "[dim]The maverick command is also available as lightwork.[/dim]",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]Setup complete, {user_name}.[/bold green]\n\n"
+                "Try your first goal:\n"
+                f'  [bold]maverick start "{CONSUMER_DEMO_GOAL}" --model {CONSUMER_DEMO_MODEL}[/bold]\n\n'
+                "Then:\n"
+                "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+                "[dim]The maverick command is also available as lightwork.[/dim]",
+                border_style="green",
+            )
+        )
     else:
-        console.print(Panel.fit(
-            f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
-            "Add one later by exporting ANTHROPIC_API_KEY or by running\n"
-            "[bold]maverick init[/bold] again.",
-            border_style="yellow",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
+                "Add one later by exporting ANTHROPIC_API_KEY or by running\n"
+                "[bold]maverick init[/bold] again.",
+                border_style="yellow",
+            )
+        )
     _clear_partial()
     return 0
 
@@ -5823,18 +6755,18 @@ _PROFILE_SELF_LEARNING: dict[str, Any] = dict(_EXPRESS_SELF_LEARNING)
 # Governance additions by level (cumulative: standard ⊃ essentials,
 # regulated ⊃ standard). Every key is one _cfg_advanced recognises.
 _STANDARD_GOVERNANCE: dict[str, Any] = {
-    "memory_guard": True,         # governed memory writes
-    "governed_actions": True,     # side-effectful actions logged + gated
+    "memory_guard": True,  # governed memory writes
+    "governed_actions": True,  # side-effectful actions logged + gated
     "calibration_enforce": True,  # confidence calibration gate
     "fairness_monitor": True,
-    "audit_sign": True,           # Ed25519-signed audit chain
-    "enforce_quotas": True,       # per-principal daily spend/token caps
+    "audit_sign": True,  # Ed25519-signed audit chain
+    "enforce_quotas": True,  # per-principal daily spend/token caps
 }
 _REGULATED_GOVERNANCE: dict[str, Any] = {
     **_STANDARD_GOVERNANCE,
-    "audit_rewards": True,        # provable-learning reward audit
-    "audit_worm": True,           # WORM export of closed audit day-files
-    "signed_approval": True,      # human Ed25519 sign-off for code/weights rungs
+    "audit_rewards": True,  # provable-learning reward audit
+    "audit_worm": True,  # WORM export of closed audit day-files
+    "signed_approval": True,  # human Ed25519 sign-off for code/weights rungs
 }
 
 GOVERNANCE_PROFILES: dict[str, dict[str, Any]] = {
@@ -5861,12 +6793,10 @@ DEFAULT_GOVERNANCE_PROFILE = "essentials"
 # same convention as pick_mode(). Public: the desktop sidecar (bridge.py)
 # imports these so the two front ends show the SAME menu and cannot drift.
 GOVERNANCE_CHOICES: list[str] = [
-    "essentials - small business: learn + improve, stay out of my way "
-    "(a gym, a studio, a shop)",
+    "essentials - small business: learn + improve, stay out of my way (a gym, a studio, a shop)",
     "standard   - growing company: + budgets enforced, signed audit trail "
     "(a manufacturer, an agency)",
-    "regulated  - bank / clinic / government: + human sign-off, immutable "
-    "audit, long retention",
+    "regulated  - bank / clinic / government: + human sign-off, immutable audit, long retention",
 ]
 
 
@@ -5923,29 +6853,32 @@ def run_express() -> int:
     without sitting through the full advanced wizard. Host-dangerous and
     infra-shaped toggles stay off (and are listed for the user)."""
     console.print()
-    console.print(Panel.fit(
-        "[bold]Lightwork express setup[/bold]\n\n"
-        "A few questions, then every safe single-user feature is turned on:\n"
-        "the flow engine, named connections, the self-improvement lifecycle\n"
-        "(reflexion, dreaming, experience, self-harness, data engine),\n"
-        "governed memory, web search, durable execution, and all 53 suites.\n\n"
-        "[dim]Left off (enable later via `maverick init` advanced): computer/\n"
-        "browser control, code execution, autonomous self-modification, at-rest\n"
-        "encryption + multi-tenancy, messaging channels, and license enforcement\n"
-        "(leaving enforcement off is what keeps every paid feature unlocked).[/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]Lightwork express setup[/bold]\n\n"
+            "A few questions, then every safe single-user feature is turned on:\n"
+            "the flow engine, named connections, the self-improvement lifecycle\n"
+            "(reflexion, dreaming, experience, self-harness, data engine),\n"
+            "governed memory, web search, durable execution, and all 53 suites.\n\n"
+            "[dim]Left off (enable later via `maverick init` advanced): computer/\n"
+            "browser control, code execution, autonomous self-modification, at-rest\n"
+            "encryption + multi-tenancy, messaging channels, and license enforcement\n"
+            "(leaving enforcement off is what keeps every paid feature unlocked).[/dim]",
+            border_style="cyan",
+        )
+    )
 
     if not preflight():
-        console.print(
-            "[red]Setup can't continue.[/red] Fix the issues above and try again."
-        )
+        console.print("[red]Setup can't continue.[/red] Fix the issues above and try again.")
         return 1
 
-    user_name = _q_text(
-        "What should we call you?",
-        default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
-    ).strip() or "you"
+    user_name = (
+        _q_text(
+            "What should we call you?",
+            default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
+        ).strip()
+        or "you"
+    )
     profile = pick_governance_profile()
     keys = _consumer_api_key()
     workdir = _q_text(
@@ -5959,8 +6892,7 @@ def run_express() -> int:
     # Express turns on every safe single-user feature; the governance level
     # layers its posture (signed audit, quotas, WORM, signed approvals) on
     # top. Union of two all-True dicts, so profile keys can only ADD.
-    preset = GOVERNANCE_PROFILES.get(
-        profile, GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE])
+    preset = GOVERNANCE_PROFILES.get(profile, GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE])
     # Computer + browser are never enabled by express. If Docker is
     # unavailable, fail closed on host-mutating tools too: the local backend
     # runs against the user's host filesystem, not a container blast radius.
@@ -5972,15 +6904,22 @@ def run_express() -> int:
             providers=["anthropic"],
             role_models={},
             channels={},
-            safety={"profile": "balanced", "scan_input": True,
-                    "scan_tool_calls": True, "scan_output": True},
+            safety={
+                "profile": "balanced",
+                "scan_input": True,
+                "scan_tool_calls": True,
+                "scan_output": True,
+            },
             budget=budget,
-            sandbox={"backend": backend,
-                     "workdir": str(Path(workdir).expanduser()), "timeout": 60},
+            sandbox={"backend": backend, "workdir": str(Path(workdir).expanduser()), "timeout": 60},
             keys=keys,
             # Host-mutating capabilities require explicit opt-in even in express.
-            capabilities={"computer_use": False, "browser": False,
-                          "ros": False, "code_exec": False},
+            capabilities={
+                "computer_use": False,
+                "browser": False,
+                "ros": False,
+                "code_exec": False,
+            },
             advanced={**_EXPRESS_ADVANCED, **preset["advanced"]},
             persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
             web_search_enabled=True,
@@ -5995,8 +6934,9 @@ def run_express() -> int:
             # means keep-forever (retention is opt-in pruning). Preserve that
             # at the default level; only an explicitly-picked governance
             # upgrade may introduce pruning windows.
-            retention=(dict(preset["retention"])
-                       if profile != DEFAULT_GOVERNANCE_PROFILE else None),
+            retention=(
+                dict(preset["retention"]) if profile != DEFAULT_GOVERNANCE_PROFILE else None
+            ),
             governance_profile=profile,
             tool_acl={"denied_tools": denied_tools},
         )
@@ -6006,21 +6946,25 @@ def run_express() -> int:
 
     console.print()
     if keys:
-        console.print(Panel.fit(
-            f"[bold green]Everything's on, {user_name}.[/bold green]\n\n"
-            "Open the dashboard:\n"
-            "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
-            "[dim]Change anything in ~/.maverick/config.toml, or re-run "
-            "maverick init.[/dim]",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]Everything's on, {user_name}.[/bold green]\n\n"
+                "Open the dashboard:\n"
+                "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+                "[dim]Change anything in ~/.maverick/config.toml, or re-run "
+                "maverick init.[/dim]",
+                border_style="green",
+            )
+        )
     else:
-        console.print(Panel.fit(
-            f"[bold yellow]Everything's on, but no API key yet, {user_name}.[/bold yellow]\n\n"
-            "Add one by exporting ANTHROPIC_API_KEY or re-running "
-            "[bold]maverick init[/bold].",
-            border_style="yellow",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold yellow]Everything's on, but no API key yet, {user_name}.[/bold yellow]\n\n"
+                "Add one by exporting ANTHROPIC_API_KEY or re-running "
+                "[bold]maverick init[/bold].",
+                border_style="yellow",
+            )
+        )
     _clear_partial()
     return 0
 
@@ -6069,13 +7013,15 @@ def show_compliance_commands(advanced: dict[str, Any]) -> None:
         for cmd, desc in _COMPLIANCE_COMMANDS
     )
     console.print()
-    console.print(Panel.fit(
-        "[bold]You enabled a regulated-data posture.[/bold] Prove and document it:\n\n"
-        f"{rows}\n\n"
-        "[dim]See docs/regulated-deployment.md. Control coverage, not legal advice.[/dim]",
-        border_style="cyan",
-        title="Compliance & documentation",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]You enabled a regulated-data posture.[/bold] Prove and document it:\n\n"
+            f"{rows}\n\n"
+            "[dim]See docs/regulated-deployment.md. Control coverage, not legal advice.[/dim]",
+            border_style="cyan",
+            title="Compliance & documentation",
+        )
+    )
 
 
 def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
@@ -6210,9 +7156,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     }
 
 
-def _run_plugin_picks(
-    state: dict[str, Any], _announce, channels: dict[str, Any]
-) -> dict[str, Any]:
+def _run_plugin_picks(state: dict[str, Any], _announce, channels: dict[str, Any]) -> dict[str, Any]:
     """Run the plugin/ACL/policy block (mcp_servers through analytics).
 
     Uses the ``is None`` sentinel for steps whose legitimate answer is falsy.
@@ -6336,8 +7280,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
             )
         else:
             console.print(
-                f"[yellow]⚠[/yellow] No partial state at {PARTIAL_STATE_PATH}; "
-                "starting fresh.\n"
+                f"[yellow]⚠[/yellow] No partial state at {PARTIAL_STATE_PATH}; starting fresh.\n"
             )
 
     # Progress bar: announce "Step N/M <label>" before each pick_*, with a
@@ -6360,9 +7303,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     while not providers:
         # Aborting on empty selection forced the user to restart the
         # whole wizard (UX seat finding). Re-ask instead.
-        console.print(
-            "[yellow]Pick at least one provider; Lightwork needs an LLM.[/yellow]"
-        )
+        console.print("[yellow]Pick at least one provider; Lightwork needs an LLM.[/yellow]")
         providers = pick_providers()
     state["providers"] = providers
     _save_partial(state)
@@ -6408,9 +7349,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     advanced = _simple["advanced"]
 
     _announce()
-    web_search_enabled, web_search_envs = (
-        state.get("_web_search_pair") or pick_web_search()
-    )
+    web_search_enabled, web_search_envs = state.get("_web_search_pair") or pick_web_search()
     state["_web_search_pair"] = [web_search_enabled, web_search_envs]
     _save_partial(state)
 
@@ -6442,8 +7381,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     state["_webhooks_pair"] = [webhooks, webhook_envs]
     _save_partial(state)
 
-    deliverables, deliverable_envs = (
-        state.get("_deliverables_pair") or pick_deliverable_handoff())
+    deliverables, deliverable_envs = state.get("_deliverables_pair") or pick_deliverable_handoff()
     state["_deliverables_pair"] = [deliverables, deliverable_envs]
     _save_partial(state)
 
@@ -6459,8 +7397,11 @@ def run(fast: bool = False, resume: bool = False) -> int:
     # Keys/sessions are never persisted to disk in the partial state
     # (they're secrets; the only safe place is ~/.maverick/.env).
     extra_envs = (
-        set(web_search_envs) | set(notify_envs) | set(webhook_envs)
-        | set(a2a_envs) | set(deliverable_envs)
+        set(web_search_envs)
+        | set(notify_envs)
+        | set(webhook_envs)
+        | set(a2a_envs)
+        | set(deliverable_envs)
     )
     keys = collect_api_keys(providers, channel_envs | extra_envs)
     # Enterprise connectors are always registered; collect any credentials the
@@ -6486,8 +7427,14 @@ def run(fast: bool = False, resume: bool = False) -> int:
         return 0
 
     write_config(
-        providers, role_models, channels, safety, budget, sandbox,
-        keys, capabilities,
+        providers,
+        role_models,
+        channels,
+        safety,
+        budget,
+        sandbox,
+        keys,
+        capabilities,
         advanced=advanced,
         mcp_servers=mcp_servers,
         plugins=plugins,
@@ -6505,7 +7452,13 @@ def run(fast: bool = False, resume: bool = False) -> int:
         personas=personas,
         a2a=a2a_cfg,
         web_search_enabled=web_search_enabled,
-        skills=signed_skills if (signed_skills.get("trusted_pubkeys") or signed_skills.get("require_signed") or signed_skills.get("require_signed_catalog")) else None,
+        skills=signed_skills
+        if (
+            signed_skills.get("trusted_pubkeys")
+            or signed_skills.get("require_signed")
+            or signed_skills.get("require_signed_catalog")
+        )
+        else None,
         self_learning=self_learning if self_learning.get("enable") else None,
         # Persist the explicit default-off decision. Unlike default-on governed
         # learning, Ekko never inherits authority from another feature.
@@ -6535,15 +7488,17 @@ def run(fast: bool = False, resume: bool = False) -> int:
     if ok:
         console.print()
         next_step = "maverick serve" if channels else 'maverick start "hello"'
-        console.print(Panel.fit(
-            "[bold green]Setup complete.[/bold green]\n\n"
-            "Try:\n"
-            f"  [bold]{next_step}[/bold]\n"
-            "  [bold]maverick status[/bold]\n"
-            "  [bold]maverick dashboard[/bold]    # web UI at http://127.0.0.1:8765\n\n"
-            "[dim]The maverick command is also available as lightwork.[/dim]",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                "[bold green]Setup complete.[/bold green]\n\n"
+                "Try:\n"
+                f"  [bold]{next_step}[/bold]\n"
+                "  [bold]maverick status[/bold]\n"
+                "  [bold]maverick dashboard[/bold]    # web UI at http://127.0.0.1:8765\n\n"
+                "[dim]The maverick command is also available as lightwork.[/dim]",
+                border_style="green",
+            )
+        )
         show_compliance_commands(advanced)
         return 0
     return 1

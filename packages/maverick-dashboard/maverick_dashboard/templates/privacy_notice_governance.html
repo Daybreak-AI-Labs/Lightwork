@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Privacy Notice Governance - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .png-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+              gap:var(--space-4); }
+  .png-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .png-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .png-stack textarea { min-height:18rem; font-family:var(--font-mono); }
+  .png-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
+                word-break:break-word; }
+  .png-warning { border:2px solid var(--danger); padding:var(--space-3);
+                 border-radius:8px; background:var(--surface-2); }
+  .png-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  @media (max-width:900px) { .png-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Privacy Notice Governance</h1>
+<p>Exact-tenant control plane for content-free notice versions, independent
+  approvals, scheduled publication intents, rollback, withdrawal, governed
+  update proposals, effective-release resolution, and signed local exports.</p>
+<div class="png-warning">
+  <strong>No raw notice content, personal data, secret values, network I/O,
+    provider writes, automatic legal-applicability decisions, SDK deployment,
+    site mutation, automatic publication, or live acceptance.</strong>
+  Policy, content, and configuration are represented only by SHA-256 digests.
+  Consent publications, citations, acknowledgements, and signing keys are
+  bounded opaque references, never their underlying values.
+</div>
+
+{% if not privacy_notice_governance_enabled %}
+<section class="panel">
+  <h2>Privacy notice governance disabled</h2>
+  <p>This surface fails closed until both
+    <code>[privacy_automation] enable = true</code> and
+    <code>[privacy_automation.notice_governance] enable = true</code> are explicit.</p>
+</section>
+{% else %}
+<p><button class="btn" id="png-load-status" type="button">Load honest status</button></p>
+<div class="png-grid">
+  <section class="panel png-stack">
+    <h2>Strict JSON operator workbench</h2>
+    <p>Tenant and actor come only from the authenticated request. Unknown fields,
+      raw notice text or markup, personal data, and key values are rejected.</p>
+    <label>Operation
+      <select id="png-operation">
+        <option value="policy-set" data-method="PUT" data-path="/approval-policies/{policy_id}">Approval policy: set exact revision</option>
+        <option value="policy-get" data-method="GET" data-path="/approval-policies/{policy_id}">Approval policy: get</option>
+        <option value="release-create" data-method="PUT" data-path="/releases/{notice_id}/versions">Release: create content-free version</option>
+        <option value="release-get" data-method="GET" data-path="/releases/{notice_id}/versions/{version}">Release: get version</option>
+        <option value="release-submit" data-method="POST" data-path="/releases/{notice_id}/versions/{version}/submit">Release: submit for review</option>
+        <option value="release-approve" data-method="POST" data-path="/releases/{notice_id}/versions/{version}/approvals">Release: independent role approval</option>
+        <option value="approval-revoke" data-method="POST" data-path="/releases/{notice_id}/versions/{version}/approvals/{role}/revoke">Approval: revoke as original approver</option>
+        <option value="release-schedule" data-method="POST" data-path="/releases/{notice_id}/versions/{version}/schedule">Release: schedule local publication intent</option>
+        <option value="intent-claim" data-method="POST" data-path="/publication-intents/claim">Publication intent: claim lease</option>
+        <option value="intent-fail" data-method="POST" data-path="/publication-intents/{intent_id}/fail">Publication intent: fail or dead-letter</option>
+        <option value="intent-requeue" data-method="POST" data-path="/publication-intents/{intent_id}/requeue">Publication intent: requeue dead letter</option>
+        <option value="intent-acknowledge" data-method="POST" data-path="/publication-intents/{intent_id}/acknowledge">Publication intent: acknowledge external worker receipt</option>
+        <option value="release-rollback" data-method="POST" data-path="/releases/{notice_id}/versions/{version}/rollback">Release: independent rollback</option>
+        <option value="release-withdraw" data-method="POST" data-path="/releases/{notice_id}/versions/{version}/withdraw">Release: independent withdrawal</option>
+        <option value="release-effective" data-method="GET" data-path="/effective/{property_id}?jurisdiction={jurisdiction}&amp;locale={locale}&amp;at={at}">Release: resolve exact effective version</option>
+        <option value="proposal-create" data-method="PUT" data-path="/update-proposals/{proposal_id}">Update proposal: create with approved citations</option>
+        <option value="proposal-get" data-method="GET" data-path="/update-proposals/{proposal_id}">Update proposal: get</option>
+        <option value="proposal-review" data-method="POST" data-path="/update-proposals/{proposal_id}/review">Update proposal: independent review</option>
+        <option value="notice-export" data-method="PUT" data-path="/releases/{notice_id}/exports/{export_id}">Notice: create signed metadata export</option>
+        <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Export: get and verify signature</option>
+        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired records</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+      </select>
+    </label>
+    <label>Path and query values as JSON object
+      <input class="input" id="png-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="png-body">{}</textarea>
+    </label>
+    <div class="png-warning" id="png-confirm-panel">
+      <label class="png-confirm"><input id="png-confirm" type="checkbox">
+        <span>I reviewed the exact digest, revision, independent-approval,
+          publication-intent, rollback, withdrawal, or purge consequences.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="png-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <pre class="png-output" id="png-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/privacy/notices";
+  var operation = document.getElementById("png-operation");
+  var paths = document.getElementById("png-path-values");
+  var body = document.getElementById("png-body");
+  var confirmation = document.getElementById("png-confirm");
+  var confirmationPanel = document.getElementById("png-confirm-panel");
+  var output = document.getElementById("png-output");
+  var highImpact = new Set([
+    "policy-set", "release-approve", "approval-revoke", "release-schedule",
+    "intent-claim", "intent-fail", "intent-requeue", "intent-acknowledge",
+    "release-rollback", "release-withdraw", "proposal-review", "retention-purge"
+  ]);
+  var forbiddenKeys = new Set([
+    "tenant", "tenant_id", "actor", "actor_ref", "principal", "principal_ref",
+    "notice_content", "raw_content", "raw_html", "html", "markup", "pii",
+    "personal_data", "signing_key", "signing_key_value", "secret", "secret_value"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() {
+    return operation.options[operation.selectedIndex];
+  }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+  }
+  function containsForbiddenKey(value) {
+    if (!value || typeof value !== "object") { return false; }
+    if (Array.isArray(value)) { return value.some(containsForbiddenKey); }
+    return Object.keys(value).some(function (key) {
+      return forbiddenKeys.has(key) || containsForbiddenKey(value[key]);
+    });
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      var value = values[key];
+      if ((typeof value !== "string" && typeof value !== "number") || value === "") {
+        throw new Error("Missing path or query value: " + key);
+      }
+      return encodeURIComponent(String(value));
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {method: method, headers: {"Accept": "application/json"}};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var responseText = await response.text();
+    var result;
+    try { result = responseText ? JSON.parse(responseText) : {}; }
+    catch (_error) { result = {detail: responseText}; }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("png-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("png-submit").addEventListener("click", async function () {
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed state change before continuing.");
+      }
+      var route = selectedRoute();
+      var pathValues = JSON.parse(paths.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      if (containsForbiddenKey(pathValues) || containsForbiddenKey(payload)) {
+        throw new Error("Tenant, actor, raw content, personal data, and key values are never accepted.");
+      }
+      var path = buildPath(route.dataset.path, pathValues);
+      await run(route.dataset.method, path, payload);
+    } catch (error) { show(String(error)); }
+  });
+  updateConfirmation();
+}());
+</script>
+{% endif %}
+{% endblock %}

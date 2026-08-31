@@ -178,6 +178,7 @@ def test_vendor_portal_and_c2patool_are_closed_separate_opt_ins():
             "ai_media_provenance": {
                 "enable": True,
                 "verification_adapter": "c2patool",
+                "c2patool_executable_sha256": "a" * 64,
             },
         }
     ) == []
@@ -206,6 +207,21 @@ def test_vendor_portal_and_c2patool_are_closed_separate_opt_ins():
         and finding.severity == "error"
         for finding in unsupported
     )
+
+    for digest in (None, "A" * 64, "not-a-digest"):
+        selected = {
+            "enable": True,
+            "verification_adapter": "c2patool",
+        }
+        if digest is not None:
+            selected["c2patool_executable_sha256"] = digest
+        findings = lint_config({"ai_media_provenance": selected})
+        assert any(
+            finding.section == "ai_media_provenance"
+            and finding.key == "c2patool_executable_sha256"
+            and finding.severity == "error"
+            for finding in findings
+        )
 
 
 def test_identity_scheduler_nested_tables_are_closed_and_bounded():
@@ -262,6 +278,76 @@ def test_identity_scheduler_nested_tables_are_closed_and_bounded():
     errors = lint_config(out_of_bounds)
     assert any(finding.key == "poll_seconds" for finding in errors)
     assert any(finding.key == "max_snapshot_items" for finding in errors)
+
+
+def test_identity_control_tables_are_closed_default_off_and_dependency_checked():
+    config = {
+        "ai_identity_governance_connectors": {
+            "enable": True,
+            "controls": {
+                "enable": True,
+                "change_coupling": {
+                    "enable": True,
+                    "dynamic_risk": True,
+                    "alerts": True,
+                },
+                "federation": {"enable": True},
+                "conditional_access": {"enable": True},
+                "purview_writeback": {"enable": False},
+            },
+        }
+    }
+    assert lint_config(config) == []
+
+    config["ai_identity_governance_connectors"]["controls"]["federation"][
+        "enabled"
+    ] = True
+    findings = lint_config(config)
+    assert any(
+        finding.section
+        == "ai_identity_governance_connectors.controls.federation"
+        and finding.key == "enabled"
+        and "unknown" in finding.message.lower()
+        for finding in findings
+    )
+
+    dependencies = lint_config(
+        {
+            "ai_identity_governance_connectors": {
+                "enable": False,
+                "controls": {
+                    "enable": False,
+                    "change_coupling": {
+                        "enable": True,
+                        "dynamic_risk": False,
+                        "alerts": False,
+                    },
+                },
+            }
+        }
+    )
+    assert any("controls.enable = true" in finding.message for finding in dependencies)
+    assert any("dynamic_risk or alerts" in finding.message for finding in dependencies)
+
+    for dependent in ("conditional_access", "purview_writeback"):
+        missing_federation = lint_config(
+            {
+                "ai_identity_governance_connectors": {
+                    "enable": True,
+                    "controls": {
+                        "enable": True,
+                        "federation": {"enable": False},
+                        dependent: {"enable": True},
+                    },
+                }
+            }
+        )
+        assert any(
+            finding.section
+            == f"ai_identity_governance_connectors.controls.{dependent}"
+            and "federation.enable = true" in finding.message
+            for finding in missing_federation
+        )
 
 
 def test_benchmark_trust_and_coordinator_tables_are_known_but_closed():

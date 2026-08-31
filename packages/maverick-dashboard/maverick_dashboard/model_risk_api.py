@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import json
 import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
+from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -17,6 +19,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Path,
     Query,
     Request,
     Response,
@@ -300,11 +303,41 @@ def _raise_identity_governance_http_error(exc: Exception) -> None:
         IdentityGovernanceTransportError,
         IdentityGovernanceUnsupportedError,
     )
+    from maverick.ai_identity_governance_controls import (
+        IdentityGovernanceAuthorizationError,
+        IdentityGovernanceBindingError,
+        IdentityGovernanceControlConfigError,
+        IdentityGovernanceDeliveryError,
+        IdentityGovernanceIdempotencyConflict,
+        IdentityGovernanceStaleBinding,
+        IdentityGovernanceStateError,
+    )
 
     if isinstance(exc, IdentityGovernanceUnsupportedError):
         raise HTTPException(status_code=501, detail=str(exc)) from exc
-    if isinstance(exc, IdentityGovernanceConfigError):
+    if isinstance(
+        exc,
+        (IdentityGovernanceConfigError, IdentityGovernanceControlConfigError),
+    ):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, IdentityGovernanceAuthorizationError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if isinstance(
+        exc,
+        (
+            IdentityGovernanceBindingError,
+            IdentityGovernanceIdempotencyConflict,
+            IdentityGovernanceStaleBinding,
+            IdentityGovernanceStateError,
+        ),
+    ):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, IdentityGovernanceDeliveryError):
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc
     if isinstance(
         exc,
         (
@@ -2921,6 +2954,34 @@ def _identity_governance_section() -> Mapping[str, Any]:
     return section
 
 
+def _identity_governance_control_status_section() -> Mapping[str, Any]:
+    """Read even the default-off control posture without enabling connectors."""
+
+    from maverick import ai_identity_governance_connectors as connectors
+    from maverick.config import config_source_errors, load_config
+
+    errors = config_source_errors()
+    config = load_config()
+    if errors or not isinstance(config, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="identity-governance connector configuration is unreadable",
+        )
+    section = config.get("ai_identity_governance_connectors")
+    try:
+        connectors.enabled(section)
+    except connectors.IdentityGovernanceConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if section is None:
+        return {}
+    if not isinstance(section, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="identity-governance connector configuration is invalid",
+        )
+    return section
+
+
 @router.get("/identity-governance/connectors")
 async def get_identity_governance_connectors(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
@@ -2981,6 +3042,400 @@ async def run_identity_governance_scheduler_once(
         identity_governance_scheduler.run_configured_collection,
         section,
         actor=_human_principal(request),
+    )
+
+
+# Default-off identity control plane -------------------------------------
+
+
+def _identity_control_runtime(
+    request: Request,
+    section: Mapping[str, Any],
+    *required_controls: str,
+):
+    """Resolve only an exact startup-injected, current-tenant control runtime."""
+
+    from . import identity_governance_runtime, identity_governance_scheduler
+
+    try:
+        posture = identity_governance_runtime.control_plane_status(section)
+    except Exception as exc:
+        _raise_identity_governance_http_error(exc)
+        raise HTTPException(
+            status_code=503,
+            detail="identity-governance control configuration is invalid",
+        ) from exc
+    configured = posture.get("configured")
+    if not isinstance(configured, Mapping) or any(
+        configured.get(name) is not True for name in required_controls
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="the requested identity-governance control is disabled",
+        )
+    candidate = getattr(
+        request.app.state,
+        identity_governance_runtime.CONTROL_RUNTIME_APP_STATE,
+        None,
+    )
+    if not isinstance(
+        candidate,
+        identity_governance_runtime.IdentityGovernanceControlRuntime,
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="identity-governance control runtime is not attached",
+        )
+    expected_tenant = identity_governance_scheduler.tenant_binding_sha256(
+        require_explicit=True
+    )
+    if candidate.tenant_sha256 != expected_tenant:
+        raise HTTPException(
+            status_code=409,
+            detail="identity-governance control runtime tenant binding does not match",
+        )
+    return candidate
+
+
+def _identity_federation_context(runtime, provider: str, body):
+    authority = runtime.resolve_authority(body.principal_ref)
+    binding = runtime.resolve_federation_binding(
+        authority,
+        provider,
+        body.provider_subject_id,
+    )
+    observation = runtime.federation_adapter(provider).observe(
+        binding,
+        expected_binding_sha256=body.expected_binding_sha256,
+        expected_revision=body.expected_revision,
+    )
+    return authority, binding, observation
+
+
+def _identity_capability_context(runtime, provider: str, body):
+    authority, binding, observation = _identity_federation_context(
+        runtime,
+        provider,
+        body,
+    )
+    mapping = runtime.require_capability_mapper().map(
+        authority,
+        binding,
+        observation,
+        expected_binding_sha256=body.expected_binding_sha256,
+        expected_authority_revision=body.expected_revision,
+    )
+    return authority, binding, observation, mapping
+
+
+def _identity_capability_decision(mapping, body) -> dict[str, Any]:
+    capability = body.required_capability
+    action = "permit" if capability in mapping.capabilities else "deny"
+    reason = "capability_mapped" if action == "permit" else "capability_not_mapped"
+    idempotency_sha256 = hashlib.sha256(body.idempotency_key.encode("utf-8")).hexdigest()
+    material = {
+        "schema": "lightwork.identity_governance.capability-decision.v1",
+        "tenant_sha256": mapping.tenant_sha256,
+        "provider": mapping.provider,
+        "principal_ref": mapping.principal_ref,
+        "binding_sha256": mapping.federation_binding_sha256,
+        "binding_revision": mapping.authority_revision,
+        "required_capability": capability,
+        "action": action,
+        "reason_code": reason,
+        "mapping_sha256": mapping.mapping_sha256,
+        "idempotency_sha256": idempotency_sha256,
+        "provider_policy_mutated": False,
+        "live_acceptance_verified": False,
+    }
+    decision_sha256 = hashlib.sha256(
+        json.dumps(
+            material,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+    ).hexdigest()
+    return {**material, "decision_sha256": decision_sha256}
+
+
+def _identity_registered_mapping_context(runtime, body):
+    authority = runtime.resolve_authority(body.principal_ref)
+    mapping = runtime.resolve_capability_mapping(
+        body.principal_ref,
+        body.mapping_sha256,
+    )
+    return authority, mapping
+
+
+@router.get("/identity-governance/controls/status")
+async def get_identity_governance_control_status(
+    request: Request,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    from . import identity_governance_runtime, identity_governance_scheduler
+
+    section = _identity_governance_control_status_section()
+    posture = await _call(identity_governance_runtime.control_plane_status, section)
+    posture["runtime_attachment_state"] = "unavailable"
+    candidate = getattr(
+        request.app.state,
+        identity_governance_runtime.CONTROL_RUNTIME_APP_STATE,
+        None,
+    )
+    if not isinstance(
+        candidate,
+        identity_governance_runtime.IdentityGovernanceControlRuntime,
+    ):
+        return posture
+    expected_tenant = identity_governance_scheduler.tenant_binding_sha256(
+        require_explicit=True
+    )
+    if candidate.tenant_sha256 != expected_tenant:
+        posture["runtime_attachment_state"] = "tenant_mismatch"
+        return posture
+    attached = await _call(candidate.status)
+    posture["runtime_attached"] = True
+    posture["runtime_attachment_state"] = "attached"
+    posture["runtime"] = attached
+    configured = posture.get("configured")
+    posture["provider_writes"] = bool(
+        isinstance(configured, Mapping)
+        and configured.get("federation") is True
+        and configured.get("purview_writeback") is True
+        and attached.get("provider_writes_possible") is True
+    )
+    return posture
+
+
+@router.post("/identity-governance/controls/federation/{provider}/observe")
+async def observe_identity_governance_federation(
+    request: Request,
+    provider: Literal["entra", "okta"],
+    body: schemas.AIIdentityFederationBindingIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(request, section, "federation")
+    _authority, _binding, observation = await _call(
+        _identity_federation_context,
+        runtime,
+        provider,
+        body,
+    )
+    return asdict(observation)
+
+
+@router.post("/identity-governance/controls/capabilities/{provider}/map")
+async def map_identity_governance_capabilities(
+    request: Request,
+    provider: Literal["entra", "okta"],
+    body: schemas.AIIdentityFederationBindingIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(request, section, "federation")
+    _authority, _binding, observation, mapping = await _call(
+        _identity_capability_context,
+        runtime,
+        provider,
+        body,
+    )
+    retained = runtime.capability_mapping_registry is not None
+    if retained:
+        await _call(runtime.retain_capability_mapping, mapping)
+    return {
+        "federation_observation": asdict(observation),
+        "capability_mapping": asdict(mapping),
+        "mapping_registry_retained": retained,
+    }
+
+
+@router.post("/identity-governance/controls/capabilities/{provider}/decision")
+async def decide_identity_governance_capability(
+    request: Request,
+    provider: Literal["entra", "okta"],
+    body: schemas.AIIdentityCapabilityDecisionIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(request, section, "federation")
+    _authority, _binding, observation, mapping = await _call(
+        _identity_capability_context,
+        runtime,
+        provider,
+        body,
+    )
+    return {
+        "federation_observation": asdict(observation),
+        "capability_mapping": asdict(mapping),
+        "decision": _identity_capability_decision(mapping, body),
+    }
+
+
+@router.post("/identity-governance/controls/conditional-access/{provider}/decision")
+async def decide_identity_governance_conditional_access(
+    request: Request,
+    provider: Literal["entra", "okta"],
+    body: schemas.AIIdentityCapabilityDecisionIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(
+        request,
+        section,
+        "federation",
+        "conditional_access",
+    )
+    authority, binding, federation, mapping = await _call(
+        _identity_capability_context,
+        runtime,
+        provider,
+        body,
+    )
+    observation = await _call(
+        runtime.conditional_access_observer(provider).observe,
+        binding,
+        expected_binding_sha256=body.expected_binding_sha256,
+        expected_revision=body.expected_revision,
+    )
+    decision = await _call(
+        runtime.require_conditional_access_decision_engine().decide,
+        authority,
+        mapping,
+        observation,
+        required_capability=body.required_capability,
+        expected_binding_sha256=body.expected_binding_sha256,
+        expected_revision=body.expected_revision,
+        idempotency_key=body.idempotency_key,
+    )
+    return {
+        "federation_observation": asdict(federation),
+        "capability_mapping": asdict(mapping),
+        "conditional_access_observation": asdict(observation),
+        "decision": asdict(decision),
+    }
+
+
+@router.post(
+    "/identity-governance/controls/purview/writebacks/prepare",
+    status_code=201,
+)
+async def prepare_identity_governance_purview_writeback(
+    request: Request,
+    body: schemas.AIIdentityPurviewPrepareIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(
+        request,
+        section,
+        "federation",
+        "purview_writeback",
+    )
+    authority, _binding, _observation, mapping = await _call(
+        _identity_capability_context,
+        runtime,
+        body.provider,
+        body,
+    )
+    await _call(runtime.retain_capability_mapping, mapping)
+    service = runtime.require_purview_writeback()
+    return await _call(
+        service.prepare,
+        authority,
+        mapping,
+        asset_id=body.asset_id,
+        classification_codes=body.classification_codes,
+        expected_binding_sha256=body.expected_asset_binding_sha256,
+        expected_source_revision=body.expected_source_revision,
+        idempotency_key=body.idempotency_key,
+    )
+
+
+@router.post("/identity-governance/controls/purview/writebacks/{intent_id}/get")
+async def get_identity_governance_purview_writeback(
+    request: Request,
+    intent_id: Annotated[str, Path(pattern=r"^IGPW-[0-9a-f]{32}$")],
+    body: schemas.AIIdentityPurviewRecordIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(request, section, "purview_writeback")
+    authority, mapping = await _call(
+        _identity_registered_mapping_context,
+        runtime,
+        body,
+    )
+    return await _record_call(
+        runtime.require_purview_writeback().get_intent,
+        intent_id,
+        authority,
+        mapping,
+    )
+
+
+@router.post("/identity-governance/controls/purview/writebacks/{intent_id}/execute")
+async def execute_identity_governance_purview_writeback(
+    request: Request,
+    intent_id: Annotated[str, Path(pattern=r"^IGPW-[0-9a-f]{32}$")],
+    body: schemas.AIIdentityPurviewRevisionIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(request, section, "purview_writeback")
+    authority, mapping = await _call(
+        _identity_registered_mapping_context,
+        runtime,
+        body,
+    )
+    return await _call(
+        runtime.require_purview_writeback().execute,
+        intent_id,
+        authority,
+        mapping,
+        expected_revision=body.expected_record_revision,
+    )
+
+
+@router.post("/identity-governance/controls/purview/writebacks/{intent_id}/compensate")
+async def compensate_identity_governance_purview_writeback(
+    request: Request,
+    intent_id: Annotated[str, Path(pattern=r"^IGPW-[0-9a-f]{32}$")],
+    body: schemas.AIIdentityPurviewRevisionIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    section = _identity_governance_section()
+    runtime = _identity_control_runtime(request, section, "purview_writeback")
+    authority, mapping = await _call(
+        _identity_registered_mapping_context,
+        runtime,
+        body,
+    )
+    return await _call(
+        runtime.require_purview_writeback().compensate,
+        intent_id,
+        authority,
+        mapping,
+        expected_revision=body.expected_record_revision,
     )
 
 

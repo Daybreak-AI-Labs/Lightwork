@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Consent & Preferences · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cp-shell{max-width:1500px;margin:0 auto;padding:1.25rem}
+  .cp-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+  .cp-hero h1{margin:.1rem 0}.cp-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}
+  .cp-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;margin:1rem 0}
+  .cp-stat,.cp-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}
+  .cp-stat strong{display:block;font-size:1.7rem}.cp-stat span{color:var(--muted);font-size:.83rem}
+  .cp-layout{display:grid;grid-template-columns:1.1fr .9fr;gap:1rem}.cp-card{margin-bottom:1rem}
+  .cp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
+  .cp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}
+  .cp-form .wide{grid-column:1/-1}.cp-actions{display:flex;gap:.5rem;align-items:center;grid-column:1/-1}
+  .cp-table{width:100%;border-collapse:collapse;font-size:.82rem}.cp-table th,.cp-table td{text-align:left;border-bottom:1px solid var(--border);padding:.5rem .35rem;vertical-align:top}
+  .cp-table code{word-break:break-all}.cp-empty{color:var(--muted);padding:.75rem 0}.cp-result{white-space:pre-wrap;word-break:break-word;max-height:18rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.7rem;font-size:.78rem}
+  .cp-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}
+  @media(max-width:1000px){.cp-grid{grid-template-columns:repeat(2,1fr)}.cp-layout{grid-template-columns:1fr}}
+  @media(max-width:620px){.cp-grid,.cp-form{grid-template-columns:1fr}.cp-form .wide{grid-column:auto}}
+</style>
+<div class="cp-shell">
+  <header class="cp-hero">
+    <div><div class="cp-kicker">Consumer privacy control plane</div><h1>Consent & Preferences</h1>
+      <p class="muted">Version-bound receipts, preference profiles, tracker governance, privacy signals, enforcement, and replayable downstream synchronization.</p></div>
+    <div class="cp-actions"><a class="btn" href="/consent/publishing">Experience publishing</a><a class="btn" href="/consent/experiments">Experiments</a><a class="btn" href="/consent/public-clients">Public SDK clients</a><a class="btn" href="/consent/profile-data">Profile data</a><a class="btn" href="/consent/trust-center-authority">Trust Center authority</a><a class="btn" href="/consent/delivery">Signed delivery</a><a class="btn" href="/consent/scan-inventory">Scan inventory</a><a class="btn" href="/consent/scan-notice-proposals">Disclosure proposals</a><button class="btn" id="cp-refresh" type="button">Refresh</button></div>
+  </header>
+  {% if not consent_preferences_enabled %}
+  <div class="cp-banner" role="status"><strong>Module disabled.</strong> Enable <code>[consent_preferences] enable = true</code> after the privacy owner approves this data plane.</div>
+  {% endif %}
+  <div id="cp-status" class="muted" role="status" aria-live="polite"></div>
+  <section class="cp-grid" aria-label="Consent program summary">
+    <div class="cp-stat"><strong id="cp-profiles">—</strong><span>Profiles</span></div>
+    <div class="cp-stat"><strong id="cp-receipts">—</strong><span>Immutable receipts</span></div>
+    <div class="cp-stat"><strong id="cp-policies">—</strong><span>Policy versions</span></div>
+    <div class="cp-stat"><strong id="cp-trackers">—</strong><span>Governed trackers</span></div>
+  </section>
+
+  <div class="cp-layout">
+    <div>
+      <section class="cp-card"><h2>Policy and notice version</h2>
+        <form class="cp-form" id="cp-policy-form">
+          <label>Policy ID<input class="input" name="policy_id" required value="global-consent"></label>
+          <label>Version<input class="input" name="version" type="number" min="1" step="1" required value="1"></label>
+          <label>Effective timestamp<input class="input" name="effective_at" type="number" step="any" required></label>
+          <label>Notice SHA-256<input class="input" name="notice_sha256" pattern="[0-9a-f]{64}" required></label>
+          <label class="wide">Purposes JSON <textarea class="input" name="purposes" rows="3" required>{"analytics":"consent","essential":"contract"}</textarea></label>
+          <div class="cp-actions"><button class="btn btn--primary" type="submit">Publish immutable version</button><span class="muted">Admin required</span></div>
+        </form>
+      </section>
+
+      <section class="cp-card"><h2>Collect a preference receipt</h2>
+        <form class="cp-form" id="cp-preference-form">
+          <label>Profile ID<input class="input" name="profile_id" required></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label>Policy ID<input class="input" name="policy_id" value="global-consent" required></label>
+          <label>Policy version<input class="input" name="policy_version" type="number" min="1" step="1" required value="1"></label>
+          <label>Purpose<input class="input" name="purpose_id" value="analytics" required></label>
+          <label>Choice<select class="input" name="action"><option>grant</option><option>deny</option><option>revoke</option><option>withdraw</option></select></label>
+          <label>Channel<input class="input" name="channel" value="all" required></label>
+          <label>Vendor<input class="input" name="vendor_id" value="all" required></label>
+          <label>Jurisdiction<input class="input" name="jurisdiction" value="global" required></label>
+          <label>Country code<input class="input" name="country_code" value="US" minlength="2" maxlength="2" required></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
+          <div class="cp-actions"><button class="btn btn--primary" type="submit">Record choice</button></div>
+        </form>
+      </section>
+
+      <section class="cp-card"><h2>Profiles</h2><div id="cp-profile-table" class="cp-empty">No profiles loaded.</div></section>
+    </div>
+    <div>
+      <section class="cp-card"><h2>Create pseudonymous profile</h2>
+        <form class="cp-form" id="cp-profile-form">
+          <label>Profile ID<input class="input" name="profile_id" required></label>
+          <label>Identity kind<select class="input" name="identity_kind"><option>anonymous</option><option>known</option></select></label>
+          <label class="wide">Subject SHA-256<input class="input" name="subject_sha256" pattern="[0-9a-f]{64}" required></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
+          <div class="cp-actions"><button class="btn btn--primary" type="submit">Create profile</button></div>
+        </form>
+      </section>
+
+      <section class="cp-card"><h2>Fail-closed enforcement check</h2>
+        <form class="cp-form" id="cp-decision-form">
+          <label>Profile ID<input class="input" name="profile_id" required></label>
+          <label>Purpose<input class="input" name="purpose_id" value="analytics" required></label>
+          <label>Channel<input class="input" name="channel" value="all" required></label>
+          <label>Vendor<input class="input" name="vendor_id" value="all" required></label>
+          <label>Policy ID<input class="input" name="policy_id" placeholder="optional exact binding"></label>
+          <label>Policy version<input class="input" name="policy_version" type="number" min="1" step="1" placeholder="optional exact binding"></label>
+          <div class="cp-actions"><button class="btn btn--primary" type="submit">Evaluate</button></div>
+        </form>
+        <pre id="cp-decision" class="cp-result">No decision evaluated.</pre>
+      </section>
+
+      <section class="cp-card"><h2>Tracker governance</h2>
+        <form class="cp-form" id="cp-tracker-form">
+          <label>Tracker ID<input class="input" name="tracker_id" required></label>
+          <label>Kind<select class="input" name="kind"><option value="web_tracker">Web tracker</option><option value="mobile_sdk">Mobile SDK</option></select></label>
+          <label>Vendor ID<input class="input" name="vendor_id" required></label>
+          <label>Status<select class="input" name="status"><option>blocked</option><option>approved</option><option>retired</option></select></label>
+          <label>Purposes (comma separated)<input class="input" name="purpose_ids" value="analytics" required></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
+          <div class="cp-actions"><button class="btn btn--primary" type="submit">Save tracker</button><span class="muted">Admin required</span></div>
+        </form>
+      </section>
+
+      <section class="cp-card"><h2>Privacy-bounded consent analytics</h2>
+        {% if not consent_analytics_enabled %}
+        <p class="muted">Analytics is independently disabled. Enable <code>[consent_preferences.analytics] enable = true</code> after cohort-threshold review.</p>
+        {% endif %}
+        <form class="cp-form" id="cp-analytics-form">
+          <label>Start timestamp<input class="input" name="start_at" type="number" step="any" required></label>
+          <label>End timestamp<input class="input" name="end_at" type="number" step="any" required></label>
+          <label class="wide">Dimensions (comma separated)<input class="input" name="dimensions" value="purpose_id,action" required></label>
+          <label>Minimum unique profiles<input class="input" name="min_cohort_size" type="number" min="2" max="100000" value="10" required></label>
+          <label>Maximum receipts<input class="input" name="max_receipts" type="number" min="1" max="100000" value="10000" required></label>
+          <div class="cp-actions"><button class="btn btn--primary" type="submit">Build aggregate snapshot</button><span class="muted">Audit permission required; small cohorts are hidden</span></div>
+        </form>
+        <pre id="cp-analytics" class="cp-result">No aggregate snapshot generated.</pre>
+      </section>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var API="/api/v1/consent";
+  var status=document.getElementById("cp-status");
+  function val(form,name){return form.elements[name].value.trim();}
+  async function call(path,options){
+    var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{}));
+    var body={};try{body=await response.json();}catch(_e){}
+    if(!response.ok){throw new Error(body.detail||("HTTP "+response.status));}return body;
+  }
+  function table(rows){
+    if(!rows.length){return '<div class="cp-empty">No profiles yet.</div>';}
+    return '<table class="cp-table"><thead><tr><th>Profile</th><th>Kind</th><th>Revision</th><th>Subject digest</th></tr></thead><tbody>'+rows.map(function(row){return '<tr><td>'+esc(row.profile_id||row.id||'')+'</td><td>'+esc(row.identity_kind||'')+'</td><td>'+esc(String(row.revision||0))+'</td><td><code>'+esc(row.subject_sha256||'')+'</code></td></tr>';}).join('')+'</tbody></table>';
+  }
+  function esc(value){var node=document.createElement('span');node.textContent=value;return node.innerHTML;}
+  async function refresh(){
+    status.textContent="Refreshing…";
+    try{
+      var results=await Promise.all([call('/summary'),call('/profiles?limit=100')]);
+      var s=results[0]||{};
+      ['profiles','receipts','policies','trackers'].forEach(function(key){document.getElementById('cp-'+key).textContent=String(s[key]||s[key+'_total']||0);});
+      document.getElementById('cp-profile-table').innerHTML=table(results[1].profiles||[]);
+      status.textContent="Current tenant loaded.";
+    }catch(error){status.textContent=error.message;}
+  }
+  document.getElementById('cp-refresh').addEventListener('click',refresh);
+  document.getElementById('cp-policy-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget;try{await call('/policies',{method:'POST',body:JSON.stringify({policy_id:val(f,'policy_id'),version:Number(val(f,'version')),purposes:JSON.parse(val(f,'purposes')),notice_sha256:val(f,'notice_sha256'),effective_at:Number(val(f,'effective_at'))})});status.textContent='Policy version published.';await refresh();}catch(error){status.textContent=error.message;}});
+  document.getElementById('cp-profile-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget;try{await call('/profiles',{method:'POST',body:JSON.stringify({profile_id:val(f,'profile_id'),identity_kind:val(f,'identity_kind'),subject_sha256:val(f,'subject_sha256'),idempotency_key:val(f,'idempotency_key')})});status.textContent='Profile created.';await refresh();}catch(error){status.textContent=error.message;}});
+  document.getElementById('cp-preference-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget,p=val(f,'profile_id');try{await call('/profiles/'+encodeURIComponent(p)+'/preferences',{method:'POST',body:JSON.stringify({policy_id:val(f,'policy_id'),policy_version:Number(val(f,'policy_version')),context:{jurisdiction:val(f,'jurisdiction'),country_code:val(f,'country_code'),collection_point:'web',asserted_source:'operator'},choices:[{purpose_id:val(f,'purpose_id'),action:val(f,'action'),channel:val(f,'channel'),vendor_id:val(f,'vendor_id')}],expected_revision:Number(val(f,'expected_revision')),idempotency_key:val(f,'idempotency_key')})});status.textContent='Preference receipt recorded.';await refresh();}catch(error){status.textContent=error.message;}});
+  document.getElementById('cp-decision-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget,payload={profile_id:val(f,'profile_id'),purpose_id:val(f,'purpose_id'),channel:val(f,'channel'),vendor_id:val(f,'vendor_id')};if(val(f,'policy_id'))payload.policy_id=val(f,'policy_id');if(val(f,'policy_version'))payload.policy_version=Number(val(f,'policy_version'));try{var result=await call('/decisions',{method:'POST',body:JSON.stringify(payload)});document.getElementById('cp-decision').textContent=JSON.stringify(result,null,2);}catch(error){status.textContent=error.message;}});
+  document.getElementById('cp-tracker-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget,id=val(f,'tracker_id');try{await call('/trackers/'+encodeURIComponent(id),{method:'PUT',body:JSON.stringify({kind:val(f,'kind'),vendor_id:val(f,'vendor_id'),purpose_ids:val(f,'purpose_ids').split(',').map(function(v){return v.trim();}).filter(Boolean),status:val(f,'status'),expected_revision:Number(val(f,'expected_revision')),idempotency_key:val(f,'idempotency_key')})});status.textContent='Tracker governance updated.';await refresh();}catch(error){status.textContent=error.message;}});
+  document.getElementById('cp-analytics-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget;try{var result=await call('/analytics/snapshot',{method:'POST',body:JSON.stringify({start_at:Number(val(f,'start_at')),end_at:Number(val(f,'end_at')),dimensions:val(f,'dimensions').split(',').map(function(v){return v.trim();}).filter(Boolean),min_cohort_size:Number(val(f,'min_cohort_size')),max_receipts:Number(val(f,'max_receipts'))})});document.getElementById('cp-analytics').textContent=JSON.stringify(result,null,2);status.textContent=result.complete?'Complete aggregate snapshot generated.':'Partial aggregate snapshot generated; review limitations.';}catch(error){status.textContent=error.message;}});
+  var effective=document.querySelector('#cp-policy-form [name="effective_at"]');if(effective&&!effective.value){effective.value=String(Date.now()/1000);}
+  var analyticsForm=document.getElementById('cp-analytics-form'),now=Date.now()/1000;if(analyticsForm){analyticsForm.elements.start_at.value=String(now-2592000);analyticsForm.elements.end_at.value=String(now);}
+  refresh();
+})();
+</script>
+{% endblock %}

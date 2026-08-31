@@ -20,6 +20,7 @@ SIGNING_TIME = "2027-01-15T07:59:00Z"
 ASSET_ID = "MAA-0123456789abcdef0123456789abcdef"
 JPEG = b"\xff\xd8\xff\xe0test-jpeg-payload"
 SIGNED_SUFFIX = b"|embedded-c2pa-manifest"
+TOOL_EXECUTABLE = b"bounded c2patool executable fixture"
 PRIVATE_KEY = (
     b"-----BEGIN PRIVATE KEY-----\n"
     b"adapter-test-private-key-secret\n"
@@ -222,10 +223,15 @@ class RecordingRunner:
         if "--manifest" in args:
             manifest_path = Path(args[args.index("--manifest") + 1])
             self.manifest_definition = json.loads(manifest_path.read_text("utf-8"))
-            private_key_path = Path(self.manifest_definition["private_key"])
-            certificate_path = Path(self.manifest_definition["sign_cert"])
-            assert private_key_path.read_bytes() == PRIVATE_KEY
-            assert certificate_path.read_bytes() == CERTIFICATE
+            if "private_key" in self.manifest_definition:
+                private_key_path = Path(self.manifest_definition["private_key"])
+                certificate_path = Path(self.manifest_definition["sign_cert"])
+                if not private_key_path.is_absolute():
+                    private_key_path = Path(cwd) / private_key_path
+                if not certificate_path.is_absolute():
+                    certificate_path = Path(cwd) / certificate_path
+                assert private_key_path.read_bytes() == PRIVATE_KEY
+                assert certificate_path.read_bytes() == CERTIFICATE
             input_path = Path(args[1])
             output_path = Path(args[args.index("--output") + 1])
             output = input_path.read_bytes() + SIGNED_SUFFIX
@@ -242,7 +248,11 @@ class RecordingRunner:
 
 
 def _executable(tmp_path: Path) -> str:
-    return str((tmp_path / "bin" / "c2patool.exe").resolve())
+    executable = (tmp_path / "bin" / "c2patool.exe").resolve()
+    executable.parent.mkdir(exist_ok=True)
+    if not executable.exists():
+        executable.write_bytes(TOOL_EXECUTABLE)
+    return str(executable)
 
 
 def _verifier(tmp_path: Path, runner: RecordingRunner, **kwargs):
@@ -250,6 +260,7 @@ def _verifier(tmp_path: Path, runner: RecordingRunner, **kwargs):
     temp_root.mkdir(exist_ok=True)
     return c2pa.C2PAToolVerifier(
         executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
         temp_root=temp_root,
         clock=lambda: NOW,
@@ -262,6 +273,7 @@ def _signer(tmp_path: Path, runner: RecordingRunner, **kwargs):
     temp_root.mkdir(exist_ok=True)
     return c2pa.C2PAToolSigner(
         executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
         credential_provider=_credentials,
         manifest_provider=_manifest,
@@ -275,10 +287,12 @@ def test_missing_tool_is_unavailable_and_interfaces_are_structural(tmp_path):
     runner = RecordingRunner()
     verifier = c2pa.C2PAToolVerifier(
         executable_locator=lambda _name: None,
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
     )
     signer = c2pa.C2PAToolSigner(
         executable_locator=lambda _name: None,
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
         credential_provider=_credentials,
         manifest_provider=_manifest,
@@ -304,6 +318,7 @@ def test_signer_without_injected_custody_providers_stays_unavailable(tmp_path):
     runner = RecordingRunner()
     signer = c2pa.C2PAToolSigner(
         executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
     )
 
@@ -323,6 +338,115 @@ def test_signer_without_injected_custody_providers_stays_unavailable(tmp_path):
     with pytest.raises(provenance.MediaProvenanceUnavailable):
         signer.sign(JPEG, binding=_binding(), assertion_codes=("c2pa.actions",))
     assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "expected_digest",
+    [None, _hex(b"different c2patool executable")],
+)
+def test_c2patool_requires_the_exact_executable_digest_before_spawn(
+    tmp_path,
+    expected_digest,
+):
+    runner = RecordingRunner()
+    verifier = c2pa.C2PAToolVerifier(
+        executable=_executable(tmp_path),
+        expected_executable_sha256=expected_digest,
+        process_runner=runner,
+    )
+
+    assert verifier.is_available() is False
+    with pytest.raises(provenance.MediaProvenanceUnavailable):
+        verifier.verify(JPEG, binding=_binding())
+    assert runner.calls == []
+
+
+def test_c2patool_mutation_during_version_admission_fails_closed(tmp_path):
+    executable = Path(_executable(tmp_path))
+
+    class MutatingVersionRunner(RecordingRunner):
+        def __call__(self, args, **kwargs):
+            result = super().__call__(args, **kwargs)
+            if "--version" in args:
+                executable.write_bytes(b"mutated during version admission")
+            return result
+
+    runner = MutatingVersionRunner()
+    verifier = c2pa.C2PAToolVerifier(
+        executable=executable,
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+    )
+
+    assert verifier.is_available() is False
+    assert len(runner.calls) == 1
+
+
+def test_verifier_rechecks_c2patool_replacement_immediately_before_spawn(tmp_path):
+    executable = Path(_executable(tmp_path))
+    runner = RecordingRunner()
+    temp_root = tmp_path / "temporary"
+    temp_root.mkdir()
+
+    def replacing_anchors():
+        replacement = executable.with_name("replacement-c2patool.exe")
+        replacement.write_bytes(TOOL_EXECUTABLE)
+        os.replace(replacement, executable)
+        return TRUST_ANCHORS
+
+    verifier = c2pa.C2PAToolVerifier(
+        executable=executable,
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+        trust_anchor_provider=replacing_anchors,
+        temp_root=temp_root,
+    )
+    assert verifier.is_available() is True
+
+    with pytest.raises(provenance.MediaProvenanceUnavailable):
+        verifier.verify(JPEG, binding=_binding())
+
+    assert len(runner.calls) == 1
+    assert list(temp_root.iterdir()) == []
+
+
+def test_local_signer_rechecks_c2patool_replacement_after_secret_access(tmp_path):
+    executable = Path(_executable(tmp_path))
+    runner = RecordingRunner()
+    temp_root = tmp_path / "temporary"
+    temp_root.mkdir()
+    credentials_accessed = False
+
+    def replacing_manifest(binding, assertions):
+        replacement = executable.with_name("replacement-c2patool.exe")
+        replacement.write_bytes(TOOL_EXECUTABLE)
+        os.replace(replacement, executable)
+        return _manifest(binding, assertions)
+
+    def credentials():
+        nonlocal credentials_accessed
+        credentials_accessed = True
+        return _credentials()
+
+    signer = c2pa.C2PAToolSigner(
+        executable=executable,
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+        credential_provider=credentials,
+        manifest_provider=replacing_manifest,
+        temp_root=temp_root,
+    )
+
+    with pytest.raises(provenance.MediaProvenanceUnavailable):
+        signer.sign(
+            JPEG,
+            binding=_binding(),
+            assertion_codes=("c2pa.actions", "c2pa.hash.data"),
+        )
+
+    assert credentials_accessed is True
+    assert len(runner.calls) == 1
+    assert list(temp_root.iterdir()) == []
 
 
 def test_verify_uses_fixed_local_argv_closed_receipt_and_cleanup(
@@ -362,7 +486,7 @@ def test_verify_uses_fixed_local_argv_closed_receipt_and_cleanup(
     assert operation.args[4:] == (
         "trust",
         "--trust_anchors",
-        str(operation.cwd / "trust-anchors.pem"),
+        "trust-anchors.pem",
     )
     assert operation.timeout_seconds == 2.5
     assert operation.output_limit_bytes == 64 * 1024
@@ -427,6 +551,173 @@ def test_sign_uses_fixed_argv_keeps_secrets_off_argv_and_cleans(tmp_path):
     assert str(operation.cwd) not in serialized
 
 
+def test_external_signer_correct_digest_keeps_private_key_out_of_lightwork(tmp_path):
+    runner = RecordingRunner()
+    signer_binary = (tmp_path / "kms-signer.exe").resolve()
+    signer_fixture = b"test executable fixture"
+    signer_binary.write_bytes(signer_fixture)
+    signer = c2pa.C2PAToolExternalSigner(
+        executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+        signer_path=signer_binary,
+        expected_signer_sha256=_hex(signer_fixture),
+        manifest_provider=_manifest,
+        temp_root=tmp_path,
+        clock=lambda: NOW,
+    )
+
+    signed_media, receipt = signer.sign(
+        JPEG,
+        binding=_binding(),
+        assertion_codes=("c2pa.actions", "c2pa.hash.data"),
+    )
+
+    assert signed_media == JPEG + SIGNED_SUFFIX
+    assert receipt["operation"] == "signing"
+    operation = runner.calls[-1]
+    assert operation.args[-2:] == ("--signer-path", str(signer_binary))
+    assert runner.manifest_definition is not None
+    assert not {
+        "alg",
+        "private_key",
+        "sign_cert",
+    }.intersection(runner.manifest_definition)
+    assert "private-key.pem" not in runner.private_modes
+    assert not operation.cwd.exists()
+
+
+def test_external_signer_rejects_wrong_expected_digest(tmp_path):
+    signer_binary = (tmp_path / "kms-signer.exe").resolve()
+    signer_binary.write_bytes(b"approved external signer")
+
+    with pytest.raises(ValueError, match="digest or identity mismatch"):
+        c2pa.C2PAToolExternalSigner(
+            executable=_executable(tmp_path),
+            expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+            process_runner=RecordingRunner(),
+            signer_path=signer_binary,
+            expected_signer_sha256=_hex("different external signer"),
+            manifest_provider=_manifest,
+            temp_root=tmp_path,
+            clock=lambda: NOW,
+        )
+
+
+def test_external_signer_replacement_after_construction_fails_before_spawn(tmp_path):
+    runner = RecordingRunner()
+    signer_binary = (tmp_path / "kms-signer.exe").resolve()
+    approved = b"approved external signer"
+    signer_binary.write_bytes(approved)
+
+    def replacing_manifest(binding, assertions):
+        replacement = tmp_path / "replacement-signer.exe"
+        replacement.write_bytes(b"unapproved replacement signer")
+        os.replace(replacement, signer_binary)
+        return _manifest(binding, assertions)
+
+    signer = c2pa.C2PAToolExternalSigner(
+        executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+        signer_path=signer_binary,
+        expected_signer_sha256=_hex(approved),
+        manifest_provider=replacing_manifest,
+        temp_root=tmp_path,
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(provenance.MediaProvenanceUnavailable):
+        signer.sign(
+            JPEG,
+            binding=_binding(),
+            assertion_codes=("c2pa.actions", "c2pa.hash.data"),
+        )
+
+    assert signer.is_available() is False
+    assert all("--manifest" not in call.args for call in runner.calls)
+
+
+def test_external_signer_rechecks_c2patool_mutation_before_spawn(tmp_path):
+    runner = RecordingRunner()
+    executable = Path(_executable(tmp_path))
+    signer_binary = (tmp_path / "kms-signer.exe").resolve()
+    signer_fixture = b"approved external signer"
+    signer_binary.write_bytes(signer_fixture)
+
+    def mutating_manifest(binding, assertions):
+        executable.write_bytes(b"mutated c2patool before external signing")
+        return _manifest(binding, assertions)
+
+    signer = c2pa.C2PAToolExternalSigner(
+        executable=executable,
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+        signer_path=signer_binary,
+        expected_signer_sha256=_hex(signer_fixture),
+        manifest_provider=mutating_manifest,
+        temp_root=tmp_path,
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(provenance.MediaProvenanceUnavailable):
+        signer.sign(
+            JPEG,
+            binding=_binding(),
+            assertion_codes=("c2pa.actions", "c2pa.hash.data"),
+        )
+
+    assert len(runner.calls) == 1
+    assert all("--manifest" not in call.args for call in runner.calls)
+
+
+def test_timestamp_authority_requires_safe_explicit_transport(tmp_path):
+    runner = RecordingRunner()
+    with pytest.raises(ValueError, match="timestamp authority URL"):
+        _signer(
+            tmp_path,
+            runner,
+            timestamp_authority_url="http://timestamp.example.com",
+        )
+    with pytest.raises(ValueError, match="host"):
+        _signer(
+            tmp_path,
+            runner,
+            timestamp_authority_url="https://127.0.0.1",
+        )
+
+
+def test_timestamp_egress_denial_precedes_signing_secret_access(
+    tmp_path, monkeypatch
+):
+    runner = RecordingRunner()
+    credential_calls = 0
+
+    def credentials():
+        nonlocal credential_calls
+        credential_calls += 1
+        return _credentials()
+
+    monkeypatch.setattr(
+        "maverick.enterprise.enterprise_egress_denial",
+        lambda url, *, tool: "denied",
+    )
+    signer = c2pa.C2PAToolSigner(
+        executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
+        process_runner=runner,
+        credential_provider=credentials,
+        manifest_provider=_manifest,
+        timestamp_authority_url="https://timestamp.example.com",
+        temp_root=tmp_path,
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(provenance.MediaProvenanceUnavailable):
+        signer.sign(JPEG, binding=_binding(), assertion_codes=("c2pa.actions",))
+    assert credential_calls == 0
+
+
 def test_detached_lightwork_receipts_fail_closed(tmp_path):
     runner = RecordingRunner()
     verifier = _verifier(tmp_path, runner)
@@ -455,6 +746,23 @@ def test_invalid_media_is_reported_without_promoting_trust_or_validity(tmp_path)
     assert normalized.validation_state == "invalid"
     assert normalized.trust_chain_state == "untrusted"
     assert normalized.standard == "c2pa"
+
+
+def test_valid_untrusted_media_keeps_validity_and_does_not_promote_trust(tmp_path):
+    failure = [
+        {
+            "code": "signingCredential.untrusted",
+            "url": "self#jumbf=/c2pa/urn:c2pa:test/c2pa.signature",
+        }
+    ]
+    runner = RecordingRunner(report=_report(state="Valid", failure=failure))
+    verifier = _verifier(tmp_path, runner)
+
+    receipt = verifier.verify(JPEG, binding=_binding())
+    normalized = provenance.normalize_c2pa_receipt(receipt)
+
+    assert normalized.validation_state == "valid"
+    assert normalized.trust_chain_state == "untrusted"
 
 
 @pytest.mark.parametrize("behavior", ["timeout", "nonzero", "oversize", "wrong-result"])
@@ -564,6 +872,7 @@ def test_hostile_manifest_resource_controls_are_rejected_before_secret_access(
 
     signer = c2pa.C2PAToolSigner(
         executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
         credential_provider=credentials,
         manifest_provider=manifest,
@@ -590,6 +899,7 @@ def test_invalid_signing_credentials_never_reach_the_tool(tmp_path, credentials)
     runner = RecordingRunner()
     signer = c2pa.C2PAToolSigner(
         executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
         credential_provider=lambda: credentials,
         manifest_provider=_manifest,
@@ -672,6 +982,7 @@ def test_secret_provider_exception_is_sanitized(tmp_path):
 
     signer = c2pa.C2PAToolSigner(
         executable=_executable(tmp_path),
+        expected_executable_sha256=_hex(TOOL_EXECUTABLE),
         process_runner=runner,
         credential_provider=credentials,
         manifest_provider=_manifest,

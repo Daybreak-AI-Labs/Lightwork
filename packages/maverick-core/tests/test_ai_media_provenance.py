@@ -308,16 +308,18 @@ def test_factory_requires_explicit_c2patool_verification_selection(
     adapter = FakeC2PAAdapter()
     constructed = 0
 
-    def factory():
+    def factory(**kwargs):
         nonlocal constructed
         constructed += 1
+        assert kwargs == {"expected_executable_sha256": "a" * 64}
         return adapter
 
     monkeypatch.setattr(ai_media_provenance_c2pa, "C2PAToolVerifier", factory)
     (_isolate / "config.toml").write_text(
         "[ai_media_provenance]\n"
         "enable = true\n"
-        'verification_adapter = "c2patool"\n',
+        'verification_adapter = "c2patool"\n'
+        f'c2patool_executable_sha256 = "{"a" * 64}"\n',
         encoding="utf-8",
     )
     config.reset_config_cache()
@@ -351,12 +353,13 @@ def test_factory_reports_selected_but_missing_c2patool_as_unavailable(
     monkeypatch.setattr(
         ai_media_provenance_c2pa,
         "C2PAToolVerifier",
-        lambda: FakeC2PAAdapter(available=False),
+        lambda **_kwargs: FakeC2PAAdapter(available=False),
     )
     (_isolate / "config.toml").write_text(
         "[ai_media_provenance]\n"
         "enable = true\n"
-        'verification_adapter = "c2patool"\n',
+        'verification_adapter = "c2patool"\n'
+        f'c2patool_executable_sha256 = "{"a" * 64}"\n',
         encoding="utf-8",
     )
     config.reset_config_cache()
@@ -369,6 +372,32 @@ def test_factory_reports_selected_but_missing_c2patool_as_unavailable(
     assert status["verification"]["adapter_id"] == "test.c2pa.adapter"
     assert status["verification"]["adapter_version"] is None
     assert status["signing"]["status"] == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "digest_line",
+    ["", 'c2patool_executable_sha256 = "not-a-digest"\n'],
+)
+def test_factory_rejects_selected_c2patool_without_exact_digest(
+    _isolate,
+    digest_line,
+):
+    from maverick import config
+
+    (_isolate / "config.toml").write_text(
+        "[ai_media_provenance]\n"
+        "enable = true\n"
+        'verification_adapter = "c2patool"\n'
+        f"{digest_line}",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    with pytest.raises(
+        provenance.MediaProvenanceConfigError,
+        match="c2patool_executable_sha256",
+    ):
+        provenance.configured_media_provenance()
 
 
 @pytest.mark.parametrize(

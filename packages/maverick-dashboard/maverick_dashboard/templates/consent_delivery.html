@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Consent Delivery · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cd-shell{max-width:1400px;margin:0 auto;padding:1.25rem}.cd-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;margin-bottom:1rem}.cd-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.cd-hero h1{margin:.1rem 0}.cd-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.cd-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:1rem}.cd-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cd-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.cd-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.cd-wide,.cd-actions{grid-column:1/-1}.cd-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.cd-output{white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.cd-warning{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}@media(max-width:900px){.cd-grid,.cd-form{grid-template-columns:1fr}.cd-wide,.cd-actions{grid-column:auto}}
+</style>
+<div class="cd-shell">
+  <header class="cd-hero"><div><div class="cd-kicker">Durable preference synchronization</div><h1>Consent Delivery</h1><p class="muted">Enroll exact HTTPS destinations, rotate key identifiers, bridge immutable receipts into a signed queue, inspect recovery state, and explicitly dispatch a bounded batch.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
+  {% if not consent_delivery_enabled %}<div class="cd-warning" role="status"><strong>Delivery disabled.</strong> Enable <code>[consent_preferences.delivery] enable = true</code> only after destination, signing-custody, privacy, retry, and recovery review.</div>{% endif %}
+  <div class="cd-warning"><strong>External side effect:</strong> “Dispatch now” performs outbound HTTPS calls. Sync only queues receipt-derived events. Neither action proves recipient interoperability or production acceptance.</div>
+  <div id="cd-status" class="muted" role="status" aria-live="polite"></div>
+  <div class="cd-grid">
+    <div>
+      <section class="cd-card"><h2>Destination and key ID</h2><form id="cd-destination" class="cd-form">
+        <label>Destination ID<input class="input" name="destination_id" value="crm" required></label><label>Exact HTTPS origin<input class="input" name="origin" placeholder="https://crm.example.com" required></label>
+        <label>Signing key ID<input class="input" name="signing_key_id" required></label><label>Idempotency key<input class="input" name="idempotency_key" required></label>
+        <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="6" required></label><label>Retention seconds<input class="input" name="retention" type="number" min="1" value="2592000" required></label>
+        <div class="cd-actions"><button class="btn btn--primary" type="submit">Enroll destination</button><button class="btn" id="cd-load-destination" type="button">Load destination</button></div>
+      </form></section>
+      <section class="cd-card"><h2>Key rotation and revocation</h2><form id="cd-key" class="cd-form">
+        <label>Destination ID<input class="input" name="destination_id" value="crm" required></label><label>Key ID<input class="input" name="key_id" required></label>
+        <label>Expected destination revision<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><label>Idempotency key<input class="input" name="idempotency_key" required></label>
+        <div class="cd-actions"><button class="btn btn--primary" type="submit" value="rotate">Rotate to key ID</button><button class="btn" type="submit" value="revoke-key">Revoke key ID</button><button class="btn" type="submit" value="revoke">Revoke destination</button></div>
+      </form></section>
+    </div>
+    <div>
+      <section class="cd-card"><h2>Bridge and dispatch</h2><form id="cd-run" class="cd-form">
+        <label class="cd-wide">Destination IDs (comma separated)<input class="input" name="destination_ids" value="crm" required></label><label>Sync limit<input class="input" name="sync_limit" type="number" min="1" max="500" value="100" required></label><label>Delivery limit<input class="input" name="delivery_limit" type="number" min="1" max="100" value="10" required></label>
+        <div class="cd-actions"><button class="btn" type="submit" value="sync">Queue authoritative changes</button><button class="btn btn--primary" type="submit" value="dispatch">Dispatch now</button><button class="btn" id="cd-load-status" type="button">Load status</button><button class="btn" id="cd-load-dead" type="button">Dead letters</button><button class="btn" id="cd-load-audit" type="button">Audit chain</button></div>
+      </form></section>
+      <section class="cd-card"><h2>Operational result</h2><pre id="cd-output" class="cd-output">No operation run.</pre></section>
+    </div>
+  </div>
+</div>
+<script>
+(function(){"use strict";var API="/api/v1/consent/delivery",status=document.getElementById('cd-status'),output=document.getElementById('cd-output');function val(form,name){return form.elements[name].value.trim();}function ids(value){return value.split(',').map(function(item){return item.trim();}).filter(Boolean);}async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body={};try{body=await response.json();}catch(_error){}if(!response.ok)throw new Error(body.detail||('HTTP '+response.status));return body;}function show(body,message){output.textContent=JSON.stringify(body,null,2);status.textContent=message;}
+document.getElementById('cd-destination').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget,payload={origin:val(form,'origin'),signing_key_id:val(form,'signing_key_id'),idempotency_key:val(form,'idempotency_key'),max_attempts:Number(val(form,'max_attempts')),base_backoff_seconds:5.0,max_backoff_seconds:3600.0,default_retention_seconds:Number(val(form,'retention'))};try{show(await call('/destinations/'+encodeURIComponent(val(form,'destination_id')),{method:'POST',body:JSON.stringify(payload)}),'Destination enrolled.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cd-load-destination').addEventListener('click',async function(){var form=document.getElementById('cd-destination');try{show(await call('/destinations/'+encodeURIComponent(val(form,'destination_id'))),'Destination loaded.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cd-key').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget,action=event.submitter&&event.submitter.value||'rotate',payload={expected_revision:Number(val(form,'expected_revision')),idempotency_key:val(form,'idempotency_key')};if(action==='rotate')payload.new_key_id=val(form,'key_id');if(action==='revoke-key')payload.key_id=val(form,'key_id');try{show(await call('/destinations/'+encodeURIComponent(val(form,'destination_id'))+'/'+(action==='rotate'?'rotate-key':action),{method:'POST',body:JSON.stringify(payload)}),'Destination authority updated.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cd-run').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget,action=event.submitter&&event.submitter.value||'sync',payload={destination_ids:ids(val(form,'destination_ids'))};if(action==='sync')payload.limit=Number(val(form,'sync_limit'));else{payload.sync_limit=Number(val(form,'sync_limit'));payload.delivery_limit=Number(val(form,'delivery_limit'));payload.lease_seconds=60.0;}try{show(await call('/'+action,{method:'POST',body:JSON.stringify(payload)}),action==='sync'?'Authoritative changes queued.':'Bounded external dispatch completed.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cd-load-status').addEventListener('click',async function(){try{show(await call('/status'),'Delivery status loaded.');}catch(error){status.textContent=error.message;}});document.getElementById('cd-load-dead').addEventListener('click',async function(){try{show(await call('/dead-letters'),'Dead letters loaded.');}catch(error){status.textContent=error.message;}});document.getElementById('cd-load-audit').addEventListener('click',async function(){try{show(await call('/audit'),'Delivery audit loaded.');}catch(error){status.textContent=error.message;}});
+})();
+</script>
+{% endblock %}

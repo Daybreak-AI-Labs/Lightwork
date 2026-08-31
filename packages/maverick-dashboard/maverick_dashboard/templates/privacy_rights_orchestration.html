@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Privacy Rights Orchestration - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .pro-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+              gap:var(--space-4); }
+  .pro-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .pro-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .pro-stack textarea { min-height:18rem; font-family:var(--font-mono); }
+  .pro-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
+                word-break:break-word; }
+  .pro-warning { border:2px solid var(--danger); padding:var(--space-3);
+                 border-radius:8px; background:var(--surface-2); }
+  .pro-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  @media (max-width:900px) { .pro-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Privacy Rights Orchestration</h1>
+<p>Exact-tenant control plane for rights requests, evidence, source work,
+  completeness-explicit manifests, response-package metadata, and closure.</p>
+<div class="pro-warning">
+  <strong>No network calls, provider writes, identity verification, response
+    delivery, live acceptance, or estate-completeness claim.</strong>
+  Callbacks are worker intent only. Raw subject and external-request references
+  are accepted only while opening a case, replaced with tenant-keyed HMACs, and
+  never persisted or returned.
+</div>
+
+{% if not privacy_rights_orchestration_enabled %}
+<section class="panel">
+  <h2>Privacy-rights orchestration disabled</h2>
+  <p>This surface fails closed until both
+    <code>[privacy_automation] enable = true</code> and
+    <code>[privacy_automation.rights_orchestration] enable = true</code> are explicit.</p>
+</section>
+{% else %}
+<p><button class="btn" id="pro-load-status" type="button">Load honest status</button></p>
+<div class="pro-grid">
+  <section class="panel pro-stack">
+    <h2>Strict JSON operator workbench</h2>
+    <p>Tenant and actor come only from the authenticated request. Unknown fields
+      are rejected. After case opening, the browser clears the raw intake body.</p>
+    <label>Operation
+      <select id="pro-operation">
+        <option value="source-enroll" data-method="PUT" data-path="/sources/{source_id}">Source: enroll or revise</option>
+        <option value="source-get" data-method="GET" data-path="/sources/{source_id}">Source: get</option>
+        <option value="source-list" data-method="GET" data-path="/sources">Source: list</option>
+        <option value="case-open" data-method="PUT" data-path="/cases/{case_id}">Case: open raw-to-HMAC intake</option>
+        <option value="case-get" data-method="GET" data-path="/cases/{case_id}">Case: get</option>
+        <option value="identity-evidence" data-method="POST" data-path="/cases/{case_id}/identity-verification">Case: identity evidence status</option>
+        <option value="legal-hold" data-method="POST" data-path="/cases/{case_id}/legal-hold">Case: legal hold</option>
+        <option value="retention-gate" data-method="POST" data-path="/cases/{case_id}/retention-gate">Case: retention gate</option>
+        <option value="task-plan" data-method="POST" data-path="/cases/{case_id}/sources/{source_id}/plan">Source work: plan tasks</option>
+        <option value="destructive-approve" data-method="POST" data-path="/tasks/{task_id}/approve-destructive">Deletion: independent approval</option>
+        <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: claim worker lease</option>
+        <option value="callback-fail" data-method="POST" data-path="/callbacks/{callback_id}/fail">Callback: record failure</option>
+        <option value="callback-ack" data-method="POST" data-path="/callbacks/{callback_id}/acknowledge">Callback: acknowledge worker evidence</option>
+        <option value="callback-requeue" data-method="POST" data-path="/callbacks/{callback_id}/requeue">Callback: requeue dead letter</option>
+        <option value="source-evidence" data-method="PUT" data-path="/cases/{case_id}/sources/{source_id}/phases/{phase}/evidence/{evidence_id}">Source work: record evidence</option>
+        <option value="manifest-build" data-method="PUT" data-path="/cases/{case_id}/manifests/{manifest_id}">Case: build completeness manifest</option>
+        <option value="package-create" data-method="PUT" data-path="/cases/{case_id}/packages/{package_id}">Response package: record metadata</option>
+        <option value="package-get" data-method="GET" data-path="/packages/{package_id}">Response package: get metadata</option>
+        <option value="closure-approve" data-method="POST" data-path="/cases/{case_id}/closure/approve">Case: independent closure approval</option>
+        <option value="case-close" data-method="POST" data-path="/cases/{case_id}/close">Case: close as opener</option>
+        <option value="case-export" data-method="PUT" data-path="/cases/{case_id}/exports/{export_id}">Case: create local export</option>
+        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+      </select>
+    </label>
+    <label>Path values as JSON object
+      <input class="input" id="pro-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="pro-body">{}</textarea>
+    </label>
+    <div class="pro-warning" id="pro-confirm-panel">
+      <label class="pro-confirm"><input id="pro-confirm" type="checkbox">
+        <span>I reviewed the exact tenant, principal, revision, evidence, hold,
+          retention, destructive-work, callback, or closure consequences.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="pro-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <pre class="pro-output" id="pro-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/privacy/rights-orchestration";
+  var operation = document.getElementById("pro-operation");
+  var paths = document.getElementById("pro-path-values");
+  var body = document.getElementById("pro-body");
+  var confirmation = document.getElementById("pro-confirm");
+  var confirmationPanel = document.getElementById("pro-confirm-panel");
+  var output = document.getElementById("pro-output");
+  var highImpact = new Set([
+    "identity-evidence", "legal-hold", "retention-gate",
+    "destructive-approve", "callback-claim", "callback-fail", "callback-ack",
+    "callback-requeue", "closure-approve", "case-close", "retention-purge"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() {
+    return operation.options[operation.selectedIndex];
+  }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      if (typeof values[key] !== "string" || !values[key]) {
+        throw new Error("Missing string path value: " + key);
+      }
+      return encodeURIComponent(values[key]);
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {method: method, headers: {"Accept": "application/json"}};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var responseText = await response.text();
+    var result;
+    try { result = responseText ? JSON.parse(responseText) : {}; }
+    catch (_error) { result = {detail: responseText}; }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("pro-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("pro-submit").addEventListener("click", async function () {
+    var clearRawIntake = operation.value === "case-open";
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed state change before continuing.");
+      }
+      var route = selectedRoute();
+      var pathValues = JSON.parse(paths.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      if (Object.prototype.hasOwnProperty.call(payload, "tenant") ||
+          Object.prototype.hasOwnProperty.call(payload, "tenant_id") ||
+          Object.prototype.hasOwnProperty.call(payload, "actor") ||
+          Object.prototype.hasOwnProperty.call(payload, "actor_ref")) {
+        throw new Error("Tenant and actor fields are never accepted.");
+      }
+      var path = buildPath(route.dataset.path, pathValues);
+      await run(route.dataset.method, path, payload);
+    } catch (error) { show(String(error)); }
+    finally { if (clearRawIntake) { body.value = "{}"; } }
+  });
+  updateConfirmation();
+}());
+</script>
+{% endif %}
+{% endblock %}

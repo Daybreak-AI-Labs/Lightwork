@@ -58,28 +58,28 @@ bindings, but it has not proven parity in live customer environments.
 |---|---|---|
 | Central inventory and lineage | `model_risk_assurance.py`, `ai_inventory.py`, `agent_topology.py`, inventory scheduler, assurance APIs/UI | **Implemented-local control plane; partial product.** Completeness across a real enterprise is unverified. |
 | Native registry discovery | Ten bounded adapters: Bedrock, Azure AI Foundry, Vertex AI, Databricks, Copilot Studio, MLflow, SageMaker, Snowflake Cortex, Agentforce, and Hugging Face | **Implemented-local adapters; partial live capability.** No provider tenant was used for acceptance. |
-| Shadow/embedded AI discovery | `ai_discovery_sensors.py` plus `ai_discovery_sensor_clients.py`: six governed sensor classes, tenant-scoped Ed25519 machine ingress with durable replay/binding checks, network-egress and browser/OAuth reference normalizers, and a signed client | **Implemented-local control plane and reference ingress; deployed sensor fleet missing.** The six production sensor agents, enterprise completeness, privacy and scale acceptance are not proven. |
-| Identity/data governance discovery | `ai_identity_governance_connectors.py`, pinned runtime transport and `identity_governance_scheduler.py`: bounded Entra identities/grants, Okta apps/assignments, Purview posture, leased scheduled collection, digest-only history and bounded deltas | **Implemented-local read-only adapters/scheduler; partial live capability.** This is not Entra Agent ID/Okta agent-principal federation, conditional-access enforcement, identity-to-capability mapping or Purview writeback; live tenant/operating acceptance is unverified. |
+| Shadow/embedded AI discovery | Six governed sensor classes, tenant-scoped Ed25519 ingress, reference normalizers/client, and deployable consent-gated JSONL network-egress, browser-extension and OAuth agents with private normalized-only spools | **Implemented-local three-agent path; partial deployed fleet.** A consenting local estate passed key lifecycle, privacy, recovery, concurrency and 1,000-event scale while declaring incomplete coverage. Production source adapters, the other three sensor classes and enterprise acceptance remain unproven. |
+| Identity/data governance discovery | Read-only Entra/Okta/Purview connectors and scheduler plus `ai_identity_governance_controls.py`: replay-safe change fanout, pseudonymous agent-principal federation through an independently injected enrolled subject-binding resolver, capability mapping, fresh conditional-access decisions and Purview CAS writeback/compensation | **Implemented-local, separately default-off controls; partial live capability.** No provider test tenant was available, so scheduler operation, subject enrollment, federation policy, conditional access and writeback remain live-unverified. |
 | Business intake | `ai_business_intake.py`, API, and operator UI create/link inventory, proposed declarations, and review work | **Implemented-local.** Fresh-customer usability and timing acceptance remain unverified. |
 | Framework and control packs | Signed/versioned NIST AI RMF and EU AI Act starter mappings, semantic diffs, subscriptions, exact attestations, re-attestation UI | **Implemented-local bounded starters; partial library.** Not licensed standards text, legal advice, certification, or OneTrust-equivalent content breadth. |
 | Operational policy management | `ai_policy_management.py`: immutable versions, exact applicability, strictest-wins decisions, human activation, four-eyes expiring exceptions, evaluation and revalidation | **Implemented-local core/API/UI.** Live customer policy migration and operating acceptance are external. |
 | Dynamic risk | `ai_dynamic_risk.py`: exact-asset normalized signals, freshness, CAS lifecycle, context floors, attributable score/tier changes, exclusions, and history | **Implemented-local core/API/UI.** Production calibration and broad live telemetry remain unverified. |
 | Production drift/quality monitoring | Aggregate-only PSI/KL, prediction, embedding, and performance drift with evidence/finding emission | **Implemented-local engines; partial deployment.** No live observability estate or alert-delivery acceptance. |
-| Runtime controls | `ai_runtime_guardrails.py`, authenticated external evaluate/execute routes, policy/Shield/PII/secret composition, digest-only receipts, exact approved asset binding, dynamic-risk coupling | **Implemented-local enforcement path; partial live coverage.** Broad third-party gateways, Copilot, agent, and MCP traffic acceptance remain unverified. |
+| Runtime controls | Runtime guardrails plus an executable authenticated gateway pilot covering allow/deny, preview/enforced no-change, approval, exact retry, response-loss recovery, indeterminate after-effect outage and approved compensation | **Implemented and operated against an isolated local gateway estate; partial live coverage.** No external/customer gateway credential was available, so third-party, Copilot, agent and MCP acceptance remains unverified. |
 | Agent/MCP governance | Signed delegation, agent trust/topology, capability attenuation/revocation, blast radius, containment, signed audit, MCP inventory | **Implemented-local and comparatively strong.** Live enterprise identity federation and cross-product adoption remain partial. |
 | Explainability | `ai_explainability.py` admits closed native/SHAP/LIME/Captum/Alibi/counterfactual receipts with exact model binding and independent review | **Implemented-local core/API/UI.** Provider adapters and adverse-action/legal acceptance are not proven. |
 | Model documentation and BOM/lineage | Model cards, deployment lineage, evidence graph, exact artifact/evaluator bindings, assurance packets, SBOM/provenance machinery | **Partial.** Strong primitives, but no single mature workspace proven against OneTrust's complete product experience. |
-| Vendor AI risk | `ai_vendor_risk.py` and `ai_vendor_portal.py`: AI diligence, bounded cited extraction, answer precedence, independent review, tenant-scoped one-time-disclosed portal credentials, explicit vendor attestation and human-review import, API/UI | **Implemented-local product surface; partial ecosystem.** Live vendors/documents, portal operations, document-contract drift and ecosystem acceptance are unverified. |
+| Vendor AI risk | Portal/diligence product plus a consent-gated local pilot using two representative synthetic documents, exact questionnaire/document/citation contracts, drift probes, exact retry/same-process replay, revocation, tenant isolation and pending-human-review import | **Implemented and operated locally with synthetic vendors/documents; partial ecosystem.** Crash/restart recovery, live consenting vendors, real documents and ecosystem acceptance remain unverified. |
 | Regulatory change | Versioned feed engine plus `ai_regulatory_feed.py` impact bridge, review, stale-evidence resolution, and notices | **Implemented-local bridge; partial live service.** Licensed/current AI-regulation operations, counsel validation, and delivered notices are external. |
 | EU incident workflow | `eu_ai_incidents.py`: Article 73 triage, 2/10/15-day clocks, human authority routing, four-eyes approval, export, and external-receipt recording | **Implemented-local workflow.** No filing transmitter, live authority directory, legal calendar, or legal determination. |
 | EU conformity readiness | `ai_conformity_workflow.py`: FRIA, Annex IV, Article 43 route, post-market, declaration and CE-readiness checklist/evidence workflow | **Implemented-local readiness workflow.** It does not make legal determinations, certify, sign declarations, or affix a CE mark. |
-| GRC writeback | Semantic, idempotent ServiceNow IRM and Archer preview/execute/receipt/conflict/event paths | **Implemented-local adapters; partial live capability.** Vendor sandbox acceptance and broader targets remain external. |
+| GRC writeback | Semantic, idempotent ServiceNow IRM and Archer preview/execute/receipt/conflict/event paths; provider-pilot mutations require an exact reviewed-origin allowlist rather than hostname/environment inference | **Implemented-local adapters; partial live capability.** Vendor sandbox acceptance and broader targets remain external. |
 | Portfolio/executive reporting | Transparent portfolio formula, quarterly immutable snapshots, trend/delta, contributor drill-through, API/UI | **Implemented-local engineering.** Production data quality and CRO/customer acceptance are unverified. |
 | AI literacy | Role requirements, pseudonymous assignments, completion receipts, waivers, gaps, evidence export, API/UI | **Implemented-local.** HRIS/LMS contracts and customer acceptance are external. |
 | AI cost and ROI | Governed AWS, Azure, GCP, and OpenAI organization-cost collectors; scheduler; exact citations; allocation/corrections; assumption-labelled ROI; API/UI | **Implemented-local adapters.** Credentials and live billing tenants were not used; model-level OpenAI cost attribution is explicitly unsupported by the Costs contract. |
 | Red-team assurance | Governed schedules/leases/dispatcher, bounded suites, commitment-only response storage, evidence and promotion gate | **Implemented-local core/dispatch.** No live enrolled-agent end-to-end or comprehensive legal bias audit. |
-| Media provenance | `ai_media_provenance.py` and `ai_media_provenance_c2pa.py`: typed C2PA interfaces, optional official-`c2patool` verifier/signer, config-selected verification, digest-only receipts, transient media, exact bindings and four-eyes release | **Implemented-local concrete optional adapter; partial live capability.** No local `c2patool` binary was available and no live interoperability was accepted; factory signing custody is intentionally absent, and production key operations remain deployment work. |
-| Benchmark exchange | `ai_benchmark_exchange.py` and `ai_benchmark_exchange_transport.py`: voluntary aggregate packages, four-eyes export, pseudonymous IDs, versioned Ed25519 trust roots, fixed-origin opt-in HTTPS coordinator transport and explicit manual-consent submission | **Implemented-local client/trust control plane; external network missing.** No coordinator was operated and there is no proven cross-tenant pooling, inclusion, anonymity/differential-privacy guarantee, privacy-budget accounting or live acceptance. |
+| Media provenance | Concrete `c2patool` adapter, real-binary acceptance runner, digest-only receipts, transient media and `C2PAToolExternalSigner` KMS/HSM subprocess boundary | **Development interoperability passed on separately installed `c2patool` 0.27.16.** The public fixture is not production custody; production key ceremonies, certificate/trust ecosystem and relying-party acceptance remain deployment work. |
+| Benchmark exchange | Client/trust plane plus a restartable aggregate-only coordinator, exact packet admission after two-human evidence review and a digest-bound trust-root rotation ceremony | **Implemented and operated locally; external network missing.** The current protocol explicitly does not claim anonymity or differential privacy and treats a privacy budget as not applicable; no live participant or cross-tenant acceptance exists. |
 | Certification and market discovery (G21) | Internal AIMS, statement-of-applicability, audit and evidence primitives can support an application | **External.** ISO 42001 certification, analyst review, and directory/profile listings require independent organizations and were not obtained. |
 | Insurance evidence | `ai_insurability.py`: exact-evidence profile versions, measurements, limitations, verifier guide, four-eyes export, API/UI | **Implemented-local packet.** Coverage, quote, pricing impact, and insurer acceptance are external. |
 | Certification-body channel (G23) | Evidence shapes can be exported for review | **External.** No accredited certification-body relationship or jointly accepted evidence format was established. |
@@ -90,14 +90,15 @@ bindings, but it has not proven parity in live customer environments.
 
 ## What OneTrust still has that Lightwork does not
 
-1. **Deployed discovery collectors.** Lightwork now has a governed six-sensor
-   contract, dedicated signed machine ingress and two reference normalizers,
-   but not the deployed browser extension, proxy/network sensor, OAuth/SaaS
-   crawler, identity-directory daemon or data-catalog daemon. Completeness,
-   privacy and scale remain unproven.
+1. **Broad deployed discovery collectors.** Lightwork now has deployable
+   network-egress, browser-event and OAuth-event consumers and a local consented
+   test estate, but production source adapters plus SaaS-posture,
+   identity-directory and data-catalog daemons are still absent. Enterprise
+   completeness, privacy and scale remain unproven.
 2. **Live-provider acceptance.** The registry, identity, cost, GRC, runtime,
-   and C2PA paths are tested locally or with injected transports, not against
-   production customer/vendor tenants.
+   paths are tested locally or with injected transports, not against production
+   customer/vendor tenants. C2PA real-binary development-fixture
+   interoperability is the exception; it is still not production custody.
 3. **Continuous operations.** Several schedulers exist, but cross-product alert
    operations, calibrated thresholds, on-call workflow, recovery, and scale
    have not been proven in a customer deployment.
@@ -128,24 +129,30 @@ bindings, but it has not proven parity in live customer environments.
 These are engineering differentiators, not proof of OneTrust parity or market
 readiness.
 
-## Recommended next build/acceptance sequence
+## Recommended next external-acceptance sequence
 
-1. Build deployable network/egress and browser/OAuth sensor agents around the
-   reference normalizers/client, run them against a consenting test estate, and
-   validate key lifecycle, privacy, completeness, recovery and scale limits.
-2. Validate one full runtime policy path against an external model/agent
-   gateway, including retry, outage, rollback, and no-change acceptance.
-3. Run live sandbox acceptance for one inventory provider, Entra or Okta,
-   ServiceNow or Archer and OpenAI Costs; install `c2patool`, validate live
-   interoperability and design production signing custody.
-4. Operate the identity scheduler, couple safe normalized changes to dynamic
-   risk/alerts, and implement the still-missing identity federation,
-   conditional-access enforcement, capability mapping and Purview writeback.
-5. Pilot the vendor portal with consenting vendors and representative
-   documents; test invitation revocation, idempotent retry, contract drift and
-   downstream review operations.
-6. Operate a benchmark coordinator and trust-root ceremony only after
-   contribution-consent, inclusion, anonymity, differential-privacy and
-   privacy-budget review.
-7. Run fresh-tenant usability, cross-tenant adversarial, recovery, scale, and
-   audit-export acceptance before making product-readiness claims.
+The corresponding repository code and local/synthetic pilots now exist. The
+next sequence is deployment and independent acceptance, not another claim that
+local tests are live proof:
+
+1. Deploy the new network-egress, browser-extension and OAuth agents in a
+   consenting external estate; validate DPIA/privacy decisions, measured source
+   coverage, key lifecycle, recovery and production-volume limits. Build the
+   remaining SaaS, directory and catalog agents.
+2. Repeat the completed local runtime pilot against a consenting real external
+   gateway, including retry, outage, rollback, no-change and operator sign-off.
+3. Provide test credentials and run the fail-closed provider harness for Hugging
+   Face, Entra, ServiceNow and OpenAI Costs after independently reviewing the
+   exact ServiceNow write-origin allowlist. The current readiness artifact is
+   blocked for all four and performed no provider I/O.
+4. Operate the completed identity scheduler/control plane against approved
+   Entra or Okta and Purview tenants; review provider-specific federation,
+   conditional-access and mutation semantics before enabling writeback.
+5. Move the successful `c2patool` development interop behind production
+   certificate/HSM/KMS custody, rotation/revocation, timestamping, recovery and
+   relying-party acceptance.
+6. Pilot with consenting external vendors and representative documents, and
+   enroll live benchmark contributors only after independent inclusion,
+   anonymity, differential-privacy and privacy-budget review.
+7. Repeat the five-suite automated platform runner in deployment-like
+   infrastructure and add moderated human usability/customer acceptance.

@@ -87,6 +87,8 @@ def test_assurance_page_renders_all_governance_operator_contracts():
         '"/identity-governance/connectors"',
         '"/identity-governance/scheduler/status"',
         '"/identity-governance/scheduler/run"',
+        '"/identity-governance/controls/status"',
+        '"/identity-governance/controls/purview/writebacks/prepare"',
         '"/ai-media-provenance/capabilities"',
         '"/ai-media-provenance/verify"',
         '"/grc-outbound/events?limit=100"',
@@ -118,6 +120,9 @@ def test_assurance_page_renders_all_governance_operator_contracts():
     assert "not raw provider rows" in page
     assert "complete-inventory" in page
     assert "automatic-risk claim" in page
+    assert "tenant-bound runtime attached by server startup" in page
+    assert "A Purview prepare creates no provider write" in page
+    assert "cannot supply raw" in page
     assert "selected local <code>c2patool</code> verifier" in page
     assert "signing still requires" in page
     assert "default verification and signing" in page
@@ -155,6 +160,48 @@ def test_governance_panels_render_api_values_as_text_only():
     assert "No grant-completeness conclusion is shown" in page
     assert "No classification-completeness conclusion is shown" in page
     assert "No provenance-coverage conclusion is shown" in page
+
+
+def test_identity_control_workbench_is_pseudonymous_explicit_and_default_off():
+    response = client.get("/security/assurance")
+
+    assert response.status_code == 200
+    page = response.text
+    fragment = page[
+        page.index('<section id="ai-identity-governance-panel"'):
+        page.index('<section id="ai-media-provenance-panel"')
+    ]
+    for element_id in (
+        "ai-identity-control-workbench",
+        "ai-identity-control-status",
+        "ai-identity-control-evaluate",
+        "ai-identity-federation-observe",
+        "ai-identity-capability-map",
+        "ai-identity-capability-decision",
+        "ai-identity-conditional-decision",
+        "ai-identity-purview-prepare",
+        "ai-identity-purview-resume",
+        "ai-identity-purview-get",
+        "ai-identity-purview-execute",
+        "ai-identity-purview-compensate",
+        "ai-identity-control-result",
+    ):
+        assert f'id="{element_id}"' in fragment
+    assert 'name="principal_ref"' in fragment
+    assert 'name="provider_subject_id"' in fragment
+    assert 'name="principal"' not in fragment
+    assert 'name="credential"' not in fragment
+    assert "it cannot supply raw" in fragment
+    assert "A Purview prepare creates no provider write" in fragment
+    script = page[page.index("const identityControlStatus"):]
+    prepare_handler = script[
+        script.index('const identityPurviewPrepare ='):
+        script.index('const identityPurviewResume =')
+    ]
+    assert '"/identity-governance/controls/purview/writebacks/prepare"' in prepare_handler
+    assert "/execute" not in prepare_handler
+    assert "/compensate" not in prepare_handler
+    assert 'showProjection("ai-identity-control-result"' in script
 
 
 def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
@@ -215,6 +262,10 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
         "ai-discovery-findings",
         "ai-identity-governance-status",
         "ai-identity-governance-collect",
+        "ai-identity-control-status",
+        "ai-identity-control-evaluate",
+        "ai-identity-purview-prepare",
+        "ai-identity-purview-resume",
         "ai-media-provenance-capabilities",
         "ai-media-provenance-list",
         "ai-media-provenance-detail",
@@ -246,6 +297,13 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
         "/ai-discovery-sensors/sensors/${encodeURIComponent(sensorId)}",
         "/ai-discovery-sensors/observations/${encodeURIComponent(observationId)}",
         "/identity-governance/connectors/${encodeURIComponent(provider)}/collect",
+        "/identity-governance/controls/federation/${encodeURIComponent(provider)}/observe",
+        "/identity-governance/controls/capabilities/${encodeURIComponent(provider)}/map",
+        "/identity-governance/controls/capabilities/${encodeURIComponent(provider)}/decision",
+        "/identity-governance/controls/conditional-access/${encodeURIComponent(provider)}/decision",
+        "/identity-governance/controls/purview/writebacks/${encodeURIComponent(intentId)}/get",
+        "/identity-governance/controls/purview/writebacks/${encodeURIComponent(intentId)}/execute",
+        "/identity-governance/controls/purview/writebacks/${encodeURIComponent(intentId)}/compensate",
         "/ai-media-provenance/records/${encodeURIComponent(provenanceId)}",
         "/ai-media-provenance/receipts/${encodeURIComponent(operation)}",
     ):
@@ -268,6 +326,10 @@ def test_policy_and_dynamic_risk_forms_cover_exact_bounded_api_contracts():
     assert 'item.observation_id, item.identity_kind, item.enabled' in page
     assert 'item.resource_id, `${asText(item.grant_kind)} / ${asText(item.permission_id)}`' in page
     assert "Array.isArray(item.classification_codes)" in page
+    assert 'pattern="prn_[0-9a-f]{32}"' in page
+    assert 'pattern="(?:sub|idn)_[0-9a-f]{32}"' in page
+    assert "capability mapping digest to the resume form" in page
+    assert "Provider policy was observed, not mutated" in page
     assert 'enctype="multipart/form-data"' in page
     assert 'prefix + "/ai-media-provenance/sign"' in page
     assert "mediaProvenanceReceipt.elements.receipt.value = \"\"" in page
@@ -335,6 +397,10 @@ def test_non_admin_page_withholds_admin_governance_mutations(monkeypatch):
     assert 'id="ai-discovery-revocation-approve"' not in page
     assert 'id="ai-media-provenance-sign"' not in page
     assert 'id="ai-media-provenance-review"' not in page
+    assert 'id="ai-identity-control-status"' not in page
+    assert 'id="ai-identity-control-evaluate"' not in page
+    assert 'id="ai-identity-purview-prepare"' not in page
+    assert 'id="ai-identity-purview-resume"' not in page
     assert "/requirements/${encodeURIComponent(key)}" not in page
     assert "/routing`" not in page
     assert "/reports/${report}/approve" not in page
@@ -350,6 +416,8 @@ def test_non_admin_page_withholds_admin_governance_mutations(monkeypatch):
     assert "/ai-discovery-sensors/sensors/${encodeURIComponent(sensorId)}/revocation/approve" not in page
     assert 'prefix + "/ai-media-provenance/sign"' not in page
     assert "/ai-media-provenance/records/${encodeURIComponent(provenanceId)}/review" not in page
+    assert "/identity-governance/controls/status" not in page
+    assert "/identity-governance/controls/purview/writebacks/prepare" not in page
     assert 'sendJson("/ai-policy-management/policies"' not in page
     assert 'sendJson("/ai-policy-management/exceptions"' not in page
     assert 'sendJson("/ai-policy-management/evaluations"' not in page
@@ -403,6 +471,10 @@ def test_admin_page_explains_trusted_article_73_authority_boundary():
     assert 'id="ai-discovery-sensor-approve"' in page
     assert 'id="ai-discovery-revocation-approve"' in page
     assert 'id="ai-identity-governance-collect"' in page
+    assert 'id="ai-identity-control-status"' in page
+    assert 'id="ai-identity-control-evaluate"' in page
+    assert 'id="ai-identity-purview-prepare"' in page
+    assert 'id="ai-identity-purview-resume"' in page
     assert 'id="ai-media-provenance-sign"' in page
     assert 'id="ai-media-provenance-review"' in page
     assert 'sendJson("/ai-policy-management/policies"' in page

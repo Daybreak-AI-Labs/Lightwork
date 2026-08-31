@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Privacy Data Discovery · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .pdd-shell{max-width:1480px;margin:0 auto;padding:1.25rem}.pdd-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.pdd-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.pdd-hero h1{margin:.1rem 0}.pdd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:1rem}.pdd-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}.pdd-card h2{font-size:1rem;margin:.1rem 0 .75rem}.pdd-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.pdd-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.pdd-form .wide,.pdd-actions{grid-column:1/-1}.pdd-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.pdd-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}.pdd-danger{border-color:#a33}.pdd-note{font-size:.8rem;color:var(--muted)}.pdd-result{white-space:pre-wrap;word-break:break-word;max-height:48rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.pdd-status{min-height:1.4rem;margin:.6rem 0}.pdd-bounds{margin:.5rem 0 0;padding-left:1.25rem}.pdd-bounds li{margin:.25rem 0}
+  @media(max-width:980px){.pdd-grid,.pdd-form{grid-template-columns:1fr}.pdd-form .wide,.pdd-actions{grid-column:auto}.pdd-hero{display:block}}
+</style>
+<div class="pdd-shell">
+  <header class="pdd-hero">
+    <div>
+      <div class="pdd-kicker">Privacy-minimising inventory authority</div>
+      <h1>Privacy Data Discovery</h1>
+      <p class="muted">Schedule bounded structured or text-document scans, review digest-only findings, and send only fresh four-eyes-approved classifications to an injected data-map or RoPA authority.</p>
+    </div>
+    <a class="btn" href="/privacy">Back to Privacy</a>
+  </header>
+
+  {% if not privacy_data_discovery_enabled %}
+  <div class="pdd-banner" role="status">
+    <strong>Privacy data discovery disabled.</strong> Enable both <code>privacy_automation.enable</code> and <code>privacy_automation.data_discovery.enable</code>. Provider work fails closed while either gate is off.
+  </div>
+  {% endif %}
+
+  <div class="pdd-banner">
+    <strong>Acceptance and completeness boundary.</strong>
+    No live provider adapters or provider/customer acceptance is claimed. A completed report covers only the exact enrolled source and declared scan bounds; it never proves that personal data is absent.
+    <ul class="pdd-bounds">
+      <li><strong>Unsupported formats:</strong> unstructured discovery currently accepts JSON, JSON-LD, XML, CSV, HTML, and plain text. PDF, Office, images, archives, audio, and video are reported as unsupported rather than silently treated as complete.</li>
+      <li><strong>Cooperative deadline:</strong> the coordinator checks time between provider items. An adapter blocked inside its own call can overrun until it yields or returns.</li>
+      <li><strong>Callback outbox limitation:</strong> approved data-map/RoPA callbacks are synchronous and have no durable delivery outbox or automatic retry. The review remains durably approved after a callback failure; an operator must reconcile delivery.</li>
+    </ul>
+  </div>
+
+  <div id="pdd-status" class="pdd-status muted" role="status" aria-live="polite"></div>
+  <div class="pdd-grid">
+    <div>
+      <section class="pdd-card">
+        <h2>1. Enroll exact source</h2>
+        <form id="pdd-source" class="pdd-form">
+          <label>Source ID<input class="input" name="source_id" required maxlength="128" value="customers"></label>
+          <label>Kind<select class="input" name="kind"><option value="structured">Structured rows</option><option value="unstructured">Unstructured documents</option></select></label>
+          <label>Provider adapter ID<input class="input" name="provider" required maxlength="64" value="fixture"></label>
+          <label>Exact public HTTPS origin<input class="input" name="origin" required maxlength="2048" placeholder="https://data.example.com"></label>
+          <label>Opaque resource reference<input class="input" name="resource_ref" required maxlength="128"></label>
+          <label>Credential environment reference<input class="input" name="credential_env" required maxlength="128" value="PRIVACY_SOURCE_TOKEN"></label>
+          <label>Evidence-key environment reference<input class="input" name="evidence_key_env" required maxlength="128" value="PRIVACY_EVIDENCE_HMAC_KEY"></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit">Enroll or rotate metadata</button><button class="btn" id="pdd-list-sources" type="button">List sources</button><span class="pdd-note">Enter environment-variable names only. Credential and evidence-key values never enter this API.</span></div>
+        </form>
+      </section>
+
+      <section class="pdd-card pdd-danger">
+        <h2>2. Suspend, reactivate, or revoke source</h2>
+        <form id="pdd-source-state" class="pdd-form">
+          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
+          <label>State<select class="input" name="state"><option value="suspended">suspended</option><option value="active">active</option><option value="revoked">revoked</option></select></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" required></label>
+          <label>Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn" type="submit">Apply source state</button></div>
+        </form>
+      </section>
+
+      <section class="pdd-card">
+        <h2>3. Schedule</h2>
+        <form id="pdd-schedule" class="pdd-form">
+          <label>Schedule ID<input class="input" name="schedule_id" required maxlength="128"></label>
+          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
+          <label>Interval seconds<input class="input" name="interval_seconds" type="number" min="1" max="31536000" value="86400" required></label>
+          <label>Next run timestamp (optional)<input class="input" name="next_run_at" type="number" step="0.001" min="1"></label>
+          <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="3" required></label>
+          <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="1" max="315360000" value="7776000" required></label>
+          <label>Active<select class="input" name="active"><option value="true">true</option><option value="false">false</option></select></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label class="wide">Scan limits JSON<textarea class="input" name="limits" rows="5" required>{"max_records":10000,"max_files":1000,"max_bytes":67108864,"max_seconds":300.0,"max_findings":10000,"max_fields_per_record":256,"max_record_bytes":262144,"max_document_bytes":4194304}</textarea></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit">Create or update schedule</button><button class="btn" id="pdd-list-schedules" type="button">List schedules</button><button class="btn" id="pdd-enqueue-due" type="button">Enqueue due schedules</button></div>
+        </form>
+      </section>
+
+      <section class="pdd-card">
+        <h2>4. Manual job and lease</h2>
+        <form id="pdd-manual" class="pdd-form">
+          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
+          <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="3" required></label>
+          <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="1" max="315360000" value="7776000" required></label>
+          <label>Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide">Scan limits JSON<textarea class="input" name="limits" rows="5" required>{"max_records":10000,"max_files":1000,"max_bytes":67108864,"max_seconds":300.0,"max_findings":10000,"max_fields_per_record":256,"max_record_bytes":262144,"max_document_bytes":4194304}</textarea></label>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit">Enqueue manual scan</button><button class="btn" id="pdd-claim" type="button">Claim up to 10 jobs</button><button class="btn" id="pdd-list-jobs" type="button">List jobs</button></div>
+        </form>
+      </section>
+
+      <section class="pdd-card pdd-danger">
+        <h2>5. Execute, fail, or replay</h2>
+        <form id="pdd-job" class="pdd-form">
+          <label>Job ID<input class="input" name="job_id" required maxlength="128"></label>
+          <label>Failure code<select class="input" name="error_code"><option value="adapter_error">adapter_error</option><option value="credential_unavailable">credential_unavailable</option><option value="provider_contract_invalid">provider_contract_invalid</option><option value="operator_cancelled">operator_cancelled</option></select></label>
+          <label>Backoff seconds<input class="input" name="base_backoff_seconds" type="number" min="0.1" max="3600" step="0.1" value="5.0"></label>
+          <label>Replay expected revision<input class="input" name="expected_revision" type="number" min="1"></label>
+          <label class="wide">Replay idempotency key<input class="input" name="idempotency_key" maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit" value="execute">Run leased scan — external side effect</button><button class="btn" type="submit" value="fail">Record sanitized failure</button><button class="btn" type="submit" value="replay">Replay dead letter</button></div>
+        </form>
+      </section>
+    </div>
+
+    <div>
+      <section class="pdd-card">
+        <h2>6. Inventory, reports, findings, and diff</h2>
+        <form id="pdd-read" class="pdd-form">
+          <label>Source ID (optional)<input class="input" name="source_id" maxlength="128"></label>
+          <label>Report ID<input class="input" name="report_id" maxlength="128"></label>
+          <label>Base report ID<input class="input" name="base_report_id" maxlength="128"></label>
+          <label>Target report ID<input class="input" name="target_report_id" maxlength="128"></label>
+          <div class="pdd-actions"><button class="btn" type="submit" value="inventory">Load inventory</button><button class="btn" type="submit" value="reports">List reports</button><button class="btn" type="submit" value="report">Get report</button><button class="btn" type="submit" value="findings">List findings</button><button class="btn" type="submit" value="diff">Compare reports</button></div>
+        </form>
+        <p class="pdd-note">Inventory and diffs contain only classifications, counts, and keyed digests. “No findings” is never represented as proof of absence.</p>
+      </section>
+
+      <section class="pdd-card">
+        <h2>7. Propose review</h2>
+        <form id="pdd-propose" class="pdd-form">
+          <label>Finding ID<input class="input" name="finding_id" required maxlength="128"></label>
+          <label>Decision<select class="input" name="decision"><option value="confirmed">confirmed</option><option value="reclassified">reclassified</option><option value="false_positive">false_positive</option></select></label>
+          <label>Effective category<select class="input" name="effective_category"><option value="">None (false positive only)</option><option>authentication_secret</option><option>biometric_identifier</option><option>date_of_birth</option><option>email_address</option><option>financial_account</option><option>government_identifier</option><option>health_information</option><option>ip_address</option><option>payment_card</option><option>person_name</option><option>phone_number</option><option>physical_address</option><option>precise_location</option><option>unknown_personal_data</option></select></label>
+          <label>Freshness seconds<input class="input" name="freshness_seconds" type="number" min="1" max="31536000" value="3600" required></label>
+          <label>Finding revision<input class="input" name="expected_finding_revision" type="number" min="1" required></label>
+          <label>Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit">Propose digest-bound review</button></div>
+        </form>
+        <p class="pdd-note">The API derives the preparer and evidence digest from the authenticated request and authoritative finding. Proposals never invoke the external callback.</p>
+      </section>
+
+      <section class="pdd-card pdd-danger">
+        <h2>8. Four-eyes approval</h2>
+        <form id="pdd-approve" class="pdd-form">
+          <label>Review ID<input class="input" name="review_id" required maxlength="128"></label>
+          <label>Expected version<input class="input" name="expected_version" type="number" min="1" required></label>
+          <label class="wide">Exact review integrity SHA-256<input class="input" name="expected_integrity_sha256" pattern="[0-9a-f]{64}" required></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit">Approve as second authenticated reviewer</button></div>
+        </form>
+        <p class="pdd-note">The approver must be a different authenticated principal. Only successful fresh approval can invoke the injected data-map/RoPA callback.</p>
+      </section>
+
+      <section class="pdd-card">
+        <h2>9. Audit, posture, and retention</h2>
+        <form id="pdd-retention" class="pdd-form">
+          <label class="wide">Retention idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pdd-actions"><button class="btn" type="submit">Purge expired reports</button><button class="btn" id="pdd-audit" type="button">Load audit</button><button class="btn" id="pdd-verify" type="button">Verify audit chain</button><button class="btn" id="pdd-posture" type="button">Privacy posture</button><button class="btn" id="pdd-runtime" type="button">Runtime status</button></div>
+        </form>
+      </section>
+
+      <section class="pdd-card">
+        <h2>Operator result</h2>
+        <pre id="pdd-result" class="pdd-result">No operation run.</pre>
+      </section>
+    </div>
+  </div>
+</div>
+<script>
+(function(){"use strict";var API="/api/v1/privacy/data-discovery",status=document.getElementById("pdd-status"),result=document.getElementById("pdd-result");function value(form,name){return form.elements[name].value.trim();}function number(form,name){return Number(value(form,name));}function optionalNumber(form,name){var raw=value(form,name);return raw?Number(raw):null;}function json(form,name){return JSON.parse(value(form,name));}async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body={};try{body=await response.json();}catch(_error){}if(!response.ok)throw new Error(body.detail||("HTTP "+response.status));return body;}function show(body,message){result.textContent=JSON.stringify(body,null,2);status.textContent=message;}function fail(error){status.textContent=error.message;}
+document.getElementById("pdd-source").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={kind:value(form,"kind"),provider:value(form,"provider"),origin:value(form,"origin"),resource_ref:value(form,"resource_ref"),credential_env:value(form,"credential_env"),evidence_key_env:value(form,"evidence_key_env"),expected_revision:number(form,"expected_revision"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/sources/"+encodeURIComponent(value(form,"source_id")),{method:"PUT",body:JSON.stringify(payload)}),"Source metadata enrolled. No provider connection was attempted.");}catch(error){fail(error);}});
+document.getElementById("pdd-list-sources").addEventListener("click",async function(){try{show(await call("/sources"),"Bounded tenant sources loaded.");}catch(error){fail(error);}});
+document.getElementById("pdd-source-state").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={state:value(form,"state"),expected_revision:number(form,"expected_revision"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/sources/"+encodeURIComponent(value(form,"source_id"))+"/state",{method:"POST",body:JSON.stringify(payload)}),"Source state changed using revision control.");}catch(error){fail(error);}});
+document.getElementById("pdd-schedule").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={source_id:value(form,"source_id"),interval_seconds:number(form,"interval_seconds"),limits:json(form,"limits"),max_attempts:number(form,"max_attempts"),retention_seconds:number(form,"retention_seconds"),active:value(form,"active")==="true",expected_revision:number(form,"expected_revision"),idempotency_key:value(form,"idempotency_key"),next_run_at:optionalNumber(form,"next_run_at")};try{show(await call("/schedules/"+encodeURIComponent(value(form,"schedule_id")),{method:"PUT",body:JSON.stringify(payload)}),"Bounded schedule stored. No provider connection was attempted.");}catch(error){fail(error);}});
+document.getElementById("pdd-list-schedules").addEventListener("click",async function(){try{show(await call("/schedules"),"Schedules loaded.");}catch(error){fail(error);}});
+document.getElementById("pdd-enqueue-due").addEventListener("click",async function(){try{show(await call("/schedules/enqueue-due",{method:"POST",body:JSON.stringify({limit:100})}),"Due schedule jobs enqueued without running provider adapters.");}catch(error){fail(error);}});
+document.getElementById("pdd-manual").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={limits:json(form,"limits"),max_attempts:number(form,"max_attempts"),retention_seconds:number(form,"retention_seconds"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/sources/"+encodeURIComponent(value(form,"source_id"))+"/jobs",{method:"POST",body:JSON.stringify(payload)}),"Manual scan queued; provider I/O has not started.");}catch(error){fail(error);}});
+document.getElementById("pdd-claim").addEventListener("click",async function(){try{show(await call("/jobs/claim",{method:"POST",body:JSON.stringify({limit:10,lease_seconds:600.0})}),"Due jobs leased to the authenticated request principal.");}catch(error){fail(error);}});
+document.getElementById("pdd-list-jobs").addEventListener("click",async function(){try{show(await call("/jobs"),"Jobs loaded.");}catch(error){fail(error);}});
+document.getElementById("pdd-job").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,action=event.submitter&&event.submitter.value||"execute",job=encodeURIComponent(value(form,"job_id")),path="/jobs/"+job+"/"+action,payload=null;if(action==="fail")payload={error_code:value(form,"error_code"),base_backoff_seconds:number(form,"base_backoff_seconds")};if(action==="replay")payload={expected_revision:number(form,"expected_revision"),idempotency_key:value(form,"idempotency_key")};if(action==="execute"&&!window.confirm("Run the injected provider adapter now? This may perform external network reads against the exact enrolled source."))return;try{show(await call(path,{method:"POST",body:payload===null?undefined:JSON.stringify(payload)}),action==="execute"?"Provider scan returned. Inspect completeness, truncation reasons, and errors before review.":"Job lifecycle updated.");}catch(error){fail(error);}});
+document.getElementById("pdd-read").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,action=event.submitter&&event.submitter.value||"inventory",source=value(form,"source_id"),report=value(form,"report_id"),base=value(form,"base_report_id"),target=value(form,"target_report_id"),path="/inventory";if(action==="inventory"&&source)path+="?source_id="+encodeURIComponent(source);if(action==="reports")path="/reports"+(source?"?source_id="+encodeURIComponent(source):"");if(action==="report")path="/reports/"+encodeURIComponent(report);if(action==="findings")path="/reports/"+encodeURIComponent(report)+"/findings";if(action==="diff")path="/reports/diff?base_report_id="+encodeURIComponent(base)+"&target_report_id="+encodeURIComponent(target);try{show(await call(path),"Digest-only discovery evidence loaded. Absence is not proven.");}catch(error){fail(error);}});
+document.getElementById("pdd-propose").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={decision:value(form,"decision"),effective_category:value(form,"effective_category")||null,freshness_seconds:number(form,"freshness_seconds"),expected_finding_revision:number(form,"expected_finding_revision"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/findings/"+encodeURIComponent(value(form,"finding_id"))+"/reviews",{method:"POST",body:JSON.stringify(payload)}),"Review proposed. No data-map/RoPA callback was invoked.");}catch(error){fail(error);}});
+document.getElementById("pdd-approve").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={expected_version:number(form,"expected_version"),expected_integrity_sha256:value(form,"expected_integrity_sha256"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/reviews/"+encodeURIComponent(value(form,"review_id"))+"/approve",{method:"POST",body:JSON.stringify(payload)}),"Four-eyes review approved. Check callback acknowledgement; there is no durable callback outbox.");}catch(error){fail(error);}});
+document.getElementById("pdd-retention").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget;if(!window.confirm("Purge reports whose persisted retention deadline has elapsed? Digest-only audit tombstones remain."))return;try{show(await call("/retention/purge",{method:"POST",body:JSON.stringify({idempotency_key:value(form,"idempotency_key")})}),"Retention purge completed.");}catch(error){fail(error);}});
+document.getElementById("pdd-audit").addEventListener("click",async function(){try{show(await call("/audit"),"Bounded audit events loaded.");}catch(error){fail(error);}});document.getElementById("pdd-verify").addEventListener("click",async function(){try{show(await call("/audit/verify"),"Tenant audit chain verified.");}catch(error){fail(error);}});document.getElementById("pdd-posture").addEventListener("click",async function(){try{show(await call("/posture"),"Privacy posture and limits loaded.");}catch(error){fail(error);}});document.getElementById("pdd-runtime").addEventListener("click",async function(){try{show(await call("/status"),"Runtime seams loaded. Live-provider acceptance remains false.");}catch(error){fail(error);}});
+})();
+</script>
+{% endblock %}

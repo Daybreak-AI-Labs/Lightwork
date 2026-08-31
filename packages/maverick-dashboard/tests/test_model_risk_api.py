@@ -3284,3 +3284,486 @@ def test_identity_governance_http_exposes_read_only_bounded_snapshots(monkeypatc
         "scheduled",
         "user:identity-governance-operator",
     )
+
+
+def test_identity_control_http_is_authenticated_default_off_and_unavailable(monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import model_risk_api
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    section = {
+        "enable": True,
+        "entra": {"enable": True},
+        "controls": {
+            "enable": True,
+            "federation": {"enable": True},
+        },
+    }
+    monkeypatch.setattr(model_risk_api, "_identity_governance_section", lambda: section)
+    monkeypatch.setattr(
+        model_risk_api,
+        "_identity_governance_control_status_section",
+        lambda: section,
+    )
+    monkeypatch.delattr(
+        app.state,
+        "identity_governance_control_runtime",
+        raising=False,
+    )
+    base = "/api/v1/security/assurance/identity-governance/controls"
+
+    assert client.get(f"{base}/status").status_code == 403
+    monkeypatch.setattr(
+        model_risk_api,
+        "_human_principal",
+        lambda _request: "user:identity-control-admin",
+    )
+    original_global_gate = model_risk_api.require_global_permission
+
+    def deny_global_admin(_request, permission):
+        assert permission == "admin"
+        raise HTTPException(status_code=403, detail="global admin required")
+
+    monkeypatch.setattr(model_risk_api, "require_global_permission", deny_global_admin)
+    assert client.get(f"{base}/status").status_code == 403
+    monkeypatch.setattr(
+        model_risk_api,
+        "require_global_permission",
+        original_global_gate,
+    )
+    status = _ok(client.get(f"{base}/status"))
+    assert status["enabled"] is True
+    assert status["runtime_attached"] is False
+    assert status["runtime_attachment_state"] == "unavailable"
+    assert status["activation"] == "explicit_startup_injection_required"
+    assert status["provider_writes"] is False
+    assert status["live_acceptance_verified"] is False
+
+    body = {
+        "principal_ref": "prn_" + ("a" * 32),
+        "provider_subject_id": "sub_" + ("b" * 32),
+        "expected_binding_sha256": "c" * 64,
+        "expected_revision": 1,
+    }
+    assert client.post(f"{base}/federation/entra/observe", json=body).status_code == 503
+    assert client.post(
+        f"{base}/federation/entra/observe",
+        json={**body, "raw_principal": "agent:must-not-be-admitted"},
+    ).status_code == 422
+
+
+def test_identity_control_status_reports_absent_configuration_as_off(monkeypatch):
+    from maverick_dashboard import model_risk_api
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(
+        model_risk_api,
+        "_human_principal",
+        lambda _request: "user:identity-control-admin",
+    )
+    monkeypatch.delattr(
+        app.state,
+        "identity_governance_control_runtime",
+        raising=False,
+    )
+
+    status = _ok(
+        client.get(
+            "/api/v1/security/assurance/identity-governance/controls/status"
+        )
+    )
+    assert status["enabled"] is False
+    assert status["configured"] == {
+        "change_coupling": False,
+        "federation": False,
+        "conditional_access": False,
+        "purview_writeback": False,
+    }
+    assert status["runtime_attached"] is False
+    assert status["provider_writes"] is False
+    assert status["default_mode"] == "read_only_off"
+
+
+def test_identity_control_http_composes_exact_runtime_and_separate_purview_actions(
+    monkeypatch,
+):
+    from maverick.ai_identity_governance_controls import (
+        CONDITIONAL_ACCESS_SCHEMA,
+        FEDERATION_OBSERVATION_SCHEMA,
+        AgentPrincipalAuthority,
+        AgentPrincipalFederationBinding,
+        AgentPrincipalFederationObservation,
+        CapabilityRule,
+        ConditionalAccessDecisionEngine,
+        ConditionalAccessObservation,
+        ConditionalAccessObserver,
+        EntraAgentPrincipalFederationAdapter,
+        IdentityCapabilityMapper,
+    )
+    from maverick_dashboard import (
+        identity_governance_runtime,
+        identity_governance_scheduler,
+        model_risk_api,
+    )
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    tenant_sha256 = identity_governance_scheduler.tenant_binding_sha256(
+        require_explicit=True
+    )
+
+    def sha(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    principal_ref = "prn_" + sha("agent-principal")[:32]
+    provider_subject_id = "sub_" + sha("provider-subject")[:32]
+    permission_id = "prm_" + sha("provider-permission")[:32]
+    authority = AgentPrincipalAuthority(
+        tenant_sha256=tenant_sha256,
+        principal_ref=principal_ref,
+        authority_binding_sha256=sha("authority-binding"),
+        revision=3,
+    )
+    binding = AgentPrincipalFederationBinding.bind(
+        authority,
+        provider="entra",
+        provider_subject_id=provider_subject_id,
+    )
+
+    class FederationTransport:
+        def observe(self, request):
+            return AgentPrincipalFederationObservation(
+                schema=FEDERATION_OBSERVATION_SCHEMA,
+                tenant_sha256=request.tenant_sha256,
+                provider=request.provider,
+                principal_ref=request.principal_ref,
+                provider_subject_id=request.provider_subject_id,
+                binding_sha256=request.binding_sha256,
+                binding_revision=request.binding_revision,
+                active=True,
+                permission_ids=(permission_id,),
+                source_sha256=sha("federation-source"),
+                observed_at=1_000.0,
+            )
+
+    class ConditionalTransport:
+        def observe(self, request):
+            return ConditionalAccessObservation(
+                schema=CONDITIONAL_ACCESS_SCHEMA,
+                tenant_sha256=request.tenant_sha256,
+                provider=request.provider,
+                principal_ref=request.principal_ref,
+                provider_subject_id=request.provider_subject_id,
+                binding_sha256=request.binding_sha256,
+                binding_revision=request.binding_revision,
+                outcome="allow",
+                policy_sha256=sha("conditional-policy"),
+                reason_codes=("policy_allow",),
+                source_sha256=sha("conditional-source"),
+                observed_at=1_000.0,
+            )
+
+    class MappingRegistry:
+        def __init__(self):
+            self.values = {}
+
+        def store(self, mapping):
+            self.values[
+                (
+                    mapping.tenant_sha256,
+                    mapping.principal_ref,
+                    mapping.mapping_sha256,
+                )
+            ] = mapping
+            return True
+
+        def get(self, tenant, principal, mapping_sha256):
+            return self.values.get((tenant, principal, mapping_sha256))
+
+    class PurviewService:
+        def __init__(self):
+            self.calls = []
+            self.record = None
+
+        def status(self):
+            return {
+                "runtime_available": True,
+                "provider_writes_possible": True,
+                "raw_identity_retained": False,
+                "secrets_retained": False,
+                "live_acceptance_verified": False,
+            }
+
+        def prepare(self, authority_value, mapping, **kwargs):
+            self.calls.append(("prepare", kwargs))
+            self.record = {
+                "id": "IGPW-" + sha("intent")[:32],
+                "principal_ref": authority_value.principal_ref,
+                "capability_mapping_sha256": mapping.mapping_sha256,
+                "asset_id": kwargs["asset_id"],
+                "status": "prepared",
+                "provider_write_state": "not_attempted",
+                "revision": 1,
+                "live_acceptance_verified": False,
+            }
+            return dict(self.record)
+
+        def get_intent(self, intent_id, authority_value, mapping):
+            self.calls.append(("get", intent_id))
+            assert authority_value.principal_ref == mapping.principal_ref
+            return dict(self.record) if self.record and self.record["id"] == intent_id else None
+
+        def execute(self, intent_id, authority_value, mapping, *, expected_revision):
+            self.calls.append(("execute", expected_revision))
+            assert authority_value.principal_ref == mapping.principal_ref
+            assert self.record and self.record["id"] == intent_id
+            self.record.update(status="applied", provider_write_state="applied", revision=2)
+            return dict(self.record)
+
+        def compensate(self, intent_id, authority_value, mapping, *, expected_revision):
+            self.calls.append(("compensate", expected_revision))
+            assert authority_value.principal_ref == mapping.principal_ref
+            assert self.record and self.record["id"] == intent_id
+            self.record.update(
+                status="compensated",
+                provider_write_state="compensated",
+                revision=3,
+            )
+            return dict(self.record)
+
+    mapper = IdentityCapabilityMapper(
+        [
+            CapabilityRule(
+                tenant_sha256=tenant_sha256,
+                provider="entra",
+                permission_id=permission_id,
+                capabilities=(
+                    "agent.execute",
+                    "purview.classification.rollback",
+                    "purview.classification.write",
+                ),
+                revision=1,
+            )
+        ],
+        revision=7,
+        clock=lambda: 1_000.0,
+    )
+    purview = PurviewService()
+    runtime = identity_governance_runtime.IdentityGovernanceControlRuntime(
+        tenant_sha256=tenant_sha256,
+        authority_resolver=lambda tenant, principal: (
+            authority
+            if tenant == tenant_sha256 and principal == authority.principal_ref
+            else None
+        ),
+        federation_binding_resolver=lambda tenant, principal, provider: (
+            binding
+            if (
+                tenant == tenant_sha256
+                and principal == authority.principal_ref
+                and provider == "entra"
+            )
+            else None
+        ),
+        federation_adapters={
+            "entra": EntraAgentPrincipalFederationAdapter(FederationTransport()),
+        },
+        capability_mapper=mapper,
+        capability_mapping_registry=MappingRegistry(),
+        conditional_access_observers={
+            "entra": ConditionalAccessObserver("entra", ConditionalTransport()),
+        },
+        conditional_access_decision_engine=ConditionalAccessDecisionEngine(
+            clock=lambda: 1_000.0
+        ),
+        purview_writeback=purview,
+    )
+    section = {
+        "enable": True,
+        "entra": {"enable": True},
+        "purview": {"enable": True},
+        "controls": {
+            "enable": True,
+            "federation": {"enable": True},
+            "conditional_access": {"enable": True},
+            "purview_writeback": {"enable": True},
+        },
+    }
+    monkeypatch.setattr(model_risk_api, "_identity_governance_section", lambda: section)
+    monkeypatch.setattr(
+        model_risk_api,
+        "_identity_governance_control_status_section",
+        lambda: section,
+    )
+    monkeypatch.setattr(
+        model_risk_api,
+        "_human_principal",
+        lambda _request: "user:identity-control-admin",
+    )
+    monkeypatch.setattr(
+        app.state,
+        "identity_governance_control_runtime",
+        runtime,
+        raising=False,
+    )
+    base = "/api/v1/security/assurance/identity-governance/controls"
+    binding_body = {
+        "principal_ref": principal_ref,
+        "provider_subject_id": provider_subject_id,
+        "expected_binding_sha256": binding.binding_sha256,
+        "expected_revision": authority.revision,
+    }
+
+    status = _ok(client.get(f"{base}/status"))
+    assert status["runtime_attachment_state"] == "attached"
+    assert status["runtime"]["federation_binding_resolver_attached"] is True
+    assert status["runtime"]["capability_mapping_registry_attached"] is True
+    assert status["provider_writes"] is True
+    observed = _ok(client.post(f"{base}/federation/entra/observe", json=binding_body))
+    assert observed["principal_ref"] == principal_ref
+    mapped = _ok(client.post(f"{base}/capabilities/entra/map", json=binding_body))
+    assert mapped["capability_mapping"]["capabilities"] == [
+        "agent.execute",
+        "purview.classification.rollback",
+        "purview.classification.write",
+    ]
+    decision_body = {
+        **binding_body,
+        "required_capability": "agent.execute",
+        "idempotency_key": "capability-decision-0001",
+    }
+    capability = _ok(
+        client.post(f"{base}/capabilities/entra/decision", json=decision_body)
+    )
+    assert capability["decision"]["action"] == "permit"
+    assert "capability-decision-0001" not in str(capability)
+    conditional = _ok(
+        client.post(
+            f"{base}/conditional-access/entra/decision",
+            json=decision_body,
+        )
+    )
+    assert conditional["decision"]["action"] == "permit"
+    assert conditional["decision"]["provider_policy_mutated"] is False
+
+    prepare_body = {
+        **binding_body,
+        "provider": "entra",
+        "asset_id": "ast_" + sha("asset")[:32],
+        "classification_codes": ["regulated"],
+        "expected_asset_binding_sha256": sha("asset-binding"),
+        "expected_source_revision": 4,
+        "idempotency_key": "purview-prepare-0001",
+    }
+    prepared = _ok(
+        client.post(f"{base}/purview/writebacks/prepare", json=prepare_body),
+        201,
+    )
+    assert prepared["status"] == "prepared"
+    assert purview.calls == [
+        (
+            "prepare",
+            {
+                "asset_id": prepare_body["asset_id"],
+                "classification_codes": ["regulated"],
+                "expected_binding_sha256": sha("asset-binding"),
+                "expected_source_revision": 4,
+                "idempotency_key": "purview-prepare-0001",
+            },
+        )
+    ]
+    record_body = {
+        "principal_ref": principal_ref,
+        "mapping_sha256": prepared["capability_mapping_sha256"],
+    }
+    loaded = _ok(
+        client.post(
+            f"{base}/purview/writebacks/{prepared['id']}/get",
+            json=record_body,
+        )
+    )
+    assert loaded["status"] == "prepared"
+    applied = _ok(
+        client.post(
+            f"{base}/purview/writebacks/{prepared['id']}/execute",
+            json={**record_body, "expected_record_revision": 1},
+        )
+    )
+    assert applied["status"] == "applied"
+    compensated = _ok(
+        client.post(
+            f"{base}/purview/writebacks/{prepared['id']}/compensate",
+            json={**record_body, "expected_record_revision": 2},
+        )
+    )
+    assert compensated["status"] == "compensated"
+    assert [call[0] for call in purview.calls] == [
+        "prepare",
+        "get",
+        "execute",
+        "compensate",
+    ]
+
+    stale = client.post(
+        f"{base}/federation/entra/observe",
+        json={**binding_body, "expected_binding_sha256": "0" * 64},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "federation_binding_stale"
+
+    unregistered_subject = client.post(
+        f"{base}/federation/entra/observe",
+        json={
+            **binding_body,
+            "provider_subject_id": "sub_" + sha("unregistered-subject")[:32],
+        },
+    )
+    assert unregistered_subject.status_code == 409
+    assert unregistered_subject.json()["detail"] == "provider_subject_not_enrolled"
+
+
+def test_identity_control_http_rejects_cross_tenant_runtime(monkeypatch):
+    from maverick_dashboard import identity_governance_runtime, model_risk_api
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    section = {
+        "enable": True,
+        "entra": {"enable": True},
+        "controls": {"enable": True, "federation": {"enable": True}},
+    }
+    runtime = identity_governance_runtime.IdentityGovernanceControlRuntime(
+        tenant_sha256="f" * 64,
+        authority_resolver=lambda _tenant, _principal: None,
+        federation_adapters={},
+    )
+    monkeypatch.setattr(model_risk_api, "_identity_governance_section", lambda: section)
+    monkeypatch.setattr(
+        model_risk_api,
+        "_identity_governance_control_status_section",
+        lambda: section,
+    )
+    monkeypatch.setattr(
+        model_risk_api,
+        "_human_principal",
+        lambda _request: "user:identity-control-admin",
+    )
+    monkeypatch.setattr(
+        app.state,
+        "identity_governance_control_runtime",
+        runtime,
+        raising=False,
+    )
+    base = "/api/v1/security/assurance/identity-governance/controls"
+    status = _ok(client.get(f"{base}/status"))
+    assert status["runtime_attached"] is False
+    assert status["runtime_attachment_state"] == "tenant_mismatch"
+    response = client.post(
+        f"{base}/federation/entra/observe",
+        json={
+            "principal_ref": "prn_" + ("a" * 32),
+            "provider_subject_id": "sub_" + ("b" * 32),
+            "expected_binding_sha256": "c" * 64,
+            "expected_revision": 1,
+        },
+    )
+    assert response.status_code == 409
+    assert "tenant binding" in response.json()["detail"]

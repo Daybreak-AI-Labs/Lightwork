@@ -236,11 +236,28 @@ def _sha256(value: object) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _tenant_sha256() -> str:
+def tenant_binding_sha256(*, require_explicit: bool = False) -> str:
+    """Return the scheduler's tenant binding without retaining the raw tenant.
+
+    Existing read-only scheduling retains its historical shared fallback.
+    Control-plane callbacks can set ``require_explicit`` to fail closed instead
+    of admitting mutation or alert state into a shared tenant namespace.
+    """
+
     from maverick.paths import current_tenant_id_strict
 
-    tenant = current_tenant_id_strict() or "<shared>"
+    tenant = current_tenant_id_strict()
+    if tenant is None:
+        if require_explicit:
+            raise IdentityGovernanceScheduleError(
+                "identity-governance controls require an explicit tenant"
+            )
+        tenant = "<shared>"
     return _sha256(b"lightwork-identity-governance-scheduler-tenant-v1\0" + tenant.encode())
+
+
+def _tenant_sha256() -> str:
+    return tenant_binding_sha256()
 
 
 def _record_id(tenant_sha256: str, provider: str) -> str:
@@ -607,7 +624,7 @@ def configured_schedules(section: object) -> tuple[ProviderSchedule, ...]:
     if table is None or table.get("enable") is not True:
         return ()
     assert isinstance(section, Mapping)
-    if set(section) - {"enable", "scheduler", *_PROVIDERS}:
+    if set(section) - {"enable", "scheduler", "controls", *_PROVIDERS}:
         raise IdentityGovernanceScheduleError(
             "identity-governance connector section key is unsupported"
         )
@@ -1656,4 +1673,5 @@ __all__ = [
     "snapshot_delta",
     "start_identity_governance_scheduler",
     "stop_identity_governance_scheduler",
+    "tenant_binding_sha256",
 ]

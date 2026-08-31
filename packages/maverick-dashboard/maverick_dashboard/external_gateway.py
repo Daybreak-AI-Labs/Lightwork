@@ -158,6 +158,14 @@ class ExternalExecuteIn(BaseModel):
     preview: bool = False
     detail: str = ""
     goal_id: int | None = None
+    # A write park is itself durable state (an approval plus execution slot).
+    # Supplying a stable key lets a caller recover an ambiguous HTTP response
+    # without creating a second approval for the same logical request.
+    idempotency_key: str = Field(
+        default="",
+        max_length=128,
+        pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127})?$",
+    )
     # When the runtime plane is on, the enforced connector path requires this
     # exact current Model Risk binding. Legacy deployments (plane off) remain
     # byte-for-byte compatible.
@@ -177,6 +185,17 @@ class ExternalExecuteCommitIn(BaseModel):
     op: str
     path: str
     body: dict | None = None
+    detail: str = ""
+    goal_id: int | None = None
+    runtime_asset_id: str | None = Field(
+        None,
+        pattern=r"^MAA-[0-9a-f]{32}$",
+    )
+    runtime_asset_revision: int | None = Field(None, ge=1)
+    runtime_asset_version_digest: str | None = Field(
+        None,
+        pattern=r"^(?:sha256:)?[0-9a-f]{64}$",
+    )
 
 
 class ExternalRedTeamResultIn(BaseModel):
@@ -935,6 +954,27 @@ async def _external_execute_runtime_gate(payload: ExternalExecuteIn):
         ) from exc
 
 
+def _runtime_execution_context_sha256(payload: ExternalExecuteIn) -> str:
+    """Bind a parked approval to its gateway-verified runtime authority."""
+
+    material = {
+        "asset_id": payload.runtime_asset_id,
+        "asset_revision": payload.runtime_asset_revision,
+        "asset_version_digest": (
+            payload.runtime_asset_version_digest or ""
+        ).lower().removeprefix("sha256:"),
+        "detail": payload.detail,
+        "goal_id": payload.goal_id,
+    }
+    return hashlib.sha256(json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+
+
 @router.post("/execute")
 async def external_execute(
     payload: ExternalExecuteIn, agent_id: str = Depends(_require_agent),
@@ -966,6 +1006,10 @@ async def external_execute(
                 "receipt": runtime_result.receipt,
             },
         }
+    if runtime_result is not None:
+        request_body["_runtime_context_sha256"] = (
+            _runtime_execution_context_sha256(payload)
+        )
     outcome = xa.execute(agent_id, request_body, shield=_shield())
     if runtime_result is not None:
         outcome = {
@@ -1001,8 +1045,47 @@ async def external_execution_commit(
     request. Shares the execute rate bucket — a commit can fire a write."""
     _rate_limit(agent_id, "execute")
     from maverick import external_agents as xa
-    return xa.execute_commit(agent_id, execution_id, payload.model_dump(),
-                             shield=_shield())
+    runtime_payload = ExternalExecuteIn(**payload.model_dump())
+    runtime_result = await _external_execute_runtime_gate(runtime_payload)
+    if runtime_result is not None and runtime_result.decision != "allow":
+        return {
+            "allowed": False,
+            "rule": "runtime_guardrail",
+            "reason": (
+                "current runtime policy or content controls did not authorize "
+                "this approved connector action; no external effect occurred"
+            ),
+            "status": runtime_result.decision,
+            "requires_approval": runtime_result.decision in {"review", "restrict"},
+            "runtime_guardrail": {
+                "decision": runtime_result.decision,
+                "receipt": runtime_result.receipt,
+            },
+        }
+    request_body = payload.model_dump(exclude={
+        "runtime_asset_id",
+        "runtime_asset_revision",
+        "runtime_asset_version_digest",
+    })
+    if runtime_result is not None:
+        request_body["_runtime_context_sha256"] = (
+            _runtime_execution_context_sha256(runtime_payload)
+        )
+    outcome = xa.execute_commit(
+        agent_id,
+        execution_id,
+        request_body,
+        shield=_shield(),
+    )
+    if runtime_result is not None:
+        outcome = {
+            **outcome,
+            "runtime_guardrail": {
+                "decision": runtime_result.decision,
+                "receipt": runtime_result.receipt,
+            },
+        }
+    return outcome
 
 
 @router.get("/red-team/{campaign_id}/cases")
@@ -1324,6 +1407,13 @@ _OPENAPI: dict = {
                                 "type": "integer",
                                 "description": "Bind the effect to one of "
                                                "this agent's live runs."},
+                            "idempotency_key": {
+                                "type": "string",
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
+                                "description": "Stable logical-operation key; "
+                                               "an exact write-park replay "
+                                               "returns the original execution."},
                             "runtime_asset_id": {
                                 "type": "string",
                                 "pattern": "^MAA-[0-9a-f]{32}$",
@@ -1347,6 +1437,7 @@ _OPENAPI: dict = {
                             "requires_approval": {"type": "boolean"},
                             "approval_id": {"type": "integer"},
                             "execution_id": {"type": "string"},
+                            "duplicate": {"type": "boolean"},
                             "expires_at": {"type": "number"},
                             "preview": {"type": "string"},
                             "request_sha256": {"type": "string"},
@@ -1394,6 +1485,24 @@ _OPENAPI: dict = {
                                             "delete"]},
                             "path": {"type": "string"},
                             "body": {"type": "object"},
+                            "detail": {
+                                "type": "string",
+                                "description": "Exact transient action detail "
+                                               "used when the write was parked."},
+                            "goal_id": {
+                                "type": "integer",
+                                "description": "Exact live-run binding used "
+                                               "when the write was parked."},
+                            "runtime_asset_id": {
+                                "type": "string",
+                                "pattern": "^MAA-[0-9a-f]{32}$",
+                                "description": "Required when runtime "
+                                               "guardrails are enabled."},
+                            "runtime_asset_revision": {
+                                "type": "integer", "minimum": 1},
+                            "runtime_asset_version_digest": {
+                                "type": "string",
+                                "pattern": "^(?:sha256:)?[0-9a-f]{64}$"},
                         }}}}},
                 "responses": {"200": {"description": "Verdict", "content": {
                     "application/json": {"schema": {

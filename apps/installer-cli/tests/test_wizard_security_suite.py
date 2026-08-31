@@ -1,4 +1,5 @@
 """Installer coverage for the Security/GRC and defensive-hunter controls."""
+
 from __future__ import annotations
 
 try:
@@ -10,12 +11,11 @@ except ModuleNotFoundError:  # Python 3.10
 def test_pick_security_suite_safe_defaults(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True] + [False] * 60)
-    monkeypatch.setattr(
-        wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
-    )
+    answers = iter([False, True] + [False] * 80)
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *args, **kwargs: next(answers))
 
     assert wizard.pick_security_suite() == {
+        "customer_sandbox_lifecycle": False,
         "security_ops": True,
         "evidence_graph": False,
         "model_risk_assurance": False,
@@ -28,6 +28,50 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_vendor_risk_portal": False,
         "portfolio_risk": False,
         "policy_packs": False,
+        "governance_agents": False,
+        "ai_evidence_analysis": False,
+        "tech_risk_compliance": {
+            "enable": False,
+            "policy_publication_links": {"enable": False},
+            "scoping": {"enable": False},
+            "scope_actions": {"enable": False},
+            "continuous_evidence": {
+                "enable": False,
+                "enabled_collectors": [],
+                "scheduler": {
+                    "enable": False,
+                    "poll_seconds": 60,
+                    "enqueue_limit": 50,
+                    "claim_limit": 10,
+                    "tenant_limit": 1_000,
+                    "lease_seconds": 120,
+                    "retry_backoff_seconds": 30,
+                },
+            },
+        },
+        "third_party_management": {
+            "enable": False,
+            "intelligence": {
+                "enable": False,
+                "providers": {
+                    "enable": False,
+                    "enabled_providers": [],
+                    "timeout_seconds": 20,
+                    "scheduler": {"enable": False, "poll_seconds": 900},
+                },
+            },
+            "lifecycle": {
+                "enable": False,
+                "portal": {
+                    "enable": False,
+                    "invitation_ttl_seconds": 86_400,
+                    "retention_seconds": 31_536_000,
+                    "max_messages": 100,
+                    "max_artifacts": 20,
+                    "max_artifact_bytes": 10_485_760,
+                },
+            },
+        },
         "ai_regulatory_feed": False,
         "red_team_assurance": False,
         "eu_ai_incidents": False,
@@ -38,6 +82,9 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_dynamic_risk": False,
         "ai_policy_management": False,
         "ai_runtime_guardrails": False,
+        "ai_cloud_agent_governance": False,
+        "databricks_ai_security_framework": False,
+        "ai_governance_loop": False,
         "ai_explainability": False,
         "ai_conformity_workflow": False,
         "ai_insurability": False,
@@ -47,8 +94,14 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_discovery_sensors": False,
         "ai_media_provenance": False,
         "ai_media_provenance_c2patool": False,
+        "ai_media_provenance_c2patool_sha256": "",
         "ai_identity_governance_connectors": False,
         "ai_identity_governance_scheduler": False,
+        "ai_identity_governance_controls": False,
+        "ai_identity_change_coupling": False,
+        "ai_identity_federation": False,
+        "ai_identity_conditional_access": False,
+        "ai_identity_purview_writeback": False,
         "threat_hunt": False,
         "env_hunt": False,
         "response_execution": False,
@@ -58,18 +111,18 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
 def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True] * 60)
-    monkeypatch.setattr(
-        wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
+    answers = iter([True] * 80)
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *args, **kwargs: next(answers))
+    checkbox_answers = iter(
+        [
+            ["AWS Bedrock", "Google Vertex AI"],
+            ["AWS CloudTrail", "Microsoft Entra ID"],
+            ["AWS CloudTrail"],
+            ["Microsoft Entra ID"],
+        ]
     )
-    checkbox_answers = iter([
-        ["AWS Bedrock", "Google Vertex AI"],
-        ["AWS CloudTrail", "Microsoft Entra ID"],
-        ["AWS CloudTrail"],
-        ["Microsoft Entra ID"],
-    ])
     monkeypatch.setattr(wizard, "_q_checkbox", lambda *args, **kwargs: next(checkbox_answers))
-    text_answers = iter(["virustotal, abuseipdb", "120"])
+    text_answers = iter(["a" * 64, "virustotal, abuseipdb", "120"])
     monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: next(text_answers))
 
     picked = wizard.pick_security_suite()
@@ -81,6 +134,50 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_vendor_risk_portal"] is True
     assert picked["portfolio_risk"] is True
     assert picked["policy_packs"] is True
+    assert picked["governance_agents"] is True
+    assert picked["ai_evidence_analysis"] is True
+    assert picked["tech_risk_compliance"] == {
+        "enable": True,
+        "policy_publication_links": {"enable": True},
+        "scoping": {"enable": True},
+        "scope_actions": {"enable": True},
+        "continuous_evidence": {
+            "enable": True,
+            "enabled_collectors": ["local_soc2_v1"],
+            "scheduler": {
+                "enable": True,
+                "poll_seconds": 60,
+                "enqueue_limit": 50,
+                "claim_limit": 10,
+                "tenant_limit": 1_000,
+                "lease_seconds": 120,
+                "retry_backoff_seconds": 30,
+            },
+        },
+    }
+    assert picked["third_party_management"] == {
+        "enable": True,
+        "intelligence": {
+            "enable": True,
+            "providers": {
+                "enable": True,
+                "enabled_providers": ["riskrecon", "securityscorecard", "hacknotice"],
+                "timeout_seconds": 20,
+                "scheduler": {"enable": True, "poll_seconds": 900},
+            },
+        },
+        "lifecycle": {
+            "enable": True,
+            "portal": {
+                "enable": True,
+                "invitation_ttl_seconds": 86_400,
+                "retention_seconds": 31_536_000,
+                "max_messages": 100,
+                "max_artifacts": 20,
+                "max_artifact_bytes": 10_485_760,
+            },
+        },
+    }
     assert picked["ai_regulatory_feed"] is True
     assert picked["red_team_assurance"] is True
     assert picked["eu_ai_incidents"] is True
@@ -91,6 +188,9 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_dynamic_risk"] is True
     assert picked["ai_policy_management"] is True
     assert picked["ai_runtime_guardrails"] is True
+    assert picked["ai_cloud_agent_governance"] is True
+    assert picked["databricks_ai_security_framework"] is True
+    assert picked["ai_governance_loop"] is True
     assert picked["ai_explainability"] is True
     assert picked["ai_conformity_workflow"] is True
     assert picked["ai_insurability"] is True
@@ -100,21 +200,191 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_discovery_sensors"] is True
     assert picked["ai_media_provenance"] is True
     assert picked["ai_media_provenance_c2patool"] is True
+    assert picked["ai_media_provenance_c2patool_sha256"] == "a" * 64
     assert picked["ai_identity_governance_connectors"] is True
     assert picked["ai_identity_governance_scheduler"] is True
+    assert picked["ai_identity_governance_controls"] is True
+    assert picked["ai_identity_change_coupling"] is True
+    assert picked["ai_identity_federation"] is True
+    assert picked["ai_identity_conditional_access"] is True
+    assert picked["ai_identity_purview_writeback"] is True
     assert picked["env_hunt"] is True
     assert picked["response_execution"] is True
     assert picked["connectors"]["cloudtrail"] == {
-        "enable": True, "push_enable": True, "pivot_enable": False,
+        "enable": True,
+        "push_enable": True,
+        "pivot_enable": False,
     }
     assert picked["connectors"]["entra"] == {
-        "enable": True, "push_enable": False, "pivot_enable": True,
+        "enable": True,
+        "push_enable": False,
+        "pivot_enable": True,
     }
     assert picked["connectors"]["edr"] == {
-        "enable": False, "push_enable": False, "pivot_enable": False,
+        "enable": False,
+        "push_enable": False,
+        "pivot_enable": False,
     }
     assert picked["enrichment_sources"] == ["virustotal", "abuseipdb"]
     assert picked["poll_seconds"] == 120
+
+
+def test_pick_security_suite_scoping_independently_enables_trc_root(monkeypatch):
+    from maverick_installer import wizard
+
+    def answer(prompt, *args, **kwargs):
+        del args, kwargs
+        return prompt.startswith("Enable local Tech Risk & Compliance questionnaire")
+
+    monkeypatch.setattr(wizard, "_q_confirm", answer)
+    picked = wizard.pick_security_suite()
+    assert picked["tech_risk_compliance"] == {
+        "enable": True,
+        "policy_publication_links": {"enable": False},
+        "scoping": {"enable": True},
+        "scope_actions": {"enable": False},
+        "continuous_evidence": {
+            "enable": False,
+            "enabled_collectors": [],
+            "scheduler": {
+                "enable": False,
+                "poll_seconds": 60,
+                "enqueue_limit": 50,
+                "claim_limit": 10,
+                "tenant_limit": 1_000,
+                "lease_seconds": 120,
+                "retry_backoff_seconds": 30,
+            },
+        },
+    }
+
+
+def test_security_suite_writer_emits_separate_trc_capability_gates():
+    from maverick.config_lint import lint_config
+    from maverick_installer import wizard
+
+    rendered = wizard._cfg_security_suite(
+        {
+            "security_ops": False,
+            "tech_risk_compliance": {
+                "enable": True,
+                "policy_publication_links": {"enable": True},
+                "scoping": {"enable": True},
+                "scope_actions": {"enable": True},
+                "continuous_evidence": {
+                    "enable": True,
+                    "enabled_collectors": ["local_soc2_v1"],
+                    "scheduler": {
+                        "enable": True,
+                        "poll_seconds": 60,
+                        "enqueue_limit": 50,
+                        "claim_limit": 10,
+                        "tenant_limit": 1_000,
+                        "lease_seconds": 120,
+                        "retry_backoff_seconds": 30,
+                    },
+                },
+            },
+            "third_party_management": {
+                "enable": True,
+                "intelligence": {
+                    "enable": True,
+                    "providers": {
+                        "enable": True,
+                        "enabled_providers": [
+                            "riskrecon",
+                            "securityscorecard",
+                            "hacknotice",
+                        ],
+                        "timeout_seconds": 20,
+                        "scheduler": {"enable": True, "poll_seconds": 900},
+                    },
+                },
+                "lifecycle": {
+                    "enable": True,
+                    "portal": {
+                        "enable": True,
+                        "invitation_ttl_seconds": 86_400,
+                        "retention_seconds": 31_536_000,
+                        "max_messages": 100,
+                        "max_artifacts": 20,
+                        "max_artifact_bytes": 10_485_760,
+                    },
+                },
+            },
+        }
+    )
+    parsed = tomllib.loads("\n".join(rendered))
+    assert parsed["tech_risk_compliance"] == {
+        "enable": True,
+        "policy_publication_links": {"enable": True},
+        "scoping": {"enable": True},
+        "scope_actions": {"enable": True},
+        "continuous_evidence": {
+            "enable": True,
+            "enabled_collectors": ["local_soc2_v1"],
+            "scheduler": {
+                "enable": True,
+                "poll_seconds": 60,
+                "enqueue_limit": 50,
+                "claim_limit": 10,
+                "tenant_limit": 1_000,
+                "lease_seconds": 120,
+                "retry_backoff_seconds": 30,
+            },
+        },
+    }
+    assert parsed["third_party_management"] == {
+        "enable": True,
+        "intelligence": {
+            "enable": True,
+            "providers": {
+                "enable": True,
+                "enabled_providers": ["riskrecon", "securityscorecard", "hacknotice"],
+                "timeout_seconds": 20,
+                "scheduler": {"enable": True, "poll_seconds": 900},
+            },
+        },
+        "lifecycle": {
+            "enable": True,
+            "portal": {
+                "enable": True,
+                "invitation_ttl_seconds": 86_400,
+                "retention_seconds": 31_536_000,
+                "max_messages": 100,
+                "max_artifacts": 20,
+                "max_artifact_bytes": 10_485_760,
+            },
+        },
+    }
+    assert lint_config(parsed) == []
+
+
+def test_pick_security_suite_does_not_offer_federation_dependents_when_off(
+    monkeypatch,
+):
+    from maverick_installer import wizard
+
+    prompts: list[str] = []
+
+    def answer(prompt, *args, **kwargs):
+        prompts.append(prompt)
+        if prompt.startswith("Enable bounded read-only Entra"):
+            return True
+        if prompt.startswith("Prepare the separately gated identity control plane"):
+            return True
+        return False
+
+    monkeypatch.setattr(wizard, "_q_confirm", answer)
+    picked = wizard.pick_security_suite()
+
+    assert picked["ai_identity_governance_connectors"] is True
+    assert picked["ai_identity_governance_controls"] is True
+    assert picked["ai_identity_federation"] is False
+    assert picked["ai_identity_conditional_access"] is False
+    assert picked["ai_identity_purview_writeback"] is False
+    assert not any("conditional-access" in prompt for prompt in prompts)
+    assert not any("Purview classification writeback for" in prompt for prompt in prompts)
 
 
 def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
@@ -128,8 +398,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
         role_models={},
         channels={},
         safety={"profile": "balanced"},
-        budget={"max_dollars": 5.0, "max_wall_seconds": 600,
-                "max_tool_calls": 30},
+        budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
         sandbox={"backend": "local", "workdir": "~/ws"},
         keys={},
         capabilities={},
@@ -160,6 +429,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "ai_dynamic_risk": True,
             "ai_policy_management": True,
             "ai_runtime_guardrails": True,
+            "ai_governance_loop": True,
             "ai_explainability": True,
             "ai_conformity_workflow": True,
             "ai_insurability": True,
@@ -245,6 +515,15 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
     assert parsed["ai_dynamic_risk"] == {"enable": True}
     assert parsed["ai_policy_management"] == {"enable": True}
     assert parsed["ai_runtime_guardrails"] == {"enable": True}
+    assert parsed["ai_governance_loop"] == {
+        "enable": True,
+        "poll_seconds": 300,
+        "batch_size": 100,
+        "lease_seconds": 120,
+        "max_attempts": 5,
+        "retry_base_seconds": 30,
+        "max_lag_seconds": 900,
+    }
     assert parsed["ai_explainability"] == {"enable": True}
     assert parsed["ai_conformity_workflow"] == {"enable": True}
     assert parsed["ai_insurability"] == {"enable": True}
@@ -312,6 +591,17 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
                 },
             },
         },
+        "controls": {
+            "enable": False,
+            "change_coupling": {
+                "enable": False,
+                "dynamic_risk": False,
+                "alerts": False,
+            },
+            "federation": {"enable": False},
+            "conditional_access": {"enable": False},
+            "purview_writeback": {"enable": False},
+        },
     }
     environment = (tmp_path / ".env").read_text(encoding="utf-8")
     commitment_line = next(
@@ -352,53 +642,129 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
 def test_security_suite_high_trust_adapters_require_separate_opt_ins():
     from maverick_installer import wizard
 
-    defaults = tomllib.loads("\n".join(wizard._cfg_security_suite({
-        "ai_vendor_risk": True,
-        "ai_media_provenance": True,
-        "ai_identity_governance_connectors": True,
-        "ai_benchmark_exchange": True,
-    })))
+    defaults = tomllib.loads(
+        "\n".join(
+            wizard._cfg_security_suite(
+                {
+                    "ai_vendor_risk": True,
+                    "ai_media_provenance": True,
+                    "ai_identity_governance_connectors": True,
+                    "ai_benchmark_exchange": True,
+                }
+            )
+        )
+    )
     assert defaults["ai_vendor_risk"]["portal_enable"] is False
     assert defaults["ai_media_provenance"] == {"enable": True}
-    assert defaults["ai_identity_governance_connectors"]["scheduler"][
-        "enable"
-    ] is False
+    assert defaults["ai_identity_governance_connectors"]["scheduler"]["enable"] is False
+    assert defaults["ai_identity_governance_connectors"]["controls"] == {
+        "enable": False,
+        "change_coupling": {
+            "enable": False,
+            "dynamic_risk": False,
+            "alerts": False,
+        },
+        "federation": {"enable": False},
+        "conditional_access": {"enable": False},
+        "purview_writeback": {"enable": False},
+    }
     assert all(
         provider["enable"] is False
-        for provider in defaults["ai_identity_governance_connectors"][
-            "scheduler"
-        ]["providers"].values()
+        for provider in defaults["ai_identity_governance_connectors"]["scheduler"][
+            "providers"
+        ].values()
     )
     assert defaults["ai_benchmark_exchange"] == {"enable": True}
 
-    selected = tomllib.loads("\n".join(wizard._cfg_security_suite({
-        "ai_vendor_risk": True,
-        "ai_vendor_risk_portal": True,
-        "ai_media_provenance": True,
-        "ai_media_provenance_c2patool": True,
-        "ai_identity_governance_connectors": True,
-        "ai_identity_governance_scheduler": True,
-    })))
+    selected = tomllib.loads(
+        "\n".join(
+            wizard._cfg_security_suite(
+                {
+                    "ai_vendor_risk": True,
+                    "ai_vendor_risk_portal": True,
+                    "ai_media_provenance": True,
+                    "ai_media_provenance_c2patool": True,
+                    "ai_media_provenance_c2patool_sha256": "a" * 64,
+                    "ai_identity_governance_connectors": True,
+                    "ai_identity_governance_scheduler": True,
+                    "ai_identity_governance_controls": True,
+                    "ai_identity_change_coupling": True,
+                    "ai_identity_federation": True,
+                    "ai_identity_conditional_access": True,
+                    "ai_identity_purview_writeback": True,
+                }
+            )
+        )
+    )
     assert selected["ai_vendor_risk"]["portal_enable"] is True
     assert selected["ai_media_provenance"] == {
         "enable": True,
         "verification_adapter": "c2patool",
+        "c2patool_executable_sha256": "a" * 64,
     }
     identity = selected["ai_identity_governance_connectors"]
     assert identity["scheduler"]["enable"] is True
     assert all(
-        provider["enable"] is False
-        for provider in identity["scheduler"]["providers"].values()
+        provider["enable"] is False for provider in identity["scheduler"]["providers"].values()
     )
+    assert identity["controls"] == {
+        "enable": True,
+        "change_coupling": {
+            "enable": True,
+            "dynamic_risk": True,
+            "alerts": True,
+        },
+        "federation": {"enable": True},
+        "conditional_access": {"enable": True},
+        "purview_writeback": {"enable": True},
+    }
+
+
+def test_identity_control_rendering_disables_dependents_without_federation():
+    from maverick_installer import wizard
+
+    selected = tomllib.loads(
+        "\n".join(
+            wizard._cfg_security_suite(
+                {
+                    "ai_identity_governance_connectors": True,
+                    "ai_identity_governance_controls": True,
+                    "ai_identity_federation": False,
+                    "ai_identity_conditional_access": True,
+                    "ai_identity_purview_writeback": True,
+                }
+            )
+        )
+    )
+    controls = selected["ai_identity_governance_connectors"]["controls"]
+    assert controls["federation"]["enable"] is False
+    assert controls["conditional_access"]["enable"] is False
+    assert controls["purview_writeback"]["enable"] is False
+
+
+def test_c2patool_rendering_fails_closed_without_an_exact_reviewed_digest():
+    from maverick_installer import wizard
+
+    for digest in ("", "not-a-digest"):
+        selected = tomllib.loads(
+            "\n".join(
+                wizard._cfg_security_suite(
+                    {
+                        "ai_media_provenance": True,
+                        "ai_media_provenance_c2patool": True,
+                        "ai_media_provenance_c2patool_sha256": digest,
+                    }
+                )
+            )
+        )
+        assert selected["ai_media_provenance"] == {"enable": True}
 
 
 def test_evidence_gateway_enables_assurance_dependencies(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, False, False, True] + [False] * 60)
-    monkeypatch.setattr(
-        wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
-    )
+    answers = iter([False, True, False, False, True] + [False] * 60)
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *args, **kwargs: next(answers))
 
     picked = wizard.pick_security_suite()
 
@@ -410,14 +776,16 @@ def test_evidence_gateway_enables_assurance_dependencies(monkeypatch):
 def test_security_connector_knobs_are_explicit_and_independent():
     from maverick_installer import wizard
 
-    lines = wizard._cfg_security_suite({
-        "security_ops": True,
-        "env_hunt": True,
-        "connectors": {
-            "cloudtrail": {"enable": True, "push_enable": True},
-            "entra": {"enable": True, "pivot_enable": True},
-        },
-    })
+    lines = wizard._cfg_security_suite(
+        {
+            "security_ops": True,
+            "env_hunt": True,
+            "connectors": {
+                "cloudtrail": {"enable": True, "push_enable": True},
+                "entra": {"enable": True, "pivot_enable": True},
+            },
+        }
+    )
     parsed = tomllib.loads("\n".join(lines))
     assert parsed["env_hunt"]["connectors"]["cloudtrail"]["enable"] is True
     assert parsed["env_hunt"]["connectors"]["cloudtrail"]["push_enable"] is True
@@ -430,14 +798,37 @@ def test_security_connector_knobs_are_explicit_and_independent():
 def test_security_enrichment_choices_render_as_runtime_enable_tables():
     from maverick_installer import wizard
 
-    lines = wizard._cfg_security_suite({
-        "security_ops": True,
-        "env_hunt": True,
-        "enrichment_sources": ["VirusTotal", "abuseipdb", "virustotal"],
-    })
+    lines = wizard._cfg_security_suite(
+        {
+            "security_ops": True,
+            "env_hunt": True,
+            "enrichment_sources": ["VirusTotal", "abuseipdb", "virustotal"],
+        }
+    )
     parsed = tomllib.loads("\n".join(lines))
 
     assert parsed["env_hunt"]["enrichment_sources"] == {
         "virustotal": {"enable": True},
         "abuseipdb": {"enable": True},
     }
+
+
+def test_customer_sandbox_wizard_step_is_default_off_and_explicitly_rendered(
+    monkeypatch,
+):
+    from maverick.config_lint import lint_config
+    from maverick_installer import wizard
+
+    def answer(prompt, *args, **kwargs):
+        del args, kwargs
+        return prompt.startswith("Enable the global-admin managed customer sandbox")
+
+    monkeypatch.setattr(wizard, "_q_confirm", answer)
+    picked = wizard.pick_security_suite()
+    assert picked["customer_sandbox_lifecycle"] is True
+    rendered = tomllib.loads("\n".join(wizard._cfg_security_suite(picked)))
+    assert rendered["customer_sandbox_lifecycle"] == {
+        "enable": True,
+        "source_revision": 1,
+    }
+    assert lint_config(rendered) == []

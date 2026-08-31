@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Consent Profile Data - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cpd-shell { max-width:1450px; margin:0 auto; padding:var(--space-4); }
+  .cpd-grid { display:grid; grid-template-columns:minmax(20rem,1fr) minmax(26rem,1.4fr);
+              gap:var(--space-4); }
+  .cpd-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .cpd-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .cpd-stack textarea { min-height:20rem; font-family:var(--font-mono); }
+  .cpd-output { min-height:28rem; max-height:56rem; overflow:auto; white-space:pre-wrap;
+                word-break:break-word; }
+  .cpd-warning { border:2px solid var(--warning,#a66a00); padding:var(--space-3);
+                 border-radius:8px; background:var(--surface-2); margin:var(--space-3) 0; }
+  .cpd-boundary { border-left:3px solid var(--accent); padding-left:var(--space-3); }
+  .cpd-confirm { display:flex; flex-direction:row !important; gap:var(--space-2) !important;
+                 align-items:flex-start; }
+  .cpd-actions { display:flex; gap:var(--space-2); flex-wrap:wrap; }
+  @media (max-width:900px) { .cpd-grid { grid-template-columns:1fr; } }
+</style>
+
+<div class="cpd-shell">
+  <h1>Consent Profile Data</h1>
+  <p>Govern versioned volunteered custom-preference catalogs and progressive
+    prompt journeys bound to an exact published consent property, configuration,
+    bundle, and policy.</p>
+
+  <section class="panel" aria-labelledby="cpd-boundaries-heading">
+    <h2 id="cpd-boundaries-heading">Authority and evidence boundary</h2>
+    <p class="cpd-boundary"><strong>Tenant and actor are server-derived.</strong>
+      This page has no tenant, profile, actor, credential, key-material, raw
+      capability, personal-data, free-text preference, or provider selector.</p>
+    <p class="cpd-boundary"><strong>Local authority only.</strong> The core is
+      provider-neutral and performs no network I/O. This surface does not prove
+      live-traffic operation, browser or mobile deployment, accessibility review,
+      customer acceptance, recovery, concurrency, or production-scale acceptance.</p>
+    <p class="cpd-boundary"><strong>No protected-trait inference.</strong> Values
+      are restricted to published boolean, single-select, and multi-select options.
+      Journey conditions are closed data or trusted purpose signals, never code.</p>
+    {% if consent_profile_data_enabled %}
+    <button class="btn" id="cpd-load-status" type="button">Load status and integrity</button>
+    {% endif %}
+  </section>
+
+  {% if not consent_profile_data_enabled %}
+  <section class="cpd-warning" role="status">
+    <h2>Consent profile data disabled</h2>
+    <p>This authority fails closed until exact booleans are enabled under
+      <code>[consent_preferences] enable = true</code> and
+      <code>[consent_preferences.profile_data] enable = true</code>.</p>
+  </section>
+  {% else %}
+  <p id="cpd-status" role="status" aria-live="polite">No operation running.</p>
+  <div class="cpd-grid">
+    <section class="panel cpd-stack">
+      <h2>Strict operator workbench</h2>
+      <p>Catalog creators and journey authors cannot approve their own versions.
+        All mutations require exact revisions and idempotency keys.</p>
+      <label>Operation
+        <select id="cpd-operation">
+          <option value="status" data-method="GET" data-path="/status">Status and product boundaries</option>
+          <option value="catalog-create" data-method="POST" data-path="/catalogs">Catalog: create immutable version</option>
+          <option value="catalog-get" data-method="GET" data-path="/catalogs/{catalog_id}/versions/{version}">Catalog: get exact version</option>
+          <option value="catalog-approve" data-method="POST" data-path="/catalogs/{catalog_id}/versions/{version}/approve">Catalog: independent approval</option>
+          <option value="journey-create" data-method="POST" data-path="/journeys">Journey: create immutable version</option>
+          <option value="journey-get" data-method="GET" data-path="/journeys/{journey_id}/versions/{version}">Journey: get exact version</option>
+          <option value="journey-approve" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/approve">Journey: independent approval</option>
+          <option value="journey-activate" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/activate">Journey: activate</option>
+          <option value="journey-pause" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/pause">Journey: pause</option>
+          <option value="journey-kill" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/kill">Journey: kill</option>
+          <option value="journey-rollback" data-method="POST" data-path="/journeys/{journey_id}/versions/{version}/rollback">Journey: rollback</option>
+          <option value="integrity" data-method="GET" data-path="/integrity">Verify tenant integrity</option>
+          <option value="retention-purge" data-method="POST" data-path="/retention/purge">Purge expired retained records</option>
+        </select>
+      </label>
+      <label>Path values as a strict JSON object
+        <input class="input" id="cpd-path-values" value="{}" autocomplete="off">
+      </label>
+      <label>Strict request body as JSON
+        <textarea class="input" id="cpd-body">{}</textarea>
+      </label>
+      <div class="cpd-warning">
+        <label class="cpd-confirm"><input id="cpd-confirm" type="checkbox">
+          <span>I reviewed the exact publication and policy digests, immutable
+            definitions or stages, independent approval, expected revision,
+            idempotency key, lifecycle effect, and retention consequence.</span>
+        </label>
+      </div>
+      <div class="cpd-actions">
+        <button class="btn btn--primary" id="cpd-submit" type="button">Run selected operation</button>
+        <button class="btn" id="cpd-example" type="button">Load bounded example</button>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Result</h2>
+      <pre class="cpd-output" id="cpd-output" aria-live="polite">No request made.</pre>
+    </section>
+  </div>
+  {% endif %}
+</div>
+
+{% if consent_profile_data_enabled %}
+<script>
+(function(){"use strict";
+var API="/api/v1/consent/profile-data",operation=document.getElementById("cpd-operation"),paths=document.getElementById("cpd-path-values"),body=document.getElementById("cpd-body"),status=document.getElementById("cpd-status"),output=document.getElementById("cpd-output"),confirmBox=document.getElementById("cpd-confirm"),REF=/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+var examples={
+"status":{paths:{},body:{}},
+"catalog-create":{paths:{},body:{catalog_id:"consumer-profile-v1",property_id:"web-main",publication_sha256:"0".repeat(64),bundle_sha256:"0".repeat(64),configuration_sha256:"0".repeat(64),policy_id:"consent-policy",policy_version:1,policy_sha256:"0".repeat(64),definitions:[{preference_id:"required-bool",definition_version:1,label_ref:"required-bool",value_type:"boolean",options:[],required:true,expires_after_seconds:null,retention_seconds:86400}],retention_seconds:86400,expected_latest_version:0,idempotency_key:"replace-catalog-create-key"}},
+"catalog-get":{paths:{catalog_id:"consumer-profile-v1",version:1},body:{}},
+"catalog-approve":{paths:{catalog_id:"consumer-profile-v1",version:1},body:{expected_revision:1,idempotency_key:"replace-catalog-approval-key"}},
+"journey-create":{paths:{},body:{journey_id:"progressive-profile-v1",catalog_id:"consumer-profile-v1",catalog_version:1,stages:[{stage_id:"foundation",priority:10,prompt_label_ref:"foundation",preference_ids:["required-bool"],condition:null}],max_prompts:1,cooldown_seconds:3600,frequency_cap:3,frequency_window_seconds:86400,retention_seconds:86400,expected_latest_version:0,idempotency_key:"replace-journey-create-key"}},
+"journey-get":{paths:{journey_id:"progressive-profile-v1",version:1},body:{}},
+"journey-approve":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:1,idempotency_key:"replace-journey-approval-key"}},
+"journey-activate":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:2,idempotency_key:"replace-journey-activate-key"}},
+"journey-pause":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:3,idempotency_key:"replace-journey-pause-key"}},
+"journey-kill":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:3,idempotency_key:"replace-journey-kill-key"}},
+"journey-rollback":{paths:{journey_id:"progressive-profile-v1",version:1},body:{expected_revision:3,idempotency_key:"replace-journey-rollback-key"}},
+"integrity":{paths:{},body:{}},
+"retention-purge":{paths:{},body:{before:1800000000,idempotency_key:"replace-profile-purge-key"}}
+};
+function parseObject(raw,label){var value;try{value=JSON.parse(raw);}catch(_error){throw new Error(label+" must be valid JSON.");}if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(label+" must be a JSON object.");return value;}
+function selected(){return operation.options[operation.selectedIndex];}
+function pathFor(template,values){return template.replace(/\{([a-z_]+)\}/g,function(_match,name){var value=values[name];if((typeof value!=="string"&&typeof value!=="number")||!REF.test(String(value)))throw new Error("Path value "+name+" is missing or invalid.");return encodeURIComponent(String(value));});}
+async function request(path,options){var response=await fetch(API+path,Object.assign({credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/json"}},options||{})),payload={};try{payload=await response.json();}catch(_error){}if(!response.ok)throw new Error(typeof payload.detail==="string"?payload.detail:"Operation failed with HTTP "+response.status+".");return payload;}
+function show(payload,message){output.textContent=JSON.stringify(payload,null,2);status.textContent=message;}
+function fail(error){status.textContent=error instanceof Error?error.message:"Operation failed.";}
+document.getElementById("cpd-load-status").addEventListener("click",async function(){try{show(await request("/status"),"Status and integrity loaded.");}catch(error){fail(error);}});
+document.getElementById("cpd-example").addEventListener("click",function(){var example=examples[operation.value]||examples.status;paths.value=JSON.stringify(example.paths);body.value=JSON.stringify(example.body,null,2);confirmBox.checked=false;status.textContent="Bounded example loaded; replace placeholder digests and idempotency keys.";});
+document.getElementById("cpd-submit").addEventListener("click",async function(){try{var item=selected(),method=item.dataset.method,path=pathFor(item.dataset.path,parseObject(paths.value,"Path values")),payload=parseObject(body.value,"Request body"),options={method:method};if(method!=="GET"&&!confirmBox.checked)throw new Error("Review and confirm the mutation before submitting.");if(method!=="GET")options.body=JSON.stringify(payload);show(await request(path,options),"Operation completed under the server-derived tenant and actor authority.");confirmBox.checked=false;}catch(error){fail(error);}});
+})();
+</script>
+{% endif %}
+{% endblock %}

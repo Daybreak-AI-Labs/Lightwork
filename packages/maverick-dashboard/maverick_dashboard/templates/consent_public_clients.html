@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Public Consent Clients · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .pcc-shell{max-width:1350px;margin:0 auto;padding:1.25rem}.pcc-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.pcc-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.pcc-hero h1{margin:.1rem 0}.pcc-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem}.pcc-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:1rem}.pcc-card h2{font-size:1rem;margin:.1rem 0 .75rem}.pcc-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.pcc-form label{display:flex;flex-direction:column;gap:.25rem;color:var(--muted);font-size:.8rem}.pcc-wide,.pcc-actions{grid-column:1/-1}.pcc-actions{display:flex;gap:.5rem;flex-wrap:wrap}.pcc-output{white-space:pre-wrap;word-break:break-word;max-height:34rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.pcc-warning{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}@media(max-width:900px){.pcc-grid,.pcc-form{grid-template-columns:1fr}.pcc-wide,.pcc-actions{grid-column:auto}}
+</style>
+<div class="pcc-shell">
+  <header class="pcc-hero"><div><div class="pcc-kicker">First-party consent integration</div><h1>Public Consent Clients</h1><p class="muted">Mint exact-origin browser or service clients against the active publication and receipt policy. Raw client credentials are returned once and never stored.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
+  {% if not consent_public_clients_enabled %}<div class="pcc-warning" role="status"><strong>Public clients disabled.</strong> Enable consent, publishing, and <code>[consent_preferences.public_api]</code> after public-edge review.</div>{% endif %}
+  <div class="pcc-warning"><strong>Credential handling:</strong> copy a newly minted client credential immediately into the approved first-party integration. The list view cannot recover it. A browser credential is origin-bound but remains public site configuration, not proof that a caller is a browser.</div>
+  <div id="pcc-status" class="muted" role="status" aria-live="polite"></div>
+  <div class="pcc-grid">
+    <div>
+      <section class="pcc-card"><h2>Mint browser client</h2><form id="pcc-create" class="pcc-form">
+        <label>Property ID<input class="input" name="property_id" value="web-main" required></label><label>Exact browser origin<input class="input" name="browser_origin" placeholder="https://www.example.com" required></label>
+        <label>Jurisdiction<input class="input" name="jurisdiction" value="global" required></label><label>Country code<input class="input" name="country_code" value="US" minlength="2" maxlength="2" required></label>
+        <label>Region code<input class="input" name="region_code"></label><label>Default locale<input class="input" name="default_locale" value="en-US" required></label>
+        <label>Rule group ID<input class="input" name="rule_group_id" value="production" required></label><label>Rule group version<input class="input" name="rule_group_version" type="number" min="1" value="1" required></label>
+        <label>Receipt policy ID<input class="input" name="policy_id" value="public-consent" required></label><label>Receipt policy version<input class="input" name="policy_version" type="number" min="1" value="1" required></label>
+        <div class="pcc-actions"><button class="btn btn--primary" type="submit">Mint once</button><button class="btn" id="pcc-list" type="button">List clients</button><button class="btn" id="pcc-list-profiles" type="button">List safe profile bindings</button></div>
+      </form></section>
+      <section class="pcc-card"><h2>Revoke client or profile capability</h2><form id="pcc-revoke-client" class="pcc-form">
+        <label>Client ID<input class="input" name="credential_id" required></label><label>Expected revision<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke client</button></div>
+      </form><hr><form id="pcc-revoke-profile" class="pcc-form">
+        <label>Property ID<input class="input" name="property_id" value="web-main" required></label><label>Profile reference<input class="input" name="profile_id" required></label><label class="pcc-wide">Review evidence SHA-256<input class="input" name="evidence_sha256" pattern="[0-9a-f]{64}" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke profile capability</button></div>
+      </form></section>
+    </div>
+    <div>
+      <section class="pcc-card"><h2>SDK integration</h2><p class="muted">Load the inert SDK from <code>/api/v1/public/consent/sdk.js</code>, then construct <code>LightworkConsent</code> with this server’s public endpoint and the one-time client credential. The SDK renders structured text with DOM APIs, stores only a pseudonymous profile capability in first-party storage, and supports GPC/DNT.</p><pre class="pcc-output">&lt;script src="https://YOUR-LIGHTWORK/api/v1/public/consent/sdk.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+const consent = new LightworkConsent({
+  endpoint: "https://YOUR-LIGHTWORK/api/v1/public/consent",
+  clientCredential: "PASTE-ONCE"
+});
+consent.renderBanner(document.querySelector("#consent-root"));
+&lt;/script&gt;</pre></section>
+      <section class="pcc-card"><h2>Authority result</h2><pre id="pcc-output" class="pcc-output">No operation run.</pre></section>
+    </div>
+  </div>
+</div>
+<script>
+(function(){"use strict";var API="/api/v1/consent/public-clients",status=document.getElementById('pcc-status'),output=document.getElementById('pcc-output');function val(form,name){return form.elements[name].value.trim();}async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body={};try{body=await response.json();}catch(_error){}if(!response.ok)throw new Error(body.detail||('HTTP '+response.status));return body;}function show(body,message){output.textContent=JSON.stringify(body,null,2);status.textContent=message;}
+document.getElementById('pcc-create').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget,payload={property_id:val(form,'property_id'),client_kind:'browser',browser_origin:val(form,'browser_origin'),service_client_id:null,target_origin:null,target_bundle_id:null,target_platform:null,jurisdiction:val(form,'jurisdiction'),country_code:val(form,'country_code'),region_code:val(form,'region_code'),default_locale:val(form,'default_locale'),rule_group_id:val(form,'rule_group_id'),rule_group_version:Number(val(form,'rule_group_version')),policy_id:val(form,'policy_id'),policy_version:Number(val(form,'policy_version')),expires_at:null};try{show(await call('',{method:'POST',body:JSON.stringify(payload)}),'Client minted. Copy the credential now; it cannot be recovered.');}catch(error){status.textContent=error.message;}});
+document.getElementById('pcc-list').addEventListener('click',async function(){try{show(await call(''),'Safe client metadata loaded.');}catch(error){status.textContent=error.message;}});document.getElementById('pcc-list-profiles').addEventListener('click',async function(){try{show(await call('/profiles'),'Safe profile selectors and revisions loaded.');}catch(error){status.textContent=error.message;}});document.getElementById('pcc-revoke-client').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget;try{show(await call('/'+encodeURIComponent(val(form,'credential_id'))+'/revoke',{method:'POST',body:JSON.stringify({expected_revision:Number(val(form,'expected_revision'))})}),'Client revoked.');}catch(error){status.textContent=error.message;}});document.getElementById('pcc-revoke-profile').addEventListener('submit',async function(event){event.preventDefault();var form=event.currentTarget;try{show(await call('/profiles/'+encodeURIComponent(val(form,'profile_id'))+'/revoke',{method:'POST',body:JSON.stringify({property_id:val(form,'property_id'),evidence_sha256:val(form,'evidence_sha256')})}),'Profile capability revoked.');}catch(error){status.textContent=error.message;}});
+})();
+</script>
+{% endblock %}

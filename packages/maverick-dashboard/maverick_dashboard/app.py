@@ -569,7 +569,84 @@ app = FastAPI(
     ],
     lifespan=_lifespan,
 )
+from .ai_governance_loop_composition import (  # noqa: E402
+    install_ai_governance_loop_composition,
+)
+from .ai_governance_loop_scheduler import (  # noqa: E402
+    attach_ai_governance_loop_scheduler,
+)
+from .consent_scan_scheduler import attach_consent_scan_scheduler  # noqa: E402
+from .consumer_trust_center_authority_composition import (  # noqa: E402
+    attach_consumer_trust_center_authority_composition,
+)
+from .customer_sandbox_composition import (  # noqa: E402
+    attach_customer_sandbox_composition,
+)
+from .data_use_provider_audit_composition import (  # noqa: E402
+    attach_data_use_provider_audit_composition,
+)
+from .privacy_rights_intake_composition import (  # noqa: E402
+    attach_privacy_rights_intake_composition,
+)
+from .third_party_collaboration_composition import (  # noqa: E402
+    attach_third_party_collaboration_composition,
+)
+from .trc_continuous_evidence_scheduler import (  # noqa: E402
+    attach_trc_continuous_evidence_scheduler,
+)
+from .unified_audit_composition import (  # noqa: E402
+    attach_unified_audit_composition,
+)
+from .unified_audit_scheduler import (  # noqa: E402
+    attach_unified_audit_scheduler,
+)
+
+install_ai_governance_loop_composition(app)
+attach_ai_governance_loop_scheduler(app)
+attach_consent_scan_scheduler(app)
+attach_trc_continuous_evidence_scheduler(app)
+attach_data_use_provider_audit_composition(app)
+attach_customer_sandbox_composition(app)
+attach_consumer_trust_center_authority_composition(app)
+attach_privacy_rights_intake_composition(app)
+attach_third_party_collaboration_composition(app)
+attach_unified_audit_composition(app)
+attach_unified_audit_scheduler(app)
 app.include_router(api_router)
+from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
+from .unified_audit_api import router as unified_audit_router  # noqa: E402
+
+app.include_router(customer_sandbox_router, prefix="/api/v1")
+app.include_router(unified_audit_router, prefix="/api/v1")
+# Public consent collection uses a separate opaque client credential and
+# profile capability.  It is mounted directly because its router already owns
+# the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
+# The feature gate is fail-closed, so including it is inert until consent,
+# publishing, and the public API are all explicitly enabled.
+from .consent_public_api import (  # noqa: E402
+    create_consent_public_router,
+    default_public_consent_dependencies,
+    public_consent_error_origin,
+)
+
+_public_consent_dependencies = default_public_consent_dependencies()
+app.state.privacy_rights_intake_public_dependencies_factory = (
+    lambda *, request: _public_consent_dependencies
+)
+app.state.public_consent_error_origin_resolver = (
+    lambda request: public_consent_error_origin(request, _public_consent_dependencies)
+)
+app.include_router(create_consent_public_router(_public_consent_dependencies))
+from .consent_identity_federation_api import (  # noqa: E402
+    create_consent_identity_federation_router,
+)
+
+app.include_router(create_consent_identity_federation_router())
+from .privacy_rights_ott_ctv_api import (  # noqa: E402
+    create_ott_ctv_privacy_rights_router,
+)
+
+app.include_router(create_ott_ctv_privacy_rights_router())
 # Admin pages (/settings + /users): their own router module -- the first
 # slice of decomposing this file by nav group. See maverick_dashboard.admin_pages.
 from .admin_pages import router as admin_pages_router  # noqa: E402
@@ -612,8 +689,16 @@ app.include_router(saml_router)
 # families self-gate on their own configuration. The prefix is
 # self-authenticating (see _AUTH_EXEMPT rationale for /a2a/v1).
 from .external_gateway import router as external_gateway_router  # noqa: E402
+from .third_party_collaboration_api import (  # noqa: E402
+    external_router as third_party_collaboration_external_router,
+)
+from .third_party_collaboration_portal import (  # noqa: E402
+    router as third_party_collaboration_portal_router,
+)
 
 app.include_router(external_gateway_router)
+app.include_router(third_party_collaboration_external_router)
+app.include_router(third_party_collaboration_portal_router)
 a2a.mount(app)
 
 _DOCS_CSP = (
@@ -774,6 +859,8 @@ _MAX_FINANCE_AML_LIST_BODY_BYTES = 20 * 1024 * 1024
 _MAX_FINANCE_ANOMALY_BODY_BYTES = 32 * 1024 * 1024
 _MAX_EVIDENCE_GATEWAY_BODY_BYTES = 3 * 1024 * 1024
 _MAX_EVIDENCE_GATEWAY_DELIVERY_BODY_BYTES = 34 * 1024 * 1024
+_MAX_PUBLIC_CONSENT_BODY_BYTES = 64 * 1024
+_MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES = 2 * 1024 * 1024
 _EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
 _SECURITY_HUNTER_BODY_PATHS = {
     "/api/v1/security/threats/scan",
@@ -816,6 +903,81 @@ async def _read_limited_request_body(
         if len(body) > max_bytes:
             raise HTTPException(status_code=413, detail=too_large_detail)
     return bytes(body)
+
+
+@app.middleware("http")
+async def bound_public_governance_body(request: Request, call_next):
+    """Cap self-authenticating public JSON before FastAPI model parsing."""
+
+    if request.method not in {"POST", "PUT", "PATCH"}:
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith("/api/v1/public/consent/"):
+        maximum = _MAX_PUBLIC_CONSENT_BODY_BYTES
+        detail = "public consent request body too large"
+    elif path.startswith("/api/v1/external/third-party-collaboration/"):
+        maximum = _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES
+        detail = "third-party collaboration request body too large"
+    else:
+        return await call_next(request)
+    try:
+        body = await _read_limited_request_body(
+            request,
+            max_bytes=maximum,
+            too_large_detail=detail,
+        )
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    delivered = False
+
+    async def replay_receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    request._body = body  # noqa: SLF001 - bounded ASGI body replay
+    request._receive = replay_receive  # noqa: SLF001 - bounded ASGI body replay
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def protect_public_consent_error_responses(request: Request, call_next):
+    """Keep public errors private and expose them only to an enrolled origin."""
+
+    response = await call_next(request)
+    if (
+        response.status_code < 400
+        or not request.url.path.startswith("/api/v1/public/consent/")
+    ):
+        return response
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    origin = getattr(request.state, "public_consent_allowed_origin", None)
+    if not isinstance(origin, str):
+        resolver = getattr(
+            request.app.state,
+            "public_consent_error_origin_resolver",
+            None,
+        )
+        if callable(resolver):
+            try:
+                origin = await run_in_threadpool(resolver, request)
+            except Exception:
+                origin = None
+    if isinstance(origin, str):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        vary = {
+            item.strip()
+            for item in response.headers.get("Vary", "").split(",")
+            if item.strip()
+        }
+        vary.add("Origin")
+        response.headers["Vary"] = ", ".join(sorted(vary))
+    return response
 
 
 @app.middleware("http")
@@ -1120,7 +1282,14 @@ async def bearer_auth(request: Request, call_next):
             # External integrations authenticate inside their route family
             # using agent, signed-sensor, or vendor-invitation credentials. The
             # trailing slash keeps /api/v1/external-agents under dashboard auth.
-            or request.url.path.startswith("/api/v1/external/")):
+            or request.url.path.startswith("/api/v1/external/")
+            # Public consent uses its own client and profile capabilities. Keep
+            # the exact administration prefix under dashboard authentication.
+            or request.url.path.startswith("/api/v1/public/consent/")
+            # Public policy links resolve an opaque stable link and optionally
+            # a private bearer. The admin policy-publication prefix remains
+            # under normal dashboard authentication.
+            or request.url.path.startswith("/api/v1/public/policies/")):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
         # an external recipient has no dashboard bearer, like the webhook paths.
@@ -2266,6 +2435,309 @@ async def privacy_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 
+@app.get("/consent", response_class=HTMLResponse)
+async def consent_preferences_page(request: Request) -> HTMLResponse:
+    """Consumer consent operations, separate from agent-action approvals."""
+    require_permission(request, "operate")
+    from maverick import consent_analytics, consent_preferences
+
+    return templates.TemplateResponse(
+        request,
+        "consent_preferences.html",
+        {
+            "consent_preferences_enabled": consent_preferences.enabled(),
+            "consent_analytics_enabled": consent_analytics.enabled(),
+        },
+    )
+
+
+@app.get("/consent/publishing", response_class=HTMLResponse)
+async def consent_publishing_page(request: Request) -> HTMLResponse:
+    """Versioned public experience configuration, promotion, and rollback."""
+    require_permission(request, "operate")
+    from collections.abc import Mapping
+
+    from maverick import config
+
+    try:
+        product = config.load_config().get("consent_preferences", {})
+    except Exception:
+        product = {}
+    publishing = product.get("publishing") if isinstance(product, Mapping) else None
+    enabled = (
+        isinstance(product, Mapping)
+        and product.get("enable") is True
+        and isinstance(publishing, Mapping)
+        and publishing.get("enable") is True
+    )
+    return templates.TemplateResponse(
+        request,
+        "consent_publishing.html",
+        {"consent_publishing_enabled": enabled},
+    )
+
+
+@app.get("/consent/experiments", response_class=HTMLResponse)
+async def consent_experiments_page(request: Request) -> HTMLResponse:
+    """Governed consent presentation experiments and bounded analytics."""
+
+    require_permission(request, "operate")
+    from .consent_experiments_api import experiments_enabled_for_page
+
+    return templates.TemplateResponse(
+        request,
+        "consent_experiments.html",
+        {"consent_experiments_enabled": experiments_enabled_for_page()},
+    )
+
+
+@app.get("/consent/delivery", response_class=HTMLResponse)
+async def consent_delivery_page(request: Request) -> HTMLResponse:
+    """Durable signed preference-delivery operations and recovery."""
+    require_permission(request, "operate")
+    from maverick import consent_delivery
+
+    return templates.TemplateResponse(
+        request,
+        "consent_delivery.html",
+        {"consent_delivery_enabled": consent_delivery.enabled()},
+    )
+
+
+@app.get("/consent/public-clients", response_class=HTMLResponse)
+async def consent_public_clients_page(request: Request) -> HTMLResponse:
+    """Origin-bound public SDK enrollment and capability revocation."""
+    require_permission(request, "operate")
+    from .consent_public_admin_api import _enabled
+
+    return templates.TemplateResponse(
+        request,
+        "consent_public_clients.html",
+        {"consent_public_clients_enabled": _enabled()},
+    )
+
+
+@app.get("/consent/profile-data", response_class=HTMLResponse)
+async def consent_profile_data_page(request: Request) -> HTMLResponse:
+    """Governed profile-data catalogs and progressive prompt journeys."""
+
+    require_permission(request, "operate")
+    from .consent_profile_data_api import profile_data_enabled_for_page
+
+    return templates.TemplateResponse(
+        request,
+        "consent_profile_data.html",
+        {"consent_profile_data_enabled": profile_data_enabled_for_page()},
+    )
+
+
+@app.get("/consent/scan-inventory", response_class=HTMLResponse)
+async def consent_scan_inventory_page(request: Request) -> HTMLResponse:
+    """Scheduled, reviewed-only browser tracker discovery operations."""
+
+    require_permission(request, "operate")
+    from .consent_scan_inventory_api import _enabled
+
+    return templates.TemplateResponse(
+        request,
+        "consent_scan_inventory.html",
+        {"consent_scan_inventory_enabled": _enabled()},
+    )
+
+
+@app.get("/consent/scan-notice-proposals", response_class=HTMLResponse)
+async def consent_scan_notice_proposals_page(request: Request) -> HTMLResponse:
+    """Reviewed scan-to-structured-disclosure proposal workbench."""
+
+    require_permission(request, "operate")
+    from .consent_scan_notice_proposals_api import (
+        scan_notice_proposals_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "consent_scan_notice_proposals.html",
+        {
+            "consent_scan_notice_proposals_enabled": (
+                scan_notice_proposals_enabled_for_page()
+            )
+        },
+    )
+
+
+@app.get("/consent/trust-center-authority", response_class=HTMLResponse)
+async def consumer_trust_center_authority_page(request: Request) -> HTMLResponse:
+    """Digest-only Trust Center context and four-eyes authority workbench."""
+
+    require_permission(request, "operate")
+    from .consumer_trust_center_authority_api import (
+        consumer_trust_center_authority_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "consumer_trust_center_authority.html",
+        {
+            "consumer_trust_center_authority_enabled": (
+                consumer_trust_center_authority_enabled_for_page()
+            )
+        },
+    )
+
+
+@app.get("/data-use", response_class=HTMLResponse)
+async def data_use_governance_page(request: Request) -> HTMLResponse:
+    """Provider-neutral data-use policy authority and compiler workspace."""
+    require_permission(request, "operate")
+    from collections.abc import Mapping
+
+    from maverick import config
+
+    try:
+        section = config.load_config().get("data_use_governance", {})
+    except Exception:
+        section = {}
+    compiler = section.get("compiler") if isinstance(section, Mapping) else None
+    return templates.TemplateResponse(
+        request,
+        "data_use_governance.html",
+        {
+            "data_use_enabled": (
+                isinstance(section, Mapping) and section.get("enable") is True
+            ),
+            "data_use_compiler_enabled": (
+                isinstance(compiler, Mapping) and compiler.get("enable") is True
+            ),
+        },
+    )
+
+
+@app.get("/data-use/providers", response_class=HTMLResponse)
+async def data_use_providers_page(request: Request) -> HTMLResponse:
+    """Controlled Snowflake and Databricks enrollment/execution workspace."""
+
+    require_permission(request, "operate")
+    from collections.abc import Mapping
+
+    from maverick import config
+
+    try:
+        loaded = config.load_config()
+        section = loaded.get("data_use_governance", {})
+    except Exception:
+        section = {}
+    enforcement = section.get("enforcement") if isinstance(section, Mapping) else None
+
+    def provider_enabled(name: str) -> bool:
+        selected = section.get(name) if isinstance(section, Mapping) else None
+        return bool(isinstance(selected, Mapping) and selected.get("enable") is True)
+
+    return templates.TemplateResponse(
+        request,
+        "data_use_providers.html",
+        {
+            "data_use_enforcement_enabled": bool(
+                isinstance(enforcement, Mapping)
+                and enforcement.get("enable") is True
+            ),
+            "data_use_snowflake_enabled": provider_enabled("snowflake"),
+            "data_use_databricks_enabled": provider_enabled("databricks"),
+        },
+    )
+
+
+@app.get("/privacy/data-discovery", response_class=HTMLResponse)
+async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
+    """Bounded personal-data discovery, review, and RoPA delivery workspace."""
+
+    require_permission(request, "operate")
+    from maverick import privacy_data_discovery
+
+    return templates.TemplateResponse(
+        request,
+        "privacy_data_discovery.html",
+        {"privacy_data_discovery_enabled": privacy_data_discovery.enabled()},
+    )
+
+
+@app.get("/privacy/regulatory-intelligence", response_class=HTMLResponse)
+async def privacy_regulatory_intelligence_page(request: Request) -> HTMLResponse:
+    """Licensed-source privacy research, trackers, alerts, and reports."""
+
+    require_permission(request, "operate")
+    from maverick import privacy_regulatory_intelligence
+
+    return templates.TemplateResponse(
+        request,
+        "privacy_regulatory_intelligence.html",
+        {
+            "privacy_regulatory_intelligence_enabled": (
+                privacy_regulatory_intelligence.enabled()
+            )
+        },
+    )
+
+
+@app.get("/privacy/rights-orchestration", response_class=HTMLResponse)
+async def privacy_rights_orchestration_page(request: Request) -> HTMLResponse:
+    """Provider-neutral privacy-rights case orchestration workbench."""
+
+    require_permission(request, "operate")
+    from .privacy_rights_orchestration_api import (
+        privacy_rights_orchestration_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "privacy_rights_orchestration.html",
+        {
+            "privacy_rights_orchestration_enabled": (
+                privacy_rights_orchestration_enabled_for_page()
+            )
+        },
+    )
+
+
+@app.get("/privacy/rights-consumer-delivery", response_class=HTMLResponse)
+async def privacy_rights_consumer_delivery_page(request: Request) -> HTMLResponse:
+    """One-time, digest-only privacy-rights delivery workbench."""
+
+    require_permission(request, "operate")
+    from .privacy_rights_consumer_delivery_api import (
+        privacy_rights_consumer_delivery_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "privacy_rights_consumer_delivery.html",
+        {
+            "privacy_rights_consumer_delivery_enabled": (
+                privacy_rights_consumer_delivery_enabled_for_page()
+            )
+        },
+    )
+
+
+@app.get("/privacy/notice-governance", response_class=HTMLResponse)
+async def privacy_notice_governance_page(request: Request) -> HTMLResponse:
+    """Approval-gated privacy-notice publication-intent workbench."""
+
+    require_permission(request, "operate")
+    from .privacy_notice_governance_api import (
+        privacy_notice_governance_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "privacy_notice_governance.html",
+        {
+            "privacy_notice_governance_enabled": (
+                privacy_notice_governance_enabled_for_page()
+            )
+        },
+    )
+
+
 @app.get("/privacy/board", response_class=HTMLResponse)
 async def privacy_board_page(request: Request) -> HTMLResponse:
     """The privacy command center: the whole program on one live board --
@@ -2293,6 +2765,64 @@ async def privacy_report_page(request: Request) -> HTMLResponse:
         "%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
     return templates.TemplateResponse(request, "privacy_report.html",
                                       {"r": report})
+
+
+@app.get("/third-party/intelligence", response_class=HTMLResponse)
+async def third_party_intelligence_page(request: Request) -> HTMLResponse:
+    """Governed screening, EDD, monitoring, delivery, and risk exchange."""
+
+    require_permission(request, "operate")
+    from .third_party_intelligence_api import (
+        third_party_intelligence_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "third_party_intelligence.html",
+        {
+            "third_party_intelligence_enabled": (
+                third_party_intelligence_enabled_for_page()
+            )
+        },
+    )
+
+
+@app.get("/third-party/lifecycle", response_class=HTMLResponse)
+async def third_party_lifecycle_page(request: Request) -> HTMLResponse:
+    """Conditional assessments, lifecycle changes, and governed offboarding."""
+
+    require_permission(request, "operate")
+    from .third_party_lifecycle_api import third_party_lifecycle_enabled_for_page
+
+    return templates.TemplateResponse(
+        request,
+        "third_party_lifecycle.html",
+        {
+            "third_party_lifecycle_enabled": (
+                third_party_lifecycle_enabled_for_page()
+            )
+        },
+    )
+
+
+@app.get("/third-party/collaboration", response_class=HTMLResponse)
+async def third_party_collaboration_page(request: Request) -> HTMLResponse:
+    """Internal control plane for governed external-vendor collaboration."""
+
+    require_permission(request, "operate")
+    from .third_party_collaboration_api import (
+        third_party_collaboration_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "third_party_collaboration.html",
+        {
+            "third_party_collaboration_enabled": (
+                third_party_collaboration_enabled_for_page()
+            )
+        },
+    )
 
 
 @app.get("/security", response_class=HTMLResponse)
@@ -3767,6 +4297,54 @@ async def compliance_page(request: Request) -> HTMLResponse:
     """
     view = _compliance_view(request.query_params.get("framework") or "all")
     return templates.TemplateResponse(request, "compliance.html", view)
+
+
+@app.get("/compliance/policy-links", response_class=HTMLResponse)
+async def policy_publication_links_page(request: Request) -> HTMLResponse:
+    """Review-gated evergreen public and private policy-link workspace."""
+
+    require_permission(request, "operate")
+    from maverick import policy_publication_links
+
+    return templates.TemplateResponse(
+        request,
+        "policy_publication_links.html",
+        {"policy_publication_links_enabled": policy_publication_links.enabled()},
+    )
+
+
+@app.get("/compliance/scoping", response_class=HTMLResponse)
+async def compliance_scoping_page(request: Request) -> HTMLResponse:
+    """Closed-questionnaire technology-risk compliance-scoping workbench."""
+
+    require_permission(request, "operate")
+    from .compliance_scoping_api import compliance_scoping_enabled_for_page
+
+    return templates.TemplateResponse(
+        request,
+        "compliance_scoping.html",
+        {"compliance_scoping_enabled": compliance_scoping_enabled_for_page()},
+    )
+
+
+@app.get("/compliance/scope-actions", response_class=HTMLResponse)
+async def compliance_scope_actions_page(request: Request) -> HTMLResponse:
+    """Scope-derived control and evidence-task planning workbench."""
+
+    require_permission(request, "operate")
+    from .compliance_scope_actions_api import (
+        compliance_scope_actions_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "compliance_scope_actions.html",
+        {
+            "compliance_scope_actions_enabled": (
+                compliance_scope_actions_enabled_for_page()
+            )
+        },
+    )
 
 
 @app.get("/plugins", response_class=HTMLResponse)

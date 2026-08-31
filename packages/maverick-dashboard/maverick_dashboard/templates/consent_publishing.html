@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Consent Publishing · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cpp-shell{max-width:1450px;margin:0 auto;padding:1.25rem}.cpp-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1rem}
+  .cpp-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.cpp-hero h1{margin:.1rem 0}.cpp-layout{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  .cpp-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-bottom:1rem}.cpp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cpp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
+  .cpp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.cpp-form .wide,.cpp-actions{grid-column:1/-1}.cpp-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .cpp-form .cpp-confirm{flex-direction:row;align-items:flex-start;gap:.55rem}.cpp-confirm input{margin-top:.15rem}.cpp-danger-copy{border-left:3px solid var(--danger);padding-left:.7rem}
+  .cpp-result{white-space:pre-wrap;word-break:break-word;max-height:28rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.7rem;font-size:.78rem}.cpp-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}
+  @media(max-width:900px){.cpp-layout,.cpp-form{grid-template-columns:1fr}.cpp-form .wide,.cpp-actions{grid-column:auto}}
+</style>
+<div class="cpp-shell">
+  <header class="cpp-hero"><div><div class="cpp-kicker">Immutable public experience control</div><h1>Consent Publishing</h1><p class="muted">Enroll exact web or mobile properties, version structured content, preview pinned bundles, publish with compare-and-swap, roll back as a new auditable publication, or withdraw the active head into an immutable tombstone.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
+  {% if not consent_publishing_enabled %}<div class="cpp-banner" role="status"><strong>Publishing disabled.</strong> Enable <code>[consent_preferences.publishing] enable = true</code> after privacy-owner approval.</div>{% endif %}
+  <div id="cpp-status" class="muted" role="status" aria-live="polite"></div>
+  <div class="cpp-layout">
+    <div>
+      <section class="cpp-card"><h2>Property enrollment</h2><form id="cpp-property" class="cpp-form">
+        <label>Property ID<input class="input" name="property_id" required value="web-main"></label><label>Kind<select class="input" name="kind"><option>web</option><option>mobile</option></select></label>
+        <label>Consent group<input class="input" name="consent_group_id" required value="consumer-global"></label><label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+        <label>Web domains (comma separated)<input class="input" name="web_domains" value="example.com"></label><label>Exact HTTPS origins<input class="input" name="origin_allowlist" value="https://www.example.com"></label>
+        <label>Mobile bundle IDs<input class="input" name="mobile_bundle_ids"></label><label>Mobile platform<input class="input" name="platform" placeholder="ios, android, …"></label>
+        <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label><div class="cpp-actions"><button class="btn btn--primary" type="submit">Enroll / revise property</button><span class="muted">Admin required; origins and bundle IDs are exact.</span></div>
+      </form></section>
+
+      <section class="cpp-card"><h2>Versioned resource</h2><form id="cpp-resource" class="cpp-form">
+        <label>Resource kind<select class="input" name="kind"><option value="purposes">Purpose</option><option value="topics">Topic</option><option value="custom-preferences">Custom preference</option><option value="notices">Notice</option><option value="translations">Translation catalog</option><option value="themes">Brand theme</option><option value="templates">Template</option><option value="rule-groups">Rule group</option></select></label>
+        <label>Resource ID<input class="input" name="resource_id" required></label><label>Locale (translations only)<input class="input" name="locale" placeholder="en-US"></label>
+        <label class="wide">Strict version request JSON<textarea class="input" name="payload" rows="14" required>{"version":1,"expected_current_version":0,"idempotency_key":"replace-me"}</textarea></label>
+        <div class="cpp-actions"><button class="btn btn--primary" type="submit">Append immutable version</button><span class="muted">Closed structured JSON only; themes accept four contrast-checked hex colors, never HTML, script, URLs, or arbitrary CSS.</span></div>
+      </form></section>
+    </div>
+    <div>
+      <section class="cpp-card"><h2>Preview and publish</h2><form id="cpp-promotion" class="cpp-form">
+        <label>Property ID<input class="input" name="property_id" required value="web-main"></label><label>Rule group ID<input class="input" name="rule_group_id" required value="production"></label>
+        <label>Rule group version<input class="input" name="rule_group_version" type="number" min="1" value="1" required></label><label>Expected property revision<input class="input" name="expected_property_revision" type="number" min="0" value="1" required></label>
+        <label>Expected publication revision<input class="input" name="expected_publication_revision" type="number" min="0" value="0" required></label><label>Idempotency key<input class="input" name="idempotency_key" required></label>
+        <div class="cpp-actions"><button class="btn" type="submit" value="preview">Preview exact bundle</button><button class="btn btn--primary" type="submit" value="publish">Publish</button><button class="btn" id="cpp-history" type="button">Load history</button></div>
+      </form></section>
+
+      <section class="cpp-card"><h2>Rollback</h2><form id="cpp-rollback" class="cpp-form">
+        <label>Property ID<input class="input" name="property_id" required value="web-main"></label><label>Target publication ID<input class="input" name="target_publication_id" required></label>
+        <label>Expected property revision<input class="input" name="expected_property_revision" type="number" min="0" value="1" required></label><label>Expected publication revision<input class="input" name="expected_publication_revision" type="number" min="0" required></label>
+        <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label><div class="cpp-actions"><button class="btn btn--primary" type="submit">Publish rollback record</button><span class="muted">Prior records remain immutable.</span></div>
+      </form></section>
+      <section class="cpp-card"><h2>Withdraw active publication</h2><p id="cpp-withdraw-explanation" class="muted cpp-danger-copy">This creates a content-free immutable tombstone at the next publication revision. Public configuration resolution is denied as withdrawn; prior publication records remain immutable for audit and are not deleted.</p><form id="cpp-withdraw" class="cpp-form">
+        <label>Property ID<input class="input" name="property_id" required value="web-main" {% if not consent_publishing_enabled %}disabled{% endif %}></label><label>Expected property revision<input class="input" name="expected_property_revision" type="number" min="0" value="1" required {% if not consent_publishing_enabled %}disabled{% endif %}></label>
+        <label>Expected publication revision<input class="input" name="expected_publication_revision" type="number" min="0" required {% if not consent_publishing_enabled %}disabled{% endif %}></label><label>Idempotency key<input class="input" name="idempotency_key" required {% if not consent_publishing_enabled %}disabled{% endif %}></label>
+        <label class="wide cpp-confirm"><input id="cpp-withdraw-confirm" name="confirm_withdrawal" type="checkbox" required {% if not consent_publishing_enabled %}disabled{% endif %}><span>I understand the active public configuration will stop resolving and an immutable withdrawal tombstone will be recorded.</span></label>
+        <div class="cpp-actions"><button class="btn btn--danger" id="cpp-withdraw-submit" type="submit" aria-describedby="cpp-withdraw-explanation" {% if not consent_publishing_enabled %}disabled{% endif %}>Withdraw active publication</button><span class="muted">Global admin permission and exact revisions required.</span></div>
+      </form></section>
+      <section class="cpp-card"><h2>Authority result</h2><pre id="cpp-result" class="cpp-result">No operation run.</pre></section>
+    </div>
+  </div>
+</div>
+<script>
+(function(){"use strict";var API="/api/v1/consent/publishing",status=document.getElementById('cpp-status'),result=document.getElementById('cpp-result');
+function val(f,n){return f.elements[n].value.trim();}function list(v){return v.split(',').map(function(x){return x.trim();}).filter(Boolean);}async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body={};try{body=await response.json();}catch(_e){}if(!response.ok)throw new Error(body.detail||('HTTP '+response.status));return body;}function show(body,message){result.textContent=JSON.stringify(body,null,2);status.textContent=message;}
+document.getElementById('cpp-property').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,p={kind:val(f,'kind'),consent_group_id:val(f,'consent_group_id'),expected_revision:Number(val(f,'expected_revision')),idempotency_key:val(f,'idempotency_key'),web_domains:list(val(f,'web_domains')),origin_allowlist:list(val(f,'origin_allowlist')),mobile_bundle_ids:list(val(f,'mobile_bundle_ids'))};if(val(f,'platform'))p.platform=val(f,'platform');try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id')),{method:'PUT',body:JSON.stringify(p)}),'Property authority updated.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cpp-resource').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,kind=val(f,'kind'),path='/'+kind+'/'+encodeURIComponent(val(f,'resource_id'));if(kind==='translations')path+='/'+encodeURIComponent(val(f,'locale'));path+='/versions';try{show(await call(path,{method:'POST',body:JSON.stringify(JSON.parse(val(f,'payload')))}),'Immutable resource version appended.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cpp-promotion').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,action=e.submitter&&e.submitter.value==='publish'?'publish':'preview',p={rule_group_id:val(f,'rule_group_id'),rule_group_version:Number(val(f,'rule_group_version'))};if(action==='publish'){p.expected_property_revision=Number(val(f,'expected_property_revision'));p.expected_publication_revision=Number(val(f,'expected_publication_revision'));p.idempotency_key=val(f,'idempotency_key');}try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/'+action,{method:'POST',body:JSON.stringify(p)}),action==='publish'?'Publication promoted.':'Exact unpublished bundle previewed.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cpp-history').addEventListener('click',async function(){var f=document.getElementById('cpp-promotion');try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/history'),'Immutable publication history loaded.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cpp-rollback').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,p={target_publication_id:val(f,'target_publication_id'),expected_property_revision:Number(val(f,'expected_property_revision')),expected_publication_revision:Number(val(f,'expected_publication_revision')),idempotency_key:val(f,'idempotency_key')};try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/rollback',{method:'POST',body:JSON.stringify(p)}),'Rollback published as a new immutable record.');}catch(error){status.textContent=error.message;}});
+document.getElementById('cpp-withdraw').addEventListener('submit',async function(e){e.preventDefault();var f=e.currentTarget,confirmation=f.elements.confirm_withdrawal;if(!confirmation.checked){status.textContent='Confirm the destructive withdrawal before continuing.';return;}var p={expected_property_revision:Number(val(f,'expected_property_revision')),expected_publication_revision:Number(val(f,'expected_publication_revision')),idempotency_key:val(f,'idempotency_key')};try{show(await call('/properties/'+encodeURIComponent(val(f,'property_id'))+'/withdraw',{method:'POST',body:JSON.stringify(p)}),'Active publication withdrawn. An immutable tombstone now denies public configuration resolution.');confirmation.checked=false;}catch(error){status.textContent=error.message;}});
+})();
+</script>
+{% endblock %}

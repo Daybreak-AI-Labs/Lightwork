@@ -849,6 +849,57 @@ def test_write_park_poll_approve_and_commit_over_http(monkeypatch):
                             "body": {"stage": "closed-won"}}]
 
 
+def test_write_park_idempotency_survives_replay_conflict_and_commit(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    request = _write_body(idempotency_key="pilot-change-001")
+
+    parked = bare.post(
+        "/api/v1/external/execute", headers=hdr, json=request,
+    ).json()
+    replay = bare.post(
+        "/api/v1/external/execute", headers=hdr, json=request,
+    ).json()
+    assert replay["duplicate"] is True
+    assert replay["execution_id"] == parked["execution_id"]
+    assert replay["approval_id"] == parked["approval_id"]
+
+    conflict = bare.post(
+        "/api/v1/external/execute",
+        headers=hdr,
+        json=_write_body(
+            body={"stage": "closed-lost"},
+            idempotency_key="pilot-change-001",
+        ),
+    ).json()
+    assert conflict["allowed"] is False
+    assert conflict["rule"] == "idempotency_conflict"
+    assert conn.writes == []
+
+    from maverick.world_model import WorldModel
+    assert WorldModel().decide_approval(
+        parked["approval_id"], "approved", decided_by="admin@corp.test",
+    ) is True
+    committed = bare.post(
+        f"/api/v1/external/executions/{parked['execution_id']}/commit",
+        headers=hdr,
+        json=_write_body(),
+    ).json()
+    assert committed["status"] == "executed"
+
+    terminal_replay = bare.post(
+        "/api/v1/external/execute", headers=hdr, json=request,
+    ).json()
+    assert terminal_replay["duplicate"] is True
+    assert terminal_replay["execution_id"] == parked["execution_id"]
+    assert terminal_replay["rule"] == "already_finished"
+    assert terminal_replay["status"] == "executed"
+    assert len(conn.writes) == 1
+
+
 def test_commit_digest_mismatch_over_http(monkeypatch):
     conn = _wire_fakecrm(monkeypatch)
     _enroll(max_risk="high")

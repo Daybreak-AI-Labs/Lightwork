@@ -889,6 +889,56 @@
       <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Check continuous collection</button>{% if gateway_admin %}<button id="ai-identity-governance-scheduler-run" class="btn" type="button">Run one configured cycle</button>{% endif %}<span id="ai-identity-governance-scheduler-status" role="status" aria-live="polite"></span></div>
     </form>
     <pre id="ai-identity-governance-scheduler-result" class="assurance-table assurance-muted" hidden></pre>
+    <details id="ai-identity-control-workbench">
+      <summary>Default-off agent identity control plane</summary>
+      <p class="assurance-muted">These controls require an authenticated global
+        administrator, explicit connector control configuration, and a
+        tenant-bound runtime attached by server startup. The browser may submit
+        only pseudonymous references and exact digests; it cannot supply raw
+        identities, authority records, capability mappings, provider
+        credentials, or approval. Federation and conditional-access calls are
+        observation-only. A Purview prepare creates no provider write; execute
+        and compensate are separate explicit actions. Adapter responses are not
+        live acceptance, complete identity coverage, or certification.</p>
+      {% if gateway_admin %}
+      <form id="ai-identity-control-status" class="assurance-form">
+        <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Check control runtime</button><span id="ai-identity-control-status-message" role="status" aria-live="polite"></span></div>
+      </form>
+      <form id="ai-identity-control-evaluate" class="assurance-form">
+        <label>Federation provider<select name="provider"><option value="entra">Microsoft Entra</option><option value="okta">Okta</option></select></label>
+        <label>Pseudonymous agent principal<input name="principal_ref" required maxlength="36" pattern="prn_[0-9a-f]{32}" placeholder="prn_…"></label>
+        <label>Pseudonymous provider subject<input name="provider_subject_id" required maxlength="36" pattern="(?:sub|idn)_[0-9a-f]{32}" placeholder="sub_…"></label>
+        <label>Federation binding SHA-256<input name="expected_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
+        <label>Authority revision<input name="expected_revision" type="number" min="1" step="1" required></label>
+        <label>Required capability<input name="required_capability" maxlength="128" pattern="[a-z][a-z0-9_.:-]{0,127}" value="agent.execute"></label>
+        <label>Decision idempotency key<input name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="identity-decision-unique-key"></label>
+        <div class="assurance-form__wide assurance-actions"><button id="ai-identity-federation-observe" class="btn btn--ghost" type="button">Observe federation</button><button id="ai-identity-capability-map" class="btn btn--ghost" type="button">Map capabilities</button><button id="ai-identity-capability-decision" class="btn" type="button">Decide capability</button><button id="ai-identity-conditional-decision" class="btn" type="button">Decide conditional access</button><span id="ai-identity-control-evaluate-status" role="status" aria-live="polite"></span></div>
+      </form>
+      <form id="ai-identity-purview-prepare" class="assurance-form">
+        <label>Federation provider<select name="provider"><option value="entra">Microsoft Entra</option><option value="okta">Okta</option></select></label>
+        <label>Pseudonymous agent principal<input name="principal_ref" required maxlength="36" pattern="prn_[0-9a-f]{32}"></label>
+        <label>Pseudonymous provider subject<input name="provider_subject_id" required maxlength="36" pattern="(?:sub|idn)_[0-9a-f]{32}"></label>
+        <label>Federation binding SHA-256<input name="expected_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
+        <label>Authority revision<input name="expected_revision" type="number" min="1" step="1" required></label>
+        <label>Pseudonymous Purview asset<input name="asset_id" required maxlength="36" pattern="ast_[0-9a-f]{32}"></label>
+        <label>Sorted classification codes<input name="classification_codes" maxlength="4096" placeholder="confidential, regulated"></label>
+        <label>Current asset binding SHA-256<input name="expected_asset_binding_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
+        <label>Current asset revision<input name="expected_source_revision" type="number" min="1" step="1" required></label>
+        <label>Prepare idempotency key<input name="idempotency_key" required minlength="8" maxlength="256" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}" placeholder="purview-prepare-unique-key"></label>
+        <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Prepare only</button><span id="ai-identity-purview-prepare-status" role="status" aria-live="polite"></span></div>
+      </form>
+      <form id="ai-identity-purview-resume" class="assurance-form">
+        <label>Intent ID<input name="intent_id" required maxlength="37" pattern="IGPW-[0-9a-f]{32}"></label>
+        <label>Pseudonymous agent principal<input name="principal_ref" required maxlength="36" pattern="prn_[0-9a-f]{32}"></label>
+        <label>Trusted mapping SHA-256<input name="mapping_sha256" required maxlength="64" pattern="[0-9a-f]{64}"></label>
+        <label>Record revision<input name="expected_record_revision" type="number" min="1" step="1" required></label>
+        <div class="assurance-form__wide assurance-actions"><button id="ai-identity-purview-get" class="btn btn--ghost" type="button">Get intent</button><button id="ai-identity-purview-execute" class="btn" type="button">Execute prepared write</button><button id="ai-identity-purview-compensate" class="btn btn--danger" type="button">Compensate applied write</button><span id="ai-identity-purview-resume-status" role="status" aria-live="polite"></span></div>
+      </form>
+      <pre id="ai-identity-control-result" class="assurance-table assurance-muted" hidden></pre>
+      {% else %}
+      <p class="assurance-muted">An authenticated global administrator is required to inspect or operate the tenant-bound identity control runtime.</p>
+      {% endif %}
+    </details>
     <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">No bounded snapshot has been collected in this browser session.</p>
     <details open>
       <summary>Normalized pseudonymous identities</summary>
@@ -2568,6 +2618,145 @@
       identityGovernanceSchedulerRun.disabled = false;
       identityGovernanceSchedulerRun.removeAttribute("aria-busy");
     }
+  });
+  {% endif %}
+
+  {% if gateway_admin %}
+  const identityControlStatus = byId("ai-identity-control-status");
+  if (identityControlStatus) identityControlStatus.addEventListener("submit", event => {
+    event.preventDefault();
+    withButton(identityControlStatus, "ai-identity-control-status-message", "Checking default-off configuration and exact startup attachment…", async () => {
+      const result = await request("/identity-governance/controls/status");
+      showProjection("ai-identity-control-result", result);
+      const attached = result.runtime_attached === true ? "attached for this tenant" : `unavailable (${asText(result.runtime_attachment_state)})`;
+      const writes = result.provider_writes === true ? "credentialed Purview writes are possible only through explicit execute" : "provider writes are unavailable";
+      setStatus("ai-identity-control-status-message", `Control runtime ${attached}; ${writes}. Live acceptance remains unverified.`);
+    });
+  });
+  const identityControlButton = async (button, statusId, message, action) => {
+    if (!button) return;
+    button.disabled = true; button.setAttribute("aria-busy", "true"); setStatus(statusId, message);
+    try { return await action(); }
+    catch (error) { setStatus(statusId, error instanceof Error ? error.message : "Identity control failed safely."); return null; }
+    finally { button.disabled = false; button.removeAttribute("aria-busy"); }
+  };
+  const identityFederationInput = form => {
+    if (!form.reportValidity()) throw new Error("Complete the exact pseudonymous binding fields.");
+    const fields = formBody(form);
+    const provider = String(fields.get("provider") || "").trim().toLowerCase();
+    if (!["entra", "okta"].includes(provider)) throw new Error("Choose Microsoft Entra or Okta.");
+    return {provider, body: {
+      principal_ref: String(fields.get("principal_ref") || "").trim(),
+      provider_subject_id: String(fields.get("provider_subject_id") || "").trim(),
+      expected_binding_sha256: String(fields.get("expected_binding_sha256") || "").trim(),
+      expected_revision: Number(fields.get("expected_revision"))
+    }, fields};
+  };
+  const identityControlEvaluate = byId("ai-identity-control-evaluate");
+  if (identityControlEvaluate) identityControlEvaluate.addEventListener("submit", event => event.preventDefault());
+  const identityFederationObserve = byId("ai-identity-federation-observe");
+  if (identityFederationObserve && identityControlEvaluate) identityFederationObserve.addEventListener("click", () => {
+    identityControlButton(identityFederationObserve, "ai-identity-control-evaluate-status", "Requesting one bounded federation observation…", async () => {
+      const {provider, body} = identityFederationInput(identityControlEvaluate);
+      const result = await sendJson(`/identity-governance/controls/federation/${encodeURIComponent(provider)}/observe`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-control-evaluate-status", "Bounded pseudonymous federation observation loaded. No provider policy was changed and complete coverage is not claimed.");
+    });
+  });
+  const identityCapabilityMap = byId("ai-identity-capability-map");
+  if (identityCapabilityMap && identityControlEvaluate) identityCapabilityMap.addEventListener("click", () => {
+    identityControlButton(identityCapabilityMap, "ai-identity-control-evaluate-status", "Resolving the current exact capability map…", async () => {
+      const {provider, body} = identityFederationInput(identityControlEvaluate);
+      const result = await sendJson(`/identity-governance/controls/capabilities/${encodeURIComponent(provider)}/map`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      const retained = result.mapping_registry_retained === true ? "Its digest was retained by the trusted registry for an exact resume." : "No trusted mapping registry is attached, so its digest cannot resume a writeback.";
+      setStatus("ai-identity-control-evaluate-status", `Server-authoritative mapping loaded. ${retained} An unmapped permission grants no capability; live acceptance remains unverified.`);
+    });
+  });
+  const identityDecisionInput = form => {
+    const selected = identityFederationInput(form);
+    selected.body.required_capability = String(selected.fields.get("required_capability") || "").trim();
+    selected.body.idempotency_key = String(selected.fields.get("idempotency_key") || "").trim();
+    return selected;
+  };
+  const identityCapabilityDecision = byId("ai-identity-capability-decision");
+  if (identityCapabilityDecision && identityControlEvaluate) identityCapabilityDecision.addEventListener("click", () => {
+    identityControlButton(identityCapabilityDecision, "ai-identity-control-evaluate-status", "Computing a fail-closed local capability decision…", async () => {
+      const {provider, body} = identityDecisionInput(identityControlEvaluate);
+      const result = await sendJson(`/identity-governance/controls/capabilities/${encodeURIComponent(provider)}/decision`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-control-evaluate-status", `Capability decision: ${asText(result.decision?.action)}. This is a local bound decision, not provider enforcement or approval.`);
+    });
+  });
+  const identityConditionalDecision = byId("ai-identity-conditional-decision");
+  if (identityConditionalDecision && identityControlEvaluate) identityConditionalDecision.addEventListener("click", () => {
+    identityControlButton(identityConditionalDecision, "ai-identity-control-evaluate-status", "Observing conditional access and computing a fail-closed decision…", async () => {
+      const {provider, body} = identityDecisionInput(identityControlEvaluate);
+      const result = await sendJson(`/identity-governance/controls/conditional-access/${encodeURIComponent(provider)}/decision`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-control-evaluate-status", `Conditional-access decision: ${asText(result.decision?.action)}. Provider policy was observed, not mutated.`);
+    });
+  });
+  const identityPurviewPrepare = byId("ai-identity-purview-prepare");
+  if (identityPurviewPrepare) identityPurviewPrepare.addEventListener("submit", event => {
+    event.preventDefault();
+    withButton(identityPurviewPrepare, "ai-identity-purview-prepare-status", "Preparing a revision-bound intent without writing to Purview…", async () => {
+      const {provider, body, fields} = identityFederationInput(identityPurviewPrepare);
+      const codes = String(fields.get("classification_codes") || "").split(",").map(value => value.trim()).filter(Boolean);
+      const canonicalCodes = [...new Set(codes)].sort();
+      if (codes.length > 128 || JSON.stringify(codes) !== JSON.stringify(canonicalCodes)) throw new Error("Classification codes must be sorted, unique, and limited to 128 values.");
+      const result = await sendJson("/identity-governance/controls/purview/writebacks/prepare", "POST", {
+        ...body,
+        provider,
+        asset_id: String(fields.get("asset_id") || "").trim(),
+        classification_codes: codes,
+        expected_asset_binding_sha256: String(fields.get("expected_asset_binding_sha256") || "").trim(),
+        expected_source_revision: Number(fields.get("expected_source_revision")),
+        idempotency_key: String(fields.get("idempotency_key") || "").trim()
+      });
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-purview-prepare-status", "Intent prepared only. Copy its ID, revision, and capability mapping digest to the resume form; no provider write or approval occurred.");
+    });
+  });
+  const identityPurviewResume = byId("ai-identity-purview-resume");
+  if (identityPurviewResume) identityPurviewResume.addEventListener("submit", event => event.preventDefault());
+  const identityPurviewResumeInput = (form, includeRevision) => {
+    if (!form.reportValidity()) throw new Error("Complete the exact intent, principal, mapping, and revision fields.");
+    const fields = formBody(form);
+    const intentId = String(fields.get("intent_id") || "").trim();
+    const body = {
+      principal_ref: String(fields.get("principal_ref") || "").trim(),
+      mapping_sha256: String(fields.get("mapping_sha256") || "").trim()
+    };
+    if (includeRevision) body.expected_record_revision = Number(fields.get("expected_record_revision"));
+    return {intentId, body};
+  };
+  const identityPurviewGet = byId("ai-identity-purview-get");
+  if (identityPurviewGet && identityPurviewResume) identityPurviewGet.addEventListener("click", () => {
+    identityControlButton(identityPurviewGet, "ai-identity-purview-resume-status", "Loading the exact owned intent through its trusted mapping digest…", async () => {
+      const {intentId, body} = identityPurviewResumeInput(identityPurviewResume, false);
+      const result = await sendJson(`/identity-governance/controls/purview/writebacks/${encodeURIComponent(intentId)}/get`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-purview-resume-status", "Exact intent loaded. No provider action occurred.");
+    });
+  });
+  const identityPurviewExecute = byId("ai-identity-purview-execute");
+  if (identityPurviewExecute && identityPurviewResume) identityPurviewExecute.addEventListener("click", () => {
+    identityControlButton(identityPurviewExecute, "ai-identity-purview-resume-status", "Executing the separately prepared, revision-bound Purview write…", async () => {
+      const {intentId, body} = identityPurviewResumeInput(identityPurviewResume, true);
+      const result = await sendJson(`/identity-governance/controls/purview/writebacks/${encodeURIComponent(intentId)}/execute`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-purview-resume-status", `Writeback state: ${asText(result.status)}. The adapter receipt is not live acceptance or certification.`);
+    });
+  });
+  const identityPurviewCompensate = byId("ai-identity-purview-compensate");
+  if (identityPurviewCompensate && identityPurviewResume) identityPurviewCompensate.addEventListener("click", () => {
+    identityControlButton(identityPurviewCompensate, "ai-identity-purview-resume-status", "Requesting explicit revision-bound compensation…", async () => {
+      const {intentId, body} = identityPurviewResumeInput(identityPurviewResume, true);
+      const result = await sendJson(`/identity-governance/controls/purview/writebacks/${encodeURIComponent(intentId)}/compensate`, "POST", body);
+      showProjection("ai-identity-control-result", result);
+      setStatus("ai-identity-purview-resume-status", `Compensation state: ${asText(result.status)}. Verify provider state independently when delivery was ambiguous.`);
+    });
   });
   {% endif %}
 

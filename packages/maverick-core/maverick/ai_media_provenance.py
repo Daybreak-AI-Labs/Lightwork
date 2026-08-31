@@ -454,8 +454,8 @@ def require_enabled() -> None:
         )
 
 
-def _configured_verification_adapter_name() -> str | None:
-    """Return the one closed, explicitly selected verification adapter."""
+def _configured_verification_adapter() -> tuple[str, str] | None:
+    """Return the closed adapter name and independently approved tool digest."""
 
     try:
         from .config import load_config
@@ -479,7 +479,15 @@ def _configured_verification_adapter_name() -> str | None:
         raise MediaProvenanceConfigError(
             "ai_media_provenance.verification_adapter must be exactly c2patool"
         )
-    return selected
+    executable_sha256 = section.get("c2patool_executable_sha256")
+    if not isinstance(executable_sha256, str) or re.fullmatch(
+        r"[0-9a-f]{64}", executable_sha256
+    ) is None:
+        raise MediaProvenanceConfigError(
+            "ai_media_provenance.c2patool_executable_sha256 must be an exact "
+            "lowercase SHA-256 digest when c2patool verification is selected"
+        )
+    return selected, executable_sha256
 
 
 def _assertions(value: object) -> tuple[str, ...]:
@@ -1612,12 +1620,17 @@ def configured_media_provenance() -> MediaProvenanceService:
     """Build the explicitly selected verifier; never infer signing custody."""
 
     require_enabled()
-    selected = _configured_verification_adapter_name()
-    if selected is None:
+    configured = _configured_verification_adapter()
+    if configured is None:
         return default_service
+    _selected, executable_sha256 = configured
     from .ai_media_provenance_c2pa import C2PAToolVerifier
 
-    return MediaProvenanceService(verifier=C2PAToolVerifier())
+    return MediaProvenanceService(
+        verifier=C2PAToolVerifier(
+            expected_executable_sha256=executable_sha256,
+        )
+    )
 
 
 __all__ = [

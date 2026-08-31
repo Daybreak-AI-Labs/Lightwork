@@ -223,6 +223,52 @@ def test_schedules_are_strict_bounded_and_opt_in() -> None:
         scheduler.configured_schedules(invalid_poll)
 
 
+def test_schedule_allows_control_metadata_but_never_passes_it_to_collector() -> None:
+    clock = Clock()
+    store = FakeCASStore(clock)
+    captured = []
+
+    def collect(section, provider):
+        captured.append((section, provider))
+        return _snapshot(provider)
+
+    section = _section("entra")
+    section["controls"] = {
+        "enable": True,
+        "change_coupling": {
+            "enable": True,
+            "dynamic_risk": True,
+            "alerts": False,
+        },
+    }
+    engine = scheduler.IdentityGovernanceScheduler(
+        store=store,
+        collector=collect,
+        clock=clock,
+    )
+    with _tenant("tenant-alpha"):
+        result = engine.run_provider(
+            section,
+            _schedule(section),
+            actor="system:test",
+        )
+
+    assert result["collected"] is True
+    assert len(captured) == 1
+    assert "scheduler" not in captured[0][0]
+    assert "controls" not in captured[0][0]
+
+
+def test_control_tenant_binding_requires_explicit_tenant() -> None:
+    with pytest.raises(scheduler.IdentityGovernanceScheduleError, match="explicit tenant"):
+        scheduler.tenant_binding_sha256(require_explicit=True)
+    with _tenant("tenant-alpha"):
+        strict = scheduler.tenant_binding_sha256(require_explicit=True)
+        compatible = scheduler.tenant_binding_sha256()
+    assert strict == compatible
+    assert len(strict) == 64
+
+
 def test_disabled_status_does_not_resolve_tenant_clock_or_store() -> None:
     class DisabledStore:
         def authoritative_time(self):

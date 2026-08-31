@@ -18,12 +18,15 @@ This is advisory only. The kernel itself fails soft on a bad config (see
 ``maverick.config.load_config``); this lets the wizard / a ``maverick config
 lint`` command surface problems up front.
 """
+
 from __future__ import annotations
 
 import difflib
 import math
+import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 # Known top-level sections -> allowed keys, or ``None`` to allow ANY key.
 #
@@ -61,12 +64,33 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "compartment_unseal",
     },
     "sandbox": {
-        "backend", "workdir", "timeout", "image", "language",
-        "require_container", "allow_network", "allow_root", "pids_limit",
-        "memory", "memory_mb", "cpus", "runtime", "options",
-        "reuse_container", "cross_run_pool", "project_dir", "namespace",
-        "context", "extra_kubectl_args", "run_as_user", "provider",
-        "api_key", "network", "warm", "host", "ssh_args",
+        "backend",
+        "workdir",
+        "timeout",
+        "image",
+        "language",
+        "require_container",
+        "allow_network",
+        "allow_root",
+        "pids_limit",
+        "memory",
+        "memory_mb",
+        "cpus",
+        "runtime",
+        "options",
+        "reuse_container",
+        "cross_run_pool",
+        "project_dir",
+        "namespace",
+        "context",
+        "extra_kubectl_args",
+        "run_as_user",
+        "provider",
+        "api_key",
+        "network",
+        "warm",
+        "host",
+        "ssh_args",
         "host_key_checking",
     },
     "features": {"skills", "world_model", "streaming"},
@@ -88,7 +112,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # and migrate.py already lists it; config-lint flagged the whole section as
     # unknown ("did you mean auth?"), telling a regulated client their flagship
     # signed-audit config looked like a typo (client-journey finding).
-    "audit": {"sign", "worm"},
+    "audit": {"sign", "worm", "unified"},
     "durable": {"enabled", "keep_last"},
     "persona": {"name", "style", "addendum"},
     # The dashboard reads more than the auth token: theme/density/allow_extension
@@ -103,8 +127,17 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # group_roles / group_suites: SCIM-group -> role / department mapping
     # tables (maverick_dashboard.scim_groups), so access flows from IdP team
     # membership.
-    "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url",
-                  "default_suites", "group_roles", "group_suites"},
+    "dashboard": {
+        "token",
+        "theme",
+        "density",
+        "allow_extension",
+        "themes",
+        "public_url",
+        "default_suites",
+        "group_roles",
+        "group_suites",
+    },
     "analytics": {"mcp_client_language"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
     # section fixed-key so misspelled retention/privacy knobs do not silently
@@ -200,6 +233,15 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "ai_dynamic_risk": {"enable"},
     "ai_policy_management": {"enable"},
     "ai_runtime_guardrails": {"enable"},
+    "ai_governance_loop": {
+        "enable",
+        "poll_seconds",
+        "batch_size",
+        "lease_seconds",
+        "max_attempts",
+        "retry_base_seconds",
+        "max_lag_seconds",
+    },
     "ai_explainability": {"enable"},
     "ai_conformity_workflow": {"enable"},
     "ai_insurability": {"enable"},
@@ -207,14 +249,100 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "ai_bank_mrm": {"enable"},
     "ai_benchmark_exchange": {"enable", "trust_roots", "coordinator"},
     "ai_discovery_sensors": {"enable"},
-    "ai_media_provenance": {"enable", "verification_adapter"},
+    "ai_media_provenance": {
+        "enable",
+        "verification_adapter",
+        "c2patool_executable_sha256",
+    },
+    # Named, packaged governance capabilities remain separately gated from the
+    # generic domain-agent/runtime primitives.  Closed allowlists prevent a
+    # misspelled agent, media type, or cloud provider from silently becoming an
+    # unreviewed extension point.
+    "governance_agents": {
+        "enable",
+        "enabled_agents",
+        "max_context_items",
+        "max_context_bytes",
+        "max_output_bytes",
+        "retention_seconds",
+    },
+    "ai_evidence_analysis": {
+        "enable",
+        "enabled_media_types",
+        "max_artifact_bytes",
+        "max_artifacts_per_case",
+        "max_extracted_text_bytes",
+        "retention_seconds",
+    },
+    "ai_cloud_agent_governance": {
+        "enable",
+        "enabled_providers",
+        "databricks_framework_enable",
+        "max_records_per_sync",
+        "max_events_per_batch",
+        "retention_seconds",
+    },
     "ai_identity_governance_connectors": {
         "enable",
         "entra",
         "okta",
         "purview",
         "scheduler",
+        "controls",
     },
+    # Consumer consent and preference governance is a privacy data plane, not
+    # the agent-action consent gate.  Every externally consequential subsystem
+    # has its own nested opt-in; property records and destination credentials
+    # remain governed runtime records rather than open-ended config keys.
+    "consent_preferences": {
+        "enable",
+        "publishing",
+        "public_api",
+        "scanner",
+        "standards",
+        "identity",
+        "delivery",
+        "analytics",
+        "experiments",
+        "profile_data",
+        "trust_center",
+        "storage",
+        "edge_cache",
+        "limits",
+    },
+    "data_use_governance": {
+        "enable",
+        "compiler",
+        "enforcement",
+        "provider_audit",
+        "scheduler",
+        "snowflake",
+        "databricks",
+        "limits",
+    },
+    "privacy_automation": {
+        "enable",
+        "data_discovery",
+        "regulatory_intelligence",
+        "rights_orchestration",
+        "rights_consumer_delivery",
+        "rights_consumer_intake",
+        "ott_ctv_rights",
+        "notice_governance",
+    },
+    "tech_risk_compliance": {
+        "enable",
+        "continuous_evidence",
+        "policy_publication_links",
+        "scoping",
+        "scope_actions",
+    },
+    "third_party_management": {
+        "enable",
+        "intelligence",
+        "lifecycle",
+    },
+    "customer_sandbox_lifecycle": {"enable", "source_revision"},
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
     "models": None,
@@ -304,6 +432,24 @@ _INTEGER_KEYS: dict[str, set[str]] = {
         "minimum_train_families",
         "minimum_holdout_families",
     },
+    "customer_sandbox_lifecycle": {"source_revision"},
+    "governance_agents": {
+        "max_context_items",
+        "max_context_bytes",
+        "max_output_bytes",
+        "retention_seconds",
+    },
+    "ai_evidence_analysis": {
+        "max_artifact_bytes",
+        "max_artifacts_per_case",
+        "max_extracted_text_bytes",
+        "retention_seconds",
+    },
+    "ai_cloud_agent_governance": {
+        "max_records_per_sync",
+        "max_events_per_batch",
+        "retention_seconds",
+    },
 }
 
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
@@ -322,12 +468,22 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "deferred_tools",
     },
     "audit": {"sign"},
-    "sandbox": {"require_container", "allow_network", "allow_root",
-                "reuse_container", "cross_run_pool", "warm"},
+    "sandbox": {
+        "require_container",
+        "allow_network",
+        "allow_root",
+        "reuse_container",
+        "cross_run_pool",
+        "warm",
+    },
     "analytics": {"mcp_client_language"},
     "self_learning": {
-        "preflight", "create_tools", "provision_packs",
-        "allow_mcp_acquisition", "allow_provider_egress", "distill_local",
+        "preflight",
+        "create_tools",
+        "provision_packs",
+        "allow_mcp_acquisition",
+        "allow_provider_egress",
+        "distill_local",
     },
     "ekko": {"provider_egress"},
     "model_improvement": {
@@ -338,6 +494,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
     },
     "automation_import": {"enable", "create_schedules"},
     "ai_vendor_risk": {"portal_enable"},
+    "ai_cloud_agent_governance": {"databricks_framework_enable"},
     "models": {"cascade"},
     "routing": {"cost_aware"},
 }
@@ -358,6 +515,15 @@ _IDENTITY_SCHEDULE_KEYS = {
     "max_delta_digests",
 }
 _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
+    ("audit", "unified"): {
+        "enable",
+        "page_size",
+        "lease_seconds",
+        "max_lag_seconds",
+        "max_attempts",
+        "retry_backoff_seconds",
+        "poll_seconds",
+    },
     ("ai_benchmark_exchange", "trust_roots"): {"schema", "version", "keys"},
     ("ai_benchmark_exchange", "coordinator"): {
         "enable",
@@ -376,11 +542,509 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
         "okta",
         "purview",
     },
+    ("ai_identity_governance_connectors", "controls"): {
+        "enable",
+        "change_coupling",
+        "federation",
+        "conditional_access",
+        "purview_writeback",
+    },
+    ("ai_identity_governance_connectors", "controls", "change_coupling"): {
+        "enable",
+        "dynamic_risk",
+        "alerts",
+    },
+    ("ai_identity_governance_connectors", "controls", "federation"): {"enable"},
+    ("ai_identity_governance_connectors", "controls", "conditional_access"): {"enable"},
+    ("ai_identity_governance_connectors", "controls", "purview_writeback"): {"enable"},
+    ("consent_preferences", "publishing"): {
+        "enable",
+        "require_signed_publications",
+    },
+    ("consent_preferences", "public_api"): {
+        "enable",
+        "token_ttl_seconds",
+        "max_request_bytes",
+        "max_response_bytes",
+        "requests_per_minute",
+    },
+    ("consent_preferences", "scanner"): {
+        "enable",
+        "scheduler",
+        "notice_proposals",
+        "interval_seconds",
+        "max_pages",
+        "max_depth",
+        "page_timeout_seconds",
+        "max_network_events",
+        "allow_authenticated_scans",
+    },
+    ("consent_preferences", "scanner", "scheduler"): {
+        "enable",
+        "poll_seconds",
+        "enqueue_limit",
+        "claim_limit",
+        "tenant_limit",
+    },
+    ("consent_preferences", "scanner", "notice_proposals"): {
+        "enable",
+    },
+    ("consent_preferences", "standards"): {
+        "gpc",
+        "dnt",
+        "gpp",
+        "tcf",
+        "google_consent_mode",
+    },
+    ("consent_preferences", "identity"): {
+        "enable",
+        "issuer",
+        "audience",
+        "jwks_origin",
+        "token_ttl_seconds",
+    },
+    ("consent_preferences", "delivery"): {
+        "enable",
+        "max_attempts",
+        "retry_base_seconds",
+        "retry_max_seconds",
+    },
+    ("consent_preferences", "analytics"): {
+        "enable",
+        "min_cohort_size",
+        "retention_days",
+    },
+    ("consent_preferences", "experiments"): {
+        "enable",
+    },
+    ("consent_preferences", "profile_data"): {
+        "enable",
+    },
+    ("consent_preferences", "trust_center"): {
+        "enable",
+    },
+    ("consent_preferences", "storage"): {
+        "backend",
+        "dsn_secret_ref",
+    },
+    ("consent_preferences", "edge_cache"): {
+        "enable",
+        "max_age_seconds",
+        "stale_if_error_seconds",
+    },
+    ("consent_preferences", "limits"): {
+        "profile_page_size",
+        "receipt_page_size",
+        "request_body_bytes",
+    },
+    ("data_use_governance", "compiler"): {
+        "enable",
+        "max_operations",
+        "max_row_filter_nodes",
+    },
+    ("data_use_governance", "enforcement"): {
+        "enable",
+        "require_four_eyes",
+        "max_attempts",
+        "retry_base_seconds",
+        "retry_max_seconds",
+    },
+    ("data_use_governance", "scheduler"): {
+        "enable",
+        "poll_seconds",
+        "lease_seconds",
+        "history_limit",
+    },
+    ("data_use_governance", "snowflake"): {
+        "enable",
+        "origin",
+        "credential_secret_ref",
+        "credential_revision",
+        "timeout_seconds",
+        "max_response_bytes",
+    },
+    ("data_use_governance", "databricks"): {
+        "enable",
+        "origin",
+        "credential_secret_ref",
+        "credential_revision",
+        "timeout_seconds",
+        "max_response_bytes",
+    },
+    ("data_use_governance", "limits"): {
+        "max_assets",
+        "max_fields",
+        "max_lineage_edges",
+        "max_context_age_seconds",
+    },
+    ("privacy_automation", "data_discovery"): {
+        "enable",
+    },
+    ("privacy_automation", "regulatory_intelligence"): {
+        "enable",
+    },
+    ("privacy_automation", "rights_orchestration"): {
+        "enable",
+    },
+    ("data_use_governance", "provider_audit"): {
+        "enable",
+        "audit_window_seconds",
+        "retention_seconds",
+        "max_attempts",
+        "snowflake_latency_watermark_seconds",
+        "cursor_overlap_seconds",
+        "max_pages_per_read",
+        "scheduler",
+    },
+    ("data_use_governance", "provider_audit", "scheduler"): {
+        "enable",
+        "poll_seconds",
+        "claim_limit",
+        "tenant_limit",
+        "lease_seconds",
+        "event_limit",
+        "retry_backoff_seconds",
+        "purge_limit",
+    },
+    ("privacy_automation", "rights_consumer_delivery"): {
+        "enable",
+    },
+    ("privacy_automation", "rights_consumer_intake"): {
+        "enable",
+        "request_ttl_seconds",
+        "retention_seconds",
+        "max_active_requests",
+        "max_active_requests_per_subject",
+    },
+    ("privacy_automation", "ott_ctv_rights"): {
+        "enable",
+    },
+    ("privacy_automation", "notice_governance"): {
+        "enable",
+    },
+    ("tech_risk_compliance", "policy_publication_links"): {
+        "enable",
+    },
+    ("tech_risk_compliance", "scoping"): {
+        "enable",
+    },
+    ("tech_risk_compliance", "scope_actions"): {
+        "enable",
+    },
+    ("tech_risk_compliance", "continuous_evidence"): {
+        "enable",
+        "enabled_collectors",
+        "scheduler",
+    },
+    ("tech_risk_compliance", "continuous_evidence", "scheduler"): {
+        "enable",
+        "poll_seconds",
+        "enqueue_limit",
+        "claim_limit",
+        "tenant_limit",
+        "lease_seconds",
+        "retry_backoff_seconds",
+    },
+    ("third_party_management", "intelligence"): {
+        "enable",
+        "providers",
+    },
+    ("third_party_management", "intelligence", "providers"): {
+        "enable",
+        "enabled_providers",
+        "generic_approved_host",
+        "timeout_seconds",
+        "scheduler",
+    },
+    ("third_party_management", "intelligence", "providers", "scheduler"): {
+        "enable",
+        "poll_seconds",
+    },
+    ("third_party_management", "lifecycle"): {
+        "enable",
+        "portal",
+    },
+    ("third_party_management", "lifecycle", "portal"): {
+        "enable",
+        "invitation_ttl_seconds",
+        "retention_seconds",
+        "max_messages",
+        "max_artifacts",
+        "max_artifact_bytes",
+    },
 }
 for _provider in ("entra", "okta", "purview"):
     _NESTED_GOVERNANCE_SCHEMA[
         ("ai_identity_governance_connectors", "scheduler", "providers", _provider)
     ] = _IDENTITY_SCHEDULE_KEYS
+
+_NESTED_BOOL_KEYS: dict[tuple[str, ...], set[str]] = {
+    ("audit", "unified"): {"enable"},
+    ("consent_preferences", "publishing"): {
+        "enable",
+        "require_signed_publications",
+    },
+    ("consent_preferences", "public_api"): {"enable"},
+    ("consent_preferences", "scanner"): {
+        "enable",
+        "allow_authenticated_scans",
+    },
+    ("consent_preferences", "scanner", "scheduler"): {"enable"},
+    ("consent_preferences", "scanner", "notice_proposals"): {"enable"},
+    ("consent_preferences", "standards"): {
+        "gpc",
+        "dnt",
+        "gpp",
+        "tcf",
+        "google_consent_mode",
+    },
+    ("consent_preferences", "identity"): {"enable"},
+    ("consent_preferences", "delivery"): {"enable"},
+    ("consent_preferences", "analytics"): {"enable"},
+    ("consent_preferences", "experiments"): {"enable"},
+    ("consent_preferences", "profile_data"): {"enable"},
+    ("consent_preferences", "trust_center"): {"enable"},
+    ("consent_preferences", "edge_cache"): {"enable"},
+    ("data_use_governance", "compiler"): {"enable"},
+    ("data_use_governance", "enforcement"): {
+        "enable",
+        "require_four_eyes",
+    },
+    ("data_use_governance", "provider_audit"): {"enable"},
+    ("data_use_governance", "provider_audit", "scheduler"): {"enable"},
+    ("data_use_governance", "scheduler"): {"enable"},
+    ("data_use_governance", "snowflake"): {"enable"},
+    ("data_use_governance", "databricks"): {"enable"},
+    ("privacy_automation", "data_discovery"): {"enable"},
+    ("privacy_automation", "regulatory_intelligence"): {"enable"},
+    ("privacy_automation", "rights_orchestration"): {"enable"},
+    ("privacy_automation", "rights_consumer_delivery"): {"enable"},
+    ("privacy_automation", "rights_consumer_intake"): {"enable"},
+    ("privacy_automation", "ott_ctv_rights"): {"enable"},
+    ("privacy_automation", "notice_governance"): {"enable"},
+    ("tech_risk_compliance", "policy_publication_links"): {"enable"},
+    ("tech_risk_compliance", "scoping"): {"enable"},
+    ("tech_risk_compliance", "scope_actions"): {"enable"},
+    ("tech_risk_compliance", "continuous_evidence"): {"enable"},
+    ("tech_risk_compliance", "continuous_evidence", "scheduler"): {"enable"},
+    ("third_party_management", "intelligence"): {"enable"},
+    ("third_party_management", "intelligence", "providers"): {"enable"},
+    ("third_party_management", "intelligence", "providers", "scheduler"): {
+        "enable"
+    },
+    ("third_party_management", "lifecycle"): {"enable"},
+    ("third_party_management", "lifecycle", "portal"): {"enable"},
+}
+
+_NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
+    (("audit", "unified"), "page_size"): (1, 500),
+    (("audit", "unified"), "lease_seconds"): (30, 86_400),
+    (("audit", "unified"), "max_lag_seconds"): (1, 31_536_000),
+    (("audit", "unified"), "max_attempts"): (1, 20),
+    (("audit", "unified"), "retry_backoff_seconds"): (0, 86_400),
+    (("audit", "unified"), "poll_seconds"): (5, 3_600),
+    (("customer_sandbox_lifecycle",), "source_revision"): (1, 2**31 - 1),
+    (("governance_agents",), "max_context_items"): (1, 1_000),
+    (("governance_agents",), "max_context_bytes"): (1_024, 10_485_760),
+    (("governance_agents",), "max_output_bytes"): (1_024, 1_048_576),
+    (("governance_agents",), "retention_seconds"): (3_600, 315_360_000),
+    (("ai_evidence_analysis",), "max_artifact_bytes"): (1_024, 104_857_600),
+    (("ai_evidence_analysis",), "max_artifacts_per_case"): (1, 100),
+    (("ai_evidence_analysis",), "max_extracted_text_bytes"): (1_024, 10_485_760),
+    (("ai_evidence_analysis",), "retention_seconds"): (3_600, 315_360_000),
+    (("ai_cloud_agent_governance",), "max_records_per_sync"): (1, 1_000_000),
+    (("ai_cloud_agent_governance",), "max_events_per_batch"): (1, 100_000),
+    (("ai_cloud_agent_governance",), "retention_seconds"): (3_600, 315_360_000),
+    (("ai_governance_loop",), "poll_seconds"): (5, 3_600),
+    (("ai_governance_loop",), "batch_size"): (1, 500),
+    (("ai_governance_loop",), "lease_seconds"): (30, 3_600),
+    (("ai_governance_loop",), "max_attempts"): (1, 20),
+    (("ai_governance_loop",), "retry_base_seconds"): (1, 86_400),
+    (("ai_governance_loop",), "max_lag_seconds"): (1, 31_536_000),
+    (("consent_preferences", "public_api"), "token_ttl_seconds"): (60, 86_400),
+    (("consent_preferences", "public_api"), "max_request_bytes"): (
+        1_024,
+        1_048_576,
+    ),
+    (("consent_preferences", "public_api"), "max_response_bytes"): (
+        1_024,
+        4_194_304,
+    ),
+    (("consent_preferences", "public_api"), "requests_per_minute"): (1, 10_000),
+    (("consent_preferences", "scanner"), "interval_seconds"): (300, 2_592_000),
+    (("consent_preferences", "scanner"), "max_pages"): (1, 10_000),
+    (("consent_preferences", "scanner"), "max_depth"): (0, 20),
+    (("consent_preferences", "scanner"), "page_timeout_seconds"): (1, 300),
+    (("consent_preferences", "scanner"), "max_network_events"): (1, 100_000),
+    (("consent_preferences", "scanner", "scheduler"), "poll_seconds"): (5, 3_600),
+    (("consent_preferences", "scanner", "scheduler"), "enqueue_limit"): (1, 500),
+    (("consent_preferences", "scanner", "scheduler"), "claim_limit"): (1, 100),
+    (("consent_preferences", "scanner", "scheduler"), "tenant_limit"): (
+        1,
+        10_000,
+    ),
+    (("consent_preferences", "identity"), "token_ttl_seconds"): (60, 86_400),
+    (("consent_preferences", "delivery"), "max_attempts"): (1, 20),
+    (("consent_preferences", "delivery"), "retry_base_seconds"): (1, 3_600),
+    (("consent_preferences", "delivery"), "retry_max_seconds"): (1, 86_400),
+    (("consent_preferences", "analytics"), "min_cohort_size"): (2, 100_000),
+    (("consent_preferences", "analytics"), "retention_days"): (1, 3_650),
+    (("consent_preferences", "edge_cache"), "max_age_seconds"): (0, 86_400),
+    (("consent_preferences", "edge_cache"), "stale_if_error_seconds"): (
+        0,
+        604_800,
+    ),
+    (("consent_preferences", "limits"), "profile_page_size"): (1, 500),
+    (("consent_preferences", "limits"), "receipt_page_size"): (1, 500),
+    (("consent_preferences", "limits"), "request_body_bytes"): (
+        1_024,
+        1_048_576,
+    ),
+    (("data_use_governance", "compiler"), "max_operations"): (1, 10_000),
+    (("data_use_governance", "compiler"), "max_row_filter_nodes"): (1, 1_000),
+    (("data_use_governance", "enforcement"), "max_attempts"): (1, 5),
+    (("data_use_governance", "enforcement"), "retry_base_seconds"): (1, 3_600),
+    (("data_use_governance", "enforcement"), "retry_max_seconds"): (1, 86_400),
+    (("data_use_governance", "provider_audit"), "audit_window_seconds"): (
+        60,
+        604_800,
+    ),
+    (("data_use_governance", "provider_audit"), "retention_seconds"): (
+        60,
+        316_224_000,
+    ),
+    (("data_use_governance", "provider_audit"), "max_attempts"): (1, 20),
+    (
+        ("data_use_governance", "provider_audit"),
+        "snowflake_latency_watermark_seconds",
+    ): (10_800, 604_800),
+    (
+        ("data_use_governance", "provider_audit"),
+        "cursor_overlap_seconds",
+    ): (60, 3_600),
+    (
+        ("data_use_governance", "provider_audit"),
+        "max_pages_per_read",
+    ): (1, 100),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "poll_seconds",
+    ): (5, 3_600),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "claim_limit",
+    ): (1, 100),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "tenant_limit",
+    ): (1, 10_000),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "lease_seconds",
+    ): (30, 86_400),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "event_limit",
+    ): (1, 500),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "retry_backoff_seconds",
+    ): (0, 86_400),
+    (
+        ("data_use_governance", "provider_audit", "scheduler"),
+        "purge_limit",
+    ): (1, 500),
+    (("data_use_governance", "scheduler"), "poll_seconds"): (5, 3_600),
+    (("data_use_governance", "scheduler"), "lease_seconds"): (30, 86_400),
+    (("data_use_governance", "scheduler"), "history_limit"): (1, 1_000),
+    (("data_use_governance", "snowflake"), "timeout_seconds"): (1, 60),
+    (("data_use_governance", "snowflake"), "credential_revision"): (1, 2**31 - 1),
+    (("data_use_governance", "snowflake"), "max_response_bytes"): (
+        1_024,
+        131_072,
+    ),
+    (("data_use_governance", "databricks"), "timeout_seconds"): (5, 50),
+    (("data_use_governance", "databricks"), "credential_revision"): (1, 2**31 - 1),
+    (("data_use_governance", "databricks"), "max_response_bytes"): (
+        1_024,
+        131_072,
+    ),
+    (("data_use_governance", "limits"), "max_assets"): (1, 1_000_000),
+    (("data_use_governance", "limits"), "max_fields"): (1, 10_000_000),
+    (("data_use_governance", "limits"), "max_lineage_edges"): (1, 20_000_000),
+    (("data_use_governance", "limits"), "max_context_age_seconds"): (
+        60,
+        31_536_000,
+    ),
+    (("privacy_automation", "rights_consumer_intake"), "request_ttl_seconds"): (
+        60,
+        2_592_000,
+    ),
+    (("privacy_automation", "rights_consumer_intake"), "retention_seconds"): (
+        3_600,
+        316_224_000,
+    ),
+    (("privacy_automation", "rights_consumer_intake"), "max_active_requests"): (
+        1,
+        10_000,
+    ),
+    (
+        ("privacy_automation", "rights_consumer_intake"),
+        "max_active_requests_per_subject",
+    ): (1, 10_000),
+    (("tech_risk_compliance", "continuous_evidence", "scheduler"), "poll_seconds"): (
+        5,
+        3_600,
+    ),
+    (("tech_risk_compliance", "continuous_evidence", "scheduler"), "enqueue_limit"): (
+        1,
+        500,
+    ),
+    (("tech_risk_compliance", "continuous_evidence", "scheduler"), "claim_limit"): (
+        1,
+        100,
+    ),
+    (("tech_risk_compliance", "continuous_evidence", "scheduler"), "tenant_limit"): (
+        1,
+        10_000,
+    ),
+    (("tech_risk_compliance", "continuous_evidence", "scheduler"), "lease_seconds"): (
+        30,
+        3_600,
+    ),
+    (
+        ("tech_risk_compliance", "continuous_evidence", "scheduler"),
+        "retry_backoff_seconds",
+    ): (1, 86_400),
+    (("third_party_management", "intelligence", "providers"), "timeout_seconds"): (
+        1,
+        120,
+    ),
+    (
+        ("third_party_management", "intelligence", "providers", "scheduler"),
+        "poll_seconds",
+    ): (60, 86_400),
+    (
+        ("third_party_management", "lifecycle", "portal"),
+        "invitation_ttl_seconds",
+    ): (300, 2_592_000),
+    (
+        ("third_party_management", "lifecycle", "portal"),
+        "retention_seconds",
+    ): (3_600, 316_224_000),
+    (("third_party_management", "lifecycle", "portal"), "max_messages"): (
+        1,
+        1_000,
+    ),
+    (("third_party_management", "lifecycle", "portal"), "max_artifacts"): (
+        0,
+        100,
+    ),
+    (("third_party_management", "lifecycle", "portal"), "max_artifact_bytes"): (
+        1_024,
+        104_857_600,
+    ),
+}
 
 _IDENTITY_SCHEDULE_INTEGER_BOUNDS = {
     "interval_seconds": (60, 86_400),
@@ -401,10 +1065,17 @@ _MISSING = object()
 # Bare ``token`` is deliberately NOT here: it is a documented operator setting
 # (e.g. ``[dashboard] token``) and too broad to flag without false positives.
 # Secret-bearing ``*_token`` keys are still caught by the suffix list below.
-_SECRET_KEY_NAMES = frozenset({
-    "api_key", "apikey", "secret", "client_secret", "password", "passwd",
-    "private_key",
-})
+_SECRET_KEY_NAMES = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "secret",
+        "client_secret",
+        "password",
+        "passwd",
+        "private_key",
+    }
+)
 _SECRET_KEY_SUFFIXES = ("_api_key", "_secret", "_password", "_token")
 
 
@@ -430,22 +1101,20 @@ def _lint_inline_secrets(cfg: dict, _path: tuple[str, ...] = ()) -> list[Finding
             continue
         if isinstance(val, dict):
             out.extend(_lint_inline_secrets(val, _path + (key,)))
-        elif (
-            _is_secret_key(key)
-            and isinstance(val, str)
-            and not _looks_like_env_ref(val)
-        ):
+        elif _is_secret_key(key) and isinstance(val, str) and not _looks_like_env_ref(val):
             dotted = ".".join(_path + (key,))
-            out.append(Finding(
-                section=".".join(_path) or "(root)",
-                key=key,
-                severity="warning",
-                message=(
-                    f"{dotted} looks like an inline secret; reference an env var "
-                    f'instead (e.g. {key} = "${{MY_SECRET}}") so the secret is not '
-                    "stored in plaintext config."
-                ),
-            ))
+            out.append(
+                Finding(
+                    section=".".join(_path) or "(root)",
+                    key=key,
+                    severity="warning",
+                    message=(
+                        f"{dotted} looks like an inline secret; reference an env var "
+                        f'instead (e.g. {key} = "${{MY_SECRET}}") so the secret is not '
+                        "stored in plaintext config."
+                    ),
+                )
+            )
     return out
 
 
@@ -463,6 +1132,14 @@ def _is_valid_numeric_cap(v: int | float) -> bool:
     if isinstance(v, int):
         return v >= 0
     return math.isfinite(v) and v >= 0
+
+
+def _is_lower_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _number_between(value: object, lower: float, upper: float) -> bool:
@@ -501,9 +1178,7 @@ def _nested_error(
     return Finding(section=section, key=key, severity=severity, message=message)
 
 
-def _lint_identity_schedule_table(
-    path: tuple[str, ...], value: dict
-) -> list[Finding]:
+def _lint_identity_schedule_table(path: tuple[str, ...], value: dict) -> list[Finding]:
     findings: list[Finding] = []
     section = ".".join(path)
     enabled = value.get("enable", _MISSING)
@@ -512,8 +1187,7 @@ def _lint_identity_schedule_table(
             _nested_error(
                 section,
                 "enable",
-                f"{section}.enable must be true or false, got "
-                f"{type(enabled).__name__}",
+                f"{section}.enable must be true or false, got {type(enabled).__name__}",
             )
         )
     for key, bounds in _IDENTITY_SCHEDULE_INTEGER_BOUNDS.items():
@@ -521,17 +1195,12 @@ def _lint_identity_schedule_table(
         if item is _MISSING:
             continue
         lower, upper = bounds
-        if (
-            isinstance(item, bool)
-            or not isinstance(item, int)
-            or not lower <= item <= upper
-        ):
+        if isinstance(item, bool) or not isinstance(item, int) or not lower <= item <= upper:
             findings.append(
                 _nested_error(
                     section,
                     key,
-                    f"{section}.{key} must be an integer between "
-                    f"{lower} and {upper}, got {item!r}",
+                    f"{section}.{key} must be an integer between {lower} and {upper}, got {item!r}",
                 )
             )
     retry_base = value.get("retry_base_seconds")
@@ -547,8 +1216,7 @@ def _lint_identity_schedule_table(
             _nested_error(
                 section,
                 "retry_max_seconds",
-                f"{section}.retry_max_seconds must be greater than or equal "
-                "to retry_base_seconds",
+                f"{section}.retry_max_seconds must be greater than or equal to retry_base_seconds",
             )
         )
     return findings
@@ -608,8 +1276,7 @@ def _lint_trust_root_keys(value: dict) -> list[Finding]:
                     _nested_error(
                         item_section,
                         key,
-                        f'unknown key "{key}" in [{item_section}]'
-                        + _suggest(key, sorted(allowed)),
+                        f'unknown key "{key}" in [{item_section}]' + _suggest(key, sorted(allowed)),
                         severity="warning",
                     )
                 )
@@ -635,9 +1302,7 @@ def _lint_trust_root_keys(value: dict) -> list[Finding]:
         for key in ("introduced_in", "revoked_in"):
             item_value = item.get(key, _MISSING)
             if item_value is not _MISSING and (
-                isinstance(item_value, bool)
-                or not isinstance(item_value, int)
-                or item_value < 1
+                isinstance(item_value, bool) or not isinstance(item_value, int) or item_value < 1
             ):
                 findings.append(
                     _nested_error(
@@ -646,6 +1311,753 @@ def _lint_trust_root_keys(value: dict) -> list[Finding]:
                         f"{item_section}.{key} must be a positive integer",
                     )
                 )
+    return findings
+
+
+def _lint_identity_controls(cfg: dict) -> list[Finding]:
+    findings: list[Finding] = []
+    controls = _at_path(cfg, ("ai_identity_governance_connectors", "controls"))
+    if not isinstance(controls, dict):
+        return findings
+    section = "ai_identity_governance_connectors.controls"
+    connector = _at_path(cfg, ("ai_identity_governance_connectors", "enable"))
+    if controls.get("enable") is True and connector is not True:
+        findings.append(
+            _nested_error(
+                section,
+                "enable",
+                f"enabled {section} requires ai_identity_governance_connectors.enable = true",
+            )
+        )
+    for path, keys in (
+        (("controls",), ("enable",)),
+        (("controls", "change_coupling"), ("enable", "dynamic_risk", "alerts")),
+        (("controls", "federation"), ("enable",)),
+        (("controls", "conditional_access"), ("enable",)),
+        (("controls", "purview_writeback"), ("enable",)),
+    ):
+        table = _at_path(cfg, ("ai_identity_governance_connectors", *path))
+        if not isinstance(table, dict):
+            continue
+        table_section = "ai_identity_governance_connectors." + ".".join(path)
+        for key in keys:
+            value = table.get(key, _MISSING)
+            if value is not _MISSING and not isinstance(value, bool):
+                findings.append(
+                    _nested_error(
+                        table_section,
+                        key,
+                        f"{table_section}.{key} must be true or false, got {type(value).__name__}",
+                    )
+                )
+        if len(path) == 2 and table.get("enable") is True and controls.get("enable") is not True:
+            findings.append(
+                _nested_error(
+                    table_section,
+                    "enable",
+                    f"enabled {table_section} requires {section}.enable = true",
+                )
+            )
+    change = controls.get("change_coupling")
+    if (
+        isinstance(change, dict)
+        and change.get("enable") is True
+        and change.get("dynamic_risk") is not True
+        and change.get("alerts") is not True
+    ):
+        findings.append(
+            _nested_error(
+                f"{section}.change_coupling",
+                "enable",
+                "enabled identity change coupling requires dynamic_risk or alerts",
+            )
+        )
+    federation = controls.get("federation")
+    federation_enabled = isinstance(federation, dict) and federation.get("enable") is True
+    for dependent_name in ("conditional_access", "purview_writeback"):
+        dependent = controls.get(dependent_name)
+        if (
+            isinstance(dependent, dict)
+            and dependent.get("enable") is True
+            and not federation_enabled
+        ):
+            dependent_section = f"{section}.{dependent_name}"
+            findings.append(
+                _nested_error(
+                    dependent_section,
+                    "enable",
+                    f"enabled {dependent_section} requires {section}.federation.enable = true",
+                )
+            )
+    return findings
+
+
+def _is_https_origin(value: object) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in ("", "/")
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _table_enabled(cfg: dict, path: tuple[str, ...]) -> bool:
+    table = _at_path(cfg, path)
+    return isinstance(table, dict) and table.get("enable") is True
+
+
+def _lint_product_governance_contracts(  # noqa: C901
+    cfg: dict,
+) -> list[Finding]:
+    """Validate consent and data-use controls that must fail closed."""
+
+    findings: list[Finding] = []
+    if _table_enabled(cfg, ("audit", "unified")):
+        audit = cfg.get("audit")
+        if not isinstance(audit, dict) or audit.get("sign") is not True:
+            findings.append(
+                _nested_error(
+                    "audit.unified",
+                    "enable",
+                    "unified audit requires [audit] sign = true",
+                )
+            )
+    if _table_enabled(cfg, ("ai_governance_loop",)):
+        required_ai_loop_authorities = (
+            ("ai_inventory",),
+            ("ai_dynamic_risk",),
+            ("ai_policy_management",),
+            ("ai_runtime_guardrails",),
+        )
+        missing = [
+            ".".join(path)
+            for path in required_ai_loop_authorities
+            if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "ai_governance_loop",
+                    "enable",
+                    "AI governance loop requires enabled authority: "
+                    + ", ".join(missing),
+                )
+            )
+    closed_capability_lists = (
+        (
+            ("governance_agents",),
+            "enabled_agents",
+            {
+                "breach_response",
+                "privacy_risk_assessment",
+                "program_copilot",
+                "knowledgebase_governance",
+                "third_party_risk",
+            },
+        ),
+        (
+            ("ai_evidence_analysis",),
+            "enabled_media_types",
+            {"pdf", "jpeg", "png", "xlsx", "text"},
+        ),
+        (
+            ("ai_cloud_agent_governance",),
+            "enabled_providers",
+            {"aws_bedrock", "azure_ai_foundry", "google_vertex_ai"},
+        ),
+    )
+    for path, key, allowed in closed_capability_lists:
+        table = _at_path(cfg, path)
+        if not isinstance(table, dict) or table.get("enable") is not True:
+            continue
+        values = table.get(key)
+        if (
+            not isinstance(values, list)
+            or not values
+            or len(values) > len(allowed)
+            or any(not isinstance(item, str) or item not in allowed for item in values)
+            or len(set(values)) != len(values)
+        ):
+            section = ".".join(path)
+            findings.append(
+                _nested_error(
+                    section,
+                    key,
+                    f"enabled {section} requires a unique closed {key} allowlist",
+                )
+            )
+
+    if _table_enabled(cfg, ("governance_agents",)):
+        missing = []
+        if not _table_enabled(cfg, ("evidence_gateway",)):
+            missing.append("evidence_gateway")
+        if missing:
+            findings.append(
+                _nested_error(
+                    "governance_agents",
+                    "enable",
+                    "packaged governance agents require enabled authority: "
+                    + ", ".join(missing),
+                )
+            )
+    if _table_enabled(cfg, ("ai_evidence_analysis",)) and not _table_enabled(
+        cfg, ("evidence_gateway",)
+    ):
+        findings.append(
+            _nested_error(
+                "ai_evidence_analysis",
+                "enable",
+                "AI evidence analysis requires evidence_gateway.enable = true",
+            )
+        )
+    if _table_enabled(cfg, ("ai_cloud_agent_governance",)):
+        required_cloud_authorities = (
+            ("ai_inventory",),
+            ("ai_policy_management",),
+            ("ai_runtime_guardrails",),
+        )
+        missing = [
+            ".".join(path)
+            for path in required_cloud_authorities
+            if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "ai_cloud_agent_governance",
+                    "enable",
+                    "cloud-agent governance requires enabled authority: "
+                    + ", ".join(missing),
+                )
+            )
+        cloud_table = _at_path(cfg, ("ai_cloud_agent_governance",))
+        if (
+            isinstance(cloud_table, dict)
+            and cloud_table.get("databricks_framework_enable") is True
+            and not _table_enabled(cfg, ("policy_packs",))
+        ):
+            findings.append(
+                _nested_error(
+                    "ai_cloud_agent_governance",
+                    "databricks_framework_enable",
+                    "Databricks framework activation requires policy_packs.enable = true",
+                )
+            )
+    for path, bool_keys in _NESTED_BOOL_KEYS.items():
+        table = _at_path(cfg, path)
+        if not isinstance(table, dict):
+            continue
+        section = ".".join(path)
+        for key in bool_keys:
+            value = table.get(key, _MISSING)
+            if value is not _MISSING and not isinstance(value, bool):
+                findings.append(
+                    _nested_error(
+                        section,
+                        key,
+                        f"{section}.{key} must be true or false, got {type(value).__name__}",
+                    )
+                )
+
+    for (path, key), (lower, upper) in _NESTED_INTEGER_BOUNDS.items():
+        table = _at_path(cfg, path)
+        if not isinstance(table, dict):
+            continue
+        value = table.get(key, _MISSING)
+        if value is _MISSING:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or not lower <= value <= upper:
+            section = ".".join(path)
+            findings.append(
+                _nested_error(
+                    section,
+                    key,
+                    f"{section}.{key} must be an integer between "
+                    f"{lower} and {upper}, got {value!r}",
+                )
+            )
+
+    for root in (
+        "consent_preferences",
+        "data_use_governance",
+        "privacy_automation",
+        "tech_risk_compliance",
+        "third_party_management",
+    ):
+        root_table = cfg.get(root)
+        root_enabled = isinstance(root_table, dict) and root_table.get("enable") is True
+        for path in _NESTED_BOOL_KEYS:
+            if path[0] != root or not _table_enabled(cfg, path):
+                continue
+            if not root_enabled:
+                section = ".".join(path)
+                findings.append(
+                    _nested_error(
+                        section,
+                        "enable",
+                        f"enabled {section} requires [{root}] enable = true",
+                    )
+                )
+
+    consent_public = ("consent_preferences", "public_api")
+    consent_publishing = ("consent_preferences", "publishing")
+    consent_trust_center = ("consent_preferences", "trust_center")
+    consent_scanner = ("consent_preferences", "scanner")
+    consent_scan_scheduler = (
+        "consent_preferences",
+        "scanner",
+        "scheduler",
+    )
+    consent_scan_notice_proposals = (
+        "consent_preferences",
+        "scanner",
+        "notice_proposals",
+    )
+    if _table_enabled(cfg, consent_scan_scheduler) and not _table_enabled(cfg, consent_scanner):
+        findings.append(
+            _nested_error(
+                "consent_preferences.scanner.scheduler",
+                "enable",
+                "consent scan scheduler requires consent scanner to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_scan_notice_proposals) and not _table_enabled(
+        cfg, consent_scanner
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.scanner.notice_proposals",
+                "enable",
+                "consent scan notice proposals require consent scanner to be enabled",
+            )
+        )
+    compliance_scoping = ("tech_risk_compliance", "scoping")
+    compliance_scope_actions = ("tech_risk_compliance", "scope_actions")
+    if _table_enabled(cfg, compliance_scope_actions) and not _table_enabled(
+        cfg, compliance_scoping
+    ):
+        findings.append(
+            _nested_error(
+                "tech_risk_compliance.scope_actions",
+                "enable",
+                "compliance scope actions require compliance scoping to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_public) and not _table_enabled(cfg, consent_publishing):
+        findings.append(
+            _nested_error(
+                "consent_preferences.public_api",
+                "enable",
+                "public consent API requires consent publishing to be enabled",
+            )
+        )
+    if _table_enabled(cfg, consent_trust_center) and not (
+        _table_enabled(cfg, consent_public) and _table_enabled(cfg, consent_publishing)
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.trust_center",
+                "enable",
+                "consumer trust center requires consent publishing and the public API",
+            )
+        )
+    continuous_evidence = ("tech_risk_compliance", "continuous_evidence")
+    continuous_evidence_scheduler = (
+        "tech_risk_compliance",
+        "continuous_evidence",
+        "scheduler",
+    )
+    if _table_enabled(cfg, continuous_evidence_scheduler) and not _table_enabled(
+        cfg, continuous_evidence
+    ):
+        findings.append(
+            _nested_error(
+                "tech_risk_compliance.continuous_evidence.scheduler",
+                "enable",
+                "continuous-evidence scheduler requires continuous evidence to be enabled",
+            )
+        )
+    continuous_table = _at_path(cfg, continuous_evidence)
+    if isinstance(continuous_table, dict) and continuous_table.get("enable") is True:
+        collectors = continuous_table.get("enabled_collectors")
+        if (
+            not isinstance(collectors, list)
+            or not collectors
+            or len(collectors) > 32
+            or any(
+                not isinstance(item, str)
+                or re.fullmatch(r"[a-z][a-z0-9_.-]{0,95}", item) is None
+                for item in collectors
+            )
+            or len(set(collectors)) != len(collectors)
+        ):
+            findings.append(
+                _nested_error(
+                    "tech_risk_compliance.continuous_evidence",
+                    "enabled_collectors",
+                    "enabled continuous evidence requires a unique closed collector allowlist",
+                )
+            )
+    rights_consumer_delivery = (
+        "privacy_automation",
+        "rights_consumer_delivery",
+    )
+    if _table_enabled(cfg, rights_consumer_delivery) and not _table_enabled(
+        cfg,
+        ("privacy_automation", "rights_orchestration"),
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.rights_consumer_delivery",
+                "enable",
+                "rights consumer delivery requires rights orchestration to be enabled",
+            )
+        )
+    rights_consumer_intake = (
+        "privacy_automation",
+        "rights_consumer_intake",
+    )
+    if _table_enabled(cfg, rights_consumer_intake):
+        required_intake_authorities = (
+            ("privacy_automation", "rights_orchestration"),
+            ("consent_preferences", "publishing"),
+            ("consent_preferences", "public_api"),
+            ("consent_preferences", "trust_center"),
+        )
+        missing = [
+            ".".join(path)
+            for path in required_intake_authorities
+            if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "privacy_automation.rights_consumer_intake",
+                    "enable",
+                    "consumer rights intake requires enabled authority: "
+                    + ", ".join(missing),
+                )
+            )
+        tenant_limit = _at_path(cfg, rights_consumer_intake + ("max_active_requests",))
+        subject_limit = _at_path(
+            cfg,
+            rights_consumer_intake + ("max_active_requests_per_subject",),
+        )
+        if (
+            isinstance(tenant_limit, int)
+            and not isinstance(tenant_limit, bool)
+            and isinstance(subject_limit, int)
+            and not isinstance(subject_limit, bool)
+            and subject_limit > tenant_limit
+        ):
+            findings.append(
+                _nested_error(
+                    "privacy_automation.rights_consumer_intake",
+                    "max_active_requests_per_subject",
+                    "per-subject active request limit must not exceed the tenant limit",
+                )
+            )
+    ott_ctv_rights = ("privacy_automation", "ott_ctv_rights")
+    if _table_enabled(cfg, ott_ctv_rights):
+        required_ott_ctv_authorities = (
+            ("privacy_automation", "rights_orchestration"),
+            ("consent_preferences", "publishing"),
+            ("consent_preferences", "public_api"),
+            ("consent_preferences", "identity"),
+            ("consent_preferences", "trust_center"),
+        )
+        missing = [
+            ".".join(path)
+            for path in required_ott_ctv_authorities
+            if not _table_enabled(cfg, path)
+        ]
+        if missing:
+            findings.append(
+                _nested_error(
+                    "privacy_automation.ott_ctv_rights",
+                    "enable",
+                    "OTT/CTV rights require enabled authority: " + ", ".join(missing),
+                )
+            )
+    if _table_enabled(cfg, ("consent_preferences", "edge_cache")) and not (
+        _table_enabled(cfg, consent_public)
+    ):
+        findings.append(
+            _nested_error(
+                "consent_preferences.edge_cache",
+                "enable",
+                "consent edge cache requires the public API to be enabled",
+            )
+        )
+    lifecycle_portal = (
+        "third_party_management",
+        "lifecycle",
+        "portal",
+    )
+    if _table_enabled(cfg, lifecycle_portal) and not _table_enabled(
+        cfg,
+        ("third_party_management", "lifecycle"),
+    ):
+        findings.append(
+            _nested_error(
+                "third_party_management.lifecycle.portal",
+                "enable",
+                "third-party collaboration portal requires lifecycle to be enabled",
+            )
+        )
+
+    identity = _at_path(cfg, ("consent_preferences", "identity"))
+    if isinstance(identity, dict) and identity.get("enable") is True:
+        if not (
+            _table_enabled(cfg, consent_public)
+            and _table_enabled(cfg, consent_publishing)
+        ):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.identity",
+                    "enable",
+                    "consent identity requires consent publishing and the public API",
+                )
+            )
+        for key in ("issuer", "audience"):
+            value = identity.get(key)
+            if not isinstance(value, str) or not value.strip():
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.identity",
+                        key,
+                        f"enabled consent identity requires a non-empty {key}",
+                    )
+                )
+        if not _is_https_origin(identity.get("jwks_origin")):
+            findings.append(
+                _nested_error(
+                    "consent_preferences.identity",
+                    "jwks_origin",
+                    "enabled consent identity requires an exact HTTPS JWKS origin",
+                )
+            )
+
+    storage = _at_path(cfg, ("consent_preferences", "storage"))
+    if isinstance(storage, dict):
+        backend = storage.get("backend", _MISSING)
+        if backend is not _MISSING and backend not in {"sqlite", "postgres"}:
+            findings.append(
+                _nested_error(
+                    "consent_preferences.storage",
+                    "backend",
+                    "consent storage backend must be 'sqlite' or 'postgres'",
+                )
+            )
+        if backend == "postgres":
+            secret_ref = storage.get("dsn_secret_ref")
+            if not isinstance(secret_ref, str) or not secret_ref.strip().startswith("$"):
+                findings.append(
+                    _nested_error(
+                        "consent_preferences.storage",
+                        "dsn_secret_ref",
+                        "Postgres consent storage requires an environment-backed dsn_secret_ref",
+                    )
+                )
+
+    compiler_enabled = _table_enabled(cfg, ("data_use_governance", "compiler"))
+    enforcement_enabled = _table_enabled(cfg, ("data_use_governance", "enforcement"))
+    providers_enabled = any(
+        _table_enabled(cfg, ("data_use_governance", provider))
+        for provider in ("snowflake", "databricks")
+    )
+    if enforcement_enabled and not compiler_enabled:
+        findings.append(
+            _nested_error(
+                "data_use_governance.enforcement",
+                "enable",
+                "data-use enforcement requires the policy compiler",
+            )
+        )
+    if enforcement_enabled and not providers_enabled:
+        findings.append(
+            _nested_error(
+                "data_use_governance.enforcement",
+                "enable",
+                "data-use enforcement requires an explicitly enabled native provider",
+            )
+        )
+    if providers_enabled and not enforcement_enabled:
+        findings.append(
+            _nested_error(
+                "data_use_governance.enforcement",
+                "enable",
+                "native data-use providers require enforcement to be enabled",
+            )
+        )
+    provider_audit_enabled = _table_enabled(
+        cfg, ("data_use_governance", "provider_audit")
+    )
+    if provider_audit_enabled and not (enforcement_enabled and providers_enabled):
+        findings.append(
+            _nested_error(
+                "data_use_governance.provider_audit",
+                "enable",
+                "provider audit requires enforcement and an enabled native provider",
+            )
+        )
+    provider_audit_scheduler_enabled = _table_enabled(
+        cfg,
+        ("data_use_governance", "provider_audit", "scheduler"),
+    )
+    if provider_audit_scheduler_enabled and not provider_audit_enabled:
+        findings.append(
+            _nested_error(
+                "data_use_governance.provider_audit.scheduler",
+                "enable",
+                "provider-audit scheduling requires provider audit to be enabled",
+            )
+        )
+    provider_audit_table = _at_path(
+        cfg,
+        ("data_use_governance", "provider_audit"),
+    )
+    if isinstance(provider_audit_table, dict):
+        audit_window = provider_audit_table.get("audit_window_seconds")
+        retention = provider_audit_table.get("retention_seconds")
+        if (
+            isinstance(audit_window, int)
+            and not isinstance(audit_window, bool)
+            and isinstance(retention, int)
+            and not isinstance(retention, bool)
+            and retention < audit_window
+        ):
+            findings.append(
+                _nested_error(
+                    "data_use_governance.provider_audit",
+                    "retention_seconds",
+                    "provider-audit retention must cover the complete audit window",
+                )
+            )
+    for provider in ("snowflake", "databricks"):
+        path = ("data_use_governance", provider)
+        table = _at_path(cfg, path)
+        if not isinstance(table, dict) or table.get("enable") is not True:
+            continue
+        section = ".".join(path)
+        if not _is_https_origin(table.get("origin")):
+            findings.append(
+                _nested_error(
+                    section,
+                    "origin",
+                    f"enabled {provider} enforcement requires an exact HTTPS origin",
+                )
+            )
+        secret_ref = table.get("credential_secret_ref")
+        if not isinstance(secret_ref, str) or not secret_ref.strip().startswith("$"):
+            findings.append(
+                _nested_error(
+                    section,
+                    "credential_secret_ref",
+                    f"enabled {provider} enforcement requires an "
+                    "environment-backed credential_secret_ref",
+                )
+            )
+    tpi = ("third_party_management", "intelligence")
+    tpi_providers = ("third_party_management", "intelligence", "providers")
+    tpi_scheduler = (
+        "third_party_management",
+        "intelligence",
+        "providers",
+        "scheduler",
+    )
+    if _table_enabled(cfg, tpi_providers) and not _table_enabled(cfg, tpi):
+        findings.append(
+            _nested_error(
+                "third_party_management.intelligence.providers",
+                "enable",
+                "third-party provider runtime requires intelligence to be enabled",
+            )
+        )
+    if _table_enabled(cfg, tpi_scheduler) and not _table_enabled(cfg, tpi_providers):
+        findings.append(
+            _nested_error(
+                "third_party_management.intelligence.providers.scheduler",
+                "enable",
+                "third-party provider scheduler requires the provider runtime",
+            )
+        )
+    tpi_provider_table = _at_path(cfg, tpi_providers)
+    if isinstance(tpi_provider_table, dict) and tpi_provider_table.get("enable") is True:
+        provider_ids = tpi_provider_table.get("enabled_providers")
+        allowed_provider_ids = {
+            "riskrecon",
+            "securityscorecard",
+            "hacknotice",
+            "generic_approved",
+        }
+        if (
+            not isinstance(provider_ids, list)
+            or not provider_ids
+            or len(provider_ids) > len(allowed_provider_ids)
+            or any(item not in allowed_provider_ids for item in provider_ids)
+            or len(set(provider_ids)) != len(provider_ids)
+        ):
+            findings.append(
+                _nested_error(
+                    "third_party_management.intelligence.providers",
+                    "enabled_providers",
+                    "enabled third-party provider runtime requires a unique closed provider list",
+                )
+            )
+        if isinstance(provider_ids, list) and "generic_approved" in provider_ids:
+            host = tpi_provider_table.get("generic_approved_host")
+            if (
+                not isinstance(host, str)
+                or len(host) > 253
+                or re.fullmatch(
+                    r"(?=.{1,253}\Z)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}"
+                    r"[A-Za-z0-9])?\.)+[A-Za-z]{2,63}",
+                    host,
+                )
+                is None
+            ):
+                findings.append(
+                    _nested_error(
+                        "third_party_management.intelligence.providers",
+                        "generic_approved_host",
+                        "generic_approved requires one exact deployment-trusted hostname",
+                    )
+                )
+    for path in (
+        ("consent_preferences", "delivery"),
+        ("data_use_governance", "enforcement"),
+    ):
+        table = _at_path(cfg, path)
+        if not isinstance(table, dict):
+            continue
+        base = table.get("retry_base_seconds")
+        maximum = table.get("retry_max_seconds")
+        if (
+            isinstance(base, int)
+            and not isinstance(base, bool)
+            and isinstance(maximum, int)
+            and not isinstance(maximum, bool)
+            and maximum < base
+        ):
+            section = ".".join(path)
+            findings.append(
+                _nested_error(
+                    section,
+                    "retry_max_seconds",
+                    f"{section}.retry_max_seconds must be at least retry_base_seconds",
+                )
+            )
     return findings
 
 
@@ -673,8 +2085,7 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
                     _nested_error(
                         section,
                         key,
-                        f'unknown key "{key}" in [{section}]'
-                        + _suggest(key, sorted(allowed)),
+                        f'unknown key "{key}" in [{section}]' + _suggest(key, sorted(allowed)),
                         severity="warning",
                     )
                 )
@@ -708,6 +2119,7 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
                 )
             )
 
+    findings.extend(_lint_identity_controls(cfg))
     trust_roots = _at_path(cfg, ("ai_benchmark_exchange", "trust_roots"))
     if isinstance(trust_roots, dict):
         findings.extend(_lint_trust_root_keys(trust_roots))
@@ -721,8 +2133,7 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
                 _nested_error(
                     section,
                     "enable",
-                    f"{section}.enable must be true or false, got "
-                    f"{type(enabled).__name__}",
+                    f"{section}.enable must be true or false, got {type(enabled).__name__}",
                 )
             )
         origin = coordinator.get("origin", _MISSING)
@@ -757,18 +2168,16 @@ def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
         ):
             item = coordinator.get(key, _MISSING)
             if item is not _MISSING and (
-                isinstance(item, bool)
-                or not isinstance(item, int)
-                or not 1_024 <= item <= upper
+                isinstance(item, bool) or not isinstance(item, int) or not 1_024 <= item <= upper
             ):
                 findings.append(
                     _nested_error(
                         section,
                         key,
-                        f"{section}.{key} must be an integer between 1024 "
-                        f"and {upper}",
+                        f"{section}.{key} must be an integer between 1024 and {upper}",
                     )
                 )
+    findings.extend(_lint_product_governance_contracts(cfg))
     return findings
 
 
@@ -794,8 +2203,7 @@ def lint_config(cfg: dict) -> list[Finding]:
                     key=None,
                     severity="warning",
                     message=(
-                        f'unknown config section "{section}"'
-                        + _suggest(section, known_sections)
+                        f'unknown config section "{section}"' + _suggest(section, known_sections)
                     ),
                 )
             )
@@ -823,8 +2231,7 @@ def lint_config(cfg: dict) -> list[Finding]:
                         key=key,
                         severity="warning",
                         message=(
-                            f'unknown key "{key}" in [{section}]'
-                            + _suggest(key, sorted(allowed))
+                            f'unknown key "{key}" in [{section}]' + _suggest(key, sorted(allowed))
                         ),
                     )
                 )
@@ -832,28 +2239,19 @@ def lint_config(cfg: dict) -> list[Finding]:
                 continue
 
             # Type checks (conservative; only knowable cases).
-            if key in integer_keys and (
-                not isinstance(kval, int) or isinstance(kval, bool)
-            ):
+            if key in integer_keys and (not isinstance(kval, int) or isinstance(kval, bool)):
                 findings.append(
                     Finding(
                         section=section,
                         key=key,
                         severity="error",
-                        message=(
-                            f"{section}.{key} must be an integer, got "
-                            f"{type(kval).__name__}"
-                        ),
+                        message=(f"{section}.{key} must be an integer, got {type(kval).__name__}"),
                     )
                 )
             elif (
                 section == "model_improvement"
                 and key in integer_keys
-                and not (
-                    _MODEL_IMPROVEMENT_FAMILY_MIN
-                    <= kval
-                    <= _MODEL_IMPROVEMENT_FAMILY_MAX
-                )
+                and not (_MODEL_IMPROVEMENT_FAMILY_MIN <= kval <= _MODEL_IMPROVEMENT_FAMILY_MAX)
             ):
                 findings.append(
                     Finding(
@@ -873,10 +2271,7 @@ def lint_config(cfg: dict) -> list[Finding]:
                         section=section,
                         key=key,
                         severity="error",
-                        message=(
-                            f"{section}.{key} must be a number, got "
-                            f"{type(kval).__name__}"
-                        ),
+                        message=(f"{section}.{key} must be a number, got {type(kval).__name__}"),
                     )
                 )
             elif key in numeric_keys and not _is_valid_numeric_cap(kval):
@@ -890,22 +2285,18 @@ def lint_config(cfg: dict) -> list[Finding]:
                         key=key,
                         severity="error",
                         message=(
-                            f"{section}.{key} must be a finite, non-negative "
-                            f"number, got {kval!r}"
+                            f"{section}.{key} must be a finite, non-negative number, got {kval!r}"
                         ),
                     )
                 )
-            elif (
-                key in bool_keys or key in _UNIVERSAL_BOOL_KEYS
-            ) and not isinstance(kval, bool):
+            elif (key in bool_keys or key in _UNIVERSAL_BOOL_KEYS) and not isinstance(kval, bool):
                 findings.append(
                     Finding(
                         section=section,
                         key=key,
                         severity="error",
                         message=(
-                            f"{section}.{key} must be true or false, got "
-                            f"{type(kval).__name__}"
+                            f"{section}.{key} must be true or false, got {type(kval).__name__}"
                         ),
                     )
                 )
@@ -920,50 +2311,68 @@ def lint_config(cfg: dict) -> list[Finding]:
                         key=key,
                         severity="error",
                         message=(
-                            "ai_media_provenance.verification_adapter must be "
-                            'exactly "c2patool"'
+                            'ai_media_provenance.verification_adapter must be exactly "c2patool"'
                         ),
                     )
                 )
-            elif (
-                section == "model_improvement"
-                and key == "allow_cross_tenant"
-                and kval is True
-            ):
-                findings.append(Finding(
-                    section=section,
-                    key=key,
-                    severity="error",
-                    message=(
-                        "model_improvement.allow_cross_tenant is reserved and "
-                        "unsupported; it must remain false"
-                    ),
-                ))
+            elif section == "model_improvement" and key == "allow_cross_tenant" and kval is True:
+                findings.append(
+                    Finding(
+                        section=section,
+                        key=key,
+                        severity="error",
+                        message=(
+                            "model_improvement.allow_cross_tenant is reserved and "
+                            "unsupported; it must remain false"
+                        ),
+                    )
+                )
             elif (
                 section == "model_improvement"
                 and key == "require_signed_receipt"
                 and kval is False
                 and value.get("enable") is True
             ):
-                findings.append(Finding(
-                    section=section,
-                    key=key,
-                    severity="error",
-                    message=(
-                        "enabled model improvement requires "
-                        "model_improvement.require_signed_receipt = true"
-                    ),
-                ))
+                findings.append(
+                    Finding(
+                        section=section,
+                        key=key,
+                        severity="error",
+                        message=(
+                            "enabled model improvement requires "
+                            "model_improvement.require_signed_receipt = true"
+                        ),
+                    )
+                )
             elif section == "ekko" and key == "provider_egress" and kval is True:
-                findings.append(Finding(
+                findings.append(
+                    Finding(
+                        section=section,
+                        key=key,
+                        severity="error",
+                        message=(
+                            "ekko.provider_egress is reserved and unsupported; it must remain false"
+                        ),
+                    )
+                )
+
+        if (
+            section == "ai_media_provenance"
+            and value.get("verification_adapter") == "c2patool"
+            and not _is_lower_sha256(value.get("c2patool_executable_sha256"))
+        ):
+            findings.append(
+                Finding(
                     section=section,
-                    key=key,
+                    key="c2patool_executable_sha256",
                     severity="error",
                     message=(
-                        "ekko.provider_egress is reserved and unsupported; "
-                        "it must remain false"
+                        "selected c2patool verification requires "
+                        "ai_media_provenance.c2patool_executable_sha256 to be "
+                        "an exact lowercase SHA-256 digest"
                     ),
-                ))
+                )
+            )
 
     findings.extend(_lint_governance_nested_tables(cfg))
     findings.extend(_lint_inline_secrets(cfg))
@@ -986,6 +2395,7 @@ def _lint_group_mappings(cfg: dict) -> list[Finding]:
     roles = {"admin", "operator", "auditor", "viewer"}
     try:
         from .domain import SUITE_PREFIXES
+
         suites = set(SUITE_PREFIXES.values())
     except Exception:  # pragma: no cover - never let a lint import break config
         suites = set()
@@ -994,31 +2404,52 @@ def _lint_group_mappings(cfg: dict) -> list[Finding]:
     if isinstance(gr, dict):
         for group, role in gr.items():
             if not (isinstance(role, str) and role.strip().lower() in roles):
-                out.append(Finding(
-                    section="dashboard.group_roles", key=str(group),
-                    severity="error",
-                    message=(f"dashboard.group_roles[{group!r}] must name a role "
-                             f"{sorted(roles)}, got {role!r}")))
+                out.append(
+                    Finding(
+                        section="dashboard.group_roles",
+                        key=str(group),
+                        severity="error",
+                        message=(
+                            f"dashboard.group_roles[{group!r}] must name a role "
+                            f"{sorted(roles)}, got {role!r}"
+                        ),
+                    )
+                )
 
     gs = dash.get("group_suites")
     if isinstance(gs, dict):
         for group, val in gs.items():
-            vals = [val] if isinstance(val, str) else (
-                list(val) if isinstance(val, (list, tuple)) else None)
+            vals = (
+                [val]
+                if isinstance(val, str)
+                else (list(val) if isinstance(val, (list, tuple)) else None)
+            )
             if vals is None:
-                out.append(Finding(
-                    section="dashboard.group_suites", key=str(group),
-                    severity="error",
-                    message=(f"dashboard.group_suites[{group!r}] must be a suite "
-                             f"name or list of suite names, got {type(val).__name__}")))
+                out.append(
+                    Finding(
+                        section="dashboard.group_suites",
+                        key=str(group),
+                        severity="error",
+                        message=(
+                            f"dashboard.group_suites[{group!r}] must be a suite "
+                            f"name or list of suite names, got {type(val).__name__}"
+                        ),
+                    )
+                )
                 continue
             unknown = [s for s in vals if s not in suites] if suites else []
             if unknown:
-                out.append(Finding(
-                    section="dashboard.group_suites", key=str(group),
-                    severity="warning",
-                    message=(f"dashboard.group_suites[{group!r}] names unknown "
-                             f"department(s) {unknown} (they confer no access)")))
+                out.append(
+                    Finding(
+                        section="dashboard.group_suites",
+                        key=str(group),
+                        severity="warning",
+                        message=(
+                            f"dashboard.group_suites[{group!r}] names unknown "
+                            f"department(s) {unknown} (they confer no access)"
+                        ),
+                    )
+                )
     return out
 
 
@@ -1063,6 +2494,7 @@ def warn_config_at_startup(*, strict: bool | None = None) -> list[Finding]:
     _log = logging.getLogger("maverick.config")
     try:
         from .config import _read_toml_raw, config_path
+
         p = config_path()
         if not p.exists():
             return []
@@ -1082,7 +2514,10 @@ def warn_config_at_startup(*, strict: bool | None = None) -> list[Finding]:
         _log.warning("config: [%s] %s: %s", f.severity, loc, f.message)
     if strict is None:
         strict = os.environ.get("MAVERICK_CONFIG_STRICT", "").strip().lower() in {
-            "1", "true", "yes", "on",
+            "1",
+            "true",
+            "yes",
+            "on",
         }
     # Strict mode fails on ANY finding, not just error-level ones: an unknown
     # key (a typo that silently uses a default -- the dangerous case M5 is

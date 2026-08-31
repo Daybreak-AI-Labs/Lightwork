@@ -10354,8 +10354,86 @@ async def marketplace_connectors_api(request: Request, q: str = "") -> dict:
 # Department router: security/GRC records and both defensive hunters. Imported
 # at the end so its lazy actor resolver can call this module's strict
 # ``_request_actor`` without a circular import during module initialization.
+from .compliance_scope_actions_api import (  # noqa: E402
+    router as compliance_scope_actions_router,
+)
+from .compliance_scoping_api import router as compliance_scoping_router  # noqa: E402
+from .consent_delivery_api import router as consent_delivery_router  # noqa: E402
+from .consent_experiments_api import router as consent_experiments_router  # noqa: E402
+from .consent_preferences_api import router as consent_preferences_router  # noqa: E402
+from .consent_profile_data_api import router as consent_profile_data_router  # noqa: E402
+from .consent_public_admin_api import router as consent_public_admin_router  # noqa: E402
+from .consent_publishing_api import router as consent_publishing_router  # noqa: E402
+from .consent_scan_inventory_api import router as consent_scan_inventory_router  # noqa: E402
+from .consent_scan_notice_proposals_api import (  # noqa: E402
+    router as consent_scan_notice_proposals_router,
+)
+from .consumer_trust_center_authority_api import (  # noqa: E402
+    router as consumer_trust_center_authority_router,
+)
+from .ai_governance_loop_api import router as ai_governance_loop_router  # noqa: E402
+from .data_use_governance_api import router as data_use_governance_router  # noqa: E402
+from .data_use_provider_audit_api import (  # noqa: E402
+    router as data_use_provider_audit_router,
+)
+from .data_use_provider_api import router as data_use_provider_router  # noqa: E402
 from .finance_api import router as finance_operations_router  # noqa: E402
+from .policy_publication_links_api import (  # noqa: E402
+    public_router as public_policy_publication_links_router,
+)
+from .policy_publication_links_api import (  # noqa: E402
+    router as policy_publication_links_router,
+)
+from .privacy_data_discovery_api import router as privacy_data_discovery_router  # noqa: E402
+from .privacy_notice_governance_api import (  # noqa: E402
+    router as privacy_notice_governance_router,
+)
+from .privacy_regulatory_intelligence_api import (  # noqa: E402
+    router as privacy_regulatory_intelligence_router,
+)
+from .privacy_rights_consumer_delivery_api import (  # noqa: E402
+    router as privacy_rights_consumer_delivery_router,
+)
+from .privacy_rights_orchestration_api import (  # noqa: E402
+    router as privacy_rights_orchestration_router,
+)
 from .security_api import router as security_router  # noqa: E402
+from .third_party_intelligence_api import (  # noqa: E402
+    router as third_party_intelligence_router,
+)
+from .third_party_lifecycle_api import router as third_party_lifecycle_router  # noqa: E402
+from .third_party_collaboration_api import (  # noqa: E402
+    router as third_party_collaboration_router,
+)
+from .trc_continuous_evidence_api import (  # noqa: E402
+    router as trc_continuous_evidence_router,
+)
 
+router.include_router(ai_governance_loop_router)
+router.include_router(consent_preferences_router)
+router.include_router(consent_profile_data_router)
+router.include_router(consent_public_admin_router)
+router.include_router(consent_delivery_router)
+router.include_router(consent_experiments_router)
+router.include_router(consent_publishing_router)
+router.include_router(consent_scan_inventory_router)
+router.include_router(consent_scan_notice_proposals_router)
+router.include_router(consumer_trust_center_authority_router)
+router.include_router(compliance_scoping_router)
+router.include_router(compliance_scope_actions_router)
+router.include_router(data_use_governance_router)
+router.include_router(data_use_provider_router)
+router.include_router(data_use_provider_audit_router)
+router.include_router(privacy_data_discovery_router)
+router.include_router(privacy_regulatory_intelligence_router)
+router.include_router(privacy_notice_governance_router)
+router.include_router(privacy_rights_orchestration_router)
+router.include_router(privacy_rights_consumer_delivery_router)
+router.include_router(third_party_intelligence_router)
+router.include_router(third_party_lifecycle_router)
+router.include_router(third_party_collaboration_router)
+router.include_router(trc_continuous_evidence_router)
+router.include_router(policy_publication_links_router)
+router.include_router(public_policy_publication_links_router)
 router.include_router(security_router)
 router.include_router(finance_operations_router)

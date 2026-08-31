@@ -2293,6 +2293,70 @@ class AIDiscoveryObservationIn(BaseModel):
         return self
 
 
+# Tenant-bound identity control plane ------------------------------------
+
+
+_AI_IDENTITY_PRINCIPAL_REF = r"^prn_[0-9a-f]{32}$"
+_AI_IDENTITY_PROVIDER_SUBJECT = r"^(?:sub|idn)_[0-9a-f]{32}$"
+_AI_IDENTITY_CODE = r"^[a-z][a-z0-9_.:-]{0,127}$"
+_AI_IDENTITY_ASSET_ID = r"^ast_[0-9a-f]{32}$"
+_AI_IDENTITY_INTENT_ID = r"^IGPW-[0-9a-f]{32}$"
+_AI_IDENTITY_IDEMPOTENCY = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,255}$"
+
+
+class AIIdentityFederationBindingIn(BaseModel):
+    """Pseudonymous exact-match assertions; raw identities are inadmissible.
+
+    ``provider_subject_id`` selects no authority by itself. The runtime must
+    independently resolve an enrolled principal/provider binding and require
+    this value to match it exactly.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    principal_ref: str = Field(..., pattern=_AI_IDENTITY_PRINCIPAL_REF)
+    provider_subject_id: str = Field(..., pattern=_AI_IDENTITY_PROVIDER_SUBJECT)
+    expected_binding_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    expected_revision: int = Field(..., ge=1)
+
+
+class AIIdentityCapabilityDecisionIn(AIIdentityFederationBindingIn):
+    required_capability: str = Field(..., pattern=_AI_IDENTITY_CODE)
+    idempotency_key: str = Field(..., pattern=_AI_IDENTITY_IDEMPOTENCY)
+
+
+class AIIdentityPurviewContextIn(AIIdentityFederationBindingIn):
+    provider: Literal["entra", "okta"]
+
+
+class AIIdentityPurviewPrepareIn(AIIdentityPurviewContextIn):
+    asset_id: str = Field(..., pattern=_AI_IDENTITY_ASSET_ID)
+    classification_codes: list[str] = Field(..., max_length=128)
+    expected_asset_binding_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    expected_source_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., pattern=_AI_IDENTITY_IDEMPOTENCY)
+
+    @model_validator(mode="after")
+    def exact_classification_codes(self):
+        if self.classification_codes != sorted(set(self.classification_codes)):
+            raise ValueError("classification_codes must be sorted and unique")
+        for index, value in enumerate(self.classification_codes):
+            if not re.fullmatch(_AI_IDENTITY_CODE.removeprefix("^").removesuffix("$"), value):
+                raise ValueError(f"classification code {index} is invalid")
+        return self
+
+
+class AIIdentityPurviewRecordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    principal_ref: str = Field(..., pattern=_AI_IDENTITY_PRINCIPAL_REF)
+    mapping_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIIdentityPurviewRevisionIn(AIIdentityPurviewRecordIn):
+    expected_record_revision: int = Field(..., ge=1)
+
+
 # Digest-only C2PA media provenance ---------------------------------------
 
 

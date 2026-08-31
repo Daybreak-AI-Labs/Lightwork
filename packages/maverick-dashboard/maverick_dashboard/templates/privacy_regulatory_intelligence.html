@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Privacy Regulatory Intelligence · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .pri-shell{max-width:1480px;margin:0 auto;padding:1.25rem}.pri-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.pri-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.pri-hero h1{margin:.1rem 0}.pri-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:1rem}.pri-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}.pri-card h2{font-size:1rem;margin:.1rem 0 .75rem}.pri-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.pri-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.pri-form .wide,.pri-actions{grid-column:1/-1}.pri-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.pri-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}.pri-boundary{border-color:#a33}.pri-note{font-size:.8rem;color:var(--muted)}.pri-result{white-space:pre-wrap;word-break:break-word;max-height:52rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.pri-status{min-height:1.4rem;margin:.6rem 0}.pri-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.35rem}.pri-checks label{display:flex;gap:.3rem;align-items:center;color:inherit}.pri-checks input{width:auto}.pri-bounds{margin:.5rem 0 0;padding-left:1.25rem}.pri-bounds li{margin:.25rem 0}
+  @media(max-width:980px){.pri-grid,.pri-form,.pri-checks{grid-template-columns:1fr}.pri-form .wide,.pri-actions{grid-column:auto}.pri-hero{display:block}}
+</style>
+<div class="pri-shell">
+  <header class="pri-hero">
+    <div>
+      <div class="pri-kicker">Licensed-source research authority</div>
+      <h1>Privacy Regulatory Intelligence</h1>
+      <p class="muted">Govern source rights, retain immutable legal evidence, produce citation-grounded research, compare jurisdictions, and operate trackers with retryable delivery.</p>
+    </div>
+    <a class="btn" href="/privacy">Back to Privacy</a>
+  </header>
+
+  {% if not privacy_regulatory_intelligence_enabled %}
+  <div class="pri-banner" role="status">
+    <strong>Regulatory intelligence disabled.</strong> Enable both <code>privacy_automation.enable</code> and <code>privacy_automation.regulatory_intelligence.enable</code>. The authority fails closed while either gate is off.
+  </div>
+  {% endif %}
+
+  <div class="pri-banner pri-boundary">
+    <strong>Content, legal, and acceptance boundary.</strong>
+    Lightwork does not bundle or reproduce OneTrust DataGuidance or any other proprietary corpus. An administrator must enroll content the tenant is licensed to use, and a different authenticated reviewer must approve its rights and provenance.
+    <ul class="pri-bounds">
+      <li>Answers and reports use only active, permitted, retained sources and include evidence citations; insufficient evidence produces an explicit abstention.</li>
+      <li>Results support legal research but are not legal advice. Counsel remains responsible for interpretation and decisions.</li>
+      <li>No live licensed feed, notification transport, customer, or legal-content acceptance is claimed by this local workspace.</li>
+    </ul>
+  </div>
+
+  <div id="pri-status" class="pri-status muted" role="status" aria-live="polite"></div>
+  <div class="pri-grid">
+    <div>
+      <section class="pri-card">
+        <h2>1. Enroll licensed source — administrator</h2>
+        <form id="pri-source" class="pri-form">
+          <label>Source ID<input class="input" name="source_id" required maxlength="128" value="primary-law"></label>
+          <label>Name<input class="input" name="name" required maxlength="500"></label>
+          <label>License reference<input class="input" name="license_ref" required maxlength="500"></label>
+          <label>Provenance URI<input class="input" name="provenance_uri" required maxlength="2048" placeholder="https://authority.example/legal-source"></label>
+          <label class="wide">Rights basis<textarea class="input" name="rights_basis" rows="3" required maxlength="2000"></textarea></label>
+          <label>Jurisdictions, comma-separated<input class="input" name="jurisdictions" required value="US-CA"></label>
+          <label>Authorities, comma-separated<input class="input" name="authorities" required value="CA-AG"></label>
+          <label>Document types, comma-separated<input class="input" name="document_types" required value="law,regulation,authority_guidance"></label>
+          <label>Languages, comma-separated<input class="input" name="languages" required value="en"></label>
+          <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="86400" max="315360000" value="31536000" required></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <fieldset class="wide"><legend>Allowed uses</legend><div class="pri-checks">
+            <label><input type="checkbox" name="allowed_uses" value="search" checked>search</label><label><input type="checkbox" name="allowed_uses" value="research" checked>research</label><label><input type="checkbox" name="allowed_uses" value="compare" checked>compare</label><label><input type="checkbox" name="allowed_uses" value="alerts" checked>alerts</label><label><input type="checkbox" name="allowed_uses" value="reports" checked>reports</label><label><input type="checkbox" name="allowed_uses" value="share">share</label>
+          </div></fieldset>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pri-actions"><button class="btn btn--primary" type="submit">Enroll source metadata</button><button class="btn" id="pri-list-sources" type="button">List sources</button></div>
+        </form>
+      </section>
+
+      <section class="pri-card pri-boundary">
+        <h2>2. Independent rights review — administrator</h2>
+        <form id="pri-source-review" class="pri-form">
+          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" required></label>
+          <label>Decision<select class="input" name="approved"><option value="true">approve</option><option value="false">reject</option></select></label>
+          <label>Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <label class="wide">Rationale<textarea class="input" name="rationale" rows="3" required maxlength="2000"></textarea></label>
+          <div class="pri-actions"><button class="btn btn--primary" type="submit">Record independent review</button><button class="btn" id="pri-revoke-source" type="button">Revoke source</button></div>
+        </form>
+        <p class="pri-note">The reviewer must be a different authenticated subject from the enrolling administrator. Revocation removes source content from future search, sharing, alert, and report use.</p>
+      </section>
+
+      <section class="pri-card">
+        <h2>3. Ingest immutable evidence — administrator</h2>
+        <form id="pri-document" class="pri-form">
+          <label>Document ID<input class="input" name="document_id" required maxlength="128"></label>
+          <label>Source ID<input class="input" name="source_id" required maxlength="128"></label>
+          <label class="wide">Title<input class="input" name="title" required maxlength="1000"></label>
+          <label>Jurisdiction<input class="input" name="jurisdiction" required value="US-CA"></label>
+          <label>Authority<input class="input" name="authority" required value="CA-AG"></label>
+          <label>Document type<select class="input" name="document_type"><option>law</option><option>regulation</option><option>authority_guidance</option><option>case_law</option><option>enforcement_action</option><option>regulatory_update</option><option>standard</option></select></label>
+          <label>Language<input class="input" name="language" required value="en"></label>
+          <label>Publication date<input class="input" name="publication_date" type="date" required></label>
+          <label>Effective date (optional)<input class="input" name="effective_date" type="date"></label>
+          <label>Superseded date (optional)<input class="input" name="superseded_date" type="date"></label>
+          <label>Expected latest version<input class="input" name="expected_latest_version" type="number" min="0" value="0" required></label>
+          <label class="wide">Citation JSON list<textarea class="input" name="citations" rows="4" required>[{"citation_id":"official","title":"Official publication","uri":"https://authority.example/document","pinpoint":"full text"}]</textarea></label>
+          <label class="wide">Licensed document text<textarea class="input" name="content" rows="8" required maxlength="524288"></textarea></label>
+          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pri-actions"><button class="btn btn--primary" type="submit">Hash and ingest new version</button></div>
+        </form>
+      </section>
+    </div>
+
+    <div>
+      <section class="pri-card">
+        <h2>4. Grounded research and jurisdiction comparison</h2>
+        <form id="pri-research" class="pri-form">
+          <label class="wide">Research question<textarea class="input" name="query" rows="3" required maxlength="2048"></textarea></label>
+          <label>Jurisdictions, comma-separated<input class="input" name="jurisdictions" value="US-CA"></label>
+          <label>Minimum evidence<input class="input" name="minimum_evidence" type="number" min="1" max="100" value="1" required></label>
+          <label>Result limit<input class="input" name="limit" type="number" min="1" max="100" value="10" required></label>
+          <label>As-of date (optional)<input class="input" name="as_of" type="date"></label>
+          <div class="pri-actions"><button class="btn btn--primary" type="submit" value="research">Research with citations</button><button class="btn" type="submit" value="compare">Compare two or more jurisdictions</button><button class="btn" type="submit" value="search">Search evidence</button></div>
+        </form>
+      </section>
+
+      <section class="pri-card">
+        <h2>5. Saved-query tracker and durable delivery</h2>
+        <form id="pri-subscription" class="pri-form">
+          <label>Tracker ID<input class="input" name="subscription_id" required maxlength="128"></label>
+          <label>Destination reference<input class="input" name="destination_ref" required maxlength="128" placeholder="privacy-alert-channel"></label>
+          <label class="wide">Query<input class="input" name="query" required maxlength="2048"></label>
+          <label>Jurisdictions<input class="input" name="jurisdictions" required value="US-CA"></label>
+          <label>Cadence seconds<input class="input" name="cadence_seconds" type="number" min="300" max="31536000" value="86400" required></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label>Idempotency key<input class="input" name="idempotency_key" required maxlength="192"></label>
+          <div class="pri-actions"><button class="btn btn--primary" type="submit">Save tracker</button><button class="btn" id="pri-due" type="button">List due trackers</button><button class="btn" id="pri-claim" type="button">Claim alert deliveries</button><button class="btn" id="pri-run-delivery" type="button">Run configured email worker — external side effect</button></div>
+        </form>
+        <p class="pri-note">Claiming leases bounded delivery records; it does not send email or call an external transport. A worker must acknowledge success or record a sanitized failure and retry delay.</p>
+      </section>
+
+      <section class="pri-card">
+        <h2>6. Evidence reports, integrity, and retention</h2>
+        <form id="pri-report" class="pri-form">
+          <label>Report ID<input class="input" name="report_id" maxlength="128"></label>
+          <label>Jurisdictions<input class="input" name="jurisdictions" value="US-CA"></label>
+          <label class="wide">Query<input class="input" name="query" maxlength="2048"></label>
+          <label>Retention seconds<input class="input" name="retention_seconds" type="number" min="86400" max="315360000" value="31536000"></label>
+          <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192"></label>
+          <div class="pri-actions"><button class="btn btn--primary" type="submit">Create evidence report</button><button class="btn" id="pri-get-report" type="button">Get report</button><button class="btn" id="pri-integrity" type="button">Verify retained-state integrity</button><button class="btn" id="pri-purge" type="button">Purge expired content</button><button class="btn" id="pri-runtime" type="button">Show runtime boundary</button></div>
+        </form>
+      </section>
+
+      <section class="pri-card">
+        <h2>Authoritative response</h2>
+        <pre id="pri-result" class="pri-result" tabindex="0">No operation run yet.</pre>
+      </section>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  "use strict";
+  var API="/api/v1/privacy/regulatory-intelligence",status=document.getElementById("pri-status"),result=document.getElementById("pri-result");
+  function value(form,name){return form.elements[name].value.trim();}
+  function raw(form,name){return form.elements[name].value;}
+  function number(form,name){return Number(value(form,name));}
+  function optional(form,name){var item=value(form,name);return item||null;}
+  function list(form,name){return value(form,name).split(",").map(function(item){return item.trim();}).filter(Boolean);}
+  function checked(form,name){return Array.from(form.querySelectorAll('input[name="'+name+'"]:checked')).map(function(item){return item.value;});}
+  async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body={};try{body=await response.json();}catch(_error){}if(!response.ok){throw new Error(body.detail||("HTTP "+response.status));}return body;}
+  function show(body,message){result.textContent=JSON.stringify(body,null,2);status.textContent=message;result.focus();}
+  function fail(error){status.textContent=error.message;}
+  async function sha256(text){var bytes=new TextEncoder().encode(text),digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest)).map(function(byte){return byte.toString(16).padStart(2,"0");}).join("");}
+
+  document.getElementById("pri-source").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={name:value(form,"name"),license_ref:value(form,"license_ref"),rights_basis:value(form,"rights_basis"),allowed_uses:checked(form,"allowed_uses"),provenance_uri:value(form,"provenance_uri"),jurisdictions:list(form,"jurisdictions"),authorities:list(form,"authorities"),document_types:list(form,"document_types"),languages:list(form,"languages"),retention_seconds:number(form,"retention_seconds"),expected_revision:number(form,"expected_revision"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/sources/"+encodeURIComponent(value(form,"source_id")),{method:"PUT",body:JSON.stringify(payload)}),"Source metadata enrolled; no content or external feed was fetched.");}catch(error){fail(error);}});
+  document.getElementById("pri-list-sources").addEventListener("click",async function(){try{show(await call("/sources"),"Tenant sources loaded.");}catch(error){fail(error);}});
+  document.getElementById("pri-source-review").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={expected_revision:number(form,"expected_revision"),rationale:value(form,"rationale"),approved:value(form,"approved")==="true",idempotency_key:value(form,"idempotency_key")};try{show(await call("/sources/"+encodeURIComponent(value(form,"source_id"))+"/review",{method:"POST",body:JSON.stringify(payload)}),"Independent source review recorded.");}catch(error){fail(error);}});
+  document.getElementById("pri-revoke-source").addEventListener("click",async function(){var form=document.getElementById("pri-source-review");if(!window.confirm("Revoke this source and remove its documents from future research, sharing, reports, and alerts?")){return;}var payload={expected_revision:number(form,"expected_revision"),reason:value(form,"rationale"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/sources/"+encodeURIComponent(value(form,"source_id"))+"/revoke",{method:"POST",body:JSON.stringify(payload)}),"Source revoked; retained audit evidence remains.");}catch(error){fail(error);}});
+  document.getElementById("pri-document").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,content=raw(form,"content"),payload={source_id:value(form,"source_id"),title:value(form,"title"),jurisdiction:value(form,"jurisdiction"),authority:value(form,"authority"),document_type:value(form,"document_type"),language:value(form,"language"),publication_date:value(form,"publication_date"),effective_date:optional(form,"effective_date"),superseded_date:optional(form,"superseded_date"),citations:JSON.parse(value(form,"citations")),content:content,content_sha256:await sha256(content),expected_latest_version:number(form,"expected_latest_version"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/documents/"+encodeURIComponent(value(form,"document_id")),{method:"PUT",body:JSON.stringify(payload)}),"Immutable document version ingested with a browser-computed SHA-256 digest.");}catch(error){fail(error);}});
+  document.getElementById("pri-research").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,action=event.submitter&&event.submitter.value||"research",jurisdictions=list(form,"jurisdictions"),payload={query:value(form,"query"),jurisdictions:jurisdictions,as_of:optional(form,"as_of")},path="/"+action;if(action==="research"){payload.minimum_evidence=number(form,"minimum_evidence");payload.limit=number(form,"limit");}else if(action==="compare"){payload.minimum_evidence_per_jurisdiction=number(form,"minimum_evidence");}else{payload.limit=number(form,"limit");}try{show(await call(path,{method:"POST",body:JSON.stringify(payload)}),action==="research"?"Grounded answer returned; inspect abstention and every citation.":"Bounded evidence result returned.");}catch(error){fail(error);}});
+  document.getElementById("pri-subscription").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={query:value(form,"query"),jurisdictions:list(form,"jurisdictions"),destination_ref:value(form,"destination_ref"),cadence_seconds:number(form,"cadence_seconds"),expected_revision:number(form,"expected_revision"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/subscriptions/"+encodeURIComponent(value(form,"subscription_id")),{method:"PUT",body:JSON.stringify(payload)}),"Saved-query tracker stored; no external delivery was attempted.");}catch(error){fail(error);}});
+  document.getElementById("pri-due").addEventListener("click",async function(){try{show(await call("/subscriptions/due"),"Due trackers loaded without advancing them.");}catch(error){fail(error);}});
+  document.getElementById("pri-claim").addEventListener("click",async function(){try{show(await call("/deliveries/claim",{method:"POST",body:JSON.stringify({limit:10,lease_seconds:60})}),"Delivery records leased; the external transport remains worker-owned.");}catch(error){fail(error);}});
+  document.getElementById("pri-run-delivery").addEventListener("click",async function(){if(!window.confirm("Send due privacy-intelligence alerts through the deployment-configured destination resolver and transport now?")){return;}try{show(await call("/deliveries/run",{method:"POST",body:JSON.stringify({limit:10,lease_seconds:60,base_backoff_seconds:30,maximum_backoff_seconds:86400})}),"Configured delivery worker completed. Inspect retry, dead-letter, and acknowledgement-ambiguity counts.");}catch(error){fail(error);}});
+  document.getElementById("pri-report").addEventListener("submit",async function(event){event.preventDefault();var form=event.currentTarget,payload={query:value(form,"query"),jurisdictions:list(form,"jurisdictions"),retention_seconds:number(form,"retention_seconds"),idempotency_key:value(form,"idempotency_key")};try{show(await call("/reports/"+encodeURIComponent(value(form,"report_id")),{method:"PUT",body:JSON.stringify(payload)}),"Evidence-backed report created.");}catch(error){fail(error);}});
+  document.getElementById("pri-get-report").addEventListener("click",async function(){var form=document.getElementById("pri-report");try{show(await call("/reports/"+encodeURIComponent(value(form,"report_id"))),"Evidence report loaded.");}catch(error){fail(error);}});
+  document.getElementById("pri-integrity").addEventListener("click",async function(){try{show(await call("/integrity"),"Retained-state integrity verified.");}catch(error){fail(error);}});
+  document.getElementById("pri-purge").addEventListener("click",async function(){if(!window.confirm("Purge content and shares past their retained expiry while preserving audit evidence?")){return;}try{show(await call("/retention/purge",{method:"POST",body:"{}"}),"Expired retained data purged.");}catch(error){fail(error);}});
+  document.getElementById("pri-runtime").addEventListener("click",async function(){try{show(await call("/status"),"Runtime and acceptance boundary loaded.");}catch(error){fail(error);}});
+})();
+</script>
+{% endblock %}

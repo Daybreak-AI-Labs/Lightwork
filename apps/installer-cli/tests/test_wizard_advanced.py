@@ -89,6 +89,32 @@ def test_pg_rls_writes_world_model_section_with_prep_reminder(tmp_path, monkeypa
     assert parsed["world_model"]["rls"] is True
 
 
+def test_unified_audit_is_default_off_and_enables_signed_six_suite_projection(
+    tmp_path,
+    monkeypatch,
+):
+    absent = tomllib.loads(_write(tmp_path / "off", monkeypatch, {}))
+    assert "audit" not in absent
+
+    parsed = tomllib.loads(
+        _write(
+            tmp_path / "on",
+            monkeypatch,
+            {"audit_sign": False, "unified_audit": True},
+        )
+    )
+    assert parsed["audit"]["sign"] is True
+    assert parsed["audit"]["unified"] == {
+        "enable": True,
+        "page_size": 100,
+        "lease_seconds": 120,
+        "max_lag_seconds": 300,
+        "max_attempts": 5,
+        "retry_backoff_seconds": 30,
+        "poll_seconds": 60,
+    }
+
+
 def test_kernel_modules_read_what_the_wizard_writes(tmp_path, monkeypatch):
     """End-to-end: write via the wizard, then the kernel sees each flag."""
     monkeypatch.setenv("HOME", str(tmp_path))

@@ -1,0 +1,26 @@
+{
+  "adapter_id": "c2patool",
+  "adapter_version": "0.27.16",
+  "assertion_codes": [
+    "c2pa.actions",
+    "c2pa.hash.data",
+    "c2pa.thumbnail.claim"
+  ],
+  "limitations": [
+    "Public development fixtures do not establish production signing custody.",
+    "C2PA validity does not prove authorship, ownership, truth, consent, or completeness."
+  ],
+  "mode": "real_binary_development_fixture",
+  "private_key_persisted_by_lightwork": false,
+  "production_custody_accepted": false,
+  "report_sha256": "34c3c755681465c665a7b248791ed1115225cbb2723531074698c1e012ac854a",
+  "schema": "lightwork.c2patool-interoperability.v1",
+  "signed_sha256": "1fa8de7419603155f70378b934ea161cc64509b9cc2b4a1d34c03029583e00e5",
+  "signed_size_bytes": 124771,
+  "signing_receipt_sha256": "6d2ef36b9eea7070eb25f81e01ca8e7a2a78df8d9c44511b3c6a322f7f6288b7",
+  "signing_trust_chain_state": "untrusted",
+  "source_sha256": "f999fd78bfe8a83c96e468a078830ba94485bc1bc6fd086fb94a43bd29dd0f23",
+  "status": "passed",
+  "verification_receipt_sha256": "f27503234664ce6cb8a1dd10eeea198094c2d965a817d882d635eecaea0433cb",
+  "verification_trust_chain_state": "trusted"
+}

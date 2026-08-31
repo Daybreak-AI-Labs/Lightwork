@@ -83,11 +83,15 @@ def _self_authenticated_path(path: str) -> bool:
     Each route enforces its own scoped credential: an agent trust-registry
     credential, a signed discovery-sensor identity, or an opaque vendor-portal
     invitation (see ``external_gateway.py``). Those callers have no dashboard
-    credential. The trailing slash matters: the ADMIN surface at
-    ``/api/v1/external-agents`` stays under normal dashboard auth."""
+    credential. ``/api/v1/public/consent`` has a separate opaque public-client
+    and profile-capability contract. ``/api/v1/public/policies`` resolves an
+    opaque stable link and, for private links, a separate bearer capability.
+    The trailing slashes matter: the ADMIN surfaces stay under normal dashboard
+    authentication."""
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
         ("/share/", "/scim/", "/form/", "/saml/", "/auth/invite/",
-         "/api/v1/external/")
+         "/api/v1/external/", "/api/v1/public/consent/",
+         "/api/v1/public/policies/")
     )
 
 

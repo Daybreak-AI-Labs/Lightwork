@@ -216,11 +216,22 @@ def _audit_idempotency_identity(
         EventKind.PLATFORM_HUNT_CUSTODY_INITIALIZED: "event_id",
         EventKind.THREAT_HUNT_RECORD_CHANGED: "event_id",
         EventKind.ENV_HUNT_RECORD_CHANGED: "event_id",
+        EventKind.UNIFIED_AUDIT_PROJECTION: "projection_event_id",
     }
     field = field_by_kind.get(payload.get("kind"))
     if field is None:
         return None
     value = payload.get(field)
+    if payload.get("kind") == EventKind.UNIFIED_AUDIT_PROJECTION:
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+        ):
+            raise ValueError(
+                "unified audit projection_event_id must be a lowercase SHA-256 digest"
+            )
+        return field, value
     if not isinstance(value, str) or not value or len(value) > 256:
         return None
     return field, value
@@ -230,6 +241,8 @@ def _locked_event_identity_exists(
     fileobj: Any,
     payload: dict[str, Any],
     identity: tuple[str, str],
+    *,
+    require_signed: bool = False,
 ) -> bool:
     """Check one locked NDJSON stream and reject identity/content collisions."""
     field, value = identity
@@ -251,6 +264,18 @@ def _locked_event_identity_exists(
             or existing.get(field) != value
         ):
             continue
+        if require_signed and not (
+            isinstance(existing.get("prev_hash"), str)
+            and isinstance(existing.get("hash"), str)
+            and bool(existing["hash"])
+            and isinstance(existing.get("sig"), str)
+            and bool(existing["sig"])
+            and isinstance(existing.get("key_id"), str)
+            and bool(existing["key_id"])
+        ):
+            raise ValueError(
+                "audit idempotency identity is bound to an unsigned prior row"
+            )
         # Retries get a fresh transport timestamp, while ``occurred_at`` is the
         # transactional business time. Every other logical field must match;
         # accepting the same identity for different content would hide a
@@ -271,6 +296,8 @@ def _prior_day_identity_exists(
     current_path: Path,
     payload: dict[str, Any],
     identity: tuple[str, str],
+    *,
+    require_signed: bool = False,
 ) -> bool:
     """Search closed segments while the deployment-wide identity lock is held."""
     from .sealing import segment_text
@@ -284,8 +311,52 @@ def _prior_day_identity_exists(
         with cross_process_lock(path):
             text = segment_text(path, fail_soft=False)
         with io.StringIO(text) as stream:
-            if _locked_event_identity_exists(stream, payload, identity):
+            if _locked_event_identity_exists(
+                stream,
+                payload,
+                identity,
+                require_signed=require_signed,
+            ):
                 return True
+    return False
+
+
+def _strict_signed_identity_exists(
+    audit_dir: Path,
+    payload: dict[str, Any],
+    identity: tuple[str, str],
+) -> bool:
+    """Acknowledge an identity only when its complete day chain verifies.
+
+    The governed identity lock is held by the caller. Take each segment's
+    rewrite lock across both the identity scan and cryptographic verification,
+    so an erase/re-anchor cannot swap the file between those two decisions.
+    """
+    from .sealing import segment_text
+    from .signing import verify_chain
+
+    for path in sorted(audit_dir.glob("*.ndjson")):
+        if not is_valid_day(path.stem):
+            continue
+        with cross_process_lock(path, strict=True):
+            text = segment_text(path, fail_soft=False)
+            with io.StringIO(text) as stream:
+                exists = _locked_event_identity_exists(
+                    stream,
+                    payload,
+                    identity,
+                    require_signed=True,
+                )
+            if not exists:
+                continue
+            breaks = verify_chain(path)
+            if breaks:
+                first = breaks[0]
+                raise ValueError(
+                    "audit idempotency identity is bound to an unverifiable "
+                    f"signed chain ({first.reason})"
+                )
+            return True
     return False
 
 
@@ -390,6 +461,19 @@ class AuditLog:
             raise ValueError(f"invalid audit day {day_str!r}: expected YYYY-MM-DD")
         return self.audit_dir / f"{day_str}.ndjson"
 
+    @property
+    def signing_enabled(self) -> bool:
+        """Whether this writer's resolved runtime policy selects signing.
+
+        This exposes the writer's actual resolved state instead of asking a
+        caller to re-read configuration with subtly different precedence.
+        It is deliberately read-only. If the optional signing dependency is
+        unavailable outside a mandatory compliance floor, the existing legacy
+        fallback changes this value to ``False`` when the first write attempts
+        signer initialization.
+        """
+        return self._signing_enabled
+
     def _ensure_dir(self) -> bool:
         try:
             ensure_private_directory(self.audit_dir)
@@ -468,6 +552,86 @@ class AuditLog:
                     return self._append_payload(path, payload, identity)
             except (OSError, TypeError, ValueError) as e:
                 log.warning("audit: write failed: %s", e)
+                return False
+
+    def record_strict_signed(self, event: AuditEvent) -> bool:
+        """Append ``event`` only through an initialized signed writer.
+
+        Unlike :meth:`record`, this path never uses the legacy optional-crypto
+        unsigned fallback. It preflights signer construction before checking or
+        appending the governed identity, refuses an unsigned prior duplicate,
+        and raises :class:`AuditWriteRefused` when signing is unavailable.
+        ``True`` therefore means this logical event is present as a signed row;
+        ``False`` means validation or the signed append failed without a row.
+        """
+        with self._lock:
+            path = self._rotate_if_needed()
+            if path is None:
+                raise AuditWriteRefused(
+                    "audit: strict signed writer could not open its audit segment"
+                )
+            try:
+                payload = _redact_event(event.to_dict())
+                identity = _audit_idempotency_identity(payload)
+            except (TypeError, ValueError) as error:
+                log.warning("audit: strict signed write validation failed: %s", error)
+                return False
+
+            if not self._signing_enabled:
+                raise AuditWriteRefused(
+                    "audit: strict signed write requested while signing is disabled"
+                )
+            try:
+                signer = self._signer_for(path)
+            except AuditRefused:
+                raise
+            except Exception as error:
+                raise AuditWriteRefused(
+                    "audit: strict signed writer could not initialize"
+                ) from error
+            if signer is None:
+                raise AuditWriteRefused(
+                    "audit: strict signed writer refused an unsigned fallback"
+                )
+
+            guard = (
+                cross_process_lock(self.audit_dir / ".governed-audit-idempotency")
+                if identity is not None
+                else contextlib.nullcontext()
+            )
+            try:
+                with guard:
+                    if identity is not None and _strict_signed_identity_exists(
+                        self.audit_dir,
+                        payload,
+                        identity,
+                    ):
+                        return True
+                    # Verify the destination chain and append while holding the
+                    # SAME strict rewrite lock. ``AuditSigner.write`` re-enters
+                    # this path lock safely, then takes its append-handle lock;
+                    # an erase/re-anchor/other cooperative whole-file rewriter
+                    # therefore cannot replace the segment between verification
+                    # and append. Identity handling was completed above; passing
+                    # it into AuditSigner would re-enter its legacy presence-only
+                    # acknowledgement path without cryptographic verification.
+                    from .signing import verify_chain
+
+                    with cross_process_lock(path, strict=True):
+                        breaks = verify_chain(path)
+                        if breaks:
+                            first = breaks[0]
+                            raise ValueError(
+                                "audit destination chain is not verifiable "
+                                f"({first.reason})"
+                            )
+                        return bool(
+                            signer.write(payload, idempotency_identity=None)
+                        )
+            except AuditRefused:
+                raise
+            except (OSError, TypeError, ValueError) as error:
+                log.warning("audit: strict signed write failed: %s", error)
                 return False
 
     def _append_payload(

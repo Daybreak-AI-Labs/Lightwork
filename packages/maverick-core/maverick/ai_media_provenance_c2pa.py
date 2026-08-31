@@ -15,6 +15,8 @@ not certification and do not prove authorship, ownership, or truth.
 from __future__ import annotations
 
 import hashlib
+import hmac
+import ipaddress
 import json
 import math
 import os
@@ -30,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 from .ai_media_provenance import (
     ADAPTER_RECEIPT_SCHEMA,
@@ -45,6 +48,7 @@ _MAX_MANIFEST_BYTES = 256 * 1024
 _MAX_CERTIFICATE_BYTES = 256 * 1024
 _MAX_PRIVATE_KEY_BYTES = 64 * 1024
 _MAX_TRUST_ANCHOR_BYTES = 1024 * 1024
+_MAX_PINNED_EXECUTABLE_BYTES = 256 * 1024 * 1024
 _MAX_JSON_DEPTH = 32
 _MAX_JSON_NODES = 20_000
 _MAX_ASSERTIONS = 64
@@ -64,6 +68,7 @@ _VERSIONED_ASSERTION_RE = re.compile(r"\.v[0-9]+\Z", re.IGNORECASE)
 _VENDOR_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,63}\Z")
 _ASSET_ID_RE = re.compile(r"MAA-[0-9a-f]{32}\Z")
 _IDENTITY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/+\-=]{0,255}\Z")
+_DNS_LABEL_RE = re.compile(r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)\Z")
 
 _READER_KEYS = frozenset({
     "active_manifest",
@@ -168,6 +173,166 @@ C2PAToolManifestProvider = Callable[
     [C2PABinding, tuple[str, ...]], Mapping[str, Any]
 ]
 C2PAToolTrustAnchorProvider = Callable[[], bytes]
+
+
+def _expected_sha256(value: object, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a SHA-256 digest")
+    normalized = value.strip().lower().removeprefix("sha256:")
+    if not _DIGEST_RE.fullmatch(normalized):
+        raise ValueError(f"{label} must be a SHA-256 digest")
+    return normalized
+
+
+def _file_object_identity(value: os.stat_result) -> tuple[int, ...]:
+    """Return path/descriptor metadata stable across Windows stat variants."""
+
+    return (
+        int(value.st_dev),
+        int(value.st_ino),
+        int(value.st_size),
+        int(value.st_mtime_ns),
+        int(getattr(value, "st_uid", 0)),
+        int(getattr(value, "st_gid", 0)),
+    )
+
+
+def _file_identity(value: os.stat_result) -> tuple[int, ...]:
+    """Return path metadata that also changes on chmod or file-type change."""
+
+    return (
+        *_file_object_identity(value),
+        int(value.st_ctime_ns),
+        int(value.st_mode),
+    )
+
+
+def _inspect_pinned_executable(
+    candidate: Path,
+    *,
+    expected_sha256: str,
+    expected_identity: tuple[int, ...] | None = None,
+    label: str = "c2patool external signer",
+) -> tuple[Path, tuple[int, ...]]:
+    """Hash a regular non-symlink executable through a path-bound descriptor.
+
+    Python cannot execute an already-open handle portably on every supported
+    platform.  This closes the inspect/open/hash races that can be closed,
+    records file identity, and lets the caller repeat the check immediately
+    before invoking c2patool. Deployment ACLs must prevent replacement in the
+    remaining spawn window.
+    """
+
+    if not candidate.is_absolute():
+        raise ValueError(f"{label} path must be absolute")
+    try:
+        candidate_metadata = candidate.lstat()
+        if stat.S_ISLNK(candidate_metadata.st_mode):
+            raise ValueError(f"{label} must be a regular non-symlink file")
+        resolved = candidate.resolve(strict=True)
+        path_before = resolved.lstat()
+    except ValueError:
+        raise
+    except (OSError, RuntimeError):
+        raise ValueError(f"{label} is unavailable") from None
+    if stat.S_ISLNK(path_before.st_mode) or not stat.S_ISREG(path_before.st_mode):
+        raise ValueError(f"{label} must be a regular non-symlink file")
+    if not 1 <= path_before.st_size <= _MAX_PINNED_EXECUTABLE_BYTES:
+        raise ValueError(f"{label} size is invalid")
+    identity = _file_identity(path_before)
+    if expected_identity is not None and identity != expected_identity:
+        raise ValueError(f"{label} changed after admission")
+
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(str(resolved), flags)
+    except OSError:
+        raise ValueError(f"{label} is unavailable") from None
+    try:
+        descriptor_before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(descriptor_before.st_mode)
+            or _file_object_identity(descriptor_before)
+            != _file_object_identity(path_before)
+        ):
+            raise ValueError(f"{label} changed during admission")
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        descriptor_after = os.fstat(descriptor)
+        if _file_identity(descriptor_after) != _file_identity(descriptor_before):
+            raise ValueError(f"{label} changed during admission")
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = resolved.lstat()
+    except OSError:
+        raise ValueError(f"{label} changed during admission") from None
+    if (
+        stat.S_ISLNK(path_after.st_mode)
+        or _file_identity(path_after) != identity
+        or not hmac.compare_digest(digest.hexdigest(), expected_sha256)
+    ):
+        raise ValueError(f"{label} digest or identity mismatch")
+    return resolved, identity
+
+
+def _timestamp_authority_url(value: object, *, allow_insecure: bool) -> str:
+    """Return one operator-pinned public TSA URL.
+
+    ``c2patool`` performs the request itself, so this validation is paired with
+    the enterprise egress check immediately before process execution.  HTTP is
+    available only as an explicit development-fixture escape hatch; production
+    callers should use HTTPS or an external signer that owns timestamping.
+    """
+
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        raise ValueError("c2patool timestamp authority URL is invalid")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        raise ValueError("c2patool timestamp authority URL is invalid") from None
+    scheme = parsed.scheme.lower()
+    if (
+        scheme not in {"https", "http"}
+        or (scheme == "http" and not allow_insecure)
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise ValueError("c2patool timestamp authority URL is invalid")
+    host = parsed.hostname.lower()
+    if (
+        host == "localhost"
+        or host.endswith((".localhost", ".localdomain"))
+        or host.endswith(".")
+        or any(ord(char) > 127 for char in host)
+    ):
+        raise ValueError("c2patool timestamp authority host is invalid")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        labels = host.split(".")
+        if len(labels) < 2 or any(not _DNS_LABEL_RE.fullmatch(label) for label in labels):
+            raise ValueError("c2patool timestamp authority host is invalid") from None
+        rendered_host = host
+    else:
+        if not address.is_global:
+            raise ValueError("c2patool timestamp authority host must be public")
+        rendered_host = f"[{host}]" if address.version == 6 else host
+    if port is not None:
+        rendered_host = f"{rendered_host}:{port}"
+    return urlunsplit((scheme, rendered_host, parsed.path or "", "", ""))
 
 
 def _default_process_runner(
@@ -684,6 +849,7 @@ class _C2PAToolRuntime:
         self,
         *,
         executable: str | os.PathLike[str] | None = None,
+        expected_executable_sha256: str | None = None,
         executable_locator: Callable[[str], str | None] = shutil.which,
         process_runner: C2PAToolProcessRunner = _default_process_runner,
         trust_anchor_provider: C2PAToolTrustAnchorProvider | None = None,
@@ -710,6 +876,14 @@ class _C2PAToolRuntime:
         ):
             raise ValueError("c2patool output bound must be between 1 KiB and 4 MiB")
         self._explicit_executable = os.fspath(executable) if executable is not None else None
+        self._expected_executable_sha256 = (
+            None
+            if expected_executable_sha256 is None
+            else _expected_sha256(
+                expected_executable_sha256,
+                "c2patool expected executable digest",
+            )
+        )
         self._executable_locator = executable_locator
         self._process_runner = process_runner
         self._trust_anchor_provider = trust_anchor_provider
@@ -717,7 +891,7 @@ class _C2PAToolRuntime:
         self._timeout_seconds = float(timeout_seconds)
         self._output_limit_bytes = output_limit_bytes
         self._clock = clock
-        self._tool_cache: tuple[str, str] | None = None
+        self._tool_cache: tuple[Path, str, tuple[int, ...]] | None = None
 
     @property
     def adapter_version(self) -> str:
@@ -730,19 +904,40 @@ class _C2PAToolRuntime:
 
     def _tool(self) -> tuple[str, str]:
         if self._tool_cache is not None:
-            return self._tool_cache
+            path, version, identity = self._tool_cache
+            try:
+                verified, _current_identity = _inspect_pinned_executable(
+                    path,
+                    expected_sha256=self._expected_tool_digest(),
+                    expected_identity=identity,
+                    label="c2patool executable",
+                )
+            except ValueError:
+                raise MediaProvenanceUnavailable(
+                    "c2patool executable failed integrity validation"
+                ) from None
+            return str(verified), version
+        expected_digest = self._expected_tool_digest()
         resolved = self._explicit_executable or self._executable_locator("c2patool")
         if isinstance(resolved, os.PathLike):
             resolved = os.fspath(resolved)
         if not isinstance(resolved, str) or not resolved or "\x00" in resolved:
             raise MediaProvenanceUnavailable("c2patool executable is unavailable")
         path = Path(resolved)
-        if not path.is_absolute():
-            raise MediaProvenanceUnavailable("c2patool executable path must be absolute")
+        try:
+            verified, identity = _inspect_pinned_executable(
+                path,
+                expected_sha256=expected_digest,
+                label="c2patool executable",
+            )
+        except ValueError:
+            raise MediaProvenanceUnavailable(
+                "c2patool executable failed integrity validation"
+            ) from None
         result = self._invoke(
-            (str(path), "--version"),
-            cwd=path.parent,
-            env=self._environment(path.parent),
+            (str(verified), "--version"),
+            cwd=verified.parent,
+            env=self._environment(verified.parent),
             output_limit_bytes=4096,
         )
         try:
@@ -752,8 +947,37 @@ class _C2PAToolRuntime:
         match = _VERSION_RE.fullmatch(version_output)
         if match is None:
             raise MediaProvenanceUnavailable("c2patool version is unavailable")
-        self._tool_cache = (str(path), match.group(1))
-        return self._tool_cache
+        try:
+            verified, identity = _inspect_pinned_executable(
+                verified,
+                expected_sha256=expected_digest,
+                expected_identity=identity,
+                label="c2patool executable",
+            )
+        except ValueError:
+            raise MediaProvenanceUnavailable(
+                "c2patool executable changed during version admission"
+            ) from None
+        version = match.group(1)
+        self._tool_cache = (verified, version, identity)
+        return str(verified), version
+
+    def _expected_tool_digest(self) -> str:
+        if self._expected_executable_sha256 is None:
+            raise MediaProvenanceUnavailable(
+                "c2patool expected executable digest is unavailable"
+            )
+        return self._expected_executable_sha256
+
+    def _verified_tool_path(self) -> str:
+        """Re-hash the admitted executable immediately before process launch."""
+
+        return self._tool()[0]
+
+    def _admitted_tool_version(self) -> str:
+        if self._tool_cache is None:
+            return self._tool()[1]
+        return self._tool_cache[1]
 
     def is_available(self) -> bool:
         try:
@@ -836,7 +1060,7 @@ class _C2PAToolRuntime:
             kind="trust anchors",
         )
 
-    def _settings(self, trust_path: Path | None = None) -> bytes:
+    def _settings(self) -> bytes:
         settings: dict[str, Any] = {
             "version": 1,
             "verify": {
@@ -848,8 +1072,6 @@ class _C2PAToolRuntime:
                 "verify_trust": True,
             },
         }
-        if trust_path is not None:
-            settings["trust"] = {"trust_anchors": str(trust_path)}
         return _canonical_json(settings, limit=4096)
 
     def _run_report(
@@ -862,6 +1084,7 @@ class _C2PAToolRuntime:
         trust_path: Path | None,
         manifest_path: Path | None = None,
         output_path: Path | None = None,
+        signer_path: Path | None = None,
     ) -> dict[str, Any]:
         if manifest_path is None:
             args: tuple[str, ...] = (
@@ -871,7 +1094,11 @@ class _C2PAToolRuntime:
                 str(settings_path),
             )
             if trust_path is not None:
-                args += ("trust", "--trust_anchors", str(trust_path))
+                # Current c2patool treats an absolute Windows path here as a
+                # URL and rejects the drive-letter scheme.  The process cwd is
+                # the private workspace, so the basename is both portable and
+                # confined to the intended trust bundle.
+                args += ("trust", "--trust_anchors", trust_path.name)
         else:
             if output_path is None:
                 raise MediaProvenanceUnavailable("c2patool output path is unavailable")
@@ -885,6 +1112,8 @@ class _C2PAToolRuntime:
                 "--settings",
                 str(settings_path),
             )
+            if signer_path is not None:
+                args += ("--signer-path", str(signer_path))
         stdout = self._invoke(
             args,
             cwd=workspace,
@@ -917,8 +1146,15 @@ class _C2PAToolRuntime:
         success_codes = {code for code, _url in successes}
         all_statuses = [*successes, *informational, *failures]
         all_codes = {code for code, _url in all_statuses}
+        # c2patool 0.27 reports an otherwise-valid, cryptographically verified
+        # asset as ``Valid`` while placing an untrusted signer certificate in
+        # the failure bucket.  Trust is a separate receipt dimension here; it
+        # must not be promoted, but it also must not erase proven integrity.
+        integrity_failures = [
+            item for item in failures if item[0] != "signingCredential.untrusted"
+        ]
         if state in {"Valid", "Trusted"} and (
-            failures or "claimSignature.validated" not in success_codes
+            integrity_failures or "claimSignature.validated" not in success_codes
         ):
             raise MediaProvenanceUnavailable("c2patool validation report is inconsistent")
         if state == "Trusted" and "signingCredential.trusted" not in success_codes:
@@ -948,7 +1184,7 @@ class _C2PAToolRuntime:
         assertions = _assertion_codes(manifest, all_statuses)
         manifest_sha256 = _sha256_json(manifest, limit=_MAX_REPORT_BYTES)
         receipt_seed = {
-            "adapter_version": self._tool()[1],
+            "adapter_version": self._admitted_tool_version(),
             "binding": dict(binding),
             "content_sha256": content_sha256,
             "manifest_sha256": manifest_sha256,
@@ -961,7 +1197,7 @@ class _C2PAToolRuntime:
             "schema": ADAPTER_RECEIPT_SCHEMA,
             "operation": operation,
             "adapter_id": self.adapter_id,
-            "adapter_version": self._tool()[1],
+            "adapter_version": self._admitted_tool_version(),
             "standard": "c2pa",
             "receipt_id": receipt_id,
             "observed_at": now,
@@ -1001,7 +1237,7 @@ class C2PAToolVerifier(_C2PAToolRuntime):
             source_sha256 = hashlib.sha256(data).hexdigest()
             binding_data = _binding_payload(binding, source_sha256)
             extension = _media_extension(data, binding_data["media_kind"])
-            executable, _version = self._tool()
+            self._tool()
             anchors = self._trust_anchors()
             with self._workspace() as temporary_name:
                 workspace = Path(temporary_name)
@@ -1009,11 +1245,12 @@ class C2PAToolVerifier(_C2PAToolRuntime):
                 settings_path = workspace / "settings.json"
                 trust_path = workspace / "trust-anchors.pem" if anchors is not None else None
                 _secure_write(input_path, data)
-                _secure_write(settings_path, self._settings(trust_path))
+                _secure_write(settings_path, self._settings())
                 if trust_path is not None and anchors is not None:
                     _secure_write(trust_path, anchors)
+                verified_executable = self._verified_tool_path()
                 report = self._run_report(
-                    executable=executable,
+                    executable=verified_executable,
                     workspace=workspace,
                     input_path=input_path,
                     settings_path=settings_path,
@@ -1043,11 +1280,23 @@ class C2PAToolSigner(_C2PAToolRuntime):
         *,
         credential_provider: C2PAToolCredentialProvider | None = None,
         manifest_provider: C2PAToolManifestProvider | None = None,
+        timestamp_authority_url: str | None = None,
+        allow_insecure_timestamp_authority: bool = False,
         **runtime: Any,
     ) -> None:
         super().__init__(**runtime)
+        if not isinstance(allow_insecure_timestamp_authority, bool):
+            raise TypeError("allow_insecure_timestamp_authority must be boolean")
         self._credential_provider = credential_provider
         self._manifest_provider = manifest_provider
+        self._timestamp_authority_url = (
+            None
+            if timestamp_authority_url is None
+            else _timestamp_authority_url(
+                timestamp_authority_url,
+                allow_insecure=allow_insecure_timestamp_authority,
+            )
+        )
 
     def is_available(self) -> bool:
         return (
@@ -1086,9 +1335,20 @@ class C2PAToolSigner(_C2PAToolRuntime):
                 assertion_codes
             ):
                 raise MediaProvenanceUnavailable("c2patool assertion request is invalid")
-            executable, _version = self._tool()
+            self._tool()
             anchors = self._trust_anchors()
             definition = _sanitize_manifest(self._manifest_provider(binding, requested))
+            if self._timestamp_authority_url is not None:
+                from .enterprise import enterprise_egress_denial
+
+                if enterprise_egress_denial(
+                    self._timestamp_authority_url,
+                    tool="ai_media_provenance.c2patool.tsa",
+                ):
+                    raise MediaProvenanceUnavailable(
+                        "c2patool timestamp-authority egress is denied"
+                    )
+                definition["ta_url"] = self._timestamp_authority_url
             credentials = self._credential_provider()
             if not isinstance(credentials, C2PAToolSigningCredentials):
                 raise MediaProvenanceUnavailable("c2patool signing credentials are unavailable")
@@ -1122,20 +1382,24 @@ class C2PAToolSigner(_C2PAToolRuntime):
                 _secure_write(private_key_path, private_key)
                 if trust_path is not None and anchors is not None:
                     _secure_write(trust_path, anchors)
-                _secure_write(settings_path, self._settings(trust_path))
+                _secure_write(settings_path, self._settings())
                 definition.update(
                     {
                         "alg": algorithm,
-                        "private_key": str(private_key_path),
-                        "sign_cert": str(certificate_path),
+                        # c2patool resolves these relative to the manifest file.
+                        # Relative names also avoid embedding a temporary Windows
+                        # drive path in a JSON manifest consumed across platforms.
+                        "private_key": private_key_path.name,
+                        "sign_cert": certificate_path.name,
                     }
                 )
                 _secure_write(
                     manifest_path,
                     _canonical_json(definition, limit=_MAX_MANIFEST_BYTES),
                 )
+                verified_executable = self._verified_tool_path()
                 report = self._run_report(
-                    executable=executable,
+                    executable=verified_executable,
                     workspace=workspace,
                     input_path=input_path,
                     settings_path=settings_path,
@@ -1172,8 +1436,177 @@ class C2PAToolSigner(_C2PAToolRuntime):
                 _erase_file(secret_path)
 
 
+class C2PAToolExternalSigner(_C2PAToolRuntime):
+    """C2PA signer using c2patool's external signer/KMS subprocess seam.
+
+    The fixed, absolute executable is queried by c2patool for its certificate
+    and algorithm and receives only claim bytes to sign.  Lightwork never
+    receives or writes a private key.  The subprocess is expected to enforce
+    its own workload identity, key policy, audit, rate limits, and HSM/KMS
+    authorization; those controls are deployment acceptance requirements, not
+    properties inferred by this adapter.
+    """
+
+    def __init__(
+        self,
+        *,
+        signer_path: str | Path,
+        expected_signer_sha256: str,
+        manifest_provider: C2PAToolManifestProvider | None = None,
+        timestamp_authority_url: str | None = None,
+        allow_insecure_timestamp_authority: bool = False,
+        **runtime: Any,
+    ) -> None:
+        super().__init__(**runtime)
+        if not isinstance(allow_insecure_timestamp_authority, bool):
+            raise TypeError("allow_insecure_timestamp_authority must be boolean")
+        candidate = Path(signer_path)
+        expected_digest = _expected_sha256(
+            expected_signer_sha256,
+            "c2patool expected external signer digest",
+        )
+        resolved, identity = _inspect_pinned_executable(
+            candidate,
+            expected_sha256=expected_digest,
+        )
+        self._signer_path = resolved
+        self._expected_signer_sha256 = expected_digest
+        self._signer_identity = identity
+        self._manifest_provider = manifest_provider
+        self._timestamp_authority_url = (
+            None
+            if timestamp_authority_url is None
+            else _timestamp_authority_url(
+                timestamp_authority_url,
+                allow_insecure=allow_insecure_timestamp_authority,
+            )
+        )
+
+    def is_available(self) -> bool:
+        if not callable(self._manifest_provider):
+            return False
+        try:
+            self._verified_signer_path()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            return False
+        return super().is_available()
+
+    def _verified_signer_path(self) -> Path:
+        verified, _identity = _inspect_pinned_executable(
+            self._signer_path,
+            expected_sha256=self._expected_signer_sha256,
+            expected_identity=self._signer_identity,
+        )
+        return verified
+
+    def sign(
+        self,
+        media: bytes,
+        *,
+        binding: C2PABinding,
+        assertion_codes: Sequence[str],
+    ) -> tuple[bytes, Mapping[str, Any]]:
+        try:
+            if not callable(self._manifest_provider) or not self.is_available():
+                raise MediaProvenanceUnavailable(
+                    "c2patool external signing providers are unavailable"
+                )
+            if not isinstance(media, (bytes, bytearray, memoryview)):
+                raise MediaProvenanceUnavailable("c2patool media is invalid")
+            data = bytes(media)
+            if not data or len(data) > _MAX_MEDIA_BYTES:
+                raise MediaProvenanceUnavailable("c2patool media exceeds its bound")
+            source_sha256 = hashlib.sha256(data).hexdigest()
+            binding_data = _binding_payload(binding, source_sha256)
+            extension = _media_extension(data, binding_data["media_kind"])
+            if isinstance(assertion_codes, (str, bytes)) or not isinstance(
+                assertion_codes, Sequence
+            ):
+                raise MediaProvenanceUnavailable("c2patool assertion request is invalid")
+            requested = tuple(
+                sorted({_normalize_assertion(item) for item in assertion_codes})
+            )
+            if not 1 <= len(requested) <= _MAX_ASSERTIONS or len(requested) != len(
+                assertion_codes
+            ):
+                raise MediaProvenanceUnavailable("c2patool assertion request is invalid")
+            self._tool()
+            definition = _sanitize_manifest(self._manifest_provider(binding, requested))
+            if self._timestamp_authority_url is not None:
+                from .enterprise import enterprise_egress_denial
+
+                if enterprise_egress_denial(
+                    self._timestamp_authority_url,
+                    tool="ai_media_provenance.c2patool.tsa",
+                ):
+                    raise MediaProvenanceUnavailable(
+                        "c2patool timestamp-authority egress is denied"
+                    )
+                definition["ta_url"] = self._timestamp_authority_url
+            with self._workspace() as temporary_name:
+                workspace = Path(temporary_name)
+                input_path = workspace / f"input{extension}"
+                output_path = workspace / f"signed{extension}"
+                settings_path = workspace / "settings.json"
+                manifest_path = workspace / "manifest.json"
+                _secure_write(input_path, data)
+                _secure_write(settings_path, self._settings())
+                _secure_write(
+                    manifest_path,
+                    _canonical_json(definition, limit=_MAX_MANIFEST_BYTES),
+                )
+                # Re-hash and identity-check immediately before c2patool is
+                # invoked.  Independently recheck the external signer too. The
+                # deployment ACL/ownership preflight prevents pathname
+                # replacement in the residual cross-process windows.
+                verified_signer_path = self._verified_signer_path()
+                verified_executable = self._verified_tool_path()
+                report = self._run_report(
+                    executable=verified_executable,
+                    workspace=workspace,
+                    input_path=input_path,
+                    settings_path=settings_path,
+                    trust_path=None,
+                    manifest_path=manifest_path,
+                    output_path=output_path,
+                    signer_path=verified_signer_path,
+                )
+                signed_media = _read_bounded_regular_file(output_path, _MAX_MEDIA_BYTES)
+                content_sha256 = hashlib.sha256(signed_media).hexdigest()
+                if content_sha256 == source_sha256:
+                    raise MediaProvenanceUnavailable(
+                        "c2patool did not change the signed asset"
+                    )
+                now = float(self._clock())
+                if not math.isfinite(now) or now <= 0 or now > 100_000_000_000.0:
+                    raise MediaProvenanceUnavailable(
+                        "c2patool observation time is invalid"
+                    )
+                receipt = self._receipt(
+                    report,
+                    operation="signing",
+                    binding=binding_data,
+                    content_sha256=content_sha256,
+                    now=now,
+                )
+                if not set(requested).issubset(receipt["assertion_codes"]):
+                    raise MediaProvenanceUnavailable(
+                        "c2patool omitted a requested assertion"
+                    )
+                return signed_media, receipt
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise MediaProvenanceUnavailable(
+                "c2patool external signing is unavailable"
+            ) from None
+
+
 __all__ = [
     "C2PAToolCredentialProvider",
+    "C2PAToolExternalSigner",
     "C2PAToolManifestProvider",
     "C2PAToolProcessResult",
     "C2PAToolProcessRunner",
