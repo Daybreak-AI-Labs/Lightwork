@@ -141,6 +141,31 @@ def test_execute_tool_is_deterministic_and_only_the_posting_tool_has_an_effect(t
 
 # -- one real paired execution ---------------------------------------------
 
+def test_run_arms_closes_its_world_when_a_pair_fails(tmp_path, monkeypatch):
+    import maverick.world_model as world_model
+
+    class FakeWorld:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    world = FakeWorld()
+    monkeypatch.setattr(world_model, "open_world", lambda _path: world)
+    monkeypatch.setattr(overhead, "load_tasks", lambda: ({"id": "only-task"},))
+    monkeypatch.setattr(overhead, "_shield_profile", lambda: {"backend": "test"})
+
+    def fail_pair(*_args, **_kwargs):
+        raise RuntimeError("pair failed")
+
+    monkeypatch.setattr(overhead, "_pair_instance", fail_pair)
+
+    with pytest.raises(RuntimeError, match="pair failed"):
+        overhead._run_arms((11,), tmp_path)
+
+    assert world.closed is True
+
+
 @pytest.fixture
 def governed_home(tmp_path, monkeypatch):
     """A throwaway Lightwork home so the arms never touch the real stores."""

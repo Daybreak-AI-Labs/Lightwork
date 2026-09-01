@@ -16,7 +16,7 @@ import sqlite3
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -230,7 +230,11 @@ class ConsentAnalytics:
         elif dimension == "policy_version":
             return int(row["policy_version"])
         else:
-            return datetime.fromtimestamp(float(row["created_at"]), UTC).date().isoformat()
+            return (
+                datetime.fromtimestamp(float(row["created_at"]), timezone.utc)
+                .date()
+                .isoformat()
+            )
         if value is None:
             return None
         if not isinstance(value, str) or len(value) > 128:

@@ -48,7 +48,9 @@ class FakeElement {
     this.listeners.set(name, handler);
   }
 
-  dispatchEvent() {
+  dispatchEvent(event) {
+    const handler = this.listeners.get(event.type);
+    if (handler) handler.call(this, event);
     return true;
   }
 
@@ -160,15 +162,7 @@ function prompt() {
   };
 }
 
-async function waitFor(predicate) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  throw new Error("timed out waiting for SDK interaction");
-}
-
-test("progressive prompt is certified, inserted, saved, and completed through closed controls", async () => {
+test("progressive prompt is certified, inserted, saved, and completed through closed controls", {timeout: 5_000}, async () => {
   const { context } = sdkContext();
   const sdk = new context.LightworkConsent({
     endpoint: "https://consent.lightwork.test/api/v1/public/consent",
@@ -215,11 +209,12 @@ test("progressive prompt is certified, inserted, saved, and completed through cl
     (node) => node.tagName === "BUTTON" && node.textContent === "Save profile choices",
   );
   assert.ok(save);
+  const completed = new Promise((resolve) => {
+    container.addEventListener("lightwork-profile-prompt-completed", resolve);
+  });
   save.listeners.get("click")();
-  await waitFor(() => calls.some(
-    (call) => call.route === "/profile-data/prompt/interactions" &&
-      call.options.body.outcome === "completed",
-  ));
+  const completedEvent = await completed;
+  assert.equal(completedEvent.detail.assignment_id, "prompt-12345678");
 
   const writes = calls.filter((call) =>
     call.route.startsWith("/profile-data/preferences/") && call.options.method === "PUT",
