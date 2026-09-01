@@ -164,15 +164,45 @@ def _initialize_windows_lock_file(path: Path, fd: int) -> None:
     os.lseek(fd, 0, os.SEEK_SET)
 
 
+def _adopt_orphaned_windows_lock_file(path: Path, fd: int) -> None:
+    """Publish the lock byte on a sidecar whose creator never did.
+
+    Adoption is idempotent -- every adopter (and a slow creator arriving
+    late) writes the same single ``\\0`` at offset 0, so concurrent writes
+    commute. A creator that is alive AND already holds the mandatory
+    byte-range lock makes this write fail; that case re-raises the classic
+    timeout error, now with the real cause attached, instead of quietly
+    fighting a live lock holder.
+    """
+    _validate_open_lock_file(path, fd)
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        if os.write(fd, b"\0") != 1:
+            raise OSError(f"could not publish the lock byte for {path}")
+        os.fsync(fd)
+    except OSError as exc:
+        raise PermissionError(f"lock file was never initialized: {path}") from exc
+    os.lseek(fd, 0, os.SEEK_SET)
+
+
 def _wait_for_windows_lock_initialization(path: Path, fd: int) -> None:
-    """Wait boundedly for an O_EXCL creator to publish the lock byte."""
+    """Wait boundedly for an O_EXCL creator to publish the lock byte.
+
+    A creator that died (or whose file was recreated empty by AV/backup
+    tooling) between creating the sidecar and writing the byte used to wedge
+    the lock FOREVER: the empty file makes every later opener take the
+    existing-file path, so no process can ever become the O_EXCL creator
+    again, and each one waited out this timeout and failed. After the bounded
+    wait a contender therefore adopts the orphan instead of giving up.
+    """
     if os.name != "nt":
         return
     deadline = time.monotonic() + _WINDOWS_LOCK_INITIALIZATION_SECONDS
     delay = 0.001
     while os.fstat(fd).st_size < 1:
         if time.monotonic() >= deadline:
-            raise PermissionError(f"lock file was never initialized: {path}")
+            _adopt_orphaned_windows_lock_file(path, fd)
+            return
         time.sleep(delay)
         delay = min(delay * 1.5, 0.025)
     os.lseek(fd, 0, os.SEEK_SET)
