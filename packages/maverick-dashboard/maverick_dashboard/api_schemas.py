@@ -705,8 +705,11 @@ class TenantOut(BaseModel):
 
 
 class TenantRoleIn(BaseModel):
-    """Grant a principal a role within one tenant (per-tenant RBAC)."""
-    role: str = Field(..., pattern="^(admin|operator|auditor|viewer)$")
+    """Grant a principal a role within one tenant (per-tenant RBAC).
+
+    Any known role name -- built-in or admin-defined custom role; rbac
+    validates against the live role registry (schema regexes can't see it)."""
+    role: str = Field(..., min_length=1, max_length=32, pattern="^[a-z][a-z0-9_-]*$")
 
 
 class UserSuitesIn(BaseModel):

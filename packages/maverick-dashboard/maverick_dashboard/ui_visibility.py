@@ -1070,7 +1070,7 @@ def overrides() -> dict[str, dict[str, bool]]:
     for path, cells in data.items():
         if path not in _PAGES_BY_PATH or not isinstance(cells, dict):
             continue
-        clean = {role: v for role, v in cells.items() if role in rbac.ROLES and isinstance(v, bool)}
+        clean = {role: v for role, v in cells.items() if rbac.is_known_role(role) and isinstance(v, bool)}
         if clean:
             out[path] = clean
     return out
@@ -1127,7 +1127,7 @@ def set_visibility(path: str, role: str, visible: bool) -> None:
     page = _PAGES_BY_PATH.get(path)
     if page is None:
         raise ValueError("unknown page")
-    if role not in rbac.ROLES:
+    if not rbac.is_known_role(role):
         raise ValueError("unknown role")
     if (path, role) in LOCKED:
         raise ValueError("this page is always available to admins")
@@ -1156,7 +1156,7 @@ def apply_selection(checked: set[str]) -> None:
     """
     data: dict[str, dict[str, bool]] = {}
     for page in PAGES:
-        for role in rbac.ROLES:
+        for role in rbac.known_roles():
             if (page["path"], role) in LOCKED or not eligible(page, role):
                 continue
             visible = f"{role}:{page['path']}" in checked
@@ -1214,15 +1214,17 @@ def nav_groups(role: str | None) -> list[dict]:
 def matrix() -> list[dict]:
     """The Settings-page editing matrix, grouped like the nav.
 
-    Each page row carries one cell per role (``rbac.ROLES`` order):
+    Each page row carries one cell per role (``rbac.known_roles()`` order:
+    builtins most-privileged first, then custom roles by name):
     ``eligible`` (permissions reach the floor), ``visible`` (resolved), and
     ``locked`` (lockout-guarded admin cell).
     """
     ov = overrides()
+    roles = rbac.known_roles()
     groups: list[dict] = []
     for page in PAGES:
         cells = []
-        for role in rbac.ROLES:
+        for role in roles:
             locked = (page["path"], role) in LOCKED
             el = eligible(page, role)
             cell = ov.get(page["path"], {}).get(role)

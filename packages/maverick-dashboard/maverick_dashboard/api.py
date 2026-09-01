@@ -1008,9 +1008,14 @@ async def set_tenant_role(
     from maverick_dashboard import rbac
 
     _get_tenant_or_404(tenant_id)
-    rbac.set_tenant_role(
-        tenant_id, principal, body.role, actor=caller_principal(request) or "local"
-    )
+    try:
+        rbac.set_tenant_role(
+            tenant_id, principal, body.role, actor=caller_principal(request) or "local"
+        )
+    except ValueError as e:
+        # An unknown (e.g. since-deleted custom) role: the schema regex can't
+        # see the live role registry, so rbac's check answers here.
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(status_code=204)
 
 

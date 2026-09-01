@@ -92,7 +92,7 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     from maverick_dashboard import rbac, ui_visibility
     return _app().templates.TemplateResponse(request, "settings.html", {
         "visibility_matrix": ui_visibility.matrix(),
-        "visibility_roles": list(rbac.ROLES),
+        "visibility_roles": list(rbac.known_roles()),
         "role_models": role_models,
         "model_options": model_options,
         "picker_options": picker_options,
@@ -329,15 +329,24 @@ def _users_context(request: Request) -> dict:
     saved = {"set": "Role updated.", "removed": "User removed.",
              "suites": "Department access updated.",
              "suites_removed": "Department access removed.",
-             "invite_revoked": "Invitation revoked."}.get(
+             "invite_revoked": "Invitation revoked.",
+             "role_saved": "Custom role saved.",
+             "role_deleted": "Custom role deleted."}.get(
         request.query_params.get("saved", ""), "")
     from maverick.departments import department_title
 
     from . import invites, suite_grants
     default_suites = suite_grants.default_suites()
+    try:
+        custom_roles = sorted(rbac.list_custom_roles().items())
+    except rbac.RbacStoreError:
+        custom_roles = []
     return {
         "users": sorted(rbac.list_users().items()),
-        "roles": rbac.ROLES,
+        "roles": rbac.known_roles(),
+        "builtin_roles": rbac.ROLES,
+        "custom_roles": custom_roles,
+        "permission_atoms": rbac.PERMISSION_ATOMS,
         "bootstrap_admins": sorted(bootstrap),
         "default_role": rbac.default_role(),
         "auth_on": auth_on,
@@ -388,6 +397,50 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
     rbac.remove_user(principal.strip(),
                      actor=auth.caller_principal(request) or "local")
     return RedirectResponse("/users?saved=removed", status_code=303)
+
+
+@router.post("/users/roles/save")
+async def users_save_custom_role(
+    request: Request,
+    name: str = Form(...),
+    permissions: list[str] = Form([]),
+    description: str = Form(""),
+) -> RedirectResponse:
+    """Create or update a custom role (admin only). Permission checkboxes come
+    in as repeated form fields; "view" is always granted (rbac enforces it),
+    so the form only offers the operate/audit/admin atoms on top."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import rbac
+    atoms = {str(p).strip() for p in permissions if str(p).strip()}
+    atoms.add("view")
+    try:
+        rbac.set_custom_role(
+            name.strip(),
+            sorted(atoms),
+            description.strip(),
+            actor=auth.caller_principal(request) or "local",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/users?saved=role_saved", status_code=303)
+
+
+@router.post("/users/roles/delete")
+async def users_delete_custom_role(
+    request: Request, name: str = Form(...)
+) -> RedirectResponse:
+    """Delete a custom role (admin only). Refused while anyone still holds it."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import rbac
+    try:
+        rbac.delete_custom_role(
+            name.strip(), actor=auth.caller_principal(request) or "local"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/users?saved=role_deleted", status_code=303)
 
 
 @router.post("/users/invite", response_class=HTMLResponse)
