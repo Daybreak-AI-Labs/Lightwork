@@ -146,6 +146,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   guidance (web access, no client-data access) and alerts the firm.
 
 
+### Changed
+- **CI runs the suite in parallel and `main` is protected** — the test matrix
+  and the posture job run as three disjoint file-level slices per interpreter,
+  each under pytest-xdist (one worker per core, tests grouped by file), taking
+  a leg from ~27 minutes serial to single digits on GitHub's two-core runners;
+  the root conftest fails any test that leaves a `maverick.*` module forked
+  between the package attribute and `sys.modules` (the order-dependent leak
+  parallel runs exposed); the repo-wide contract gates memoise their source
+  scan;
+  `main` is governed by the importable ruleset in
+  `.github/rulesets/protect-main.json` (pull requests only, squash only,
+  linear history, every blocking check required, merge queue) with every
+  required workflow triggering on `merge_group`; and a `no-ai-attribution`
+  check refuses AI co-author trailers, generator footers and assistant
+  session links in commit messages and PR text before they can reach `main`.
+
 ### Fixed
 - **Dashboard `/agents` and `/workflows` latency** — the built-in pack catalog
   (2,000+ packs) was re-parsed from disk on every request, making those pages

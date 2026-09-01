@@ -588,17 +588,17 @@ def test_pick_mcp_servers_skipped(monkeypatch):
 
 def test_pick_plugins_returns_empty_when_no_entry_points(monkeypatch):
     _StubQ(monkeypatch)
-    # Force empty entry_points discovery.
+    # Make the wizard's ``from maverick.plugins import _entry_points`` fail
+    # WITHOUT re-importing the module. The old approach popped the module and
+    # let the import re-execute it: that bound a second maverick.plugins object
+    # as the package attribute while ``finally`` restored only the sys.modules
+    # entry, so every later string-form monkeypatch ("maverick.plugins.x") in
+    # the same process patched the copy and the app kept calling the original.
+    # Serial runs never noticed (apps/ tests run last); pytest-xdist orders
+    # files by size and put this file first (#2410).
+    monkeypatch.setitem(sys.modules, "maverick.plugins", None)
     import maverick_installer.wizard as w
-    real_plugins = sys.modules.get("maverick.plugins")
-    try:
-        # Remove module so the import in pick_plugins re-imports / fails.
-        sys.modules.pop("maverick.plugins", None)
-        out = w.pick_plugins()
-        assert out == []
-    finally:
-        if real_plugins:
-            sys.modules["maverick.plugins"] = real_plugins
+    assert w.pick_plugins() == []
 
 
 def test_pick_tool_acl_skipped(monkeypatch):
