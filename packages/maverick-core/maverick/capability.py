@@ -450,6 +450,16 @@ def capability_from_config(
     role = role_for_principal(principal)
     if role:
         base = _apply_role(base, role)
+    # Regulatory obligations (regulatory_compiler) narrow the grant last, so a
+    # compiled attenuation can never be widened by ACL or role config, and every
+    # child derived from this grant inherits the loss. A compiler failure is a
+    # policy outage: deny all rather than run with an unknown envelope.
+    try:
+        from .regulatory_compiler import attenuate as _obligation_attenuate
+        base = _obligation_attenuate(base)
+    except Exception:
+        log.exception("regulatory attenuation failed; denying all")
+        return deny_all_capability(principal)
     return base
 
 

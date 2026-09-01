@@ -2458,10 +2458,12 @@ class Agent:
             )
             # tamper-evident record of the denial; a refusal propagates
             from .audit import EventKind, audit_event
+            from .regulatory_compiler import audit_tags as _obligation_tags
             audit_event(EventKind.GOVERNANCE_DENIED, agent=self.name,
                         goal_id=self.ctx.goal_id, tool=name,
                         principal=_principal, rule=_gov.rule,
-                        reason=_gov.reason)
+                        reason=_gov.reason,
+                        **_obligation_tags(name, _gov.rule))
             return (
                 f"⚠ DENIED by org policy ({_gov.rule}): {_gov.reason}. "
                 "The tool was not executed."
@@ -2498,10 +2500,12 @@ class Agent:
             f"tool={name} BLOCKED: governance requires human approval",
         )
         from .audit import EventKind, audit_event
+        from .regulatory_compiler import audit_tags as _obligation_tags
         audit_event(EventKind.GOVERNANCE_DENIED, agent=self.name,
                goal_id=self.ctx.goal_id, tool=name,
                principal=_principal, rule=_gov.rule,
-               reason="human approval not granted")
+               reason="human approval not granted",
+               **_obligation_tags(name, _gov.rule))
         # Human-override ingestion: the operator's "no" is itself a
         # learning signal — recallable on the next similar goal and
         # consolidated by dreaming. No-op unless [reflexion] is on.
@@ -2660,8 +2664,12 @@ class Agent:
 
         # Success-path audit (who-did-what-when): a tamper-evident record that
         # this tool call executed, on the same signed chain as the denial events.
+        # Proof the compiled obligations were checked on this call: the row names
+        # every active obligation whose scope covered the tool (empty -> omitted).
+        from .regulatory_compiler import checked_tags as _checked_tags
         self._audit_tool_event("tool_call", name=name,
-                               input_summary=_audit_summary(args))
+                               input_summary=_audit_summary(args),
+                               **_checked_tags(name))
 
         output = await self.tools.run(name, args)
 

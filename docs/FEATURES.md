@@ -3388,6 +3388,31 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   forever otherwise),
   per-run file-write + tool quotas, `maverick compliance --strict`, CycloneDX
   SBOM in CI.
+- **Regulatory compiler — compliance by construction**
+  (`regulatory_compiler.py`, `maverick regulatory show|check|verify`,
+  `python -m maverick.regulatory_compiler --ci`) — a policy document says what
+  must not happen; this makes it *unable* to happen. Each regulation is a small
+  library of obligations — a citation, a scope (tool names or a risk floor) and
+  an effect — compiled into the same `Policy` the tool-call chokepoint already
+  evaluates (deny-wins, strictest-wins) plus a capability attenuation that can
+  only narrow and that every spawned child inherits. Shipped: **GDPR** (Art. 17
+  erasure only through the governed path — a direct write to a personal-data
+  store pauses for a human; Art. 32 a human confirms every outbound transfer;
+  Art. 22 no solely automated high-impact decision), **EU AI Act** (Art. 14
+  human oversight of every high-risk action), **HIPAA** (45 CFR 164.502(b)
+  minimum necessary — PHI never leaves through an ungoverned channel, as an
+  attenuation no ACL or role can widen). Activation is `[compliance] profiles`,
+  the switch the compliance profiles already use, with a wizard step. Two
+  things a document cannot do: **proof the gate was live** — every denial the
+  compiled rules produce is audited with `obligation_id`/`regulation`/`article`,
+  and every call that ran carries `obligations_checked`, so a trust receipt for
+  that row cites the regulation — and **anti-vacuity**: `verify` proves each
+  active obligation bites (every bound tool is a classified tool, the compiled
+  policy denies or pauses it, a floor catches a real tool, an attenuation
+  narrows a capability); the CI gate fails on a stale tool name or a silent
+  overlay and exits 2 when it inspected nothing. Conduct prohibitions (EU AI
+  Act Art. 5) stay the packs' hard refusals; this does not pretend a tool gate
+  covers them.
 - **Compliance mode profiles** — `[compliance] profiles = ["hipaa"]` turns on
   a cross-domain runtime posture (`compliance_profiles.py`): **HIPAA mode**
   asserts the 45 CFR Part 164 safeguards, names the protection floors it

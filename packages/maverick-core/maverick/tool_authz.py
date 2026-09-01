@@ -130,11 +130,13 @@ def authorize(
     # 4. Record the dispatch on the signed chain. This is what makes the
     #    attestation's policy_envelope claim falsifiable for flow actions.
     from .audit import EventKind, audit_event
+    from .regulatory_compiler import checked_tags
 
     audit_event(
         EventKind.TOOL_CALL, agent=f"{origin}:action", goal_id=goal_id,
         name=tool, origin=origin, principal=principal,
         input_summary=_audit_summary(params),
+        **checked_tags(tool),
     )
     return None
 
@@ -142,10 +144,12 @@ def authorize(
 def _record_denial(tool: str, origin: str, goal_id: int | None,
                    rule: str, reason: str) -> None:
     from .audit import EventKind, audit_event
+    from .regulatory_compiler import audit_tags
 
     audit_event(
         EventKind.GOVERNANCE_DENIED, agent=f"{origin}:action", goal_id=goal_id,
         tool=tool, origin=origin, rule=rule, reason=reason,
+        **audit_tags(tool, rule),
     )
 
 

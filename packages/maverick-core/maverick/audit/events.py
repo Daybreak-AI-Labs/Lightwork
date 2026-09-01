@@ -130,6 +130,10 @@ class EventKind:
     # short-lived capability token, so the Operating Record shows the scoped
     # credential each tool call actually ran under -- not just the run-long grant.
     TOKEN_EXCHANGE = "token_exchange"
+    # governance_denied and tool_call rows may carry optional regulatory tags
+    # (regulatory_compiler): ``obligation_id``/``regulation``/``article`` on a
+    # denial the compiled rules produced, ``obligations_checked`` (ids) on a
+    # call that ran while obligations covering it were active. Additive.
     GOVERNANCE_DENIED = "governance_denied"
     AUTONOMY_ESCALATED = "autonomy_escalated"
     AUTONOMY_GATED = "autonomy_gated"
