@@ -37,13 +37,12 @@
   bounded opaque references, never their underlying values.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not privacy_notice_governance_enabled %}
-<section class="panel">
-  <h2>Privacy notice governance disabled</h2>
-  <p>This surface fails closed until both
-    <code>[privacy_automation] enable = true</code> and
-    <code>[privacy_automation.notice_governance] enable = true</code> are explicit.</p>
-</section>
+{{ module_gate('privacy_automation.notice_governance', 'Privacy notice governance',
+               detail='Notice drafting, review, versioned releases, and signed
+                       exports all stay safely off until it is on -- have your
+                       privacy owner review the approval workflow first.') }}
 {% else %}
 <p><button class="btn" id="png-load-status" type="button">Load honest status</button></p>
 <section class="panel png-runtime" aria-labelledby="png-runtime-title">

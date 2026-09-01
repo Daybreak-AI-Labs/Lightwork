@@ -4,14 +4,14 @@
 <style>
   .ce-shell{max-width:1500px;margin:0 auto;padding:1.25rem}.ce-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;margin-bottom:1rem}.ce-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.ce-hero h1{margin:.1rem 0}.ce-links{display:flex;gap:.5rem;flex-wrap:wrap}.ce-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.ce-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}.ce-card h2{font-size:1rem;margin:.1rem 0 .75rem}.ce-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.ce-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.ce-wide,.ce-actions{grid-column:1/-1}.ce-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.ce-output{white-space:pre-wrap;word-break:break-word;max-height:44rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.ce-warning{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}.ce-limit{border-left:3px solid var(--accent);padding-left:.75rem;margin:.45rem 0}.ce-secret{font-family:monospace}.ce-list{margin:.5rem 0;padding-left:1.25rem}.ce-list li{margin:.3rem 0}@media(max-width:980px){.ce-grid,.ce-form{grid-template-columns:1fr}.ce-wide,.ce-actions{grid-column:auto}}
 </style>
+{% from "_module_gate.html" import module_gate %}
+{% if not consent_experiments_enabled %}<div class="ce-shell">{{ module_gate('consent_preferences.experiments', 'Consent experiments', detail='Runs governed experiments on certified consent presentation variants -- review your privacy, statistical, accessibility, and rollback safeguards first.') }}</div>{% endif %}
 <fieldset class="ce-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if consent_experiments_enabled else 'false' }}"{% if not consent_experiments_enabled %} disabled aria-disabled="true"{% endif %}>
   <legend class="sr-only">Consent experiments workbench</legend>
   <header class="ce-hero">
     <div><div class="ce-kicker">Governed choice-surface optimization</div><h1>Consent Experiments</h1><p class="muted">Approve immutable certified presentation variants, assign them without retaining raw identities, record bounded outcomes, and stop or roll back to control.</p></div>
     <nav class="ce-links" aria-label="Consent experiment links"><a class="btn" href="/consent">Consent</a><a class="btn" href="/consent/publishing">Publishing</a><a class="btn" href="/consent/scan-inventory">Scan inventory</a></nav>
   </header>
-
-  {% if not consent_experiments_enabled %}<div class="ce-warning" role="status"><strong>Consent experiments disabled.</strong> Enable exact booleans under <code>[consent_preferences] enable = true</code> and <code>[consent_preferences.experiments] enable = true</code> only after human, privacy, statistical, accessibility, key-custody, and rollback review.</div>{% endif %}
 
   <section class="ce-card" aria-labelledby="ce-boundaries-heading">
     <h2 id="ce-boundaries-heading">Current boundary and limits</h2>

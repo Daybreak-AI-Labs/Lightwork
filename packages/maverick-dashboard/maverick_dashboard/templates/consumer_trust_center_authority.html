@@ -27,13 +27,12 @@
   signing-key values, legal prose, or free text.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not consumer_trust_center_authority_enabled %}
-<section class="panel">
-  <h2>Trust Center authority disabled</h2>
-  <p>This surface fails closed until both
-    <code>[consent_preferences] enable = true</code> and
-    <code>[consent_preferences.trust_center] enable = true</code> are explicit.</p>
-</section>
+{{ module_gate('consent_preferences.trust_center', 'Consumer Trust Center',
+               detail='Backs the consumer-facing Trust Center with four-eyes
+                       capability grants and rights authorizations -- review
+                       your approver assignments first.') }}
 {% else %}
 <p><button class="btn" id="tca-load-status" type="button">Load honest status</button></p>
 <div class="tca-grid">

@@ -83,10 +83,11 @@
       <p class="muted">No fulfillment record opened for this request yet.</p>
     </div>
   {% else %}
-    <div class="panel empty">
-      <p class="muted">DSAR fulfillment is not enabled — turn on
-        <code>[dsar_fulfillment]</code> to track identity verification,
-        collection, and token-gated delivery here.</p>
-    </div>
+    {% from "_module_gate.html" import module_gate %}
+    {{ module_gate('dsar_fulfillment', 'DSAR fulfillment',
+                   detail='Tracks identity verification, collection, and
+                           token-gated response delivery for this request --
+                           agree on who verifies identities before turning it
+                           on.') }}
   {% endif %}
 {% endblock %}

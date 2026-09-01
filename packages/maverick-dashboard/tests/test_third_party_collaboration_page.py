@@ -62,8 +62,8 @@ def test_disabled_page_is_inert_and_names_all_required_gates() -> None:
     page = _client(enabled=False).get("/third-party/collaboration")
     assert page.status_code == 200
     text = page.text
-    assert "Collaboration portal disabled" in text
-    assert "third_party_management.lifecycle.portal" in text
+    assert 'data-module-gate="third_party_management.lifecycle.portal"' in text
+    assert "[third_party_management.lifecycle.portal]" not in text
     assert "deployment-owned public-reference" in text
     assert "/api/v1/third-party/collaboration" not in text
 

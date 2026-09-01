@@ -38,8 +38,9 @@ def test_page_exposes_full_publishing_lifecycle_and_default_off_boundary() -> No
     assert response.status_code == 200
     page = response.text
     assert "Consent Publishing" in page
-    assert "Publishing disabled." in page
-    assert "[consent_preferences.publishing] enable = true" in page
+    assert 'data-module-gate="consent_preferences.publishing"' in page
+    assert "Consent publishing is turned off." in page
+    assert "[consent_preferences.publishing] enable = true" not in page
     for element in (
         "cpp-property",
         "cpp-resource",
@@ -77,7 +78,7 @@ def test_enabled_page_removes_disabled_banner(isolated_page) -> None:
     )
     config.reset_config_cache()
     page = client.get("/consent/publishing").text
-    assert "Publishing disabled." not in page
+    assert 'data-module-gate="consent_preferences.publishing"' not in page
     assert re.search(r'id="cpp-withdraw-submit"[^>]*disabled', page) is None
     assert re.search(r'id="cpp-withdraw-confirm"[^>]*disabled', page) is None
     assert "Confirm the destructive withdrawal before continuing." in page

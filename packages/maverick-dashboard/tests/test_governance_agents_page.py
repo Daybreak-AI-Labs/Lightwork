@@ -291,8 +291,8 @@ def test_dashboard_route_passes_exact_tenant_and_global_permissions(
 def test_page_fails_closed_and_static_dom_is_safe(page_client) -> None:
     disabled = page_client.get("/governance-agents", params={"enabled": False})
     assert disabled.status_code == 200
-    assert "Governance agents disabled" in disabled.text
-    assert "governance_agents" in disabled.text
+    assert 'data-module-gate="governance_agents"' in disabled.text
+    assert "[governance_agents] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"

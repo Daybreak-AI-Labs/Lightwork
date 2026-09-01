@@ -18,8 +18,12 @@
     </nav>
   </header>
 
+  {% from "_module_gate.html" import module_gate %}
   {% if not consent_scan_notice_proposals_enabled %}
-  <div class="csnp-warning" role="status"><strong>Scan disclosure proposals disabled.</strong> Enable <code>[consent_preferences]</code>, <code>[consent_preferences.scanner]</code>, and <code>[consent_preferences.scanner.notice_proposals]</code> only after privacy, completeness, reviewer-independence, revocation, recovery, and signing-custody review.</div>
+  {{ module_gate('consent_preferences.scanner.notice_proposals', 'Scan notice proposals',
+                 detail='Turns completed scan reports into reviewable disclosure
+                         proposals -- review your reviewer independence and
+                         revocation handling first.') }}
   {% endif %}
 
   <section class="csnp-card" aria-labelledby="csnp-boundaries">

@@ -87,8 +87,9 @@ def test_page_exposes_complete_governed_operator_contract(page_client: TestClien
 def test_page_fails_closed_and_uses_only_safe_dom(page_client: TestClient) -> None:
     disabled = page_client.get("/consent/profile-data", params={"enabled": False})
     assert disabled.status_code == 200
-    assert "Consent profile data disabled" in disabled.text
-    assert "consent_preferences.profile_data" in disabled.text
+    assert 'data-module-gate="consent_preferences.profile_data"' in disabled.text
+    assert "Consent profile data is turned off." in disabled.text
+    assert "[consent_preferences.profile_data] enable = true" not in disabled.text
     assert 'id="cpd-submit"' not in disabled.text
 
     template = (

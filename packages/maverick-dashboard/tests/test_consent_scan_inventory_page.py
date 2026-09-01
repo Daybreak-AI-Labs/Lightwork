@@ -65,6 +65,7 @@ def test_scan_inventory_page_renders_safe_operator_contract(page_client: TestCli
 def test_scan_inventory_page_renders_when_gate_is_off(page_client: TestClient) -> None:
     response = page_client.get("/consent/scan-inventory", params={"enabled": False})
     assert response.status_code == 200
-    assert "Scan inventory disabled" in response.text
-    assert "consent_preferences.scanner" in response.text
+    assert 'data-module-gate="consent_preferences.scanner"' in response.text
+    assert "Consent application scanning is turned off." in response.text
+    assert "[consent_preferences.scanner] enable = true" not in response.text
     assert "Live acceptance flags remain false" in response.text
