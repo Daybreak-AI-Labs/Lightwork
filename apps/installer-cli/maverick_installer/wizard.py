@@ -46,6 +46,26 @@ CONFIG_DIR = Path.home() / ".maverick"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 ENV_FILE = CONFIG_DIR / ".env"
 
+
+def _prior_consent_salt() -> str:
+    """The existing consent subject_salt, or a fresh one on first enable.
+
+    Consent subject digests are sha256(salt:subject), so regenerating the
+    salt on a wizard re-run would orphan every stored consent record.
+    Mirror the MAVERICK_RED_TEAM_COMMITMENT_KEY preservation: read the
+    current config.toml (which the wizard is about to rewrite) and keep
+    the salt that the existing records were digested under.
+    """
+
+    try:
+        prior = tomllib.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        salt = str((prior.get("consent_registry") or {}).get("subject_salt") or "")
+        if 16 <= len(salt.strip()) <= 256:
+            return salt.strip()
+    except (OSError, ValueError):
+        pass
+    return secrets.token_urlsafe(24)
+
 console = Console()
 
 
@@ -122,6 +142,7 @@ STEPS: list[tuple[str, str]] = [
     ("oauth_vault", "OAuth token vault"),
     ("governed_connectors", "Governed connectors"),
     ("durable", "Durable execution"),
+    ("journal", "Workspace journal"),
     ("finance", "Finance suite"),
     ("value", "Savings assumptions"),
     ("assessments", "Assessment assists"),
@@ -1454,6 +1475,36 @@ def pick_durable() -> dict[str, Any]:
     return {"enabled": True, "keep_last": 5}
 
 
+def pick_workspace_journal() -> dict[str, Any]:
+    """Opt-in workspace mutation journal (pre-images + ``maverick journal
+    revert``).
+
+    Off by default. Returns keys for the ``[workspace]`` table (``journal``,
+    ``journal_strict``); written only when enabled.
+    """
+    console.print()
+    console.print(
+        "[dim]The workspace journal captures every file the agents overwrite "
+        "or create through the file tools — BEFORE the mutation — so "
+        "`maverick journal revert` can restore a goal's workspace to its "
+        "pre-run state without a prior snapshot. Shell-driven mutations "
+        "(rm/mv/redirects) are not covered — the audit trail records those "
+        "commands. Bounded disk per goal; OFF by default.[/dim]"
+    )
+    if not _q_confirm(
+            "Enable the workspace mutation journal (undoable file edits)?",
+            default=False):
+        return {"journal": False}
+    strict = _q_confirm(
+        "Strict mode: REFUSE any write whose pre-image cannot be journaled? "
+        "(makes reversibility a guarantee; a full journal then blocks writes)",
+        default=False)
+    out: dict[str, Any] = {"journal": True}
+    if strict:
+        out["journal_strict"] = True
+    return out
+
+
 def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product prompts
     """Assessment-flow assists (doc discovery + learning), both default ON.
 
@@ -2677,7 +2728,10 @@ def pick_security_suite() -> dict[str, Any]:
         )
     ai_inventory = _q_confirm(
         "Enable read-only discovery of customer-owned AI assets across cloud AI, "
-        "model registries, data platforms, agent builders, and model hubs? "
+        "model registries, data platforms, agent builders, and model hubs such as "
+        "Bedrock, SageMaker, Azure AI Foundry, Vertex AI, Databricks, Copilot "
+        "Studio, MLflow, Hugging Face, OpenAI, Replicate, Snowflake, or "
+        "Salesforce Agentforce? "
         "Credentials are configured separately and are never stored in the "
         "inventory ledger.",
         default=False,
@@ -2695,15 +2749,21 @@ def pick_security_suite() -> dict[str, Any]:
         model_risk_assurance = True
         connector_labels = {
             "AWS Bedrock": "bedrock",
-            "AWS SageMaker": "aws_sagemaker",
+            "AWS SageMaker (stock contract)": "aws_sagemaker",
+            "Amazon SageMaker account registry": "sagemaker",
             "Azure AI Foundry": "azure_ai_foundry",
             "Google Vertex AI": "vertex_ai",
             "Databricks Unity Catalog": "databricks_unity_catalog",
             "Microsoft Copilot Studio": "copilot_studio",
             "MLflow Model Registry": "mlflow",
             "Snowflake Cortex": "snowflake_cortex",
-            "Salesforce Agentforce": "salesforce_agentforce",
-            "Hugging Face Hub": "hugging_face",
+            "Snowflake Model Registry": "snowflake",
+            "Salesforce Agentforce (stock contract)": "salesforce_agentforce",
+            "Salesforce Agentforce account": "agentforce",
+            "Hugging Face Hub (stock contract)": "hugging_face",
+            "Hugging Face Hub organization": "huggingface",
+            "OpenAI platform (org models + fine-tunes)": "openai",
+            "Replicate (account deployments)": "replicate",
         }
         selected = _q_checkbox(
             "Prepare which read-only AI inventory connectors?",
@@ -3539,6 +3599,14 @@ def pick_finance() -> dict[str, Any]:
             "  Poll the official Texas Register RSS and queue each issue for review?",
             default=False,
         )
+        operations["eur_lex_enable"] = _q_confirm(
+            "  Poll EUR-Lex (all EU Parliament and Council legislation) for review?",
+            default=False,
+        )
+        operations["edpb_enable"] = _q_confirm(
+            "  Poll the EDPB news feed (GDPR guidance and decisions) for review?",
+            default=False,
+        )
         operations["regulatory_domains"] = _q_checkbox(
             "  Regulatory domains to route into the review queue:",
             ["finance", "money_transmitter", "insurance_producer", "lending"],
@@ -3890,6 +3958,120 @@ def pick_advanced() -> dict[str, Any]:
             "truth performance; emit bound assurance evidence and a signed alert "
             "when configured PSI, KL, cosine, or decay thresholds are crossed. Raw "
             "rows and vectors are not retained. OFF by default.",
+            default=False,
+        ),
+        "ai_incident_reporting": _q_confirm(
+            "EU AI Act Art. 73 serious-incident reporting? Classify an "
+            "assurance incident under Art. 3(49), start the tiered 2/10/15-day "
+            "clock from awareness, draft the report for the routed Member-State "
+            "authority, and record human-gated submissions. Clocks and drafts "
+            "only -- nothing is ever transmitted. OFF by default.",
+            default=False,
+        ),
+        "ai_regulatory_feed": _q_confirm(
+            "AI regulatory-change impact bridge? Run reviewed regulatory "
+            "alerts through explicit operator rules to create policy-impact "
+            "records, exact evidence-staleness flags, and idempotent customer "
+            "notices. Requires finance operations and the AI evidence gateway. "
+            "Decision support, never a legal applicability opinion. OFF by "
+            "default.",
+            default=False,
+        ),
+        "eu_conformity": _q_confirm(
+            "EU AI Act conformity workflows? Human-gated registers for the "
+            "Art. 27 fundamental-rights impact assessment, the Annex IV "
+            "technical-documentation checklist, and the Art. 43 conformity-"
+            "assessment route with forbidden combinations refused. Drafting "
+            "and tracking assistance, never a conformity assessment or legal "
+            "advice. OFF by default.",
+            default=False,
+        ),
+        "explainability": _q_confirm(
+            "Model-agnostic explainability? Seeded permutation importance, "
+            "partial dependence, Spearman global sensitivity, and "
+            "standardized-deviation reason codes, recordable as governed "
+            "evidence. Attribution for your own review, never a fairness "
+            "certification. OFF by default.",
+            default=False,
+        ),
+        "content_provenance": _q_confirm(
+            "Signed content provenance (EU AI Act Art. 50(2), applicable "
+            "2 Dec 2026)? Machine-readable sidecar manifests binding "
+            "generated content to the generating system, Ed25519-signed and "
+            "verifiable against an external key registry. Marking assistance "
+            "only, never a content-authenticity certification. OFF by "
+            "default.",
+            default=False,
+        ),
+        "llm_gateway": _q_confirm(
+            "Governed LLM gateway? Agents built anywhere point their "
+            "OpenAI-compatible base URL at Lightwork; every call crosses a "
+            "governed checkpoint (own bearer, model allowlist, bounded "
+            "bodies, egress-guarded upstream) and unknown callers land in a "
+            "shadow-AI ledger. Requires an upstream URL and token after "
+            "setup. OFF by default.",
+            default=False,
+        ),
+        "vendor_management": _q_confirm(
+            "Third-party vendor register? Governed vendor records with "
+            "criticality tiers, questionnaire campaigns served over the "
+            "public form endpoint, monitoring notes, links to assessments "
+            "and RoPA entries, and a OneTrust vendor-CSV importer. A "
+            "register and audit trail, never a vendor risk rating service. "
+            "OFF by default.",
+            default=False,
+        ),
+        "consent_registry": _q_confirm(
+            "Consent receipts and preferences registry? Per-subject consent "
+            "receipts (purpose, policy version, channel) with salted "
+            "subject digests, a current-preference projection, audit "
+            "export, and a OneTrust consent-CSV importer. The governed "
+            "record behind a consent front end, never a cookie banner or "
+            "TCF-certified CMP. OFF by default.",
+            default=False,
+        ),
+        "data_map": _q_confirm(
+            "Data map and discovery? A governed register of data assets "
+            "with a column-name classifier, a deterministic CONTENT "
+            "classifier for pasted data samples (Luhn/mod-97/structural "
+            "validation, never an ML guess), an information_schema CSV "
+            "importer for warehouses, a SharePoint site census via "
+            "Microsoft Graph, and a Snowflake masking-policy DDL export. "
+            "Triage for a human data-mapping exercise, never a crawler. "
+            "OFF by default.",
+            default=False,
+        ),
+        "breach_notification": _q_confirm(
+            "Breach-notification planner? Fourteen regimes' verified "
+            "who/when/whether rules (GDPR, HIPAA, six US states, LGPD, "
+            "PIPEDA, Australia, Singapore, Japan, Korea) turned into "
+            "per-incident obligations with computed deadlines and "
+            "citations. Decision support for your counsel, never legal "
+            "advice, and nothing is ever transmitted. OFF by default.",
+            default=False,
+        ),
+        "dsar_fulfillment": _q_confirm(
+            "DSAR fulfillment pipeline? Execute subject requests as a "
+            "governed pipeline: recorded identity verification, collection "
+            "logging, deterministic third-party redaction, and a "
+            "token-gated response link assembled at delivery time (no "
+            "second copy of personal data stored). OFF by default.",
+            default=False,
+        ),
+        "ai_literacy": _q_confirm(
+            "EU AI Act Art. 4 AI-literacy register? Named humans set which "
+            "trainings each role requires, record completions with evidence "
+            "references, and export gap and evidence snapshots for auditors. "
+            "Decision support, never a certification of competence. OFF by "
+            "default.",
+            default=False,
+        ),
+        "grc_sync": _q_confirm(
+            "Outbound GRC synchronization? Idempotently mirror model-risk "
+            "findings, accepted risks, and incidents into your ServiceNow, "
+            "Archer, or other REST GRC system as governed pointer records "
+            "with a round-trip link. Evidence never leaves Lightwork. Paths "
+            "and connector are configured in [grc_sync]. OFF by default.",
             default=False,
         ),
         "agent_topology": _q_confirm(
@@ -5411,19 +5593,33 @@ def _cfg_deployment(deployment: str | None) -> list[str]:
     ]
 
 
-def _cfg_governance(profile: str | None) -> list[str]:
-    if not profile:
-        return []
+def _cfg_governance(
+    profile: str | None,
+    finance: dict[str, Any] | None = None,
+) -> list[str]:
+    values: list[str] = []
     # Record the governance level chosen at onboarding. This is a label for
     # humans + dashboards: the enforceable knobs it expanded to ([audit],
     # [quotas], [self_improvement], retention, ...) are written explicitly
     # elsewhere in this file, so hand-edits keep working. Re-run
     # `maverick init` to switch levels.
-    return [
-        "[governance]",
-        f"profile = {_toml_str(str(profile))}   # essentials | standard | regulated | custom",
-        "",
-    ]
+    if profile:
+        values.append(
+            f"profile = {_toml_str(str(profile))}   "
+            "# essentials | standard | regulated | custom"
+        )
+    if finance:
+        # Finance governance scalars share this table with the onboarding
+        # profile. Keeping a single owner prevents a profile + finance install
+        # from declaring [governance] twice and invalidating the whole config.
+        values.append('require_human_min_risk = "high"')
+        if finance.get("require_fresh_human_approval"):
+            # A prior persistent consent grant won't satisfy the Art-14 gate --
+            # each paused action needs a fresh human decision.
+            values.append("require_fresh_human_approval = true")
+    if not values:
+        return []
+    return ["[governance]", *values, ""]
 
 
 def _cfg_providers(providers: list[str]) -> list[str]:
@@ -5606,6 +5802,18 @@ def _append_nested_product_config(
     append_table(section, values)
 
 
+def _cfg_workspace(workspace: dict[str, Any] | None) -> list[str]:
+    if not (workspace and workspace.get("journal")):
+        return []
+    # Workspace mutation journal: pre-image every file-tool write so
+    # `maverick journal revert` can restore a goal's workspace. Off unless
+    # opted in; journal_strict refuses writes it cannot journal.
+    lines = ["", "[workspace]"]
+    for k, v in workspace.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if not assessments:
         return []
@@ -5661,14 +5869,20 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
     if security_suite is None:
         return []
     allowed_inventory_connectors = {
+        "agentforce",
         "azure_ai_foundry",
         "aws_sagemaker",
         "bedrock",
         "copilot_studio",
         "databricks_unity_catalog",
         "hugging_face",
+        "huggingface",
         "mlflow",
+        "openai",
+        "replicate",
         "salesforce_agentforce",
+        "sagemaker",
+        "snowflake",
         "snowflake_cortex",
         "vertex_ai",
     }
@@ -6217,12 +6431,9 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
         return []
     # Finance suite governance (finance-agent-suite): pause money movement for
     # a human, enforce compliance regimes (strictest-wins), and screen
-    # sanctions. The [governance] scalar key precedes its sub-tables (TOML).
-    lines = ["", "[governance]", 'require_human_min_risk = "high"']
-    if finance.get("require_fresh_human_approval"):
-        # A prior persistent consent grant won't satisfy the Art-14 gate --
-        # each paused action needs a fresh human decision.
-        lines.append("require_fresh_human_approval = true")
+    # sanctions. _cfg_governance owns the parent table and its scalar keys;
+    # this helper emits only the finance-owned child and peer tables.
+    lines: list[str] = []
     rha = finance.get("require_human_above") or 0
     if rha and rha > 0:
         lines.append("")
@@ -6251,6 +6462,8 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
             for key in (
                 "federal_register_enable",
                 "texas_register_enable",
+                "eur_lex_enable",
+                "edpb_enable",
                 "regulatory_domains",
                 "regulatory_poll_seconds",
                 "control_test_interval_seconds",
@@ -6882,6 +7095,52 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[drift_monitoring]")
         lines.append("enable = true")
+    if advanced.get("ai_incident_reporting"):
+        lines.append("")
+        lines.append("[ai_incident_reporting]")
+        lines.append("enable = true")
+    if advanced.get("eu_conformity"):
+        lines.append("")
+        lines.append("[eu_conformity]")
+        lines.append("enable = true")
+    if advanced.get("explainability"):
+        lines.append("")
+        lines.append("[explainability]")
+        lines.append("enable = true")
+    if advanced.get("content_provenance"):
+        lines.append("")
+        lines.append("[content_provenance]")
+        lines.append("enable = true")
+    if advanced.get("llm_gateway"):
+        lines.append("")
+        lines.append("[llm_gateway]")
+        lines.append("enable = true")
+        lines.append('upstream_url = "https://api.openai.com"')
+    if advanced.get("vendor_management"):
+        lines.append("")
+        lines.append("[vendor_management]")
+        lines.append("enable = true")
+    if advanced.get("consent_registry"):
+        lines.append("")
+        lines.append("[consent_registry]")
+        lines.append("enable = true")
+        lines.append(f'subject_salt = "{_prior_consent_salt()}"')
+    if advanced.get("data_map"):
+        lines.append("")
+        lines.append("[data_map]")
+        lines.append("enable = true")
+    if advanced.get("breach_notification"):
+        lines.append("")
+        lines.append("[breach_notification]")
+        lines.append("enable = true")
+    if advanced.get("dsar_fulfillment"):
+        lines.append("")
+        lines.append("[dsar_fulfillment]")
+        lines.append("enable = true")
+    if advanced.get("grc_sync"):
+        lines.append("")
+        lines.append("[grc_sync]")
+        lines.append("enable = true")
     if advanced.get("agent_topology"):
         lines.append("")
         lines.append("[agent_topology]")
@@ -7258,6 +7517,7 @@ def write_config(
     oauth: dict[str, Any] | None = None,
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
+    workspace: dict[str, Any] | None = None,
     finance: dict[str, Any] | None = None,
     value: dict[str, Any] | None = None,
     assessments: dict[str, Any] | None = None,
@@ -7317,6 +7577,15 @@ def write_config(
         if _flows_url:
             flows.setdefault("public_url", _flows_url)
 
+    # The security-suite questionnaire owns these shared tables. The advanced
+    # questionnaire can also enable them, so OR its answers into a copied suite
+    # config and remove the duplicate emit path before composing TOML.
+    security_suite = None if security_suite is None else dict(security_suite)
+    for shared_key in ("ai_regulatory_feed", "ai_literacy"):
+        if advanced.pop(shared_key, False):
+            security_suite = dict(security_suite or {})
+            security_suite[shared_key] = True
+
     # The assessment questionnaire owns the single [entity_graph] table. The
     # shared governance inventory requires that projection, so reconcile a
     # prior assessment-time decline here instead of emitting a second table
@@ -7341,7 +7610,7 @@ def write_config(
         "",
     ]
     lines += _cfg_deployment(deployment)
-    lines += _cfg_governance(governance_profile)
+    lines += _cfg_governance(governance_profile, finance)
     lines += _cfg_providers(providers)
     lines += _cfg_role_models(role_models)
     lines += _cfg_channels(channels)
@@ -7356,6 +7625,7 @@ def write_config(
     lines += _cfg_oauth(oauth)
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
+    lines += _cfg_workspace(workspace)
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
     lines += _cfg_assessments(assessments)
@@ -8254,6 +8524,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    workspace = state.get("workspace") or pick_workspace_journal()
+    state["workspace"] = workspace
+    _save_partial(state)
+
+    _announce()
     finance = state.get("finance") or pick_finance()
     state["finance"] = finance
     _save_partial(state)
@@ -8301,6 +8576,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
+        "workspace": workspace,
         "finance": finance,
         "value": value,
         "assessments": assessments,
@@ -8495,6 +8771,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     oauth = _simple["oauth"]
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
+    workspace = _simple["workspace"]
     finance = _simple["finance"]
     value = _simple["value"]
     assessments = _simple["assessments"]
@@ -8623,6 +8900,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         oauth=oauth if oauth.get("vault") else None,
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,
+        workspace=workspace if workspace.get("journal") else None,
         finance=finance if finance.get("enable") else None,
         value=value or None,
         assessments=assessments or None,

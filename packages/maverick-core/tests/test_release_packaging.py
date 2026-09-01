@@ -652,7 +652,7 @@ def test_release_cohort_dependency_environments_are_complete():
     assert "python -m pip check" in binary_step
     assert "python scripts/verify_constraint_closure.py" in binary_step
     for build_tool in (
-        "pip==26.1.2",
+        "pip==26.2.1",
         "setuptools==83.0.0",
         "wheel==0.47.0",
         "packaging==26.2",
@@ -682,7 +682,7 @@ def test_release_cohort_dependency_environments_are_complete():
     assert "--pyproject packages/maverick-core/pyproject.toml" in sbom_step
     assert sbom_step.count("scripts/verify_constraint_closure.py") == 2
     for build_tool in (
-        "pip==26.1.2",
+        "pip==26.2.1",
         "setuptools==83.0.0",
         "wheel==0.47.0",
         "packaging==26.2",
@@ -789,7 +789,7 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
     assert "release artifacts are not reproducible from this commit" in build_step
     assert "python -I scripts/verify_constraint_closure.py" in bootstrap_step
     for build_tool in (
-        "pip==26.1.2",
+        "pip==26.2.1",
         "setuptools==83.0.0",
         "wheel==0.47.0",
         "packaging==26.2",
@@ -1417,7 +1417,7 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
         "PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt"
         in workflow
     )
-    assert "'pip==26.1.2'" in workflow
+    assert "'pip==26.2.1'" in workflow
     assert "'pytest==9.1.1'" in workflow
     assert "'certifi==2026.7.22'" in workflow
     assert "'cryptography==50.0.0'" in workflow
@@ -1853,7 +1853,7 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     assert "COPY requirements/ci.txt ./requirements/ci.txt" in dockerfile
     assert " AS wheel-builder" in dockerfile
     assert " AS runtime" in dockerfile
-    assert "pip==26.1.2" in dockerfile
+    assert "pip==26.2.1" in dockerfile
     assert dockerfile.count("--constraint /tmp/requirements/ci.txt") == 1
     assert "--core-extra release-runtime" in dockerfile
     assert "--no-index" in dockerfile

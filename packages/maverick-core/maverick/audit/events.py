@@ -207,6 +207,12 @@ class EventKind:
     # A run forked from another at a specific point in its event trail, so the
     # Operating Record can hold counterfactuals side by side.
     SESSION_FORKED = "session_forked"
+    # An operator rolled a goal's journaled file mutations back to their
+    # pre-run state (`maverick journal revert`). Payload: journal (the goal
+    # dir name), reverted/deleted/skipped/entries counts, complete (False =
+    # --partial on an incomplete journal) — never file contents, which stay
+    # in the archived journal directory.
+    WORKSPACE_REVERT = "workspace_revert"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.

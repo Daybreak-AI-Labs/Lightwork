@@ -27,6 +27,7 @@ from fastapi import (
 )
 from starlette.concurrency import run_in_threadpool
 
+from . import governance_schemas
 from . import model_risk_schemas as schemas
 from .auth import require_global_permission, require_permission
 
@@ -511,6 +512,22 @@ def _raise_policy_and_dynamic_risk_http_error(exc: Exception) -> None:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _raise_main_governance_http_error(exc: Exception) -> None:
+    """Map the governance modules added on main without inflating `_call`."""
+
+    from maverick.ai_literacy import AILiteracyConfigError, AILiteracyError
+    from maverick.eu_conformity import EUConformityConfigError, EUConformityError
+    from maverick.grc_sync import GRCSyncConfigError, GRCSyncError
+
+    if isinstance(
+        exc,
+        (AILiteracyConfigError, EUConformityConfigError, GRCSyncConfigError),
+    ):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, (AILiteracyError, EUConformityError, GRCSyncError)):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 async def _call(fn: Callable, *args, **kwargs):
     try:
         return await run_in_threadpool(fn, *args, **kwargs)
@@ -609,6 +626,7 @@ async def _call(fn: Callable, *args, **kwargs):
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         if isinstance(exc, RedTeamStateError):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _raise_main_governance_http_error(exc)
         if isinstance(exc, ClosedPortfolioPeriod):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if isinstance(exc, PortfolioRiskConfigError):
@@ -760,6 +778,16 @@ async def model_risk_inventory(request: Request) -> dict[str, Any]:
     require_permission(request, "operate")
     officer = _module("model_risk_assurance", "model_risk_assurance")
     return {"assets": await _call(officer.list_inventory)}
+
+
+@router.get("/model-risk/dependency-graph")
+async def model_risk_dependency_graph(
+    request: Request,
+    asset_id: str | None = Query(default=None, min_length=1, max_length=64),
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    officer = _module("model_risk_assurance", "model_risk_assurance")
+    return await _call(officer.dependency_graph, asset_id=asset_id)
 
 
 @router.post("/model-risk/observations")
@@ -1360,11 +1388,15 @@ async def cancel_red_team_campaign(
 @router.get("/red-team/schedules")
 async def red_team_schedules(
     request: Request,
-    limit: int = Query(100, ge=1, le=100),
+    limit: int = Query(default=100, ge=1, le=500),
 ) -> dict[str, Any]:
     require_permission(request, "view")
     manager = _module("red_team_assurance", "red_team_assurance")
-    return await _call(manager.list_schedules, limit=limit)
+    page = await _call(manager.list_schedules, limit=limit)
+    return {
+        **page,
+        "schedules": page["items"],
+    }
 
 
 @router.get("/red-team/schedules/{schedule_id}")
@@ -1436,6 +1468,102 @@ async def cancel_red_team_schedule(
     )
 
 
+@router.get("/ai-incidents")
+async def ai_incident_declarations(
+    request: Request,
+    status: str | None = Query(default=None, min_length=1, max_length=32),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    rows = await _call(reporting.list_declarations, status=status)
+    return {"declarations": rows, "count": len(rows)}
+
+
+@router.get("/ai-incidents/categories")
+async def ai_incident_categories(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return {
+        "categories": reporting.SERIOUS_INCIDENT_CATEGORIES,
+        "regulation": reporting.REGULATION_METADATA,
+    }
+
+
+@router.get("/ai-incidents/overdue")
+async def ai_incident_overdue(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    rows = await _call(reporting.overdue_declarations)
+    return {"declarations": rows, "count": len(rows)}
+
+
+@router.get("/ai-incidents/{record_id}/report")
+async def ai_incident_report_draft(
+    request: Request,
+    record_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    draft = await _call(reporting.render_report, record_id)
+    return {"record_id": record_id, "draft": draft}
+
+
+@router.post("/ai-incidents", status_code=201)
+async def declare_ai_incident(
+    request: Request,
+    body: governance_schemas.IncidentDeclareIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return await _call(
+        reporting.declare_serious_incident,
+        body.incident_id,
+        category=body.category,
+        widespread=body.widespread,
+        became_aware_at=body.became_aware_at,
+        causal_link=body.causal_link,
+        member_state=body.member_state,
+        authority=body.authority,
+        declared_by=_actor(request),
+    )
+
+
+@router.post("/ai-incidents/{record_id}/submissions")
+async def record_ai_incident_submission(
+    request: Request,
+    record_id: str,
+    body: governance_schemas.IncidentSubmissionIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return await _call(
+        reporting.record_submission,
+        record_id,
+        kind=body.kind,
+        submitted_by=_actor(request),
+        submitted_at=body.submitted_at,
+        reference=body.reference,
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/ai-incidents/{record_id}/withdraw")
+async def withdraw_ai_incident(
+    request: Request,
+    record_id: str,
+    body: governance_schemas.IncidentWithdrawIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return await _call(
+        reporting.withdraw_declaration,
+        record_id,
+        rationale=body.rationale,
+        reviewer=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+
+
 @router.get("/portfolio-risk/report")
 async def portfolio_risk_report(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
@@ -1450,36 +1578,6 @@ async def portfolio_risk_snapshots(request: Request) -> dict[str, Any]:
     return {"snapshots": await _call(portfolio.list_snapshots)}
 
 
-@router.get("/portfolio-risk/trend")
-async def portfolio_risk_trend(
-    request: Request,
-    contributor_limit: int = 100,
-) -> dict[str, Any]:
-    require_permission(request, "view")
-    portfolio = _module("portfolio_risk", "portfolio_risk")
-    return await _call(
-        portfolio.portfolio_trend,
-        contributor_limit=contributor_limit,
-    )
-
-
-@router.get(
-    "/portfolio-risk/snapshots/{period_id}/contributors/{contributor_id}"
-)
-async def portfolio_risk_contributor(
-    request: Request,
-    period_id: str,
-    contributor_id: str,
-) -> dict[str, Any]:
-    require_permission(request, "view")
-    portfolio = _module("portfolio_risk", "portfolio_risk")
-    return await _record_call(
-        portfolio.get_contributor_drillthrough,
-        period_id,
-        contributor_id,
-    )
-
-
 @router.get("/portfolio-risk/snapshots/{period_id}")
 async def portfolio_risk_snapshot(
     request: Request,
@@ -1488,6 +1586,33 @@ async def portfolio_risk_snapshot(
     require_permission(request, "view")
     portfolio = _module("portfolio_risk", "portfolio_risk")
     return await _record_call(portfolio.get_snapshot, period_id)
+
+
+@router.get("/portfolio-risk/trend")
+async def portfolio_risk_trend(
+    request: Request,
+    contributor_limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Prior-quarter comparison with contributor deltas and drill-through ids."""
+    require_permission(request, "view")
+    portfolio = _module("portfolio_risk", "portfolio_risk")
+    return await _call(
+        portfolio.portfolio_trend, contributor_limit=contributor_limit
+    )
+
+
+@router.get("/portfolio-risk/snapshots/{period_id}/contributors/{contributor_id}")
+async def portfolio_risk_contributor(
+    request: Request,
+    period_id: str,
+    contributor_id: str,
+) -> dict[str, Any]:
+    """Content-free contributor identity for click-through from the trend."""
+    require_permission(request, "view")
+    portfolio = _module("portfolio_risk", "portfolio_risk")
+    return await _record_call(
+        portfolio.get_contributor_drillthrough, period_id, contributor_id
+    )
 
 
 @router.post("/portfolio-risk/snapshots")
@@ -3914,6 +4039,44 @@ async def refresh_policy_pack_subscription(
     )
 
 
+@router.get("/policy-packs/subscriptions/{pack_id}/changes")
+async def policy_pack_subscription_changes(
+    request: Request,
+    pack_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    packs = _module("policy_packs", "policy_packs")
+    return await _record_call(packs.subscription_changes, pack_id)
+
+
+def _governed_evidence_resolver() -> Callable[[str], Mapping[str, Any] | None]:
+    """Adapt assurance evidence rows to the policy-pack resolver contract."""
+    from datetime import datetime, timezone
+
+    from maverick import model_risk_assurance as mra
+
+    def resolve(evidence_id: str) -> Mapping[str, Any] | None:
+        record = mra.get_evidence(evidence_id)
+        if record is None:
+            return None
+        observed = record.get("observed_at")
+        if isinstance(observed, (int, float)):
+            observed = datetime.fromtimestamp(
+                float(observed), tz=timezone.utc,
+            ).isoformat()
+        return {
+            "id": record.get("id"),
+            "revision": record.get("revision"),
+            "content_sha256": record.get("payload_sha256"),
+            "evidence_kind": record.get("evidence_kind"),
+            "schema": record.get("schema"),
+            "observed_at": observed,
+        }
+
+    return resolve
+
+
 @router.post(
     "/policy-packs/subscriptions/{subscription_id}/controls/{control_id}/attest"
 )
@@ -3947,6 +4110,30 @@ async def attest_policy_pack_control(
         "subscription": detail,
         "idempotent": bool(result.get("idempotent")),
     }
+
+
+@router.post("/policy-packs/subscriptions/{subscription_id}/attest")
+async def attest_policy_pack_control_legacy(
+    request: Request,
+    subscription_id: str,
+    body: schemas.PolicyPackLegacyAttestIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    packs = _module("policy_packs", "policy_packs")
+    _module("model_risk_assurance", "model_risk_assurance")
+    return await _record_call(
+        packs.attest_control,
+        subscription_id,
+        body.control_id,
+        evidence_bindings=[
+            binding.model_dump() for binding in body.evidence_bindings
+        ],
+        evidence_resolver=_governed_evidence_resolver(),
+        expected_revision=body.expected_revision,
+        actor=_actor(request),
+        idempotency_key=body.idempotency_key,
+    )
 
 
 @router.get("/ai-regulatory-feed/notices")
@@ -4826,6 +5013,16 @@ async def upsert_ai_cost_roi_assumption(
 
 
 # AI literacy ---------------------------------------------------------------
+
+
+@router.get("/ai-literacy/plane-status")
+async def get_ai_literacy_plane_status(request: Request) -> dict[str, Any]:
+    """Expose whether operational literacy data awaits canonical evidence."""
+
+    require_permission(request, "view")
+    _require_active_tenant()
+    literacy = _module("ai_literacy", "ai_literacy")
+    return await _call(literacy.literacy_plane_status)
 
 
 @router.get("/ai-literacy/requirements")

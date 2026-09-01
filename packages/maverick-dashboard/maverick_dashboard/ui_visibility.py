@@ -662,6 +662,17 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
         "in_nav": False,
     },
+    # The governance workspace: plain-language FRIA / Annex IV / literacy /
+    # Art. 73 workflows for legal, privacy, and compliance staff. Its own
+    # sidebar entry -- those personas never open the technical cockpit.
+    {
+        "path": "/security/governance",
+        "label": "AI Governance",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+    },
     # The Finance workspace: the same chassis over the finance assessment
     # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
     # "Financial Risk", not "Finance": this workspace is the SOX / fraud /

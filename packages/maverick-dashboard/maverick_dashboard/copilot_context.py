@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass
+from re import Pattern
+from re import compile as compile_regex
 
 _READ_ONLY_BOUNDARY = (
     "Copilot guidance is read-only and never grants authority or executes an action."
@@ -1208,6 +1210,34 @@ _CONTEXTS = tuple(
             ),
         ),
         CopilotPageContext(
+            path="/security/governance",
+            title="AI Governance Workspace",
+            summary=(
+                "Run plain-language EU AI Act and governance workflows for legal, "
+                "privacy, compliance, and HR teams."
+            ),
+            capabilities=(
+                "Prepare fundamental-rights impact assessments, Annex IV documentation checklists, and conformity-assessment routes.",
+                "Track role-specific AI literacy requirements, evidence, expiry, and coverage gaps.",
+                "Operate Article 73 serious-incident clocks and inspect governed GRC synchronization state.",
+            ),
+            boundaries=(
+                "Workspace records are decision support, not legal advice, certification, or a regulatory filing.",
+                "Nothing on this page transmits a record to an authority or external system without separately configured and authorized integration.",
+                "Local readiness and recorded evidence do not prove legal sufficiency, provider acceptance, or regulator acceptance.",
+            ),
+            next_steps=(
+                "Open the governance record that needs attention and confirm its current revision and evidence.",
+                "Resolve missing literacy, documentation, or incident-clock evidence with the accountable reviewer.",
+                "Reconcile any configured GRC writeback against the external system before accepting the outcome.",
+            ),
+            suggested_questions=(
+                "Which governance workflow should I use?",
+                "What still needs human review?",
+                "What does this workspace not prove?",
+            ),
+        ),
+        CopilotPageContext(
             path="/security/assurance",
             title="Model Risk and AI Assurance",
             summary=(
@@ -1334,6 +1364,23 @@ _CONTEXT_BY_PATH = {context.path: context for context in _CONTEXTS}
 if len(_CONTEXT_BY_PATH) != len(_CONTEXTS):  # pragma: no cover - import invariant
     raise RuntimeError("duplicate Copilot page context path")
 
+_DETAIL_PAGE_CONTEXTS: tuple[tuple[str, str, Pattern[str]], ...] = (
+    ("/privacy/vendors/", "/privacy", compile_regex(r"VMR-[0-9a-f]{24}\Z")),
+    ("/privacy/dsar/", "/privacy", compile_regex(r"DSAR-[0-9a-f]{10}\Z")),
+)
+
+
+def _canonical_context_path(path: str) -> str:
+    """Map a valid server-issued detail route to its closed parent context."""
+
+    for prefix, canonical_path, identifier_pattern in _DETAIL_PAGE_CONTEXTS:
+        if path.startswith(prefix):
+            identifier = path.removeprefix(prefix)
+            if identifier_pattern.fullmatch(identifier):
+                return canonical_path
+            break
+    return path
+
 
 def context_for_page(page: object) -> CopilotPageContext:
     """Resolve a browser-proposed path to a closed server-owned context."""
@@ -1349,7 +1396,7 @@ def context_for_page(page: object) -> CopilotPageContext:
         or "\\" in path
     ):
         return _GENERIC
-    return _CONTEXT_BY_PATH.get(path, _GENERIC)
+    return _CONTEXT_BY_PATH.get(_canonical_context_path(path), _GENERIC)
 
 
 def public_context(

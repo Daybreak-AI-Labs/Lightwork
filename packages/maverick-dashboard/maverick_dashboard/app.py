@@ -1152,6 +1152,17 @@ _AUTH_EXEMPT = {
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
     "/static/daybreak-logo.jpg",
+    # The LLM gateway authenticates every call with its OWN bearer inside
+    # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
+    # agents that hold the gateway credential, never the dashboard bearer.
+    # Self-gates on [llm_gateway] enable and 403s when off.
+    "/gateway/v1/chat/completions",
+    "/gateway/v1/otel",
+    # The consent webhook authenticates every delivery with its OWN HMAC
+    # signature inside maverick.consent_registry (external CMPs hold the
+    # webhook secret, never the dashboard bearer). Self-gates on
+    # [consent_registry] webhook_enable and 403s when off.
+    "/consent/webhook",
 }
 
 
@@ -1574,6 +1585,33 @@ def _configured_oidc_bearer_present(request: Request) -> bool:
 
 
 @app.middleware("http")
+async def http_metrics(request: Request, call_next):
+    """Count every request into the always-on runtime metrics registry.
+
+    Route TEMPLATES, never raw paths, keep label cardinality bounded;
+    a request that matches no route counts under "unmatched"."""
+    import time as _time
+
+    from maverick import runtime_metrics
+
+    started = _time.monotonic()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    template = getattr(route, "path", None) or "unmatched"
+    runtime_metrics.increment(
+        "lightwork_http_requests_total", method=request.method,
+        route=template, status=str(response.status_code),
+        help_text="Dashboard HTTP requests by route template",
+    )
+    runtime_metrics.increment(
+        "lightwork_http_request_seconds_total", route=template,
+        amount=_time.monotonic() - started,
+        help_text="Total request wall time by route template",
+    )
+    return response
+
+
+@app.middleware("http")
 async def bearer_auth(request: Request, call_next):
     expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
     if (
@@ -1581,6 +1619,9 @@ async def bearer_auth(request: Request, call_next):
         or request.url.path.startswith("/share/")
         or request.url.path.startswith("/scim/")
         or request.url.path.startswith("/form/")
+        # DSAR response links are addressed by their unguessable token,
+        # exactly like /form/ — the requester has no dashboard bearer.
+        or request.url.path.startswith("/dsar/response/")
         or request.url.path.startswith("/saml/")
         or request.url.path.startswith("/auth/invite/")
         # External integrations authenticate inside their route family
@@ -2658,7 +2699,13 @@ async def spend_page(request: Request) -> HTMLResponse:
 
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
-PRIVACY_ASSESSMENT_TYPES = frozenset({"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia"})
+PRIVACY_ASSESSMENT_TYPES = frozenset(
+    {
+        "pia", "dpia", "lia", "ccpa", "lgpd", "pipeda",
+        "us_state_privacy", "cppa_admt", "colorado_admt", "nyc_ll144",
+        "texas_traiga", "illinois_hb3773", "aira", "vendor_risk", "tia",
+    }
+)
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"}
 )
@@ -2666,6 +2713,7 @@ SECURITY_ASSESSMENT_TYPES = frozenset(
     {
         "soc2",
         "iso27001",
+        "iso42001",
         "nist_csf",
         "nist_800_53",
         "cis_v8",
@@ -2770,11 +2818,20 @@ async def privacy_page(request: Request) -> HTMLResponse:
     reviewer threads, a tier above viewer summaries.
     """
     require_permission(request, "operate")
+    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
+    # Every register scan below is synchronous disk I/O; keep it off the
+    # event loop in one threadpool hop.
+    records, estate = await run_in_threadpool(_privacy_page_data)
+    ctx["records"] = records
+    ctx["estate"] = estate
+    return templates.TemplateResponse(request, "privacy.html", ctx)
+
+
+def _privacy_page_data() -> tuple[dict, dict]:
+    """The Privacy workspace's data plane: privacy-ops records plus the
+    estate registers (vendors, consent, data map), each its own opt-in."""
     import time as _time
 
-    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
-    # The record types — the data plane behind the [privacy_ops] knob. The
-    # page still works without them.
     from maverick import privacy_ops
 
     records = {
@@ -2815,10 +2872,117 @@ async def privacy_page(request: Request) -> HTMLResponse:
             1 for r in records["incidents"] if r.get("status") in ("open", "notify")
         )
         records["incidents_breached"] = sum(
-            1 for r in records["incidents"] if r.get("clock_breached")
-        )
-    ctx["records"] = records
-    return templates.TemplateResponse(request, "privacy.html", ctx)
+            1 for r in records["incidents"] if r.get("clock_breached"))
+    from maverick import consent_registry, data_map, vendor_management
+    estate = {
+        "vendors_enabled": vendor_management.enabled(),
+        "consent_enabled": consent_registry.enabled(),
+        "data_map_enabled": data_map.enabled(),
+        "vendors": [], "vendor_posture": {},
+        "consent_posture": {},
+        "assets": [], "data_map_posture": {},
+        # The forms' vocab comes from the modules that enforce it, so a
+        # new kind/status/channel never needs a template edit. "import"
+        # is the importer's channel, not a manual-entry choice.
+        "contract_kinds": vendor_management.CONTRACT_KINDS,
+        "consent_statuses": consent_registry.STATUSES,
+        "consent_channels": tuple(
+            c for c in consent_registry.CHANNELS if c != "import"),
+    }
+    estate["renewals"] = {"overdue": [], "due_soon": []}
+    estate["notices"] = []
+    estate["notice_coverage"] = {}
+    if estate["vendors_enabled"]:
+        estate["vendors"] = vendor_management.list_vendors()
+        estate["vendor_posture"] = vendor_management.vendor_posture()
+        try:
+            estate["renewals"] = vendor_management.contract_renewals()
+        except Exception:
+            pass
+    if estate["consent_enabled"]:
+        estate["consent_posture"] = consent_registry.consent_posture()
+        try:
+            estate["notices"] = consent_registry.list_notices()[:20]
+            estate["notice_coverage"] = consent_registry.notice_coverage()
+        except Exception:
+            pass
+    if estate["data_map_enabled"]:
+        estate["assets"] = data_map.list_data_assets()
+        estate["data_map_posture"] = data_map.data_map_posture()
+    return records, estate
+
+
+def _date(stamp) -> str:
+    import time as _time
+
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return "—"
+    return _time.strftime("%Y-%m-%d", _time.localtime(value)) if value else "—"
+
+
+@app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
+async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
+    """One vendor's full governed record: lifecycle, contracts and their
+    renewal state, questionnaires (never their live form tokens), linked
+    specialist records, and monitoring notes."""
+    require_permission(request, "operate")
+    import time as _time
+
+    from maverick import vendor_management
+    if not vendor_management.enabled():
+        raise HTTPException(status_code=403,
+                            detail="vendor_management is not enabled")
+    record = vendor_management.get_vendor(vendor_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such vendor")
+    record["registered_at_date"] = _date(record.get("registered_at"))
+    now = _time.time()
+    for c in record.get("contracts") or []:
+        c["renews_date"] = _date(c.get("renews_at"))
+        c["overdue"] = float(c.get("renews_at") or 0) < now
+    for q in record.get("questionnaires") or []:
+        q.pop("token", None)   # the live form token never reaches a page
+        q["requested_at_date"] = _date(q.get("requested_at"))
+    for n in record.get("monitoring_notes") or []:
+        n["recorded_at_date"] = _date(n.get("recorded_at"))
+    return templates.TemplateResponse(
+        request, "vendor_detail.html", {"vendor": record})
+
+
+@app.get("/privacy/dsar/{request_id}", response_class=HTMLResponse)
+async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
+    """One DSAR with its fulfillment trail: the SLA clock, identity
+    verification, collection sources, and the response link's delivery
+    state (reads used against the cap; never the token itself)."""
+    require_permission(request, "operate")
+    import time as _time
+
+    from maverick import dsar_fulfillment, privacy_ops
+    if not privacy_ops.enabled():
+        raise HTTPException(status_code=403, detail="privacy_ops is not enabled")
+    record = privacy_ops.get_dsar(request_id[:64])
+    if record is None or "status" not in record:
+        raise HTTPException(status_code=404, detail="no such DSAR")
+    record = dict(record)
+    now = _time.time()
+    record["days_left"] = int((float(record.get("due_at", now)) - now) // 86400)
+    record["overdue"] = (record["days_left"] < 0
+                         and record.get("status") in ("open", "awaiting_erasure"))
+    record["created_date"] = _date(record.get("created_at"))
+    record["due_date"] = _date(record.get("due_at"))
+    fulfillment = None
+    fulfillment_enabled = dsar_fulfillment.enabled()
+    if fulfillment_enabled:
+        fulfillment = dsar_fulfillment.get_fulfillment(record["id"])
+        if fulfillment and fulfillment.get("response"):
+            fulfillment["response"]["expires_date"] = _date(
+                fulfillment["response"].get("expires_at"))
+    return templates.TemplateResponse(
+        request, "dsar_detail.html",
+        {"dsar": record, "fulfillment": fulfillment,
+         "fulfillment_enabled": fulfillment_enabled})
 
 
 @app.get("/consent", response_class=HTMLResponse)
@@ -3437,7 +3601,8 @@ async def _governance_extensions_page_data(
         try:
             evidence = await run_in_threadpool(officer.list_evidence)
             data["drift_items"] = [
-                row for row in evidence if row.get("evidence_kind") == "drift_monitoring"
+                row for row in evidence
+                if row.get("evidence_kind") == "drift_monitoring"
             ][:20]
         except Exception:
             data["drift_error"] = "Drift evidence is temporarily unavailable."
@@ -3445,6 +3610,48 @@ async def _governance_extensions_page_data(
     if not data["topology_enabled"]:
         data["topology_error"] = "Agent topology is disabled."
     return data
+
+
+async def _ai_incident_page_data(module: Any) -> dict[str, Any]:
+    """Bounded Art. 73 clock status; report drafts stay behind the API."""
+
+    enabled = module.enabled()
+    rows: list[dict[str, Any]] = []
+    overdue = 0
+    error = ""
+    if enabled:
+        try:
+            declarations = await run_in_threadpool(module.list_declarations)
+        except Exception:
+            error = "Serious-incident declarations are temporarily unavailable."
+        else:
+            for record in declarations[:20]:
+                clock = record.get("clock") or {}
+                is_overdue = bool(clock.get("overdue"))
+                remaining = float(clock.get("seconds_remaining") or 0.0)
+                rows.append(
+                    {
+                        "id": record.get("id"),
+                        "category": record.get("category"),
+                        "member_state": record.get("member_state"),
+                        "status": record.get("status"),
+                        "deadline_citation": record.get("deadline_citation"),
+                        "clock_label": (
+                            "OVERDUE"
+                            if is_overdue
+                            else f"{remaining / 86_400:.1f}d left"
+                        ),
+                        "overdue": is_overdue,
+                        "revision": record.get("revision"),
+                    }
+                )
+            overdue = sum(1 for row in rows if row["overdue"])
+    return {
+        "enabled": enabled,
+        "declarations": rows,
+        "overdue": overdue,
+        "error": error,
+    }
 
 
 async def _portfolio_risk_page_data(module: Any) -> dict[str, Any]:
@@ -3530,7 +3737,9 @@ async def _ai_inventory_page_data(
             asset_result, run_result, *status_results = results
             if isinstance(asset_result, Exception) or isinstance(run_result, Exception):
                 raise RuntimeError("inventory governed records unavailable")
-            observation_index = {row.get("asset_id"): row for row in model_risk_assets}
+            observation_index = {
+                row.get("asset_id"): row for row in model_risk_assets
+            }
             for state_row in asset_result:
                 row = dict(state_row)
                 observation = observation_index.get(row.get("asset_id")) or {}
@@ -3539,7 +3748,9 @@ async def _ai_inventory_page_data(
                 assets.append(row)
             runs = run_result
             for connector, result in zip(connectors, status_results, strict=True):
-                statuses[connector] = None if isinstance(result, Exception) else result
+                statuses[connector] = (
+                    None if isinstance(result, Exception) else result
+                )
         except Exception as exc:
             if "active tenant" in str(exc).lower():
                 error = (
@@ -3635,7 +3846,10 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
                 and str(summary_result)
                 == "AI evidence gateway records require an explicit tenant scope"
             ):
-                error = "Select a company or tenant before loading evidence. No records were read."
+                error = (
+                    "Select a company or tenant before loading evidence. "
+                    "No records were read."
+                )
                 error_action = (
                     "Set [client] id in the Lightwork configuration or set "
                     "MAVERICK_TENANT, then restart the dashboard."
@@ -3653,15 +3867,21 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
         else:
             summary = summary_result
         if isinstance(policy_result, Exception):
-            panel_errors["policies"] = "Policy and model bindings are temporarily unavailable."
+            panel_errors["policies"] = (
+                "Policy and model bindings are temporarily unavailable."
+            )
         else:
             policies = policy_result
         if isinstance(receipt_result, Exception):
-            panel_errors["receipts"] = "Interaction receipts are temporarily unavailable."
+            panel_errors["receipts"] = (
+                "Interaction receipts are temporarily unavailable."
+            )
         else:
             receipts = receipt_result
         if isinstance(impact_result, Exception):
-            panel_errors["impacts"] = "Regulatory impacts are temporarily unavailable."
+            panel_errors["impacts"] = (
+                "Regulatory impacts are temporarily unavailable."
+            )
         else:
             impact_page = impact_result
             impacts = list(impact_page["items"])
@@ -3696,6 +3916,7 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
     from maverick import (
         agent_topology,
         ai_evidence_gateway,
+        ai_incident_reporting,
         ai_inventory,
         ai_vendor_risk,
         drift_monitoring,
@@ -3727,6 +3948,8 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
     portfolio_report = portfolio_data["report"]
     portfolio_snapshots = portfolio_data["snapshots"]
     portfolio_error = portfolio_data["error"]
+
+    ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
 
     red_team_data = await _red_team_page_data(
         red_team_assurance,
@@ -3785,6 +4008,10 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "drift_monitoring_error": extensions_data["drift_error"],
             "agent_topology_enabled": extensions_data["topology_enabled"],
             "agent_topology_error": extensions_data["topology_error"],
+            "ai_incident_enabled": ai_incident_data["enabled"],
+            "ai_incident_declarations": ai_incident_data["declarations"],
+            "ai_incident_overdue": ai_incident_data["overdue"],
+            "ai_incident_error": ai_incident_data["error"],
             "portfolio_enabled": portfolio_enabled,
             "portfolio_report": portfolio_report,
             "portfolio_snapshots": portfolio_snapshots[:20],
@@ -3816,6 +4043,273 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "impact_page": impact_page,
             "gateway_view": view,
             "gateway_admin": has_global_permission(request, "admin"),
+        },
+    )
+
+
+async def _governance_workspace_page_data(
+    conformity: Any,
+    literacy: Any,
+    sync: Any,
+) -> dict[str, Any]:
+    """Bounded context for the legal/privacy governance workspace page.
+
+    Tables carry identifiers, statuses, and progress counts only; assessment
+    content and report drafts stay behind the authenticated governance API.
+    """
+
+    data: dict[str, Any] = {
+        "eu_conformity_enabled": conformity.enabled(),
+        "fria_records": [],
+        "fria_error": "",
+        "art43_routes": [],
+        "pmm_plans": [],
+        "registrations": [],
+        "ai_literacy_enabled": literacy.enabled(),
+        "literacy_gaps": {},
+        "literacy_plane_status": {},
+        "literacy_error": "",
+        "literacy_training_keys": [],
+        "grc_sync_enabled": sync.enabled(),
+        "grc_status": {},
+        "grc_outbound": [],
+        "grc_error": "",
+    }
+    if data["eu_conformity_enabled"]:
+        try:
+            rows = await run_in_threadpool(conformity.list_frias)
+        except Exception:
+            data["fria_error"] = (
+                "Fundamental-rights assessments are temporarily unavailable."
+            )
+        else:
+            for row in rows[:100]:
+                elements = row.get("elements") or {}
+                data["fria_records"].append(
+                    {
+                        "id": row.get("id"),
+                        "asset_id": row.get("asset_id"),
+                        "context": row.get("context"),
+                        "status": row.get("status"),
+                        "revision": row.get("revision"),
+                        "progress": sum(
+                            1
+                            for value in elements.values()
+                            if isinstance(value, dict)
+                        ),
+                    }
+                )
+        try:
+            routes = await run_in_threadpool(conformity.list_assessment_routes)
+        except Exception:
+            data["fria_error"] = data["fria_error"] or (
+                "Conformity-route records are temporarily unavailable."
+            )
+        else:
+            data["art43_routes"] = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "route": row.get("route"),
+                    "annex_iii_point": row.get("annex_iii_point"),
+                    "status": row.get("status"),
+                    "revision": row.get("revision"),
+                    "modifications": len(row.get("modifications") or []),
+                }
+                for row in routes[:100]
+            ]
+        pmm_result, registration_result = await asyncio.gather(
+            run_in_threadpool(conformity.list_pmm_plans),
+            run_in_threadpool(conformity.list_registrations),
+            return_exceptions=True,
+        )
+        if not isinstance(pmm_result, Exception):
+            data["pmm_plans"] = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "plan_reference": row.get("plan_reference"),
+                    "reviews": len(row.get("reviews") or []),
+                    "revision": row.get("revision"),
+                }
+                for row in pmm_result[:100]
+            ]
+        if not isinstance(registration_result, Exception):
+            data["registrations"] = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "basis": row.get("basis"),
+                    "citation": row.get("citation"),
+                    "registry": row.get("registry"),
+                    "reference": row.get("reference"),
+                }
+                for row in registration_result[:100]
+            ]
+    if data["ai_literacy_enabled"]:
+        try:
+            data["literacy_gaps"] = await run_in_threadpool(literacy.literacy_gaps)
+        except Exception:
+            data["literacy_error"] = (
+                "Training assignments and completions are temporarily unavailable."
+            )
+        try:
+            data["literacy_plane_status"] = await run_in_threadpool(
+                literacy.literacy_plane_status
+            )
+        except Exception:
+            data["literacy_error"] = data["literacy_error"] or (
+                "The canonical AI-literacy evidence authority is temporarily "
+                "unavailable."
+            )
+        try:
+            requirements = await run_in_threadpool(literacy.list_requirements)
+        except Exception:
+            requirements = []
+        keys: dict[str, str] = {}
+        for requirement in requirements:
+            for training in requirement.get("trainings") or []:
+                keys.setdefault(
+                    str(training.get("key")), str(training.get("title") or "")
+                )
+        data["literacy_training_keys"] = [
+            {"key": key, "title": title} for key, title in sorted(keys.items())
+        ][:200]
+    if data["grc_sync_enabled"]:
+        status_result, outbound_result = await asyncio.gather(
+            run_in_threadpool(sync.sync_status),
+            run_in_threadpool(sync.list_outbound, limit=50),
+            return_exceptions=True,
+        )
+        if isinstance(status_result, Exception):
+            data["grc_error"] = "The GRC sync ledger is temporarily unavailable."
+        else:
+            data["grc_status"] = status_result
+        if isinstance(outbound_result, Exception):
+            data["grc_error"] = (
+                data["grc_error"]
+                or "The GRC sync ledger is temporarily unavailable."
+            )
+        else:
+            data["grc_outbound"] = outbound_result
+    return data
+
+
+@app.get("/security/governance", response_class=HTMLResponse)
+async def governance_workspace_page(request: Request) -> HTMLResponse:
+    """The governance workspace for legal, privacy, compliance, and HR:
+    FRIA, Annex IV checklist, AI-literacy tracking, Art. 73 clocks, and
+    GRC sync visibility, driven by /api/v1/security/governance."""
+    require_permission(request, "operate")
+    from maverick import (
+        ai_incident_reporting,
+        ai_literacy,
+        eu_conformity,
+        grc_sync,
+        model_risk_assurance,
+    )
+
+    workspace = await _governance_workspace_page_data(
+        eu_conformity,
+        ai_literacy,
+        grc_sync,
+    )
+    ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
+
+    # The two per-model registers: GPAI provider obligations and Art. 26
+    # deployer duties, as status rows the page can render and act on.
+    def _register_states() -> tuple[list, list]:
+        if not workspace["eu_conformity_enabled"]:
+            return [], []
+        try:
+            gpai = [
+                eu_conformity.gpai_status_from_record(row)
+                for row in eu_conformity.list_gpai_registers()[:100]
+            ]
+            deployer = [
+                eu_conformity.deployer_status_from_record(row)
+                for row in eu_conformity.list_deployer_registers()[:100]
+            ]
+            return gpai, deployer
+        except Exception:
+            return [], []
+
+    gpai_registers, deployer_registers = await run_in_threadpool(
+        _register_states)
+
+    from maverick import governance_alerts
+
+    try:
+        attention = await run_in_threadpool(governance_alerts.digest)
+    except Exception:
+        attention = {"attention_count": 0, "sections": {}}
+
+    # Pickers so nobody has to paste raw MAA-/MRI- ids: the governed asset
+    # inventory and recorded assurance incidents, both fail-soft and bounded.
+    governed_assets: list[dict[str, Any]] = []
+    assurance_incidents: list[dict[str, Any]] = []
+    if model_risk_assurance.enabled():
+        assets_result, incidents_result = await asyncio.gather(
+            run_in_threadpool(model_risk_assurance.list_inventory),
+            run_in_threadpool(model_risk_assurance.list_incidents),
+            return_exceptions=True,
+        )
+        if not isinstance(assets_result, Exception):
+            governed_assets = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "display_name": row.get("display_name"),
+                    "asset_type": row.get("asset_type"),
+                }
+                for row in assets_result[:500]
+            ]
+        if not isinstance(incidents_result, Exception):
+            assurance_incidents = [
+                {
+                    "id": row.get("id"),
+                    "severity": row.get("severity"),
+                    "summary": str(row.get("summary") or "")[:120],
+                }
+                for row in incidents_result[:100]
+            ]
+
+    return templates.TemplateResponse(
+        request,
+        "governance.html",
+        {
+            "eu_conformity_enabled": workspace["eu_conformity_enabled"],
+            "fria_records": workspace["fria_records"],
+            "fria_error": workspace["fria_error"],
+            "fria_elements": eu_conformity.FRIA_ELEMENTS,
+            "annex_iv_items": eu_conformity.ANNEX_IV_ITEMS,
+            "art43_routes": workspace["art43_routes"],
+            "conformity_routes": eu_conformity.ROUTES,
+            "pmm_plans": workspace["pmm_plans"],
+            "registrations": workspace["registrations"],
+            "registration_bases": eu_conformity.REGISTRATION_BASES,
+            "ifu_items": eu_conformity.IFU_ITEMS,
+            "gpai_registers": gpai_registers,
+            "gpai_obligations": eu_conformity.GPAI_OBLIGATIONS,
+            "gpai_systemic_obligations": eu_conformity.GPAI_SYSTEMIC_OBLIGATIONS,
+            "deployer_registers": deployer_registers,
+            "deployer_obligations": eu_conformity.DEPLOYER_OBLIGATIONS,
+            "deployer_conditional_obligations":
+                eu_conformity.DEPLOYER_CONDITIONAL_OBLIGATIONS,
+            "attention": attention,
+            "governed_assets": governed_assets,
+            "assurance_incidents": assurance_incidents,
+            "ai_literacy_enabled": workspace["ai_literacy_enabled"],
+            "literacy_gaps": workspace["literacy_gaps"],
+            "literacy_plane_status": workspace["literacy_plane_status"],
+            "literacy_error": workspace["literacy_error"],
+            "literacy_training_keys": workspace["literacy_training_keys"],
+            "ai_incident_enabled": ai_incident_data["enabled"],
+            "ai_incident_declarations": ai_incident_data["declarations"],
+            "ai_incident_error": ai_incident_data["error"],
+            "ai_incident_categories": (
+                ai_incident_reporting.SERIOUS_INCIDENT_CATEGORIES
+            ),
+            "grc_sync_enabled": workspace["grc_sync_enabled"],
+            "grc_status": workspace["grc_status"],
+            "grc_outbound": workspace["grc_outbound"][:50],
+            "grc_error": workspace["grc_error"],
         },
     )
 
@@ -6738,17 +7232,51 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     )
 
 
+def _vendor_questionnaire_for(token: str) -> dict | None:
+    """The vendor questionnaire this token addresses, or None. Never raises —
+    the form endpoints must stay usable when the register is off."""
+    try:
+        from maverick import vendor_management
+        return vendor_management.questionnaire_for_token(token)
+    except Exception:
+        return None
+
+
+@app.get("/form/{token}", response_class=HTMLResponse)
+async def form_page(request: Request, token: str) -> HTMLResponse:
+    """The public questionnaire page a vendor lands on from their link.
+
+    Renders the questionnaire's template questions as a plain yes/no form
+    that posts back to the same token — no account, no auth; the
+    unguessable token is the addressing secret, exactly as for POST.
+    Only vendor-questionnaire tokens render a page; automation-form
+    tokens stay POST-only and 404 here."""
+    questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
+    if questionnaire is None:
+        raise HTTPException(status_code=404, detail="no such form")
+    return templates.TemplateResponse(
+        request, "form_questionnaire.html",
+        {"questionnaire": questionnaire, "token": token},
+    )
+
+
 @app.post("/form/{token}")
 async def form_submit(request: Request, token: str) -> JSONResponse:
     """Record a hosted-form submission under ``token`` so a ``form`` event trigger
     fires a flow with the submitted fields as data. Public by design (a form is
     meant to be filled by anyone with the link); the unguessable ``token`` in the
     path is the addressing secret, the body is size/field-bounded, and firing is
-    rate-limited. Gated on event triggers being enabled (404 otherwise)."""
+    rate-limited. Gated on event triggers being enabled — except a vendor
+    questionnaire token, which stays answerable while only the vendor
+    register is on (404 otherwise)."""
     from maverick import automation_events
 
     if not automation_events.enabled():
-        raise HTTPException(status_code=404, detail="event triggers are disabled")
+        questionnaire = await run_in_threadpool(
+            _vendor_questionnaire_for, token)
+        if questionnaire is None:
+            raise HTTPException(status_code=404,
+                                detail="event triggers are disabled")
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:
@@ -6771,6 +7299,59 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
 
     seq = form_store.append(token, fields)
     return JSONResponse({"ok": True, "seq": seq}, status_code=201)
+
+
+@app.get("/dsar/response/{token}")
+async def dsar_response_page(request: Request, token: str) -> JSONResponse:
+    """The subject's DSAR response, addressed by its unguessable token.
+
+    Public by design, exactly like /form/{token}: the token (stored
+    server-side only as a SHA-256 digest, with expiry) is the addressing
+    secret. The bundle is assembled at delivery time and scrubbed of
+    third-party identifiers by the deterministic redactor before anything
+    leaves. Unknown, expired, or disabled all read as the same 404."""
+    from maverick import dsar_fulfillment
+    if not dsar_fulfillment.enabled():
+        raise HTTPException(status_code=404, detail="no such response")
+    check_goal_rate_limit(request, source="dsar-response")
+    response = await run_in_threadpool(
+        dsar_fulfillment.response_for_token, token)
+    if response is None:
+        raise HTTPException(status_code=404, detail="no such response")
+    return JSONResponse(response)
+
+
+@app.post("/consent/webhook")
+async def consent_webhook(request: Request) -> JSONResponse:
+    """Signed consent-event push from any consent front end (CMP).
+
+    Authenticated by HMAC-SHA256 over ``{timestamp}.{body}``
+    (X-Lightwork-Signature hex + X-Lightwork-Timestamp unix seconds,
+    ±300s replay window) — external CMPs hold the webhook secret, never
+    a dashboard credential. Bounded body; per-event failures skip rather
+    than abort; a backdated or replayed event can never flip a newer
+    withdrawal."""
+    from maverick import consent_registry
+    if not consent_registry.webhook_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="the consent webhook is disabled ([consent_registry] "
+                   "webhook_enable)")
+    body = await _read_limited_webhook_body(request)
+    signature = request.headers.get("x-lightwork-signature", "")
+    timestamp = request.headers.get("x-lightwork-timestamp", "")
+    try:
+        result = await run_in_threadpool(
+            consent_registry.ingest_consent_webhook, body, signature,
+            timestamp,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except consent_registry.ConsentRegistryConfigError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return JSONResponse(result, status_code=202)
 
 
 @app.post("/webhook/linear")
@@ -8473,6 +9054,105 @@ async def plan_tree_3d_page(request: Request) -> HTMLResponse:
         "plan_tree_3d.html",
         {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
     )
+
+
+@app.post("/gateway/v1/chat/completions")
+async def llm_gateway_chat_completions(request: Request) -> JSONResponse:
+    """OpenAI-compatible governed pass-through for never-enrolled agents.
+
+    Auth is the gateway's own bearer, verified inside the core module; the
+    body is screened, forwarded over the SSRF-pinned egress path, and the
+    caller ledger updated. Bodies are never stored."""
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "message": (
+                        "The LLM gateway is disabled; enable [llm_gateway] "
+                        "in the Lightwork configuration."
+                    ),
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    # Bounded read BEFORE parsing: this path is auth-exempt, so an
+    # unauthenticated caller must never be able to make the dashboard
+    # buffer an unbounded body (request.json() would). The core module
+    # re-checks the same cap post-parse as a second line of defense.
+    settings = llm_gateway.get_llm_gateway_config()
+    try:
+        raw = await _read_limited_request_body(
+            request,
+            max_bytes=settings["max_body_bytes"],
+            too_large_detail=(
+                "The request exceeds the gateway's configured size cap."
+            ),
+        )
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"message": str(exc.detail),
+                               "type": "invalid_request_error"}},
+        )
+    import json as _json
+    try:
+        body = _json.loads(raw or b"{}")
+    except ValueError:
+        body = None
+    status_code, payload = await run_in_threadpool(
+        llm_gateway.handle_chat_completion, body, caller_token=token,
+    )
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.post("/gateway/v1/otel")
+async def llm_gateway_otel(request: Request) -> JSONResponse:
+    """OTLP/JSON GenAI span ingestion into the shadow-caller ledger.
+
+    Point any OpenTelemetry collector's HTTP exporter here (same gateway
+    bearer as the chat endpoint): spans carrying the GenAI semantic
+    conventions become governed telemetry — model identity and token
+    counts only, never prompts or completions."""
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"message": "The LLM gateway is disabled.",
+                               "type": "invalid_request_error"}},
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    if not llm_gateway.verify_gateway_bearer(token):
+        return JSONResponse(
+            status_code=401,
+            content={"error": {"message": "The gateway bearer is missing or wrong.",
+                               "type": "invalid_request_error"}},
+        )
+    body = await _read_limited_webhook_body(request)
+    import json as _json
+    try:
+        payload = _json.loads(body or b"{}")
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": "The OTLP payload must be JSON.",
+                               "type": "invalid_request_error"}},
+        )
+    try:
+        result = await run_in_threadpool(llm_gateway.ingest_otel_spans, payload)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(exc),
+                               "type": "invalid_request_error"}},
+        )
+    return JSONResponse(status_code=200, content=result)
 
 
 @app.get("/livez")

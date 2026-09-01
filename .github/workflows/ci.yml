@@ -316,7 +316,7 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           # Resolve all first-party base dependencies together so pip-audit
           # sees the complete cohort rather than a hand-reconstructed subset.
@@ -352,7 +352,7 @@ jobs:
           # PYSEC-2026-196; 26.1.2 patches it. Bump pip to the fixed floor
           # before auditing so the gate reflects our shipped dependency tree,
           # not a stale CVE in the runner's own tooling.
-          python -m pip install --upgrade 'pip==26.1.2' 'setuptools==83.0.0'
+          python -m pip install --upgrade 'pip==26.2.1' 'setuptools==83.0.0'
           python -m pip install 'pip-audit==2.10.0'
           pip-audit
       - name: pip-audit every reviewed optional-dependency lock entry
@@ -463,7 +463,7 @@ jobs:
           SBOM_ENV="$RUNNER_TEMP/lightwork-ci-release-runtime"
           python -m venv "$SBOM_ENV"
           "$SBOM_ENV/bin/python" -I -m pip install --upgrade \
-            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           python scripts/install_release_cohort.py \
             --source-root . \
@@ -550,7 +550,7 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           # All local distributions are direct requirements in one resolver
           # transaction, so no sibling can fall back to a public lookalike and
@@ -625,18 +625,19 @@ jobs:
           packages/maverick-core/tests/test_local_backend_process_reaping.py
 
   posture:
-    # The suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each control's
-    # explicit on/off mechanics under test but means ~19,000 passing tests
-    # describe a configuration no customer runs. Production ships
-    # secure-by-default: audit signing, at-rest encryption, fail-closed consent
-    # for high-risk actions, and the tool-risk ceiling.
+    # The main suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each
+    # control's explicit on/off mechanics under test; this job runs the same
+    # maverick-core tree under the PRODUCTION posture (audit signing,
+    # at-rest encryption, fail-closed consent for high-risk actions, the
+    # tool-risk ceiling) -- the configuration customers actually run.
     #
-    # The reviewed 91-test debt register is checked in and ratcheted: a new
-    # failure fails this job, and a fixed failure also fails until the baseline
-    # is deliberately reduced. requirements/ci.txt keeps this measurement
-    # reproducible instead of absorbing dependency drift into the baseline.
+    # The debt register started at 91 tests and has been driven to zero, so
+    # this job is fully blocking: any posture failure is new by definition.
+    # The ratchet mechanics remain -- deliberately re-admitted debt must be
+    # committed to the baseline in the open. requirements/ci.txt keeps the
+    # measurement reproducible instead of absorbing dependency drift.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -648,7 +649,7 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           python -m pip install \
             -e ./packages/maverick-core \
@@ -666,22 +667,24 @@ jobs:
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"
           PYTHONFAULTHANDLER: "1"
-        # Scoped to maverick-core because that is where the baseline was
-        # measured and where every control the posture flips lives (audit
-        # signing, at-rest encryption, consent, the tool-risk ceiling).
-        # Widening it to the whole workspace needs a measurement first --
-        # asserting a baseline that was never taken is the defect class this
-        # PR exists to close.
+        # Scope: the WHOLE workspace. It began scoped to maverick-core --
+        # where every control the posture flips lives -- because that was
+        # the only tree the baseline had actually been measured over, and
+        # asserting a baseline nobody took is the defect class this gate
+        # exists to close. The measurement has since been taken across the
+        # workspace (20,899 passed, zero posture failures), so the claim
+        # and the coverage now match.
         #
-        # Exit code 1 is expected while the debt register is non-empty. Other
-        # pytest exit codes (collection/internal/timeout errors) fail directly;
-        # then --ci compares the completed report with the exact baseline.
+        # With an empty baseline, pytest exit 1 means a real posture failure
+        # and --ci fails on it as "new". Other pytest exit codes
+        # (collection/internal/timeout errors) fail directly; --ci then
+        # compares the completed report with the exact (empty) baseline.
         shell: bash
         run: |
           set +e
           set -o pipefail
-          timeout --verbose --signal=ABRT --kill-after=30s 25m \
-            python -m pytest packages/maverick-core/tests -q -p no:randomly \
+          timeout --verbose --signal=ABRT --kill-after=30s 40m \
+            python -m pytest -q -p no:randomly \
               --tb=no --timeout=180 --timeout-method=signal \
             2>&1 | tee posture-report.txt
           pytest_status=${PIPESTATUS[0]}
@@ -867,7 +870,7 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge

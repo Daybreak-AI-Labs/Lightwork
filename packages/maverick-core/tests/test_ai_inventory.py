@@ -463,7 +463,7 @@ def test_copilot_studio_follows_same_origin_odata_nextlink_and_extracts_model():
 def test_http_retry_honors_retry_after_without_persisting_response_body():
     sleeps: list[float] = []
     responses = [
-        _Response({"secret": "must-not-be-read"}, 429, {"Retry-After": "3"}),
+        _Response({"secret": "must-not-be-read"}, 429, {"Retry-After": "3"}),  # pragma: allowlist secret
         _Response({"value": []}),
     ]
     transport = _Transport(lambda _call: responses.pop(0))
@@ -636,7 +636,7 @@ def test_missing_grace_is_derived_only_from_complete_runs_and_never_deletes():
 
 
 def test_tenant_state_isolated_and_provider_secrets_are_not_persisted(monkeypatch):
-    secret = "top-secret-copilot-token"
+    secret = "top-secret-copilot-token"  # pragma: allowlist secret
     monkeypatch.setenv("COPILOT_STUDIO_TOKEN", secret)
 
     def handler(_call):
@@ -806,6 +806,675 @@ def test_read_projections_reject_corrupted_governed_fields():
         service.list_asset_states()
 
 
+def test_config_gate_is_default_off_and_rejects_unknown_connector(tmp_path):
+    from maverick import config
+
+    (tmp_path / "config.toml").write_text("[ai_inventory]\nenable = false\n", encoding="utf-8")
+    config.reset_config_cache()
+    assert inventory.enabled() is False
+    with pytest.raises(inventory.AIInventoryConfigError, match="disabled"):
+        inventory.require_enabled()
+
+    (tmp_path / "config.toml").write_text(
+        '[ai_inventory]\nenable = true\nconnectors = ["made_up"]\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert inventory.enabled() is False
+    with pytest.raises(inventory.AIInventoryConfigError, match="unknown"):
+        inventory.get_ai_inventory_config()
+
+
+class _SageMaker:
+    def __init__(self):
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def list_models(self, **kwargs):
+        self.calls.append(("models", kwargs))
+        created = datetime(2026, 8, 1, tzinfo=timezone.utc)
+        if kwargs.get("NextToken") == "models-2":
+            return {
+                "Models": [
+                    {
+                        "ModelName": "fraud-scorer-b",
+                        "ModelArn": "arn:aws:sagemaker:us-east-1:123:model/fraud-scorer-b",
+                        "CreationTime": created,
+                    }
+                ]
+            }
+        return {
+            "Models": [
+                {
+                    "ModelName": "fraud-scorer-a",
+                    "ModelArn": "arn:aws:sagemaker:us-east-1:123:model/fraud-scorer-a",
+                    "CreationTime": created,
+                }
+            ],
+            "NextToken": "models-2",
+        }
+
+    def list_endpoints(self, **kwargs):
+        self.calls.append(("endpoints", kwargs))
+        return {
+            "Endpoints": [
+                {
+                    "EndpointName": "fraud-scorer-prod",
+                    "EndpointArn": "arn:aws:sagemaker:us-east-1:123:endpoint/fraud-scorer-prod",
+                    "CreationTime": datetime(2026, 8, 2, tzinfo=timezone.utc),
+                    "LastModifiedTime": datetime(2026, 8, 3, tzinfo=timezone.utc),
+                    "EndpointStatus": "InService",
+                }
+            ]
+        }
+
+    def list_tags(self, **kwargs):
+        self.calls.append(("tags", kwargs))
+        return {"Tags": [{"Key": "owner", "Value": "fraud-team@example.com"}]}
+
+
+def test_sagemaker_lists_models_and_endpoints_with_normalized_tag_owners():
+    client = _SageMaker()
+    adapter = inventory.SageMakerInventoryAdapter(
+        sagemaker_client=client,
+        region="us-east-1",
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert [(asset.asset_type, asset.display_name) for asset in result.assets] == [
+        ("model", "fraud-scorer-a"),
+        ("model", "fraud-scorer-b"),
+        ("model", "fraud-scorer-prod"),
+    ]
+    # AWS Key/Value tag casing is normalized before owner extraction.
+    assert all(asset.owner == "fraud-team@example.com" for asset in result.assets)
+    assert result.assets[0].source_id.startswith("arn:aws:sagemaker:")
+    assert result.assets[2].binding_strength == "observed_snapshot"
+    assert result.assets[2].metadata["resource_kind"] == "endpoint"
+    # Pagination followed the token exactly once, then stopped.
+    model_calls = [kwargs for op, kwargs in client.calls if op == "models"]
+    assert model_calls == [{"MaxResults": 100}, {"MaxResults": 100, "NextToken": "models-2"}]
+
+
+def test_sagemaker_rejects_pagination_token_cycles():
+    class _Cyclic(_SageMaker):
+        def list_models(self, **kwargs):
+            return {
+                "Models": [],
+                "NextToken": "same-token",
+            }
+
+    adapter = inventory.SageMakerInventoryAdapter(
+        sagemaker_client=_Cyclic(),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="cycle"):
+        adapter.discover()
+
+
+def test_mlflow_registered_models_and_latest_versions_bind_exactly(monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_TOKEN", "mlflow-test-token")
+
+    def handler(call):
+        assert call["url"].endswith("/api/2.0/mlflow/registered-models/search")
+        if call["params"].get("page_token") == "page-2":
+            return _Response(
+                {
+                    "registered_models": [
+                        {
+                            "name": "churn-model",
+                            "user_id": "ml-platform@example.com",
+                            "creation_timestamp": 1_754_000_000_000,
+                            "last_updated_timestamp": 1_754_100_000_000,
+                            "latest_versions": [
+                                {
+                                    "name": "churn-model",
+                                    "version": "7",
+                                    "current_stage": "Production",
+                                    "run_id": "run-777",
+                                    "source": "s3://bucket/artifacts/run-777",
+                                    "last_updated_timestamp": 1_754_100_000_000,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        return _Response(
+            {
+                "registered_models": [
+                    {
+                        "name": "triage-model",
+                        "tags": [{"key": "owner", "value": "risk@example.com"}],
+                        "last_updated_timestamp": 1_753_000_000_000,
+                        "latest_versions": [],
+                    }
+                ],
+                "next_page_token": "page-2",
+            }
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.MLflowInventoryAdapter(
+        tracking_uri="https://mlflow.internal.example.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    names = [asset.display_name for asset in result.assets]
+    assert names == ["triage-model", "churn-model", "churn-model v7"]
+    assert result.assets[0].owner == "risk@example.com"
+    assert result.assets[1].owner == "ml-platform@example.com"
+    version = result.assets[2]
+    assert version.binding_strength == "immutable_provider_revision"
+    assert version.dependencies == (f"{adapter._server_key}:churn-model",)
+    # Millisecond epochs are converted, never persisted raw.
+    assert all(asset.last_seen < 1e11 for asset in result.assets)
+    assert version.metadata["stage"] == "Production"
+
+
+def test_huggingface_follows_same_origin_link_cursor_and_binds_sha(monkeypatch):
+    monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf-test-token")
+    fake_revision = "0f0e0d0c0b0a09080706050403020100aabbccdd"  # pragma: allowlist secret
+
+    def handler(call):
+        if "cursor" not in call["url"]:
+            assert call["params"]["author"] == "example-org"
+            return _Response(
+                [
+                    {
+                        "id": "example-org/classifier",
+                        "sha": fake_revision,
+                        "lastModified": "2026-08-05T00:00:00Z",
+                        "pipeline_tag": "text-classification",
+                        "private": True,
+                    }
+                ],
+                headers={
+                    "Link": '<https://huggingface.co/api/models?cursor=abc>; rel="next"'
+                },
+            )
+        return _Response(
+            [
+                {
+                    "id": "example-org/reranker",
+                    "lastModified": "2026-08-06T00:00:00Z",
+                    "private": True,
+                }
+            ]
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    exact, snapshot = result.assets
+    assert exact.binding_strength == "immutable_provider_revision"
+    assert exact.metadata["revision"] == fake_revision
+    assert snapshot.binding_strength == "observed_snapshot"
+    assert all(asset.owner == "example-org" for asset in result.assets)
+
+
+def test_huggingface_rejects_off_origin_links_foreign_repos_and_non_lists(
+    monkeypatch,
+):
+    monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf-test-token")
+
+    hostile_link = _Transport(
+        lambda call: _Response(
+            [],
+            headers={"Link": '<https://evil.example.com/api/models?cursor=x>; rel="next"'},
+        )
+    )
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=hostile_link,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError):
+        adapter.discover()
+
+    foreign_repo = _Transport(
+        lambda call: _Response([{"id": "someone-else/exfil", "private": False}])
+    )
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=foreign_repo,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="organization"):
+        adapter.discover()
+
+    non_list = _Transport(lambda call: _Response({"error": "nope"}))
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=non_list,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="list"):
+        adapter.discover()
+
+
+class _SqlTransport:
+    """A transport with both verbs, for the statement-based adapter."""
+
+    def __init__(self, post_handler, get_handler=None):
+        self.post_handler = post_handler
+        self.get_handler = get_handler
+        self.posts: list[dict[str, Any]] = []
+        self.gets: list[dict[str, Any]] = []
+
+    def post(self, url, *, headers, json, timeout):
+        call = {"url": url, "headers": dict(headers), "json": dict(json), "timeout": timeout}
+        self.posts.append(call)
+        return self.post_handler(call)
+
+    def get(self, url, *, headers, params, timeout):
+        call = {"url": url, "headers": dict(headers), "params": dict(params or {}), "timeout": timeout}
+        self.gets.append(call)
+        return self.get_handler(call)
+
+
+_SNOWFLAKE_COLUMNS = [
+    "created_on", "name", "model_type", "database_name", "schema_name",
+    "owner", "comment", "versions", "default_version_name", "aliases",
+]
+
+
+def _snowflake_row(name, versions='["V1"]', default="V1"):
+    return [
+        "2026-08-01T00:00:00+00:00", name, "USER_MODEL", "ML", "REGISTRY",
+        "ML_ADMIN", "", versions, default, "{}",
+    ]
+
+
+def test_snowflake_sends_one_fixed_statement_and_fetches_partitions(monkeypatch):
+    monkeypatch.setenv("SNOWFLAKE_TOKEN", "snowflake-test-token")
+
+    def post_handler(call):
+        assert call["json"]["statement"] == "SHOW MODELS IN ACCOUNT"
+        assert call["headers"]["X-Snowflake-Authorization-Token-Type"] == "OAUTH"
+        return _Response(
+            {
+                "statementHandle": "01b2c3d4-0000-1111-2222-333344445555",
+                "resultSetMetaData": {
+                    "rowType": [{"name": column} for column in _SNOWFLAKE_COLUMNS],
+                    "partitionInfo": [{"rowCount": 1}, {"rowCount": 1}],
+                },
+                "data": [_snowflake_row("churn_scorer")],
+            }
+        )
+
+    def get_handler(call):
+        assert call["params"] == {"partition": 1}
+        assert "01b2c3d4" in call["url"]
+        return _Response({"data": [_snowflake_row("fraud_scorer", '["V1","V2"]', "V2")]})
+
+    transport = _SqlTransport(post_handler, get_handler)
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    names = [asset.display_name for asset in result.assets]
+    assert names == [
+        "ML.REGISTRY.churn_scorer",
+        "ML.REGISTRY.churn_scorer V1",
+        "ML.REGISTRY.fraud_scorer",
+        "ML.REGISTRY.fraud_scorer V1",
+        "ML.REGISTRY.fraud_scorer V2",
+    ]
+    root, version = result.assets[0], result.assets[1]
+    assert root.binding_strength == "observed_snapshot"
+    assert version.binding_strength == "immutable_provider_revision"
+    assert version.dependencies == (root.source_id,)
+    assert all(asset.owner == "ML_ADMIN" for asset in result.assets)
+    # One statement post plus one partition get -- never a second statement.
+    assert len(transport.posts) == 1
+    assert len(transport.gets) == 1
+
+
+def test_snowflake_fails_closed_on_async_shape_drift_and_bad_versions(monkeypatch):
+    monkeypatch.setenv("SNOWFLAKE_TOKEN", "snowflake-test-token")
+
+    deferred = _SqlTransport(lambda call: _Response({}, 202))
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=deferred,
+        limits=_limits(retry_attempts=1),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryTransportError, match="asynchronous"):
+        adapter.discover()
+
+    ragged = _SqlTransport(
+        lambda call: _Response(
+            {
+                "statementHandle": "01b2c3d4-0000-1111-2222-333344445555",
+                "resultSetMetaData": {
+                    "rowType": [{"name": column} for column in _SNOWFLAKE_COLUMNS],
+                    "partitionInfo": [{"rowCount": 1}],
+                },
+                "data": [["only", "two"]],
+            }
+        )
+    )
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=ragged,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="row shape"):
+        adapter.discover()
+
+    hostile_versions = _SqlTransport(
+        lambda call: _Response(
+            {
+                "statementHandle": "01b2c3d4-0000-1111-2222-333344445555",
+                "resultSetMetaData": {
+                    "rowType": [{"name": column} for column in _SNOWFLAKE_COLUMNS],
+                    "partitionInfo": [{"rowCount": 1}],
+                },
+                "data": [_snowflake_row("bad_model", "not-json")],
+            }
+        )
+    )
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=hostile_versions,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="versions"):
+        adapter.discover()
+
+    monkeypatch.setenv("SNOWFLAKE_TOKEN_TYPE", "PASSWORD")
+    with pytest.raises(inventory.AIInventoryConfigError, match="token type"):
+        inventory.SnowflakeInventoryAdapter(
+            account_url="https://acme-prod.snowflakecomputing.com",
+            transport=deferred,
+            limits=_limits(),
+            sleep=lambda _delay: None,
+        )
+
+
+def test_agentforce_fixed_soql_follows_next_records_and_normalizes_instants(
+    monkeypatch,
+):
+    monkeypatch.setenv("SALESFORCE_TOKEN", "salesforce-test-token")
+
+    def handler(call):
+        if call["url"].endswith("/services/data/v61.0/query"):
+            assert "BotDefinition" in call["params"]["q"]
+            return _Response(
+                {
+                    "totalSize": 2,
+                    "done": False,
+                    "nextRecordsUrl": "/services/data/v61.0/query/01gRO-2000",
+                    "records": [
+                        {
+                            "attributes": {"type": "BotDefinition"},
+                            "Id": "0Xx000000000001AAA",
+                            "DeveloperName": "Service_Agent",
+                            "MasterLabel": "Service Agent",
+                            "CreatedDate": "2026-07-01T00:00:00.000+0000",
+                            "LastModifiedDate": "2026-08-01T12:30:00.000+0000",
+                        }
+                    ],
+                }
+            )
+        assert call["url"].endswith("/services/data/v61.0/query/01gRO-2000")
+        return _Response(
+            {
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {
+                        "attributes": {"type": "BotDefinition"},
+                        "Id": "0Xx000000000002AAA",
+                        "DeveloperName": "Order_Agent",
+                        "MasterLabel": "Order Agent",
+                        "CreatedDate": "2026-07-02T00:00:00.000+0000",
+                        "LastModifiedDate": "2026-08-02T12:30:00.000+0000",
+                    }
+                ],
+            }
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.AgentforceInventoryAdapter(
+        instance_url="https://acme.my.salesforce.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    assert [asset.display_name for asset in result.assets] == [
+        "Service Agent",
+        "Order Agent",
+    ]
+    assert all(asset.asset_type == "agent" for asset in result.assets)
+    # Salesforce's +0000 offset parses on every supported Python.
+    assert result.assets[0].last_seen == datetime(
+        2026, 8, 1, 12, 30, tzinfo=timezone.utc,
+    ).timestamp()
+
+
+def test_agentforce_rejects_off_origin_next_and_endless_not_done_pages(
+    monkeypatch,
+):
+    monkeypatch.setenv("SALESFORCE_TOKEN", "salesforce-test-token")
+
+    hostile = _Transport(
+        lambda call: _Response(
+            {
+                "done": False,
+                "nextRecordsUrl": "https://evil.example.com/services/data/v61.0/query/x",
+                "records": [],
+            }
+        )
+    )
+    adapter = inventory.AgentforceInventoryAdapter(
+        instance_url="https://acme.my.salesforce.com",
+        transport=hostile,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="origin"):
+        adapter.discover()
+
+    missing_cursor = _Transport(
+        lambda call: _Response({"done": False, "records": []})
+    )
+    adapter = inventory.AgentforceInventoryAdapter(
+        instance_url="https://acme.my.salesforce.com",
+        transport=missing_cursor,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="nextRecordsUrl"):
+        adapter.discover()
+
+
+def test_openai_lists_models_with_ownership(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    def handler(call):
+        assert call["url"] == "https://api.openai.com/v1/models"
+        assert call["headers"]["Authorization"] == "Bearer sk-test"
+        return _Response(
+            {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "gpt-5.2",
+                        "object": "model",
+                        "created": 1_764_000_000,
+                        "owned_by": "system",
+                    },
+                    {
+                        "id": "ft:gpt-5-mini:acme:triage:9x",
+                        "object": "model",
+                        "created": 1_765_000_000,
+                        "owned_by": "org-acme",
+                    },
+                ],
+            }
+        )
+
+    adapter = inventory.OpenAIInventoryAdapter(
+        transport=_Transport(handler),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 1
+    vendor, tuned = result.assets
+    assert vendor.source_id == "gpt-5.2"
+    assert vendor.owner == "system"
+    assert vendor.metadata["fine_tuned"] is False
+    assert tuned.owner == "org-acme"
+    assert tuned.metadata["fine_tuned"] is True
+    assert all(
+        asset.binding_strength == "observed_snapshot" for asset in result.assets
+    )
+
+
+def test_openai_rejects_a_malformed_listing(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    adapter = inventory.OpenAIInventoryAdapter(
+        transport=_Transport(lambda call: _Response({"object": "list", "data": "no"})),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError):
+        adapter.discover()
+
+
+_FAKE_REPLICATE_VERSION = (
+    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"  # pragma: allowlist secret
+)
+
+
+def test_replicate_pages_account_deployments_and_binds_versions(monkeypatch):
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8-test")
+
+    def handler(call):
+        if "cursor" not in call["url"]:
+            return _Response(
+                {
+                    "results": [
+                        {
+                            "owner": "acme",
+                            "name": "support-triage",
+                            "current_release": {
+                                "number": 7,
+                                "model": "acme/triage-llm",
+                                "version": _FAKE_REPLICATE_VERSION,
+                                "created_at": "2026-08-10T00:00:00Z",
+                            },
+                        }
+                    ],
+                    "next": "https://api.replicate.com/v1/deployments?cursor=abc",
+                }
+            )
+        return _Response(
+            {
+                "results": [
+                    {
+                        "owner": "acme",
+                        "name": "experimental",
+                        "current_release": {"number": 1, "model": "acme/exp"},
+                    }
+                ],
+                "next": None,
+            }
+        )
+
+    adapter = inventory.ReplicateInventoryAdapter(
+        transport=_Transport(handler),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    pinned, floating = result.assets
+    assert pinned.source_id == "acme/support-triage"
+    assert pinned.binding_strength == "immutable_provider_revision"
+    assert pinned.metadata["version"] == _FAKE_REPLICATE_VERSION
+    assert floating.binding_strength == "observed_snapshot"
+    assert all(asset.platform == "Replicate" for asset in result.assets)
+
+
+def test_replicate_rejects_an_off_origin_next_url(monkeypatch):
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8-test")
+    adapter = inventory.ReplicateInventoryAdapter(
+        transport=_Transport(
+            lambda call: _Response(
+                {"results": [], "next": "https://evil.example/v1/deployments?c=1"}
+            )
+        ),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError):
+        adapter.discover()
+
+
+def test_every_connector_has_a_read_side_source_mapping():
+    # The read-side projections refuse persisted records whose connector
+    # is missing from _CONNECTOR_SOURCES -- one absent entry makes a
+    # connector's successful sync unreadable and poisons the listing.
+    assert set(inventory._CONNECTOR_SOURCES) == set(inventory._CONNECTORS)
+
+
+def test_dependency_token_normalizes_source_native_references():
+    # Source-native references (dotted catalog names, ARNs, dotted model
+    # names) must all normalize to the model-risk token grammar.
+    token = inventory._dependency_token
+    pattern = r"[a-z][a-z0-9_:-]{0,63}"
+    import re as re_mod
+
+    for reference in (
+        "main.support.triage_model",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-v2",
+        "gpt-3.5-turbo",
+        "  Mixed Case/Name  ",
+        "42-leading-digit",
+        "",
+    ):
+        assert re_mod.fullmatch(pattern, token(reference)), reference
+
+
 def test_second_wave_connectors_are_registered_and_use_the_bounded_factory(monkeypatch):
     from maverick import ai_inventory_connectors as second_wave
 
@@ -837,7 +1506,7 @@ def test_second_wave_connectors_are_registered_and_use_the_bounded_factory(monke
     transport = object()
     sagemaker_client = object()
     adapter = inventory.build_configured_adapter(
-        "mlflow",
+        "aws_sagemaker",
         transport=transport,
         sagemaker_client=sagemaker_client,
         sleep=lambda _seconds: None,
@@ -845,7 +1514,7 @@ def test_second_wave_connectors_are_registered_and_use_the_bounded_factory(monke
     )
 
     assert adapter is sentinel
-    assert captured["name"] == "mlflow"
+    assert captured["name"] == "aws_sagemaker"
     assert captured["enabled_connectors"] == enabled
     assert captured["transport"] is transport
     assert captured["sagemaker_client"] is sagemaker_client
@@ -854,22 +1523,4 @@ def test_second_wave_connectors_are_registered_and_use_the_bounded_factory(monke
         inventory.available_connectors()
     )
     assert inventory._CONNECTOR_SOURCES["hugging_face"] == "hugging_face_hub"
-
-
-def test_config_gate_is_default_off_and_rejects_unknown_connector(tmp_path):
-    from maverick import config
-
-    (tmp_path / "config.toml").write_text("[ai_inventory]\nenable = false\n", encoding="utf-8")
-    config.reset_config_cache()
-    assert inventory.enabled() is False
-    with pytest.raises(inventory.AIInventoryConfigError, match="disabled"):
-        inventory.require_enabled()
-
-    (tmp_path / "config.toml").write_text(
-        '[ai_inventory]\nenable = true\nconnectors = ["made_up"]\n',
-        encoding="utf-8",
-    )
-    config.reset_config_cache()
-    assert inventory.enabled() is False
-    with pytest.raises(inventory.AIInventoryConfigError, match="unknown"):
-        inventory.get_ai_inventory_config()
+    assert inventory._CONNECTOR_SOURCES["mlflow"] == "mlflow_model_registry"

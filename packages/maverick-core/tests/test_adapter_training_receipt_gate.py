@@ -13,23 +13,23 @@ from maverick.training import qualification as q
 from maverick.training import receipts
 from maverick.training.specialist_models import load_catalog
 
-MEASURED_AT = "2026-07-23T12:30:00Z"
-EVALUATED_AT = datetime(2026, 7, 23, 13, 0, tzinfo=timezone.utc)
+# The qualification gate enforces a maximum evidence age against the real
+# clock, so fixed calendar dates rot (this file failed on 2026-08-23 with a
+# 2026-07-23 anchor). Anchor the scenario one day in the past instead; every
+# ordering between the timestamps is preserved exactly.
+_BASE = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=1)
 
 
-@pytest.fixture(autouse=True)
-def _pin_historical_qualification_evaluation(monkeypatch):
-    """Keep this historical receipt fixture inside its 30-day validity window."""
-    evaluate_qualification = q.evaluate_qualification
+def _stamp(minutes: int) -> str:
+    return (_BASE + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def evaluate_at_fixture_time(evidence, policy, *, now=None):
-        return evaluate_qualification(
-            evidence,
-            policy,
-            now=EVALUATED_AT if now is None else now,
-        )
 
-    monkeypatch.setattr(q, "evaluate_qualification", evaluate_at_fixture_time)
+COMPLETED_AT = _stamp(0)
+MEASURED_AT = _stamp(30)
+ISSUED_AT = _stamp(60)
+_QUALIFIED_NOW = _BASE + timedelta(minutes=60)
+#: The qualification window anchors to measured_at (q.MAX_EVIDENCE_AGE).
+_EXPIRES = _BASE + timedelta(minutes=30) + q.MAX_EVIDENCE_AGE
 
 
 def _manifest(tmp_path) -> ar.AdapterManifest:
@@ -56,7 +56,7 @@ def _receipt(adapter_sha256: str) -> dict:
         "evidence": {
             "run_id": evidence.run_id,
             "tenant_id": "tenant-a",
-            "completed_at": "2026-07-23T12:00:00Z",
+            "completed_at": COMPLETED_AT,
             "dataset_sha256": "1" * 64,
             "environment_sha256": "a" * 64,
             "environment_id": "privacy",
@@ -88,7 +88,7 @@ def _receipt(adapter_sha256: str) -> dict:
                 "qualification_policy_sha256": decision.policy_sha256,
             },
         },
-        "issued_at": "2026-07-23T13:00:00Z",
+        "issued_at": ISSUED_AT,
     }
 
 
@@ -110,7 +110,7 @@ def _receipt_binding(adapter_sha256: str = "9" * 64) -> dict[str, str]:
         **_commitment(),
         "training_run_id": receipt["run_id"],
         "training_completed_at": receipt["completed_at"],
-        "receipt_issued_at": "2026-07-23T13:00:00Z",
+        "receipt_issued_at": ISSUED_AT,
         "dataset_sha256": receipt["dataset_sha256"],
         "environment_sha256": receipt["environment_sha256"],
         "environment_id": receipt["environment_id"],
@@ -319,7 +319,7 @@ def _model_improvement_binding(
     decision = q.evaluate_qualification(
         measured,
         policy,
-        now=datetime(2026, 7, 23, 13, 0, tzinfo=timezone.utc),
+        now=_QUALIFIED_NOW,
     )
     receipt_binding = {
         **_receipt_binding(adapter_sha256),
@@ -585,27 +585,27 @@ def test_routing_revalidates_non_extendable_qualification_expiry(monkeypatch):
 
     ar._revalidate_model_improvement_pointer(
         pointer,
-        now=datetime(2026, 8, 22, 12, 29, tzinfo=timezone.utc),
+        now=_EXPIRES - timedelta(minutes=1),
     )
     with pytest.raises(ValueError, match="expired"):
         ar._revalidate_model_improvement_pointer(
             pointer,
-            now=datetime(2026, 8, 22, 12, 30, tzinfo=timezone.utc),
+            now=_EXPIRES,
         )
 
     extended = {
         **improvement,
         "qualification": {
             **improvement["qualification"],
-            "expires_at": (datetime(2026, 8, 22, 12, 30, tzinfo=timezone.utc) + timedelta(days=1))
-            .isoformat()
-            .replace("+00:00", "Z"),
+            "expires_at": (
+                _EXPIRES + timedelta(days=1)
+            ).isoformat().replace("+00:00", "Z"),
         },
     }
     with pytest.raises(ValueError, match="not derived"):
         ar._revalidate_model_improvement_pointer(
             {**pointer, "model_improvement": extended},
-            now=datetime(2026, 8, 22, 12, 29, tzinfo=timezone.utc),
+            now=_EXPIRES - timedelta(minutes=1),
         )
 
 

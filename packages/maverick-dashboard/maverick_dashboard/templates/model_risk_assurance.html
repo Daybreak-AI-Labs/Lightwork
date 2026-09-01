@@ -240,6 +240,21 @@
     <pre id="agent-topology-result" class="assurance-table assurance-muted" hidden></pre>
     {% endif %}
   </section>
+  <section>
+    <h3>Serious-incident clocks (EU AI Act Art. 73)</h3>
+    <p class="assurance-muted">Declare, file, and withdraw from the
+      <a href="/security/governance">Governance workspace</a>; this panel is the
+      read-only clock view.</p>
+    {% if not ai_incident_enabled %}<p class="assurance-alert">Enable AI incident reporting to track Art. 73 awareness clocks for declared serious incidents.</p>
+    {% elif ai_incident_error %}<p class="assurance-alert">{{ ai_incident_error }}</p>
+    {% elif ai_incident_declarations %}
+    {% if ai_incident_overdue %}<p class="assurance-alert">{{ ai_incident_overdue }} declaration(s) are past their Art. 73 reporting deadline.</p>{% endif %}
+    <div class="assurance-table"><table><caption>Declared serious incidents, most urgent first</caption><thead><tr><th>Declaration</th><th>Category</th><th>Member State</th><th>Status</th><th>Clock</th></tr></thead><tbody>
+    {% for row in ai_incident_declarations %}<tr><td>{{ row.id }}</td><td>{{ row.category }}</td><td>{{ row.member_state }}</td><td>{{ row.status }}</td><td>{% if row.overdue %}<strong>{{ row.clock_label }}</strong> ({{ row.deadline_citation }}){% else %}{{ row.clock_label }} ({{ row.deadline_citation }}){% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <p class="assurance-muted">Declarations, submissions, and withdrawals are human assertions recorded through <code>maverick ai-incidents</code> or the authenticated API; nothing is ever transmitted to an authority by the platform.</p>
+    {% else %}<p class="assurance-empty">No serious-incident declarations. Clocks start from awareness the moment one is declared.</p>{% endif %}
+  </section>
 </section>
 
 {% if not gateway_enabled %}

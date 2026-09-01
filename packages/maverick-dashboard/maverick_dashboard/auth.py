@@ -72,7 +72,14 @@ SELF_AUTH_WEBHOOK_PATHS = frozenset(
 )
 
 _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
-    {"/a2a/v1", "/static/daybreak-logo.jpg"}
+    {
+        "/a2a/v1",
+        "/static/daybreak-logo.jpg",
+        # The LLM gateway authenticates every call with its own bearer inside
+        # maverick.llm_gateway (same trust-domain rationale as /a2a/v1).
+        "/gateway/v1/chat/completions",
+        "/gateway/v1/otel",
+    }
 ) | SELF_AUTH_WEBHOOK_PATHS
 
 
@@ -89,9 +96,9 @@ def _self_authenticated_path(path: str) -> bool:
     The trailing slashes matter: the ADMIN surfaces stay under normal dashboard
     authentication."""
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
-        ("/share/", "/scim/", "/form/", "/saml/", "/auth/invite/",
-         "/api/v1/external/", "/api/v1/public/consent/",
-         "/api/v1/public/policies/")
+        ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
+         "/auth/invite/", "/api/v1/external/",
+         "/api/v1/public/consent/", "/api/v1/public/policies/")
     )
 
 

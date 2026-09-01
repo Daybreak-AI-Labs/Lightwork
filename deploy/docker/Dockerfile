@@ -40,7 +40,7 @@ COPY apps/installer-cli ./apps/installer-cli
 
 # Build the complete manifest-driven cohort and every dependency into a private
 # wheelhouse. The runtime stage has no project trees, pyprojects, or tests.
-RUN python -m pip install --upgrade 'pip==26.1.2' \
+RUN python -m pip install --upgrade 'pip==26.2.1' \
     && python scripts/install_release_cohort.py \
         --target-python python \
         --core-extra release-runtime \
@@ -48,8 +48,18 @@ RUN python -m pip install --upgrade 'pip==26.1.2' \
 
 FROM python:3.12-slim${PYTHON_DIGEST} AS runtime
 
+# PYTHONNOUSERSITE: the harness interpreter must never import from the user
+# site-packages. System site-packages are root-owned (installed below, before
+# USER maverick), so the only writable import path a model-driven `pip
+# install --user` can reach at runtime is ~/.local/lib/pythonX/site-packages —
+# with user-site honored, a mid-run install there shadows any module the
+# harness lazily imports later (import-path poisoning of the process that
+# holds credentials and enforces the gates). The sandbox's child-shell env
+# drops this var (sandbox/local.py scrub_env), so packages the agent installs
+# for its OWN scripts keep working; only the harness process is closed off.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONNOUSERSITE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -65,7 +75,7 @@ RUN apt-get update \
 # from falling back to a public lookalike.
 COPY --from=wheel-builder /wheelhouse /wheelhouse
 COPY requirements/ci.txt /tmp/requirements/ci.txt
-RUN python -m pip install --upgrade 'pip==26.1.2' \
+RUN python -m pip install --upgrade 'pip==26.2.1' \
     && python -m pip install \
         --no-index \
         --find-links=/wheelhouse \

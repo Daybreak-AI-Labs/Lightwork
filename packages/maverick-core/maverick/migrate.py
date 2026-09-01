@@ -88,6 +88,23 @@ KNOWN_SECTIONS = frozenset({
     "ai_evidence_analysis",
     "ai_cloud_agent_governance",
     "ai_identity_governance_connectors",
+    "ai_entity_tasks",
+    "assessment_evidence_autopopulation",
+    "administration_document_access",
+    "governed_document_vault",
+    "incident_attachment_metadata",
+    "governance_inventory",
+    "ai_incident_reporting",
+    "eu_conformity",
+    "explainability",
+    "content_provenance",
+    "llm_gateway",
+    "vendor_management",
+    "consent_registry",
+    "data_map",
+    "breach_notification",
+    "dsar_fulfillment",
+    "grc_sync",
     # Registry drift, again: these are all read by real load_config() call sites
     # AND written by the installer wizard, yet were missing here -- so an operator
     # who enabled a documented, wizard-offered feature got a false "unknown

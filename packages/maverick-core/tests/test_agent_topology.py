@@ -71,13 +71,13 @@ def _configured(monkeypatch):
             name="vendor_api",
             url="https://mcp.example.test/private/path?tenant=secret",
             auth_token="DO-NOT-EXPOSE",
-            headers={"X-Tenant-Secret": "DO-NOT-EXPOSE"},
+            headers={"X-Tenant-Secret": "DO-NOT-EXPOSE"},  # pragma: allowlist secret
         ),
         mcp_client.MCPServerSpec(
             name="local_scanner",
             command="C:/tenant/private/tools/scanner.exe",
             args=["--private-path", "C:/tenant/raw"],
-            env={"SCANNER_SECRET": "DO-NOT-EXPOSE"},
+            env={"SCANNER_SECRET": "DO-NOT-EXPOSE"},  # pragma: allowlist secret
             pin_sha256=_hex("scanner-binary"),
         ),
     ]

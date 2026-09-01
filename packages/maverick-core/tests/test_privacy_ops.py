@@ -856,6 +856,94 @@ class TestDepthHooks:
         ) == ""
         assert opened is False
 
+    def _ooxml(self, members):
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, body in members.items():
+                archive.writestr(name, body)
+        return buffer.getvalue()
+
+    def test_ooxml_extraction_covers_xlsx_and_pptx_with_the_stdlib(self):
+        xlsx = self._ooxml({
+            "xl/sharedStrings.xml":
+                "<sst><si><t>alice@example.com</t></si>"
+                "<si><t>SSN 123-45-6789</t></si></sst>",
+            "xl/worksheets/sheet1.xml":
+                "<worksheet><sheetData><row><c><v>42</v></c></row>"
+                "</sheetData></worksheet>",
+            # A relationship part sits under the same folder and must not be
+            # mistaken for a sheet.
+            "xl/worksheets/_rels/sheet1.xml.rels": "<Relationships/>",
+        })
+        meta = {}
+        text = privacy_ops._document_text(
+            xlsx,
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet",
+            _metadata=meta,
+        )
+        assert meta["method"] == "xlsx_shared_strings_and_sheets"
+        assert "alice@example.com" in text and "123-45-6789" in text
+        assert "42" in text
+
+        pptx = self._ooxml({"ppt/slides/slide1.xml":
+                            "<p:sld><a:p><a:r><a:t>deck secret</a:t></a:r>"
+                            "</a:p></p:sld>"})
+        meta = {}
+        text = privacy_ops._document_text(
+            pptx,
+            "application/vnd.openxmlformats-officedocument"
+            ".presentationml.presentation",
+            _metadata=meta,
+        )
+        assert meta["method"] == "pptx_slide_xml"
+        assert "deck secret" in text
+
+    def test_ooxml_extraction_unescapes_so_entities_cannot_evade(self):
+        """An identifier written as a character reference must not survive
+        tag-stripping still escaped -- that is an evasion, not cosmetics."""
+        docx = self._ooxml({"word/document.xml":
+                            "<w:document><w:body><w:p><w:r><w:t>"
+                            "a&amp;b&#64;example.com</w:t></w:r></w:p>"
+                            "</w:body></w:document>"})
+        text = privacy_ops._document_text(
+            docx,
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document",
+        )
+        assert "a&b@example.com" in text
+        # Escaped markup stays inert text; it is never re-read as a tag.
+        inert = self._ooxml({"word/document.xml":
+                             "<w:document><w:body><w:p><w:r><w:t>"
+                             "&lt;w:t&gt;kept&lt;/w:t&gt;</w:t></w:r></w:p>"
+                             "</w:body></w:document>"})
+        assert "<w:t>kept</w:t>" in privacy_ops._document_text(
+            inert,
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document",
+        )
+
+    def test_ooxml_extraction_refuses_duplicate_named_parts(self):
+        """A forged archive must not make "which entry wins" ambiguous."""
+        import io
+        import warnings
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            with warnings.catch_warnings():   # building the forgery warns
+                warnings.simplefilter("ignore")
+                archive.writestr("word/document.xml", "<w:t>benign</w:t>")
+                archive.writestr("word/document.xml", "<w:t>payload</w:t>")
+        assert privacy_ops._document_text(
+            buffer.getvalue(),
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document",
+        ) == ""
+
     def test_import_onetrust_ropa_maps_drifting_headers(self):
         csv_text = (
             '"Processing Activity Name","Purpose of Processing",'

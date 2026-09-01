@@ -18,6 +18,7 @@ import json
 import time
 
 import pytest
+from maverick import external_identity
 from maverick.agent_trust import TrustedAgent, load_registry
 from maverick.external_identity import (
     envelope_message,
@@ -513,3 +514,48 @@ def test_hmac_replay_of_identical_bytes_is_refused(monkeypatch):
         "hooky", body, ts, sig, registry=_hmac_registry())
     assert agent is None
     assert rule == "replay"
+
+
+# ---- Identity federation (https JWKS endpoints) ------------------------------
+
+
+@requires_crypto
+def test_jwt_federates_against_an_https_jwks_endpoint(monkeypatch, rsa_keys):
+    priv_pem, _, pub = rsa_keys
+    from jwt.algorithms import RSAAlgorithm
+
+    jwk = json.loads(RSAAlgorithm.to_jwk(pub))
+    jwk["kid"] = "k1"
+    fetched: list[str] = []
+
+    def fake_remote(jwt_mod, url):
+        fetched.append(url)
+        return external_identity._StaticJWKS(jwt_mod, [jwk])
+
+    monkeypatch.setattr(external_identity, "_remote_jwks_client", fake_remote)
+    reg = _registry(jwks_file="https://login.example.com/common/discovery/keys")
+    agent, rule = verify_agent_jwt(_mint(priv_pem), registry=reg)
+    assert agent is not None and agent.id == AGENT
+    assert rule == "ok"
+    assert fetched == ["https://login.example.com/common/discovery/keys"]
+
+
+@requires_crypto
+def test_jwt_plaintext_jwks_endpoint_is_refused(rsa_keys):
+    priv_pem, _, _ = rsa_keys
+    reg = _registry(jwks_file="http://login.example.com/keys")
+    agent, rule = verify_agent_jwt(_mint(priv_pem), registry=reg)
+    assert agent is None
+    assert rule == "jwks_unavailable"
+
+
+@requires_crypto
+def test_jwt_federated_endpoint_failure_fails_closed(monkeypatch, rsa_keys):
+    priv_pem, _, _ = rsa_keys
+    monkeypatch.setattr(
+        external_identity, "_remote_jwks_client", lambda jwt_mod, url: None,
+    )
+    reg = _registry(jwks_file="https://login.example.com/keys")
+    agent, rule = verify_agent_jwt(_mint(priv_pem), registry=reg)
+    assert agent is None
+    assert rule == "jwks_unavailable"

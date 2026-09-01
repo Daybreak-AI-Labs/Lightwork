@@ -23,6 +23,7 @@ import hmac
 import json
 import math
 import re
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from itertools import islice
 from typing import Any
@@ -1861,7 +1862,489 @@ class AILiteracyRegister:
 default_register = AILiteracyRegister()
 
 
+# Role-oriented compatibility API used by the governance workspace and CLI.
+# Its records use separate stores so the privacy-minimising evidence register
+# above retains its closed schemas and pseudonymous subject projections.
+ROLE_REQUIREMENT_SCHEMA = "lightwork.ai-literacy-role-requirement.v1"
+ROLE_ASSIGNMENT_SCHEMA = "lightwork.ai-literacy-role-assignment.v1"
+ROLE_COMPLETION_SCHEMA = "lightwork.ai-literacy-role-completion.v1"
+REGULATION_METADATA = {
+    "regulation": "Regulation (EU) 2024/1689",
+    "article": "Art. 4",
+    "obligation": "AI literacy of staff and other persons operating AI systems",
+    "applicable_since": "2025-02-02",
+}
+NON_CERTIFICATION_NOTICE = (
+    "AI-literacy tracking is decision support for the Art. 4 obligation; it "
+    "is not a certification of competence or of training sufficiency."
+)
+PLANE_RECONCILIATION_NOTICE = (
+    "The privacy-minimising canonical register is the compliance evidence "
+    "authority. Role-compatibility records are operational intake only and "
+    "require explicit evidence-enriched reconciliation; they are never "
+    "promoted automatically."
+)
+_ROLE_REQUIREMENTS = GovernedRecordStore(
+    "ai_literacy_role_requirements", "ALR", "ai_literacy_role_requirement",
+)
+_ROLE_ASSIGNMENTS = GovernedRecordStore(
+    "ai_literacy_role_assignments", "ALA", "ai_literacy_role_assignment",
+)
+_ROLE_COMPLETIONS = GovernedRecordStore(
+    "ai_literacy_role_completions", "ALC", "ai_literacy_role_completion",
+)
+
+_ROLE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}\Z")
+_ROLE_MAX_TRAININGS = 64
+_ROLE_MAX_ROLES = 64
+_ROLE_MAX_HISTORY = 20
+_ROLE_MAX_LIST = 500
+_ROLE_DAY = 86_400.0
+
+
+class AILiteracyConfigError(AILiteracyError):
+    """The [ai_literacy] configuration is missing, malformed, or disabled."""
+
+
+def _role_sha256(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _role_token(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not _ROLE_TOKEN_RE.fullmatch(value.strip()):
+        raise ValueError(f"{label} must be a bounded identifier token")
+    return value.strip()
+
+
+def _role_text(value: Any, label: str, limit: int) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty string")
+    out = value.strip()
+    if len(out) > limit:
+        raise ValueError(f"{label} exceeds {limit} characters")
+    return out
+
+
+def _role_timestamp(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be a Unix timestamp")
+    number = float(value)
+    if not 0 < number < 10_000_000_000:
+        raise ValueError(f"{label} is out of range")
+    return number
+
+
+def get_ai_literacy_config() -> dict[str, bool]:
+    try:
+        from .config import config_source_errors, load_global_config
+
+        errors = config_source_errors(include_tenant=False)
+        root = load_global_config()
+    except Exception as exc:
+        raise AILiteracyConfigError("AI literacy configuration is unavailable") from exc
+    if errors or not isinstance(root, Mapping):
+        raise AILiteracyConfigError("AI literacy configuration is unreadable")
+    raw = root.get("ai_literacy") or {}
+    if not isinstance(raw, Mapping):
+        raise AILiteracyConfigError("ai_literacy must be a table")
+    unknown = sorted(set(raw) - {"enable"})
+    if unknown:
+        raise AILiteracyConfigError(f"unknown ai_literacy keys: {', '.join(unknown)}")
+    flag = raw.get("enable", False)
+    if not isinstance(flag, bool):
+        raise AILiteracyConfigError("ai_literacy.enable must be a boolean")
+    return {"enable": flag}
+
+
+def _require_role_api_enabled() -> None:
+    if not enabled():
+        raise AILiteracyConfigError(
+            "AI literacy register requires [ai_literacy] enable = true"
+        )
+
+
+def _role_trainings(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ValueError("trainings must be a list")
+    if not value or len(value) > _ROLE_MAX_TRAININGS:
+        raise ValueError(f"trainings must contain 1-{_ROLE_MAX_TRAININGS} entries")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, Mapping):
+            raise ValueError("each training must be an object")
+        unknown = sorted(set(raw) - {"key", "title", "validity_days"})
+        if unknown:
+            raise ValueError(f"unknown training keys: {', '.join(unknown)}")
+        key = _role_token(raw.get("key"), "training key")
+        if key in seen:
+            raise ValueError("training keys must be unique")
+        seen.add(key)
+        validity = raw.get("validity_days")
+        if validity is not None:
+            if isinstance(validity, bool) or not isinstance(validity, int):
+                raise ValueError("validity_days must be an integer or omitted")
+            if not 1 <= validity <= 3_650:
+                raise ValueError("validity_days must be between 1 and 3650")
+        out.append(
+            {
+                "key": key,
+                "title": _role_text(raw.get("title"), "training title", 256),
+                "validity_days": validity,
+            }
+        )
+    out.sort(key=lambda row: row["key"])
+    return out
+
+
+def set_role_requirement(
+    role: str,
+    trainings: Sequence[Mapping[str, Any]],
+    *,
+    actor: str,
+    expected_revision: int = 0,
+) -> dict[str, Any]:
+    """Create or CAS-update the training requirement for one role."""
+
+    _require_role_api_enabled()
+    role_role_token = _role_token(role, "role")
+    operator = _role_text(actor, "actor", 256)
+    normalized = _role_trainings(trainings)
+    record_id = f"ALR-{_role_sha256(role_role_token)[:24]}"
+    if expected_revision == 0:
+        record = {
+            "id": record_id,
+            "schema": ROLE_REQUIREMENT_SCHEMA,
+            "role": role_role_token,
+            "trainings": normalized,
+            "set_by": operator,
+            "notice": NON_CERTIFICATION_NOTICE,
+        }
+        return dict(_ROLE_REQUIREMENTS.create(
+            record, action="set_literacy_requirement", actor=operator,
+        ))
+
+    def mutate(value: dict[str, Any]) -> None:
+        value["trainings"] = normalized
+        value["set_by"] = operator
+
+    saved = _ROLE_REQUIREMENTS.update(
+        record_id,
+        mutate,
+        expected_revision=int(expected_revision),
+        action="set_literacy_requirement",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"role requirement is not recorded: {role_role_token}")
+    return dict(saved)
+
+
+def assign_roles(
+    person: str,
+    roles: Sequence[str],
+    *,
+    actor: str,
+    expected_revision: int = 0,
+) -> dict[str, Any]:
+    """Create or CAS-update one person's role assignment."""
+
+    _require_role_api_enabled()
+    person_role_token = _role_token(person, "person")
+    operator = _role_text(actor, "actor", 256)
+    if not isinstance(roles, Sequence) or isinstance(roles, (str, bytes)):
+        raise ValueError("roles must be a list")
+    if not roles or len(roles) > _ROLE_MAX_ROLES:
+        raise ValueError(f"roles must contain 1-{_ROLE_MAX_ROLES} entries")
+    normalized = sorted({_role_token(role, "role") for role in roles})
+    known = {row["role"] for row in _role_requirement_rows()}
+    missing = sorted(set(normalized) - known)
+    if missing:
+        raise ValueError(
+            f"roles have no recorded requirement: {', '.join(missing)}"
+        )
+    record_id = f"ALA-{_role_sha256(person_role_token)[:24]}"
+    if expected_revision == 0:
+        record = {
+            "id": record_id,
+            "schema": ROLE_ASSIGNMENT_SCHEMA,
+            "person": person_role_token,
+            "roles": normalized,
+            "assigned_by": operator,
+        }
+        return dict(_ROLE_ASSIGNMENTS.create(
+            record, action="assign_literacy_roles", actor=operator,
+        ))
+
+    def mutate(value: dict[str, Any]) -> None:
+        value["roles"] = normalized
+        value["assigned_by"] = operator
+
+    saved = _ROLE_ASSIGNMENTS.update(
+        record_id,
+        mutate,
+        expected_revision=int(expected_revision),
+        action="assign_literacy_roles",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"assignment is not recorded: {person_role_token}")
+    return dict(saved)
+
+
+def record_completion(
+    person: str,
+    training: str,
+    *,
+    completed_at: float,
+    evidence_ref: str,
+    actor: str,
+) -> dict[str, Any]:
+    """Record (or refresh) one person's completion of one training."""
+
+    _require_role_api_enabled()
+    person_role_token = _role_token(person, "person")
+    training_role_token = _role_token(training, "training")
+    operator = _role_text(actor, "actor", 256)
+    completed = _role_timestamp(completed_at, "completed_at")
+    if completed > time.time() + 300:
+        raise ValueError("completed_at must not be future-dated")
+    reference = _role_text(evidence_ref, "evidence_ref", 512)
+    record_id = f"ALC-{_role_sha256([person_role_token, training_role_token])[:24]}"
+    current = _ROLE_COMPLETIONS.get(record_id)
+    if current is None:
+        record = {
+            "id": record_id,
+            "schema": ROLE_COMPLETION_SCHEMA,
+            "person": person_role_token,
+            "training": training_role_token,
+            "completed_at": completed,
+            "evidence_ref": reference,
+            "recorded_by": operator,
+            "history": [],
+        }
+        try:
+            return dict(_ROLE_COMPLETIONS.create(
+                record, action="record_literacy_completion", actor=operator,
+            ))
+        except RecordConflict:
+            current = _ROLE_COMPLETIONS.get(record_id)
+            if current is None:
+                raise
+
+    def mutate(value: dict[str, Any]) -> None:
+        history = list(value.get("history") or [])
+        history.append(
+            {
+                "completed_at": value.get("completed_at"),
+                "evidence_ref": value.get("evidence_ref"),
+                "recorded_by": value.get("recorded_by"),
+            }
+        )
+        value["history"] = history[-_ROLE_MAX_HISTORY:]
+        value["completed_at"] = completed
+        value["evidence_ref"] = reference
+        value["recorded_by"] = operator
+
+    saved = _ROLE_COMPLETIONS.update(
+        record_id,
+        mutate,
+        expected_revision=int(current.get("revision") or 0),
+        action="record_literacy_completion",
+        actor=operator,
+    )
+    if saved is None:
+        raise AILiteracyError("completion record disappeared during refresh")
+    return dict(saved)
+
+
+def _role_requirement_rows() -> list[dict[str, Any]]:
+    rows = _ROLE_REQUIREMENTS.list(limit=_ROLE_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("role") or ""))
+    return rows
+
+
+def literacy_gaps(*, now: float | None = None) -> dict[str, Any]:
+    """Per person: every required training that is missing or expired."""
+
+    _require_role_api_enabled()
+    current = time.time() if now is None else _role_timestamp(now, "now")
+    requirements = {row["role"]: row for row in _role_requirement_rows()}
+    completions: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in _ROLE_COMPLETIONS.list(limit=_ROLE_MAX_LIST * 4):
+        completions[(str(row.get("person")), str(row.get("training")))] = row
+    persons: list[dict[str, Any]] = []
+    counts = {"current": 0, "expired": 0, "missing": 0}
+    assignments = _ROLE_ASSIGNMENTS.list(limit=_ROLE_MAX_LIST * 4)
+    assignments.sort(key=lambda row: str(row.get("person") or ""))
+    for assignment in assignments:
+        person = str(assignment.get("person") or "")
+        required: dict[str, dict[str, Any]] = {}
+        for role in assignment.get("roles") or []:
+            requirement = requirements.get(str(role))
+            if requirement is None:
+                continue
+            for training in requirement.get("trainings") or []:
+                required.setdefault(str(training["key"]), dict(training))
+        states: list[dict[str, Any]] = []
+        for key in sorted(required):
+            training = required[key]
+            completion = completions.get((person, key))
+            if completion is None:
+                status = "missing"
+                completed_at = None
+                valid_until = None
+            else:
+                completed_at = float(completion.get("completed_at") or 0.0)
+                validity = training.get("validity_days")
+                valid_until = (
+                    completed_at + float(validity) * _ROLE_DAY
+                    if validity is not None
+                    else None
+                )
+                status = (
+                    "expired"
+                    if valid_until is not None and valid_until <= current
+                    else "current"
+                )
+            counts[status] += 1
+            states.append(
+                {
+                    "training": key,
+                    "title": training.get("title"),
+                    "status": status,
+                    "completed_at": completed_at,
+                    "valid_until": valid_until,
+                }
+            )
+        persons.append(
+            {
+                "person": person,
+                "roles": list(assignment.get("roles") or []),
+                "trainings": states,
+                "gap_count": sum(
+                    1 for state in states if state["status"] != "current"
+                ),
+            }
+        )
+    return {
+        "persons": persons,
+        "person_count": len(persons),
+        "counts": counts,
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+        "generated_at": current,
+    }
+
+
+def export_evidence(*, now: float | None = None) -> str:
+    """A bounded JSON snapshot of the whole register for an auditor."""
+
+    _require_role_api_enabled()
+    gaps = literacy_gaps(now=now)
+    snapshot = {
+        "schema": "lightwork.ai-literacy-evidence.v1",
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+        "generated_at": gaps["generated_at"],
+        "roles": [
+            {
+                "role": row.get("role"),
+                "trainings": row.get("trainings"),
+                "set_by": row.get("set_by"),
+                "revision": row.get("revision"),
+            }
+            for row in _role_requirement_rows()
+        ],
+        "persons": gaps["persons"],
+        "counts": gaps["counts"],
+    }
+    return json.dumps(snapshot, indent=2, sort_keys=True, default=str)
+
+
+def list_requirements() -> list[dict[str, Any]]:
+    _require_role_api_enabled()
+    return [
+        {
+            "role": row.get("role"),
+            "trainings": row.get("trainings"),
+            "set_by": row.get("set_by"),
+            "revision": row.get("revision"),
+        }
+        for row in _role_requirement_rows()
+    ]
+
+
+def literacy_plane_status(*, now: float | None = None) -> dict[str, Any]:
+    """Report both literacy planes without conflating their evidence strength.
+
+    The role-oriented workspace intentionally accepts less evidence than the
+    canonical register.  This facade makes that boundary machine-readable and
+    fails closed whenever operational records still require an explicit,
+    evidence-enriched migration into the canonical authority.
+    """
+
+    _require_role_api_enabled()
+    observed_at = time.time() if now is None else _role_timestamp(now, "now")
+    canonical_available = True
+    try:
+        canonical_export = default_register.export_evidence(as_of=observed_at)
+        canonical_requirements = default_register.list_requirements(
+            include_retired=True,
+        )
+    except AILiteracyStateError:
+        # The canonical plane requires explicit tenant authority.  Compatibility
+        # callers may still run without it, but must see a fail-closed status
+        # instead of silently treating the role plane as authoritative.
+        canonical_available = False
+        canonical_export = {"summary": {}}
+        canonical_requirements = []
+    role_gaps = literacy_gaps(now=observed_at)
+    role_requirements = _role_requirement_rows()
+    role_assignments = _ROLE_ASSIGNMENTS.list(limit=_ROLE_MAX_LIST * 4 + 1)
+    role_completions = _ROLE_COMPLETIONS.list(limit=_ROLE_MAX_LIST * 4 + 1)
+    role_limit = _ROLE_MAX_LIST * 4
+    if len(role_assignments) > role_limit or len(role_completions) > role_limit:
+        raise AILiteracyStateError(
+            "AI literacy compatibility plane exceeds the bounded status limit"
+        )
+    canonical_summary = dict(canonical_export.get("summary") or {})
+    canonical_present = bool(
+        canonical_requirements or int(canonical_summary.get("subjects") or 0)
+    )
+    role_present = bool(
+        role_requirements or role_assignments or role_completions
+    )
+    return {
+        "enabled": True,
+        "authoritative_plane": "canonical",
+        "canonical": {
+            "available": canonical_available,
+            "requirement_count": len(canonical_requirements),
+            "summary": canonical_summary,
+            "records_present": canonical_present,
+            "stores_direct_person_identifiers": False,
+        },
+        "role_compatibility": {
+            "requirement_count": len(role_requirements),
+            "assignment_count": len(role_assignments),
+            "completion_count": len(role_completions),
+            "person_count": role_gaps["person_count"],
+            "counts": dict(role_gaps["counts"]),
+            "records_present": role_present,
+            "stores_direct_person_identifiers": True,
+            "authoritative_for_compliance": False,
+        },
+        "mixed_planes": canonical_present and role_present,
+        "reconciliation_required": role_present,
+        "notice": PLANE_RECONCILIATION_NOTICE,
+        "generated_at": observed_at,
+    }
+
+
 __all__ = [
+    "AILiteracyConfigError",
     "AILiteracyError",
     "AILiteracyIdempotencyConflict",
     "AILiteracyRegister",
@@ -1869,11 +2352,25 @@ __all__ = [
     "ASSIGNMENT_SCHEMA",
     "COMPLETION_SCHEMA",
     "EVIDENCE_EXPORT_SCHEMA",
+    "NON_CERTIFICATION_NOTICE",
     "NON_DETERMINATION_NOTICE",
+    "PLANE_RECONCILIATION_NOTICE",
+    "REGULATION_METADATA",
     "REQUIREMENT_SCHEMA",
+    "ROLE_ASSIGNMENT_SCHEMA",
+    "ROLE_COMPLETION_SCHEMA",
+    "ROLE_REQUIREMENT_SCHEMA",
     "STATUS_SCHEMA",
     "WAIVER_SCHEMA",
+    "assign_roles",
     "default_register",
     "enabled",
+    "export_evidence",
+    "get_ai_literacy_config",
+    "list_requirements",
+    "literacy_plane_status",
+    "literacy_gaps",
+    "record_completion",
+    "set_role_requirement",
     "verify_evidence_export",
 ]

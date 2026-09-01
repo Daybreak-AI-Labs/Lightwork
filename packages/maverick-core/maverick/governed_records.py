@@ -28,6 +28,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from . import runtime_metrics
 from .privacy_ops import (
     AuditOutboxError,
     PrivacyStateError,
@@ -255,9 +256,14 @@ class LocalGovernedRecordBackend:
         with cross_process_lock(admission_target, strict=True):
             record_id = _valid_record_id(record.get("id"), self._store.prefix)
             existing = self._store.load(record_id)
+            # Admission counts IDs, never bodies: the old list-based check
+            # parsed up to ``maximum`` JSON files per create, which turned
+            # bulk imports into O(rows x namespace) reads.
             if (
                 existing is None
-                and len(self._store.list_bounded(limit=maximum)) >= maximum
+                and sum(
+                    1 for _ in self._store.iter_record_ids(limit=maximum)
+                ) >= maximum
             ):
                 raise GovernedRecordCapacityError(
                     "governed record namespace capacity has been reached"
@@ -1919,6 +1925,11 @@ class GovernedRecordStore:
         fence: GovernedMutationFence | None = None,
         max_records: int | None = None,
     ) -> dict[str, Any]:
+        runtime_metrics.increment(
+            "lightwork_governed_record_ops_total", op="create",
+            namespace=self.namespace,
+            help_text="Governed record store operations",
+        )
         actor_name = _required(actor, "actor", 4096)
         action_name = _required(action, "action", 64)
         value = dict(record)
@@ -1974,6 +1985,11 @@ class GovernedRecordStore:
         actor: str,
         fence: GovernedMutationFence | None = None,
     ) -> dict[str, Any] | None:
+        runtime_metrics.increment(
+            "lightwork_governed_record_ops_total", op="update",
+            namespace=self.namespace,
+            help_text="Governed record store operations",
+        )
         actor_name = _required(actor, "actor", 4096)
         action_name = _required(action, "action", 64)
         if (
@@ -2010,9 +2026,19 @@ class GovernedRecordStore:
         return self._flush(saved, backend=backend)
 
     def get(self, record_id: str) -> dict[str, Any] | None:
+        runtime_metrics.increment(
+            "lightwork_governed_record_ops_total", op="get",
+            namespace=self.namespace,
+            help_text="Governed record store operations",
+        )
         return self._backend().load(record_id)
 
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        runtime_metrics.increment(
+            "lightwork_governed_record_ops_total", op="list",
+            namespace=self.namespace,
+            help_text="Governed record store operations",
+        )
         backend = self._backend()
         return backend.list() if limit is None else backend.list(limit=limit)
 
@@ -2037,6 +2063,20 @@ class GovernedRecordStore:
                 "governed-record backend does not support retained deletion"
             )
         return bool(delete(str(record_id or ""), expected_revision=expected_revision))
+
+    def count(self, *, maximum: int = 100_000) -> int:
+        """Records in the namespace, WITHOUT reading any record bodies.
+
+        One bounded id-scan window (the iterator's rotating cursor makes
+        multi-page counting ambiguous, so this is a single window and
+        ``maximum`` is the honest ceiling). Capacity checks and posture
+        tiles need the number, not thousands of parsed JSON bodies.
+        """
+
+        return sum(
+            1 for _ in self._backend().iter_record_ids(
+                limit=max(0, int(maximum)))
+        )
 
     def iter_record_ids(
         self,

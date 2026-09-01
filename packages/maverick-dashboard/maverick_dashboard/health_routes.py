@@ -282,7 +282,19 @@ async def metrics_response(
             )
 
     lines.extend(_storage_metrics())
-    return PlainTextResponse("\n".join(lines) + "\n")
+    body = "\n".join(lines) + "\n"
+    # Lightwork's own always-on runtime counters (HTTP requests by route
+    # template, gateway calls, governed-record ops) render into the SAME
+    # scrape rather than a second endpoint -- one /metrics, one scrape
+    # config. Fail-soft: a metrics-registry problem must not blank the
+    # platform series above it.
+    try:
+        from maverick import runtime_metrics
+
+        body += runtime_metrics.render()
+    except Exception:  # pragma: no cover - never blocks a scrape
+        pass
+    return PlainTextResponse(body)
 
 
 def _prometheus_label(value: str) -> str:

@@ -1358,6 +1358,14 @@ def test_ai_literacy_http_lifecycle_is_tenant_bound(monkeypatch):
 
     monkeypatch.setattr(ai_literacy, "enabled", lambda: True)
     monkeypatch.setattr(ai_literacy, "default_register", Register())
+    monkeypatch.setattr(
+        ai_literacy,
+        "literacy_plane_status",
+        lambda: {
+            "authoritative_plane": "canonical",
+            "reconciliation_required": True,
+        },
+    )
     base = "/api/v1/security/assurance/ai-literacy"
     requirement = {
         "title": "Safe AI operation",
@@ -1430,6 +1438,11 @@ def test_ai_literacy_http_lifecycle_is_tenant_bound(monkeypatch):
         json={"person_ids": ["person-one"]},
     ))["schema"].endswith("evidence-export.v1")
     assert _ok(client.get(f"{base}/requirements"))["count"] == 1
+    plane = _ok(client.get(f"{base}/plane-status"))
+    assert plane == {
+        "authoritative_plane": "canonical",
+        "reconciliation_required": True,
+    }
     assert next(item for item in calls if item[0] == "upsert")[2]["actor"] == "local:dashboard"
 
 
@@ -3805,3 +3818,217 @@ def test_identity_control_http_rejects_cross_tenant_runtime(monkeypatch):
     )
     assert response.status_code == 409
     assert "tenant binding" in response.json()["detail"]
+def test_red_team_schedule_routes_are_admin_and_actor_bound(monkeypatch):
+    from maverick import red_team_assurance as rta
+
+    calls: dict = {}
+    monkeypatch.setattr(rta, "enabled", lambda: True)
+    monkeypatch.setattr(
+        rta,
+        "list_schedules",
+        lambda **_kwargs: {
+            "items": [{"id": "RTS-one", "status": "active"}],
+            "count": 1,
+            "truncated": False,
+            "limit": 100,
+        },
+    )
+    monkeypatch.setattr(
+        rta,
+        "get_schedule",
+        lambda schedule_id: (
+            {"id": schedule_id, "status": "active"}
+            if schedule_id == "RTS-one"
+            else None
+        ),
+    )
+
+    def create(**kwargs):
+        calls["create"] = kwargs
+        return {"id": "RTS-one", "status": "active", "revision": 1}
+
+    def cancel(schedule_id, **kwargs):
+        calls["cancel"] = (schedule_id, kwargs)
+        return {"id": schedule_id, "status": "cancelled", "revision": 2}
+
+    def run_due(**kwargs):
+        calls["run_due"] = kwargs
+        return {
+            "campaigns": [],
+            "failures": [],
+            "count": 0,
+            "failure_count": 0,
+            "due_count": 0,
+            "truncated": False,
+            "limit": kwargs["limit"],
+        }
+
+    monkeypatch.setattr(rta, "create_schedule", create)
+    monkeypatch.setattr(rta, "cancel_schedule", cancel)
+    monkeypatch.setattr(rta, "run_due_schedules", run_due)
+
+    body = {
+        "asset_id": "MAA-" + ("a" * 32),
+        "external_agent_id": "external-one",
+        "idempotency_key": "schedule-one",
+        "safe_target_environment": True,
+        "cadence_seconds": 3600,
+    }
+    created = _ok(client.post(
+        "/api/v1/security/assurance/red-team/schedules",
+        json=body,
+    ), 201)
+    assert created["status"] == "active"
+    assert calls["create"]["actor"] == "local:dashboard"
+    assert calls["create"]["cadence_seconds"] == 3600
+    assert calls["create"]["first_run_at"] is None
+
+    page = _ok(client.get("/api/v1/security/assurance/red-team/schedules"))
+    assert page["schedules"][0]["id"] == "RTS-one"
+    assert _ok(client.get(
+        "/api/v1/security/assurance/red-team/schedules/RTS-one"
+    ))["status"] == "active"
+    assert client.get(
+        "/api/v1/security/assurance/red-team/schedules/RTS-missing"
+    ).status_code == 404
+
+    dispatched = _ok(client.post(
+        "/api/v1/security/assurance/red-team/schedules/run-due",
+        json={"limit": 5},
+    ))
+    assert dispatched["count"] == 0
+    assert calls["run_due"] == {"actor": "local:dashboard", "limit": 5}
+
+    cancelled = _ok(client.post(
+        "/api/v1/security/assurance/red-team/schedules/RTS-one/cancel",
+        json={"expected_revision": 1, "rationale": "Cadence retired."},
+    ))
+    assert cancelled["status"] == "cancelled"
+    assert calls["cancel"][1]["actor"] == "local:dashboard"
+
+    # Schema floors hold at the boundary: a sub-5-minute cadence never
+    # reaches the module.
+    too_fast = dict(body, cadence_seconds=60)
+    assert client.post(
+        "/api/v1/security/assurance/red-team/schedules",
+        json=too_fast,
+    ).status_code == 422
+
+
+def test_red_team_schedule_routes_fail_closed_when_disabled():
+    assert client.get(
+        "/api/v1/security/assurance/red-team/schedules"
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/security/assurance/red-team/schedules/run-due",
+        json={},
+    ).status_code == 403
+
+
+def test_policy_pack_change_view_and_reattestation_over_http(monkeypatch):
+    from maverick import model_risk_assurance as mra
+    from maverick import policy_packs
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(policy_packs, "enabled", lambda: True)
+    monkeypatch.setattr(mra, "enabled", lambda: True)
+
+    changes_view = {
+        "id": "PPS-one",
+        "pack_id": "example-ai-policy",
+        "pack_version": "1.0.0",
+        "active_pack_version": "1.1.0",
+        "needs_refresh": True,
+        "refresh_is_forward": True,
+        "pending_diff": {"requirements_changed": ["CTRL-1"]},
+        "applied_diff": None,
+        "requirements": {"CTRL-1": {"status": "current"}},
+        "retired_requirements": [],
+        "revision": 3,
+    }
+    monkeypatch.setattr(
+        policy_packs,
+        "subscription_changes",
+        lambda pack_id: changes_view if pack_id == "example-ai-policy" else None,
+    )
+
+    calls: dict = {}
+
+    def attest(subscription_id, control_id, **kwargs):
+        calls["attest"] = (subscription_id, control_id, kwargs)
+        resolved = kwargs["evidence_resolver"]("MRE-one")
+        calls["resolved"] = resolved
+        return {
+            "attestation": {"id": "PPA-one"},
+            "subscription": {"id": subscription_id, "revision": 4},
+            "idempotent": False,
+        }
+
+    monkeypatch.setattr(policy_packs, "attest_control", attest)
+    monkeypatch.setattr(
+        mra,
+        "get_evidence",
+        lambda evidence_id: {
+            "id": evidence_id,
+            "revision": 2,
+            "payload_sha256": "b" * 64,
+            "evidence_kind": "evaluation",
+            "schema": "lightwork.model-risk-evidence.v1",
+            "observed_at": 1_700_000_000.0,
+            "status": "pending_review",
+        },
+    )
+
+    view = _ok(client.get(
+        "/api/v1/security/assurance/policy-packs/subscriptions/"
+        "example-ai-policy/changes"
+    ))
+    assert view["pending_diff"]["requirements_changed"] == ["CTRL-1"]
+    assert client.get(
+        "/api/v1/security/assurance/policy-packs/subscriptions/absent/changes"
+    ).status_code == 404
+
+    body = {
+        "control_id": "CTRL-1",
+        "expected_revision": 3,
+        "idempotency_key": "attest-ctrl-1-v2",
+        "evidence_bindings": [
+            {
+                "requirement_id": "REQ-1",
+                "evidence_id": "MRE-one",
+                "evidence_revision": 2,
+                "evidence_sha256": "b" * 64,
+            }
+        ],
+    }
+    result = _ok(client.post(
+        "/api/v1/security/assurance/policy-packs/subscriptions/PPS-one/attest",
+        json=body,
+    ))
+    assert result["attestation"]["id"] == "PPA-one"
+    subscription_id, control_id, kwargs = calls["attest"]
+    assert (subscription_id, control_id) == ("PPS-one", "CTRL-1")
+    assert kwargs["actor"] == "local:dashboard"
+    assert kwargs["evidence_bindings"][0]["evidence_sha256"] == "b" * 64
+    # The route's resolver adapts assurance rows to the attestation contract:
+    # payload digest becomes content digest, the epoch instant becomes ISO.
+    assert calls["resolved"]["content_sha256"] == "b" * 64
+    assert calls["resolved"]["observed_at"].endswith("+00:00")
+    assert calls["resolved"]["evidence_kind"] == "evaluation"
+
+    # A malformed digest never reaches the module.
+    bad = dict(body)
+    bad["evidence_bindings"] = [dict(body["evidence_bindings"][0], evidence_sha256="XYZ")]
+    assert client.post(
+        "/api/v1/security/assurance/policy-packs/subscriptions/PPS-one/attest",
+        json=bad,
+    ).status_code == 422
+
+
+def test_policy_pack_change_and_attest_routes_require_a_tenant(monkeypatch):
+    from maverick import policy_packs
+
+    monkeypatch.setattr(policy_packs, "enabled", lambda: True)
+    assert client.get(
+        "/api/v1/security/assurance/policy-packs/subscriptions/any/changes"
+    ).status_code == 409

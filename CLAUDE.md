@@ -79,7 +79,8 @@ All verified locally green; each is a build-failer:
   (3.10 support; this broke three PRs).
 - `shell=True` outside `maverick/sandbox/` (route shell through `sandbox.exec()`).
 - detect-secrets vs `.secrets.baseline` (new hashes fail; `pragma: allowlist
-  secret` for false positives).
+  secret` for false positives). It scans GIT-TRACKED files only: `git add`
+  new files BEFORE the local diff, or it silently misses them (broke a PR).
 - `python -m maverick.plugin_matrix --ci`, `python -m maverick.deprecations
   --ci` (past-due deprecations fail), `python -m maverick.grpc_api.contract
   --check` (proto removals/renumbers fail; additive only), `python -m

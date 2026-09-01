@@ -1436,3 +1436,19 @@ def test_postgres_cutover_refuses_to_hide_local_records(monkeypatch):
         governed_records._reset_process_authority_pin_for_testing()
         with pytest.raises(GovernedRecordBackendError, match="migrate/import"):
             store.list()
+
+
+def test_count_reads_ids_never_bodies(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick import audit
+    monkeypatch.setattr(audit, "record", lambda *_a, **_k: True)
+    monkeypatch.setattr(audit, "record_global", lambda *_a, **_k: True)
+    from maverick.governed_records import GovernedRecordStore
+
+    store = GovernedRecordStore("count_probe", "CPX", "count_probe")
+    assert store.count() == 0
+    for index in range(5):
+        store.create({"id": f"CPX-{index:03d}", "n": index},
+                     action="seed", actor="tester")
+    assert store.count() == 5
+    assert store.count(maximum=3) == 3  # honest ceiling, single window

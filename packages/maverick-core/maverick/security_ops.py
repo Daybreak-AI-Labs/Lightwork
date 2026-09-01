@@ -3168,6 +3168,7 @@ SECURITY_ASSESSMENT_TYPES = frozenset(
         "hipaa",
         "cmmc_l2",
         "fedramp_moderate",
+        "iso42001",
     }
 )
 

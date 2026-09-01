@@ -135,12 +135,22 @@ def _regulatory_monitor_active() -> tuple[bool, str]:
         if not isinstance(texas_raw, bool):
             return False, "finance_operations.texas_register_enable must be boolean"
         texas = texas_raw is True
+        eur_lex_raw = section.get("eur_lex_enable", False)
+        if not isinstance(eur_lex_raw, bool):
+            return False, "finance_operations.eur_lex_enable must be boolean"
+        edpb_raw = section.get("edpb_enable", False)
+        if not isinstance(edpb_raw, bool):
+            return False, "finance_operations.edpb_enable must be boolean"
         state_feeds = section.get("state_feeds", [])
         if not isinstance(state_feeds, list):
             return False, "finance_operations.state_feeds must be a list"
         source_keys = ["federal-register"] if federal else []
         if texas:
             source_keys.append("texas-register")
+        if eur_lex_raw is True:
+            source_keys.append("eur-lex-legislation")
+        if edpb_raw is True:
+            source_keys.append("edpb-news")
         for index, value in enumerate(state_feeds):
             if not isinstance(value, dict) or not str(value.get("key") or "").strip():
                 return False, f"finance_operations.state_feeds[{index}] is invalid"

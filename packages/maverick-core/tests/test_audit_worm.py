@@ -21,6 +21,18 @@ from maverick.audit.signing import (
     verify_chain,
 )
 
+_REAL_SEALING_ACTIVE = worm._at_rest_sealing_active
+
+
+@pytest.fixture(autouse=True)
+def _plaintext_worm_path(monkeypatch):
+    """These tests exercise WORM push/verify MECHANICS over plaintext
+    day-files (a supported configuration). The at-rest sealing interlock
+    is pinned off here so the mechanics run under the secure posture
+    too; the interlock itself has its own test below, which re-pins it
+    on explicitly."""
+    monkeypatch.setattr(worm, "_at_rest_sealing_active", lambda: False)
+
 
 class FakeSink:
     def __init__(self):
@@ -474,6 +486,9 @@ def test_push_refuses_plaintext_when_configured_sealing_is_unavailable(
     from maverick import crypto_at_rest
 
     ad = _audit_dir(tmp_path, {"2020-01-01.ndjson": "sensitive plaintext\n"})
+    # This test needs the REAL sealing-active logic (the autouse fixture
+    # pins it off for the plaintext-mechanics tests).
+    monkeypatch.setattr(worm, "_at_rest_sealing_active", _REAL_SEALING_ACTIVE)
     monkeypatch.setattr(crypto_at_rest, "at_rest_enabled", lambda: True)
 
     def _outage(_data):

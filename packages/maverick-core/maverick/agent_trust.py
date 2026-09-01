@@ -225,8 +225,10 @@ class TrustedAgent:
     rest_token: str = ""
     # Platform-native identity (external gateway). ``jwt_issuer`` /
     # ``jwt_audience`` route and pin an OIDC-style JWT to THIS entry;
-    # ``jwks_file`` is a local path to the issuer's signing key material (PEM
-    # public key or JSON JWKS) read at VERIFY time, never at parse time.
+    # ``jwks_file`` is the issuer's signing key material read at VERIFY time,
+    # never at parse time: a local path (PEM public key or JSON JWKS), or an
+    # ``https://`` JWKS endpoint for identity federation with Entra ID / Okta
+    # / any OIDC IdP (fetched with a bounded timeout, keys cached).
     # ``hmac_secret_ref`` NAMES a secret resolved through
     # ``maverick.secret_provider.get_secret`` at verify time — the registry
     # stores the reference, never the secret (it must stay recoverable, unlike

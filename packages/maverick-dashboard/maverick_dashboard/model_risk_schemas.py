@@ -314,6 +314,15 @@ class PolicyPackAttestIn(BaseModel):
     )
 
 
+class PolicyPackLegacyAttestIn(PolicyPackAttestIn):
+    """Compatibility payload for the original body-selected control route."""
+
+    control_id: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+    )
+
+
 class ModelRiskDeclarationReviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

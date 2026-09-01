@@ -16,6 +16,33 @@ here.
   reflector), run in parallel (`orchestrator.py`, `agent.py`, `swarm.py`).
 - **Durable, resumable execution** — checkpoint / rewind / `maverick resume`
   (`checkpoint.py`), opt-in via `[durable]`.
+- **Workspace mutation journal** (`workspace_journal.py`, opt-in `[workspace]
+  journal`) — every file-tool write (write_file, the str_replace editors,
+  ast_edit share one chokepoint) records the file's PRE-mutation state:
+  existed-or-not, bytes, sha256. `maverick journal list | diff | revert
+  --goal N` then restores a goal's workspace to its pre-run bytes,
+  newest-entry-first, with no snapshot planned in advance — reversibility as
+  a property of the harness, not a habit of the model. Per-goal
+  (tenant-scoped store), byte/entry-capped (`journal_max_*`); an incomplete
+  journal refuses a full revert (`--partial` to restore what was captured),
+  each real revert writes one signed `workspace_revert` audit row and
+  archives the journal so it can't replay, and revert re-validates every
+  recorded path (no traversal, no writes through symlinks) so a tampered
+  journal can't become an arbitrary-write primitive. `journal_strict = true`
+  refuses any write whose pre-image can't be journaled — reversibility as a
+  guarantee for regulated deployments. Shell-driven mutations are out of
+  scope (the audit trail records those commands); default off, wizard step
+  under *Workspace journal*.
+- **Loop-guard suppression tier** — the long-standing repeated-identical-call
+  nudge (`MAVERICK_LOOP_GUARD_THRESHOLD`) now also covers byte-identical
+  *successes* (a poll loop whose output never changes is burning budget on
+  zero information), and past `MAVERICK_LOOP_GUARD_BLOCK` (default 6,
+  clamped above the nudge threshold so advice always precedes enforcement,
+  0 disables) the next byte-identical call is refused WITHOUT executing.
+  Per-call only — changed arguments or a different tool clears it — so
+  legitimate polls that vary anything keep working. Built for the
+  open-weight lanes (ollama / vllm / tgi), where smaller models grind
+  identical retries through the whole tool budget.
 - **Session forking + run tree** (`session_tree.py`, default-on
   `[session_tree] enable`, depth-capped by `max_depth`) — branch a run at one
   decision point so Oversight can read what the agent chose *beside* the
@@ -599,7 +626,13 @@ here.
   safeguards, incident 72h clock, DPA clause coverage — never a synthetic
   score); and a drill-through of the records behind the numbers. One
   aggregate round trip; hand-rolled SVG (no chart deps); auto-refreshes
-  every 60s; Present mode for a full-screen pitch.
+  every 60s; Present mode for a full-screen pitch. Estate rows drill
+  through to the record behind them (`/privacy/vendors/{id}`,
+  `/privacy/dsar/{id}`, operate-gated): a vendor's contracts with renewal
+  state, questionnaires, linked specialist records and monitoring notes;
+  a request's SLA clock, identity verification, collection sources, and
+  delivery state with reads used against the cap. Neither page can render
+  a questionnaire form token or a response-link token — tests assert it.
 - **Privacy ops record types** (`privacy_ops.py`, `/api/v1/privacy/*`,
   tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the "nimble
   OneTrust" data plane, every engine deterministic and explainable:
@@ -795,16 +828,27 @@ here.
   [`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md).
 - **External AI estate discovery** (`ai_inventory.py`, the assurance API and
   cockpit, opt-in `[ai_inventory] enable`) — tenant-scoped, read-only inventory
-  synchronization for customer-owned AWS Bedrock, Azure AI Foundry, Google
-  Vertex AI, Databricks Unity Catalog, Microsoft Copilot Studio, MLflow,
-  SageMaker, Snowflake Cortex, Salesforce Agentforce, and Hugging Face estates.
+  synchronization for customer-owned AWS Bedrock, Amazon SageMaker, Azure AI
+  Foundry, Google Vertex AI, Databricks Unity Catalog, Microsoft Copilot
+  Studio, MLflow tracking-server, Hugging Face Hub organization, Snowflake
+  Model Registry (one fixed read-only `SHOW MODELS IN ACCOUNT` statement;
+  asynchronous execution refused), Salesforce Agentforce / Einstein Bot
+  definition estates (one fixed SOQL read over `BotDefinition`), OpenAI
+  platform organizations (`GET /v1/models`, fine-tunes flagged by
+  `owned_by`), and Replicate account deployments (account-scoped listing;
+  each `current_release` binds an immutable provider version). The hardened
+  stock contracts additionally cover SageMaker, Snowflake Cortex, Salesforce
+  Agentforce and Hugging Face under their exact provider/source bindings.
   Connectors use fixed list operations, bounded pagination/retries/record caps,
   provider revision bindings, missing-asset grace runs, and explicit safe read
   projections. Credentials resolve from the standard provider chain or named
   environment references and are never written to discovery records. A sync is
   global-admin initiated or run by the bounded per-tenant inventory scheduler;
-  reads require an explicitly selected tenant. These registry adapters do not
-  discover browser use, network egress, OAuth grants, or arbitrary shadow AI.
+  reads require an explicitly selected tenant. Recurring sweeps also run
+  through `maverick ai-inventory sync` (cron-able, with
+  per-connector failure isolation) and `maverick ai-inventory status` shows
+  each connector's last outcome. These registry adapters do not discover
+  browser use, network egress, OAuth grants, or arbitrary shadow AI.
 - **AI system hierarchy and portfolio risk** (`model_risk_assurance.py`,
   `portfolio_risk.py`, opt-in `[portfolio_risk] enable`) — declarations can
   bind components to governed parent systems with cycle/depth checks and
@@ -813,7 +857,10 @@ here.
   not a compliance or legal verdict.
 - **Governed model drift monitoring** (`drift_monitoring.py`, opt-in
   `[drift_monitoring] enable`) — tenant-scoped aggregate baselines and bounded
-  evaluations for feature PSI/KL, prediction drift, embedding-centroid cosine
+  evaluations for the full statistical battery — feature and prediction
+  PSI/KL, Jensen-Shannon divergence, a two-sample chi-squared homogeneity
+  test, and a binned Kolmogorov-Smirnov test with exact-tail p-values
+  computed in-tree (formula v2) — plus prediction drift, embedding-centroid cosine
   distance, and delayed-ground-truth performance decay. Raw feature rows,
   predictions, labels, and embeddings remain transient. Threshold breaches emit
   exact-artifact `drift_monitoring` evidence, a signed aggregate alert, and the
@@ -828,6 +875,368 @@ here.
   inventory as governed `tool` assets with safe manifest digests, pin posture,
   transport, and referencing agents. Tokens, header/environment values, URL
   paths, queries, and raw launch arguments are neither projected nor persisted.
+- **EU AI Act serious-incident reporting** (`ai_incident_reporting.py`,
+  opt-in `[ai_incident_reporting] enable`, requires the assurance officer) —
+  classifies an existing assurance incident under Art. 3(49) (death, serious
+  health harm, irreversible critical-infrastructure disruption, fundamental-
+  rights infringement, property/environment harm; Art. 3(61) widespread flag)
+  and starts the Art. 73 tiered clock from *awareness*: 15 days by default
+  (73(2)), 2 days for widespread/critical-infrastructure (73(3)), 10 days for
+  death (73(4)); the strictest applicable window binds and the GDPR Art. 33
+  72-hour clock is deliberately not reused. Declarations, initial/complete
+  submissions (73(5)) and withdrawals are human assertions with named actors
+  on CAS-governed records; the module routes to the operator-named market
+  surveillance authority of an EU-27 Member State (73(1)), renders a bounded
+  report draft with citations, and never transmits anything itself. Citations
+  carry the consolidated basis (2026-07-27) as versioned metadata.
+- **AI regulatory-change impact bridge** (`ai_regulatory_feed.py`, opt-in
+  `[ai_regulatory_feed] enable`, requires finance operations and the AI
+  evidence gateway; `maverick regulatory-feed`) — runs reviewed alerts from
+  the finance regulatory-change engine through explicit operator-configured
+  impact rules to create `ai-regulatory-impact.v1` records for human review,
+  tenant-bound staleness records naming the exact evidence affected, and
+  idempotent customer notices deliverable through the configured notification
+  backends with CAS retry semantics. Only bounded alert metadata and
+  before/after values are retained; full source documents, notification
+  credentials, and delivery receipts are never persisted. Decision support
+  requiring human review — never a legal applicability opinion.
+- **EU conformity workflows** (`eu_conformity.py`, opt-in `[eu_conformity]
+  enable`, `maverick eu-conformity`) — three human-gated registers: the
+  Art. 27 fundamental-rights impact assessment as six named element
+  assertions with completion, the Art. 27(2) outdate-and-reassess
+  transition, and a recorded (never transmitted) Art. 27(3) authority
+  notification; the Art. 11(1)/Annex IV technical-documentation checklist
+  with per-item references and a cited skeleton render; and the Art. 43
+  conformity-assessment route where forbidden combinations are refused at
+  the boundary (point 1 without harmonised standards or common
+  specifications cannot self-assess; points 2-8 never involve a notified
+  body) and a substantial modification reopens the assessment while
+  provider pre-determined documented changes do not. Plus three market-
+  obligation registers: the Art. 72 post-market monitoring plan (where the
+  documented plan lives, with bounded review history; the plan follows the
+  Commission's Art. 72(3) template), the Art. 49 registration record where
+  a basis in the wrong registry is refused with its citation (49(1)-(3) EU
+  database; Annex III point 2 national, 49(5)), and the Art. 13(3)
+  instructions-for-use content checklist (six cited items, reference-only).
+  Drafting and tracking
+  assistance — never a conformity assessment, CE marking, or legal advice.
+- **AI-literacy register** (`ai_literacy.py`, opt-in `[ai_literacy] enable`,
+  `maverick ai-literacy`) — the EU AI Act Art. 4 obligation (applicable since
+  2025-02-02) made inspectable: named humans set per-role training
+  requirements with validity windows, assign people, and record completions
+  with evidence references and bounded history; `gaps` derives who is
+  missing or expired and `export` emits one bounded JSON evidence snapshot.
+  Person identifiers are operator-chosen tokens in a tenant-scoped governed
+  store. Decision support for the obligation — never a certification of
+  competence or training sufficiency.
+- **Outbound GRC synchronization** (`grc_sync.py`, opt-in `[grc_sync] enable`,
+  `maverick grc-sync`) — idempotently mirrors model-risk findings, accepted
+  risks, and incidents into a customer's ServiceNow IRM, Archer, or other
+  REST GRC system through the same SSRF-safe, enterprise-egress-guarded
+  request path every governed connector uses. Each (record, target) pair owns
+  one outbound ledger entry: unchanged sources send nothing, a changed source
+  updates the same remote record, and a create whose response yields no
+  remote id becomes terminal `delivered_unconfirmed` rather than a blind
+  duplicate. The payload is a bounded governed pointer — id, type, severity,
+  summary, content digest, `correlation_id` round-trip link, optional
+  backlink URL; evidence bodies and detail payloads never leave the platform.
+- **Governance workspace** (dashboard `/security/governance` +
+  `/api/v1/security/governance`, `governance_api.py`/`governance_schemas.py`,
+  rides the `[eu_conformity]`/`[ai_literacy]`/`[ai_incident_reporting]`/
+  `[grc_sync]` knobs — no knob of its own) — the plain-language surface for
+  legal, privacy/DPO, compliance, and HR over the governed registers: the
+  Art. 27 FRIA as six answered questions with citations, the Annex IV
+  reference checklist, the Art. 43 route decision and substantial-modification
+  marking, Art. 4 literacy requirements/assignments/completions with gap
+  chips and a downloadable evidence file, Art. 73 declare/file/withdraw with
+  deadline-aware category picking, and the read-only GRC outbound ledger.
+  Inventory-backed pickers replace raw record ids; every mutation is
+  operate-floor, CSRF-checked, CAS-guarded, and recorded under the caller's
+  name. The page opens with the needs-attention digest, adds the Art. 72/49/13
+  market-obligation panels, and can download a per-asset audit bundle — one
+  JSON file with every governance record and rendered draft for a system.
+  FRIA answer bodies stay operate-floor: the view-floor listing carries
+  assertion state only. Nothing on the page transmits anything to an
+  authority or external system.
+- **Model-agnostic explainability** (`explainability.py`, opt-in
+  `[explainability] enable`, `maverick explainability`) — dependency-free
+  implementations of the technical-evaluation battery: seeded permutation
+  importance (model reliance; accuracy-drop with labels) and partial
+  dependence for any caller-supplied scoring callable, Spearman global
+  sensitivity over logged feature/score pairs, and standardized-deviation
+  reason codes for single decisions (the adverse-action shape regulated
+  verticals expect). Reports record as digest-scoped `explainability`
+  evidence against a governed asset. Attribution for the operator's own
+  review — never a fairness certification, causal claim, or legal advice.
+- **Governed LLM gateway** (`llm_gateway.py`, dashboard
+  `/gateway/v1/chat/completions`, opt-in `[llm_gateway]`, `maverick
+  gateway`) — estate coverage for agents that never enroll: point any
+  OpenAI-compatible agent's base URL at Lightwork and every call crosses a
+  governed checkpoint — the gateway's own bearer, an optional model
+  allowlist, bounded bodies, the SSRF-pinned enterprise-egress-guarded
+  upstream path — while unknown callers land in a shadow-caller ledger
+  (digests, models, counts, token usage; bodies are never stored, upstream
+  error bodies never relayed). v1 is one fixed upstream, the chat-completions
+  shape, no streaming.
+- **Agent identity federation** — a trust-registry entry's `jwks_file` may
+  now be an `https://` JWKS endpoint (Microsoft Entra ID, Okta, any OIDC
+  IdP), fetched with a bounded timeout and cached keys, so platform-issued
+  agent tokens verify without exporting key files; authorization never
+  federates — the agent must still hold an active, inbound-permitted
+  registry entry, and the verified subject must equal the agent id exactly.
+- **Signed content provenance** (`content_provenance.py`, opt-in
+  `[content_provenance] enable`, `maverick content-provenance`) — the
+  Art. 50(2) machine-readable marking obligation (applicable 2026-12-02)
+  made verifiable: bounded sidecar manifests bind exact content bytes to
+  the generating asset, modality, and optional delivery receipt,
+  Ed25519-signed through a dedicated hash-chained attestation ledger
+  (domain-separated from audit rows and assurance packs) and verified
+  against an EXTERNAL key registry with full row-hash and key-id
+  derivation checks. Media-container embedding (C2PA JUMBF) is out of
+  scope and stated so. Never a content-authenticity certification.
+- **Underwriting evidence pack** (`underwriting_pack.py`,
+  `maverick underwriting-pack export`) — governance as premium input: a
+  bounded underwriter-oriented posture summary (evidence coverage by kind
+  and freshness, incident and Art. 73 discipline, EU AI Act register
+  completeness, literacy posture, framework metadata) wrapped around the
+  signed, externally verifiable assurance pack and bound to it by digest.
+  Rides enabled modules; absent ones degrade to `enabled: false`. Never an
+  insurance application, rating, or representation to any insurer.
+- **GPAI provider obligations register** (in `eu_conformity`,
+  `maverick eu-conformity gpai`, `/governance/gpai`) — Art. 53(1)(a)-(d)
+  evidence tracking per general-purpose model, the Art. 55(1)(a)-(d)
+  additions for systemic-risk models, and the Art. 53(2) open-source
+  exemption applied only where the law allows (never to systemic risk,
+  never to the copyright policy or training-content summary).
+- **Independent FRIA review (four-eyes)** — a completed FRIA accepts a
+  concur/objections review only from a reviewer other than the assessor;
+  objections are recorded and the Art. 27(2) reopen path stays the only
+  way content changes.
+- **Asset dependency graph** (`model_risk_assurance.dependency_graph`,
+  `GET /assurance/model-risk/dependency-graph`) — nodes and dependency
+  edges over the governed inventory, whole-estate or scoped to one asset's
+  direct neighbourhood.
+- **California ADMT & risk-assessment readiness template** (in
+  `assessment.py`) — the finalized CPPA CCPA regulations (OAL-approved
+  2025-09-23): the ADMT significant-decision inventory, the enumerated
+  pre-use notice, the opt-out and its two exceptions, plain-language
+  access responses, the five risk-assessment triggers (including
+  TRAINING ADMT/biometric technologies, required since 2026-01-01), the
+  April 1 CPPA submission calendar, and the staggered cybersecurity-audit
+  certifications. Regulation text verified before drafting.
+- **Governance workspace panels for the per-model registers** — the GPAI
+  (Art. 53/55) and deployer (Art. 26) registers now have real screens on
+  `/security/governance`: open a register, record evidence per duty, and
+  assign named human oversight (the page renders UNASSIGNED in red until
+  people are named). The `/privacy` workspace gains contracts & renewals
+  (with overdue/due-soon badges), privacy-notice publishing with the
+  coverage badge, the one-click site scan, and an Estate worksheet
+  button on every DSAR row.
+- **OSCAL assessment-results export** (`assessment_exports.py`,
+  `maverick exports oscal`) — any saved assessment as an OSCAL 1.1.2
+  ``assessment-results`` JSON document: one observation per answered
+  question, findings with honest satisfied/not-satisfied targets, and a
+  deterministic rendering for an unchanged record. A minimal,
+  self-assessment OSCAL profile — stated, and never a certification.
+- **Statement of Applicability generator** (`maverick exports soa`) —
+  control-style assessments (ISO 42001/27001, SOC 2, ...) render as the
+  SoA a certification audit starts from: per-control applicability
+  (``na`` answers become justified exclusions), implementation status,
+  and the assessor's notes, as markdown or JSON.
+- **CycloneDX ML-BOM export** (`ai_bom.py`, `maverick exports ai-bom`) —
+  the governed inventory as a CycloneDX 1.6 bill of materials: model
+  components typed ``machine-learning-model`` with full SHA-256 version
+  digests, datasets typed ``data``, dependency edges resolved back to
+  governed asset ids, and a deterministic serial number for an unchanged
+  estate.
+- **Gateway prompt screening** (`[llm_gateway] screen_prompts`) — the
+  in-kernel deny-wins detector ensemble (injection, exfiltration, PII)
+  now screens chat-completion messages before they leave: a firing
+  detector blocks with named reason codes and ledgers as
+  ``screened_blocked``; the screen itself fails open if it errors, and
+  never stores content.
+- **OpenTelemetry GenAI ingestion** (`POST /gateway/v1/otel`) — point
+  any OTel collector at the gateway (same bearer): spans carrying the
+  GenAI semantic conventions (``gen_ai.system``, ``gen_ai.request.model``,
+  token usage) aggregate into the shadow-caller ledger per service and
+  model. Any agent framework's standard traces become governed telemetry
+  without an SDK; prompts and completions are never read.
+- **Art. 26 deployer-obligations register** (in `eu_conformity`,
+  `maverick eu-conformity deployer`, `/governance/deployer`) — the EU AI
+  Act's deployer side made trackable: the always-applicable duties
+  (use-per-IFU 26(1), monitoring and incident escalation 26(5), the
+  ≥6-month log-retention duty 26(6), informing affected persons 26(11),
+  authority cooperation 26(12)) plus flag-conditional duties
+  (input-data control 26(4), workplace worker-information 26(7),
+  public-authority registration checks 26(8), the DPIA information duty
+  26(9)). Art. 26(2) human oversight is deliberately un-assertable with
+  a bare reference — it must name natural persons. The 26(10)
+  law-enforcement biometric regime is out of scope and stated so.
+- **US AI-law and multi-state privacy templates** (in `assessment.py`) —
+  Colorado's replacement ADMT Act (SB 26-189, eff. 2027-01-01: developer
+  documentation, pre-decision and 30-day adverse-decision disclosures,
+  correction and human-review rights, 3-year records), NYC Local Law 144
+  (annual independent bias audit, published impact ratios, 10-business-day
+  notices), Texas TRAIGA (intent-based prohibited practices,
+  government-context disclosure), Illinois HB 3773 (discriminatory-effect
+  testing, the zip-code proxy ban, IDHR notice), and a 20-state US
+  privacy applicability/readiness questionnaire. Statute status verified
+  against live sources before drafting (including SB 24-205's repeal).
+- **ISO/IEC 42001 AIMS readiness template** (in `assessment.py`,
+  security department) — the clause 4-10 management loop and Annex A
+  control themes as original outcome paraphrases; no standards text
+  reproduced.
+- **Vendor questionnaire auto-scoring and the public questionnaire page**
+  — hosted-form submissions now score deterministically against the
+  template's risk answers (per-question findings, worst-severity rating,
+  "clear" when everything answered came back safe), and the minted
+  `/form/{token}` link now renders a public questionnaire page the vendor
+  answers in the browser; questionnaire tokens stay answerable even when
+  automation events are off (previously the POST 404'd — fixed).
+- **Vendor contract renewal tracking** (`maverick vendor contract`,
+  `/api/v1/vendors/{id}/contracts`) — one current contract per kind
+  (DPA/MSA/SLA/addendum) with its renewal date; the governance-alerts
+  digest, CLI, and workspace chips now surface contracts past renewal
+  and renewing soon, alongside new data-map attention chips for flagged
+  assets not yet linked to a governing record.
+- **Privacy notice register** (in `consent_registry`, `maverick consent
+  notice`, `/api/v1/consent/notices`) — immutable, digest-bound notice
+  versions that consent receipts' `policy_version` resolves to, with a
+  coverage check that names any receipt version the register cannot
+  produce.
+- **First-party site scan** (`maverick consent scan-site`,
+  `/api/v1/consent/site-scan`) — one bounded, SSRF-pinned,
+  egress-guarded fetch of the operator's own page reporting Set-Cookie
+  attributes, third-party script/iframe/img hosts, and well-known
+  trackers. Header- and markup-level on a single page — not a crawler,
+  not a browser, never a CMP.
+- **DSAR estate worksheet** (`maverick dsar worksheet`,
+  `GET /api/v1/privacy/dsar/{id}/estate-worksheet`) — the human search
+  plan beyond the platform's own holdings: platform export counts, the
+  data-map assets whose flagged columns identify people, active vendors
+  as processors to contact, and a bounded connected-source document
+  search; absent modules degrade to `enabled: false`.
+- **Fairness metrics as governed evidence** (`maverick explainability
+  fairness`, `record_fairness_evidence`) — the existing four-fifths /
+  demographic-parity / equal-opportunity monitor now records
+  digest-scoped `fairness` evidence against a governed asset, honestly:
+  a failing report records as FAILED evidence, never suppressed. A
+  screening record, not a fairness certification.
+- **LGPD and PIPEDA assessment templates** (in `assessment.py`) — Brazil's
+  LGPD (legal bases Arts. 7/11, subject rights Art. 18, security/incident
+  Arts. 46/48, DPO Art. 41, transfers Art. 33) and Canada's PIPEDA (fair
+  information principles, valid-consent s.6.1, breach-of-safeguards
+  s.10.1) join the questionnaire chassis; both surface in the dashboard's
+  privacy department. Structured self-assessment, never legal advice.
+- **ISO/IEC 27701 PIMS readiness template** (`iso27701` in
+  `assessment.py`) — privacy-information-management readiness on top of
+  an ISO 27001 ISMS: scope and controller/processor roles, PII
+  inventory, legal basis and consent, data-subject requests, processor
+  contracts, transfers, privacy by design, breach response, retention,
+  awareness, the management-system loop, and the SoA. Original
+  paraphrases; completing it is not certification.
+- **Third-party vendor register** (`vendor_management.py`, opt-in
+  `[vendor_management] enable`, `maverick vendor`, `/api/v1/vendors`) —
+  governed vendor records with criticality tiers and lifecycle status,
+  hosted-form questionnaire campaigns over the public `/form/{token}`
+  endpoint (any registered assessment template, responses read back
+  in-place), monitoring notes, links to DPA/paper reviews and
+  assessments, a posture rollup, and a OneTrust third-party CSV importer
+  that never overwrites a vendor already registered here. A register and
+  audit trail, never a vendor risk rating service.
+- **Consent receipts and preferences registry** (`consent_registry.py`,
+  opt-in `[consent_registry] enable` + `subject_salt`, `maverick
+  consent`, `/api/v1/consent/*`) — per-subject, per-purpose consent
+  events (status, policy version, channel) with salted one-way subject
+  digests, self-checking per-event receipt hashes, a current-preference
+  projection, bounded audit export, a OneTrust consent CSV importer, and
+  a signed consent WEBHOOK (`POST /consent/webhook`, opt-in
+  `webhook_enable` + an HMAC secret from the environment variable named
+  by `webhook_secret_env`) so any CMP can push events into the durable
+  record — backdated pushes can never flip a newer withdrawal. The
+  governed record behind a consent front end — never a cookie banner,
+  IAB TCF CMP, or preference-center UI, and stated so.
+- **Data map and discovery** (`data_map.py`, opt-in `[data_map] enable`,
+  `maverick data-map`, `/api/v1/data-map/*`) — a governed register of
+  data assets with a pure-Python column-name classifier (email, phone,
+  national id, date of birth, health, financial, credentials, and more;
+  health marks the asset special-category), a warehouse
+  `information_schema.columns` CSV importer (stock Snowflake/BigQuery/
+  Redshift/Postgres exports), a bounded SharePoint site census via
+  Microsoft Graph (`Sites.Read.All`, SSRF-pinned, egress-guarded), links
+  from assets to the RoPA/assessment/vendor records that govern them,
+  and an unlinked-flagged-assets posture signal. On top of the
+  name-based triage, a deterministic CONTENT classifier
+  (`content_classifier.py`, `maverick data-map classify-content`,
+  `POST /api/v1/data-map/assets/{id}/classify-content`) verifies real
+  data samples with recomputable checks — Luhn for payment cards, mod-97
+  for IBANs, SSA structural rules for SSNs, octet-validated IPs,
+  context-gated DOB/ICD-10 — recording `content_categories` beside the
+  name-suggested ones (an auditor can recompute every finding; no ML
+  scores). A Snowflake masking-policy DDL exporter (`maverick data-map
+  masking-sql`, `GET /api/v1/data-map/masking-sql`) turns flagged
+  columns into reviewable `CREATE MASKING POLICY`/`ALTER TABLE` SQL —
+  emitted, never executed. Live file scanning closes the sample-only
+  gap: `maverick data-map scan-sharepoint-files` lists a site's document
+  library through Graph (`Files.Read.All`) and runs the classifier over
+  bounded samples of the formats the platform reads **with the stdlib
+  alone** — plain text plus docx/xlsx/pptx OOXML parts and untrusted PDF
+  content streams — recording EVIDENCE (per-category counts and which
+  file NAMES were flagged), never a byte of content. Item ids that could
+  smuggle path segments are refused, and an unreadable container (a
+  scanned PDF, an encrypted or bomb-shaped archive) counts as SKIPPED so
+  the record never implies coverage the scan did not have. Sampling and
+  emission, never a crawler.
+- **Deterministic text redaction** (`redaction.py`) — replaces the
+  content classifier's validated findings with typed placeholders
+  (`[REDACTED:email]`); span-exact, idempotent on its own output, text
+  only by design (no OCR — a dependency decision, not a drive-by). Used
+  by the DSAR response path to scrub third-party identifiers.
+- **Breach-notification planner** (`breach_notification.py`, opt-in
+  `[breach_notification] enable`, `maverick breach`,
+  `POST /api/v1/breach/plan`,
+  `GET /api/v1/privacy/incidents/{id}/notification-plan`) — fourteen
+  regimes' verified who/when/whether rules (GDPR/UK 72h; HIPAA 60d with
+  the 500 split; CA/TX/CO/FL/NY state clocks; LGPD 3 business days per
+  ANPD Res. 15/2024; PIPEDA RROSH; Australia NDB 30-day assessment;
+  Singapore 3-day post-determination; Japan two-stage 30/60d; Korea 72h)
+  turned into per-incident obligations with computed due timestamps,
+  threshold notes, and citations. Weekend-aware business-day math
+  (holidays excluded, stated); unverified regimes are absent by design,
+  named in the refusal. Four regimes also carry the statutory element
+  list a notice must CONTAIN, each with its citation (GDPR Art. 33(3),
+  HIPAA 164.404(c)(1), Cal. Civ. Code 1798.82(d) including the required
+  "Notice of Data Breach" headings). Time-sensitive legal content is
+  ratcheted: `python -m maverick.deprecations --ci` fails the build once
+  a `VERIFIED_AT` stamp passes 270 days, so an encoded deadline cannot
+  quietly rot. Decision support for counsel, never legal advice;
+  nothing is transmitted.
+- **DSAR fulfillment pipeline** (`dsar_fulfillment.py`, opt-in
+  `[dsar_fulfillment] enable`, `maverick dsar-fulfill`,
+  `/api/v1/privacy/dsar/*/fulfillment*`, public
+  `GET /dsar/response/{token}`) — executes a subject request as a
+  governed pipeline: a named human records HOW identity was verified
+  (fixed method vocabulary), collection sources are logged toward a
+  completeness record, and the response ships through a token-gated link
+  (token stored only as a SHA-256 digest, with expiry) assembled at
+  delivery time from the live stores — no second copy of personal data
+  is persisted — with third-party identifiers scrubbed by the
+  deterministic redactor, the subject's own reference preserved.
+  Slim Microsoft 365 collection (`maverick dsar-fulfill collect-graph`)
+  counts the subject's mailbox and drive footprint (`$select=id`,
+  `Mail.ReadBasic.All` + `Files.Read.All`) and logs each probe as a
+  collection source while moving NO content; a subject that is not a
+  userPrincipalName is refused rather than guessed at, and a missing
+  mailbox is recorded as a finding, not a crash.
+- **Governance needs-attention digest** (`governance_alerts.py`,
+  `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
+  — one bounded read-side digest of what compliance must act on: Art. 73
+  clocks overdue or due soon, Art. 4 literacy gaps (missing, expired,
+  expiring soon), Art. 27(2) outdated FRIAs, and Art. 43(4) routes flagged
+  for reassessment. No knob of its own — each section rides its source
+  module's opt-in and degrades to ``enabled: false``. The CLI exits non-zero
+  when anything needs attention, so an operator cron can wrap it with their
+  own delivery channel; the platform itself transmits nothing.
 - **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
   enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
   Ed25519-verified external updates, anti-rollback staging, explicit global
@@ -3265,7 +3674,9 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   DORA, Basel III final reforms, and IFRS 17; strictest-wins), and the
   `maverick finance status` posture report (`maverick/finance/`). The opt-in
   `[finance_operations]` control plane adds: SSRF-guarded Federal Register,
-  opt-in official Texas Register RSS, and configured state-register polling;
+  opt-in official Texas Register RSS, opt-in EU feeds (EUR-Lex
+  Parliament/Council legislation and EDPB news, both verified live at
+  source before encoding), and configured state-register polling;
   atomic deterministic content versioning,
   enabled-scope matching, field diffs, and a citation-bearing review queue;
   versioned 50-state money-transmitter and insurance-producer source-routing
@@ -3376,7 +3787,22 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   `control_data_plane_e2e.py` (one goal provably runs out-of-process, with a JSON
   evidence artifact) and `control_data_plane_soak.py` (many goals under
   concurrent workers reach `done` zero-loss and **exactly-once** — the contention
-  test of `JobQueue.claim`'s `WHERE status='pending'` guard).
+  test of `JobQueue.claim`'s `WHERE status='pending'` guard). The HTTP
+  plane has its own proof: `maverick_dashboard.load_harness` drives the
+  real app with concurrent clients and asserts no 5xx, that admission
+  holds under contention (N clients racing one vendor name end with
+  exactly one record, losers seeing the governed-record 409), a clean
+  `PRAGMA integrity_check`, and that every issued request was metered.
+  Latency percentiles are recorded and never asserted — a wall-clock
+  gate in CI is a flake generator.
+- **The production security posture is CI-enforced** (`posture_gate.py`,
+  `posture.baseline.json`) — the suite runs with secure defaults off so
+  each control's on/off mechanics stay under test, which once meant
+  ~19,000 green tests describing a configuration no customer runs. The
+  same tree under the real posture (audit signing on, at-rest encryption
+  on, consent fail-closed for high-risk actions, tool-risk ceiling
+  applied) is measured every build; the debt register went 91 → **0**
+  and the job now BLOCKS on any posture failure.
 - **Process table** — `maverick ps` (unified view of runs/workers).
 - **Scheduling** — recurring autonomous goals from a prompt; `worker --once`
   cron-friendly drain (`scheduler.py`, `job_queue.py`, `worker.py`).
@@ -3496,7 +3922,12 @@ attribute set** — `gen_ai.operation.name` / `system` / `request.model` /
 `execute_tool` tool-span attributes AND the `invoke_agent` agent-span leg
 (`gen_ai.agent.name/id` around every `Agent.run`) with semconv `error.type`
 stamped on failed spans — so any OTel-native backend reads them
-with no custom mapping), Prometheus `/metrics`, and a **Sentry performance
+with no custom mapping), Prometheus `/metrics` — which serves the
+platform series **and** Lightwork's own always-on counters from a
+dependency-free registry (`runtime_metrics.py`: dashboard requests by
+route TEMPLATE never raw path, request wall time, gateway calls,
+governed-record ops, with a per-metric series cap and a dropped-series
+counter so cardinality cannot run away silently) in one scrape — and a **Sentry performance
 tab** (all opt-in) (`observability.py`): `MAVERICK_SENTRY_DSN` (or
 `[observability] sentry_dsn`) initializes Sentry tracing and every existing
 `trace_span` call feeds it — a transaction at the root (episodes), child spans
@@ -4258,6 +4689,14 @@ tested without spawning py-spy.
   reduced licensed source archives, checksums, SBOMs, and Sigstore material.
   Tauri/MSI outputs remain authenticated source-bootstrap/build engineering
   artifacts rather than customer product installers.
+- **Container import-path hardening** — the deploy image sets
+  `PYTHONNOUSERSITE=1` for the harness interpreter: system site-packages are
+  root-owned, so the only writable import path a model-driven `pip install
+  --user` could reach was the user site — where a mid-run install shadows any
+  module the harness lazily imports later (poisoning the process that holds
+  credentials and enforces the gates). The sandbox's child-shell env drops
+  the var (`scrub_env`), so packages the agent installs for its OWN scripts
+  keep importing; only the harness process is closed off.
 - **Backwards-compat tooling** — `maverick migrate` (`migrate.py`): walks an
   existing config forward — real migration advisories (Twilio WhatsApp → the
   first-party Cloud API adapter), unknown-section lint with did-you-mean

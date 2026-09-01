@@ -6,9 +6,13 @@ a bring-your-own-agent deployment actually holds credentials for, each pinned
 to a single :class:`~maverick.agent_trust.TrustedAgent` registry entry:
 
 * **JWT** (``jwt_issuer`` / ``jwt_audience`` / ``jwks_file``) — an OIDC-style
-  ID/access token verified offline against key material read from a LOCAL
-  file (PEM public key or JSON JWKS); the token's ``sub`` must equal the
-  agent id exactly, so a token minted for agent A can never authenticate B.
+  ID/access token verified against key material read from a LOCAL file (PEM
+  public key or JSON JWKS), or — identity federation — fetched from an
+  ``https://`` JWKS endpoint (Microsoft Entra ID, Okta, any OIDC IdP) with a
+  bounded timeout and cached keys; the token's ``sub`` must equal the agent
+  id exactly, so a token minted for agent A can never authenticate B.
+  Authorization never federates: the agent must still hold an active,
+  inbound-permitted registry entry here.
 * **HMAC** (``hmac_secret_ref``) — the Lightwork webhook signature format
   (``X-Maverick-Timestamp`` + ``X-Maverick-Signature``) verified through
   :func:`maverick.webhooks.verify_signature`; the registry stores a secret
@@ -23,7 +27,9 @@ per-agent ledger (:func:`claim_once`) before it authenticates, so the same
 bytes cannot be replayed inside their freshness window — including against a
 different dashboard worker, which an in-process cache could not prevent.
 
-Pure verifier library: no FastAPI imports, no network. Every function returns
+Pure verifier library: no FastAPI imports, and no network except the one
+explicit opt-in above — an ``https://`` value in ``jwks_file`` is a deliberate
+operator decision to trust that IdP endpoint. Every function returns
 ``(TrustedAgent | None, rule)`` and FAILS CLOSED — any error, mismatch, or
 missing material yields ``(None, <rule>)``; nothing here ever raises to the
 caller. Each resolver re-applies ``is_active()`` and ``permits_inbound()``
@@ -206,15 +212,70 @@ class _StaticJWKS:
         return self._jwt.PyJWK.from_dict(matches[0])
 
 
+#: Fetched JWKS documents per federated endpoint: url -> (expires_at,
+#: keys). Cached with a bounded lifespan so IdP key rotation is picked up
+#: without a per-request fetch.
+_JWKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
+_JWKS_FETCH_TIMEOUT_SECONDS = 10
+_JWKS_CACHE_LIFESPAN_SECONDS = 300
+_JWKS_MAX_BYTES = 1024 * 1024
+
+
+def _remote_jwks_client(jwt_mod, url: str):
+    """A cached static resolver over one https JWKS endpoint, or ``None``.
+
+    Only ``https://`` is ever fetched — a plaintext URL is a refusal, not
+    a downgrade — and the fetch goes through the platform's enterprise
+    egress policy and SSRF-pinned client, exactly like every other
+    operator-configured outbound URL; PyJWT never touches the network
+    here. Fetch or parse errors fail closed like an unreadable file."""
+    if not url.startswith("https://"):
+        return None
+    cached = _JWKS_CACHE.get(url)
+    now = time.monotonic()
+    if cached is not None and cached[0] > now:
+        return _StaticJWKS(jwt_mod, cached[1])
+    try:
+        from .enterprise import enterprise_egress_denial
+        from .tools._ssrf import BlockedHost, safe_client
+
+        if enterprise_egress_denial(url, tool="external_identity"):
+            return None
+        try:
+            with safe_client(url, timeout=_JWKS_FETCH_TIMEOUT_SECONDS) as client:
+                response = client.get(url)
+        except BlockedHost:
+            return None
+        if response.status_code != 200:
+            return None
+        text = response.text or ""
+        if len(text.encode("utf-8", "ignore")) > _JWKS_MAX_BYTES:
+            return None
+        document = json.loads(text)
+        keys = document.get("keys") if isinstance(document, dict) else None
+        if not isinstance(keys, list) or not keys:
+            return None
+        keys = [key for key in keys if isinstance(key, dict)]
+    except Exception:
+        return None
+    _JWKS_CACHE[url] = (now + _JWKS_CACHE_LIFESPAN_SECONDS, keys)
+    return _StaticJWKS(jwt_mod, keys)
+
+
 def _signing_key_for(jwt_mod, entry: TrustedAgent):
     """Resolve ``entry.jwks_file`` into a ``verify_oidc_token`` signing key.
 
     PEM content is handed to PyJWT as-is; a JSON document (JWKS or a single
-    JWK) is wrapped in the static resolver above. The file is read at VERIFY
-    time (like ``grpc_tls._read``) so rotation is a file swap. Returns
-    ``None`` on an absent/unreadable/junk file — the caller fails closed."""
+    JWK) is wrapped in the static resolver above; an ``https://`` value is
+    federated key material fetched from the IdP's JWKS endpoint with a
+    bounded timeout and cached keys. The material is resolved at VERIFY
+    time (like ``grpc_tls._read``) so rotation is a file swap or an IdP-side
+    roll. Returns ``None`` on absent/unreadable/junk material — the caller
+    fails closed."""
     if not entry.jwks_file:
         return None
+    if entry.jwks_file.startswith(("http://", "https://")):
+        return _remote_jwks_client(jwt_mod, entry.jwks_file)
     try:
         raw = Path(entry.jwks_file).expanduser().read_bytes()
     except OSError:

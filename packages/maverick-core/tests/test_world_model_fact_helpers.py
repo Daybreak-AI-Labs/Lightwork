@@ -26,7 +26,10 @@ def test_get_and_delete_fact(tmp_path):
     assert w.delete_fact("goal:1:color") == 0  # already gone
 
 
-def test_list_facts_scoped_by_prefix(tmp_path):
+def test_list_facts_scoped_by_prefix(tmp_path, monkeypatch):
+    # The byte-size assertion is defined on the stored plaintext; under the
+    # secure default an unset flag seals values, so opt out explicitly.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     w = _wm(tmp_path)
     w.upsert_fact("goal:1:a", "x")
     w.upsert_fact("goal:1:b", "yy")

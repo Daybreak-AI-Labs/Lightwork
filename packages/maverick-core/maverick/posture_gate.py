@@ -7,21 +7,28 @@ Production ships secure-by-default: audit signing on, at-rest encryption on,
 consent fail-closed for high-risk actions, and the tool-risk ceiling applied.
 
 Running ``packages/maverick-core/tests`` under the real posture
-(``MAVERICK_TEST_SECURE_DEFAULT=1``) produces **91 failures out of 15,869**.
-That number is the point of this module. It is scoped to maverick-core because
-that is where every control the posture flips lives, and because that is the
-tree the baseline was actually measured over -- widening the claim to the whole
-workspace without measuring it would be the defect this repo keeps finding. It was projected as two to three weeks of work on the premise that
-"the breakage is the work"; reading the failures, none is a product bug. They
-are tests that assert a legacy default (``test_off_by_default`` for at-rest
-encryption is correct to fail when encryption defaults on) or fixtures that
-never granted consent because consent used to auto-approve.
+(``MAVERICK_TEST_SECURE_DEFAULT=1``) once produced **91 failures**. That debt
+register has been driven to **zero**: none was a product bug -- each was a
+test asserting a legacy default (``test_off_by_default`` for at-rest
+encryption was correct to fail once encryption defaults on) or a fixture that
+never granted consent because consent used to auto-approve. The fixes follow
+three patterns, all of which keep the legacy run meaningful too: an explicit
+``MAVERICK_CONSENT_MODE=auto-approve`` where consent is not the subject, an
+explicit ``MAVERICK_ENCRYPT_AT_REST=0`` where a plaintext premise is the
+subject, and posture-branched assertions (via ``secure_by_default()``) where
+the DEFAULT ITSELF is the subject.
 
-So the posture job does not block PRs yet -- a red job that blocks every merge
-gets switched off, and then nothing measures it at all. Instead the failing set
-is committed here and ratcheted: a NEW failure under the production posture
-fails the build, and a fixed one must be removed from the baseline. The list
-only shrinks.
+With the baseline empty the gate is fully blocking: any failure under the
+posture is "new" and fails the build. The mechanics stay a ratchet -- if debt
+is ever deliberately re-admitted (it should not be), it must be committed to
+the baseline where everyone can see it, and fixed entries must be removed.
+
+Scope: the WHOLE workspace. The gate began scoped to maverick-core -- where
+every control the posture flips lives -- because that was the only tree the
+baseline had actually been measured over; widening a claim past its
+measurement is the defect this repo keeps finding. The workspace-wide
+measurement has since been taken (20,899 passed, zero posture failures), so
+the gate now covers everything the suite covers.
 
 Usage in CI::
 
@@ -30,16 +37,6 @@ Usage in CI::
 
 ``--regen`` rewrites the baseline from a report, for when the number moves
 deliberately.
-
-**The baseline is environment-sensitive, and the committed one was measured
-locally.** CI resolves starlette 1.3.x / fastapi 0.140.x where local pins are
-older, and on that runner 19 further tests fail -- none of which reproduce
-locally under the same flag. So the CI job runs this WITHOUT ``--ci`` for now:
-it reports the delta and uploads the report, rather than gating on a
-measurement taken somewhere else. Flipping it to blocking needs a baseline
-regenerated from that artifact, and those 19 explained rather than absorbed. A
-baseline nobody can account for is an exemption list wearing a ratchet's
-clothes, which is the failure this module was written to avoid.
 """
 
 from __future__ import annotations

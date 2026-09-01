@@ -1725,6 +1725,152 @@ def _pdf_text(data: bytes) -> str:
     return _pdf_extraction(data)[0]
 
 
+_MAX_OOXML_PARTS = 64
+_XML_REF = re.compile(r"&(#\d{1,7}|#[xX][0-9A-Fa-f]{1,6}|amp|lt|gt|quot|apos);")
+_XML_NAMED = {"amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'"}
+
+#: OOXML containers whose text surface we can read with the stdlib alone:
+#: (kind, method, scope, part matcher, max parts). No new dependency, and
+#: nothing outside these named parts is ever decompressed.
+_OOXML_TEXT_PARTS: dict[str, tuple] = {
+    "application/vnd.openxmlformats-officedocument"
+    ".wordprocessingml.document": (
+        "docx", "docx_document_xml", "word/document.xml",
+        lambda name: name == "word/document.xml", 1,
+    ),
+    "application/vnd.openxmlformats-officedocument"
+    ".spreadsheetml.sheet": (
+        "xlsx", "xlsx_shared_strings_and_sheets",
+        "xl/sharedStrings.xml + xl/worksheets/sheet*.xml",
+        lambda name: name == "xl/sharedStrings.xml" or (
+            name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+        ),
+        _MAX_OOXML_PARTS,
+    ),
+    "application/vnd.openxmlformats-officedocument"
+    ".presentationml.presentation": (
+        "pptx", "pptx_slide_xml", "ppt/slides/slide*.xml",
+        lambda name: (
+            name.startswith("ppt/slides/slide") and name.endswith(".xml")
+        ),
+        _MAX_OOXML_PARTS,
+    ),
+}
+
+
+def _xml_unescape(text: str) -> str:
+    """Resolve the five predefined XML entities and numeric references.
+
+    Without this, an identifier written as ``&#64;`` or ``&amp;`` survives
+    tag-stripping still escaped and slips past the deterministic
+    classifier -- an evasion, not a cosmetic difference. ONLY these
+    predefined references are resolved: no DTD is read and no external
+    entity is ever fetched.
+    """
+    def _one(match: re.Match[str]) -> str:
+        ref = match.group(1)
+        if ref[:1] == "#":
+            try:
+                code = int(ref[2:], 16) if ref[1:2] in "xX" else int(ref[1:])
+            except ValueError:
+                return match.group(0)
+            if 0 < code <= 0x10FFFF:
+                return chr(code)
+            return match.group(0)
+        return _XML_NAMED[ref]
+
+    return _XML_REF.sub(_one, text)
+
+
+def _ooxml_parts(data: bytes, matcher, *, max_parts: int) -> list[str]:
+    """Return the named XML parts of an OOXML container; bombs refused.
+
+    The hardening the docx path has always applied -- entry count, total
+    uncompressed size, per-part size, compression ratio, refusal of
+    encrypted members, duplicate-name refusal (a forged archive must not
+    make "which entry wins" ambiguous), and a bounded read so
+    ``ZipFile.read`` can never allocate a forged body -- now applies to
+    every OOXML format instead of living in one branch.
+
+    All or nothing: if any wanted part breaches a bound this returns no
+    parts at all, so the caller reports "could not read" rather than
+    silently handing back a truncated document. A partial read that looks
+    complete is how a scan reports "clean" on a file it never finished.
+    """
+    import io
+    import zipfile
+
+    parts: list[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            entries = archive.infolist()
+            if (
+                len(entries) > _MAX_DOCX_ENTRIES
+                or sum(max(0, info.file_size) for info in entries)
+                > _MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES
+            ):
+                return []
+            wanted = [info for info in entries if matcher(info.filename)]
+            if (
+                not wanted
+                or len(wanted) > max_parts
+                or len({info.filename for info in wanted}) != len(wanted)
+            ):
+                return []
+            budget = _MAX_DOCX_DOCUMENT_XML_BYTES
+            for info in sorted(wanted, key=lambda i: i.filename):
+                if (
+                    info.flag_bits & 0x1
+                    or info.file_size < 0
+                    or info.file_size > budget
+                    or (
+                        info.file_size > 0
+                        and (
+                            info.compress_size <= 0
+                            or info.file_size
+                            > info.compress_size * _MAX_DOCX_COMPRESSION_RATIO
+                        )
+                    )
+                ):
+                    return []
+                with archive.open(info, "r") as stream:
+                    raw = stream.read(budget + 1)
+                if len(raw) > budget:
+                    return []
+                budget -= len(raw)
+                parts.append(raw.decode("utf-8", errors="ignore"))
+    except (
+        EOFError,
+        KeyError,
+        NotImplementedError,
+        OSError,
+        RuntimeError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+    ):
+        return []
+    return parts
+
+
+def _ooxml_text(kind: str, parts: list[str]) -> str:
+    """Flatten OOXML parts to plain text, one line per authored unit."""
+    if kind == "docx":
+        joined = "\n".join(part.replace("</w:p>", "\n") for part in parts)
+    elif kind == "pptx":
+        joined = "\n".join(part.replace("</a:p>", "\n") for part in parts)
+    else:
+        # xlsx: shared strings and cell values ARE the text surface. A value
+        # split across cells is therefore not reassembled -- deliberate: the
+        # classifier reads what one cell actually holds.
+        joined = "\n".join(
+            part.replace("</t>", "\n").replace("</v>", "\n")
+            for part in parts
+        )
+    # Strip tags FIRST, then unescape: otherwise an escaped "&lt;a&gt;"
+    # would become a tag and be stripped as markup.
+    return _xml_unescape(re.sub(r"<[^>]+>", "", joined))
+
+
 def _document_text(
     data: bytes,
     mime: str,
@@ -1732,10 +1878,13 @@ def _document_text(
     _metadata: dict | None = None,
 ) -> str:
     """Honest text extraction for the formats we can read with the stdlib:
-    text/json/xml decode as UTF-8; docx is a ZIP whose word/document.xml we
-    strip of tags. Anything else returns "" and the caller says so — no
-    over-claiming that an unsupported or scanned document was read. PDF
-    extraction is explicitly untrusted and limited to page content streams."""
+    text/json/xml decode as UTF-8; the OOXML containers (docx, xlsx, pptx)
+    are ZIPs whose named text parts we strip of tags and unescape. Anything
+    else returns "" and the caller says so — no over-claiming that an
+    unsupported or scanned document was read. PDF extraction is explicitly
+    untrusted and limited to page content streams. No format here needs a
+    third-party parser; formats that would (legacy .doc/.xls, images) stay
+    unsupported rather than pulling a dependency in by the back door."""
     m = (mime or "").split(";")[0].strip().lower()
     metadata = {
         "method": "unsupported",
@@ -1762,65 +1911,19 @@ def _document_text(
         if _metadata is not None:
             _metadata.update(metadata)
         return text
-    if m == ("application/vnd.openxmlformats-officedocument"
-             ".wordprocessingml.document"):
+    if m in _OOXML_TEXT_PARTS:
+        kind, method, scope, matcher, max_parts = _OOXML_TEXT_PARTS[m]
         metadata.update({
-            "method": "docx_document_xml",
-            "scope": "word/document.xml",
+            "method": method,
+            "scope": scope,
             "confidence": "best_effort",
         })
         if _metadata is not None:
             _metadata.update(metadata)
-        import io
-        import zipfile
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as z:
-                entries = z.infolist()
-                if (
-                    len(entries) > _MAX_DOCX_ENTRIES
-                    or sum(max(0, info.file_size) for info in entries)
-                    > _MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES
-                ):
-                    return ""
-                documents = [
-                    info for info in entries
-                    if info.filename == "word/document.xml"
-                ]
-                if len(documents) != 1:
-                    return ""
-                document = documents[0]
-                if (
-                    document.flag_bits & 0x1
-                    or document.file_size < 0
-                    or document.file_size > _MAX_DOCX_DOCUMENT_XML_BYTES
-                    or (
-                        document.file_size > 0
-                        and (
-                            document.compress_size <= 0
-                            or document.file_size
-                            > document.compress_size * _MAX_DOCX_COMPRESSION_RATIO
-                        )
-                    )
-                ):
-                    return ""
-                # Do not use ZipFile.read(): a forged/bomb entry can otherwise
-                # allocate its entire decompressed body before we inspect it.
-                with z.open(document, "r") as stream:
-                    raw = stream.read(_MAX_DOCX_DOCUMENT_XML_BYTES + 1)
-                if len(raw) > _MAX_DOCX_DOCUMENT_XML_BYTES:
-                    return ""
-                xml = raw.decode("utf-8", errors="ignore")
-        except (
-            EOFError,
-            KeyError,
-            NotImplementedError,
-            OSError,
-            RuntimeError,
-            zipfile.BadZipFile,
-            zipfile.LargeZipFile,
-        ):
+        parts = _ooxml_parts(data, matcher, max_parts=max_parts)
+        if not parts:
             return ""
-        return re.sub(r"<[^>]+>", "", xml.replace("</w:p>", "\n"))
+        return _ooxml_text(kind, parts)
     return ""
 
 
@@ -2364,19 +2467,10 @@ def import_onetrust_ropa(csv_text: str, *, imported_by: str = "") -> list[dict]:
 
     Tolerant of their column-name drift; rows without a recognizable
     activity name are skipped rather than guessed at."""
-    import csv as _csv
-    import io
-    reader = _csv.DictReader(io.StringIO(csv_text or ""))
+    from .csv_alias import alias_rows
     imported = []
-    for row in list(reader)[:5000]:
-        low = {(k or "").strip().lower(): (v or "").strip()
-               for k, v in row.items()}
-        entry: dict = {}
-        for field, aliases in _ONETRUST_HEADERS.items():
-            for alias in aliases:
-                if low.get(alias):
-                    entry[field] = low[alias]
-                    break
+    for mapped in alias_rows(csv_text, _ONETRUST_HEADERS, limit=5000):
+        entry: dict = dict(mapped)
         if not entry.get("activity"):
             continue
         entry["source"] = "onetrust"
@@ -2637,6 +2731,13 @@ def open_dsar_from_message(text: str, *, channel: str = "",
     )
 
 
+def get_dsar(request_id: str) -> dict | None:
+    """One DSAR request by id, or None — the read the fulfillment
+    pipeline anchors on."""
+
+    return _DSAR.load(str(request_id or "")[:64])
+
+
 def list_dsars() -> list[dict]:
     retry_pending_audits()
     now = time.time()
@@ -2664,6 +2765,102 @@ def list_dsars() -> list[dict]:
         r["overdue"] = r["status"] == "open" and r["days_left"] < 0
         out.append(r)
     return out
+
+
+def dsar_estate_worksheet(request_id: str) -> dict:
+    """Where to look for one subject's data, beyond the platform's holdings.
+
+    The fulfillment machinery exports what Lightwork itself holds; this
+    worksheet is the human search plan for the rest of the estate: the
+    data-map assets whose flagged columns identify people, the active
+    vendors who process on the organization's behalf, and (when document
+    sources are connected) a bounded document search for the subject.
+    Every section degrades to ``enabled: false`` when its module is off —
+    the worksheet never fails because part of the estate is unmapped.
+    """
+
+    record = _DSAR.load(str(request_id or "")[:64])
+    if record is None:
+        raise KeyError(f"no such request: {request_id}")
+    subject = str(record.get("subject_id") or "")
+
+    platform: dict = {"enabled": True}
+    try:
+        from . import dsar as dsar_export
+
+        bundle = dsar_export.export_subject_data(subject)
+        platform["sections"] = {
+            key: len(value)
+            for key, value in bundle.items()
+            if isinstance(value, list)
+        }
+    except Exception:
+        platform = {"enabled": False, "error": "unavailable"}
+
+    estate: dict = {"enabled": False}
+    try:
+        from . import data_map as dm
+
+        if dm.enabled():
+            # The vocabulary lives with the classifier that produces it.
+            identifying = dm.IDENTIFYING_CATEGORIES
+            assets = [
+                {
+                    "id": row.get("id"),
+                    "system": row.get("system"),
+                    "name": row.get("name"),
+                    "categories": sorted(
+                        identifying.intersection(row.get("categories") or [])
+                    ),
+                    "links": len(row.get("links") or []),
+                }
+                for row in dm.list_data_assets()
+                if identifying.intersection(row.get("categories") or [])
+            ]
+            estate = {"enabled": True, "assets": assets[:100]}
+    except Exception:
+        estate = {"enabled": False, "error": "unavailable"}
+
+    processors: dict = {"enabled": False}
+    try:
+        from . import vendor_management as vm
+
+        if vm.enabled():
+            processors = {
+                "enabled": True,
+                "vendors": [
+                    {"id": row.get("id"), "name": row.get("name")}
+                    for row in vm.list_vendors(status="active")
+                ][:100],
+            }
+    except Exception:
+        processors = {"enabled": False, "error": "unavailable"}
+
+    documents: dict = {"enabled": False}
+    try:
+        from . import doc_discovery
+
+        if doc_discovery.enabled():
+            hits = doc_discovery.discover(
+                subject, keywords=("dsar", "request", "consent", "contract"),
+                limit=8,
+            )
+            documents = {
+                "enabled": True,
+                "hits": [hit.to_dict() for hit in hits],
+            }
+    except Exception:
+        documents = {"enabled": False, "error": "unavailable"}
+
+    return {
+        "request_id": record.get("id"),
+        "kind": record.get("kind"),
+        "status": record.get("status"),
+        "platform_holdings": platform,
+        "data_map": estate,
+        "processors": processors,
+        "documents": documents,
+    }
 
 
 def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
@@ -2868,6 +3065,13 @@ def close_incident(incident_id: str, *, closed_by: str = "") -> dict | None:
     return saved
 
 
+def get_incident(incident_id: str) -> dict | None:
+    """One privacy incident by id, or None — the read the breach planner
+    anchors on."""
+
+    return _INCIDENT.load(str(incident_id or "")[:64])
+
+
 def list_incidents() -> list[dict]:
     retry_pending_audits()
     now = time.time()
@@ -3040,7 +3244,8 @@ __all__ = [
     "list_incidents", "open_incident", "privacy_program_context_heads", "program_report",
     "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
-    "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",
+    "detect_dsar", "dsar_estate_worksheet", "fulfill_dsar",
+    "get_ai_system", "get_dpa_review",
     "import_onetrust_ropa", "list_ai_systems", "open_dsar_from_message",
     "list_dpa_reviews", "list_dsars", "list_ropa", "open_dsar",
     "register_ai_system", "register_ai_system_from_assessment",

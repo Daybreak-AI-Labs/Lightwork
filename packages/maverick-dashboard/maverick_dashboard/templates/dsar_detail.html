@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}{{ dsar.id }} · Lightwork{% endblock %}
+{% block content %}
+  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Privacy workspace</a></p>
+  <h1 class="page-title">{{ dsar.kind | capitalize }} request {{ dsar.id }}</h1>
+  <p class="page-subtitle">
+    <span class="badge {{ 'done' if dsar.status == 'fulfilled' else 'warn' if dsar.status == 'awaiting_erasure' else 'info' if dsar.status == 'open' else '' }}">{{ dsar.status | replace('_', ' ') }}</span>
+    · subject {{ dsar.subject_id }}
+    {% if dsar.status in ('open', 'awaiting_erasure') %}
+      · <span {% if dsar.overdue %}class="pw-due-warn"{% endif %}>{{ (dsar.days_left ~ ' days left') if not dsar.overdue else ((dsar.days_left | abs) ~ ' days overdue') }}</span>
+    {% endif %}
+  </p>
+
+  <div class="panel">
+    <p class="muted" style="margin: 0;">
+      Opened {{ dsar.created_date or '—' }} by {{ dsar.opened_by or '—' }}
+      {% if dsar.channel %} · via {{ dsar.channel }}{% endif %}
+      · due {{ dsar.due_date or '—' }}
+    </p>
+    {% if dsar.intake %}
+      <p class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;">
+        Opened from message intake — matched: {{ dsar.intake.signals | join('; ') }}</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2>Fulfillment</h2></div>
+  {% if fulfillment %}
+    <div class="panel">
+      <h3 style="margin-top: 0;">Identity</h3>
+      {% if fulfillment.identity.status == 'verified' %}
+        <p><span class="badge done">verified</span>
+          via <code>{{ fulfillment.identity.method }}</code>
+          by {{ fulfillment.identity.verified_by }}
+          — reference: {{ fulfillment.identity.reference }}</p>
+      {% else %}
+        <p><span class="badge warn">unverified</span>
+          <span class="muted">No response link can be minted until a named
+            operator records how this requester proved who they are.</span></p>
+      {% endif %}
+    </div>
+
+    <div class="panel{% if not fulfillment.sources %} empty{% endif %}">
+      <h3 style="margin-top: 0;">Collection sources</h3>
+      {% if fulfillment.sources %}
+        <table>
+          <thead><tr><th scope="col">source</th><th scope="col">reference</th>
+            <th scope="col">items</th><th scope="col">by</th></tr></thead>
+          <tbody>
+          {% for s in fulfillment.sources %}
+            <tr>
+              <td><code>{{ s.source }}</code></td>
+              <td>{{ s.reference }}</td>
+              <td>{{ s.items }}</td>
+              <td class="muted">{{ s.recorded_by }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No collection sources logged yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top: 0;">Response link</h3>
+      {% if fulfillment.response %}
+        <p>
+          <span class="badge {{ 'done' if fulfillment.response.delivered_at else 'info' }}">{{ 'delivered' if fulfillment.response.delivered_at else 'minted' }}</span>
+          expires {{ fulfillment.response.expires_date or '—' }}
+          {% if fulfillment.response.max_reads %}
+            · reads {{ fulfillment.response.reads_used or 0 }}/{{ fulfillment.response.max_reads }}
+          {% endif %}
+        </p>
+        <p class="muted" style="font-size: var(--text-sm);">The token was shown
+          once at mint time and only its hash is stored — it cannot be
+          recovered from here.</p>
+      {% else %}
+        <p class="muted">No response link minted yet.</p>
+      {% endif %}
+    </div>
+  {% elif fulfillment_enabled %}
+    <div class="panel empty">
+      <p class="muted">No fulfillment record opened for this request yet.</p>
+    </div>
+  {% else %}
+    <div class="panel empty">
+      <p class="muted">DSAR fulfillment is not enabled — turn on
+        <code>[dsar_fulfillment]</code> to track identity verification,
+        collection, and token-gated delivery here.</p>
+    </div>
+  {% endif %}
+{% endblock %}

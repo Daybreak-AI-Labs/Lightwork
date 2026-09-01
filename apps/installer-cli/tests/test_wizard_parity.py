@@ -236,6 +236,35 @@ def test_write_config_emits_plugins(tmp_path: Path, monkeypatch):
     assert parsed["plugins"]["enabled"] == ["weather", "github-issues"]
 
 
+@pytest.mark.parametrize(
+    "security_suite",
+    [
+        pytest.param(None, id="advanced-questionnaire-only"),
+        pytest.param(
+            {"ai_regulatory_feed": False, "ai_literacy": False},
+            id="advanced-promotes-security-declines",
+        ),
+    ],
+)
+def test_write_config_reconciles_shared_security_questionnaires(
+    tmp_path: Path,
+    monkeypatch,
+    security_suite,
+):
+    parsed = _write_full_config(
+        tmp_path,
+        monkeypatch,
+        advanced={"ai_regulatory_feed": True, "ai_literacy": True},
+        security_suite=security_suite,
+    )
+
+    body_lines = (tmp_path / "config.toml").read_text().splitlines()
+    assert body_lines.count("[ai_regulatory_feed]") == 1
+    assert body_lines.count("[ai_literacy]") == 1
+    assert parsed["ai_regulatory_feed"] == {"enable": True}
+    assert parsed["ai_literacy"] == {"enable": True}
+
+
 def test_write_config_self_harness_ships_production_floors(tmp_path: Path, monkeypatch):
     # Enabling self-harness writes the validation floors so a wizard-built config
     # is production-safe by default (an operator can relax them).
@@ -386,6 +415,27 @@ def test_write_config_omits_durable_when_disabled(tmp_path: Path, monkeypatch):
         durable={"enabled": False},
     )
     assert "durable" not in parsed
+
+
+def test_write_config_emits_workspace_journal_when_enabled(tmp_path: Path,
+                                                           monkeypatch):
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        workspace={"journal": True, "journal_strict": True},
+    )
+    assert parsed["workspace"]["journal"] is True
+    assert parsed["workspace"]["journal_strict"] is True
+
+
+def test_write_config_omits_workspace_journal_when_declined(tmp_path: Path,
+                                                            monkeypatch):
+    # Off by default: declining writes no [workspace] section at all — the
+    # kernel's journal default is off, so the config stays minimal.
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        workspace={"journal": False},
+    )
+    assert "workspace" not in parsed
 
 
 def test_write_config_roundtrips_backslash_paths_and_allowlist(tmp_path: Path, monkeypatch):
@@ -785,6 +835,29 @@ def test_write_config_emits_finance_governance(tmp_path: Path, monkeypatch):
     assert parsed["governance"]["deny_above"]["*"] == 50000.0
     assert parsed["finance"]["regimes"] == ["sox", "gaap"]
     assert parsed["screening"]["sdn_path"] == "/etc/ofac/sdn.txt"
+
+
+def test_write_config_merges_finance_keys_into_profile_governance(
+    tmp_path: Path,
+    monkeypatch,
+):
+    parsed = _write_full_config(
+        tmp_path,
+        monkeypatch,
+        governance_profile="regulated",
+        finance={
+            "enable": True,
+            "require_fresh_human_approval": True,
+            "require_human_above": 5000.0,
+        },
+    )
+
+    body_lines = (tmp_path / "config.toml").read_text().splitlines()
+    assert body_lines.count("[governance]") == 1
+    assert parsed["governance"]["profile"] == "regulated"
+    assert parsed["governance"]["require_human_min_risk"] == "high"
+    assert parsed["governance"]["require_fresh_human_approval"] is True
+    assert parsed["governance"]["require_human_above"]["*"] == 5000.0
 
 
 def test_write_config_emits_finance_operations_and_new_regimes(tmp_path: Path, monkeypatch):
