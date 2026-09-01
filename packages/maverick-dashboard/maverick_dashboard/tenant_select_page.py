@@ -24,8 +24,9 @@ def _page_context(request: Request, detail: str = "") -> dict:
 
     from maverick.tenant.registry import list_tenants
 
-    from .auth import has_global_permission
     from maverick_dashboard import settings_store
+
+    from .auth import has_global_permission
 
     try:
         tenants = [

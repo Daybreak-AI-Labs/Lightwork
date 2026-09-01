@@ -853,10 +853,10 @@ from .privacy_drop_management_page import (  # noqa: E402
 from .shared_governance_inventory_page import (  # noqa: E402
     create_shared_governance_inventory_page_router,
 )
+from .tenant_select_page import create_tenant_select_page_router  # noqa: E402
 from .third_party_contracts_page import (  # noqa: E402
     create_third_party_contracts_page_router,
 )
-from .tenant_select_page import create_tenant_select_page_router  # noqa: E402
 from .third_party_executive_reports_page import (  # noqa: E402
     create_third_party_executive_reports_page_router,
 )

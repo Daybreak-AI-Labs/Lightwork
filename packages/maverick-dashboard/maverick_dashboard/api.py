@@ -137,8 +137,8 @@ from .api_schemas import (
     RiskAcceptIn,
     RoleOverrideIn,
     RopaIn,
-    ScheduleIn,
     SandboxBackendIn,
+    ScheduleIn,
     ScheduleOut,
     SchemaImportIn,
     SharePointSyncIn,
@@ -339,6 +339,7 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
     restart. The store validates the id against the tenant registry."""
     require_global_permission(request, "admin")
     from maverick import config as _cfg
+
     from maverick_dashboard import settings_store
 
     try:

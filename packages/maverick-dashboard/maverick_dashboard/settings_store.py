@@ -334,6 +334,38 @@ def _dump_value(lines: list[str], val: dict) -> None:
         lines.append("")
 
 
+def _dump_selector_sections(lines: list[str], data: dict) -> None:
+    """Emit the single-key selector tables the dashboard owns: [dashboard]
+    active_tenant (set_active_tenant) and [sandbox] backend
+    (set_sandbox_backend). _dump is an allowlist serializer, so a key missing
+    here would be silently dropped by the next save."""
+    dash = data.get("dashboard") or {}
+    if dash.get("active_tenant"):
+        lines.append("[dashboard]")
+        lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
+        lines.append("")
+    sandbox = data.get("sandbox") or {}
+    if sandbox.get("backend"):
+        lines.append("[sandbox]")
+        lines.append(f"backend = {_toml_str(sandbox['backend'])}")
+        lines.append("")
+
+
+def _dump_plugins(lines: list[str], plugins: dict) -> None:
+    """Emit [plugins] -- the dashboard-install allowlist + opt-in switch
+    (set_installable_plugins / set_plugin_install_allowed)."""
+    if not plugins:
+        return
+    lines.append("[plugins]")
+    if "allow_install" in plugins:
+        lines.append(
+            f"allow_install = {'true' if plugins['allow_install'] else 'false'}"
+        )
+    if plugins.get("installable"):
+        lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
+    lines.append("")
+
+
 def _dump(data: dict) -> str:
     lines = [
         "# Dashboard-managed settings overlay (provider keys + capability/feature",
@@ -359,35 +391,8 @@ def _dump(data: dict) -> str:
             for k in sorted(tbl):
                 lines.append(f"{k} = {_toml_value(tbl[k])}")
             lines.append("")
-    # [dashboard] active_tenant -- the workspace tenant this dashboard binds
-    # every request to (set_active_tenant). Serialized explicitly like every
-    # other overlay section: _dump is an allowlist, so an unknown key here
-    # would otherwise be dropped on the next save.
-    dash = data.get("dashboard") or {}
-    if dash.get("active_tenant"):
-        lines.append("[dashboard]")
-        lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
-        lines.append("")
-    # [sandbox] backend -- the dashboard-selected execution backend
-    # (set_sandbox_backend). Only the selector; other sandbox keys are
-    # config-file policy and never written here.
-    sandbox = data.get("sandbox") or {}
-    if sandbox.get("backend"):
-        lines.append("[sandbox]")
-        lines.append(f"backend = {_toml_str(sandbox['backend'])}")
-        lines.append("")
-    # [plugins] -- the dashboard-install allowlist + opt-in switch
-    # (set_installable_plugins / set_plugin_install_allowed).
-    plugins = data.get("plugins") or {}
-    if plugins:
-        lines.append("[plugins]")
-        if "allow_install" in plugins:
-            lines.append(
-                f"allow_install = {'true' if plugins['allow_install'] else 'false'}"
-            )
-        if plugins.get("installable"):
-            lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
-        lines.append("")
+    _dump_selector_sections(lines, data)
+    _dump_plugins(lines, data.get("plugins") or {})
     _dump_value(lines, data.get("value") or {})
     # [model_cost_tiers] -- manager-set cost bands per model. Keys are model
     # ids that can contain '/' or '.', so they are always quoted.
