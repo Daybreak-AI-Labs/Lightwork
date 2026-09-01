@@ -343,10 +343,16 @@ def _dump(data: dict) -> str:
     ]
     # "flows" carries the autonomous self-improvement knobs (auto_evolve/auto_apply,
     # both booleans) -- persisted here so set_flow_autonomy survives a restart.
-    for section in ("capabilities", "features", "flows", "self_modify", "ekko",
+    # _MODULE_TOP_SECTIONS: the governance-module tables set_module_enables
+    # writes (nested subsection dicts serialize as inline tables, which
+    # deep-merge identically to [a.b] headers). dict.fromkeys dedupes: a
+    # section emitted twice is a duplicate TOML table, which invalidates the
+    # WHOLE overlay file.
+    for section in dict.fromkeys((
+                    "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control",
-                    *_LEARNING_SECTIONS):
+                    *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS)):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
@@ -483,6 +489,86 @@ def set_section_enable(section: str, enabled: bool) -> None:
     with _locked():
         data = _load_overlay_for_update()
         data.setdefault(section, {})["enable"] = bool(enabled)
+        _write(data)
+
+
+# Governance-module enable flags an admin may switch from inside the app --
+# each entry is a dotted path whose final table carries the ``enable``
+# boolean the module's fail-closed gate reads (e.g.
+# "consent_preferences.publishing" -> [consent_preferences.publishing]
+# enable). The single authority the /features/switches API trusts for
+# module switching; anything not listed stays config-file-only.
+MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
+    "consent_preferences",
+    "consent_preferences.analytics",
+    "consent_preferences.delivery",
+    "consent_preferences.experiments",
+    "consent_preferences.profile_data",
+    "consent_preferences.public_api",
+    "consent_preferences.publishing",
+    "consent_preferences.scanner",
+    "consent_preferences.scanner.notice_proposals",
+    "consent_preferences.trust_center",
+    "consent_registry",
+    "data_map",
+    "data_use_governance",
+    "data_use_governance.compiler",
+    "data_use_governance.databricks",
+    "data_use_governance.enforcement",
+    "data_use_governance.snowflake",
+    "dsar_fulfillment",
+    "finance_operations",
+    "governance_agents",
+    "privacy_automation",
+    "privacy_automation.data_discovery",
+    "privacy_automation.notice_governance",
+    "privacy_automation.regulatory_intelligence",
+    "privacy_automation.rights_consumer_delivery",
+    "privacy_automation.rights_orchestration",
+    "tech_risk_compliance",
+    "tech_risk_compliance.continuous_evidence",
+    "tech_risk_compliance.policy_publication_links",
+    "tech_risk_compliance.scope_actions",
+    "tech_risk_compliance.scoping",
+    "third_party_management",
+    "third_party_management.intelligence",
+    "third_party_management.lifecycle",
+    "third_party_management.lifecycle.portal",
+    "vendor_management",
+})
+
+# Top-level tables the module paths live under; _dump is an allowlist, so a
+# section missing here would be silently dropped on the next save.
+_MODULE_TOP_SECTIONS: tuple[str, ...] = tuple(sorted(
+    {path.split(".", 1)[0] for path in MODULE_ENABLE_PATHS}
+))
+
+
+def set_module_enables(paths, enabled: bool) -> None:
+    """Overlay ``enable`` for one or more governance-module dotted paths.
+
+    All writes land in ONE locked read-modify-write, so "turn on this module
+    and the parents its gate requires" is atomic -- a crash can't leave a
+    child enabled under a disabled parent that the one click promised to
+    open. Every path must be allowlisted in :data:`MODULE_ENABLE_PATHS`.
+    """
+    wanted = [str(p or "").strip() for p in paths]
+    if not wanted:
+        raise ValueError("no module sections given")
+    for path in wanted:
+        if path not in MODULE_ENABLE_PATHS:
+            raise ValueError(f"unknown module section {path!r}")
+    with _locked():
+        data = _load_overlay_for_update()
+        for path in wanted:
+            node = data
+            for part in path.split("."):
+                child = node.get(part)
+                if not isinstance(child, dict):
+                    child = {}
+                    node[part] = child
+                node = child
+            node["enable"] = bool(enabled)
         _write(data)
 
 

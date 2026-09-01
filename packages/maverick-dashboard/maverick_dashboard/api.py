@@ -9356,6 +9356,236 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
     return {"section": body.section, "enabled": bool(body.enabled)}
 
 
+# In-app governance-module switches. Each key is the dotted config path of a
+# fail-closed [section] enable gate; "requires" is the full requirement chain
+# in order (parents first). Turning a module ON enables every path in the
+# chain -- one click must open a WORKING workbench, never a child under a
+# dead parent -- while turning it OFF disables only the module itself, so
+# siblings keep running. Labels are user-facing; config keys stay out of the
+# UI (the learning page set that precedent).
+_MODULE_SWITCHES: dict[str, dict] = {
+    "consent_preferences": {
+        "label": "Consent preferences",
+        "requires": (),
+    },
+    "consent_preferences.analytics": {
+        "label": "Consent analytics",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.delivery": {
+        "label": "Consent delivery",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.experiments": {
+        "label": "Consent experiments",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.profile_data": {
+        "label": "Consent profile data",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.publishing": {
+        "label": "Consent publishing",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.public_api": {
+        "label": "Consent public clients",
+        "requires": ("consent_preferences", "consent_preferences.publishing"),
+    },
+    "consent_preferences.scanner": {
+        "label": "Consent application scanning",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.scanner.notice_proposals": {
+        "label": "Scan notice proposals",
+        "requires": ("consent_preferences", "consent_preferences.scanner"),
+    },
+    "consent_preferences.trust_center": {
+        "label": "Consumer Trust Center",
+        "requires": ("consent_preferences",),
+    },
+    "consent_registry": {
+        "label": "Consent registry",
+        "requires": (),
+    },
+    "data_map": {
+        "label": "Data map",
+        "requires": (),
+    },
+    "data_use_governance": {
+        "label": "Data-use governance",
+        "requires": (),
+    },
+    "data_use_governance.compiler": {
+        "label": "Data-use policy compiler",
+        "requires": ("data_use_governance",),
+    },
+    "data_use_governance.enforcement": {
+        "label": "Data-use enforcement",
+        "requires": ("data_use_governance", "data_use_governance.compiler"),
+    },
+    "data_use_governance.snowflake": {
+        "label": "Snowflake data-use enforcement",
+        "requires": (
+            "data_use_governance",
+            "data_use_governance.compiler",
+            "data_use_governance.enforcement",
+        ),
+    },
+    "data_use_governance.databricks": {
+        "label": "Databricks data-use enforcement",
+        "requires": (
+            "data_use_governance",
+            "data_use_governance.compiler",
+            "data_use_governance.enforcement",
+        ),
+    },
+    "dsar_fulfillment": {
+        "label": "DSAR fulfillment",
+        "requires": (),
+    },
+    "finance_operations": {
+        "label": "Finance operations",
+        "requires": (),
+    },
+    "governance_agents": {
+        "label": "Governance agents",
+        "requires": (),
+    },
+    "privacy_automation": {
+        "label": "Privacy automation",
+        "requires": (),
+    },
+    "privacy_automation.data_discovery": {
+        "label": "Privacy data discovery",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.notice_governance": {
+        "label": "Privacy notice governance",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.regulatory_intelligence": {
+        "label": "Privacy regulatory intelligence",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.rights_orchestration": {
+        "label": "Privacy-rights orchestration",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.rights_consumer_delivery": {
+        "label": "Privacy-rights consumer delivery",
+        "requires": (
+            "privacy_automation",
+            "privacy_automation.rights_orchestration",
+        ),
+    },
+    "tech_risk_compliance": {
+        "label": "Tech-risk compliance",
+        "requires": (),
+    },
+    "tech_risk_compliance.scoping": {
+        "label": "Compliance scoping",
+        "requires": ("tech_risk_compliance",),
+    },
+    "tech_risk_compliance.scope_actions": {
+        "label": "Compliance scope actions",
+        "requires": ("tech_risk_compliance",),
+    },
+    "tech_risk_compliance.policy_publication_links": {
+        "label": "Policy publication links",
+        "requires": ("tech_risk_compliance",),
+    },
+    "tech_risk_compliance.continuous_evidence": {
+        "label": "Continuous evidence",
+        "requires": ("tech_risk_compliance",),
+    },
+    "third_party_management": {
+        "label": "Third-party management",
+        "requires": (),
+    },
+    "third_party_management.lifecycle": {
+        "label": "Third-party lifecycle",
+        "requires": ("third_party_management",),
+    },
+    "third_party_management.lifecycle.portal": {
+        "label": "Third-party collaboration portal",
+        "requires": ("third_party_management", "third_party_management.lifecycle"),
+    },
+    "third_party_management.intelligence": {
+        "label": "Third-party intelligence",
+        "requires": ("third_party_management",),
+    },
+    "vendor_management": {
+        "label": "Vendor management",
+        "requires": (),
+    },
+}
+
+
+def _module_path_enabled(loaded: dict, path: str) -> bool:
+    node: object = loaded
+    for part in path.split("."):
+        if not isinstance(node, dict):
+            return False
+        node = node.get(part)
+    return isinstance(node, dict) and bool(node.get("enable", False))
+
+
+def _module_switch_enabled(loaded: dict, section: str) -> bool:
+    chain = (*_MODULE_SWITCHES[section]["requires"], section)
+    return all(_module_path_enabled(loaded, p) for p in chain)
+
+
+@router.get("/features/modules")
+async def list_module_switches(request: Request) -> dict:
+    """Every in-app switchable governance module with its effective state
+    (a module reads as ON only when its whole requirement chain is on)."""
+    require_permission(request, "view")
+    from maverick import config as _cfg
+
+    def _read() -> list[dict]:
+        loaded = _cfg.load_config() or {}
+        return [
+            {
+                "section": section,
+                "label": meta["label"],
+                "enabled": _module_switch_enabled(loaded, section),
+            }
+            for section, meta in _MODULE_SWITCHES.items()
+        ]
+
+    return {"modules": await run_in_threadpool(_read)}
+
+
+@router.post("/features/modules")
+async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
+    """Turn one governance module on or off from its own page. Admin-gated
+    and allowlisted; persists through the settings overlay -- no server
+    files, no restart. Enabling applies the module's full requirement chain
+    in one atomic write; disabling turns off only the module itself."""
+    require_global_permission(request, "admin")
+    meta = _MODULE_SWITCHES.get(body.section)
+    if meta is None:
+        raise HTTPException(status_code=400, detail=f"unknown module {body.section!r}")
+    from maverick_dashboard import settings_store
+
+    paths = (
+        [*meta["requires"], body.section] if body.enabled else [body.section]
+    )
+    try:
+        await run_in_threadpool(settings_store.set_module_enables, paths, bool(body.enabled))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick import config as _cfg
+
+    _cfg.reset_config_cache()
+    loaded = _cfg.load_config() or {}
+    return {
+        "section": body.section,
+        "enabled": _module_switch_enabled(loaded, body.section),
+    }
+
+
 @router.get("/copilot/context")
 async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str, object]:
     """Return closed page help for the shared Copilot without model access."""
