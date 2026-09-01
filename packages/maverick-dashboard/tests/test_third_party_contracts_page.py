@@ -187,6 +187,60 @@ def test_page_collects_only_closed_lifecycle_fields(client: TestClient) -> None:
         assert forbidden not in names
 
 
+def test_update_json_controls_have_visible_names_and_explicit_toggle_relationships(
+    client: TestClient,
+) -> None:
+    response = client.get(ROUTE)
+    parser = _Markup()
+    parser.feed(response.text)
+    by_name = {
+        attrs["name"]: attrs
+        for _tag, attrs in parser.tags
+        if isinstance(attrs.get("name"), str)
+    }
+    by_id = {
+        attrs["id"]: (tag, attrs)
+        for tag, attrs in parser.tags
+        if isinstance(attrs.get("id"), str)
+    }
+    relationships = (
+        (
+            "include_lifecycle",
+            "lifecycle_json",
+            "tpc-update-lifecycle-json",
+            "tpc-update-lifecycle-json-label",
+            "Replace complete lifecycle JSON",
+        ),
+        (
+            "include_field_schema",
+            "update_field_schema_json",
+            "tpc-update-field-schema-json",
+            "tpc-update-field-schema-json-label",
+            "Replace custom field schema",
+        ),
+        (
+            "include_field_values",
+            "update_field_values_json",
+            "tpc-update-field-values-json",
+            "tpc-update-field-values-json-label",
+            "Replace custom field values",
+        ),
+        (
+            "include_formulas",
+            "update_formulas_json",
+            "tpc-update-formulas-json",
+            "tpc-update-formulas-json-label",
+            "Replace safe formula definitions",
+        ),
+    )
+    for toggle_name, textarea_name, textarea_id, label_id, visible_label in relationships:
+        assert by_name[toggle_name]["aria-controls"] == textarea_id
+        assert by_name[textarea_name]["id"] == textarea_id
+        assert by_name[textarea_name]["aria-labelledby"] == label_id
+        assert by_id[label_id][0] == "span"
+        assert f'id="{label_id}">{visible_label}</span>' in response.text
+
+
 def test_page_rejects_query_material_and_requires_tenant(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -415,14 +415,14 @@
             <input class="input" name="update_owner_ref" maxlength="128" aria-label="Updated owner reference">
             <label class="tpc-check"><input name="include_status" type="checkbox"><span>Transition status</span></label>
             <input class="input" name="update_status" maxlength="32" aria-label="Updated lifecycle status">
-            <label class="tpc-check"><input name="include_lifecycle" type="checkbox"><span>Replace complete lifecycle JSON</span></label>
-            <textarea class="input" name="lifecycle_json" maxlength="32768">{}</textarea>
-            <label class="tpc-check"><input name="include_field_schema" type="checkbox"><span>Replace custom field schema</span></label>
-            <textarea class="input" name="update_field_schema_json" maxlength="32768">[]</textarea>
-            <label class="tpc-check"><input name="include_field_values" type="checkbox"><span>Replace custom field values</span></label>
-            <textarea class="input" name="update_field_values_json" maxlength="32768">{}</textarea>
-            <label class="tpc-check"><input name="include_formulas" type="checkbox"><span>Replace safe formula definitions</span></label>
-            <textarea class="input" name="update_formulas_json" maxlength="32768">[]</textarea>
+            <label class="tpc-check"><input name="include_lifecycle" type="checkbox" aria-controls="tpc-update-lifecycle-json"><span id="tpc-update-lifecycle-json-label">Replace complete lifecycle JSON</span></label>
+            <textarea class="input" id="tpc-update-lifecycle-json" name="lifecycle_json" maxlength="32768" aria-labelledby="tpc-update-lifecycle-json-label">{}</textarea>
+            <label class="tpc-check"><input name="include_field_schema" type="checkbox" aria-controls="tpc-update-field-schema-json"><span id="tpc-update-field-schema-json-label">Replace custom field schema</span></label>
+            <textarea class="input" id="tpc-update-field-schema-json" name="update_field_schema_json" maxlength="32768" aria-labelledby="tpc-update-field-schema-json-label">[]</textarea>
+            <label class="tpc-check"><input name="include_field_values" type="checkbox" aria-controls="tpc-update-field-values-json"><span id="tpc-update-field-values-json-label">Replace custom field values</span></label>
+            <textarea class="input" id="tpc-update-field-values-json" name="update_field_values_json" maxlength="32768" aria-labelledby="tpc-update-field-values-json-label">{}</textarea>
+            <label class="tpc-check"><input name="include_formulas" type="checkbox" aria-controls="tpc-update-formulas-json"><span id="tpc-update-formulas-json-label">Replace safe formula definitions</span></label>
+            <textarea class="input" id="tpc-update-formulas-json" name="update_formulas_json" maxlength="32768" aria-labelledby="tpc-update-formulas-json-label">[]</textarea>
             <button class="btn btn--primary" type="submit">Apply compare-and-swap update</button>
           </fieldset>
         </form>
