@@ -670,6 +670,11 @@ class WorkflowSaveIn(BaseModel):
     expected_generation: int | None = Field(None, ge=0)
 
 
+class ActiveTenantIn(BaseModel):
+    """Select (or, with ``None``, clear) the dashboard's active tenant."""
+    tenant_id: str | None = Field(None, max_length=128)
+
+
 class TenantCreateIn(BaseModel):
     """Provision a new tenant (admin only)."""
     id: str = Field(..., max_length=128)

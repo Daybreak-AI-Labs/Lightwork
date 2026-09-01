@@ -854,11 +854,13 @@ from .shared_governance_inventory_page import (  # noqa: E402
 from .third_party_contracts_page import (  # noqa: E402
     create_third_party_contracts_page_router,
 )
+from .tenant_select_page import create_tenant_select_page_router  # noqa: E402
 from .third_party_executive_reports_page import (  # noqa: E402
     create_third_party_executive_reports_page_router,
 )
 
 app.include_router(create_ai_cloud_agent_governance_workbench_router(templates))
+app.include_router(create_tenant_select_page_router(templates))
 app.include_router(create_ai_evidence_analysis_page_router(templates))
 app.include_router(create_assessment_evidence_autopopulation_page_router(templates))
 app.include_router(create_ai_entity_tasks_page_router(templates))
@@ -1810,6 +1812,17 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             {"path": request.url.path},
             status_code=404,
         )
+    if (
+        exc.status_code == 409
+        and _wants_html(request)
+        and str(exc.detail or "").startswith("select an active tenant")
+    ):
+        # Every tenant-scoped workbench raises this same gate. A browser user
+        # gets the picker, not a JSON dead end that sends them to a config
+        # file; API callers keep the machine-readable 409 below.
+        from .tenant_select_page import tenant_select_response
+
+        return tenant_select_response(request, templates, detail=str(exc.detail))
     return JSONResponse(
         {"detail": exc.detail},
         status_code=exc.status_code,
@@ -1966,6 +1979,47 @@ async def security_headers(request: Request, call_next):
         csp = _DEFAULT_CSP
     response.headers.setdefault("Content-Security-Policy", csp)
     return response
+
+
+@app.middleware("http")
+async def bind_active_tenant(request: Request, call_next):
+    """Scope each request to the dashboard's selected active tenant.
+
+    The tenant-scoped workbenches (consent, privacy discovery, third-party,
+    ...) refuse to run unbound. Before this middleware the only ways to bind
+    were the MAVERICK_TENANT env var or an enterprise client binding -- a
+    config-file/environment step, which the dashboard promises not to need.
+    The Settings-persisted selection fills the same slot, and only that slot:
+    an explicit env/context binding still wins, and a selection that names a
+    tenant since suspended or deleted is ignored rather than trusted, so the
+    registry stays the authority on who may do work.
+    """
+    from maverick.paths import current_tenant_id, reset_tenant, set_tenant
+
+    def _stored_selection() -> str | None:
+        # current_tenant_id covers all three existing bindings -- request
+        # context, MAVERICK_TENANT, and the enterprise client binding (the
+        # tenant FLOOR for one-client deployments) -- and each outranks the
+        # dashboard selection, which must never widen an existing scope.
+        if current_tenant_id() is not None:
+            return None
+        from maverick_dashboard import settings_store
+
+        selected = settings_store.active_tenant()
+        if not selected:
+            return None
+        from maverick.tenant.registry import is_active
+
+        return selected if is_active(selected) else None
+
+    selected = await run_in_threadpool(_stored_selection)
+    if not selected:
+        return await call_next(request)
+    token = set_tenant(selected)
+    try:
+        return await call_next(request)
+    finally:
+        reset_tenant(token)
 
 
 # ----- browser-extension CORS gate (extensions/browser) -----

@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Workspace tenant · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .tsel :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
+  .tsel__gate { border: 1px solid var(--warning, var(--border-strong)); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); }
+  .tsel__gate strong { display: block; margin-bottom: 2px; }
+  .tsel__gate .muted { font-size: var(--text-sm); }
+  .tsel__err { color: var(--danger); font-size: var(--text-sm); margin: var(--space-2) 0 0; white-space: pre-wrap; }
+  .tsel__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  .tsel__row { display: flex; align-items: center; gap: var(--space-3); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+  .tsel__row[data-state="selected"] { border-left-color: var(--success); }
+  .tsel__row[data-state="suspended"] { border-left-color: var(--danger); opacity: 0.75; }
+  .tsel__row-main { flex: 1 1 auto; min-width: 0; }
+  .tsel__row-name { font-weight: var(--font-medium); }
+  .tsel__row-meta { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
+  .tsel__note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
+  .tsel__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-3); align-items: end; margin-top: var(--space-3); }
+  .tsel__form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); color: var(--muted); }
+  .tsel__form input, .tsel__form select { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg, transparent); color: var(--text); font: inherit; }
+</style>
+
+<div class="tsel">
+  {% if detail %}
+  <div class="tsel__gate" role="alert">
+    <strong>This workbench needs a workspace tenant.</strong>
+    <span class="muted">{{ detail }} Pick one below — your selection is saved on this
+      server, and reloading brings you straight back to the page that sent you here.</span>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2 style="text-transform:none; letter-spacing:0;">Workspace tenant</h2>
+    <p class="muted" style="max-width: 640px;">
+      A tenant is the workspace all tenant-scoped workbenches (consent, privacy
+      discovery, third parties, …) read and write — each tenant keeps its own
+      isolated data. Select the one this dashboard should work in. Running
+      solo? One workspace is all you need.
+    </p>
+
+    {% if env_tenant %}
+    <div class="tsel__gate">
+      <strong>Pinned by the environment: <code>{{ env_tenant }}</code></strong>
+      <span class="muted">The <code>MAVERICK_TENANT</code> environment variable binds every
+        request to this tenant and outranks the selection below. Unset it and restart the
+        dashboard to control the workspace from this page.</span>
+    </div>
+    {% endif %}
+
+    {% if tenants %}
+    <ul class="tsel__list" aria-label="Available tenants">
+      {% for t in tenants %}
+      <li class="tsel__row"
+          data-state="{{ 'suspended' if not t.active else ('selected' if t.id == selected else 'idle') }}">
+        <span class="badge {{ 'active' if t.id == selected and t.active else '' }}">
+          {{ 'suspended' if not t.active else ('selected' if t.id == selected else 'available') }}
+        </span>
+        <div class="tsel__row-main">
+          <div class="tsel__row-name">{{ t.name }}</div>
+          <div class="tsel__row-meta"><code>{{ t.id }}</code>{% if t.plan %} · {{ t.plan }} plan{% endif %}</div>
+        </div>
+        {% if is_admin and t.active and t.id != selected %}
+        <button type="button" class="btn btn--primary tsel-pick" data-tenant="{{ t.id }}">Work in this tenant</button>
+        {% elif is_admin and t.id == selected %}
+        <button type="button" class="btn tsel-clear">Clear selection</button>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No tenants exist yet on this server.</p>
+    {% if is_admin %}
+    <button type="button" class="btn btn--primary" id="tsel-quick">Set up my workspace</button>
+    <p class="tsel__note">One click: creates a workspace named <code>local</code> and
+      selects it, so every workbench is ready to use. You can add more tenants later.</p>
+    {% endif %}
+    {% endif %}
+
+    <p class="tsel__err" id="tsel-err" role="alert" aria-live="assertive"></p>
+
+    {% if not is_admin %}
+    <p class="tsel__note">Only an administrator can change the active workspace or create
+      tenants — ask yours to set one here.</p>
+    {% endif %}
+  </div>
+
+  {% if is_admin %}
+  <div class="panel" style="margin-top: var(--space-4);">
+    <h2 style="text-transform:none; letter-spacing:0;">Create a tenant</h2>
+    <p class="muted" style="max-width: 640px; margin-bottom: 0;">
+      Provision a new isolated workspace and switch to it. Lowercase letters,
+      digits, dashes and underscores make a good id (e.g. <code>acme-prod</code>).
+    </p>
+    <form class="tsel__form" id="tsel-create">
+      <label>Tenant id
+        <input name="id" required maxlength="128" autocomplete="off" spellcheck="false" placeholder="local">
+      </label>
+      <label>Display name
+        <input name="display_name" maxlength="200" autocomplete="off" placeholder="My workspace">
+      </label>
+      <label>Plan
+        <select name="plan">
+          <option value="free" selected>free</option>
+          <option value="pro">pro</option>
+          <option value="enterprise">enterprise</option>
+        </select>
+      </label>
+      <button type="submit" class="btn btn--primary">Create and switch</button>
+    </form>
+    <p class="tsel__err" id="tsel-create-err" role="alert" aria-live="assertive"></p>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var errBox = document.getElementById('tsel-err');
+
+  function fail(box, e) {
+    box.textContent = (e && e.message) || 'Could not reach the server.';
+  }
+
+  async function jsonOrDetail(r, fallback) {
+    if (r.ok) return r.status === 204 ? {} : r.json().catch(function () { return {}; });
+    if (r.status === 403) {
+      throw new Error('Only an administrator can change the active workspace — ask yours.');
+    }
+    var body = await r.json().catch(function () { return {}; });
+    throw new Error(body.detail || (fallback + ' (' + r.status + ').'));
+  }
+
+  async function select(tenantId) {
+    var r = await fetch('/api/v1/workspace/active-tenant', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId }),
+    });
+    await jsonOrDetail(r, 'Could not switch the workspace');
+  }
+
+  document.querySelectorAll('.tsel-pick').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      errBox.textContent = ''; btn.disabled = true;
+      try { await select(btn.getAttribute('data-tenant')); location.reload(); }
+      catch (e) { fail(errBox, e); btn.disabled = false; }
+    });
+  });
+
+  document.querySelectorAll('.tsel-clear').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      errBox.textContent = ''; btn.disabled = true;
+      try { await select(null); location.reload(); }
+      catch (e) { fail(errBox, e); btn.disabled = false; }
+    });
+  });
+
+  async function createAndSwitch(payload, box, btn) {
+    box.textContent = ''; if (btn) btn.disabled = true;
+    try {
+      var r = await fetch('/api/v1/admin/tenants', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await jsonOrDetail(r, 'Could not create the tenant');
+      await select(payload.id);
+      location.reload();
+    } catch (e) { fail(box, e); if (btn) btn.disabled = false; }
+  }
+
+  var quick = document.getElementById('tsel-quick');
+  if (quick) {
+    quick.addEventListener('click', function () {
+      createAndSwitch({ id: 'local', display_name: 'My workspace', plan: 'free' },
+                      errBox, quick);
+    });
+  }
+
+  var form = document.getElementById('tsel-create');
+  if (form) {
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var f = new FormData(form);
+      createAndSwitch({
+        id: String(f.get('id') || '').trim(),
+        display_name: String(f.get('display_name') || '').trim(),
+        plan: String(f.get('plan') || 'free'),
+      }, document.getElementById('tsel-create-err'),
+         form.querySelector('button[type="submit"]'));
+    });
+  }
+})();
+</script>
+{% endblock %}

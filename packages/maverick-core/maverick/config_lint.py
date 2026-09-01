@@ -148,6 +148,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "default_suites",
         "group_roles",
         "group_suites",
+        "active_tenant",
     },
     "analytics": {"mcp_client_language"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this

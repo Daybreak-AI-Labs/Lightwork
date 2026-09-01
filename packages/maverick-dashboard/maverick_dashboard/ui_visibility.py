@@ -952,6 +952,20 @@ PAGES: tuple[dict, ...] = (
         "floor": "admin",
         "default": "admin",
     },
+    # The workspace picker: which tenant this dashboard works in. Reached from
+    # the tenant-gate page (any tenant-scoped workbench opened unbound renders
+    # it) and from the Tenants console, so it stays out of the sidebar. Floor
+    # is "view" -- every signed-in user may see the current binding; changing
+    # it is admin-gated at the API.
+    {
+        "path": "/workspace/tenant",
+        "label": "Workspace tenant",
+        "group": "Admin",
+        "icon": "tenants",
+        "floor": "view",
+        "default": "view",
+        "in_nav": False,
+    },
     {
         "path": "/cache",
         "label": "Cache",

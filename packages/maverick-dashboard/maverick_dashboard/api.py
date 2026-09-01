@@ -49,6 +49,7 @@ from ._shared import (
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear api._world_cache
 from .api_schemas import (
+    ActiveTenantIn,
     AgentOverrideIn,
     AiSystemIn,
     AnswerIn,
@@ -303,6 +304,49 @@ async def list_tenants(request: Request) -> list[TenantOut]:
     from maverick.tenant import registry as tenant_registry
 
     return [_to_tenant_out(r) for r in tenant_registry.list_tenants()]
+
+
+# The dashboard's own tenant binding. Deliberately NOT under /admin/tenants:
+# a literal path segment there would be swallowed by GET /admin/tenants/{id},
+# and reading which workspace you are in is a viewer concern, not an admin one.
+
+
+@router.get("/workspace/active-tenant")
+async def get_active_tenant(request: Request) -> dict:
+    """The tenant this dashboard currently works in, and where the binding
+    came from -- the environment pin outranks the in-app selection."""
+    require_permission(request, "view")
+    import os
+
+    from maverick_dashboard import settings_store
+
+    selected = await run_in_threadpool(settings_store.active_tenant)
+    env_tenant = os.environ.get("MAVERICK_TENANT", "").strip() or None
+    return {
+        "tenant_id": env_tenant or selected,
+        "source": "env" if env_tenant else ("selection" if selected else None),
+        "selected": selected,
+        "env_tenant": env_tenant,
+    }
+
+
+@router.put("/workspace/active-tenant")
+async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
+    """Select (or clear, with ``tenant_id: null``) the workspace tenant every
+    tenant-scoped workbench runs as. Persists through the same settings
+    overlay as the rest of the in-app configuration -- no server files, no
+    restart. The store validates the id against the tenant registry."""
+    require_global_permission(request, "admin")
+    from maverick import config as _cfg
+    from maverick_dashboard import settings_store
+
+    try:
+        await run_in_threadpool(settings_store.set_active_tenant, body.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _cfg.reset_config_cache()
+    selected = await run_in_threadpool(settings_store.active_tenant)
+    return {"tenant_id": selected, "source": "selection" if selected else None}
 
 
 @router.get("/workforce/posture")

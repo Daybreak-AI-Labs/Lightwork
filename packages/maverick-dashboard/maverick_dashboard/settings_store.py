@@ -353,6 +353,15 @@ def _dump(data: dict) -> str:
             for k in sorted(tbl):
                 lines.append(f"{k} = {_toml_value(tbl[k])}")
             lines.append("")
+    # [dashboard] active_tenant -- the workspace tenant this dashboard binds
+    # every request to (set_active_tenant). Serialized explicitly like every
+    # other overlay section: _dump is an allowlist, so an unknown key here
+    # would otherwise be dropped on the next save.
+    dash = data.get("dashboard") or {}
+    if dash.get("active_tenant"):
+        lines.append("[dashboard]")
+        lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
+        lines.append("")
     _dump_value(lines, data.get("value") or {})
     # [model_cost_tiers] -- manager-set cost bands per model. Keys are model
     # ids that can contain '/' or '.', so they are always quoted.
@@ -474,6 +483,46 @@ def set_section_enable(section: str, enabled: bool) -> None:
     with _locked():
         data = _load_overlay_for_update()
         data.setdefault(section, {})["enable"] = bool(enabled)
+        _write(data)
+
+
+def active_tenant() -> str | None:
+    """The dashboard-selected active tenant id, or ``None`` when unset.
+
+    Read through the merged config (the overlay deep-merges over config.toml),
+    so an operator can also pin ``[dashboard] active_tenant`` in config.toml
+    and the UI selection overrides it the same way every other setting does.
+    """
+    loaded = config.load_config() or {}
+    value = (loaded.get("dashboard") or {}).get("active_tenant")
+    cleaned = str(value or "").strip()
+    return cleaned or None
+
+
+def set_active_tenant(tenant_id: str | None) -> None:
+    """Persist (or clear) the dashboard's active tenant selection.
+
+    The id must name an existing, active tenant in the registry -- selecting a
+    tenant that does not exist would silently scope every workbench to an
+    empty data root, which reads as data loss.
+    """
+    cleaned = str(tenant_id or "").strip()
+    if cleaned:
+        from maverick.tenant.registry import get_tenant
+
+        record = get_tenant(cleaned)
+        if record is None:
+            raise ValueError(f"unknown tenant {cleaned!r}")
+        if not record.active:
+            raise ValueError(f"tenant {cleaned!r} is suspended")
+    with _locked():
+        data = _load_overlay_for_update()
+        if cleaned:
+            data.setdefault("dashboard", {})["active_tenant"] = cleaned
+        else:
+            (data.get("dashboard") or {}).pop("active_tenant", None)
+            if not data.get("dashboard"):
+                data.pop("dashboard", None)
         _write(data)
 
 
