@@ -898,9 +898,11 @@ def test_retention_integrity_and_complete_mount_surface(environment) -> None:
 
     paths = client.app.openapi()["paths"]
     scoped = [path for path in paths if path.startswith(API)]
-    assert len(scoped) == 43
-    assert len(api.router.routes) == 50
+    assert len(scoped) == 45
+    assert len(api.router.routes) == 52
     expected_fragments = {
+        "/status",
+        "/provider-runtime/",
         "/sources/",
         "/snapshots/",
         "/vendors/",
