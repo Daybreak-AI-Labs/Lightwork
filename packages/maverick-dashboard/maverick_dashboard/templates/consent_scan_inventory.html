@@ -9,7 +9,8 @@
     <div><div class="csi-kicker">Reviewed tracker discovery</div><h1>Consent Scan Inventory</h1><p class="muted">Enroll exact web properties, schedule bounded browser scans, inspect privacy-minimized findings, record versioned reviews, and bridge only fresh reviewed mappings.</p></div>
     <nav class="csi-links" aria-label="Consent scan links"><a class="btn" href="/consent">Consent</a><a class="btn" href="/consent/publishing">Publishing</a><a class="btn" href="/consent/delivery">Delivery</a><a class="btn" href="/consent/scan-notice-proposals">Disclosure proposals</a></nav>
   </header>
-  {% if not consent_scan_inventory_enabled %}<div class="csi-warning" role="status"><strong>Scan inventory disabled.</strong> Enable both <code>[consent_preferences] enable = true</code> and <code>[consent_preferences.scanner] enable = true</code> only after privacy, scope, browser, credential, recovery, and retention review.</div>{% endif %}
+  {% from "_module_gate.html" import module_gate %}
+  {% if not consent_scan_inventory_enabled %}{{ module_gate('consent_preferences.scanner', 'Consent application scanning', detail='Runs bounded browser scans of enrolled properties to build a reviewed tracker inventory -- review your scan scope, credentials, and retention first.') }}{% endif %}
   <div class="csi-warning"><strong>External side effect:</strong> “Run leased scan” launches the injected browser scanner and can send HTTPS requests to the enrolled property. Enqueue, claim, list, diff, review, and retention-status actions do not perform a web scan.</div>
   <section class="csi-card" aria-labelledby="csi-boundaries-heading">
     <h2 id="csi-boundaries-heading">Evidence boundaries</h2>

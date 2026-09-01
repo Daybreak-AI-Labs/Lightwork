@@ -38,14 +38,13 @@
     The case/package authority is never used as consumer identity proof.</p>
 </section>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not privacy_rights_consumer_delivery_enabled %}
-<section class="panel">
-  <h2>Consumer delivery disabled</h2>
-  <p>This surface fails closed until all three gates are explicit:
-    <code>[privacy_automation] enable = true</code>,
-    <code>[privacy_automation.rights_orchestration] enable = true</code>, and
-    <code>[privacy_automation.rights_consumer_delivery] enable = true</code>.</p>
-</section>
+{{ module_gate('privacy_automation.rights_consumer_delivery', 'Privacy-rights consumer delivery',
+               detail='Consumer-facing delivery of rights responses stays
+                       safely off until it is on; turning it on also brings on
+                       the rights orchestration it depends on -- have your
+                       privacy owner review both first.') }}
 {% else %}
 <p><button class="btn" id="prcd-load-status" type="button">Load honest status</button></p>
 <div class="prcd-grid">

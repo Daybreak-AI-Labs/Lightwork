@@ -74,8 +74,9 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
 def test_page_fails_closed_and_template_uses_safe_dom(page_client) -> None:
     disabled = page_client.get("/compliance/scoping", params={"enabled": False})
     assert disabled.status_code == 200
-    assert "Compliance scoping disabled" in disabled.text
-    assert "tech_risk_compliance.scoping" in disabled.text
+    assert 'data-module-gate="tech_risk_compliance.scoping"' in disabled.text
+    assert "[tech_risk_compliance] enable = true" not in disabled.text
+    assert "[tech_risk_compliance.scoping] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"

@@ -13,7 +13,9 @@
   .lrn__row-label { font-weight: var(--font-medium); }
   .lrn__row-desc { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
   .lrn__row-members { color: var(--muted); font-size: var(--text-xs); margin-top: 4px; }
-  .lrn__row-err { color: var(--danger); font-size: var(--text-xs); margin-top: 4px; }
+  /* Failure text must be LOUD: a quiet line under the row reads as "I
+     clicked Turn on and nothing happened" (a real field complaint). */
+  .lrn__row-err:not(:empty) { color: var(--danger); font-size: var(--text-sm); font-weight: var(--font-medium); margin-top: 4px; }
   .lrn__moat { --glass-tint: var(--brand-subtle); border: 1px solid var(--brand-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5); }
   .lrn__moat strong { color: var(--brand); }
   .lrn__enable-note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
@@ -83,7 +85,13 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ enabled: !allOn }),
         });
-        if (!r.ok) { msg.textContent = 'Could not update (permission?).'; btn.disabled = false; return; }
+        if (!r.ok) {
+          var b = await r.json().catch(function () { return {}; });
+          msg.textContent = r.status === 403
+            ? 'Only an administrator can change this — ask yours to flip it.'
+            : (b.detail || ('Could not update (' + r.status + ').'));
+          btn.disabled = false; return;
+        }
         location.reload();   // re-render with the new on/off state
       } catch (e) { msg.textContent = 'Could not reach the server.'; btn.disabled = false; }
     });
@@ -287,7 +295,13 @@
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
               });
-              if (!r.ok) { msg.textContent = 'Could not update (permission?).'; btn.disabled = false; return; }
+              if (!r.ok) {
+                var b = await r.json().catch(function () { return {}; });
+                msg.textContent = r.status === 403
+                  ? 'Only an administrator can change this — ask yours to flip it.'
+                  : (b.detail || ('Could not update (' + r.status + ').'));
+                btn.disabled = false; return;
+              }
               location.reload();
             } catch (e) { msg.textContent = 'Could not reach the server.'; btn.disabled = false; }
           });

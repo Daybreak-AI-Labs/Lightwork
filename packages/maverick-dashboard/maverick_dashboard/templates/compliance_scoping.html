@@ -28,13 +28,12 @@
   never a secret value.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not compliance_scoping_enabled %}
-<section class="panel">
-  <h2>Compliance scoping disabled</h2>
-  <p>This surface fails closed until both
-    <code>[tech_risk_compliance] enable = true</code> and
-    <code>[tech_risk_compliance.scoping] enable = true</code> are explicit.</p>
-</section>
+{{ module_gate('tech_risk_compliance.scoping', 'Compliance scoping',
+               detail='Closed questionnaires, deterministic scope computation,
+                       and signed local exports stay off until your compliance
+                       owner approves this workbench.') }}
 {% else %}
 <p><button class="btn" id="cs-load-status" type="button">Load honest status</button></p>
 <div class="cs-grid">

@@ -679,6 +679,20 @@ class WorkflowSaveIn(BaseModel):
         return self
 
 
+class SandboxBackendIn(BaseModel):
+    """Select the execution sandbox backend from the dashboard."""
+    backend: str = Field(..., pattern="^(local|docker|podman)$")
+    # Explicit acknowledgement for the un-isolated backend: switching TO
+    # "local" runs model-driven shell on the host, so it never happens on a
+    # bare click.
+    acknowledge_local_risk: bool = False
+
+
+class ActiveTenantIn(BaseModel):
+    """Select (or, with ``None``, clear) the dashboard's active tenant."""
+    tenant_id: str | None = Field(None, max_length=128)
+
+
 class TenantCreateIn(BaseModel):
     """Provision a new tenant (admin only)."""
     id: str = Field(..., max_length=128)
@@ -709,8 +723,11 @@ class TenantOut(BaseModel):
 
 
 class TenantRoleIn(BaseModel):
-    """Grant a principal a role within one tenant (per-tenant RBAC)."""
-    role: str = Field(..., pattern="^(admin|operator|auditor|viewer)$")
+    """Grant a principal a role within one tenant (per-tenant RBAC).
+
+    Any known role name -- built-in or admin-defined custom role; rbac
+    validates against the live role registry (schema regexes can't see it)."""
+    role: str = Field(..., min_length=1, max_length=32, pattern="^[a-z][a-z0-9_-]*$")
 
 
 class UserSuitesIn(BaseModel):

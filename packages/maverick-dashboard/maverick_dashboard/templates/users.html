@@ -67,6 +67,61 @@
     </div>
   </div>
 
+  <div class="section-head"><h2>Custom roles</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">
+      Need something between the built-ins — say, a compliance reviewer who
+      both audits and operates? Define your own role from the same building
+      blocks. Every custom role can view; pick what it adds. Custom roles show
+      up in every role picker on this page and in the page-visibility matrix
+      in Settings. The built-in four can't be changed or deleted.
+    </p>
+    {% if custom_roles %}
+    <table>
+      <thead><tr><th scope="col">role</th><th scope="col">can do</th>
+        <th scope="col">description</th><th scope="col">action</th></tr></thead>
+      <tbody>
+      {% for name, rec in custom_roles %}
+        <tr>
+          <td><span class="badge">{{ name }}</span></td>
+          <td class="muted" style="font-size: var(--text-sm);">{{ rec.permissions | join(' · ') }}</td>
+          <td class="muted" style="font-size: var(--text-sm);">{{ rec.description }}</td>
+          <td>
+            <form method="post" action="/users/roles/delete" style="display:inline;">
+              <input type="hidden" name="name" value="{{ name }}" />
+              <button type="submit" class="btn btn--ghost">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="font-size: var(--text-sm);">
+      A role still assigned to anyone (including a pending invite) can't be
+      deleted — reassign those users first. Saving a name again updates it.
+    </p>
+    {% endif %}
+    <form method="post" action="/users/roles/save"
+          style="display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;">
+      <label style="display: flex; flex-direction: column; gap: 4px;">
+        <span class="muted" style="font-size: var(--text-sm);">Role name (lowercase, e.g. privacy-officer)</span>
+        <input class="input" name="name" required maxlength="32"
+               pattern="[a-z][a-z0-9_-]{1,31}" spellcheck="false" autocomplete="off" />
+      </label>
+      <fieldset style="border: 0; padding: 0; margin: 0; display: flex; gap: var(--space-3);">
+        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 4px;">Adds (view is always on)</legend>
+        <label><input type="checkbox" name="permissions" value="operate" /> operate</label>
+        <label><input type="checkbox" name="permissions" value="audit" /> audit</label>
+        <label><input type="checkbox" name="permissions" value="admin" /> admin</label>
+      </fieldset>
+      <label style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 16rem;">
+        <span class="muted" style="font-size: var(--text-sm);">Description (optional)</span>
+        <input class="input" name="description" maxlength="200" />
+      </label>
+      <button type="submit" class="btn btn--primary">Save role</button>
+    </form>
+  </div>
+
   <div class="section-head"><h2>Add a user</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">

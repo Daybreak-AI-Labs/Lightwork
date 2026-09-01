@@ -49,6 +49,7 @@ from ._shared import (
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear api._world_cache
 from .api_schemas import (
+    ActiveTenantIn,
     AgentOverrideIn,
     AiSystemIn,
     AnswerIn,
@@ -136,6 +137,7 @@ from .api_schemas import (
     RiskAcceptIn,
     RoleOverrideIn,
     RopaIn,
+    SandboxBackendIn,
     ScheduleIn,
     ScheduleOut,
     SchemaImportIn,
@@ -315,6 +317,50 @@ async def list_tenants(request: Request) -> list[TenantOut]:
     from maverick.tenant import registry as tenant_registry
 
     return [_to_tenant_out(r) for r in tenant_registry.list_tenants()]
+
+
+# The dashboard's own tenant binding. Deliberately NOT under /admin/tenants:
+# a literal path segment there would be swallowed by GET /admin/tenants/{id},
+# and reading which workspace you are in is a viewer concern, not an admin one.
+
+
+@router.get("/workspace/active-tenant")
+async def get_active_tenant(request: Request) -> dict:
+    """The tenant this dashboard currently works in, and where the binding
+    came from -- the environment pin outranks the in-app selection."""
+    require_permission(request, "view")
+    import os
+
+    from maverick_dashboard import settings_store
+
+    selected = await run_in_threadpool(settings_store.active_tenant)
+    env_tenant = os.environ.get("MAVERICK_TENANT", "").strip() or None
+    return {
+        "tenant_id": env_tenant or selected,
+        "source": "env" if env_tenant else ("selection" if selected else None),
+        "selected": selected,
+        "env_tenant": env_tenant,
+    }
+
+
+@router.put("/workspace/active-tenant")
+async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
+    """Select (or clear, with ``tenant_id: null``) the workspace tenant every
+    tenant-scoped workbench runs as. Persists through the same settings
+    overlay as the rest of the in-app configuration -- no server files, no
+    restart. The store validates the id against the tenant registry."""
+    require_global_permission(request, "admin")
+    from maverick import config as _cfg
+
+    from maverick_dashboard import settings_store
+
+    try:
+        await run_in_threadpool(settings_store.set_active_tenant, body.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    _cfg.reset_config_cache()
+    selected = await run_in_threadpool(settings_store.active_tenant)
+    return {"tenant_id": selected, "source": "selection" if selected else None}
 
 
 @router.get("/workforce/posture")
@@ -976,9 +1022,14 @@ async def set_tenant_role(
     from maverick_dashboard import rbac
 
     _get_tenant_or_404(tenant_id)
-    rbac.set_tenant_role(
-        tenant_id, principal, body.role, actor=caller_principal(request) or "local"
-    )
+    try:
+        rbac.set_tenant_role(
+            tenant_id, principal, body.role, actor=caller_principal(request) or "local"
+        )
+    except ValueError as e:
+        # An unknown (e.g. since-deleted custom) role: the schema regex can't
+        # see the live role registry, so rbac's check answers here.
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return Response(status_code=204)
 
 
@@ -9426,6 +9477,344 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
 
     _cfg.reset_config_cache()
     return {"section": body.section, "enabled": bool(body.enabled)}
+
+
+# In-app governance-module switches. Each key is the dotted config path of a
+# fail-closed [section] enable gate; "requires" is the full requirement chain
+# in order (parents first). Turning a module ON enables every path in the
+# chain -- one click must open a WORKING workbench, never a child under a
+# dead parent -- while turning it OFF disables only the module itself, so
+# siblings keep running. Labels are user-facing; config keys stay out of the
+# UI (the learning page set that precedent).
+_MODULE_SWITCHES: dict[str, dict] = {
+    "consent_preferences": {
+        "label": "Consent preferences",
+        "requires": (),
+    },
+    "consent_preferences.analytics": {
+        "label": "Consent analytics",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.delivery": {
+        "label": "Consent delivery",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.experiments": {
+        "label": "Consent experiments",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.profile_data": {
+        "label": "Consent profile data",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.publishing": {
+        "label": "Consent publishing",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.public_api": {
+        "label": "Consent public clients",
+        "requires": ("consent_preferences", "consent_preferences.publishing"),
+    },
+    "consent_preferences.scanner": {
+        "label": "Consent application scanning",
+        "requires": ("consent_preferences",),
+    },
+    "consent_preferences.scanner.notice_proposals": {
+        "label": "Scan notice proposals",
+        "requires": ("consent_preferences", "consent_preferences.scanner"),
+    },
+    "consent_preferences.trust_center": {
+        "label": "Consumer Trust Center",
+        "requires": ("consent_preferences",),
+    },
+    "consent_registry": {
+        "label": "Consent registry",
+        "requires": (),
+    },
+    "data_map": {
+        "label": "Data map",
+        "requires": (),
+    },
+    "data_use_governance": {
+        "label": "Data-use governance",
+        "requires": (),
+    },
+    "data_use_governance.compiler": {
+        "label": "Data-use policy compiler",
+        "requires": ("data_use_governance",),
+    },
+    "data_use_governance.enforcement": {
+        "label": "Data-use enforcement",
+        "requires": ("data_use_governance", "data_use_governance.compiler"),
+    },
+    "data_use_governance.snowflake": {
+        "label": "Snowflake data-use enforcement",
+        "requires": (
+            "data_use_governance",
+            "data_use_governance.compiler",
+            "data_use_governance.enforcement",
+        ),
+    },
+    "data_use_governance.databricks": {
+        "label": "Databricks data-use enforcement",
+        "requires": (
+            "data_use_governance",
+            "data_use_governance.compiler",
+            "data_use_governance.enforcement",
+        ),
+    },
+    "dsar_fulfillment": {
+        "label": "DSAR fulfillment",
+        "requires": (),
+    },
+    "finance_operations": {
+        "label": "Finance operations",
+        "requires": (),
+    },
+    "governance_agents": {
+        "label": "Governance agents",
+        "requires": (),
+    },
+    "privacy_automation": {
+        "label": "Privacy automation",
+        "requires": (),
+    },
+    "privacy_automation.data_discovery": {
+        "label": "Privacy data discovery",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.notice_governance": {
+        "label": "Privacy notice governance",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.regulatory_intelligence": {
+        "label": "Privacy regulatory intelligence",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.rights_orchestration": {
+        "label": "Privacy-rights orchestration",
+        "requires": ("privacy_automation",),
+    },
+    "privacy_automation.rights_consumer_delivery": {
+        "label": "Privacy-rights consumer delivery",
+        "requires": (
+            "privacy_automation",
+            "privacy_automation.rights_orchestration",
+        ),
+    },
+    "tech_risk_compliance": {
+        "label": "Tech-risk compliance",
+        "requires": (),
+    },
+    "tech_risk_compliance.scoping": {
+        "label": "Compliance scoping",
+        "requires": ("tech_risk_compliance",),
+    },
+    "tech_risk_compliance.scope_actions": {
+        "label": "Compliance scope actions",
+        "requires": ("tech_risk_compliance",),
+    },
+    "tech_risk_compliance.policy_publication_links": {
+        "label": "Policy publication links",
+        "requires": ("tech_risk_compliance",),
+    },
+    "tech_risk_compliance.continuous_evidence": {
+        "label": "Continuous evidence",
+        "requires": ("tech_risk_compliance",),
+    },
+    "third_party_management": {
+        "label": "Third-party management",
+        "requires": (),
+    },
+    "third_party_management.lifecycle": {
+        "label": "Third-party lifecycle",
+        "requires": ("third_party_management",),
+    },
+    "third_party_management.lifecycle.portal": {
+        "label": "Third-party collaboration portal",
+        "requires": ("third_party_management", "third_party_management.lifecycle"),
+    },
+    "third_party_management.intelligence": {
+        "label": "Third-party intelligence",
+        "requires": ("third_party_management",),
+    },
+    "vendor_management": {
+        "label": "Vendor management",
+        "requires": (),
+    },
+}
+
+
+def _module_path_enabled(loaded: dict, path: str) -> bool:
+    node: object = loaded
+    for part in path.split("."):
+        if not isinstance(node, dict):
+            return False
+        node = node.get(part)
+    return isinstance(node, dict) and bool(node.get("enable", False))
+
+
+def _module_switch_enabled(loaded: dict, section: str) -> bool:
+    chain = (*_MODULE_SWITCHES[section]["requires"], section)
+    return all(_module_path_enabled(loaded, p) for p in chain)
+
+
+@router.get("/features/modules")
+async def list_module_switches(request: Request) -> dict:
+    """Every in-app switchable governance module with its effective state
+    (a module reads as ON only when its whole requirement chain is on)."""
+    require_permission(request, "view")
+    from maverick import config as _cfg
+
+    def _read() -> list[dict]:
+        loaded = _cfg.load_config() or {}
+        return [
+            {
+                "section": section,
+                "label": meta["label"],
+                "enabled": _module_switch_enabled(loaded, section),
+            }
+            for section, meta in _MODULE_SWITCHES.items()
+        ]
+
+    return {"modules": await run_in_threadpool(_read)}
+
+
+@router.post("/features/modules")
+async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
+    """Turn one governance module on or off from its own page. Admin-gated
+    and allowlisted; persists through the settings overlay -- no server
+    files, no restart. Enabling applies the module's full requirement chain
+    in one atomic write; disabling turns off only the module itself."""
+    require_global_permission(request, "admin")
+    meta = _MODULE_SWITCHES.get(body.section)
+    if meta is None:
+        raise HTTPException(status_code=400, detail=f"unknown module {body.section!r}")
+    from maverick_dashboard import settings_store
+
+    paths = (
+        [*meta["requires"], body.section] if body.enabled else [body.section]
+    )
+    try:
+        await run_in_threadpool(settings_store.set_module_enables, paths, bool(body.enabled))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick import config as _cfg
+
+    _cfg.reset_config_cache()
+    loaded = _cfg.load_config() or {}
+    return {
+        "section": body.section,
+        "enabled": _module_switch_enabled(loaded, body.section),
+    }
+
+
+def _probe_container_daemon(binary: str) -> dict:
+    """``{"available": bool, "detail": str}`` for a container runtime.
+
+    argv-only subprocess (never a shell); bounded so a hung daemon can't hang
+    the status endpoint.
+    """
+    import shutil
+    import subprocess
+
+    path = shutil.which(binary)
+    if not path:
+        return {
+            "available": False,
+            "detail": f"{binary} is not installed (not found on PATH)",
+        }
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+            [path, "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True,
+            text=True,
+            timeout=6,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "detail": f"{binary} did not answer within 6s -- daemon starting or hung?",
+        }
+    except OSError as exc:
+        return {"available": False, "detail": f"could not run {binary}: {exc}"}
+    if proc.returncode != 0:
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = lines[-1].strip() if lines else f"{binary} info failed"
+        return {"available": False, "detail": detail[:300]}
+    version = (proc.stdout or "").strip()
+    detail = "daemon reachable" + (f" (server {version})" if version else "")
+    return {"available": True, "detail": detail}
+
+
+@router.get("/sandbox/status")
+async def sandbox_status(request: Request) -> dict:
+    """The execution sandbox: the selected backend and, live, whether each
+    container runtime's daemon is actually reachable right now."""
+    require_permission(request, "view")
+    from maverick import config as _cfg
+
+    def _read() -> dict:
+        loaded = _cfg.load_config() or {}
+        backend = str((loaded.get("sandbox") or {}).get("backend") or "local").strip().lower()
+        return {
+            "backend": backend,
+            "backends": {
+                "local": {
+                    "available": True,
+                    "detail": (
+                        "always available -- runs model-driven shell on this "
+                        "host with no isolation"
+                    ),
+                },
+                "docker": _probe_container_daemon("docker"),
+                "podman": _probe_container_daemon("podman"),
+            },
+        }
+
+    return await run_in_threadpool(_read)
+
+
+@router.post("/sandbox/backend")
+async def set_sandbox_backend(request: Request, body: SandboxBackendIn) -> dict:
+    """Switch the sandbox backend from the dashboard -- no config file, no
+    restart. A container backend must have a REACHABLE daemon before the
+    switch lands (a selected-but-dead runtime would strand every later goal
+    with an opaque failure); switching to "local" requires an explicit risk
+    acknowledgement since it runs shell on the host un-isolated."""
+    require_global_permission(request, "admin")
+    backend = body.backend
+    if backend == "local" and not body.acknowledge_local_risk:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "switching to the local backend runs the agent's shell on "
+                "this host with no isolation; pass acknowledge_local_risk "
+                "to confirm"
+            ),
+        )
+    if backend != "local":
+        probe = await run_in_threadpool(_probe_container_daemon, backend)
+        if not probe["available"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{backend} is not ready: {probe['detail']}. Start the "
+                    f"{backend} daemon (e.g. open Docker Desktop, or "
+                    f"`systemctl start {backend}`) and try again."
+                ),
+            )
+    from maverick_dashboard import settings_store
+
+    try:
+        await run_in_threadpool(settings_store.set_sandbox_backend, backend)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick import config as _cfg
+
+    _cfg.reset_config_cache()
+    return {"backend": backend}
 
 
 @router.get("/copilot/context")

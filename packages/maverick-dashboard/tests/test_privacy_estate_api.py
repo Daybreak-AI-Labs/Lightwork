@@ -210,9 +210,12 @@ def test_privacy_page_explains_what_is_off(tmp_path):
     config.reset_config_cache()
     page = client.get("/privacy")
     assert page.status_code == 200
-    assert "The vendor register is off" in page.text
-    assert "The consent registry is off" in page.text
-    assert "The data map is off" in page.text
+    assert 'data-module-gate="vendor_management"' in page.text
+    assert 'data-module-gate="consent_registry"' in page.text
+    assert 'data-module-gate="data_map"' in page.text
+    assert "[vendor_management] enable = true" not in page.text
+    assert "[consent_registry] enable = true" not in page.text
+    assert "[data_map] enable = true" not in page.text
 
 
 def test_sharepoint_sync_without_a_token_is_503():

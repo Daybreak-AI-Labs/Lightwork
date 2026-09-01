@@ -75,7 +75,7 @@ def test_page_has_nav_and_closed_copilot_context() -> None:
     assert visibility == {
         "path": "/consent/native",
         "label": "Native Consent SDK",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "key",
         "floor": "view",
         "default": "audit",

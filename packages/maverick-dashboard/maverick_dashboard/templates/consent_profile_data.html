@@ -42,13 +42,12 @@
     {% endif %}
   </section>
 
+  {% from "_module_gate.html" import module_gate %}
   {% if not consent_profile_data_enabled %}
-  <section class="cpd-warning" role="status">
-    <h2>Consent profile data disabled</h2>
-    <p>This authority fails closed until exact booleans are enabled under
-      <code>[consent_preferences] enable = true</code> and
-      <code>[consent_preferences.profile_data] enable = true</code>.</p>
-  </section>
+  {{ module_gate('consent_preferences.profile_data', 'Consent profile data',
+                 detail='Governs consumer profile data catalogs and journeys --
+                         review who authors and who approves them before
+                         turning it on.') }}
   {% else %}
   <p id="cpd-status" role="status" aria-live="polite">No operation running.</p>
   <div class="cpd-grid">

@@ -19,10 +19,20 @@ Store: ``~/.maverick/dashboard-users.json`` (0600), ``{principal: role}``.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 
+# Built-in roles, ordered most-privileged first (SCIM group resolution and the
+# admin UIs rely on the order). Custom roles extend -- never replace -- these:
+# the builtins are immutable, and every permission a custom role can hold is
+# one of the same four atoms the 1,400+ require_permission call sites gate on.
 ROLES = ("admin", "operator", "auditor", "viewer")
+
+# The permission atoms a role may grant. "view" is mandatory for every role:
+# a principal who cannot even view has no working dashboard, which reads as
+# breakage rather than policy.
+PERMISSION_ATOMS = ("admin", "audit", "operate", "view")
 
 
 class RbacStoreError(RuntimeError):
@@ -92,7 +102,7 @@ def default_role() -> str:
         if "default_role" not in dashboard:
             return "operator"
         r = dashboard.get("default_role")
-        if isinstance(r, str) and r in ROLES:
+        if isinstance(r, str) and is_known_role(r):
             return r
         raise RbacStoreError("RBAC default_role is invalid")
     except RbacStoreError:
@@ -100,7 +110,238 @@ def default_role() -> str:
     except Exception as exc:
         raise RbacStoreError(f"RBAC defaults unavailable: {exc}") from exc
 def permissions_for(role: str | None) -> frozenset[str]:
-    return _PERMISSIONS.get(role or "", frozenset())
+    name = role or ""
+    builtin = _PERMISSIONS.get(name)
+    if builtin is not None:
+        return builtin
+    if not name:
+        return frozenset()
+    try:
+        rec = _load_custom().get(name)
+    except RbacStoreError:
+        # A corrupt custom-role store must DENY, not crash every request or --
+        # worse -- broaden access through some fallback.
+        return frozenset()
+    if rec is None:
+        return frozenset()
+    return frozenset(rec["permissions"])
+
+
+# --- Custom roles -------------------------------------------------------------
+# Admin-defined roles beyond the four builtins, e.g. "privacy-officer" =
+# {audit, view} + operate. A custom role is a NAME plus a subset of the same
+# four permission atoms; every gate in the product checks atoms, never role
+# names (the /settings and /users lockout guard is the one name-keyed rule,
+# and it guards the builtin "admin" only). Store:
+# ``~/.maverick/dashboard-custom-roles.json`` (0600), global control-plane:
+# ``{name: {"permissions": [...], "description": "..."}}``.
+
+_ROLE_NAME = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
+
+
+def custom_roles_path() -> Path:
+    from maverick.paths import maverick_home
+
+    return maverick_home() / "dashboard-custom-roles.json"
+
+
+def _validate_custom_role(name: object, rec: object) -> tuple[str, dict]:
+    if not isinstance(name, str) or not _ROLE_NAME.match(name):
+        raise RbacStoreError(f"custom role store corrupt: invalid role name {name!r}")
+    if name in ROLES:
+        raise RbacStoreError(f"custom role store corrupt: {name!r} shadows a built-in role")
+    if not isinstance(rec, dict):
+        raise RbacStoreError(f"custom role store corrupt: record for {name!r} must be an object")
+    perms = rec.get("permissions")
+    if (
+        not isinstance(perms, list)
+        or not perms
+        or any(p not in PERMISSION_ATOMS for p in perms)
+        or len(set(perms)) != len(perms)
+    ):
+        raise RbacStoreError(f"custom role store corrupt: invalid permissions for {name!r}")
+    if "view" not in perms:
+        raise RbacStoreError(f"custom role store corrupt: {name!r} must grant view")
+    description = rec.get("description", "")
+    if not isinstance(description, str) or len(description) > 200:
+        raise RbacStoreError(f"custom role store corrupt: invalid description for {name!r}")
+    ordered = [p for p in PERMISSION_ATOMS if p in perms]
+    return name, {"permissions": ordered, "description": description}
+
+
+def _load_custom() -> dict[str, dict]:
+    from maverick.file_lock import (
+        atomic_read_text,
+        ensure_private_directory,
+        ensure_private_file,
+    )
+    from maverick.paths import maverick_home
+
+    p = custom_roles_path()
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(p.parent)
+    if not p.exists():
+        return {}
+    try:
+        ensure_private_file(p)
+        data = _decode_json_object(atomic_read_text(p), label="custom role store")
+    except RbacStoreError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise RbacStoreError(f"custom role store unreadable or corrupt: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RbacStoreError("custom role store corrupt: top-level value must be an object")
+    out: dict[str, dict] = {}
+    for raw_name, raw_rec in data.items():
+        name, rec = _validate_custom_role(raw_name, raw_rec)
+        out[name] = rec
+    return out
+
+
+def _write_custom(data: dict[str, dict]) -> None:
+    from maverick.file_lock import atomic_write_text
+
+    atomic_write_text(custom_roles_path(), json.dumps(data, indent=2, sort_keys=True))
+
+
+def list_custom_roles() -> dict[str, dict]:
+    """All admin-defined roles: ``{name: {"permissions": [...], "description"}}``."""
+    return {name: dict(rec) for name, rec in _load_custom().items()}
+
+
+def known_roles() -> tuple[str, ...]:
+    """Every assignable role: the builtins (most-privileged first, the order
+    SCIM resolution and the admin UIs rely on) then custom roles by name."""
+    try:
+        custom = sorted(_load_custom())
+    except RbacStoreError:
+        custom = []
+    return ROLES + tuple(custom)
+
+
+def is_known_role(role: object) -> bool:
+    if not isinstance(role, str):
+        return False
+    if role in ROLES:
+        return True
+    try:
+        return role in _load_custom()
+    except RbacStoreError:
+        return False
+
+
+def most_privileged(roles) -> str | None:
+    """The most-privileged role among ``roles`` (builtin or custom), ranked by
+    the permission atoms it grants -- the generalization of "ROLES is ordered
+    most-privileged first" that SCIM group resolution used before custom
+    roles. Deterministic: permission rank first, then name."""
+    # Privilege order of the atoms: operate outranks audit, matching the
+    # historical builtin order (admin > operator > auditor > viewer).
+    privilege = ("admin", "operate", "audit", "view")
+    best_rank: tuple | None = None
+    best_role: str | None = None
+    for role in roles:
+        perms = permissions_for(role)
+        if not perms:
+            continue
+        rank = tuple(atom in perms for atom in privilege)
+        if (
+            best_rank is None
+            or rank > best_rank
+            or (rank == best_rank and role < best_role)
+        ):
+            best_rank = rank
+            best_role = role
+    return best_role
+
+
+def set_custom_role(
+    name: str,
+    permissions,
+    description: str = "",
+    *,
+    actor: str = "",
+) -> None:
+    """Create or update an admin-defined role. Builtins are immutable."""
+    name = (name or "").strip()
+    if name in ROLES:
+        raise ValueError("built-in roles cannot be redefined")
+    cleaned_name, rec = None, None
+    try:
+        cleaned_name, rec = _validate_custom_role(
+            name,
+            {"permissions": list(permissions), "description": str(description or "")},
+        )
+    except RbacStoreError as exc:
+        raise ValueError(str(exc)) from exc
+    with _locked(custom_roles_path()):
+        data = _load_custom()
+        old = data.get(cleaned_name)
+        if old == rec:
+            return
+        prior = {k: dict(v) for k, v in data.items()}
+        data[cleaned_name] = rec
+        _write_custom(data)
+        _audit_role_change_with_rollback(
+            actor,
+            cleaned_name,
+            "custom_role",
+            "",
+            (old or {}).get("permissions"),
+            rec["permissions"],
+            lambda: _write_custom(prior),
+        )
+
+
+def _custom_role_assignments(name: str) -> list[str]:
+    """Where ``name`` is still in use (human-readable), for delete refusal."""
+    used: list[str] = []
+    used.extend(f"user {p}" for p, r in _load().items() if r == name)
+    for tenant, members in _load_tenant().items():
+        used.extend(f"user {p} in tenant {tenant}" for p, r in members.items() if r == name)
+    try:
+        from . import invites as _invites
+
+        used.extend(
+            f"pending invite {inv.email}"
+            for inv in _invites.list_invites()
+            if inv.role == name and inv.pending
+        )
+    except Exception:
+        # The invite store being unreadable must not block role management;
+        # roster and tenant assignments remain the hard refusals.
+        pass
+    return used
+
+
+def delete_custom_role(name: str, *, actor: str = "") -> None:
+    """Delete an admin-defined role. Refuses while any assignment still
+    references it -- deleting an in-use role would turn every holder's next
+    request into a corrupt-roster refusal."""
+    name = (name or "").strip()
+    if name in ROLES:
+        raise ValueError("built-in roles cannot be deleted")
+    with _locked(custom_roles_path()):
+        data = _load_custom()
+        old = data.get(name)
+        if old is None:
+            return
+        used = _custom_role_assignments(name)
+        if used:
+            preview = ", ".join(used[:5]) + (", ..." if len(used) > 5 else "")
+            raise ValueError(f"role {name!r} is still assigned ({preview}); reassign first")
+        prior = {k: dict(v) for k, v in data.items()}
+        data.pop(name)
+        _write_custom(data)
+        _audit_role_change_with_rollback(
+            actor,
+            name,
+            "custom_role",
+            "",
+            old.get("permissions"),
+            None,
+            lambda: _write_custom(prior),
+        )
 
 
 def _load() -> dict[str, str]:
@@ -129,7 +370,7 @@ def _load() -> dict[str, str]:
     for principal, role in data.items():
         if not isinstance(principal, str) or not principal.strip() or principal != principal.strip():
             raise RbacStoreError("RBAC roster corrupt: principals must be non-blank trimmed strings")
-        if not isinstance(role, str) or role not in ROLES:
+        if not is_known_role(role):
             raise RbacStoreError(f"RBAC roster corrupt: invalid role for {principal!r}")
         out[principal] = role
     return out
@@ -217,7 +458,7 @@ def set_role(principal: str, role: str, *, actor: str = "") -> None:
     principal = (principal or "").strip()
     if not principal:
         raise ValueError("empty principal")
-    if role not in ROLES:
+    if not is_known_role(role):
         raise ValueError("unknown role")
     with _locked(store_path()):
         data = _load()
@@ -305,7 +546,7 @@ def _load_tenant() -> dict[str, dict[str, str]]:
                 raise RbacStoreError(
                     f"tenant RBAC roster corrupt: invalid principal in {tenant!r}"
                 )
-            if not isinstance(role, str) or role not in ROLES:
+            if not is_known_role(role):
                 raise RbacStoreError(
                     f"tenant RBAC roster corrupt: invalid role for {principal!r}"
                 )
@@ -332,7 +573,7 @@ def set_tenant_role(tenant: str, principal: str, role: str, *,
     principal = (principal or "").strip()
     if not tenant or not principal:
         raise ValueError("empty tenant or principal")
-    if role not in ROLES:
+    if not is_known_role(role):
         raise ValueError("unknown role")
     with _locked(tenant_store_path()):
         data = _load_tenant()
@@ -384,8 +625,10 @@ def list_tenant_roles(tenant: str) -> dict[str, str]:
 
 
 __all__ = [
-    "ROLES", "RbacStoreError", "store_path", "default_role", "permissions_for",
-    "list_users", "get_stored_role", "set_role", "remove_user",
+    "ROLES", "PERMISSION_ATOMS", "RbacStoreError", "store_path", "default_role",
+    "permissions_for", "list_users", "get_stored_role", "set_role", "remove_user",
     "tenant_store_path", "get_tenant_role", "set_tenant_role",
     "remove_tenant_role", "list_tenant_roles",
+    "custom_roles_path", "list_custom_roles", "known_roles", "is_known_role",
+    "most_privileged", "set_custom_role", "delete_custom_role",
 ]

@@ -80,8 +80,9 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
 def test_page_fails_closed_and_new_template_uses_safe_dom(page_client) -> None:
     disabled = page_client.get("/privacy/rights-orchestration", params={"enabled": False})
     assert disabled.status_code == 200
-    assert "Privacy-rights orchestration disabled" in disabled.text
-    assert "privacy_automation.rights_orchestration" in disabled.text
+    assert 'data-module-gate="privacy_automation.rights_orchestration"' in disabled.text
+    assert "Privacy-rights orchestration is turned off." in disabled.text
+    assert "[privacy_automation.rights_orchestration] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"
