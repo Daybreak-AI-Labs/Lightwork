@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           python -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           python -I -m pip install -e packages/maverick-core --no-deps
           python -I -m pip install 'cryptography==50.0.0'
@@ -242,7 +242,7 @@ jobs:
             parity_python=".native-parity-venv/bin/python"
           fi
           "$parity_python" -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
             'packaging==26.2' 'pytest==9.1.1' 'certifi==2026.7.22'
           # --no-index forces the install to use the wheel we just built; if no
           # wheel matches this OS/Python the install fails hard (not a silent skip).

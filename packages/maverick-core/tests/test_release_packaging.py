@@ -466,7 +466,7 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
         assert project["version"] == release_version
         assert project["license"] == "LicenseRef-Proprietary"
         assert project["urls"]["Homepage"] == canonical_homepage
-        assert metadata["build-system"]["requires"] == ["setuptools==83.0.0"]
+        assert metadata["build-system"]["requires"] == ["setuptools==84.0.0"]
 
         requirements = list(project.get("dependencies", []))
         for extra_requirements in project.get("optional-dependencies", {}).values():
@@ -653,7 +653,7 @@ def test_release_cohort_dependency_environments_are_complete():
     assert "python scripts/verify_constraint_closure.py" in binary_step
     for build_tool in (
         "pip==26.2.1",
-        "setuptools==83.0.0",
+        "setuptools==84.0.0",
         "wheel==0.47.0",
         "packaging==26.2",
     ):
@@ -683,7 +683,7 @@ def test_release_cohort_dependency_environments_are_complete():
     assert sbom_step.count("scripts/verify_constraint_closure.py") == 2
     for build_tool in (
         "pip==26.2.1",
-        "setuptools==83.0.0",
+        "setuptools==84.0.0",
         "wheel==0.47.0",
         "packaging==26.2",
     ):
@@ -790,7 +790,7 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
     assert "python -I scripts/verify_constraint_closure.py" in bootstrap_step
     for build_tool in (
         "pip==26.2.1",
-        "setuptools==83.0.0",
+        "setuptools==84.0.0",
         "wheel==0.47.0",
         "packaging==26.2",
         "build==1.5.0",
