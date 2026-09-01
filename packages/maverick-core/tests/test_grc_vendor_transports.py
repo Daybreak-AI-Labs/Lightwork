@@ -540,13 +540,6 @@ def test_invalid_or_missing_credentials_never_reach_http() -> None:
         ),
         (gvt.VendorHTTPResponse(200, {}, b"x" * 4_097), "vendor_response_too_large"),
         (gvt.VendorHTTPResponse(200, {}, b"not-json"), "vendor_response_not_json"),
-        # Pathological nesting is rejected AT PARSE (json.loads raises
-        # RecursionError, mapped to not_json) -- a 1,100-deep array never
-        # reaches the object check, so it cannot earn the not_object category.
-        (
-            gvt.VendorHTTPResponse(200, {}, b"[" * 1_100 + b"0" + b"]" * 1_100),
-            "vendor_response_not_json",
-        ),
         # Valid JSON that parses but is not an object gets the precise category.
         (gvt.VendorHTTPResponse(200, {}, b"[1, 2, 3]"), "vendor_response_not_object"),
     ],
@@ -569,6 +562,31 @@ def test_response_size_and_json_are_bounded(
     with pytest.raises(GRCTransportFailure) as caught:
         transport.send(request)
     assert caught.value.category == category
+
+
+def test_pathological_nesting_is_rejected_on_every_interpreter() -> None:
+    """A 1,100-deep array must never be ACCEPTED, but which bounded category
+    rejects it is interpreter-dependent: CPython <= 3.11 raises RecursionError
+    inside json.loads (mapped to not_json), while 3.12+ parses it and the
+    object check refuses it (not_object). Pinning either category alone made
+    this test red on the other half of the CI matrix."""
+    request = _request(
+        GRCSystem.SERVICENOW_IRM,
+        SourceKind.FINDING,
+        "servicenow_irm.upsert_issue",
+    )
+    response = gvt.VendorHTTPResponse(200, {}, b"[" * 1_100 + b"0" + b"]" * 1_100)
+    transport = gvt.ServiceNowIRMTransport(
+        base_url="https://tenant.service-now.com",
+        http=_QueueHTTP([response]),
+        secret_resolver=lambda _name: _SECRET,
+    )
+    with pytest.raises(gvt.GRCVendorProtocolError) as caught:
+        transport.send(request)
+    assert caught.value.category in {
+        "vendor_response_not_json",
+        "vendor_response_not_object",
+    }
 
 
 def test_untyped_response_and_wrong_operation_fail_closed_before_persistence() -> None:
