@@ -233,6 +233,14 @@ jobs:
         # lock (`python -m maverick.migration_governance --regen`) so the change
         # is reviewed. Pure offline check, no DB. See migration_governance.py.
         run: python -m maverick.migration_governance --ci
+      - name: Regulatory-compiler gate (obligations compile to live, non-vacuous gates)
+        # Compiles every shipped regulatory profile (GDPR, EU AI Act, HIPAA)
+        # into governance rules and proves each obligation actually bites: every
+        # bound tool is a classified tool, the compiled policy denies / pauses
+        # it, a risk floor catches at least one real tool, and an attenuation
+        # narrows a capability. A stale tool name or a silent overlay fails the
+        # build; inspecting nothing exits 2. See maverick/regulatory_compiler.py.
+        run: python -m maverick.regulatory_compiler --ci --profiles gdpr,eu_ai_act,hipaa
       - name: Evaluator-anchor governance gate (released anchors are immutable)
         # Pins every evaluator ground-truth anchor's checksum in the committed
         # evaluator_anchors.lock.json: editing a released anchor's labels or

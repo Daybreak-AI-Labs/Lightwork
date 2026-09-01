@@ -28,6 +28,7 @@ def test_compliance_command_set_is_the_full_surface():
         "maverick assess",
         "maverick hunt",
         "maverick remediate",
+        "maverick regulatory verify",
     ]
 
 
