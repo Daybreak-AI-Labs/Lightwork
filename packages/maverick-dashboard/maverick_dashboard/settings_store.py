@@ -6,10 +6,12 @@ or toggle set in the UI takes effect on the next run without touching the
 user's config.toml. (Models / budget / tool denials live in the separate
 runtime-overrides.toml, read via their own hooks.)
 
-Secrets: provider api_keys are written here at 0600. The kernel resolves
-``[providers.<name>].api_key`` from config BEFORE the env vars, so a key set
-here unblocks goals immediately. The HTTP layer must NEVER echo a stored key
-back — callers get a masked hint only (see ``state()``).
+Secrets: provider api_keys, webhook signing material, and channel credentials
+are authenticated-encrypted with the deployment at-rest key before this file is
+written (the file is also mode 0600). The kernel transparently opens those
+values while loading the fixed dashboard overlay, so a key set here unblocks
+goals immediately. The HTTP layer must NEVER echo a stored key back — callers
+get a masked hint only (see ``state()``).
 """
 from __future__ import annotations
 
@@ -77,7 +79,15 @@ CAPABILITY_DEFAULTS = {
     "computer_use": False, "browser": False, "web_search": False,
     "mobile_tools": False, "ros": False, "code_exec": False,
 }
-FEATURE_DEFAULTS = {"skills": True, "world_model": True, "streaming": True}
+FEATURE_DEFAULTS = {
+    "skills": True,
+    "world_model": True,
+    "streaming": True,
+    "pack_editing": True,
+    "role_editing": True,
+    "scheduling": True,
+    "triggers": True,
+}
 
 # What each toggle actually turns on -- shown next to the checkbox so an
 # admin knows what they are selecting before they select it.
@@ -105,6 +115,14 @@ FEATURE_INFO = {
                    "disables cross-run state.",
     "streaming": "Live token streaming to the dashboard chat and goal "
                  "timelines (off = responses arrive only when complete).",
+    "pack_editing": "Edit and override domain packs from the dashboard. Turn "
+                    "off to make pack editors read-only.",
+    "role_editing": "Edit core agent role prompts, models, and effort from the "
+                    "dashboard. Turn off to lock the role roster.",
+    "scheduling": "Arm recurring workflow schedules from the dashboard. Host "
+                  "CLI scheduling remains an operator-controlled path.",
+    "triggers": "Bind saved templates to signed inbound webhooks. Requires a "
+                "configured webhook signing secret.",
 }
 
 # The self-learning loop's subsystems -- ONE source of truth shared by the
@@ -238,13 +256,36 @@ def _tomllib():
     return tomllib
 
 
+def _unseal_overlay(data: dict) -> dict:
+    """Open authenticated dashboard ciphertext without mutating parsed TOML."""
+    # Reuse the config loader's bounded tree contract.  It performs a cheap
+    # marker preflight, authenticates every token, and forces the deployment
+    # key so an ambient tenant cannot change which key opens global settings.
+    return config._unseal_config_tree(data)  # type: ignore[return-value]
+
+
+def _seal_global_secret(value: object) -> str:
+    """Return one deployment-key ciphertext, preserving existing ciphertext."""
+    from maverick.crypto_at_rest import (
+        deployment_key_scope,
+        is_sealed_str,
+        seal_to_str,
+    )
+
+    text = str(value)
+    if is_sealed_str(text):
+        return text
+    with deployment_key_scope():
+        return seal_to_str(text)
+
+
 def load_overlay() -> dict:
     p = config.dashboard_overrides_path()
     if not p.exists():
         return {}
     try:
         with open(p, "rb") as f:
-            return _tomllib().load(f)
+            return _unseal_overlay(_tomllib().load(f))
     except (OSError, ValueError):
         return {}
 
@@ -362,12 +403,12 @@ def _dump(data: dict) -> str:
         for model in sorted(tiers):
             lines.append(f"{_toml_str(model)} = {_toml_str(str(tiers[model]))}")
         lines.append("")
-    # [webhooks] secret -- the signing key the Settings page manages. Written
-    # verbatim (never logged or re-displayed).
+    # [webhooks] secret -- the signing key the Settings page manages. Sealed
+    # before persistence and never logged or re-displayed.
     whk = data.get("webhooks") or {}
     if whk.get("secret"):
         lines.append("[webhooks]")
-        lines.append(f"secret = {_toml_str(whk['secret'])}")
+        lines.append(f"secret = {_toml_str(_seal_global_secret(whk['secret']))}")
         lines.append("")
     for name in sorted(data.get("providers") or {}):
         pcfg = data["providers"][name] or {}
@@ -376,6 +417,8 @@ def _dump(data: dict) -> str:
             continue
         lines.append(f"[providers.{name}]")
         for field, val in fields:
+            if field == "api_key":
+                val = _seal_global_secret(val)
             lines.append(f"{field} = {_toml_str(val)}")
         lines.append("")
     for name in sorted(data.get("channels") or {}):
@@ -384,6 +427,11 @@ def _dump(data: dict) -> str:
             continue
         lines.append(f"[channels.{name}]")
         lines.append(f"enabled = {'true' if ccfg.get('enabled') else 'false'}")
+        secret_fields = {
+            field["key"]
+            for field in (_CHANNELS_BY_NAME.get(name) or {}).get("fields", [])
+            if field.get("secret")
+        }
         for k in sorted(ccfg):
             if k == "enabled":
                 continue
@@ -393,6 +441,8 @@ def _dump(data: dict) -> str:
             elif isinstance(v, int):
                 lines.append(f"{k} = {v}")
             else:
+                if k in secret_fields:
+                    v = _seal_global_secret(v)
                 lines.append(f"{k} = {_toml_str(v)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

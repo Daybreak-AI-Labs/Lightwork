@@ -373,6 +373,89 @@ def test_imap_password_env_trigger_requires_admin(monkeypatch, tmp_path):
     assert r2.status_code != 403
 
 
+@pytest.mark.parametrize(
+    ("source", "config"),
+    [
+        (
+            "imap_email",
+            {
+                "host": "mail.example",
+                "username": "u",
+                "password_env": "IMAP_PASSWORD",
+            },
+        ),
+        ("github_issues", {"owner": "acme", "repo": "private"}),
+        ("file_dir", {"path": "incoming"}),
+    ],
+)
+def test_host_resource_event_sources_reject_tenant_local_admin(
+    monkeypatch, tmp_path, source, config
+):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+
+    principal = "user:tenant-admin"
+    rbac.set_role(principal, "viewer")
+    rbac.set_tenant_role("acme", principal, "admin")
+    _as(monkeypatch, principal)
+
+    response = c.post(
+        "/api/v1/event-triggers",
+        json={"template": "triage", "source": source, "config": config},
+    )
+
+    assert response.status_code == 403
+
+
+def test_file_dir_trigger_rejects_paths_outside_tenant_event_input(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    _as(monkeypatch, "user:root")
+
+    outside = tmp_path / "outside"
+    response = c.post(
+        "/api/v1/event-triggers",
+        json={
+            "template": "triage",
+            "source": "file_dir",
+            "config": {"path": str(outside)},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "event-input root" in response.json()["detail"]
+
+
+def test_file_dir_trigger_rejects_parent_traversal_glob(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    _as(monkeypatch, "user:root")
+
+    response = c.post(
+        "/api/v1/event-triggers",
+        json={
+            "template": "triage",
+            "source": "file_dir",
+            "config": {"path": "incoming", "glob": "../*"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "cannot traverse" in response.json()["detail"]
+
+
 def test_shared_halt_requires_admin(monkeypatch, tmp_path):
     # The shared Postgres halt is a global, untenanted fleet control. A tenant
     # operator may operate local goals, but must not arm the cluster-wide halt.

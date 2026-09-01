@@ -105,10 +105,12 @@ class AssessmentRefreshIn(BaseModel):
     """Auto-draft (or re-draft) a governance assessment. ``template`` selects
     which lenses to run; ``None`` keeps the existing/default one."""
     template: str | None = Field(default=None, max_length=64)
+    expected_revision: int = Field(..., ge=0)
 
 
 class AssessmentReviewIn(BaseModel):
     """A reviewer's decision on one lens of an assessment."""
+    expected_revision: int = Field(..., ge=1)
     lens: str = Field(..., pattern="^(privacy|security|ai_risk)$")
     decision: str = Field(..., pattern="^(accepted|needs_work)$")
     note: str | None = Field(default=None, max_length=4000)
@@ -117,6 +119,7 @@ class AssessmentReviewIn(BaseModel):
 
 class AssessmentEvidenceIn(BaseModel):
     """An evidence note/link attached to a specific finding."""
+    expected_revision: int = Field(..., ge=1)
     lens: str = Field(..., pattern="^(privacy|security|ai_risk)$")
     control: str = Field(..., max_length=200)
     evidence: str = Field(..., max_length=2000)
@@ -668,6 +671,12 @@ class WorkflowSaveIn(BaseModel):
     budget_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
     overwrite: bool = False
     expected_generation: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def require_generation_for_overwrite(self):
+        if self.overwrite and self.expected_generation is None:
+            raise ValueError("expected_generation is required when overwrite is true")
+        return self
 
 
 class TenantCreateIn(BaseModel):

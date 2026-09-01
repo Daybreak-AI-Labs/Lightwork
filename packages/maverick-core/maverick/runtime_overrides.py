@@ -516,7 +516,7 @@ def mcp_overlay() -> dict[str, dict]:
         if (isinstance(name, str) and _VALID_SERVER_NAME.fullmatch(name)
                 and isinstance(spec, dict)
                 and ("command" in spec or "url" in spec)):
-            out[name] = spec
+            out[name] = _unseal_mcp_spec(spec)
     return out
 
 
@@ -538,6 +538,54 @@ def _toml_inline(value) -> str:
     raise ValueError(f"cannot serialise {type(value).__name__} to TOML")
 
 
+def _transform_secret_tree(value: object, transform) -> object:
+    """Apply ``transform`` to every string leaf of one credential container."""
+    if isinstance(value, str):
+        return transform(value)
+    if isinstance(value, dict):
+        return {key: _transform_secret_tree(item, transform) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_transform_secret_tree(item, transform) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_transform_secret_tree(item, transform) for item in value)
+    return value
+
+
+def _map_mcp_secrets(spec: dict, transform) -> dict:
+    """Transform only MCP credential-bearing fields in a detached spec."""
+    out = copy.deepcopy(spec)
+    if isinstance(out.get("auth_token"), str):
+        out["auth_token"] = transform(out["auth_token"])
+    # Values in these user-supplied containers are credential material or may
+    # carry it (Authorization headers and stdio environment values in
+    # particular).  Keys remain visible so runtime schema validation and
+    # operator diagnostics still work without opening the values.
+    for field in ("env", "headers", "oauth"):
+        if isinstance(out.get(field), dict):
+            out[field] = _transform_secret_tree(out[field], transform)
+    return out
+
+
+def _seal_mcp_spec(spec: dict) -> dict:
+    from .crypto_at_rest import deployment_key_scope, is_sealed_str, seal_to_str
+
+    def seal_value(value: str) -> str:
+        return value if is_sealed_str(value) else seal_to_str(value)
+
+    with deployment_key_scope():
+        return _map_mcp_secrets(spec, seal_value)
+
+
+def _unseal_mcp_spec(spec: dict) -> dict:
+    from .crypto_at_rest import deployment_key_scope, is_sealed_str, unseal_from_str
+
+    def unseal_value(value: str) -> str:
+        return unseal_from_str(value) if is_sealed_str(value) else value
+
+    with deployment_key_scope():
+        return _map_mcp_secrets(spec, unseal_value)
+
+
 def _render_mcp(servers: dict[str, dict]) -> str:
     """Render ``[mcp_servers.<name>]`` tables. Names are bare keys (validated by
     add_mcp_server) so the header is unambiguous; these tables come LAST in the
@@ -545,7 +593,8 @@ def _render_mcp(servers: dict[str, dict]) -> str:
     body = ""
     for name in sorted(servers):
         body += f"\n[mcp_servers.{name}]\n"
-        for key, val in servers[name].items():
+        sealed = _seal_mcp_spec(servers[name])
+        for key, val in sealed.items():
             if key == "name":  # the table key already carries the name
                 continue
             body += f"{_toml_string(str(key))} = {_toml_inline(val)}\n"

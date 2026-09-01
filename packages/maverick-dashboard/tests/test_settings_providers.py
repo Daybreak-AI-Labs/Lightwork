@@ -27,6 +27,9 @@ def test_provider_key_overlay_unblocks(monkeypatch, tmp_path):
     settings_store.set_provider("anthropic", api_key="sk-test-123456")  # pragma: allowlist secret
     assert config.dashboard_overrides_path().exists()
     assert not config.config_path().exists()            # config.toml untouched
+    persisted = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert "sk-test-123456" not in persisted  # pragma: allowlist secret
+    assert "MVKAR1:" in persisted
     assert config.any_provider_configured() is True
     assert config.get_provider_config("anthropic")["api_key"] == "sk-test-123456"  # pragma: allowlist secret
     settings_store.clear_provider("anthropic")
@@ -42,6 +45,19 @@ def test_toggle_overlay_reflected(monkeypatch, tmp_path):
     assert config.get_capabilities()["web_search"] is True
     settings_store.set_toggle("features", "skills", False)
     assert config.get_features()["skills"] is False
+
+
+def test_settings_exposes_every_runtime_feature_toggle(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    assert set(settings_store.FEATURE_DEFAULTS) == set(config.get_features())
+    settings_store.set_toggle("features", "pack_editing", False)
+    settings_store.set_toggle("features", "triggers", False)
+    effective = config.get_features()
+    assert effective["pack_editing"] is False
+    assert effective["triggers"] is False
 
 
 def _client(monkeypatch, tmp_path):

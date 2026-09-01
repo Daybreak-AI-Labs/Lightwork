@@ -332,4 +332,64 @@
       every page still apply regardless.
     </p>
   </div>
+  <script>
+  (function () {
+    'use strict';
+    var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^="/settings"]'));
+    var dirty = new Set();
+
+    function sectionName(form) {
+      var node = form.closest('.panel');
+      while (node && node.previousElementSibling) {
+        node = node.previousElementSibling;
+        var heading = node.querySelector && node.querySelector('.section-head h2, h2');
+        if (heading && heading.textContent.trim()) return heading.textContent.trim();
+      }
+      return form.action || 'another section';
+    }
+    function markDirty(event) { dirty.add(event.currentTarget); }
+
+    forms.forEach(function (form) {
+      form.addEventListener('input', markDirty);
+      form.addEventListener('change', markDirty);
+      form.addEventListener('submit', function (event) {
+        if (form.dataset.settingsSubmitApproved === 'true') {
+          delete form.dataset.settingsSubmitApproved;
+          dirty.clear();
+          return;
+        }
+        var otherDirty = Array.from(dirty).filter(function (candidate) {
+          return candidate !== form;
+        });
+        if (!otherDirty.length) {
+          dirty.delete(form);
+          return;
+        }
+        event.preventDefault();
+        var submitter = event.submitter || null;
+        var sections = otherDirty.map(sectionName).filter(function (name, index, all) {
+          return all.indexOf(name) === index;
+        });
+        var prompt = 'Saving this section reloads Settings and will discard unsaved changes in '
+          + sections.join(', ') + '. Continue?';
+        var confirmation = window.mvConfirm
+          ? window.mvConfirm(prompt, { okText: 'Discard others and save' })
+          : Promise.resolve(window.confirm(prompt));
+        confirmation.then(function (approved) {
+          if (!approved) return;
+          dirty.clear();
+          form.dataset.settingsSubmitApproved = 'true';
+          if (form.requestSubmit) form.requestSubmit(submitter || undefined);
+          else form.submit();
+        });
+      });
+    });
+
+    window.addEventListener('beforeunload', function (event) {
+      if (!dirty.size) return;
+      event.preventDefault();
+      event.returnValue = '';
+    });
+  })();
+  </script>
 {% endblock %}

@@ -7,9 +7,11 @@ Configures Lightwork for a fresh install. Sets up:
   - safety profile
   - sandbox backend
   - budget caps
-  - API keys (stored in ~/.maverick/.env, referenced from config.toml via ${VAR})
+  - API keys (stored beside config.toml, referenced from it via ${VAR})
 
-Writes ~/.maverick/config.toml and ~/.maverick/.env. The agent reads from there.
+Writes ``$MAVERICK_CONFIG`` when explicitly selected, otherwise
+``$MAVERICK_HOME/config.toml`` (default ``~/.maverick/config.toml``), plus a
+sibling ``.env``. The agent reads from the same resolution contract.
 
 v0.1.1 additions (council UX feedback):
   - Preflight: Python version, write perms, optional docker check
@@ -42,9 +44,28 @@ except ImportError:  # pragma: no cover
 
 from . import models as catalog
 
-CONFIG_DIR = Path.home() / ".maverick"
-CONFIG_FILE = CONFIG_DIR / "config.toml"
-ENV_FILE = CONFIG_DIR / ".env"
+
+def _resolve_config_paths() -> tuple[Path, Path, Path]:
+    """Resolve exactly the paths used by :mod:`maverick.config`.
+
+    The previous import-time ``Path.home() / '.maverick'`` ignored the
+    documented ``MAVERICK_HOME``/``MAVERICK_CONFIG`` overrides.  The wizard
+    could therefore overwrite the real user config and then smoke-test a
+    different, still-empty location.  Environment is fixed before a CLI
+    process imports this module, so resolving once here keeps the existing
+    monkeypatchable constants while aligning both sides of the handoff.
+    """
+    explicit = os.environ.get("MAVERICK_CONFIG", "").strip()
+    if explicit:
+        config_file = Path(explicit).expanduser()
+        config_dir = config_file.parent
+    else:
+        config_dir = Path(os.environ.get("MAVERICK_HOME", "~/.maverick")).expanduser()
+        config_file = config_dir / "config.toml"
+    return config_dir, config_file, config_dir / ".env"
+
+
+CONFIG_DIR, CONFIG_FILE, ENV_FILE = _resolve_config_paths()
 
 
 def _prior_consent_salt() -> str:

@@ -34,7 +34,10 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     Lightwork uses by default. Appearance is applied via the existing
     persist_theme middleware (the form GETs back here with the params); the
     model choice is saved to the dashboard-owned runtime overlay."""
-    auth.require_permission(request, "admin")
+    # Every form on this page changes deployment-wide process configuration.
+    # A tenant-local admin must not see an apparently actionable console whose
+    # POSTs all fail the correct global gate.
+    auth.require_global_permission(request, "admin")
     import re as _re
 
     from maverick.llm import catalog_specs, model_for_role

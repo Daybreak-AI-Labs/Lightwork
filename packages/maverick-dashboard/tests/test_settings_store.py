@@ -93,6 +93,10 @@ def test_concurrent_channel_and_provider_both_apply(monkeypatch, tmp_path):
     overlay = settings_store.load_overlay()
     assert overlay.get("channels", {}).get("telegram", {}).get("bot_token") == "tok-channel"  # pragma: allowlist secret
     assert overlay.get("providers", {}).get("anthropic", {}).get("api_key") == "sk-test-prov"  # pragma: allowlist secret
+    persisted = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert "tok-channel" not in persisted  # pragma: allowlist secret
+    assert "sk-test-prov" not in persisted  # pragma: allowlist secret
+    assert persisted.count("MVKAR1:") >= 2
 
 
 if __name__ == "__main__":

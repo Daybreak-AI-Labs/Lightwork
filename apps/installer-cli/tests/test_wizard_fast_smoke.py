@@ -10,6 +10,32 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def test_wizard_paths_honor_maverick_home(monkeypatch, tmp_path):
+    from maverick_installer import wizard
+
+    target = tmp_path / "isolated-home"
+    monkeypatch.setenv("MAVERICK_HOME", str(target))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+
+    config_dir, config_file, env_file = wizard._resolve_config_paths()
+    assert config_dir == target
+    assert config_file == target / "config.toml"
+    assert env_file == target / ".env"
+
+
+def test_explicit_config_path_wins_and_keeps_env_adjacent(monkeypatch, tmp_path):
+    from maverick_installer import wizard
+
+    target = tmp_path / "operator" / "lightwork.toml"
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "ignored"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(target))
+
+    config_dir, config_file, env_file = wizard._resolve_config_paths()
+    assert config_dir == target.parent
+    assert config_file == target
+    assert env_file == target.parent / ".env"
+
+
 def _stub(monkeypatch, tmp_path: Path, *, smoke: bool):
     from maverick_installer import wizard
 

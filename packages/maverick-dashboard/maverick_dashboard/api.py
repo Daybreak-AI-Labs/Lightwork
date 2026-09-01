@@ -250,7 +250,19 @@ _PERF_SLA_CACHE: tuple[float, list[dict], str | None] | None = None
 _PERF_HISTORY_MAX_FILES = 128
 _COMPLIANCE_PACKET_CACHE_TTL_SECONDS = 60.0
 _COMPLIANCE_PACKET_LOCK = asyncio.Lock()
-_COMPLIANCE_PACKET_CACHE: tuple[float, str] | None = None
+_COMPLIANCE_PACKET_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
+
+
+def _active_cache_context() -> tuple[str, str]:
+    """Stable process-cache namespace for the active tenant and data root.
+
+    The data-root component prevents a process whose ``MAVERICK_HOME`` changes
+    (notably an embedded server or test worker) from reusing evidence generated
+    against the previous storage context.
+    """
+    from maverick.paths import current_tenant_id_strict, data_dir
+
+    return current_tenant_id_strict() or "__shared__", os.fspath(data_dir())
 
 
 def _to_goal_out(g) -> GoalOut:
@@ -1869,6 +1881,25 @@ def _safe_filename(name: str) -> str:
     return cleaned.strip(" .-")[:120] or "document"
 
 
+def _attachment_content_disposition(name: str) -> str:
+    """RFC 6266/5987 attachment header with an ASCII fallback.
+
+    Starlette encodes response headers as latin-1.  Putting a Unicode filename
+    directly inside ``filename=`` therefore raises before the response can be
+    sent.  ``filename*`` carries the exact UTF-8 name while old clients retain a
+    conservative ASCII fallback.
+    """
+    from urllib.parse import quote
+
+    safe_name = _safe_filename(name)
+    fallback = safe_name.encode("ascii", "ignore").decode("ascii").strip(" .-")
+    fallback = fallback or "document"
+    disposition = f'attachment; filename="{fallback}"'
+    if fallback != safe_name:
+        disposition += f"; filename*=UTF-8''{quote(safe_name, safe='')}"
+    return disposition
+
+
 @router.get("/privacy/paper-reviews")
 async def list_paper_reviews(request: Request) -> dict:
     require_permission(request, "operate")
@@ -1983,7 +2014,7 @@ async def download_paper_redline(request: Request, review_id: str) -> Response:
     return Response(
         content=body,
         media_type=_PAPER_DOCX_MIME,
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(name)}"'},
+        headers={"Content-Disposition": _attachment_content_disposition(name)},
     )
 
 
@@ -2022,7 +2053,11 @@ async def draft_our_paper_docx(
     return Response(
         content=draft.content,
         media_type=_PAPER_DOCX_MIME,
-        headers={"Content-Disposition": f'attachment; filename="{stem}-{inst}-our-paper.docx"'},
+        headers={
+            "Content-Disposition": _attachment_content_disposition(
+                f"{stem}-{inst}-our-paper.docx"
+            )
+        },
     )
 
 
@@ -3403,7 +3438,7 @@ def _probe_tenant(t: dict) -> dict:
     """One synchronous probe of a client deployment: /health for liveness
     and latency, /value.json (best-effort) for the agent's own counted value
     ledger. Never raises -- the fleet view shows the error instead."""
-    import httpx
+    from maverick.tools import _ssrf
 
     base = t["base_url"].rstrip("/")
     headers = {"Authorization": f"Bearer {t['token']}"} if t.get("token") else {}
@@ -3418,7 +3453,7 @@ def _probe_tenant(t: dict) -> dict:
     }
     t0 = time.monotonic()
     try:
-        r = httpx.get(f"{base}/health", headers=headers, timeout=4)
+        r = _ssrf.safe_get(f"{base}/health", headers=headers, timeout=4)
         out["latency_ms"] = round((time.monotonic() - t0) * 1000, 1)
         out["ok"] = r.status_code == 200
         if not out["ok"]:
@@ -3428,7 +3463,7 @@ def _probe_tenant(t: dict) -> dict:
         out["error"] = str(exc)[:200]
         return out
     try:
-        v = httpx.get(f"{base}/value.json", headers=headers, timeout=4)
+        v = _ssrf.safe_get(f"{base}/value.json", headers=headers, timeout=4)
         if v.status_code == 200:
             d = v.json()
             out["agent"] = str(d.get("agent", ""))[:60]
@@ -3441,7 +3476,9 @@ def _probe_tenant(t: dict) -> dict:
     except Exception:  # value ledger is optional on older agents
         pass
     try:
-        x = httpx.get(f"{base}/api/v1/external-agents", headers=headers, timeout=4)
+        x = _ssrf.safe_get(
+            f"{base}/api/v1/external-agents", headers=headers, timeout=4
+        )
         if x.status_code == 200:
             st = (x.json() or {}).get("status") or {}
             out["external"] = {
@@ -4566,12 +4603,11 @@ async def download_goal_attachment(
         if fetched is None:
             raise HTTPException(status_code=410, detail="attachment bytes not on this host")
         path = fetched
-    safe_name = match.filename.replace('"', "_")
     return FileResponse(
         path,
         media_type=match.mime or "application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Content-Disposition": _attachment_content_disposition(match.filename),
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -5112,7 +5148,15 @@ async def refresh_assessment_endpoint(
     require_permission(request, "admin")
     from maverick import assessments
 
-    a = assessments.refresh(_assess_kind(kind), name, template=payload.template)
+    try:
+        a = assessments.refresh(
+            _assess_kind(kind),
+            name,
+            template=payload.template,
+            expected_revision=payload.expected_revision,
+        )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if a is None:
         raise HTTPException(status_code=404, detail=f"unknown {kind}: {name!r}")
     return a
@@ -5135,7 +5179,10 @@ async def review_assessment_endpoint(
             reviewer=caller_principal(request) or "",
             note=payload.note or "",
             cadence_days=payload.cadence_days,
+            expected_revision=payload.expected_revision,
         )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if a is None:
@@ -5150,20 +5197,38 @@ async def add_assessment_evidence_endpoint(
     require_permission(request, "admin")
     from maverick import assessments
 
-    a = assessments.add_evidence(
-        _assess_kind(kind), name, payload.lens, payload.control, payload.evidence
-    )
+    try:
+        a = assessments.add_evidence(
+            _assess_kind(kind),
+            name,
+            payload.lens,
+            payload.control,
+            payload.evidence,
+            expected_revision=payload.expected_revision,
+        )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if a is None:
         raise HTTPException(status_code=404, detail="no such finding")
     return a
 
 
 @router.delete("/assessments/{kind}/{name}", status_code=204)
-async def delete_assessment_endpoint(request: Request, kind: str, name: str) -> Response:
+async def delete_assessment_endpoint(
+    request: Request,
+    kind: str,
+    name: str,
+    expected_revision: int = Query(..., ge=1),
+) -> Response:
     require_permission(request, "admin")
     from maverick import assessments
 
-    assessments.delete_assessment(_assess_kind(kind), name)
+    try:
+        assessments.delete_assessment(
+            _assess_kind(kind), name, expected_revision=expected_revision,
+        )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
@@ -7489,7 +7554,7 @@ async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) ->
 
 _SECURITY_REGISTER_CACHE_TTL_SECONDS = 60.0
 _SECURITY_REGISTER_HUNT_DAYS = 7
-_security_register_cache: tuple[float, dict] | None = None
+_security_register_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 _security_register_cache_lock = threading.Lock()
 
 
@@ -7567,16 +7632,17 @@ def _security_register_snapshot_uncached() -> dict:
 
 
 def _security_register_snapshot() -> dict:
-    global _security_register_cache
+    cache_key = _active_cache_context()
     with _security_register_cache_lock:
         now = time.monotonic()
-        if (
-            _security_register_cache is not None
-            and now - _security_register_cache[0] < _SECURITY_REGISTER_CACHE_TTL_SECONDS
-        ):
-            return _security_register_cache[1]
+        cached = _security_register_cache.get(cache_key)
+        if cached is not None and now - cached[0] < _SECURITY_REGISTER_CACHE_TTL_SECONDS:
+            return cached[1]
         snapshot = _security_register_snapshot_uncached()
-        _security_register_cache = (time.monotonic(), snapshot)
+        _security_register_cache[cache_key] = (time.monotonic(), snapshot)
+        for key, (created_at, _value) in list(_security_register_cache.items()):
+            if time.monotonic() - created_at >= _SECURITY_REGISTER_CACHE_TTL_SECONDS:
+                _security_register_cache.pop(key, None)
         return snapshot
 
 
@@ -8543,6 +8609,54 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
     )
 
 
+def _govern_event_source_config(request: Request, source: str, config: dict) -> dict:
+    """Authorize shared host resources and confine file watches.
+
+    Tenant-local OAuth providers remain tenant-admin capabilities. Sources
+    which consume process credentials or local filesystem access are instead
+    deployment control-plane capabilities and require a global admin.
+    """
+    cfg = dict(config or {})
+    uses_tenant_oauth = bool(str(cfg.get("provider") or "").strip())
+    uses_process_github_token = source == "github_issues" and not uses_tenant_oauth
+    if source == "imap_email" or source == "file_dir" or uses_process_github_token:
+        require_global_permission(request, "admin")
+    elif uses_tenant_oauth:
+        require_permission(request, "admin")
+
+    if source != "file_dir":
+        return cfg
+
+    from pathlib import Path
+
+    from maverick.paths import data_dir
+
+    raw_path = str(cfg.get("path") or "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="file_dir source needs a 'path'")
+    glob = str(cfg.get("glob") or "*")
+    glob_path = Path(glob)
+    if glob_path.is_absolute() or ".." in glob_path.parts:
+        raise HTTPException(
+            status_code=400,
+            detail="file_dir glob must be relative and cannot traverse parent directories",
+        )
+    root = data_dir("event-input").resolve(strict=False)
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    candidate = candidate.resolve(strict=False)
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"file_dir path must stay under the tenant event-input root: {root}",
+        ) from exc
+    cfg["path"] = os.fspath(candidate)
+    return cfg
+
+
 def _owned_event_triggers(request: Request) -> list[dict]:
     """Event triggers visible to the caller: their own when auth is on, all of
     them for auth-off/admin (``goal_owner_filter`` returns None)."""
@@ -8577,14 +8691,7 @@ async def list_event_triggers_endpoint(request: Request) -> dict:
 async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     require_permission(request, "operate")
     _require_event_triggers()
-    # Sources that read shared credentials and then connect to caller-supplied
-    # endpoints must be ADMIN-only. Otherwise a low-priv operator could name a
-    # shared secret (OAuth provider or process env var) and exfiltrate it to
-    # their own host during polling.
-    cfg = payload.config or {}
-    reads_env_secret = payload.source == "imap_email" and cfg.get("password_env")
-    if cfg.get("provider") or reads_env_secret:
-        require_permission(request, "admin")
+    cfg = _govern_event_source_config(request, payload.source, payload.config)
     from maverick.automation_events import EventSourceError, get_source
 
     try:
@@ -8657,7 +8764,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             default_name,
             template,
             payload.source,
-            config=payload.config or {},
+            config=cfg,
             params=payload.params or {},
             owner=durable_automation_owner(request),
             flow=flow,
@@ -8717,6 +8824,15 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
+    triggers = [
+        {
+            **trigger,
+            "config": _govern_event_source_config(
+                request, str(trigger.get("source") or ""), trigger.get("config") or {}
+            ),
+        }
+        for trigger in triggers
+    ]
 
     def _fire(goal_id: int) -> None:
         goal = _world().get_goal(goal_id)
@@ -10026,24 +10142,23 @@ async def compliance_packet_download(request: Request) -> Response:
     """Download a one-click compliance evidence bundle (SOC 2 control snapshot +
     GDPR/EU-AI-Act control report + audit-chain verdict) as a JSON artifact."""
     require_permission(request, "audit")
-    global _COMPLIANCE_PACKET_CACHE
+    cache_key = _active_cache_context()
     now = time.monotonic()
-    if (
-        _COMPLIANCE_PACKET_CACHE is not None
-        and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
-    ):
-        body = _COMPLIANCE_PACKET_CACHE[1]
+    cached = _COMPLIANCE_PACKET_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS:
+        body = cached[1]
     else:
         async with _COMPLIANCE_PACKET_LOCK:
             now = time.monotonic()
-            if (
-                _COMPLIANCE_PACKET_CACHE is not None
-                and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
-            ):
-                body = _COMPLIANCE_PACKET_CACHE[1]
+            cached = _COMPLIANCE_PACKET_CACHE.get(cache_key)
+            if cached is not None and now - cached[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS:
+                body = cached[1]
             else:
                 body = await run_in_threadpool(_build_compliance_packet_body)
-                _COMPLIANCE_PACKET_CACHE = (time.monotonic(), body)
+                _COMPLIANCE_PACKET_CACHE[cache_key] = (time.monotonic(), body)
+                for key, (created_at, _value) in list(_COMPLIANCE_PACKET_CACHE.items()):
+                    if time.monotonic() - created_at >= _COMPLIANCE_PACKET_CACHE_TTL_SECONDS:
+                        _COMPLIANCE_PACKET_CACHE.pop(key, None)
     return Response(
         content=body,
         media_type="application/json",

@@ -245,10 +245,64 @@ def _read_toml_raw(path: Path) -> dict:
     return raw
 
 
+def _tree_contains_sealed_value(value: object) -> bool:
+    """Whether a parsed config tree contains an at-rest ciphertext token.
+
+    Keep this marker-only preflight independent from ``crypto_at_rest`` so an
+    ordinary plaintext config load does not import the encryption stack or
+    resolve key paths.  ``is_sealed_str`` performs the authenticated structural
+    check before any token is actually decrypted below.
+    """
+    if isinstance(value, str):
+        return value.startswith("MVKAR1:")
+    if isinstance(value, dict):
+        return any(_tree_contains_sealed_value(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_tree_contains_sealed_value(item) for item in value)
+    return False
+
+
+def _unseal_config_tree(value: object) -> object:
+    """Return a detached config tree with authenticated ciphertext opened.
+
+    Dashboard-managed credentials are deployment-global configuration, so they
+    must use the process/deployment key even when a request currently carries a
+    tenant context.  Legacy plaintext remains readable; a genuine ciphertext
+    that cannot be authenticated fails closed through ``unseal_from_str``.
+    """
+    if not _tree_contains_sealed_value(value):
+        return value
+    from .crypto_at_rest import (
+        deployment_key_scope,
+        is_sealed_str,
+        unseal_from_str,
+    )
+
+    def walk(item: object) -> object:
+        if isinstance(item, str):
+            return unseal_from_str(item) if is_sealed_str(item) else item
+        if isinstance(item, dict):
+            return {key: walk(child) for key, child in item.items()}
+        if isinstance(item, list):
+            return [walk(child) for child in item]
+        if isinstance(item, tuple):
+            return tuple(walk(child) for child in item)
+        return item
+
+    with deployment_key_scope():
+        return walk(value)
+
+
 def _load_config_file(path: Path) -> dict:
     # _interp returns a fresh dict tree on every call, so the cached raw dict is
-    # never mutated by callers; env substitution stays live.
-    return _interp(_read_toml_raw(path))
+    # never mutated by callers; env substitution stays live.  Only the fixed
+    # dashboard overlay accepts encrypted scalar tokens.  Hand-authored base or
+    # tenant configs retain their literal values and existing interpolation
+    # contract.
+    loaded = _interp(_read_toml_raw(path))
+    if path.name == DASHBOARD_OVERRIDES_BASENAME:
+        return _unseal_config_tree(loaded)  # type: ignore[return-value]
+    return loaded
 
 
 def _deep_merge_config(base: dict, overlay: dict) -> dict:

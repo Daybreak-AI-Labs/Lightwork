@@ -75,6 +75,7 @@ from .auth import (
     goal_owner_filter,
     has_permission,
     non_static_auth_configured,
+    require_global_permission,
     require_permission,
     require_principal_in_request_context,
     require_suite,
@@ -2460,6 +2461,7 @@ async def goal_set_project(
 @app.get("/styles", response_class=HTMLResponse)
 async def styles_page(request: Request) -> HTMLResponse:
     """Output styles -- the response style applied to every run."""
+    require_global_permission(request, "operate")
     from maverick.styles import active_style_name, all_styles
 
     items = [{"name": n, "guidance": g} for n, g in sorted(all_styles().items())]
@@ -2473,7 +2475,7 @@ async def styles_set(request: Request, name: str = Form("")) -> RedirectResponse
     """Set the active output style (empty value clears it). Same-origin; the
     operator role (it changes how every agent responds)."""
     _require_same_origin(request)
-    require_permission(request, "operate")
+    require_global_permission(request, "operate")
     from maverick import runtime_overrides
 
     n = (name or "").strip()
@@ -2561,7 +2563,7 @@ async def tenants_page(request: Request) -> HTMLResponse:
     bootstrap admin. Fail-soft to an empty roster so a missing registry never
     500s the console.
     """
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     try:
         from maverick.tenant.registry import list_tenants
 
@@ -2638,7 +2640,7 @@ async def tenants_overview_page(request: Request) -> HTMLResponse:
     the RBAC "admin" permission gates the route outright. Fail-soft to an
     empty roster so a missing registry never 500s the console.
     """
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     try:
         rows = _tenant_overview_rows()
     except Exception:  # pragma: no cover -- never 500 the console
@@ -2654,7 +2656,7 @@ async def tenants_overview_page(request: Request) -> HTMLResponse:
 async def tenants_overview_api(request: Request) -> JSONResponse:
     """JSON face of the multi-tenant view. Admin-only like ``/tenants`` (the
     RBAC "admin" permission, so store-assigned admins count too)."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     try:
         rows = _tenant_overview_rows()
     except Exception:  # pragma: no cover -- never 500 the console
@@ -4476,7 +4478,10 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
     from datetime import datetime, timezone
 
     w = _world()
-    episodes = w.list_episodes(limit=10_000)
+    # Keep both the statement and its itemized export within the same
+    # principal boundary as the spend APIs. Tenant scoping alone is not enough:
+    # a tenant can contain many mutually untrusted dashboard users.
+    episodes = w.list_episodes(limit=10_000, owner=goal_owner_filter(request))
     months: dict[str, dict] = {}
     for e in episodes:
         if not e.ended_at:
@@ -5329,6 +5334,7 @@ async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
 @app.get("/plugins", response_class=HTMLResponse)
 async def plugins_page(request: Request) -> HTMLResponse:
     """Discovered + enabled plugins."""
+    require_global_permission(request, "admin")
     try:
         from maverick.plugins import _allowed_plugin_names, _entry_points
         from maverick.runtime_overrides import plugin_overlay
@@ -5395,7 +5401,7 @@ async def plugins_toggle(
     # Enabling a plugin loads its code on the next goal -- a control-plane
     # change as privileged as /plugins/install (which requires admin). Gate it
     # the same way so a viewer/operator can't alter what code the agent loads.
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick.runtime_overrides import (
         disable_plugin,
         enable_plugin,
@@ -5422,6 +5428,7 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
     install allowlist (``install_plugin`` rejects anything not on it). Only the
     allowlisted package names are ever accepted -- never free-text input."""
     _require_same_origin(request)
+    require_global_permission(request, "admin")
     if os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() not in {"1", "true", "yes"}:
         raise HTTPException(
             status_code=403,
@@ -5431,7 +5438,6 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
                 "MAVERICK_ALLOW_PLUGIN_INSTALL=1)."
             ),
         )
-    require_permission(request, "admin")
     from maverick.plugins import install_plugin
 
     try:
@@ -5446,7 +5452,7 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
     """MCP servers: config.toml entries (read-only here) plus dashboard-added
     servers (overlay, removable). Admins add a new server from the form below —
     no config.toml editing needed."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     try:
         from maverick.config import load_config
 
@@ -5504,7 +5510,7 @@ async def mcp_add(request: Request) -> RedirectResponse:
     (command/args/env) or http (url/headers/auth) spec and stores it in the
     runtime overlay; the kernel validates + unions it on the next goal."""
     _require_same_origin(request)
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick.runtime_overrides import add_mcp_server
 
     form = await request.form()
@@ -5544,7 +5550,7 @@ async def mcp_add(request: Request) -> RedirectResponse:
 async def mcp_remove(request: Request, name: str = Form(...)) -> RedirectResponse:
     """Remove a dashboard-added MCP server (config.toml servers are untouched)."""
     _require_same_origin(request)
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick.runtime_overrides import remove_mcp_server
 
     remove_mcp_server((name or "").strip())
@@ -5921,7 +5927,7 @@ async def channels_page(request: Request, saved: str = "") -> HTMLResponse:
     sections, plus a read-only, secret-redacted view of everything configured.
     Saved to the dashboard overlay, never config.toml; effective on the next
     `maverick serve`."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     sensitive_markers = (
         "token",
         "secret",
@@ -5974,7 +5980,7 @@ async def channels_save(request: Request) -> RedirectResponse:
     the dashboard overlay (dashboard-config.toml), never config.toml; blank
     fields keep the current value so a toggle never wipes a hidden secret."""
     _require_same_origin(request)
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
     form = await request.form()
@@ -5992,7 +5998,7 @@ async def channels_save(request: Request) -> RedirectResponse:
 async def channels_clear(request: Request, channel: str = Form(...)) -> RedirectResponse:
     """Remove a channel's dashboard overlay (reverts to config.toml / env)."""
     _require_same_origin(request)
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
     try:

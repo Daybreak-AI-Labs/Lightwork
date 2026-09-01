@@ -27,15 +27,26 @@ def test_add_then_read_stdio_server():
 
 
 def test_add_http_server_roundtrips_via_toml():
+    import maverick.runtime_overrides as ro
     from maverick.runtime_overrides import add_mcp_server, mcp_overlay
     add_mcp_server("remote", {
         "url": "https://host.example/mcp",
         "auth_token": "t0ken",
         "headers": {"X-Org": "acme"},
+        "oauth": {
+            "token_url": "https://host.example/token",
+            "client_id": "client-one",
+            "client_secret": "oauth-secret",
+        },
     })
+    persisted = ro.OVERRIDES_PATH.read_text(encoding="utf-8")
+    for plaintext in ("t0ken", "acme", "client-one", "oauth-secret"):
+        assert plaintext not in persisted
+    assert persisted.count("MVKAR1:") >= 4
     overlay = mcp_overlay()
     assert overlay["remote"]["url"] == "https://host.example/mcp"
     assert overlay["remote"]["headers"]["X-Org"] == "acme"
+    assert overlay["remote"]["oauth"]["client_secret"] == "oauth-secret"
     # the inline-table / list rendering must parse back cleanly
     assert overlay["remote"]["auth_token"] == "t0ken"
 
