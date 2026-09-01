@@ -2112,7 +2112,9 @@ async def bind_active_tenant(request: Request, call_next):
     auth-off mode or for the authenticated static dashboard token. End-user
     selections are principal-scoped and are bound later by the authentication
     dependency, after membership can be verified. An explicit env/context
-    binding still wins in every mode.
+    binding still wins in every mode. A selection naming a tenant that was
+    suspended or deleted is ignored rather than trusted, so the registry stays
+    authoritative for who may do work.
     """
     from maverick.paths import current_tenant_id, reset_tenant, set_tenant
 

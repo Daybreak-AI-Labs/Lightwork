@@ -329,7 +329,12 @@ async def list_tenants(request: Request) -> list[TenantOut]:
 
 @router.get("/workspace/active-tenant")
 async def get_active_tenant(request: Request) -> dict:
-    """The caller's workspace tenant and the binding that selected it."""
+    """Return the caller's workspace tenant and the binding that selected it.
+
+    The environment pin outranks both the authenticated principal's selection
+    and the persisted local-operator selection introduced by the self-service
+    workspace picker.
+    """
     require_permission(request, "view")
     import os
 
@@ -360,7 +365,8 @@ async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
     Authenticated users may select only tenants where they hold a membership;
     global tenant administrators may select any active tenant. Genuine local
     mode and the static operator token retain the single-operator persisted
-    selection. A preference never grants access by itself.
+    selection introduced by the self-service picker. Both stores validate the
+    selected tenant, and a preference never grants access by itself.
     """
     require_permission(request, "view")
     from maverick import config as _cfg

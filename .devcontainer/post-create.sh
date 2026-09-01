@@ -23,6 +23,11 @@ pip install 'questionary>=2.0' 'rich>=13.7' \
 # cffi fixes the import. build: so `python3 -m build --wheel` works per-package.
 pip install pytest pytest-asyncio 'ruff>=0.5' 'vulture>=2.11' \
             'pyjwt[crypto]' cffi build
+# AI-evidence local parsers: Pillow mirrors the CI environment
+# (requirements/ci.txt pins it); xlrd + olefile power the legacy-XLS worker.
+# Their tests self-skip without these (test_oidc pattern), so this install is
+# what makes them actually RUN in the devcontainer.
+pip install 'pillow>=10' 'xlrd>=2.0' 'olefile>=0.47'
 # openai: every OpenAI-compatible provider (openai/ollama/vllm/tgi/azure/...)
 # imports it; without it a vllm:/ollama:-routed run dies at the provider.
 pip install 'openai>=1.30'

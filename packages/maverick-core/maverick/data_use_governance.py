@@ -456,7 +456,11 @@ class DataUseGovernanceStore:
     ) -> None:
         self.path = Path(path).expanduser()
         self._clock = clock
-        self._id_factory = id_factory or (lambda prefix: f"{prefix}-{secrets.token_urlsafe(18)}")
+        # Hex, never base64url: token_urlsafe can emit "--", which the
+        # prohibited-syntax check treats as a SQL comment -- the store then
+        # refused an id it minted itself (a ~0.5%-per-id CI flake and a
+        # real production failure). Same 144 bits of entropy.
+        self._id_factory = id_factory or (lambda prefix: f"{prefix}-{secrets.token_hex(18)}")
         self._initialize()
 
     def _now(self) -> float:
