@@ -54,8 +54,8 @@ jobs:
         run: |
           python -I -m pip install --upgrade \
             --constraint requirements/ci.txt \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
-            'packaging==26.2' 'pip-tools==7.6.0'
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.48.0' \
+            'packaging==26.3' 'pip-tools==7.6.1'
           python -I scripts/verify_constraint_closure.py
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
