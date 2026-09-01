@@ -54,7 +54,7 @@ jobs:
         run: |
           python -I -m pip install --upgrade \
             --constraint requirements/ci.txt \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.48.0' \
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
             'packaging==26.3' 'pip-tools==7.6.1'
           python -I scripts/verify_constraint_closure.py
 
@@ -435,7 +435,7 @@ jobs:
               # It is compiled separately because Python 3.12/Homebrew creates
               # the target venv without pip or setuptools.
               build_input.write_text(
-                  "setuptools==83.0.0\n",
+                  "setuptools==84.0.0\n",
                   encoding="utf-8",
               )
 
@@ -497,7 +497,7 @@ jobs:
           ):
               raise SystemExit("resolved dependency lock is empty or unhashed")
           if (
-              "setuptools==83.0.0" not in build_requirements
+              "setuptools==84.0.0" not in build_requirements
               or "--hash=sha256:" not in build_requirements
           ):
               raise SystemExit("hashed setuptools build lock was not generated")
