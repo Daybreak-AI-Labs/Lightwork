@@ -1575,7 +1575,11 @@ here.
   path.
 - **Trust receipts — bearer-verifiable evidence for one decision**
   (`trust_receipt.py`, `trust_receipt_verify.py`, `maverick attest receipt
-  mint|verify|export-verifier`) — the unit below an attestation bundle: a
+  mint|verify|export-verifier`, dashboard **Audit → Trust Receipts** at
+  `/audit/receipts`: pick a signed row, mint and download its receipt,
+  optionally anchoring it through a checkpoint, download the standalone
+  verifier, and verify a receipt against the deployment's keys or a pasted
+  one — audit-gated end to end) — the unit below an attestation bundle: a
   portable artifact for a single signed audit row ("`wire_transfer` was denied
   under `deny_actions` for `agent:finance-1` at T", "`read_file` ran") that an
   auditor, regulator or a customer's customer verifies offline with a public key
@@ -3412,7 +3416,11 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   SBOM in CI.
 - **Regulatory compiler — compliance by construction**
   (`regulatory_compiler.py`, `maverick regulatory show|check|verify`,
-  `python -m maverick.regulatory_compiler --ci`) — a policy document says what
+  `python -m maverick.regulatory_compiler --ci`, dashboard **Compliance →
+  Regulatory Obligations** at `/compliance/obligations`: what is compiled, the
+  anti-vacuity proof, a library preview per regulation, and "check an action"
+  answered from the compiled policy — read-only by design, enforcement is
+  chosen in config) — a policy document says what
   must not happen; this makes it *unable* to happen. Each regulation is a small
   library of obligations — a citation, a scope (tool names or a risk floor) and
   an effect — compiled into the same `Policy` the tool-call chokepoint already
