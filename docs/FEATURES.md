@@ -1573,6 +1573,27 @@ here.
   verifier out as a standalone program that imports nothing from maverick and
   needs only Python plus `cryptography` — the "hand a regulator a USB stick"
   path.
+- **Trust receipts — bearer-verifiable evidence for one decision**
+  (`trust_receipt.py`, `trust_receipt_verify.py`, `maverick attest receipt
+  mint|verify|export-verifier`) — the unit below an attestation bundle: a
+  portable artifact for a single signed audit row ("`wire_transfer` was denied
+  under `deny_actions` for `agent:finance-1` at T", "`read_file` ran") that an
+  auditor, regulator or a customer's customer verifies offline with a public key
+  obtained out of band. The receipt embeds the row, every row that follows it
+  up to a chain tip, and — with `--checkpoint-dir` — the signed checkpoint that
+  committed that tip. Verification re-derives all of it: the envelope
+  signature, the row's own hash and signature, the **claim recomputed from the
+  row** (a stated claim that drifts from the row FAILS, however validly it was
+  re-signed), the hash links to the tip, and the checkpoint's agreement with
+  it. Three depths that are not synonyms: *signed* (a genuine row), *chained*
+  (provably linked to an issuer-committed tip), *anchored* (that commitment
+  matched a digest the verifier brought from OUTSIDE the receipt —
+  `--anchor-digest` or the checkpoint file via `--checkpoint-dir` — the only
+  depth at which history could not have been quietly re-committed afterwards).
+  The minter refuses a broken chain, never mutates the audit files, and stamps
+  `issuer.key_custody` so a co-located key is reported as integrity rather than
+  tamper-evidence. Point-in-time by design: a later lawful erasure re-signs the
+  day, and the verifier says so.
 - **Memory Guard — governed reads/writes (OWASP ASI06)** (`memory_guard.py`,
   opt-in `[memory_guard] enable` / `MAVERICK_MEMORY_GUARD`) — the screen
   between an agent and its memory store. Every fact write is stamped with

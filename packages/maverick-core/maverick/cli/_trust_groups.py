@@ -624,3 +624,104 @@ def memory_plane_verify_cmd(bundle: str, key_hex: str) -> None:
     click.echo(format_report(result))
     if not result.ok:
         raise click.ClickException("memory-plane verification failed")
+
+
+# ---- trust receipts ---------------------------------------------------------
+
+@attest_group.group("receipt")
+def receipt_group() -> None:
+    """Bearer-verifiable receipts for single audited decisions.
+
+    A receipt binds ONE signed audit row -- "tool X was denied under rule R",
+    "tool X ran" -- to the chain it sits in and (with ``--checkpoint-dir``) to
+    a signed checkpoint whose digest the operator publishes out of band. A
+    third party verifies it offline with ``receipt export-verifier`` and the
+    publisher's key from ``attest key``; nothing is trusted from inside the
+    receipt itself.
+    """
+
+
+@receipt_group.command("mint")
+@click.argument("day")
+@click.argument("row_hash")
+@click.option("--out", "-o", "out", type=click.Path(), required=True,
+              help="Where to write the receipt JSON.")
+@click.option("--audit-dir", type=click.Path(), default=None,
+              help="Audit directory holding the day-file (default: this instance's).")
+@click.option("--checkpoint-dir", type=click.Path(), default=None,
+              help="Publish (or reuse) a signed checkpoint committing to the "
+                   "row's chain, so the receipt can verify at depth 'anchored'.")
+@click.option("--no-suffix", is_flag=True,
+              help="Omit the rows after the cited one: a smaller receipt that "
+                   "verifies at depth 'signed' only.")
+def receipt_mint_cmd(day: str, row_hash: str, out: str, audit_dir: str | None,
+                     checkpoint_dir: str | None, no_suffix: bool) -> None:
+    """Mint a signed receipt for the audit row ROW_HASH recorded on DAY."""
+    import json as _json
+
+    from ..trust_receipt import export
+    try:
+        path = export(out, audit_dir=audit_dir, day=day, row_hash=row_hash,
+                      checkpoint_dir=checkpoint_dir, include_suffix=not no_suffix)
+    except (LookupError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"receipt -> {path}")
+    receipt = _json.loads(path.read_text(encoding="utf-8"))
+    claim = receipt.get("claim") or {}
+    click.echo(f"claim:      {claim.get('decision')} {claim.get('tool') or ''}".rstrip())
+    commitment = receipt.get("commitment") or {}
+    if commitment.get("source") == "checkpoint":
+        click.echo(f"checkpoint: #{commitment.get('sequence')} "
+                   f"sha256={commitment.get('raw_sha256')}")
+        click.echo("Publish that digest out of band; a verifier passes it as "
+                   "--anchor-digest to reach depth 'anchored'.")
+    elif commitment.get("source") == "anchor_ledger":
+        click.echo("committed by the issuer's anchor ledger (depth 'chained'; "
+                   "pass --checkpoint-dir for an externally anchorable receipt)")
+    else:
+        click.echo(click.style(
+            "no commitment: verifiable at depth 'signed' only "
+            "(pass --checkpoint-dir to anchor it)", fg="yellow"))
+
+
+@receipt_group.command("verify")
+@click.argument("receipt", type=click.Path(exists=True))
+@click.option("--key", "keys", multiple=True, metavar="HEX",
+              help="Trusted Ed25519 public key obtained OUT OF BAND (repeatable).")
+@click.option("--anchor-digest", default=None, metavar="SHA256",
+              help="Published sha256 of the checkpoint file the receipt cites.")
+@click.option("--checkpoint-dir", type=click.Path(), default=None,
+              help="Issuer's checkpoint directory, to compare on-disk bytes.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def receipt_verify_cmd(receipt: str, keys: tuple[str, ...], anchor_digest: str | None,
+                       checkpoint_dir: str | None, as_json: bool) -> None:
+    """Verify RECEIPT against trusted keys (fails closed without one)."""
+    import json as _json
+
+    from ..trust_receipt import verify
+    from ..trust_receipt_verify import format_report
+    result = verify(receipt, trusted_keys=keys, anchor_digest=anchor_digest,
+                    checkpoint_dir=checkpoint_dir)
+    click.echo(_json.dumps(result.to_dict(), indent=2) if as_json
+               else format_report(result))
+    if not result.ok:
+        raise click.ClickException("trust receipt verification failed")
+
+
+@receipt_group.command("export-verifier")
+@click.argument("out", type=click.Path())
+def receipt_export_verifier_cmd(out: str) -> None:
+    """Write the standalone receipt verifier to OUT (no maverick install needed)."""
+    import pathlib
+
+    from ..trust_receipt import verifier_source
+    text, digest = verifier_source()
+    path = pathlib.Path(out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    click.echo(f"verifier -> {path}")
+    click.echo(f"sha256:     {digest}")
+    click.echo("")
+    click.echo(f"  python {path.name} <receipt.json> --key <pubkey-hex> "
+               "[--anchor-digest <sha256>] [--checkpoint-dir <dir>]")
+    click.echo("Needs only Python and 'cryptography'.")

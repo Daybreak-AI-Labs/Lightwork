@@ -138,6 +138,9 @@ class EventKind:
     CONSENT_RESULT  = "consent_result"
     SECRET_REDACTED = "secret_redacted"
     ERASE           = "erase"
+    # A bearer-verifiable receipt for one audited decision was minted
+    # (trust_receipt.py). Payload: day, row_hash, committed, key_id.
+    TRUST_RECEIPT_ISSUED = "trust_receipt_issued"
     # Data-retention enforcement deleted aged audit day-files / world rows. One
     # signed row per non-dry-run purge so a gap in the day-files (or shrunken
     # episode/event tables) is provably policy-driven retention, not tampering.
