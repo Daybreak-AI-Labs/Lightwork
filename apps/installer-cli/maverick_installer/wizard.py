@@ -4434,6 +4434,16 @@ def pick_advanced() -> dict[str, Any]:
             "enterprise mode; recommended at the company boundary.",
             default=False,
         ),
+        "control_plane": _q_confirm(
+            "Turn on the Agent Control Plane? One console (dashboard page + "
+            "`maverick control-plane`) over every agent this deployment runs or "
+            "admits: suspend / resume / contain / attenuate a principal, or halt "
+            "the fleet, with each verb landing in the enforcement the runtime "
+            "already consults and recorded on the signed audit chain. Reads work "
+            "regardless; this arms the verbs. Recommended wherever more than one "
+            "person operates agents.",
+            default=False,
+        ),
         "anonymous_logs": _q_confirm(
             "Anonymous mode? Scrub user-identifying content (goal text, user/channel "
             "ids, home paths, emails/phones) from logs and audit events — hashes or "
@@ -4772,6 +4782,17 @@ def pick_advanced() -> dict[str, Any]:
         ).strip()
         if disclosure:
             advanced["compliance_disclosure_text"] = disclosure
+        # Regulatory obligations compile into the SAME action gate every tool
+        # call already passes (maverick.regulatory_compiler): a regulation is
+        # enforced by construction, and `maverick regulatory verify` proves it.
+        profiles = _q_checkbox(
+            "  Regulatory obligations to compile into the action gate "
+            "(strictest-wins)",
+            ["gdpr", "eu_ai_act", "hipaa"],
+            default=[],
+        )
+        if profiles:
+            advanced["compliance_profiles"] = [str(p) for p in profiles]
     # OIDC SSO is a string-bearing toggle (issuer/audience/jwks_uri), so it has
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
@@ -6860,11 +6881,17 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# mode is a separate [residency] strict knob.")
         lines.append("[residency]")
         _emit_kv(lines, "region", advanced["residency_region"])
-    if advanced.get("compliance_disclosure_text"):
+    if advanced.get("compliance_disclosure_text") or advanced.get("compliance_profiles"):
         lines.append("")
-        lines.append("# AI-disclosure line surfaced to users (maverick.compliance).")
+        lines.append("# AI-disclosure line surfaced to users (maverick.compliance), and the")
+        lines.append("# regulatory obligations compiled into the action gate")
+        lines.append("# (maverick.regulatory_compiler; strictest-wins).")
         lines.append("[compliance]")
-        _emit_kv(lines, "disclosure_text", advanced["compliance_disclosure_text"])
+        if advanced.get("compliance_disclosure_text"):
+            _emit_kv(lines, "disclosure_text", advanced["compliance_disclosure_text"])
+        if advanced.get("compliance_profiles"):
+            lines.append("profiles = [" + ", ".join(
+                _toml_str(p) for p in advanced["compliance_profiles"]) + "]")
     if advanced.get("agent_trust"):
         lines.append("")
         lines.append("[agent_trust]")
@@ -6886,6 +6913,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             'max_wall_seconds = 600, data_scopes = ["support"] },'
         )
         lines.append("# ]")
+    if advanced.get("control_plane"):
+        lines.append("")
+        lines.append("# Agent Control Plane (maverick.agent_control_plane): arms the")
+        lines.append("# suspend/resume/contain/release/attenuate/halt verbs on the console")
+        lines.append("# and `maverick control-plane`; roster/status/ledger reads work anyway.")
+        lines.append("[control_plane]")
+        lines.append("enable = true")
     if advanced.get("anonymous_logs"):
         lines.append("")
         lines.append("[privacy]")
@@ -8419,6 +8453,7 @@ _COMPLIANCE_COMMANDS: list[tuple[str, str]] = [
     ("maverick assess", "run a PIA / AIRA / vendor-risk assessment"),
     ("maverick hunt", "hunt the audit trail for agent attacks"),
     ("maverick remediate", "assess security posture + fix low-risk gaps"),
+    ("maverick regulatory verify", "prove compiled obligations are live gates"),
 ]
 
 

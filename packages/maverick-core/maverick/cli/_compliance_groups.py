@@ -2902,3 +2902,102 @@ def dsar_fulfill_mint(fulfillment_id, expires_hours, max_reads, revision,
     except (KeyError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(link["response_path"])
+
+
+# ----- Regulatory compiler (compliance by construction) ------------------
+
+@main.group("regulatory")
+def regulatory_group() -> None:
+    """Regulatory obligations compiled into the action gate.
+
+    A regulation here is a library of obligations -- a citation, a scope and an
+    effect -- compiled into the same governance policy every tool call passes,
+    plus a capability attenuation that can only narrow. Activation is
+    ``[compliance] profiles``. ``verify`` proves each active obligation is a
+    live, non-vacuous gate; ``check`` shows what the gate does to one action.
+    """
+
+
+def _regulatory_keys(profiles: str | None) -> list[str]:
+    from ..regulatory_compiler import active_keys
+    if profiles:
+        return [p.strip() for p in profiles.split(",") if p.strip()]
+    return active_keys()
+
+
+@regulatory_group.command("show")
+@click.option("--profiles", default=None, metavar="K1,K2",
+              help="Regulation keys to show (default: those active in config).")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def regulatory_show_cmd(profiles: str | None, as_json: bool) -> None:
+    """List the compiled obligations and the policy they produce."""
+    import json as _json
+
+    from ..regulatory_compiler import describe
+    report = describe(_regulatory_keys(profiles))
+    if as_json:
+        click.echo(_json.dumps(report, indent=2))
+        return
+    if not report["profiles"]:
+        click.echo("no regulation active (set [compliance] profiles, or pass --profiles)")
+        return
+    for ob in report["obligations"]:
+        scope = ", ".join(ob["actions"] or ob["deny_tools"]) or f">= {ob['min_risk']} risk"
+        click.echo(f"[{ob['effect']}] {ob['id']}  {ob['regulation']} {ob['article']}: {scope}")
+    pol = report["policy"]
+    click.echo("")
+    click.echo(f"deny_actions:            {', '.join(pol['deny_actions']) or '-'}")
+    click.echo(f"require_human_actions:   {', '.join(pol['require_human_actions']) or '-'}")
+    click.echo(f"require_human_min_risk:  {pol['require_human_min_risk'] or '-'}")
+    click.echo(f"attenuation (deny):      "
+               f"{', '.join(report['attenuation']['deny_tools']) or '-'}")
+
+
+@regulatory_group.command("check")
+@click.argument("action")
+@click.option("--profiles", default=None, metavar="K1,K2",
+              help="Regulation keys to check under (default: those active in config).")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def regulatory_check_cmd(action: str, profiles: str | None, as_json: bool) -> None:
+    """What the compiled obligations do to ACTION, and which one says so."""
+    import json as _json
+
+    from ..governance import evaluate
+    from ..regulatory_compiler import audit_tags_under, compile_obligations
+    compiled = compile_obligations(_regulatory_keys(profiles))
+    verdict = evaluate(action, policy=compiled.policy)
+    tags = audit_tags_under(action, verdict.rule, compiled.obligations)
+    attenuated = action in compiled.deny_tools
+    report = {"action": action, "decision": verdict.decision.value,
+              "rule": verdict.rule, "reason": verdict.reason,
+              "attenuated": attenuated, **tags}
+    if as_json:
+        click.echo(_json.dumps(report, indent=2))
+        return
+    colour = {"allow": "green", "require_human": "yellow", "deny": "red"}
+    click.echo(f"{action}: " + click.style(verdict.decision.value.upper(),
+                                            fg=colour.get(verdict.decision.value)))
+    if tags:
+        click.echo(f"  under {tags['regulation']} {tags['article']} ({tags['obligation_id']})")
+    if attenuated:
+        click.echo("  removed from every capability by an attenuation obligation")
+    if not tags and not attenuated:
+        click.echo("  no active obligation covers this action")
+
+
+@regulatory_group.command("verify")
+@click.option("--ci", is_flag=True,
+              help="Exit 1 on any problem, exit 2 if nothing was inspected.")
+@click.option("--profiles", default=None, metavar="K1,K2",
+              help="Regulation keys to verify (default: those active in config).")
+def regulatory_verify_cmd(ci: bool, profiles: str | None) -> None:
+    """Prove every active obligation is a live, non-vacuous gate."""
+    from ..regulatory_compiler import main as _main
+    argv: list[str] = []
+    if profiles:
+        argv += ["--profiles", profiles]
+    if ci:
+        argv.append("--ci")
+    code = _main(argv)
+    if code:
+        sys.exit(code)

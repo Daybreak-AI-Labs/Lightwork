@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from .finance.regimes import union_policies  # generic strictest-wins policy union
 from .governance import Policy
+from .regulatory_compiler import compile_obligations
 
 # Protection floors a profile can require. Active compliance profiles make
 # these floors mandatory: runtime readers treat a required floor as enabled so
@@ -50,7 +51,32 @@ PROFILES: dict[str, ComplianceProfile] = {
             FLOOR_EGRESS_LOCK, FLOOR_AUDIT_LOG,
         }),
         # PHI handling warrants human oversight on every high-risk action.
+        # The minimum-necessary clause (45 CFR 164.502(b)) is compiled by
+        # regulatory_compiler as a capability attenuation, not a policy rule.
         policy=Policy(require_human_min_risk="high"),
+    ),
+    # The two profiles below are compiled from regulatory_compiler's obligation
+    # library, so the same citation that tags the audit row is the one that
+    # produced the rule. Floors are the minimum a regulator would expect the
+    # runtime to already have; the gates are what the regulation adds.
+    "gdpr": ComplianceProfile(
+        "gdpr",
+        "GDPR (Regulation (EU) 2016/679)",
+        "Erasure only through the governed path (Art. 17); a human confirms "
+        "every outbound transfer of personal data (Art. 32); no solely "
+        "automated high-impact decision -- every high-risk action pauses for a "
+        "human (Art. 22).",
+        required_floors=frozenset({FLOOR_PII_REDACTION, FLOOR_AUDIT_LOG}),
+        policy=compile_obligations(["gdpr"]).policy,
+    ),
+    "eu_ai_act": ComplianceProfile(
+        "eu_ai_act",
+        "EU AI Act (Regulation (EU) 2024/1689)",
+        "Effective human oversight of a high-risk AI system: every high-risk "
+        "action pauses for a human (Art. 14). Conduct prohibitions (Art. 5) "
+        "remain the packs' hard refusals.",
+        required_floors=frozenset({FLOOR_AUDIT_LOG}),
+        policy=compile_obligations(["eu_ai_act"]).policy,
     ),
 }
 
