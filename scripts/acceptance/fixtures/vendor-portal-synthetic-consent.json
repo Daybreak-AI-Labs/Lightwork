@@ -1,0 +1,13 @@
+{
+  "authorized_by": "user:synthetic-pilot-operator",
+  "estate_ref": "local-vendor-portal-synthetic-estate",
+  "live_vendor_consent_obtained": false,
+  "operator_attestation": "synthetic_fixture_execution_authorized",
+  "record_id": "synthetic-vendor-portal-consent-2026-08-28",
+  "schema": "lightwork.ai-vendor-portal.synthetic-consent-fixture.v1",
+  "scope": [
+    "two bundled synthetic vendor cases",
+    "no external network, vendor, or customer participants"
+  ],
+  "synthetic_documents_only": true
+}

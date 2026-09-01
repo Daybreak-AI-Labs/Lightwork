@@ -44,7 +44,12 @@
                      follow-ups. Review and send questions back without
                      leaving this screen.
                      <a href="/privacy/board">Command center →</a> ·
-                     <a href="/privacy/report">Program report →</a>') %}
+                     <a href="/privacy/report">Program report →</a> ·
+                     <a href="/privacy/data-discovery">Data discovery →</a> ·
+                     <a href="/privacy/regulatory-intelligence">Regulatory intelligence →</a> ·
+                     <a href="/privacy/rights-orchestration">Rights orchestration →</a> ·
+                     <a href="/privacy/rights-consumer-delivery">Rights delivery →</a> ·
+                     <a href="/privacy/notice-governance">Notice governance →</a>') %}
     {{ state('Current state',
              stats.total ~ ' assessment' ~ ('' if stats.total == 1 else 's') ~ ' on record',
              badge=(stats.pending ~ ' to review') if stats.pending else 'clear',

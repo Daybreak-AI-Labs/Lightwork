@@ -100,12 +100,14 @@ def canonical_tenant_id(tenant: str) -> str:
     if not isinstance(tenant, str) or not tenant:
         raise InvalidTenantError("tenant id is required")
     canonical = unicodedata.normalize("NFC", tenant)
+    # Check the identity before path encoding: a trailing space becomes ``%20``
+    # in the portable segment and would otherwise bypass the Win32 alias guard.
+    if canonical.endswith((".", " ")):
+        raise InvalidTenantError("tenant id cannot end with a dot or space")
     segment = _tenant_segment(canonical)
     # Win32 strips trailing dots from path components and treats device names
     # as devices even when an extension is present. Reject these names on every
     # OS so a deployment can move its data without changing tenant identity.
-    if segment.endswith((".", " ")):
-        raise InvalidTenantError("tenant id cannot end with a dot or space")
     device_stem = segment.split(".", 1)[0].casefold()
     if device_stem in _WINDOWS_DEVICE_NAMES:
         raise InvalidTenantError("tenant id is a reserved filesystem name")

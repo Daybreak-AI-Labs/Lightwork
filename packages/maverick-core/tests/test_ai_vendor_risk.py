@@ -53,6 +53,20 @@ def _safe_answers() -> dict[str, str]:
     }
 
 
+def test_feature_gate_is_explicit_and_depends_on_model_risk(tmp_path):
+    from maverick import config
+
+    assert avr.enabled() is False
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[ai_vendor_risk]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert avr.enabled() is True
+
+
 def _full_vendor_document() -> bytes:
     return (
         b"Model provenance is documented with the foundation model provider and version. "
@@ -79,6 +93,57 @@ def test_questionnaire_covers_every_required_ai_vendor_domain():
         "aiv_human_oversight",
     }
     assert avr.AI_VENDOR_TEMPLATE.type == "ai_vendor_risk"
+
+
+def test_public_questionnaire_is_exactly_template_bound():
+    with tenant_scope(tenant="acme"):
+        questionnaire = avr.questionnaire()
+
+    assert questionnaire["schema"] == "lightwork.ai-vendor-questionnaire.v1"
+    assert questionnaire["template_revision"] == 1
+    assert len(questionnaire["template_digest"]) == 64
+    assert [row["id"] for row in questionnaire["questions"]] == [
+        question.id for question in avr.AI_VENDOR_QUESTIONS
+    ]
+    assert "certification" in questionnaire["notice"]
+
+
+def test_vendor_attestation_is_distinct_review_required_provenance():
+    attestation_sha = _hex("vendor-portal-submission")
+    with tenant_scope(tenant="acme"):
+        draft = avr.draft_vendor_assessment(
+            "Acme AI",
+            answers={"aiv_provenance": "no"},
+            attested_answers=_safe_answers(),
+            attestation_sha256=attestation_sha,
+            actor="user:risk-owner",
+            use_prior=False,
+        )
+
+    assert draft["answers"]["aiv_provenance"]["answer"] == "no"
+    assert draft["answer_sources"]["aiv_provenance"] == {
+        "kind": "manual",
+        "confidence": 1.0,
+    }
+    for question_id, source in draft["answer_sources"].items():
+        if question_id == "aiv_provenance":
+            continue
+        assert source == {
+            "kind": "vendor_attested",
+            "confidence": 0.75,
+            "review_required": True,
+            "submission_sha256": attestation_sha,
+        }
+    assert draft["status"] == "pending_review"
+
+    with tenant_scope(tenant="acme"):
+        with pytest.raises(ValueError, match="attestation_sha256"):
+            avr.draft_vendor_assessment(
+                "No Digest",
+                attested_answers={"aiv_provenance": "yes"},
+                actor="user:risk-owner",
+                use_prior=False,
+            )
 
 
 def test_every_operation_requires_explicit_tenant_authority():
@@ -117,7 +182,7 @@ def test_document_extraction_produces_all_answers_with_bound_citations():
 
 
 def test_document_citation_redacts_secret_and_never_persists_full_text():
-    secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
+    secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
     document = (
         "Model provenance is documented with provider and version " + secret + ". "
         "This unrelated confidential paragraph must not be retained anywhere."

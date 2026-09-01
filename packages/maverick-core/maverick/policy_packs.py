@@ -1400,6 +1400,83 @@ def _validate_requirement_state(control_id: str, value: Any) -> dict[str, Any]:
     return row
 
 
+_DIFF_LIST_FIELDS = (
+    "controls_added",
+    "controls_removed",
+    "requirements_changed",
+    "requirements_unchanged",
+    "metadata_changed",
+)
+
+
+def _safe_diff_projection(
+    value: Any,
+    *,
+    pack_id: str,
+    pack_version: str,
+    pack_sha256: str,
+) -> dict[str, Any] | None:
+    """Validate and project the last stored semantic diff without evidence links."""
+
+    if value is None:
+        return None
+    try:
+        row = _object(
+            value,
+            "subscription semantic diff",
+            {
+                "pack_id",
+                "from_version",
+                "to_version",
+                "from_content_sha256",
+                "to_content_sha256",
+                *_DIFF_LIST_FIELDS,
+            },
+        )
+    except PolicyPackValidationError as exc:
+        # This value came from the durable subscription row, not from the
+        # caller.  Treat a malformed or forward-incompatible projection as a
+        # state-integrity failure so API callers cannot mistake corruption for
+        # a correctable request error and continue on a weaker path.
+        raise PolicyPackStateError(
+            "subscription semantic diff is malformed"
+        ) from exc
+    if row.get("pack_id") != pack_id or row.get("to_version") != pack_version:
+        raise PolicyPackStateError("subscription semantic diff identity is invalid")
+    try:
+        parse_semver(_text(row.get("from_version"), "diff from_version", 64))
+        parse_semver(_text(row.get("to_version"), "diff to_version", 64))
+    except PolicyPackValidationError as exc:
+        raise PolicyPackStateError("subscription semantic diff version is invalid") from exc
+    for field in ("from_content_sha256", "to_content_sha256"):
+        digest = row.get(field)
+        if not isinstance(digest, str) or not _HEX_64.fullmatch(digest):
+            raise PolicyPackStateError("subscription semantic diff digest is invalid")
+    if row["to_content_sha256"] != pack_sha256:
+        raise PolicyPackStateError("subscription semantic diff target is invalid")
+    projected = {
+        "pack_id": pack_id,
+        "from_version": row["from_version"],
+        "to_version": row["to_version"],
+        "from_content_sha256": row["from_content_sha256"],
+        "to_content_sha256": row["to_content_sha256"],
+    }
+    for field in _DIFF_LIST_FIELDS:
+        raw = row.get(field)
+        if not isinstance(raw, list) or len(raw) > MAX_CONTROLS:
+            raise PolicyPackStateError("subscription semantic diff controls are invalid")
+        try:
+            controls = [_token(item, f"diff {field} control_id", 64) for item in raw]
+        except PolicyPackValidationError as exc:
+            raise PolicyPackStateError(
+                "subscription semantic diff control identity is invalid"
+            ) from exc
+        if controls != sorted(set(controls)):
+            raise PolicyPackStateError("subscription semantic diff controls are not canonical")
+        projected[field] = controls
+    return projected
+
+
 def _normalize_bindings(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value or len(value) > MAX_EVIDENCE_BINDINGS:
         raise PolicyPackValidationError(
@@ -1948,6 +2025,134 @@ class PolicyPackService:
             "revision": record.get("revision"),
         }
 
+    def get_subscription_change_detail(
+        self,
+        pack_id: str,
+    ) -> dict[str, Any] | None:
+        """Return exact change and re-attestation state without evidence identifiers."""
+
+        _require_tenant_scope()
+        record = self.subscriptions.get(subscription_id(_pack_id(pack_id)))
+        if record is None:
+            return None
+        record, pack = self._validate_subscription(
+            record,
+            require_active_channel=False,
+            validate_attestation_links=True,
+        )
+
+        def attestation_present(control_id: str, state: Mapping[str, Any]) -> bool:
+            attestation_id = state.get("attestation_id")
+            if attestation_id is None:
+                return False
+            attestation = self.attestations.get(str(attestation_id))
+            if attestation is None:
+                raise PolicyPackStateError("subscription attestation is missing")
+            attestation = _validate_attestation(attestation)
+            expected_requirements = (
+                state.get("previous_requirements_sha256")
+                if state.get("status") == "stale"
+                else state.get("requirements_sha256")
+            )
+            if (
+                attestation["subscription_id"] != record["id"]
+                or attestation["pack_id"] != pack["pack_id"]
+                or attestation["control_id"] != control_id
+                or attestation["requirements_sha256"]
+                != expected_requirements
+            ):
+                raise PolicyPackStateError(
+                    "subscription attestation is not bound to its requirement"
+                )
+            return True
+
+        controls: list[dict[str, Any]] = []
+        for control_id in sorted(record["requirements"]):
+            state = _validate_requirement_state(
+                control_id,
+                record["requirements"][control_id],
+            )
+            controls.append(
+                {
+                    "control_id": control_id,
+                    "status": state["status"],
+                    "requirements_sha256": state["requirements_sha256"],
+                    "previous_requirements_sha256": state.get(
+                        "previous_requirements_sha256"
+                    ),
+                    "stale_reason": state.get("stale_reason"),
+                    "attestation_present": attestation_present(control_id, state),
+                }
+            )
+
+        retired: list[dict[str, Any]] = []
+        for value in record["retired_requirements"]:
+            state = _object(
+                value,
+                "retired subscription requirement",
+                {
+                    "control_id",
+                    "requirements_sha256",
+                    "attestation_id",
+                    "retired_by_pack_sha256",
+                },
+            )
+            try:
+                control_id = _token(
+                    state.get("control_id"),
+                    "retired control_id",
+                    64,
+                )
+            except PolicyPackValidationError as exc:
+                raise PolicyPackStateError(
+                    "retired subscription requirement identity is invalid"
+                ) from exc
+            for field in ("requirements_sha256", "retired_by_pack_sha256"):
+                digest = state.get(field)
+                if not isinstance(digest, str) or not _HEX_64.fullmatch(digest):
+                    raise PolicyPackStateError(
+                        "retired subscription requirement digest is invalid"
+                    )
+            attestation_id = state.get("attestation_id")
+            if attestation_id is not None and (
+                not isinstance(attestation_id, str)
+                or not attestation_id.startswith("ppa-")
+            ):
+                raise PolicyPackStateError(
+                    "retired subscription attestation link is invalid"
+                )
+            retired.append(
+                {
+                    "control_id": control_id,
+                    "requirements_sha256": state["requirements_sha256"],
+                    "retired_by_pack_sha256": state["retired_by_pack_sha256"],
+                    "attestation_present": attestation_present(control_id, state),
+                }
+            )
+        retired.sort(
+            key=lambda item: (
+                item["control_id"],
+                item["retired_by_pack_sha256"],
+            )
+        )
+        return {
+            "id": record["id"],
+            "pack_id": pack["pack_id"],
+            "pack_version": pack["version"],
+            "pack_sha256": pack["content_sha256"],
+            "revision": record["revision"],
+            "last_diff": _safe_diff_projection(
+                record.get("last_diff"),
+                pack_id=pack["pack_id"],
+                pack_version=pack["version"],
+                pack_sha256=pack["content_sha256"],
+            ),
+            "controls": controls,
+            "retired_controls": retired,
+            "certification": False,
+            "legal_advice": False,
+        }
+
     def active_subscription(self, pack_id: str) -> dict[str, Any] | None:
         _require_tenant_scope()
         record = self.subscriptions.get(subscription_id(pack_id))
@@ -2407,6 +2612,10 @@ def get_subscription_summary(pack_id: str) -> dict[str, Any] | None:
     return _DEFAULT.get_subscription_summary(pack_id)
 
 
+def get_subscription_change_detail(pack_id: str) -> dict[str, Any] | None:
+    return _DEFAULT.get_subscription_change_detail(pack_id)
+
+
 def active_subscription(pack_id: str) -> dict[str, Any] | None:
     return _DEFAULT.active_subscription(pack_id)
 
@@ -2486,6 +2695,7 @@ __all__ = [
     "fetch_update",
     "finalize_pack",
     "get_subscription",
+    "get_subscription_change_detail",
     "get_catalog_summary",
     "get_channel_summary",
     "get_subscription_summary",

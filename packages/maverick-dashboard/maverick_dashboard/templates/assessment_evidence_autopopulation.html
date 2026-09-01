@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Assessment Evidence Proposals - Lightwork{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ style_path }}">
+{% endblock %}
+{% block content %}
+<main class="aep-shell" id="assessment-evidence-shell"
+      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
+  <header class="aep-glass aep-hero">
+    <div>
+      <p class="eyebrow">Privacy + third-party assessment intelligence</p>
+      <h1>Evidence-assisted assessment proposals</h1>
+      <p class="aep-lede">Convert already released evidence analyses into questionnaire-bound answer drafts, then keep human review and application as explicit, separate steps.</p>
+    </div>
+    <div class="aep-runtime" aria-live="polite">
+      <span class="aep-pill" id="aep-status-pill" data-state="checking">Checking</span>
+      <strong id="aep-status-title">Tenant composition</strong>
+      <span id="aep-status-detail">No proposal or evidence store has been opened by this page.</span>
+      <button class="btn" id="aep-refresh-status" type="button">Refresh status</button>
+    </div>
+  </header>
+
+  <aside class="aep-glass aep-boundary" aria-labelledby="aep-boundary-title">
+    <p class="eyebrow">Decision boundary</p>
+    <h2 id="aep-boundary-title">Documents propose. Humans decide. Apply is separate.</h2>
+    <ul>
+      <li>Only current, human-approved AI Evidence Analysis records can support a proposal.</li>
+      <li>Partial, missing, conflicting, or low-confidence evidence can never become an automatically applicable answer.</li>
+      <li>Approval selects exact eligible questions; it does not change the assessment.</li>
+      <li>Apply rechecks evidence and assessment CAS, fills only unanswered questions, and never overwrites a human answer.</li>
+      <li>Digest citations and local integrity do not establish legal conclusions, provider truth, customer acceptance, or an external WORM anchor.</li>
+    </ul>
+  </aside>
+
+  <section class="aep-grid">
+    <article class="aep-glass aep-panel">
+      <p class="eyebrow">Step 1</p>
+      <h2>Generate proposal</h2>
+      <form class="aep-form" id="aep-create-form" autocomplete="off" novalidate>
+        <fieldset{% if not proposal_can_operate %} disabled aria-disabled="true"{% endif %}>
+          <label for="aep-assessment-id">Open assessment ID</label>
+          <input class="input" id="aep-assessment-id" name="assessment_id" maxlength="128" required>
+          <label for="aep-analysis-ids">Released evidence analysis IDs <span>one per line</span></label>
+          <textarea class="input" id="aep-analysis-ids" name="analysis_ids" rows="5" maxlength="4128" required></textarea>
+          <label for="aep-create-idempotency">Idempotency key</label>
+          <input class="input" id="aep-create-idempotency" name="idempotency_key" maxlength="192" required>
+          <button class="btn btn-primary" type="submit">Generate proposal only</button>
+        </fieldset>
+      </form>
+    </article>
+
+    <article class="aep-glass aep-panel">
+      <p class="eyebrow">Step 2</p>
+      <h2>Review explicit answer subset</h2>
+      <form class="aep-form" id="aep-review-form" autocomplete="off" novalidate>
+        <fieldset{% if not proposal_can_operate %} disabled aria-disabled="true"{% endif %}>
+          <label for="aep-review-id">Proposal ID</label>
+          <input class="input" id="aep-review-id" name="proposal_id" maxlength="128" required>
+          <label for="aep-review-revision">Expected proposal revision</label>
+          <input class="input" id="aep-review-revision" name="expected_revision" type="number" min="1" max="9223372036854775807" step="1" required>
+          <label for="aep-review-decision">Decision</label>
+          <select class="select" id="aep-review-decision" name="decision"><option value="approve">Approve selected eligible answers</option><option value="reject">Reject proposal</option></select>
+          <fieldset class="aep-selection" id="aep-candidate-selection">
+            <legend>Eligible questions loaded from inspected proposal</legend>
+            <p class="aep-muted">Inspect a proposal to load its independently eligible questions.</p>
+          </fieldset>
+          <label for="aep-review-rationale">Human rationale</label>
+          <textarea class="input" id="aep-review-rationale" name="rationale" rows="4" maxlength="4000" required></textarea>
+          <label for="aep-review-idempotency">Idempotency key</label>
+          <input class="input" id="aep-review-idempotency" name="idempotency_key" maxlength="192" required>
+          <button class="btn btn-primary" type="submit">Record review decision</button>
+        </fieldset>
+      </form>
+    </article>
+
+    <article class="aep-glass aep-panel aep-panel--apply">
+      <p class="eyebrow">Step 3</p>
+      <h2>Apply approved answers</h2>
+      <form class="aep-form" id="aep-apply-form" autocomplete="off" novalidate>
+        <fieldset{% if not proposal_can_operate %} disabled aria-disabled="true"{% endif %}>
+          <label for="aep-apply-id">Approved proposal ID</label>
+          <input class="input" id="aep-apply-id" name="proposal_id" maxlength="128" required>
+          <div class="aep-row">
+            <label for="aep-apply-revision">Expected proposal revision
+              <input class="input" id="aep-apply-revision" name="expected_revision" type="number" min="1" max="9223372036854775807" step="1" required>
+            </label>
+            <label for="aep-assessment-revision">Pinned assessment revision
+              <input class="input" id="aep-assessment-revision" name="expected_assessment_revision" type="number" min="1" max="9223372036854775807" step="1" required>
+            </label>
+          </div>
+          <label for="aep-apply-idempotency">Idempotency key</label>
+          <input class="input" id="aep-apply-idempotency" name="idempotency_key" maxlength="192" required>
+          <label class="aep-confirm"><input id="aep-apply-confirm" name="confirm" type="checkbox" required> I understand this is a separate CAS write that fills only unanswered questions and still requires final assessment review.</label>
+          <button class="btn btn-primary" type="submit">Apply approved subset</button>
+        </fieldset>
+      </form>
+    </article>
+  </section>
+
+  <section class="aep-glass aep-panel aep-panel--wide" aria-labelledby="aep-inspect-title">
+    <div class="aep-panel-head">
+      <div><p class="eyebrow">Evidence and provenance</p><h2 id="aep-inspect-title">Inspect proposal</h2></div>
+      <form class="aep-inline" id="aep-inspect-form" autocomplete="off" novalidate>
+        <label class="sr-only" for="aep-inspect-id">Proposal ID</label>
+        <input class="input" id="aep-inspect-id" name="proposal_id" placeholder="AEP-…" maxlength="128" required>
+        <button class="btn" type="submit">Inspect</button>
+        <button class="btn" id="aep-refresh-list" type="button">Refresh queue</button>
+      </form>
+    </div>
+    <p class="aep-status" id="aep-operation-status" role="status" aria-live="polite"></p>
+    <div class="aep-candidates" id="aep-candidates" aria-live="polite"></div>
+    <details class="aep-details"><summary>Bounded server response</summary><pre class="aep-output" id="aep-output" tabindex="0"></pre></details>
+  </section>
+
+  <section class="aep-glass aep-panel aep-panel--wide" aria-labelledby="aep-queue-title">
+    <div class="aep-panel-head"><div><p class="eyebrow">Review queue</p><h2 id="aep-queue-title">Recent proposals</h2></div><span class="aep-pill" id="aep-queue-count">0</span></div>
+    <div class="aep-queue" id="aep-queue"></div>
+  </section>
+</main>
+<script src="{{ script_path }}" defer></script>
+{% endblock %}

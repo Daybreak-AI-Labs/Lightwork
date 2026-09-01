@@ -35,6 +35,7 @@ from .privacy_ops import (
     RecordConflict,
     _queue_audit,
     _RecordStore,
+    _unsafe_path_alias,
     _validate_document_evidence_record,
     _validated_audit_queue,
 )
@@ -192,6 +193,8 @@ class GovernedRecordBackend(Protocol):
         fence: GovernedMutationFence | None = None,
     ) -> dict[str, Any] | None: ...
 
+    def delete(self, record_id: str, *, expected_revision: int) -> bool: ...
+
 
 class LocalGovernedRecordBackend:
     """Existing private-file backend for one control-plane replica."""
@@ -309,6 +312,46 @@ class LocalGovernedRecordBackend:
             expected_revision=expected_revision,
             metadata_only=metadata_only,
         )
+
+    def delete(self, record_id: str, *, expected_revision: int) -> bool:
+        """Physically remove one fully delivered retained record under CAS."""
+
+        from .file_lock import cross_process_lock
+
+        expected = _expected_revision(expected_revision)
+        if expected is None:
+            raise ValueError("expected_revision is required for governed deletion")
+        path = self._store._path(record_id)  # noqa: SLF001 - backend-owned store
+        if path is None:
+            return False
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return False
+        if _unsafe_path_alias(path, info):
+            raise PermissionError("governed record path alias is not permitted")
+        with cross_process_lock(path, strict=True):
+            try:
+                locked_info = path.lstat()
+            except FileNotFoundError:
+                return False
+            if _unsafe_path_alias(path, locked_info):
+                raise PermissionError("governed record path alias is not permitted")
+            current = self._store._read_path(path)  # noqa: SLF001 - backend-owned store
+            if current is None:
+                return False
+            revision = _RecordStore._revision(current)
+            if revision != expected:
+                raise RecordConflict(
+                    "governed record changed "
+                    f"(expected revision {expected}, found {revision})"
+                )
+            if _validated_audit_queue(current):
+                raise AuditOutboxError(
+                    "governed record cannot be deleted with pending audit receipts"
+                )
+            path.unlink()
+        return True
 
 
 class _DeploymentGlobalRecordStore(_RecordStore):
@@ -1336,6 +1379,47 @@ class PostgresGovernedRecordBackend:
                     raise RecordConflict("governed record changed during update")
                 return saved
 
+    def delete(self, record_id: str, *, expected_revision: int) -> bool:
+        """Physically remove one fully delivered retained record under CAS."""
+
+        try:
+            validated = _valid_record_id(record_id, self.prefix)
+        except ValueError:
+            return False
+        expected = _expected_revision(expected_revision)
+        if expected is None:
+            raise ValueError("expected_revision is required for governed deletion")
+        tenant = self._tenant_key()
+        with self._operation("delete"):
+            with self._transaction(tenant) as cur:
+                row = self._select_for_update(cur, tenant, validated)
+                if row is None:
+                    return False
+                current = _row_record(
+                    row,
+                    record_id=validated,
+                    prefix=self.prefix,
+                    require_encryption=self._require_encryption,
+                )
+                revision = _RecordStore._revision(current)
+                if revision != expected:
+                    raise RecordConflict(
+                        "governed record changed "
+                        f"(expected revision {expected}, found {revision})"
+                    )
+                if _validated_audit_queue(current):
+                    raise AuditOutboxError(
+                        "governed record cannot be deleted with pending audit receipts"
+                    )
+                cur.execute(
+                    "DELETE FROM governed_records WHERE tenant_id=%s "
+                    "AND namespace=%s AND record_id=%s AND revision=%s",
+                    (tenant, self.namespace, validated, revision),
+                )
+                if cur.rowcount != 1:
+                    raise RecordConflict("governed record changed during delete")
+                return True
+
 
 @dataclass(frozen=True)
 class _BackendSelection:
@@ -1957,6 +2041,28 @@ class GovernedRecordStore:
         )
         backend = self._backend()
         return backend.list() if limit is None else backend.list(limit=limit)
+
+    def delete(self, record_id: str, *, expected_revision: int) -> bool:
+        """Delete a retention-expired record only after its audit outbox cleared.
+
+        Product services must first commit and deliver their own digest-only
+        tombstone/audit event.  This primitive deliberately adds no event of its
+        own because an event queued in the record being removed could be lost.
+        """
+
+        if (
+            not isinstance(expected_revision, int)
+            or isinstance(expected_revision, bool)
+            or expected_revision < 1
+        ):
+            raise ValueError("expected_revision must be a positive integer")
+        backend = self._backend()
+        delete = getattr(backend, "delete", None)
+        if not callable(delete):
+            raise GovernedRecordBackendError(
+                "governed-record backend does not support retained deletion"
+            )
+        return bool(delete(str(record_id or ""), expected_revision=expected_revision))
 
     def count(self, *, maximum: int = 100_000) -> int:
         """Records in the namespace, WITHOUT reading any record bodies.

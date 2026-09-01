@@ -48,9 +48,10 @@ def test_tenant_encoding_is_collision_resistant(monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     assert data_dir("memory", tenant="ac/me") != data_dir("memory", tenant="ac_me")
     assert data_dir("memory", tenant="/") != data_dir("memory", tenant="default")
-    assert data_dir("memory", tenant=".").resolve().parent == (
-        paths.maverick_home() / "tenants" / "%2E"
-    ).resolve()
+    # Win32 aliases and non-portable trailing-dot identities are rejected at
+    # admission rather than merely percent-encoded.
+    with pytest.raises(paths.InvalidTenantError):
+        data_dir("memory", tenant=".")
 
 
 def test_tenant_segment_nfc_normalised(monkeypatch):

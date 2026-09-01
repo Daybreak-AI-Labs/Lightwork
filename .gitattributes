@@ -2,6 +2,11 @@
 /packages/maverick-core/maverick/training/environment_packs/environment_packs.lock.json text eol=lf
 /packages/maverick-core/maverick/training/specialist_models.v1.json text eol=lf
 
+# Machine-readable proof artifacts are byte-hashed in handoff records. Keep
+# repository bytes stable across Windows and POSIX checkouts.
+/proof/*.json text eol=lf
+/scripts/acceptance/fixtures/*.json text eol=lf
+
 # Signed governance-frontier evidence, published as one unit. The manifest is
 # Ed25519-signed by the key in trusted-publisher.pub and pins SHA-256 digests
 # of the source tree it was measured from, so a hunk-level merge produces a

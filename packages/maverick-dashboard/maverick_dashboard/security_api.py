@@ -28,8 +28,12 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/security", tags=["security"])
 
 from .governance_api import router as governance_router  # noqa: E402
+from .identity_governance_outcomes_api import (  # noqa: E402
+    router as identity_governance_outcomes_router,
+)
 from .model_risk_api import router as model_risk_router  # noqa: E402
 
+router.include_router(identity_governance_outcomes_router)
 router.include_router(model_risk_router)
 router.include_router(governance_router)
 
@@ -828,7 +832,14 @@ async def trigger_policy_review(
 async def list_security_incidents(request: Request) -> dict:
     require_permission(request, "operate")
     ops = _ops()
-    return {"incidents": await _ops_call(ops, ops.list_incidents)}
+    records = await _ops_call(ops, ops.list_incidents)
+    from .incident_attachment_projection import project_incident_records
+
+    return {
+        "incidents": await run_in_threadpool(
+            project_incident_records, request, records, "security"
+        )
+    }
 
 
 @router.post("/incidents", status_code=201)
@@ -837,7 +848,7 @@ async def open_security_incident(
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
-    return await _ops_record_call(
+    record = await _ops_record_call(
         ops,
         ops.open_incident,
         body.title,
@@ -849,6 +860,11 @@ async def open_security_incident(
         reported_by=_actor(request),
         discovered_at=body.discovered_at,
     )
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(
+        project_incident_record, request, record, "security"
+    )
 
 
 @router.get("/incidents/{incident_id}")
@@ -858,7 +874,11 @@ async def get_security_incident(request: Request, incident_id: str) -> dict:
     record = await _ops_call(ops, ops.get_incident, incident_id[:80])
     if record is None:
         raise HTTPException(status_code=404, detail="no such incident")
-    return record
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(
+        project_incident_record, request, record, "security"
+    )
 
 
 @router.post("/incidents/{incident_id}/phase")
@@ -869,7 +889,7 @@ async def record_incident_phase(
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
-    return await _ops_record_call(
+    record = await _ops_record_call(
         ops,
         ops.record_incident_phase,
         incident_id[:80],
@@ -878,6 +898,11 @@ async def record_incident_phase(
         _actor(request),
         body.expected_revision,
         occurred_at=body.occurred_at,
+    )
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(
+        project_incident_record, request, record, "security"
     )
 
 
@@ -889,7 +914,7 @@ async def start_incident_clock(
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
-    return await _ops_record_call(
+    record = await _ops_record_call(
         ops,
         ops.start_incident_clock,
         incident_id[:80],
@@ -897,6 +922,11 @@ async def start_incident_clock(
         body.anchor_at,
         _actor(request),
         body.expected_revision,
+    )
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(
+        project_incident_record, request, record, "security"
     )
 
 
@@ -908,7 +938,7 @@ async def decide_incident_notification(
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
-    return await _ops_record_call(
+    record = await _ops_record_call(
         ops,
         ops.decide_incident_notification,
         incident_id[:80],
@@ -917,6 +947,11 @@ async def decide_incident_notification(
         body.rationale,
         _actor(request),
         body.expected_revision,
+    )
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(
+        project_incident_record, request, record, "security"
     )
 
 
@@ -928,13 +963,18 @@ async def close_security_incident(
 ) -> dict:
     require_permission(request, "operate")
     ops = _ops()
-    return await _ops_record_call(
+    record = await _ops_record_call(
         ops,
         ops.close_incident,
         incident_id[:80],
         body.summary,
         _actor(request),
         body.expected_revision,
+    )
+    from .incident_attachment_projection import project_incident_record
+
+    return await run_in_threadpool(
+        project_incident_record, request, record, "security"
     )
 
 

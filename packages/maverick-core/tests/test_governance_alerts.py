@@ -138,9 +138,10 @@ def test_seeded_registers_are_counted(tmp_path):
     assert sections["serious_incidents"]["due_soon"] == []
     assert sections["ai_literacy"]["missing"] == 1
     assert sections["ai_literacy"]["expired"] == 0
+    assert sections["ai_literacy"]["unreconciled_ai_literacy_data"] is True
     assert len(sections["eu_conformity"]["outdated_frias"]) == 1
     assert sections["eu_conformity"]["reassessment_required"] == [asset]
-    assert report["attention_count"] == 4
+    assert report["attention_count"] == 5
 
 
 def test_expiring_soon_counts_within_the_horizon(tmp_path):
@@ -166,4 +167,5 @@ def test_expiring_soon_counts_within_the_horizon(tmp_path):
     assert literacy["missing"] == 0
     assert literacy["expired"] == 0
     assert literacy["expiring_soon"] == 1
-    assert report["attention_count"] == 1
+    assert literacy["unreconciled_ai_literacy_data"] is True
+    assert report["attention_count"] == 2

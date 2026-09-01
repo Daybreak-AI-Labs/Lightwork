@@ -59,7 +59,10 @@ def test_all_html_pages_are_well_formed(monkeypatch, tmp_path):
 def test_theme_switch_preserves_query_params(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     r = _client().get("/")
-    assert "searchParams.set('theme'" in r.text
+    assert 'data-ui-preference="theme"' in r.text
+    script = _client().get("/static/lightwork-ui.js")
+    assert script.status_code == 200
+    assert "target.searchParams.set(key, select.value)" in script.text
     # The old clobbering assignment is gone.
     assert "window.location.search = '?theme='" not in r.text
 

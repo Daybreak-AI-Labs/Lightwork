@@ -719,7 +719,7 @@
         msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…';
         fetch('/api/v1/departments/' + encodeURIComponent(dlgKey) + '/deploy',
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
+          .then(function (r) { return r.json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
             dlgDeploy.disabled = false;
             if (res.ok) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; }
@@ -736,7 +736,7 @@
         btn.disabled = true; if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…'; }
         fetch('/api/v1/departments/' + encodeURIComponent(btn.dataset.key) + '/deploy',
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
+          .then(function (r) { return r.json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
             btn.disabled = false;
             if (res.ok) { if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; } }
@@ -814,30 +814,47 @@
         const opts = { method, headers: {} };
         if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
         const r = await fetch(path, opts);
-        let data = {}; try { data = await r.json(); } catch (e) {}
+        let data;
+        try { data = await r.json(); }
+        catch (e) { throw new Error('Request failed: the server returned an invalid JSON response.'); }
+        if (!r.ok) {
+          throw new Error(data && typeof data.detail === 'string' ? data.detail : ('HTTP ' + r.status));
+        }
         return { status: r.status, data };
       }
       document.getElementById('btn-validate').addEventListener('click', async () => {
-        const name = targetName();
-        if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
-        const { data } = await call('POST', `/api/v1/agents/${name}/validate`, payload());
-        if (data.errors && data.errors.length) show('Invalid: ' + data.errors.join('; '), false);
-        else if (data.warnings && data.warnings.length) show('OK, with warnings: ' + data.warnings.join('; '), true);
-        else show('Looks good.', true);
+        try {
+          const name = targetName();
+          if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
+          const { data } = await call('POST', `/api/v1/agents/${name}/validate`, payload());
+          if (data.errors && data.errors.length) show('Invalid: ' + data.errors.join('; '), false);
+          else if (data.warnings && data.warnings.length) show('OK, with warnings: ' + data.warnings.join('; '), true);
+          else show('Looks good.', true);
+        } catch (error) {
+          show(error instanceof Error ? error.message : 'Request failed.', false);
+        }
       });
       document.getElementById('btn-save').addEventListener('click', async () => {
-        const name = targetName();
-        if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
-        const { status, data } = await call('POST', `/api/v1/agents/${name}/override`, payload());
-        if (status === 200) { show(creating ? 'Custom agent created.' : 'Deployed.', true); window.location.search = '?name=' + encodeURIComponent(name); }
-        else show('Rejected: ' + (data.detail || ('HTTP ' + status)), false);
+        try {
+          const name = targetName();
+          if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
+          await call('POST', `/api/v1/agents/${name}/override`, payload());
+          show(creating ? 'Custom agent created.' : 'Deployed.', true);
+          window.location.search = '?name=' + encodeURIComponent(name);
+        } catch (error) {
+          show(error instanceof Error ? error.message : 'Request failed.', false);
+        }
       });
       const resetBtn = document.getElementById('btn-reset');
       if (resetBtn) resetBtn.addEventListener('click', async () => {
-        const name = targetName();
-        const { status, data } = await call('DELETE', `/api/v1/agents/${name}/override`);
-        if (status === 200) { show('Reverted to built-in.', true); window.location.search = '?name=' + encodeURIComponent(name); }
-        else show('Failed: ' + (data.detail || ('HTTP ' + status)), false);
+        try {
+          const name = targetName();
+          await call('DELETE', `/api/v1/agents/${name}/override`);
+          show('Reverted to built-in.', true);
+          window.location.search = '?name=' + encodeURIComponent(name);
+        } catch (error) {
+          show(error instanceof Error ? error.message : 'Request failed.', false);
+        }
       });
     })();
   </script>

@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Continuous Evidence - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .trc-shell { display:flex; flex-direction:column; gap:var(--space-4); }
+  .trc-glass {
+    background:linear-gradient(145deg, color-mix(in srgb, var(--surface-2) 82%, transparent),
+                                      color-mix(in srgb, var(--accent) 8%, transparent));
+    border:1px solid color-mix(in srgb, var(--border) 72%, white 18%);
+    border-radius:22px;
+    box-shadow:0 22px 52px color-mix(in srgb, black 28%, transparent),
+               inset 0 1px 0 color-mix(in srgb, white 20%, transparent);
+    backdrop-filter:blur(22px) saturate(145%);
+    -webkit-backdrop-filter:blur(22px) saturate(145%);
+  }
+  .trc-hero { padding:clamp(1.25rem,3vw,2.4rem); display:grid;
+              grid-template-columns:minmax(0,2fr) minmax(15rem,1fr); gap:var(--space-4); }
+  .trc-kicker { text-transform:uppercase; letter-spacing:.14em; font-size:.76rem;
+                color:var(--accent); font-weight:700; }
+  .trc-hero h1 { margin:.25rem 0 .65rem; }
+  .trc-boundary { padding:var(--space-3); border-left:3px solid var(--warn); }
+  .trc-status-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
+                     gap:var(--space-3); }
+  .trc-stat { padding:var(--space-3); min-height:7.4rem; }
+  .trc-stat__label { color:var(--muted); font-size:.82rem; }
+  .trc-stat__value { display:block; margin-top:.55rem; font-size:1.35rem;
+                     font-weight:760; overflow-wrap:anywhere; }
+  .trc-stat__detail { display:block; margin-top:.45rem; color:var(--muted);
+                      font-size:.78rem; }
+  .trc-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,1.7fr);
+              gap:var(--space-4); }
+  .trc-panel { padding:var(--space-4); }
+  .trc-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .trc-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .trc-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; }
+  .trc-output { min-height:30rem; max-height:64rem; overflow:auto; white-space:pre-wrap;
+                overflow-wrap:anywhere; padding:var(--space-3); border-radius:14px;
+                background:color-mix(in srgb, black 32%, transparent);
+                border:1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+  .trc-warning { padding:var(--space-3); border:1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
+                 border-radius:14px; background:color-mix(in srgb, var(--warn) 8%, transparent); }
+  .trc-confirm { display:flex !important; flex-direction:row !important;
+                 align-items:flex-start; gap:var(--space-2) !important; }
+  @media (max-width:980px) {
+    .trc-hero,.trc-grid { grid-template-columns:1fr; }
+    .trc-status-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+  @media (max-width:560px) { .trc-status-grid { grid-template-columns:1fr; } }
+  @media (prefers-reduced-transparency:reduce) {
+    .trc-glass { backdrop-filter:none; -webkit-backdrop-filter:none; background:var(--surface-2); }
+  }
+</style>
+
+<div class="trc-shell">
+  <section class="trc-hero trc-glass">
+    <div>
+      <div class="trc-kicker">Tech Risk &amp; Compliance · Continuous control evidence</div>
+      <h1>Continuous Evidence Operations</h1>
+      <p>Operate exact, independently approved collector definitions and tenant enrollments for local SOC 2 observations plus AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security streams, and Okta policy posture.</p>
+      <div class="trc-actions">
+        <button class="btn btn--primary" id="trc-refresh" type="button">Refresh live posture</button>
+        <button class="btn" id="trc-run-cycle" type="button">Run one bounded scheduler cycle</button>
+        <a class="btn" href="/compliance">Back to Compliance</a>
+      </div>
+      <p id="trc-live-status" role="status" aria-live="polite">No request made.</p>
+    </div>
+    <aside class="trc-boundary">
+      <strong>Evidence boundary</strong>
+      <p>Provider observations are read-only, normalized, and digest-only. A configured source or successful run does not prove estate completeness, control effectiveness, compliance, certification, licensed access, or live provider/customer acceptance.</p>
+      <p>Status resolves no credential value and performs no provider network request.</p>
+    </aside>
+  </section>
+
+  {% if not trc_continuous_evidence_enabled %}
+  <section class="trc-panel trc-glass">
+    <h2>Continuous evidence is disabled</h2>
+    <p>Enable <code>[tech_risk_compliance]</code> and <code>[tech_risk_compliance.continuous_evidence]</code>. Stock feeds also require an exact tenant <code>stock_collectors.sources</code> manifest, an approved definition, an active enrollment, and deployment-held credential custody.</p>
+  </section>
+  {% else %}
+  <section class="trc-status-grid" aria-label="Continuous evidence status">
+    <article class="trc-stat trc-glass"><span class="trc-stat__label">Composition</span><span class="trc-stat__value" id="trc-composition">unknown</span><span class="trc-stat__detail" id="trc-composition-detail">Refresh to inspect configured sources.</span></article>
+    <article class="trc-stat trc-glass"><span class="trc-stat__label">Scheduler</span><span class="trc-stat__value" id="trc-scheduler">unknown</span><span class="trc-stat__detail" id="trc-scheduler-detail">No lifecycle claim yet.</span></article>
+    <article class="trc-stat trc-glass"><span class="trc-stat__label">Stock feeds</span><span class="trc-stat__value" id="trc-feeds">0 / 7</span><span class="trc-stat__detail" id="trc-feeds-detail">Configuration only; not provider acceptance.</span></article>
+    <article class="trc-stat trc-glass"><span class="trc-stat__label">Last bounded cycle</span><span class="trc-stat__value" id="trc-cycle">not run</span><span class="trc-stat__detail" id="trc-cycle-detail">Manual and scheduled cycles use the same server authority.</span></article>
+  </section>
+
+  <div class="trc-grid">
+    <section class="trc-panel trc-glass trc-stack">
+      <h2>Governed operator workbench</h2>
+      <p>The browser may submit only closed IDs, revisions, digests, states, and bounded counts. Tenant, principal, provider origin, asset scope, source selector, and credentials are server-owned.</p>
+      <label>Operation
+        <select class="select" id="trc-operation">
+          <option value="definitions" data-method="GET" data-path="/definitions">List collector definitions</option>
+          <option value="definition-get" data-method="GET" data-path="/definitions/{definition_id}/versions/{version}">Get exact definition</option>
+          <option value="definition-register" data-method="PUT" data-path="/definitions/{definition_id}/versions/{version}">Register pending definition</option>
+          <option value="definition-approve" data-method="POST" data-path="/definitions/{definition_id}/versions/{version}/approve">Independently approve definition</option>
+          <option value="definition-retire" data-method="POST" data-path="/definitions/{definition_id}/versions/{version}/retire">Retire definition</option>
+          <option value="enrollments" data-method="GET" data-path="/enrollments">List collector enrollments</option>
+          <option value="enrollment-get" data-method="GET" data-path="/enrollments/{enrollment_id}">Get exact enrollment</option>
+          <option value="enrollment-create" data-method="PUT" data-path="/enrollments/{enrollment_id}">Create exact enrollment</option>
+          <option value="enrollment-state" data-method="POST" data-path="/enrollments/{enrollment_id}/state">Pause, resume, or revoke enrollment</option>
+          <option value="enqueue" data-method="POST" data-path="/jobs/enqueue-due">Enqueue due jobs</option>
+          <option value="jobs" data-method="GET" data-path="/jobs">List jobs</option>
+          <option value="job-requeue" data-method="POST" data-path="/jobs/{job_id}/requeue">Requeue dead-letter job</option>
+          <option value="runs" data-method="GET" data-path="/runs">List collection runs</option>
+          <option value="observations" data-method="GET" data-path="/observations">List digest-only observations</option>
+          <option value="alerts" data-method="GET" data-path="/alerts">List evidence-change alerts</option>
+          <option value="integrity" data-method="GET" data-path="/integrity">Verify tenant integrity</option>
+          <option value="retention" data-method="POST" data-path="/retention/purge">Purge expired retained records</option>
+        </select>
+      </label>
+      <label>Path values as JSON
+        <input class="input" id="trc-path-values" value="{}" autocomplete="off" spellcheck="false">
+      </label>
+      <label>Strict request body as JSON
+        <textarea class="input" id="trc-body" rows="12" spellcheck="false">{}</textarea>
+      </label>
+      <div class="trc-warning" id="trc-confirm-panel" hidden>
+        <label class="trc-confirm"><input id="trc-confirm" type="checkbox"><span>I reviewed the exact authority digest, revision, approval/revocation consequence, retention effect, or recovery action.</span></label>
+      </div>
+      <button class="btn btn--primary" id="trc-submit" type="button">Run selected operation</button>
+    </section>
+    <section class="trc-panel trc-glass">
+      <h2>Verified response</h2>
+      <pre class="trc-output" id="trc-output" aria-live="polite">No request made.</pre>
+    </section>
+  </div>
+  {% endif %}
+</div>
+
+{% if trc_continuous_evidence_enabled %}
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/compliance/continuous-evidence";
+  var operation = document.getElementById("trc-operation");
+  var output = document.getElementById("trc-output");
+  var confirmation = document.getElementById("trc-confirm");
+  var confirmationPanel = document.getElementById("trc-confirm-panel");
+  var highImpact = new Set(["definition-register", "definition-approve", "definition-retire", "enrollment-create", "enrollment-state", "enqueue", "job-requeue", "retention"]);
+  var forbiddenKeys = new Set(["tenant", "tenant_id", "principal", "principal_ref", "actor", "actor_ref", "provider", "origin", "url", "scope_ref", "source_ref", "credential", "credential_env", "secret", "raw_evidence", "raw_payload", "compliance_status", "certified"]);
+
+  function setText(id, value) {
+    var target = document.getElementById(id);
+    if (target) { target.textContent = String(value); }
+  }
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function containsForbidden(value) {
+    if (!value || typeof value !== "object") { return false; }
+    if (Array.isArray(value)) { return value.some(containsForbidden); }
+    return Object.keys(value).some(function (key) {
+      return forbiddenKeys.has(key) || containsForbidden(value[key]);
+    });
+  }
+  function route() { return operation.options[operation.selectedIndex]; }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      var value = values[key];
+      if ((typeof value !== "string" && typeof value !== "number") || value === "") {
+        throw new Error("Missing path value: " + key);
+      }
+      return encodeURIComponent(String(value));
+    });
+  }
+  async function request(method, path, payload) {
+    var options = {method: method, headers: {"Accept": "application/json"}};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var text = await response.text();
+    var result;
+    try { result = JSON.parse(text); }
+    catch (_error) { throw new Error("The server returned an invalid JSON response."); }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
+    return result;
+  }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+  }
+  async function refresh() {
+    setText("trc-live-status", "Loading bounded readiness without provider I/O…");
+    var result = await request("GET", "/status", {});
+    show(result);
+    var stock = result.stock_collectors || {};
+    var configured = Array.isArray(stock.configured_stock_collector_ids) ? stock.configured_stock_collector_ids.length : 0;
+    var missing = Array.isArray(stock.missing_stock_collector_ids) ? stock.missing_stock_collector_ids.length : 0;
+    setText("trc-composition", stock.ready === true ? "ready" : "not ready");
+    setText("trc-composition-detail", missing ? (missing + " selected source manifest(s) missing") : "Exact authority is rechecked for every job.");
+    setText("trc-scheduler", result.scheduler && result.scheduler.running ? "running" : "stopped / gated");
+    setText("trc-scheduler-detail", result.custom_collector_dependencies_injected ? "Stock registry and credential authority installed." : "Stock runtime dependency pair is not active.");
+    setText("trc-feeds", configured + " / 7");
+    setText("trc-feeds-detail", "Configured references only; live acceptance remains unverified.");
+    setText("trc-live-status", "Readiness refreshed. No credential value or provider endpoint was opened.");
+  }
+
+  document.getElementById("trc-refresh").addEventListener("click", function () {
+    refresh().catch(function (error) { setText("trc-live-status", String(error)); show(String(error)); });
+  });
+  document.getElementById("trc-run-cycle").addEventListener("click", function () {
+    setText("trc-live-status", "Running one bounded server-authorized cycle…");
+    request("POST", "/scheduler/run-once", {}).then(function (result) {
+      show(result);
+      setText("trc-cycle", result.executed ? "completed" : "gated / no cycle");
+      var cycle = result.cycle || {};
+      setText("trc-cycle-detail", "Completed " + (cycle.jobs_completed || 0) + ", incomplete " + (cycle.jobs_incomplete || 0) + ", retry pending " + (cycle.jobs_retry_pending || 0) + ".");
+      setText("trc-live-status", "Bounded cycle finished; review incomplete and retry state before reporting coverage.");
+    }).catch(function (error) { setText("trc-live-status", String(error)); show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("trc-submit").addEventListener("click", async function () {
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed operation before continuing.");
+      }
+      var pathValues = JSON.parse(document.getElementById("trc-path-values").value || "{}");
+      var payload = JSON.parse(document.getElementById("trc-body").value || "{}");
+      if (containsForbidden(payload)) {
+        throw new Error("Tenant, provider, source, credential, raw evidence, and conclusions are server-owned.");
+      }
+      var selected = route();
+      var result = await request(selected.dataset.method, buildPath(selected.dataset.path, pathValues), payload);
+      show(result);
+      setText("trc-live-status", "Operation completed. Review the returned revision and integrity digest.");
+    } catch (error) { setText("trc-live-status", String(error)); show(String(error)); }
+  });
+  updateConfirmation();
+  refresh().catch(function (error) { setText("trc-live-status", String(error)); });
+}());
+</script>
+{% endif %}
+{% endblock %}

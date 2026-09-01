@@ -323,6 +323,24 @@
       });
     })();
 
+    // Feature-gated workbenches must not advertise executable controls while
+    // their server capability is disabled. Templates expose only the final
+    // boolean; no client value can enable a server-side feature.
+    (function () {
+      document.querySelectorAll('[data-feature-enabled="false"]').forEach(function (root) {
+        root.setAttribute('aria-disabled', 'true');
+        root.querySelectorAll('form, fieldset').forEach(function (container) {
+          container.setAttribute('aria-disabled', 'true');
+        });
+        root.querySelectorAll('button, input, select, textarea').forEach(function (control) {
+          control.disabled = true;
+          if (!control.title) {
+            control.title = 'This capability is disabled by the server configuration.';
+          }
+        });
+      });
+    })();
+
     // Sidebar toggle. Wide screens: the hamburger collapses/expands the
     // persistent sidebar (preference persisted). Narrow screens: it opens the
     // off-canvas drawer, closed by the backdrop, Escape, or following a link.
@@ -339,10 +357,23 @@
         const shown = mobile.matches ? body.classList.contains('nav-open')
                                      : !body.classList.contains('nav-collapsed');
         btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
-        // On mobile the closed drawer is only translated off-screen (still in
-        // the DOM + tab order). Mark it inert so keyboard focus can't land on
-        // the hidden nav links. Desktop-collapsed already uses display:none.
-        if (sidebar) sidebar.inert = mobile.matches && !body.classList.contains('nav-open');
+        // A closed drawer is only translated off-screen on mobile, so it can
+        // otherwise remain in the accessibility tree and keyboard tab order.
+        // Use both the reflected property and the content attribute: the
+        // latter is required by browser engines that do not expose HTMLElement
+        // `.inert`, while aria-hidden gives assistive technology an explicit
+        // state. The same state is harmless and accurate for desktop collapse.
+        if (sidebar) {
+          const hidden = !shown;
+          sidebar.inert = hidden;
+          sidebar.toggleAttribute('inert', hidden);
+          if (hidden) {
+            sidebar.setAttribute('aria-hidden', 'true');
+            if (sidebar.contains(document.activeElement)) btn.focus();
+          } else {
+            sidebar.removeAttribute('aria-hidden');
+          }
+        }
       }
       function closeDrawer() { body.classList.remove('nav-open'); syncAria(); }
       btn.addEventListener('click', function() {
@@ -366,6 +397,15 @@
     (function () {
       var prefs = document.getElementById('prefs-menu');
       if (!prefs) return;
+      prefs.querySelectorAll('[data-ui-preference]').forEach(function (select) {
+        select.addEventListener('change', function () {
+          var key = select.getAttribute('data-ui-preference');
+          if (!key || !select.value) return;
+          var target = new URL(window.location.href);
+          target.searchParams.set(key, select.value);
+          window.location.assign(target.toString());
+        });
+      });
       document.addEventListener('click', function (ev) {
         if (prefs.open && !prefs.contains(ev.target)) prefs.open = false;
       });

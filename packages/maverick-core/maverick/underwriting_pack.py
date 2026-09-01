@@ -128,6 +128,7 @@ def _literacy_posture(now: float) -> dict[str, Any]:
         if not ai_literacy.enabled():
             return {"enabled": False}
         gaps = ai_literacy.literacy_gaps(now=now)
+        plane_status = ai_literacy.literacy_plane_status(now=now)
         counts = gaps.get("counts") or {}
         return {
             "enabled": True,
@@ -135,6 +136,14 @@ def _literacy_posture(now: float) -> dict[str, Any]:
             "current": counts.get("current"),
             "expired": counts.get("expired"),
             "missing": counts.get("missing"),
+            "data_plane": "role_compatibility",
+            "authoritative_for_compliance": False,
+            "authoritative_plane": plane_status.get("authoritative_plane"),
+            "canonical": plane_status.get("canonical"),
+            "reconciliation_required": plane_status.get(
+                "reconciliation_required"
+            ),
+            "reconciliation_notice": plane_status.get("notice"),
         }
     except Exception:
         return {"enabled": False, "error": "unavailable"}

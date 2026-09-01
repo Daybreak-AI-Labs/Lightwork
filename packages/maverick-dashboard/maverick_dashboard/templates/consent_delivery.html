@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}Consent Delivery · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cd-shell{max-width:1400px;margin:0 auto;padding:1.25rem;display:grid;gap:1rem}.cd-glass{background:var(--glass-sheen,none),color-mix(in srgb,var(--panel) 72%,transparent);border:1px solid var(--glass-border,var(--border));box-shadow:var(--glass-shadow,var(--shadow-sm)),var(--glass-edge,0 0 transparent);-webkit-backdrop-filter:blur(24px) saturate(155%);backdrop-filter:blur(24px) saturate(155%)}.cd-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;border-radius:var(--radius-xl,18px);padding:1.25rem}.cd-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.cd-hero h1{margin:.1rem 0}.cd-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.cd-card{border:1px solid var(--glass-border,var(--border));border-radius:var(--radius-lg,12px);padding:1rem;margin-bottom:1rem}.cd-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cd-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.cd-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.cd-wide,.cd-actions{grid-column:1/-1}.cd-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.cd-output{white-space:pre-wrap;word-break:break-word;max-height:32rem;overflow:auto;background:var(--surface-sunken,var(--bg));border:1px solid var(--glass-border,var(--border));border-radius:var(--radius-md,8px);padding:.75rem;font-size:.78rem}.cd-warning{border:1px solid color-mix(in srgb,var(--warn,#d28a18) 65%,var(--border));border-radius:var(--radius-lg,10px);padding:.8rem}.cd-statusline{min-height:1.5rem}.cd-adapter{padding:1rem;border-radius:var(--radius-xl,18px)}.cd-adapter-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;margin-bottom:1rem}.cd-adapter-head h2{margin:.1rem 0}.cd-provider-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;margin-bottom:1rem}.cd-provider{padding:.75rem;border:1px solid var(--glass-border,var(--border));border-radius:var(--radius-lg,12px);background:var(--glass-soft,var(--surface-sunken));min-height:5.5rem}.cd-provider strong{display:block;font-size:.82rem;margin-bottom:.35rem}.cd-provider span{font-size:.76rem;color:var(--muted)}.cd-provider[data-state="ready"]{border-color:color-mix(in srgb,var(--success,#2e9d62) 70%,var(--border))}.cd-provider[data-state="blocked"]{border-color:color-mix(in srgb,var(--warn,#d28a18) 70%,var(--border))}.cd-adapter-layout{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:1rem}.cd-boundary{font-size:.82rem;color:var(--muted);margin:.5rem 0 0}@media(max-width:1000px){.cd-provider-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cd-adapter-layout{grid-template-columns:1fr}}@media(max-width:900px){.cd-grid,.cd-form{grid-template-columns:1fr}.cd-wide,.cd-actions{grid-column:auto}.cd-hero,.cd-adapter-head{flex-direction:column}}@media(max-width:560px){.cd-provider-grid{grid-template-columns:1fr}}@media(prefers-reduced-transparency:reduce){.cd-glass{background:var(--panel);-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:var(--shadow-sm)}}
+</style>
+<fieldset class="cd-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if consent_delivery_enabled else 'false' }}"{% if not consent_delivery_enabled %} disabled aria-disabled="true"{% endif %}>
+  <legend class="sr-only">Consent delivery workbench</legend>
+  <header class="cd-hero cd-glass"><div><div class="cd-kicker">Durable preference synchronization</div><h1>Consent Delivery</h1><p class="muted">Enroll exact HTTPS destinations, rotate key identifiers, bridge immutable receipts into a signed queue, inspect recovery state, and explicitly dispatch a bounded batch.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
+  {% if not consent_delivery_enabled %}<div class="cd-warning cd-glass" role="status"><strong>Delivery disabled.</strong> Enable <code>[consent_preferences.delivery] enable = true</code> only after destination, signing-custody, privacy, retry, and recovery review.</div>{% endif %}
+  <div class="cd-warning cd-glass"><strong>External side effect:</strong> “Dispatch now” performs outbound HTTPS calls. Sync only queues receipt-derived events. Neither action proves recipient interoperability or production acceptance.</div>
+  <div id="cd-status" class="muted cd-statusline" role="status" aria-live="polite"></div>
+  <div class="cd-grid">
+    <div>
+      <section class="cd-card cd-glass"><h2>Destination and key ID</h2><form id="cd-destination" class="cd-form">
+        <label>Destination ID<input class="input" name="destination_id" value="crm" required></label><label>Exact HTTPS origin<input class="input" name="origin" placeholder="https://crm.example.com" required></label>
+        <label>Signing key ID<input class="input" name="signing_key_id" required></label><label>Idempotency key<input class="input" name="idempotency_key" required></label>
+        <label>Maximum attempts<input class="input" name="max_attempts" type="number" min="1" max="20" value="6" required></label><label>Retention seconds<input class="input" name="retention" type="number" min="1" value="2592000" required></label>
+        <div class="cd-actions"><button class="btn btn--primary" type="submit">Enroll destination</button><button class="btn" id="cd-load-destination" type="button">Load destination</button></div>
+      </form></section>
+      <section class="cd-card cd-glass"><h2>Key rotation and revocation</h2><form id="cd-key" class="cd-form">
+        <label>Destination ID<input class="input" name="destination_id" value="crm" required></label><label>Key ID<input class="input" name="key_id" required></label>
+        <label>Expected destination revision<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><label>Idempotency key<input class="input" name="idempotency_key" required></label>
+        <div class="cd-actions"><button class="btn btn--primary" type="submit" value="rotate">Rotate to key ID</button><button class="btn" type="submit" value="revoke-key">Revoke key ID</button><button class="btn" type="submit" value="revoke">Revoke destination</button></div>
+      </form></section>
+    </div>
+    <div>
+      <section class="cd-card cd-glass"><h2>Bridge and dispatch</h2><form id="cd-run" class="cd-form">
+        <label class="cd-wide">Destination IDs (comma separated)<input class="input" name="destination_ids" value="crm" required></label><label>Sync limit<input class="input" name="sync_limit" type="number" min="1" max="500" value="100" required></label><label>Delivery limit<input class="input" name="delivery_limit" type="number" min="1" max="100" value="10" required></label>
+        <div class="cd-actions"><button class="btn" type="submit" value="sync">Queue authoritative changes</button><button class="btn btn--primary" type="submit" value="dispatch">Dispatch now</button><button class="btn" id="cd-load-status" type="button">Load status</button><button class="btn" id="cd-load-dead" type="button">Dead letters</button><button class="btn" id="cd-load-audit" type="button">Audit chain</button></div>
+      </form></section>
+      <section class="cd-card cd-glass"><h2>Operational result</h2><pre id="cd-output" class="cd-output">No operation run.</pre></section>
+    </div>
+  </div>
+  <section class="cd-adapter cd-glass" aria-labelledby="cd-adapter-title">
+    <div class="cd-adapter-head"><div><div class="cd-kicker">Named destination adapters</div><h2 id="cd-adapter-title">Salesforce · Marketo · Adobe Experience Platform · Snowflake</h2><p class="muted">Inspect exact provider bindings, minimized operation receipts, ambiguous outcomes, and independent reconciliation.</p></div><button class="btn btn--primary" id="cd-adapter-status" type="button">Check adapter readiness</button></div>
+    <div class="cd-provider-grid" id="cd-provider-grid" aria-label="Named provider readiness">
+      <article class="cd-provider" data-provider="salesforce" data-state="unknown"><strong>Salesforce</strong><span>Readiness not checked.</span></article>
+      <article class="cd-provider" data-provider="marketo" data-state="unknown"><strong>Marketo</strong><span>Readiness not checked.</span></article>
+      <article class="cd-provider" data-provider="adobe_experience_platform" data-state="unknown"><strong>Adobe Experience Platform</strong><span>Readiness not checked.</span></article>
+      <article class="cd-provider" data-provider="snowflake" data-state="unknown"><strong>Snowflake</strong><span>Readiness not checked.</span></article>
+    </div>
+    <div class="cd-adapter-layout">
+      <form id="cd-adapter-form" class="cd-form">
+        <label class="cd-wide">Configured destination ID<input class="input" name="destination_id" value="salesforce" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
+        <label class="cd-wide">Message SHA-256<input class="input" name="message_sha256" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" autocomplete="off"></label>
+        <label class="cd-wide">Request SHA-256<input class="input" name="request_sha256" minlength="64" maxlength="64" pattern="[0-9a-f]{64}" autocomplete="off"></label>
+        <div class="cd-actions"><button class="btn" id="cd-adapter-ambiguous" type="button">List ambiguities</button><button class="btn" id="cd-adapter-operation" type="button">Load receipt</button><button class="btn btn--primary" id="cd-adapter-reconcile" type="button">Reconcile independently</button><button class="btn" id="cd-adapter-integrity" type="button">Verify ledger</button></div>
+        <p class="cd-boundary cd-wide">The browser supplies only bounded digests. It cannot choose a provider URL, credential, tenant, or reconciliation disposition. Stock readback covers Salesforce, Marketo, and Snowflake; Adobe Experience Platform requires a deployment-owned query authority.</p>
+      </form>
+      <div><h3>Adapter result</h3><pre id="cd-adapter-output" class="cd-output">Readiness has not been checked.</pre></div>
+    </div>
+  </section>
+</fieldset>
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/consent/delivery";
+  var ADAPTERS = "/destination-adapters";
+  var status = document.getElementById("cd-status");
+  var output = document.getElementById("cd-output");
+  var adapterOutput = document.getElementById("cd-adapter-output");
+  var adapterForm = document.getElementById("cd-adapter-form");
+
+  function val(form, name) {
+    return form.elements[name].value.trim();
+  }
+
+  function ids(value) {
+    return value.split(",").map(function (item) {
+      return item.trim();
+    }).filter(Boolean);
+  }
+
+  function destinationId() {
+    var value = val(adapterForm, "destination_id");
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value)) {
+      throw new Error("Enter one configured destination identifier.");
+    }
+    return value;
+  }
+
+  function digest(name, label) {
+    var value = val(adapterForm, name);
+    if (!/^[0-9a-f]{64}$/.test(value)) {
+      throw new Error(label + " must be an exact lowercase SHA-256 digest.");
+    }
+    return value;
+  }
+
+  async function call(path, options) {
+    var response = await fetch(API + path, Object.assign({
+      headers: {"Content-Type": "application/json"}
+    }, options || {}));
+    var body;
+    try {
+      body = await response.json();
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(
+        body && typeof body.detail === "string" ? body.detail : "HTTP " + response.status
+      );
+    }
+    return body;
+  }
+
+  function show(body, message, target) {
+    (target || output).textContent = JSON.stringify(body, null, 2);
+    status.textContent = message;
+  }
+
+  function failure(error, target) {
+    var message = error instanceof Error ? error.message : "Operation failed.";
+    status.textContent = message;
+    if (target) {
+      target.textContent = message;
+    }
+  }
+
+  function renderAdapterStatus(body) {
+    var destinations = Array.isArray(body.destinations) ? body.destinations : [];
+    var reconciliation = body.reconciliation_supported &&
+      typeof body.reconciliation_supported === "object" ? body.reconciliation_supported : {};
+    document.querySelectorAll("#cd-provider-grid [data-provider]").forEach(function (card) {
+      var binding = destinations.find(function (item) {
+        return item.provider_id === card.dataset.provider;
+      });
+      var text = card.querySelector("span");
+      if (!binding) {
+        card.dataset.state = "blocked";
+        text.textContent = "Not configured for this tenant.";
+      } else if (binding.credential_reference_present !== true) {
+        card.dataset.state = "blocked";
+        text.textContent = "Credential reference is not present in deployment custody.";
+      } else if (reconciliation[card.dataset.provider] !== true) {
+        card.dataset.state = "blocked";
+        text.textContent = card.dataset.provider === "adobe_experience_platform" ?
+          "Configured; deploy an AEP query authority for readback." :
+          "Configured; independent reconciliation is not installed.";
+      } else if (body.transport_factory_installed === true) {
+        card.dataset.state = "ready";
+        text.textContent = "Readback configured for attempt; live provider acceptance remains unverified.";
+      } else {
+        card.dataset.state = "blocked";
+        text.textContent = "Configured, but the runtime is not ready.";
+      }
+    });
+  }
+
+  document.getElementById("cd-destination").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var payload = {
+      origin: val(form, "origin"),
+      signing_key_id: val(form, "signing_key_id"),
+      idempotency_key: val(form, "idempotency_key"),
+      max_attempts: Number(val(form, "max_attempts")),
+      base_backoff_seconds: 5.0,
+      max_backoff_seconds: 3600.0,
+      default_retention_seconds: Number(val(form, "retention"))
+    };
+    try {
+      show(await call("/destinations/" + encodeURIComponent(val(form, "destination_id")), {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }), "Destination enrolled.");
+    } catch (error) {
+      failure(error);
+    }
+  });
+
+  document.getElementById("cd-load-destination").addEventListener("click", async function () {
+    var form = document.getElementById("cd-destination");
+    try {
+      show(
+        await call("/destinations/" + encodeURIComponent(val(form, "destination_id"))),
+        "Destination loaded."
+      );
+    } catch (error) {
+      failure(error);
+    }
+  });
+
+  document.getElementById("cd-key").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var action = event.submitter && event.submitter.value || "rotate";
+    var payload = {
+      expected_revision: Number(val(form, "expected_revision")),
+      idempotency_key: val(form, "idempotency_key")
+    };
+    if (action === "rotate") payload.new_key_id = val(form, "key_id");
+    if (action === "revoke-key") payload.key_id = val(form, "key_id");
+    try {
+      show(await call(
+        "/destinations/" + encodeURIComponent(val(form, "destination_id")) + "/" +
+          (action === "rotate" ? "rotate-key" : action),
+        {method: "POST", body: JSON.stringify(payload)}
+      ), "Destination authority updated.");
+    } catch (error) {
+      failure(error);
+    }
+  });
+
+  document.getElementById("cd-run").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    var action = event.submitter && event.submitter.value || "sync";
+    var payload = {destination_ids: ids(val(form, "destination_ids"))};
+    if (action === "sync") {
+      payload.limit = Number(val(form, "sync_limit"));
+    } else {
+      payload.sync_limit = Number(val(form, "sync_limit"));
+      payload.delivery_limit = Number(val(form, "delivery_limit"));
+      payload.lease_seconds = 60.0;
+    }
+    try {
+      show(
+        await call("/" + action, {method: "POST", body: JSON.stringify(payload)}),
+        action === "sync" ? "Authoritative changes queued." : "Bounded external dispatch completed."
+      );
+    } catch (error) {
+      failure(error);
+    }
+  });
+
+  document.getElementById("cd-load-status").addEventListener("click", async function () {
+    try { show(await call("/status"), "Delivery status loaded."); } catch (error) { failure(error); }
+  });
+  document.getElementById("cd-load-dead").addEventListener("click", async function () {
+    try { show(await call("/dead-letters"), "Dead letters loaded."); } catch (error) { failure(error); }
+  });
+  document.getElementById("cd-load-audit").addEventListener("click", async function () {
+    try { show(await call("/audit"), "Delivery audit loaded."); } catch (error) { failure(error); }
+  });
+
+  document.getElementById("cd-adapter-status").addEventListener("click", async function () {
+    try {
+      var body = await call(ADAPTERS + "/status");
+      renderAdapterStatus(body);
+      show(body, "Named destination readiness loaded.", adapterOutput);
+    } catch (error) {
+      failure(error, adapterOutput);
+    }
+  });
+
+  document.getElementById("cd-adapter-ambiguous").addEventListener("click", async function () {
+    try {
+      var destination = destinationId();
+      show(
+        await call(ADAPTERS + "/" + encodeURIComponent(destination) + "/ambiguous"),
+        "Ambiguous provider outcomes loaded.",
+        adapterOutput
+      );
+    } catch (error) {
+      failure(error, adapterOutput);
+    }
+  });
+
+  document.getElementById("cd-adapter-operation").addEventListener("click", async function () {
+    try {
+      var destination = destinationId();
+      var messageDigest = digest("message_sha256", "Message digest");
+      show(
+        await call(
+          ADAPTERS + "/" + encodeURIComponent(destination) + "/operations/" +
+            encodeURIComponent(messageDigest)
+        ),
+        "Minimized provider receipt loaded.",
+        adapterOutput
+      );
+    } catch (error) {
+      failure(error, adapterOutput);
+    }
+  });
+
+  document.getElementById("cd-adapter-reconcile").addEventListener("click", async function () {
+    try {
+      var destination = destinationId();
+      var payload = {
+        message_sha256: digest("message_sha256", "Message digest"),
+        request_sha256: digest("request_sha256", "Request digest")
+      };
+      show(await call(ADAPTERS + "/" + encodeURIComponent(destination) + "/reconcile", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }), "Independent provider reconciliation completed.", adapterOutput);
+    } catch (error) {
+      failure(error, adapterOutput);
+    }
+  });
+
+  document.getElementById("cd-adapter-integrity").addEventListener("click", async function () {
+    try {
+      show(
+        await call(ADAPTERS + "/integrity"),
+        "Named destination operation ledger verified.",
+        adapterOutput
+      );
+    } catch (error) {
+      failure(error, adapterOutput);
+    }
+  });
+})();
+</script>
+{% endblock %}

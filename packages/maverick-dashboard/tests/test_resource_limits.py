@@ -199,6 +199,75 @@ def test_finance_body_cap_streams_chunked_body_without_content_length(monkeypatc
     assert response.json() == {"detail": "finance operations request body too large"}
 
 
+@pytest.mark.parametrize(
+    ("path", "limit_name", "detail"),
+    (
+        (
+            "/api/v1/public/consent/rights-requests",
+            "_MAX_PUBLIC_CONSENT_BODY_BYTES",
+            "public consent request body too large",
+        ),
+        (
+            "/api/v1/external/third-party-collaboration/portal_ref_1234567890/draft",
+            "_MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES",
+            "third-party collaboration request body too large",
+        ),
+    ),
+)
+def test_public_governance_body_cap_stops_lengthless_stream_before_authority(
+    monkeypatch,
+    path,
+    limit_name,
+    detail,
+):
+    from maverick_dashboard import app as dash_app
+
+    monkeypatch.setattr(dash_app, limit_name, 64)
+    resolver_calls: list[str] = []
+    monkeypatch.setattr(
+        dash_app.app.state,
+        "third_party_collaboration_portal_resolver",
+        lambda *_args, **_kwargs: resolver_calls.append("called"),
+        raising=False,
+    )
+    consent_origin_calls: list[str] = []
+    if path.startswith("/api/v1/public/consent/"):
+        monkeypatch.setattr(
+            dash_app.app.state,
+            "public_consent_error_origin_resolver",
+            lambda request: consent_origin_calls.append(request.url.path)
+            or "https://consent.example",
+            raising=False,
+        )
+
+    def chunks():
+        yield b"{" + (b"x" * 39)
+        yield b"x" * 40 + b"}"
+
+    response = _client().request(
+        "PUT" if path.endswith("/draft") else "POST",
+        path,
+        content=chunks(),
+        headers={
+            "Content-Type": "application/json",
+            "Transfer-Encoding": "chunked",
+            "Authorization": "ThirdPartyInvitation tpc1." + ("A" * 43),
+            "Origin": "https://consent.example",
+        },
+    )
+    assert response.status_code == 413
+    assert response.json() == {"detail": detail}
+    assert resolver_calls == []
+    if path.startswith("/api/v1/public/consent/"):
+        assert response.headers["access-control-allow-origin"] == (
+            "https://consent.example"
+        )
+        assert response.headers["cache-control"] == "no-store, private"
+        assert consent_origin_calls == [path]
+    else:
+        assert "access-control-allow-origin" not in response.headers
+
+
 # ---------- task 4: /healthz minimal payload under a token ----------
 
 def test_healthz_minimal_payload_when_token_set(monkeypatch, tmp_path):

@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Application Consent Scans · Lightwork{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="/static/lightwork-consent-application-scanner.css">
+{% endblock %}
+{% block content %}
+<main class="cas-shell" id="consent-application-scanner-shell"
+      data-api-base="{{ api_base }}" data-copilot-page="/consent/application-scans">
+  <header class="cas-hero glass-surface">
+    <div>
+      <p class="eyebrow">Consent and preference governance</p>
+      <h1>Mobile and connected-app manifest analysis</h1>
+      <p class="cas-lead">
+        Inspect bounded Android, Fire OS, iOS, tvOS, Roku, Tizen, and webOS
+        manifest metadata. Findings remain cited observations until a different
+        principal reviews the exact application revision and result digest.
+      </p>
+    </div>
+    <div class="cas-orb" aria-hidden="true"></div>
+  </header>
+
+  <aside class="cas-boundary glass-surface" aria-labelledby="cas-boundary-title">
+    <p class="eyebrow">Evidence boundary</p>
+    <h2 id="cas-boundary-title">Manifest evidence is not live-device proof</h2>
+    <ul>
+      <li>Raw manifest bytes and free-form permission descriptions remain transient.</li>
+      <li>SDK names are unreviewed candidates, never automatic tracker or legal classifications.</li>
+      <li>Binary APK AXML, executables, device behavior, IDFA state, and runtime traffic are not inspected.</li>
+      <li>Local analysis does not establish native-SDK, platform, accessibility, recovery, scale, or customer acceptance.</li>
+      <li>Authorization follows the active tenant: tenant viewers inspect, tenant administrators operate, and tenant auditors verify custody.</li>
+    </ul>
+  </aside>
+
+  <section class="cas-panel glass-surface cas-status" aria-labelledby="cas-status-title">
+    <div>
+      <p class="eyebrow">Runtime status</p>
+      <h2 id="cas-status-title">Tenant composition</h2>
+      <p id="cas-runtime-status" role="status" aria-live="polite">Checking application-scanner custody…</p>
+    </div>
+    <button class="btn" id="cas-refresh-status" type="button">Refresh status</button>
+    <pre class="cas-output cas-span" id="cas-status-output" tabindex="0"></pre>
+  </section>
+
+  <fieldset class="cas-grid" id="cas-operations" disabled>
+    <legend class="sr-only">Application-scanner operations</legend>
+
+    <section class="cas-panel glass-surface" aria-labelledby="cas-register-title">
+      <p class="eyebrow">Application authority</p>
+      <h2 id="cas-register-title">Register an application</h2>
+      <form id="cas-register-form" class="cas-form" autocomplete="off" novalidate>
+        <fieldset{% if not application_scanner_can_admin %} disabled aria-disabled="true"{% endif %}>
+          <label for="cas-platform">Platform
+            <select class="input" id="cas-platform" name="platform" required>
+              {% for value, label in [('android','Android'),('fireos','Fire OS'),('ios','iOS'),('tvos','tvOS'),('roku','Roku'),('tizen','Tizen'),('webos','webOS')] %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label for="cas-bundle-id">Bundle, package, channel, or widget ID
+            <input class="input" id="cas-bundle-id" name="bundle_id" maxlength="255" required>
+          </label>
+          <label for="cas-display-name">Display name
+            <input class="input" id="cas-display-name" name="display_name" maxlength="255" required>
+          </label>
+          <label for="cas-register-key">Idempotency key
+            <input class="input" id="cas-register-key" name="idempotency_key" maxlength="192" required>
+          </label>
+          <button class="btn btn--primary" type="submit">Register application</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="cas-panel glass-surface" aria-labelledby="cas-scan-title">
+      <p class="eyebrow">Transient source intake</p>
+      <h2 id="cas-scan-title">Analyze extracted manifests</h2>
+      <form id="cas-scan-form" class="cas-form" autocomplete="off" novalidate>
+        <fieldset{% if not application_scanner_can_admin %} disabled aria-disabled="true"{% endif %}>
+          <label for="cas-application-id">Application ID
+            <input class="input" id="cas-application-id" name="application_id" maxlength="192" required>
+          </label>
+          <label for="cas-application-revision">Expected application revision
+            <input class="input" id="cas-application-revision" name="expected_application_revision" type="number" min="1" max="2147483647" required>
+          </label>
+          <label for="cas-scan-key">Scan idempotency key
+            <input class="input" id="cas-scan-key" name="idempotency_key" maxlength="192" required>
+          </label>
+          <label for="cas-files">Manifest files
+            <input class="input" id="cas-files" name="files" type="file" multiple required
+                   accept=".xml,.json,.plist,.xcprivacy,application/xml,application/json,application/x-plist,text/plain">
+          </label>
+          <p class="help">Maximum 64 files, 1 MiB each, 4 MiB combined. Supply already-extracted manifest files—not an APK, IPA, WGT, IPK, or executable.</p>
+          <button class="btn btn--primary" type="submit">Analyze manifests</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="cas-panel glass-surface" aria-labelledby="cas-review-title">
+      <p class="eyebrow">Independent decision</p>
+      <h2 id="cas-review-title">Review an exact result</h2>
+      <form id="cas-review-form" class="cas-form" autocomplete="off" novalidate>
+        <fieldset{% if not application_scanner_can_admin %} disabled aria-disabled="true"{% endif %}>
+          <label for="cas-scan-id">Scan ID
+            <input class="input" id="cas-scan-id" name="scan_id" maxlength="192" required>
+          </label>
+          <label for="cas-scan-revision">Expected scan revision
+            <input class="input" id="cas-scan-revision" name="expected_revision" type="number" min="1" max="2147483647" required>
+          </label>
+          <label for="cas-decision">Decision
+            <select class="input" id="cas-decision" name="decision" required>
+              <option value="accepted">Accept observations</option>
+              <option value="needs_changes">Needs changes</option>
+              <option value="rejected">Reject result</option>
+            </select>
+          </label>
+          <label for="cas-review-code">Review note code
+            <input class="input" id="cas-review-code" name="review_note_code" maxlength="192" required>
+          </label>
+          <button class="btn btn--primary" type="submit">Record review</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="cas-panel glass-surface" aria-labelledby="cas-inspect-title">
+      <p class="eyebrow">Custody and maintenance</p>
+      <h2 id="cas-inspect-title">Inspect governed records</h2>
+      <div class="cas-actions">
+        <button class="btn" id="cas-list-applications" type="button">List applications</button>
+        <button class="btn" id="cas-list-scans" type="button">List scans</button>
+        <button class="btn" id="cas-verify-integrity" type="button"{% if not application_scanner_can_audit %} disabled{% endif %}>Verify integrity</button>
+        <button class="btn btn--danger" id="cas-purge" type="button"{% if not application_scanner_can_admin %} disabled{% endif %}>Purge expired findings</button>
+      </div>
+      {% if not application_scanner_can_audit %}<p class="help">Auditor permission is required for integrity verification.</p>{% endif %}
+    </section>
+
+    <section class="cas-panel glass-surface cas-result" aria-labelledby="cas-result-title">
+      <p class="eyebrow">Governed result</p>
+      <h2 id="cas-result-title">Operation output</h2>
+      <p id="cas-operation-status" role="status" aria-live="polite">No operation has run.</p>
+      <pre class="cas-output" id="cas-operation-output" tabindex="0"></pre>
+    </section>
+  </fieldset>
+
+  <noscript><p class="cas-boundary glass-surface">JavaScript is required for this bounded administrative workbench.</p></noscript>
+</main>
+{% endblock %}
+{% block scripts_extra %}
+<script src="/static/lightwork-consent-application-scanner.js" defer></script>
+{% endblock %}

@@ -92,6 +92,19 @@ def test_chat_can_handoff_an_unsaved_flow_or_agent_draft(monkeypatch, tmp_path):
     assert "kind === 'flow' ? '/flows/designer' : '/workflow-builder'" in ui
 
 
+def test_collapsed_sidebar_is_removed_from_keyboard_and_accessibility_navigation(
+    monkeypatch,
+    tmp_path,
+):
+    """The visually off-canvas mobile drawer must not remain interactive."""
+    _prep(monkeypatch, tmp_path)
+    ui = _client().get("/static/lightwork-ui.js").text
+    assert "sidebar.toggleAttribute('inert', hidden)" in ui
+    assert "sidebar.setAttribute('aria-hidden', 'true')" in ui
+    assert "sidebar.removeAttribute('aria-hidden')" in ui
+    assert "sidebar.contains(document.activeElement)" in ui
+
+
 def test_overview_first_run_form_has_inline_error_region(monkeypatch, tmp_path):
     """The landing-page first-goal form gets the same graceful errors."""
     _prep(monkeypatch, tmp_path)

@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
@@ -4011,6 +4013,147 @@ def _assessments_dir() -> Path:
 
 
 _ASSESSMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_ASSESSMENT_COMMENT_IDEMPOTENCY_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$"
+)
+_ASSESSMENT_COMMENT_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+_AI_ANSWER_FLAGS = frozenset(
+    {
+        "human_review_required",
+        "low_confidence",
+        "source_incomplete",
+        "source_stale",
+        "source_conflict",
+        "human_edited",
+    }
+)
+_AI_ANSWER_SOURCE_KINDS = frozenset(
+    {"assessment_memory", "document_evidence", "agent_draft", "imported_record"}
+)
+_MAX_ASSESSMENT_COMMENTS = 1_000
+_MAX_ASSESSMENT_COMMENT_CHARS = 4_000
+_MAX_ASSESSMENT_COMMENTS_BYTES = 8 * 1024 * 1024
+
+
+def _assessment_comment_operation(value: object) -> str:
+    if not isinstance(value, str) or not _ASSESSMENT_COMMENT_IDEMPOTENCY_RE.fullmatch(value):
+        raise ValueError("idempotency_key is invalid")
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def assessment_comment_id(assessment_id: str, idempotency_key: str) -> str:
+    """Return the opaque stable comment id for an idempotent create request."""
+
+    operation_sha = _assessment_comment_operation(idempotency_key)
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"lightwork:assessment-comment:{assessment_id}:{operation_sha}",
+        )
+    )
+
+
+def _assessment_comment_semantic_sha256(
+    *,
+    section_id: str,
+    question_id: str,
+    comment: str,
+    commented_by: str,
+) -> str:
+    payload = {
+        "comment": comment,
+        "commented_by": commented_by,
+        "question_id": question_id,
+        "section_id": section_id,
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def _validated_assessment_comments(value: object) -> list[dict]:
+    comments = [] if value is None else value
+    if not isinstance(comments, list) or len(comments) > _MAX_ASSESSMENT_COMMENTS:
+        raise AssessmentStateError("assessment comments are invalid")
+    validated: list[dict] = []
+    identifiers: set[str] = set()
+    operations: set[str] = set()
+    total_bytes = 0
+    for raw in comments:
+        if not isinstance(raw, dict):
+            raise AssessmentStateError("assessment comments are invalid")
+        item = dict(raw)
+        identifier = item.get("id")
+        section = item.get("section_id")
+        question = item.get("question_id")
+        text = item.get("comment")
+        actor = item.get("commented_by")
+        created_at = item.get("commented_at")
+        if (
+            not isinstance(identifier, str)
+            or not _ASSESSMENT_COMMENT_ID_RE.fullmatch(identifier)
+            or identifier in identifiers
+            or not isinstance(section, str)
+            or not 1 <= len(section) <= 80
+            or not isinstance(question, str)
+            or not 1 <= len(question) <= 60
+            or not isinstance(text, str)
+            or not 1 <= len(text) <= _MAX_ASSESSMENT_COMMENT_CHARS
+            or not isinstance(actor, str)
+            or not 1 <= len(actor) <= 256
+            or isinstance(created_at, bool)
+            or not isinstance(created_at, (int, float))
+            or not math.isfinite(float(created_at))
+            or float(created_at) < 0
+        ):
+            raise AssessmentStateError("assessment comments are invalid")
+        identifiers.add(identifier)
+        operation_sha = item.get("_idempotency_sha256")
+        semantic_sha = item.get("_semantic_sha256")
+        if operation_sha is not None or semantic_sha is not None:
+            if (
+                not isinstance(operation_sha, str)
+                or not _DIGEST_RE.fullmatch(operation_sha)
+                or operation_sha in operations
+                or not isinstance(semantic_sha, str)
+                or not _DIGEST_RE.fullmatch(semantic_sha)
+                or semantic_sha
+                != _assessment_comment_semantic_sha256(
+                    section_id=section,
+                    question_id=question,
+                    comment=text,
+                    commented_by=actor,
+                )
+            ):
+                raise AssessmentStateError("assessment comments are invalid")
+            operations.add(operation_sha)
+        try:
+            total_bytes += len(_canonical_json(item).encode("utf-8"))
+        except (TypeError, ValueError) as exc:
+            raise AssessmentStateError("assessment comments are invalid") from exc
+        if total_bytes > _MAX_ASSESSMENT_COMMENTS_BYTES:
+            raise AssessmentStateError("assessment comment storage limit reached")
+        validated.append(item)
+    return validated
+
+
+def _validated_record_comments(record: dict) -> list[dict]:
+    comments = _validated_assessment_comments(record.get("comments"))
+    if not comments:
+        return comments
+    snapshot = record.get("template_snapshot")
+    if not isinstance(snapshot, dict) or not snapshot:
+        raise AssessmentStateError(
+            "assessment comments require a pinned questionnaire snapshot"
+        )
+    template = template_for_saved_record(record)
+    for item in comments:
+        pinned = template.question(str(item["question_id"])) if template is not None else None
+        if pinned is None or pinned.section != item["section_id"]:
+            raise AssessmentStateError(
+                "assessment comment is not bound to the pinned questionnaire"
+            )
+    return comments
 
 
 def _assessment_path(assessment_id: str) -> Path | None:
@@ -4039,6 +4182,8 @@ def _read_saved_path_unlocked(path: Path) -> dict | None:
         label="assessment",
     )
     _record_revision(record, label="assessment")
+    if "comments" in record:
+        _validated_record_comments(record)
     return record
 
 
@@ -4056,7 +4201,20 @@ def _write_saved_path_unlocked(path: Path, record: dict) -> None:
 
 
 def _public_assessment_record(record: dict) -> dict:
-    return {key: value for key, value in record.items() if key != "_audit_pending"}
+    public = {key: value for key, value in record.items() if key != "_audit_pending"}
+    comments = public.get("comments")
+    if isinstance(comments, list):
+        public["comments"] = [
+            {
+                key: value
+                for key, value in item.items()
+                if key not in {"_idempotency_sha256", "_semantic_sha256"}
+            }
+            if isinstance(item, dict)
+            else item
+            for item in comments
+        ]
+    return public
 
 
 def save_session(session: AssessmentSession) -> Path:
@@ -4235,6 +4393,177 @@ def add_followups(
     )
 
 
+def add_assessment_comment(
+    assessment_id: str,
+    *,
+    section_id: str,
+    question_id: str,
+    comment: str,
+    commented_by: str,
+    expected_revision: int,
+    idempotency_key: str,
+) -> dict | None:
+    """Create an audited comment bound to one pinned assessment question.
+
+    Comments are discussion records, not follow-up tasks and therefore do not
+    change the assessment workflow state. The section/question pair is
+    resolved against the immutable questionnaire snapshot saved with the
+    assessment so a caller cannot attach a comment to an invented or newly
+    repointed question.
+    """
+
+    if not isinstance(section_id, str):
+        raise ValueError("section_id must be a string")
+    if not isinstance(question_id, str):
+        raise ValueError("question_id must be a string")
+    if not isinstance(comment, str):
+        raise ValueError("comment must be a string")
+    if not isinstance(commented_by, str):
+        raise ValueError("commented_by must be a string")
+    section = section_id.strip()
+    question = question_id.strip()
+    text = comment.strip()
+    actor = commented_by.strip()
+    if not section or len(section) > 80:
+        raise ValueError("section_id must be between 1 and 80 characters")
+    if not question or len(question) > 60:
+        raise ValueError("question_id must be between 1 and 60 characters")
+    if not text or len(text) > _MAX_ASSESSMENT_COMMENT_CHARS:
+        raise ValueError("comment must be between 1 and 4000 characters")
+    if not actor or len(actor) > 256:
+        raise ValueError("commented_by must be between 1 and 256 characters")
+    expected = _validated_revision_value(expected_revision, label="expected assessment")
+    operation_sha = _assessment_comment_operation(idempotency_key)
+    comment_id = assessment_comment_id(assessment_id, idempotency_key)
+    semantic_sha = _assessment_comment_semantic_sha256(
+        section_id=section,
+        question_id=question,
+        comment=text,
+        commented_by=actor,
+    )
+
+    created_at = time.time()
+
+    def _mutate(record: dict) -> None:
+        # Comments promise a binding to the immutable questionnaire reviewed by
+        # the respondent. Legacy records without a snapshot cannot satisfy that
+        # promise and must be upgraded/re-run instead of consulting a live
+        # mutable template pointer.
+        snapshot = record.get("template_snapshot")
+        if not isinstance(snapshot, dict) or not snapshot:
+            raise AssessmentTransitionError(
+                "assessment comments require a pinned questionnaire snapshot"
+            )
+        template = template_for_saved_record(record)
+        item = template.question(question) if template is not None else None
+        if item is None or item.section != section:
+            raise AssessmentTransitionError(
+                "assessment section/question does not exist in the pinned questionnaire"
+            )
+        comments = _validated_record_comments(record)
+        for existing in comments:
+            if existing.get("_idempotency_sha256") != operation_sha:
+                continue
+            if (
+                existing.get("id") != comment_id
+                or existing.get("_semantic_sha256") != semantic_sha
+            ):
+                raise AssessmentConflict(
+                    "idempotency_key was already used for a different assessment comment"
+                )
+            return
+        revision = _record_revision(record, label="assessment")
+        if revision != expected:
+            raise AssessmentConflict(
+                f"assessment changed (expected revision {expected}, found {revision})"
+            )
+        if len(comments) >= _MAX_ASSESSMENT_COMMENTS:
+            raise AssessmentStateError("assessment comment limit reached")
+        created = {
+            "id": comment_id,
+            "section_id": section,
+            "question_id": question,
+            "comment": text,
+            "commented_by": actor,
+            "commented_at": created_at,
+            "_idempotency_sha256": operation_sha,
+            "_semantic_sha256": semantic_sha,
+        }
+        _validated_assessment_comments([*comments, created])
+        record["comments"] = [*comments, created]
+
+    receipt = _audit_receipt(
+        "ASSESSMENT_COMMENT_CREATED",
+        actor,
+        assessment=assessment_id,
+        comment_id=comment_id,
+        section_id=section,
+        question_id=question,
+        comment_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        semantic_sha256=semantic_sha,
+    )
+    return _rewrite_saved(
+        assessment_id,
+        _mutate,
+        # CAS is enforced inside the locked mutation after replay detection so
+        # an exact retry remains successful even if later writes advanced the
+        # assessment revision.
+        expected_revision=None,
+        audit_receipt=receipt,
+    )
+
+
+def assessment_comments(
+    assessment_id: str,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+    expected_revision: int | None = None,
+) -> dict | None:
+    """Return a bounded, deterministic page of question comments."""
+
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ValueError("offset must be a non-negative integer")
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+        raise ValueError("limit must be between 1 and 500")
+    record = load_saved(assessment_id)
+    if record is None:
+        return None
+    revision = _record_revision(record, label="assessment")
+    if expected_revision is not None and revision != _validated_revision_value(
+        expected_revision,
+        label="expected assessment",
+    ):
+        raise AssessmentConflict(
+            f"assessment changed (expected revision {expected_revision}, found {revision})"
+        )
+    template = template_for_saved_record(record)
+    questions = tuple(template.questions) if template is not None else ()
+    section_order: dict[str, int] = {}
+    question_order: dict[str, int] = {}
+    for index, item in enumerate(questions):
+        section_order.setdefault(item.section, len(section_order))
+        question_order[item.id] = index
+    comments = _validated_record_comments(record)
+    comments.sort(
+        key=lambda item: (
+            section_order.get(str(item["section_id"]), len(section_order)),
+            question_order.get(str(item["question_id"]), len(question_order)),
+            float(item["commented_at"]),
+            str(item["id"]),
+        )
+    )
+    total = len(comments)
+    return {
+        "assessment_id": assessment_id,
+        "assessment_revision": revision,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "comments": comments[offset : offset + limit],
+    }
+
+
 def answer_followup(
     assessment_id: str,
     followup_id: str,
@@ -4314,6 +4643,93 @@ def assign_assessment(
         assigned_by,
         assessment=assessment_id,
         assignee=who,
+    )
+    return _rewrite_saved(
+        assessment_id,
+        _mutate,
+        expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def set_assessment_answer_ai_metadata(
+    assessment_id: str,
+    question_id: str,
+    *,
+    confidence: float,
+    flags: Sequence[str],
+    source_kind: str,
+    source_ref: str,
+    source_sha256: str,
+    recorded_by: str,
+    expected_revision: int,
+) -> dict | None:
+    """Persist bounded, cited AI-assistance metadata on one saved answer.
+
+    This never changes the answer or score.  The caller must separately review
+    and mutate an answer through the assessment workflow; the metadata only
+    makes AI assistance, confidence, flags, and its exact source discoverable.
+    """
+
+    question = str(question_id or "").strip()
+    if not question or len(question) > 60:
+        raise ValueError("question_id is invalid")
+    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+        raise ValueError("confidence must be a number between 0 and 1")
+    normalized_confidence = float(confidence)
+    if not math.isfinite(normalized_confidence) or not 0 <= normalized_confidence <= 1:
+        raise ValueError("confidence must be a number between 0 and 1")
+    if isinstance(flags, (str, bytes)) or not isinstance(flags, Sequence) or len(flags) > 16:
+        raise ValueError("AI answer flags are invalid")
+    normalized_flags = tuple(sorted(set(flags)))
+    if len(normalized_flags) != len(flags) or any(
+        not isinstance(flag, str) or flag not in _AI_ANSWER_FLAGS
+        for flag in normalized_flags
+    ):
+        raise ValueError("AI answer flags are invalid")
+    kind = str(source_kind or "").strip()
+    if kind not in _AI_ANSWER_SOURCE_KINDS:
+        raise ValueError("AI answer source kind is invalid")
+    reference = str(source_ref or "").strip()
+    if not reference or len(reference) > 256:
+        raise ValueError("AI answer source reference is invalid")
+    digest = str(source_sha256 or "")
+    if not _DIGEST_RE.fullmatch(digest):
+        raise ValueError("AI answer source digest is invalid")
+    actor = str(recorded_by or "").strip()
+    if not actor or len(actor) > 256:
+        raise ValueError("AI answer recorder is invalid")
+
+    def _mutate(record: dict) -> None:
+        template = template_for_saved_record(record)
+        if template is None or template.question(question) is None:
+            raise AssessmentStateError(
+                "AI answer metadata is not bound to the pinned questionnaire"
+            )
+        answers = record.get("answers")
+        if not isinstance(answers, dict) or not isinstance(answers.get(question), dict):
+            raise AssessmentStateError("AI answer metadata requires a saved answer")
+        answers[question]["ai_metadata"] = {
+            "schema": "lightwork.assessment-answer-ai-metadata.v1",
+            "confidence": round(normalized_confidence, 6),
+            "flags": list(normalized_flags),
+            "source": {
+                "kind": kind,
+                "ref": reference,
+                "sha256": digest,
+            },
+            "recorded_by": actor,
+            "recorded_at": time.time(),
+            "answer_at_recording": answers[question].get("answer"),
+        }
+
+    receipt = _audit_receipt(
+        "ASSESSMENT_ANSWER_AI_METADATA_RECORDED",
+        actor,
+        assessment=assessment_id,
+        question_id=question,
+        source_kind=kind,
+        source_sha256=digest,
     )
     return _rewrite_saved(
         assessment_id,
@@ -4738,6 +5154,187 @@ def load_saved(assessment_id: str) -> dict | None:
     return _public_assessment_record(record) if record is not None else None
 
 
+def list_saved_heads(
+    *,
+    limit: int = 100,
+) -> tuple[tuple[dict, ...], int]:
+    """Read a bounded deterministic set of current assessment heads.
+
+    Unlike :func:`list_saved`, this projection helper does not retry the audit
+    outbox or write any record.  It is intended for read-only cross-suite
+    consumers that must never turn a context read into a mutation.  The total
+    valid filename count is returned so callers can disclose truncation.
+    """
+
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1_000:
+        raise ValueError("assessment head limit is outside its bound")
+    directory = _assessments_dir()
+    if not directory.exists():
+        return (), 0
+    identifiers = tuple(
+        sorted(
+            path.stem
+            for path in directory.glob("*.json")
+            if _ASSESSMENT_ID_RE.fullmatch(path.stem)
+        )
+    )
+    records: list[dict] = []
+    for assessment_id in identifiers[:limit]:
+        record = _load_saved_raw(assessment_id)
+        if record is not None:
+            records.append(_public_assessment_record(record))
+    return tuple(records), len(identifiers)
+
+
+def assessment_score_profile(record: dict) -> dict:
+    """Return a deterministic question-level score explanation.
+
+    The projection is derived only from the immutable questionnaire snapshot
+    and saved answers.  It does not rescore from a mutable live template and it
+    does not use a model.  ``contribution_bps`` is an explanatory severity
+    weight; the authoritative overall result remains the existing transparent
+    max-severity rollup.
+    """
+
+    if not isinstance(record, dict):
+        raise AssessmentStateError("assessment record is invalid")
+    assessment_id = str(record.get("id") or "")
+    if _assessment_path(assessment_id) is None:
+        raise AssessmentStateError("assessment identity is invalid")
+    template = template_for_saved_record(record)
+    if template is None:
+        raise AssessmentStateError("assessment questionnaire is unavailable")
+    answers = record.get("answers")
+    if not isinstance(answers, dict):
+        raise AssessmentStateError("assessment answers are invalid")
+    result = record.get("result")
+    if not isinstance(result, dict):
+        raise AssessmentStateError("assessment result is invalid")
+    findings = result.get("findings")
+    if not isinstance(findings, list):
+        raise AssessmentStateError("assessment findings are invalid")
+    finding_kinds = {
+        str(item.get("question_id")): str(item.get("kind"))
+        for item in findings
+        if isinstance(item, dict)
+        and isinstance(item.get("question_id"), str)
+        and item.get("kind") in {"risk", "unverified"}
+    }
+    severity_bps = {"low": 2_500, "medium": 5_000, "high": 10_000}
+    rows: list[dict] = []
+    for position, question in enumerate(template.questions, start=1):
+        answer_record = answers.get(question.id)
+        if answer_record is None:
+            answer = None
+        elif isinstance(answer_record, dict) and answer_record.get("answer") in ANSWERS:
+            answer = str(answer_record["answer"])
+        else:
+            raise AssessmentStateError("assessment answer contract is invalid")
+        finding_kind = finding_kinds.get(question.id)
+        if answer is None:
+            contribution_kind = "unanswered"
+        elif answer == "na":
+            contribution_kind = "not_applicable"
+        elif finding_kind == "risk":
+            contribution_kind = "risk_finding"
+        elif finding_kind == "unverified":
+            contribution_kind = "unverified_finding"
+        else:
+            contribution_kind = "control_in_place"
+        rows.append(
+            {
+                "position": position,
+                "question_id": question.id,
+                "section": question.section,
+                "severity": question.severity,
+                "risk_answer": question.risk_answer,
+                "answer": answer,
+                "applicable": answer not in {None, "na"},
+                "finding_kind": finding_kind,
+                "contribution_kind": contribution_kind,
+                "contribution_bps": (
+                    severity_bps[question.severity] if finding_kind is not None else 0
+                ),
+            }
+        )
+    return {
+        "schema": "lightwork.assessment-score-profile.v1",
+        "assessment_id": assessment_id,
+        "assessment_revision": _record_revision(record, label="assessment"),
+        "template_revision": record.get("template_revision"),
+        "template_digest": str(record.get("template_digest") or ""),
+        "scoring_method": "transparent_max_severity",
+        "risk_rating": result.get("risk_rating"),
+        "inherent_risk": result.get("inherent_risk", result.get("risk_rating")),
+        "residual_risk": result.get("residual_risk", result.get("risk_rating")),
+        "answered": result.get("answered"),
+        "total": result.get("total"),
+        "questions": rows,
+    }
+
+
+def assessment_record_projection(record: dict, *, show_all_details: bool) -> dict:
+    """Return a stable lightweight or full assessment wire projection."""
+
+    if type(show_all_details) is not bool:
+        raise ValueError("show_all_details must be boolean")
+    score_profile = assessment_score_profile(record)
+    direct_path = f"/assessments?assessment_id={score_profile['assessment_id']}"
+    administrator = (
+        None
+        if not record.get("assignee")
+        else {
+            "principal_ref": record.get("assignee"),
+            "assigned_by_ref": record.get("assigned_by") or None,
+            "assigned_at": record.get("assigned_at"),
+        }
+    )
+    completed_by = (
+        None
+        if not record.get("decided_by")
+        else {
+            "principal_ref": record.get("decided_by"),
+            "completed_at": record.get("decided_at"),
+            "decision": record.get("status"),
+        }
+    )
+    if show_all_details:
+        return {
+            **_public_assessment_record(record),
+            "score_profile": score_profile,
+            "show_all_details": True,
+            "direct_path": direct_path,
+            "record_administrator": administrator,
+            "completed_by": completed_by,
+        }
+    result = record.get("result")
+    if not isinstance(result, dict):
+        raise AssessmentStateError("assessment result is invalid")
+    return {
+        "schema": "lightwork.assessment-record-summary.v1",
+        "id": score_profile["assessment_id"],
+        "type": record.get("type"),
+        "subject": record.get("subject"),
+        "status": record.get("status"),
+        "revision": score_profile["assessment_revision"],
+        "template_revision": score_profile["template_revision"],
+        "template_digest": score_profile["template_digest"],
+        "risk_rating": result.get("risk_rating"),
+        "inherent_risk": result.get("inherent_risk", result.get("risk_rating")),
+        "residual_risk": result.get("residual_risk", result.get("risk_rating")),
+        "findings": len(result.get("findings") or []),
+        "assignee": record.get("assignee", ""),
+        "created_at": record.get("created_at"),
+        "updated_at": record.get("decided_at") or record.get("assigned_at") or record.get(
+            "created_at"
+        ),
+        "show_all_details": False,
+        "direct_path": direct_path,
+        "record_administrator": administrator,
+        "completed_by": completed_by,
+    }
+
+
 # --- Rendering -------------------------------------------------------------
 
 
@@ -4985,8 +5582,15 @@ __all__ = [
     "save_custom_template",
     "delete_custom_template",
     "save_session",
+    "add_assessment_comment",
+    "assessment_comment_id",
+    "assessment_comments",
+    "set_assessment_answer_ai_metadata",
     "list_saved",
+    "list_saved_heads",
     "load_saved",
+    "assessment_score_profile",
+    "assessment_record_projection",
     "decide_assessment",
     "accept_risk",
     "trigger_review",

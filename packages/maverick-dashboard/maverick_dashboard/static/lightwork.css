@@ -33,6 +33,7 @@
       /* Serif display face for greetings/headlines (system serif — New York on
          Apple, Georgia elsewhere — no webfont, stays offline-first). */
       --font-serif: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+      --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
       /* ---- layout ---- */
       --sidebar-w: 248px; --topbar-h: 56px; --drawer-w: min(82vw, 320px);
       --content-max: 1180px;
@@ -111,6 +112,11 @@
     body.font-dyslexic { line-height: 1.8; }
 
     * { box-sizing: border-box; }
+    .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
     body {
       margin: 0;
       font: var(--text-base)/var(--leading) -apple-system, BlinkMacSystemFont,
@@ -255,6 +261,9 @@
       font-weight: var(--font-semibold);
       box-shadow: 0 2px 12px color-mix(in srgb, var(--brand) 38%, transparent);
     }
+    .sidebar nav a.navquick {
+      justify-content: center; margin: 0 var(--space-2) var(--space-3);
+    }
     .sidebar nav a.navquick:hover { background: var(--brand-hi); }
     .sidebar nav a.active {
       color: var(--brand); background: var(--brand-subtle); font-weight: var(--font-medium);
@@ -382,6 +391,11 @@
 
     code { background: var(--surface-sunken); padding: 0.1rem 0.3rem; border-radius: var(--radius-sm); font-size: 0.85em; }
     .muted { color: var(--muted); }
+    .boundary {
+      padding: var(--space-4); border: 1px solid var(--border);
+      border-inline-start: 3px solid var(--warn); border-radius: var(--radius-lg);
+      background: var(--surface-1);
+    }
 
     /* ---------- buttons / inputs (available for page migration) ---------- */
     .btn {
@@ -550,6 +564,22 @@
     .section-head h2:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) { .mv-toast, .mv-row, .card { animation: none; } }
 
+    /* Page-native cards that predate the shared .card component still use one
+       material owner.  The solid layer is the accessible fallback for
+       browsers without backdrop-filter and for high-contrast mode; the
+       liquid-glass layer below replaces it only when the effect is supported.
+       --glass-tint lets a state (completed/on/user) retain its meaning without
+       returning to a page-local opaque fill. */
+    main :where(
+      .fb-kpi, .fb-card, .pb-kpi, .pb-card, .gs__step,
+      .msg--user .bubble, .worklog, .deliverable, .signoff, .artifact, .ask,
+      .activity, .lrn__row, .lrn__moat, .pf-tile, .rt-node
+    ) {
+      background:
+        linear-gradient(var(--glass-tint, transparent), var(--glass-tint, transparent)),
+        var(--surface-1);
+    }
+
     /* =====================================================================
        Liquid glass. Panels, chrome, and overlays become translucent,
        backdrop-blurred surfaces floating over a soft ambient gradient tinted
@@ -608,11 +638,42 @@
       body:not(.theme-hicontrast) .stat,
       body:not(.theme-hicontrast) .card,
       body:not(.theme-hicontrast) .mv-row,
-      body:not(.theme-hicontrast) .mv-empty {
+      body:not(.theme-hicontrast) .mv-empty,
+      body:not(.theme-hicontrast) .glass-surface,
+      body:not(.theme-hicontrast) .status-card,
+      body:not(.theme-hicontrast) .boundary {
         background: var(--glass-sheen), var(--glass);
         -webkit-backdrop-filter: blur(20px) saturate(160%);
         backdrop-filter: blur(20px) saturate(160%);
         border-color: var(--glass-border);
+        box-shadow: var(--glass-shadow), var(--glass-edge);
+      }
+      /* Earlier governance modules shipped their own *-card class names.
+         Bring those authenticated workbenches into the same material system
+         without weakening semantic warning/danger border colors. */
+      body:not(.theme-hicontrast) main :where(
+        .as-card, .cd-card, .ce-card, .cp-card, .cpp-card, .csi-card,
+        .csnp-card, .dug-card, .dup-card, .pcc-card, .pdd-card, .ppl-card,
+        .pri-card, .tpi-card
+      ) {
+        background: var(--glass-sheen), var(--glass) !important;
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        backdrop-filter: blur(20px) saturate(160%);
+        box-shadow: var(--glass-shadow), var(--glass-edge);
+      }
+      /* Legacy board and workflow surfaces opt into the same shared material.
+         Their border colors remain page-owned so completion, warning, and
+         selected states do not lose semantic meaning. */
+      body:not(.theme-hicontrast) main :where(
+        .fb-kpi, .fb-card, .pb-kpi, .pb-card, .gs__step,
+        .msg--user .bubble, .worklog, .deliverable, .signoff, .artifact, .ask,
+        .activity, .lrn__row, .lrn__moat, .pf-tile, .rt-node
+      ) {
+        background:
+          linear-gradient(var(--glass-tint, transparent), var(--glass-tint, transparent)),
+          var(--glass-sheen), var(--glass);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        backdrop-filter: blur(20px) saturate(160%);
         box-shadow: var(--glass-shadow), var(--glass-edge);
       }
       /* Hovered glass lifts, it doesn't just recolor: the same crisp pane
@@ -632,6 +693,17 @@
       body:not(.theme-hicontrast) .btn--primary:hover {
         background: linear-gradient(180deg,
           color-mix(in srgb, var(--brand-hi) 86%, #ffffff 14%), var(--brand-hi));
+      }
+      body:not(.theme-hicontrast) :where(
+        .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
+        .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
+        select, textarea, .mv-copilot__prompt
+      ) {
+        background-color: var(--glass-soft);
+        border-color: var(--glass-border);
+        -webkit-backdrop-filter: blur(12px) saturate(150%);
+        backdrop-filter: blur(12px) saturate(150%);
+        box-shadow: var(--glass-edge);
       }
       /* Scrollbars join the material: thin, rounded, translucent. */
       body:not(.theme-hicontrast) * {
@@ -693,12 +765,47 @@
         body:not(.theme-hicontrast) .card,
         body:not(.theme-hicontrast) .mv-row,
         body:not(.theme-hicontrast) .mv-empty,
+        body:not(.theme-hicontrast) .glass-surface,
+        body:not(.theme-hicontrast) .status-card,
+        body:not(.theme-hicontrast) .boundary,
         body:not(.theme-hicontrast) .prefs__panel,
         body:not(.theme-hicontrast) .mv-confirm {
           background: var(--surface-1);
           -webkit-backdrop-filter: none;
           backdrop-filter: none;
           box-shadow: var(--shadow-sm);
+        }
+        body:not(.theme-hicontrast) main :where(
+          .as-card, .cd-card, .ce-card, .cp-card, .cpp-card, .csi-card,
+          .csnp-card, .dug-card, .dup-card, .pcc-card, .pdd-card, .ppl-card,
+          .pri-card, .tpi-card
+        ) {
+          background: var(--surface-1) !important;
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+          box-shadow: var(--shadow-sm);
+        }
+        body:not(.theme-hicontrast) main :where(
+          .fb-kpi, .fb-card, .pb-kpi, .pb-card, .gs__step,
+          .msg--user .bubble, .worklog, .deliverable, .signoff, .artifact, .ask,
+          .activity, .lrn__row, .lrn__moat, .pf-tile, .rt-node
+        ) {
+          background:
+            linear-gradient(var(--glass-tint, transparent), var(--glass-tint, transparent)),
+            var(--surface-1);
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+          box-shadow: var(--shadow-sm);
+        }
+        body:not(.theme-hicontrast) :where(
+          .btn:not(.btn--primary):not(.btn--danger), .ctl, .iconbtn, .halt-pill,
+          .input, .select, .textarea, input:not([type="checkbox"]):not([type="radio"]),
+          select, textarea, .mv-copilot__prompt
+        ) {
+          background: var(--surface-sunken);
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+          box-shadow: none;
         }
         body:not(.theme-hicontrast) .topbar {
           background: color-mix(in srgb, var(--panel) 92%, var(--bg));
@@ -734,7 +841,7 @@
 }
 .hero-kicker { color: var(--brand-hi); font-size: var(--text-xs); font-weight: 750;
   letter-spacing: .13em; text-transform: uppercase; }
-.hero-title { margin: .25rem 0 0; font-family: var(--font-display);
+.hero-title { margin: .25rem 0 0; font-family: var(--font-serif);
   font-size: clamp(2.1rem, 5vw, 3.6rem); line-height: .97; letter-spacing: -.03em; }
 .hero-subtitle { color: var(--accent); font-style: italic; margin: .55rem 0 var(--space-3); }
 .hero-lede { color: var(--muted); max-width: 46rem; margin: 0; font-size: var(--text-md); }
@@ -754,40 +861,156 @@
   .hero::before { background: var(--brand); }
 }
 
+/* --- Governance workbench primitives ------------------------------------
+   OneTrust-replacement modules share these structure, state, and output
+   classes instead of inventing an isolated visual language for each page. */
+.governance-workbench { display: grid; gap: var(--space-5); }
+.governance-workbench .hero { margin-bottom: 0; }
+.governance-grid {
+  display: grid; grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.governance-grid > * { grid-column: span 6; margin-bottom: 0; }
+.governance-grid > .governance-result { grid-column: span 12; }
+.governance-form-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.governance-workbench form { display: grid; gap: var(--space-3); }
+.governance-workbench label { display: grid; gap: var(--space-1); }
+.governance-fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.governance-fieldset[disabled] { opacity: .62; }
+.governance-fieldset[disabled] :is(button, input, select, textarea) { cursor: not-allowed; }
+.permission-fieldset { border: 0; margin: 0; min-inline-size: 0; padding: 0; }
+.permission-fieldset[disabled] { opacity: .62; }
+.permission-fieldset[disabled] :is(button, input, select, textarea) { cursor: not-allowed; }
+.feature-gated-workbench { border: 0; min-inline-size: 0; }
+.governance-boundary { margin: 0; }
+.governance-boundary h2 { margin: .2rem 0 var(--space-2); }
+.governance-boundary ul { margin: 0; padding-inline-start: 1.2rem; }
+.governance-status { margin: 0; }
+.governance-details { margin-top: var(--space-3); }
+.governance-details > summary {
+  color: var(--brand-hi); cursor: pointer; font-weight: var(--font-semibold);
+  width: fit-content;
+}
+.governance-details[open] > summary { margin-bottom: var(--space-2); }
+.governance-output {
+  min-height: 5rem; max-height: 24rem; overflow: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere; margin: var(--space-3) 0 0; padding: var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-sunken); color: var(--text); font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.governance-confirmation {
+  grid-template-columns: auto 1fr !important; align-items: start;
+  padding: var(--space-3); border: 1px solid var(--warn);
+  border-radius: var(--radius-md); background: var(--warn-subtle);
+}
+.danger-text { color: var(--danger) !important; }
+.mono { font-family: var(--font-mono); }
+@media (max-width: 780px) {
+  .governance-grid > * { grid-column: span 12; }
+  .governance-form-grid { grid-template-columns: 1fr; }
+}
+
 /* --- Platform copilot (base.html, every page) ----------------------------- */
 .mv-copilot__fab {
   position: fixed; right: 1.1rem; bottom: 1.1rem; z-index: 60;
-  width: 3rem; height: 3rem; border-radius: 50%; border: 1px solid var(--border);
+  min-width: 3rem; height: 3rem; border-radius: var(--radius-pill); border: 1px solid var(--glass-border, var(--border));
   background: linear-gradient(135deg, var(--brand), var(--brand-hi));
-  color: #fff; font-size: 1.15rem; cursor: pointer; box-shadow: var(--shadow-md);
+  color: var(--brand-fg); cursor: pointer; box-shadow: var(--shadow-md);
+  display: inline-flex; align-items: center; justify-content: center; gap: .45rem;
+  padding: 0 .95rem;
 }
 .mv-copilot__fab:hover { filter: brightness(1.08); }
+.mv-copilot__fab svg { width: 1.05rem; height: 1.05rem; fill: none; stroke: currentColor;
+  stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mv-copilot__fab-label { font-size: var(--text-sm); font-weight: var(--font-semibold); }
 .mv-copilot {
   position: fixed; right: 1.1rem; bottom: 4.6rem; z-index: 60;
-  width: min(21rem, calc(100vw - 2.2rem));
-  border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-  box-shadow: var(--shadow-md); padding: var(--space-4);
+  width: min(25rem, calc(100vw - 2.2rem)); max-height: min(42rem, calc(100dvh - 7rem));
+  overflow: auto; border: 1px solid var(--glass-border, var(--border));
+  border-radius: calc(var(--radius-lg) + 4px);
+  background: var(--glass-sheen, none), color-mix(in srgb, var(--panel) 82%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(175%); backdrop-filter: blur(24px) saturate(175%);
+  box-shadow: var(--shadow-lg), var(--glass-edge, 0 0 transparent); padding: var(--space-4);
 }
 .mv-copilot__head { display: flex; align-items: center;
   justify-content: space-between; margin-bottom: var(--space-2); }
+.mv-copilot__head > div { display: grid; gap: .12rem; }
+.mv-copilot__eyebrow { color: var(--brand-hi); font-size: .65rem; font-weight: 700;
+  letter-spacing: .11em; text-transform: uppercase; }
 .mv-copilot__hello { color: var(--muted); font-size: var(--text-sm); margin: 0 0 var(--space-2); }
+.mv-copilot__egress {
+  margin: 0 0 var(--space-3); padding: .55rem .65rem;
+  border: 1px solid var(--warn); border-radius: var(--radius-md);
+  background: var(--warn-subtle); color: var(--text); font-size: var(--text-xs);
+}
 .mv-copilot__tips { margin: 0 0 var(--space-3); padding-left: 1.1rem;
   color: var(--muted); font-size: var(--text-sm); display: grid; gap: .35rem; }
 .mv-copilot__log { display: grid; gap: .4rem; max-height: 14rem;
   overflow-y: auto; margin-bottom: var(--space-2); }
 .mv-copilot__log:empty { display: none; }
+.mv-copilot__prompts { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 var(--space-3); }
+.mv-copilot__prompt { border: 1px solid var(--glass-border, var(--border));
+  border-radius: var(--radius-pill); background: var(--glass-soft, var(--surface-2));
+  color: var(--text); padding: .3rem .55rem; font: inherit; font-size: var(--text-xs);
+  cursor: pointer; text-align: start; }
+.mv-copilot__prompt:hover { border-color: var(--brand-border); color: var(--brand-hi); }
 .mv-copilot__msg { font-size: var(--text-sm); border-radius: var(--radius-md);
   padding: .45rem .65rem; max-width: 92%; }
 .mv-copilot__msg--user { justify-self: end; background: var(--brand);
-  color: #fff; }
+  color: var(--brand-fg); }
 .mv-copilot__msg--bot { justify-self: start; background: var(--surface-sunken);
   border: 1px solid var(--border); color: var(--text); }
 .mv-copilot__row { display: flex; gap: var(--space-2); }
 .mv-copilot__row .input { flex: 1; min-width: 0; }
 .mv-copilot__note { color: var(--muted); font-size: var(--text-xs);
   margin: .4rem 0 0; min-height: 1em; }
+/* The Copilot is fixed outside <main>, so it needs its own explicit material
+   fallbacks rather than relying on the page-surface selectors above. */
+body.theme-hicontrast .mv-copilot,
+body.theme-hicontrast :where(
+  .mv-copilot__prompt, .mv-copilot__msg--bot, .mv-copilot__egress,
+  .mv-copilot__row .input
+) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+body.theme-hicontrast .mv-copilot {
+  background: var(--panel);
+  border-color: var(--border);
+}
+body.theme-hicontrast :where(
+  .mv-copilot__prompt, .mv-copilot__msg--bot, .mv-copilot__egress,
+  .mv-copilot__row .input
+) {
+  background: var(--bg);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mv-copilot,
+  .mv-copilot__prompt,
+  .mv-copilot__msg--bot,
+  .mv-copilot__egress,
+  .mv-copilot__row .input {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  .mv-copilot { background: var(--panel); }
+  .mv-copilot__prompt,
+  .mv-copilot__msg--bot,
+  .mv-copilot__egress,
+  .mv-copilot__row .input {
+    background: var(--surface-sunken);
+  }
+}
+@media (max-width: 480px) {
+  .mv-copilot__fab { width: 3rem; padding: 0; }
+  .mv-copilot__fab-label { display: none; }
+}
 
 /* ---- Dashboard viz (shared chart primitives — see _charts.html) ----------
    Color classes carry a semantic job (status or the sequential brand hue) and

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import time
 from typing import Any
@@ -80,6 +81,11 @@ BUDGET_PERIODS = ("monthly", "total")
 #: rather than growing the sidecar without bound.
 _MAX_PENDING_EXECUTIONS = 20
 _EXECUTION_TTL_SECONDS = 24 * 3600
+#: Recovery scan for the newest approvals after a process dies between the
+#: approval transaction and the sidecar binding write.  The approval is born
+#: during that exact window, so a bounded newest-first scan is sufficient
+#: while preventing an unbounded queue read on the gateway hot path.
+_EXECUTION_APPROVAL_RECONCILE_LIMIT = 10_000
 #: Canonical-JSON body ceiling for the execute tier — the sidecar ledger and
 #: the approver display must stay readable; bulk payloads belong on the
 #: system of record's own bulk surfaces, not proxied through the gateway.
@@ -1212,12 +1218,22 @@ def execute_connectors() -> list[str]:
 
 
 def _request_digest(connector: str, op: str, path: str,
-                    body: dict | None) -> str:
+                    body: dict | None, *,
+                    runtime_context_sha256: str = "") -> str:
     """Canonical fingerprint binding an approval to EXACTLY one request."""
     import hashlib
-    canon = json.dumps(
-        {"connector": connector, "op": op, "path": path, "body": body or {}},
-        sort_keys=True, separators=(",", ":"))
+    material = {
+        "connector": connector,
+        "op": op,
+        "path": path,
+        "body": body or {},
+    }
+    # Preserve the legacy digest exactly while the runtime plane is off.  When
+    # it is on, bind the parked approval to the gateway-derived asset/detail
+    # context so a commit cannot swap to an easier policy authority.
+    if runtime_context_sha256:
+        material["runtime_context_sha256"] = runtime_context_sha256
+    canon = json.dumps(material, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
@@ -1259,12 +1275,51 @@ def _screen_execute_request(agent_id: str, request: dict, *,
     path = str(request.get("path") or "").strip()
     body = request.get("body")
     detail = str(request.get("detail") or "")
+    raw_idempotency_key = request.get("idempotency_key")
+    idempotency_key = (
+        raw_idempotency_key.strip()
+        if isinstance(raw_idempotency_key, str)
+        else ""
+    )
+    runtime_context_sha256 = request.get("_runtime_context_sha256")
     tool = (f"{connector}.{'read' if op == 'get' else 'write'}"
             if connector else "execute")
     parsed = {"connector": connector, "op": op, "path": path,
               "body": body if isinstance(body, dict) else None,
               "preview": bool(request.get("preview")), "detail": detail,
-              "tool": tool}
+              "tool": tool, "idempotency_key": idempotency_key,
+              "runtime_context_sha256": runtime_context_sha256 or ""}
+    if runtime_context_sha256 is not None and (
+        not isinstance(runtime_context_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", runtime_context_sha256)
+    ):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "bad_runtime_context",
+            "runtime policy context binding is malformed",
+        ), parsed
+    if (
+        (
+            raw_idempotency_key is not None
+            and raw_idempotency_key != ""
+            and not isinstance(raw_idempotency_key, str)
+        )
+        or
+        len(idempotency_key) > 128
+        or any(
+            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:@/-"
+            for char in idempotency_key
+        )
+    ):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "bad_idempotency_key",
+            "idempotency_key must be a bounded opaque identifier",
+        ), parsed
     if connector not in execute_connectors():
         return _screen_verdict(
             agent_id, tool, False, "connector_not_enabled",
@@ -1339,7 +1394,9 @@ def execute(agent_id: str, request: dict, *,
     what was authorized — never a swapped payload.
 
     ``request``: ``{connector, op: get|post|put|patch|delete, path, body?,
-    preview?, detail?, goal_id?}``. ``preview: true`` describes a write
+    preview?, detail?, goal_id?, idempotency_key?}``. A stable idempotency key
+    makes an ambiguous write-park retry return the original execution instead
+    of creating a second approval. ``preview: true`` describes a write
     without performing it (no network, no approval — there is no side
     effect). ``goal_id`` binds the effect to one of the agent's live runs so
     the receipt and the step trail land on that Operating Record row.
@@ -1353,6 +1410,8 @@ def execute(agent_id: str, request: dict, *,
     connector, op, path = parsed["connector"], parsed["op"], parsed["path"]
     body, preview = parsed["body"], parsed["preview"]
     detail, tool = parsed["detail"], parsed["tool"]
+    idempotency_key = parsed["idempotency_key"]
+    runtime_context_sha256 = parsed["runtime_context_sha256"]
     risk = "low" if (op == "get" or preview) else "high"
     # detail="" — the full blob (detail included) was scanned above; the
     # shared chain still applies containment, ceilings, and budget.
@@ -1378,7 +1437,8 @@ def execute(agent_id: str, request: dict, *,
     from .governed_rest import GOVERNED_REST_FACTORIES
     conn = GOVERNED_REST_FACTORIES[connector]()
     digest = _request_digest(connector, op, path,
-                             body if isinstance(body, dict) else None)
+                             body if isinstance(body, dict) else None,
+                             runtime_context_sha256=runtime_context_sha256)
     if preview:
         if op == "get":
             return _screen_verdict(agent_id, tool, False, "bad_op",
@@ -1396,7 +1456,8 @@ def execute(agent_id: str, request: dict, *,
         return _park_execution(agent_id, conn, meta, tool=tool,
                                connector=connector, op=op, path=path,
                                body=body, detail=detail, digest=digest,
-                               req_risk=req_risk, floor=floor, goal_id=gid)
+                               req_risk=req_risk, floor=floor, goal_id=gid,
+                               idempotency_key=idempotency_key)
     return _perform_execution(agent_id, connector, op, path,
                               body if isinstance(body, dict) else None,
                               goal_id=gid, digest=digest, tool=tool,
@@ -1406,36 +1467,93 @@ def execute(agent_id: str, request: dict, *,
 def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
                     connector: str, op: str, path: str, body: dict | None,
                     detail: str, digest: str, req_risk: str, floor: str,
-                    goal_id: int | None) -> dict:
+                    goal_id: int | None,
+                    idempotency_key: str = "") -> dict:
     """Park one digest-bound execution behind a real approval row.
 
     The slot is reserved BEFORE the approval is created so a full backlog
     never strands an orphan approval in the queue; the approval id is bound
-    to the slot right after. The approver sees the network-free preview and
-    the request fingerprint — what they authorize is exactly what
-    :func:`execute_commit` will verify before acting."""
+    to the slot right after.  A unique approval action is persisted with the
+    slot first, allowing an exact retry/status poll to reconcile the approval
+    if the process dies between those two durable writes. The approver sees
+    the network-free preview and the request fingerprint — what they authorize
+    is exactly what :func:`execute_commit` will verify before acting."""
     execution_id = secrets.token_urlsafe(12)
+    approval_action = f"external-exec:{agent_id}:{tool}:{execution_id}"
     now = time.time()
     backlog = enrolled = False
+    replay: tuple[str, dict] | None = None
+    conflict = False
     with _sidecar_locked():
         sidecar = _load_sidecar()
         m = sidecar.get(agent_id)
         if m is not None:
             enrolled = True
             live = _prune_executions(m, now)
-            if sum(1 for e in live.values()
-                   if e.get("status") == "pending") >= _MAX_PENDING_EXECUTIONS:
+            if idempotency_key:
+                for existing_id, existing in live.items():
+                    if existing.get("idempotency_key") != idempotency_key:
+                        continue
+                    if secrets.compare_digest(
+                        str(existing.get("digest")
+                            or existing.get("idempotency_digest") or ""),
+                        digest,
+                    ):
+                        replay = (existing_id, dict(existing))
+                    else:
+                        conflict = True
+                    break
+            if replay is not None or conflict:
+                pass
+            elif sum(1 for e in live.values()
+                     if e.get("status") == "pending") >= _MAX_PENDING_EXECUTIONS:
                 backlog = True
             else:
                 live[execution_id] = {
                     "approval_id": None, "digest": digest,
+                    "approval_action": approval_action,
                     "connector": connector, "op": op, "path": path[:500],
                     "goal_id": goal_id, "created_at": now,
-                    "status": "pending"}
+                    "status": "pending",
+                    "idempotency_key": idempotency_key or None,
+                    "idempotency_digest": digest if idempotency_key else None}
                 _save_sidecar(sidecar)
     if not enrolled:
         return _screen_verdict(agent_id, tool, False, "not_enrolled",
                                "agent has a trust entry but no enrollment")
+    if conflict:
+        return _deny_and_count(
+            agent_id,
+            tool,
+            "idempotency_conflict",
+            "idempotency_key is already bound to a different request",
+        )
+    if replay is not None:
+        existing_id, existing = replay
+        if not existing.get("approval_id"):
+            reconciled = _reconcile_execution_approval(agent_id, existing_id)
+            if reconciled is not None:
+                existing = reconciled
+        status = str(existing.get("status") or "pending")
+        rule = "approval_required" if status == "pending" else "already_finished"
+        reason = (
+            "an identical request already has a parked approval"
+            if existing.get("approval_id")
+            else "an identical request is still being parked; poll its execution"
+        )
+        if status != "pending":
+            reason = f"execution already {status}; the write was not re-fired"
+        out = _screen_verdict(agent_id, tool, False, rule, reason)
+        out.update({
+            "duplicate": True,
+            "execution_id": existing_id,
+            "status": status,
+            "requires_approval": status == "pending",
+            "approval_id": existing.get("approval_id"),
+            "expires_at": float(existing.get("created_at") or now)
+            + _EXECUTION_TTL_SECONDS,
+        })
+        return out
     if backlog:
         return _screen_verdict(
             agent_id, tool, False, "execution_backlog",
@@ -1447,7 +1565,7 @@ def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
                     if op != "get" else f"would GET {connector}{path}")
         from .world_model import open_world
         approval_id = open_world().create_approval(
-            f"external-exec:{agent_id}:{tool}", risk=req_risk,
+            approval_action, risk=req_risk,
             scope=meta.get("department") or None,
             detail=(f"{describe}\nrequest sha256: {digest}\n"
                     f"{detail or ''}")[:2000],
@@ -1483,6 +1601,59 @@ def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
     return out
 
 
+def _reconcile_execution_approval(
+    agent_id: str,
+    execution_id: str,
+) -> dict | None:
+    """Repair the approval-to-sidecar crash boundary without creating rows.
+
+    Approval creation is a committed WorldModel transaction while execution
+    metadata is an atomic sidecar write, so they cannot share one transaction.
+    The sidecar durably records a unique action first.  If the second write is
+    interrupted, this routine finds the one exact approval and binds its id.
+    It never guesses between duplicate matches and never creates an approval.
+    """
+
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        entry = ((sidecar.get(agent_id) or {}).get("executions")
+                 or {}).get(str(execution_id))
+        if entry is None:
+            return None
+        if entry.get("approval_id"):
+            return dict(entry)
+        action = entry.get("approval_action")
+        if not isinstance(action, str) or not action:
+            return dict(entry)
+        try:
+            from .world_model import open_world
+            matches = [
+                approval
+                for approval in open_world().list_approvals(
+                    limit=_EXECUTION_APPROVAL_RECONCILE_LIMIT
+                )
+                if approval.action == action
+                and approval.provenance == "external_agents"
+                and approval.requested_by == f"agent:{agent_id}"
+            ]
+        except Exception:
+            log.warning(
+                "external_agents: approval reconciliation failed",
+                exc_info=True,
+            )
+            return dict(entry)
+        if len(matches) != 1:
+            if len(matches) > 1:
+                log.error(
+                    "external_agents: ambiguous approval reconciliation for %r",
+                    agent_id,
+                )
+            return dict(entry)
+        entry["approval_id"] = int(matches[0].id)
+        _save_sidecar(sidecar)
+        return dict(entry)
+
+
 def execute_status(agent_id: str, execution_id: str) -> dict:
     """Poll one parked execution: ledger status joined with the live approval
     decision, so the agent knows when to re-send the request and commit."""
@@ -1490,6 +1661,8 @@ def execute_status(agent_id: str, execution_id: str) -> dict:
     entry = ((meta or {}).get("executions") or {}).get(str(execution_id))
     if entry is None:
         raise ExternalAgentsError(f"unknown execution {execution_id!r}")
+    if not entry.get("approval_id") and entry.get("approval_action"):
+        entry = _reconcile_execution_approval(agent_id, str(execution_id)) or entry
     created = float(entry.get("created_at") or 0)
     status = str(entry.get("status") or "pending")
     now = time.time()
@@ -1541,6 +1714,8 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
     if entry is None:
         return _screen_verdict(agent_id, tool, False, "unknown_execution",
                                f"unknown execution {str(execution_id)!r}")
+    if not entry.get("approval_id") and entry.get("approval_action"):
+        entry = _reconcile_execution_approval(agent_id, str(execution_id)) or entry
     now = time.time()
     # Terminal state FIRST, regardless of age: a replayed commit on an
     # already-fired execution must always hear the terminal status — an
@@ -1581,6 +1756,18 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
     if body is not None and not isinstance(body, dict):
         return _screen_verdict(agent_id, tool, False, "bad_body",
                                "body must be a JSON object")
+    runtime_context_sha256 = request.get("_runtime_context_sha256")
+    if runtime_context_sha256 is not None and (
+        not isinstance(runtime_context_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", runtime_context_sha256)
+    ):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "bad_runtime_context",
+            "runtime policy context binding is malformed",
+        )
     approval_id = entry.get("approval_id")
     if not approval_id:
         # The park never completed (approval creation failed after the slot
@@ -1593,7 +1780,8 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
             "the park never completed (no approval exists); submit the "
             "request again")
     digest = _request_digest(connector, op, path,
-                             body if isinstance(body, dict) else None)
+                             body if isinstance(body, dict) else None,
+                             runtime_context_sha256=runtime_context_sha256 or "")
     if digest != entry.get("digest"):
         # Void only while still pending: a stale snapshot must never delete
         # an entry a concurrent (correct) commit has claimed and is

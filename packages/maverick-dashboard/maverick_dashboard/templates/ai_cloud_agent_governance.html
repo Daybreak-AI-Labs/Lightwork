@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Cloud Agent Governance - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cag-grid { display:grid; grid-template-columns:minmax(19rem,1fr) minmax(25rem,2fr);
+              gap:var(--space-4); }
+  .cag-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .cag-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .cag-stack textarea { min-height:20rem; font-family:var(--font-mono); }
+  .cag-output { min-height:28rem; max-height:58rem; overflow:auto; white-space:pre-wrap;
+                word-break:break-word; }
+  .cag-warning { border:2px solid var(--warn); padding:var(--space-3);
+                 border-radius:8px; background:var(--surface-2); }
+  .cag-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  @media (max-width:900px) { .cag-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Managed-cloud AI agent governance</h1>
+<p>Content-free inventory and revision-pinned controls for AWS Bedrock,
+  Azure AI Foundry, Google Vertex AI, and reviewed Databricks framework mappings.</p>
+<div class="cag-warning">
+  <strong>Bounded governance evidence.</strong> Inventory can be incomplete.
+  Adapter acceptance is not proof that a provider-side write occurred. Ambiguous
+  dispatches require a fresh provider read and explicit reconciliation. This
+  page never accepts tenants, native provider IDs, credentials, provider URLs,
+  signing keys, raw prompts, framework prose, or provider configuration.
+</div>
+
+{% if not ai_cloud_agent_governance_configuration_available %}
+<section class="panel">
+  <h2>Configuration authority unavailable</h2>
+  <p>The workbench is closed because no exact active tenant and server-owned
+    capability probe are available.</p>
+</section>
+{% elif not ai_cloud_agent_governance_enabled %}
+<section class="panel">
+  <h2>Cloud-agent governance disabled</h2>
+  <p>Enable <code>[ai_cloud_agent_governance]</code> and compose durable
+    tenant/provider authorities before using this surface.</p>
+</section>
+{% else %}
+<p><button class="btn" id="cag-load-status" type="button">Load honest status</button></p>
+<div class="cag-grid">
+  <section class="panel cag-stack">
+    <h2>Strict JSON operator workbench</h2>
+    <label>Operation
+      <select id="cag-operation">
+        <option value="inventory" data-method="GET" data-path="/inventory">Inventory: list all server-configured providers</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state root</option>
+        <option value="evaluate" data-method="POST" data-path="/policy-evaluations">Enforcement: evaluate exact policy pins</option>
+        <option value="prepare" data-method="POST" data-path="/enforcement-intents">Enforcement: prepare reviewed intent</option>
+        <option value="intent-get" data-method="GET" data-path="/enforcement-intents/{intent_ref}">Enforcement: inspect intent</option>
+        <option value="dispatch" data-method="POST" data-path="/enforcement-intents/{intent_ref}/dispatch">Enforcement: dispatch exact intent</option>
+        <option value="reconcile" data-method="POST" data-path="/enforcement-intents/{intent_ref}/reconcile">Enforcement: reconcile fresh provider read</option>
+        <option value="framework-review" data-method="POST" data-path="/databricks/framework-reviews">Databricks: review registered mapping pack</option>
+        <option value="framework-attest" data-method="POST" data-path="/databricks/framework-attestations">Databricks: independently attest review</option>
+        <option value="framework-activate" data-method="POST" data-path="/databricks/framework-activations">Databricks: activate approved mapping pack</option>
+      </select>
+    </label>
+    <label>Path values as JSON object
+      <input class="input" id="cag-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="cag-body">{}</textarea>
+    </label>
+    <div class="cag-warning" id="cag-confirm-panel">
+      <label class="cag-confirm"><input id="cag-confirm" type="checkbox">
+        <span>I reviewed the exact opaque references, expected revisions,
+          policy/evidence digests, intended effect, and current tenant context.
+          I understand that provider acceptance is not proof of applied state.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="cag-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <pre class="cag-output" id="cag-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/assurance/cloud-agents";
+  var operation = document.getElementById("cag-operation");
+  var pathValues = document.getElementById("cag-path-values");
+  var body = document.getElementById("cag-body");
+  var confirmation = document.getElementById("cag-confirm");
+  var confirmationPanel = document.getElementById("cag-confirm-panel");
+  var output = document.getElementById("cag-output");
+  var mutations = new Set([
+    "evaluate", "prepare", "dispatch", "reconcile", "framework-review",
+    "framework-attest", "framework-activate"
+  ]);
+  var forbidden = new Set([
+    "tenant", "tenant_id", "tenant_sha256", "principal", "principal_ref",
+    "provider", "binding_ref", "adapter", "credential", "credential_env",
+    "native_id", "native_resource_id", "provider_url", "signing_key",
+    "prompt", "raw_prompt", "framework_document", "licensed_text"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() { return operation.options[operation.selectedIndex]; }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !mutations.has(operation.value);
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      if (typeof values[key] !== "string" || !values[key]) {
+        throw new Error("Missing string path value: " + key);
+      }
+      return encodeURIComponent(values[key]);
+    });
+  }
+  function rejectServerOwnedFields(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) { return; }
+    Object.keys(value).forEach(function (key) {
+      if (forbidden.has(key)) {
+        throw new Error(key + " is server-owned and cannot be supplied here.");
+      }
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {method: method, headers: {"Accept": "application/json"}};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var text = await response.text();
+    var result;
+    try {
+      if (!text) { throw new Error("empty response"); }
+      result = JSON.parse(text);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("cag-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("cag-submit").addEventListener("click", function () {
+    try {
+      if (mutations.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed operation before continuing.");
+      }
+      var route = selectedRoute();
+      var selectedPathValues = JSON.parse(pathValues.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      rejectServerOwnedFields(payload);
+      var path = buildPath(route.dataset.path, selectedPathValues);
+      run(route.dataset.method, path, payload).catch(function (error) { show(String(error)); });
+    } catch (error) { show(String(error)); }
+  });
+  updateConfirmation();
+}());
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Compliance Scoping - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cs-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+             gap:var(--space-4); }
+  .cs-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .cs-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .cs-stack textarea { min-height:18rem; font-family:var(--font-mono); }
+  .cs-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
+               word-break:break-word; }
+  .cs-warning { border:2px solid var(--danger); padding:var(--space-3);
+                border-radius:8px; background:var(--surface-2); }
+  .cs-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  @media (max-width:900px) { .cs-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Technology Risk &amp; Compliance Scoping</h1>
+<p>Exact-tenant control plane for closed questionnaires, deterministic scope
+  computation, responsibility assignment, overlaps, crosswalks, and signed
+  local exports.</p>
+<div class="cs-warning">
+  <strong>No licensed framework text, legal advice, external discovery,
+    certification, network I/O, provider writes, or live acceptance.</strong>
+  Questions and controls are opaque references only. Evidence is represented by
+  a SHA-256 digest plus an <code>evidence:</code> reference. Export signing accepts
+  only an <code>env:</code>, <code>vault:</code>, or <code>secret:</code> key reference,
+  never a secret value.
+</div>
+
+{% if not compliance_scoping_enabled %}
+<section class="panel">
+  <h2>Compliance scoping disabled</h2>
+  <p>This surface fails closed until both
+    <code>[tech_risk_compliance] enable = true</code> and
+    <code>[tech_risk_compliance.scoping] enable = true</code> are explicit.</p>
+</section>
+{% else %}
+<p><button class="btn" id="cs-load-status" type="button">Load honest status</button></p>
+<div class="cs-grid">
+  <section class="panel cs-stack">
+    <h2>Strict JSON operator workbench</h2>
+    <p>Tenant and actor come only from the authenticated request. Unknown fields,
+      free-text framework or evidence content, and key values are rejected.</p>
+    <label>Operation
+      <select id="cs-operation">
+        <option value="questionnaire-create" data-method="PUT" data-path="/questionnaires/{questionnaire_id}/versions">Questionnaire: create immutable version</option>
+        <option value="questionnaire-get" data-method="GET" data-path="/questionnaires/{questionnaire_id}/versions/{version}">Questionnaire: get version</option>
+        <option value="questionnaire-publish" data-method="POST" data-path="/questionnaires/{questionnaire_id}/versions/{version}/publish">Questionnaire: independent publish</option>
+        <option value="assessment-create" data-method="PUT" data-path="/assessments/{assessment_id}">Assessment: create</option>
+        <option value="assessment-get" data-method="GET" data-path="/assessments/{assessment_id}">Assessment: get</option>
+        <option value="required-questions" data-method="GET" data-path="/assessments/{assessment_id}/required-questions">Assessment: next required questions</option>
+        <option value="response-record" data-method="POST" data-path="/assessments/{assessment_id}/responses/{question_id}">Assessment: record closed response and evidence digest</option>
+        <option value="scope-compute" data-method="PUT" data-path="/assessments/{assessment_id}/scopes/{scope_id}">Scope: compute with responsibilities</option>
+        <option value="scope-get" data-method="GET" data-path="/scopes/{scope_id}">Scope: get</option>
+        <option value="scope-overlaps" data-method="GET" data-path="/scopes/{scope_id}/overlaps">Scope: get overlaps</option>
+        <option value="scope-crosswalks" data-method="GET" data-path="/scopes/{scope_id}/crosswalks">Scope: get crosswalks</option>
+        <option value="scope-responsibilities" data-method="GET" data-path="/scopes/{scope_id}/responsibilities">Scope: get responsibility assignments</option>
+        <option value="scope-approve" data-method="POST" data-path="/scopes/{scope_id}/approve">Scope: independent approval</option>
+        <option value="scope-finalize" data-method="POST" data-path="/scopes/{scope_id}/finalize">Scope: finalize as original computer</option>
+        <option value="scope-export" data-method="PUT" data-path="/scopes/{scope_id}/exports/{export_id}">Scope: create signed local export</option>
+        <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Export: get and verify signature</option>
+        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+      </select>
+    </label>
+    <label>Path values as JSON object
+      <input class="input" id="cs-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="cs-body">{}</textarea>
+    </label>
+    <div class="cs-warning" id="cs-confirm-panel">
+      <label class="cs-confirm"><input id="cs-confirm" type="checkbox">
+        <span>I reviewed the immutable publication, independent approval,
+          finalization, or retention-purge consequences and the exact revision.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="cs-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <pre class="cs-output" id="cs-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/compliance/scoping";
+  var operation = document.getElementById("cs-operation");
+  var paths = document.getElementById("cs-path-values");
+  var body = document.getElementById("cs-body");
+  var confirmation = document.getElementById("cs-confirm");
+  var confirmationPanel = document.getElementById("cs-confirm-panel");
+  var output = document.getElementById("cs-output");
+  var highImpact = new Set([
+    "questionnaire-publish", "scope-approve", "scope-finalize", "retention-purge"
+  ]);
+  var forbiddenKeys = new Set([
+    "tenant", "tenant_id", "actor", "actor_ref", "framework_text",
+    "question_text", "raw_evidence", "evidence_text", "signing_key",
+    "signing_key_value", "secret", "secret_value"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() {
+    return operation.options[operation.selectedIndex];
+  }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+  }
+  function containsForbiddenKey(value) {
+    if (!value || typeof value !== "object") { return false; }
+    if (Array.isArray(value)) { return value.some(containsForbiddenKey); }
+    return Object.keys(value).some(function (key) {
+      return forbiddenKeys.has(key) || containsForbiddenKey(value[key]);
+    });
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      var value = values[key];
+      if ((typeof value !== "string" && typeof value !== "number") || value === "") {
+        throw new Error("Missing path value: " + key);
+      }
+      return encodeURIComponent(String(value));
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {method: method, headers: {"Accept": "application/json"}};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var responseText = await response.text();
+    var result;
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("cs-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("cs-submit").addEventListener("click", async function () {
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed state change before continuing.");
+      }
+      var route = selectedRoute();
+      var pathValues = JSON.parse(paths.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      if (containsForbiddenKey(payload)) {
+        throw new Error("Tenant, actor, raw text, evidence, and key values are never accepted.");
+      }
+      var path = buildPath(route.dataset.path, pathValues);
+      await run(route.dataset.method, path, payload);
+    } catch (error) { show(String(error)); }
+  });
+  updateConfirmation();
+}());
+</script>
+{% endif %}
+{% endblock %}

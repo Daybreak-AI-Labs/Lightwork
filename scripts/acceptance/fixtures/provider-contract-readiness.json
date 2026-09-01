@@ -1,0 +1,35 @@
+{
+  "schema": "lightwork.ai-provider-contract-acceptance.config.v1",
+  "estate_classification": "consenting_test_estate",
+  "consent_acknowledgement": "I authorize bounded live provider contract tests against this consenting test estate.",
+  "hugging_face": {
+    "enable": true,
+    "endpoint": "https://huggingface.co",
+    "namespace": "consenting-test-namespace",
+    "credential_secret_ref": "HF_TOKEN"
+  },
+  "entra": {
+    "enable": true,
+    "base_url": "https://graph.microsoft.com",
+    "tenant_id": "00000000-0000-4000-8000-000000000000",
+    "credential_secret_ref": "ENTRA_DISCOVERY_TOKEN"
+  },
+  "servicenow": {
+    "enable": true,
+    "base_url": "https://dev00000.service-now.com",
+    "environment": "dev",
+    "write_origin_allowlist": [
+      "https://dev00000.service-now.com"
+    ],
+    "case_id": "lightwork-provider-contract-v1",
+    "credential_secret_ref": "SERVICENOW_TOKEN",
+    "write_acknowledgement": "I authorize one idempotent Lightwork finding write and replay to this ServiceNow test estate."
+  },
+  "openai_costs": {
+    "enable": true,
+    "organization_ref": "consenting-test-organization",
+    "period_start": "2026-08-01T00:00:00Z",
+    "period_end": "2026-08-02T00:00:00Z",
+    "credential_secret_ref": "OPENAI_ADMIN_KEY"
+  }
+}

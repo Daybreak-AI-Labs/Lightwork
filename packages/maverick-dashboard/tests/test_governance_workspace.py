@@ -699,9 +699,12 @@ def test_needs_attention_digest_on_api_and_page():
     )
 
     digest = _ok(client.get(f"{_PREFIX}/alerts"))
-    assert digest["attention_count"] == 2
+    assert digest["attention_count"] == 3
     assert len(digest["sections"]["serious_incidents"]["overdue"]) == 1
     assert digest["sections"]["ai_literacy"]["missing"] == 1
+    assert digest["sections"]["ai_literacy"][
+        "unreconciled_ai_literacy_data"
+    ] is True
 
     page = client.get("/security/governance")
     assert page.status_code == 200
@@ -840,6 +843,9 @@ def test_literacy_register_through_the_api_and_page():
     requirements = _ok(client.get(f"{_PREFIX}/literacy/requirements"))
     assert requirements["count"] == 1
     assert len(requirements["requirements"][0]["trainings"]) == 2
+    assert requirements["data_plane"] == "role_compatibility"
+    assert requirements["authoritative_for_compliance"] is False
+    assert requirements["reconciliation_required"] is True
 
     # Duplicate training keys are refused by the request schema itself.
     assert client.post(
@@ -879,6 +885,7 @@ def test_literacy_register_through_the_api_and_page():
     gaps = _ok(client.get(f"{_PREFIX}/literacy/gaps"))
     assert gaps["person_count"] == 1
     assert gaps["counts"] == {"current": 1, "expired": 0, "missing": 1}
+    assert gaps["reconciliation_required"] is True
 
     evidence = _ok(client.get(f"{_PREFIX}/literacy/evidence"))
     exported = json.loads(evidence["evidence"])
@@ -888,6 +895,7 @@ def test_literacy_register_through_the_api_and_page():
     assert page.status_code == 200
     assert "analyst@example.com" in page.text
     assert "model-limits (missing)" in page.text
+    assert "Reconciliation required" in page.text
 
 
 # ---------------------------------------------------------------------------

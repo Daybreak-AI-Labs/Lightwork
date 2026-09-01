@@ -1,0 +1,152 @@
+{
+  "application_test_source_binding": {
+    "content_bytes": 40411018,
+    "dirty": true,
+    "file_count": 5473,
+    "git_index_sha256": "f2fc1f9466a422ec7fedc484ced983fbca28e9cd61cdf94b98db16dd67f95285",
+    "git_status_sha256": "a0bbdfa6da8e24070dd293e31145069d81c64b6ce620831ee8399e4fa2edb86a",
+    "head_commit": "ffa309a0990ecd216ee995a24bd53ece6bee16ac",
+    "missing_file_count": 0,
+    "schema": "lightwork.application-test-source-binding.v1",
+    "scope_ref": "bounded-application-tests-and-acceptance-v1",
+    "scope_sha256": "20e29a5dacb2c5a34853daf2446701b06f01aba48a3a99b09e14a563a91062ce",
+    "worktree_manifest_sha256": "faa05d072ff0ba2abc50dbbb2f0e22dac0505bbf72f81ab48539f60f3943e6e1"
+  },
+  "external_credentials_requested": false,
+  "generated_at": "2026-08-28T20:59:51.809654+00:00",
+  "interpreter_ref": "PY-42a6030afa0a382235b87892",
+  "limits": [
+    "This report covers fixed local pytest suites only; it is not fresh customer-tenant usability acceptance.",
+    "Cross-tenant findings are local adversarial regression tests, not an external penetration test or live hosted-tenant exercise.",
+    "Concurrency coverage uses bounded local test loads and is not production capacity, soak, latency or horizontal-scale evidence.",
+    "Recovery coverage uses controlled local fault/restart cases and is not disaster-recovery or infrastructure failover acceptance.",
+    "Runtime-policy coverage exercises the real local FastAPI external-gateway routes, authentication, approval and execution ledger in an isolated test estate with controlled connector and policy doubles; no external or customer gateway and no external credentials were used.",
+    "Audit export coverage verifies local code paths and fixtures; auditor, customer, regulator and off-host custody acceptance were not run.",
+    "Raw pytest output is not retained in this report; only its SHA-256 digest, byte count and parsed aggregate counts are recorded.",
+    "This evidence is valid only for the recorded Git HEAD, index and bounded application/test working-tree manifest; source changes require a new run and source-state changes during the run invalidate acceptance.",
+    "The JSON report is unsigned local evidence and must be correlated with CI, audit-ledger and environment-specific records."
+  ],
+  "live_acceptance_status": "not_run",
+  "local_test_only": true,
+  "python_version": "3.12.10",
+  "report_sha256": "98544f50471411e9e42cd5d114894037d432532633b8f4680d7caf8470e7e58e",
+  "run_id": "GPA-7e64b2023e5c9ccd21c5f3d1",
+  "runner_sha256": "41e42a2ce1be263d396ae863ec03ea79b1c667f864d8ddb98449556105825f05",
+  "runtime_gateway_acceptance": {
+    "authentication_approval_and_execution_ledger_exercised": true,
+    "connector_and_runtime_policy_dependencies": "controlled_test_doubles",
+    "external_credentials_used": false,
+    "external_or_customer_gateway_run": false,
+    "real_external_gateway_routes_exercised": true,
+    "scope": "isolated_local_fastapi_test_estate"
+  },
+  "schema": "lightwork.governance-platform-acceptance.v1",
+  "scope_manifest_sha256": "9b1c886154c70c3c670baf56409a53ac46d43333cdb201cf2dcebbe07a1b9589",
+  "source_binding_at_start_sha256": "5b185be7bbfb20a02066df13e4f56dbc867fba40a97d2df8c94120e3772f0ea6",
+  "source_state_stable_during_run": true,
+  "suites": [
+    {
+      "category": "fresh-tenant-usability",
+      "command_sha256": "876736580653221f7ad5dc12ffc498493a89cfd0ef81460b8a2db6c49bdbc5ac",
+      "duration_seconds": 6.843,
+      "file_count": 3,
+      "output_bytes": 101,
+      "output_sha256": "82fc119655a74d7add37c55bce13481471420e6e488cc9874934c0aa8739450c",
+      "output_truncated": false,
+      "pytest_counts": {
+        "passed": 13
+      },
+      "return_code": 0,
+      "spawn_error_category": null,
+      "status": "passed",
+      "test_manifest_sha256": "f16fcb39c32485fa1eec34ea7a7e1050b414c467fe6b9d7a5d96580fe4da6569",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "category": "cross-tenant-adversarial",
+      "command_sha256": "b093ecf5b4f9b098fb9e20d963243c0749f4cb11ca5a65fa2db5456e74c96d88",
+      "duration_seconds": 5.141,
+      "file_count": 3,
+      "output_bytes": 101,
+      "output_sha256": "2f1b81d937e8bcc251e1d975b7cc0114adbbfd5ad4a0886a3b3b38e56825e69f",
+      "output_truncated": false,
+      "pytest_counts": {
+        "passed": 28
+      },
+      "return_code": 0,
+      "spawn_error_category": null,
+      "status": "passed",
+      "test_manifest_sha256": "3a46c64217e4f1669139ecf8118ce34204a998330a72be8928951d166ad836b8",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "category": "recovery",
+      "command_sha256": "a2f9eb0325dc465bdb3a769ed15a68aa17ee3ca97f75638cc9f1a3351dabb3a5",
+      "duration_seconds": 14.656,
+      "file_count": 5,
+      "output_bytes": 102,
+      "output_sha256": "23dd21ca5b47aa6cb082547487707a31860c71348a874908296e62eafcdeeacd",
+      "output_truncated": false,
+      "pytest_counts": {
+        "passed": 44
+      },
+      "return_code": 0,
+      "spawn_error_category": null,
+      "status": "passed",
+      "test_manifest_sha256": "4cb6d75c75d4a03888055e5dbbbcedfcd718705c28a1e571f502fdb3afaad963",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "category": "concurrency-scale",
+      "command_sha256": "b565ada8dac9fe8ebeffb67a3545f0649e49d542002191c4f4dacd7524796c37",
+      "duration_seconds": 8.781,
+      "file_count": 6,
+      "output_bytes": 101,
+      "output_sha256": "f03f529f51c0cc87fad4d31d4dd97fa25b8ea8e7455775d9d13bab7038a92cac",
+      "output_truncated": false,
+      "pytest_counts": {
+        "passed": 22
+      },
+      "return_code": 0,
+      "spawn_error_category": null,
+      "status": "passed",
+      "test_manifest_sha256": "908ece60489de7acc301f22e7906002a296b59ef40695dd8a8c0703b2e3acd7e",
+      "timed_out": false,
+      "timeout_seconds": 120
+    },
+    {
+      "category": "audit-export",
+      "command_sha256": "c3cf8c78287b9b62a1afcfd7e9e7f251e5a94a96f4053b61d3ba6c4c46ff356e",
+      "duration_seconds": 1.907,
+      "file_count": 2,
+      "output_bytes": 101,
+      "output_sha256": "86d7886319b1bf421c601fdb12fb59f6bec232edd8e61d1090f83f09a90c61d7",
+      "output_truncated": false,
+      "pytest_counts": {
+        "passed": 33
+      },
+      "return_code": 0,
+      "spawn_error_category": null,
+      "status": "passed",
+      "test_manifest_sha256": "9471ce52473f9d95c520167bda48a725d928b8c5de2bcb4f3c88c2a9426066da",
+      "timed_out": false,
+      "timeout_seconds": 120
+    }
+  ],
+  "summary": {
+    "all_selected_suites_passed": true,
+    "all_selected_test_suites_passed": true,
+    "pytest_counts": {
+      "passed": 140
+    },
+    "suite_counts": {
+      "error": 0,
+      "failed": 0,
+      "passed": 5,
+      "timed_out": 0
+    }
+  }
+}

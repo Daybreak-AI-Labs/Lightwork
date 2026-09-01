@@ -726,6 +726,55 @@ def test_write_parks_a_digest_bound_approval(monkeypatch):
     assert approval.requested_by == "agent:sf-quotebot"
 
 
+def test_idempotent_replay_reconciles_crash_after_approval_creation(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    request = _write_request(idempotency_key="crash-boundary-park")
+    real_save = xa._save_sidecar
+    saves = 0
+
+    class _SimulatedProcessCrash(BaseException):
+        pass
+
+    def crash_before_approval_binding(sidecar):
+        nonlocal saves
+        saves += 1
+        if saves == 2:
+            raise _SimulatedProcessCrash
+        return real_save(sidecar)
+
+    monkeypatch.setattr(xa, "_save_sidecar", crash_before_approval_binding)
+    with pytest.raises(_SimulatedProcessCrash):
+        xa.execute("sf-quotebot", request)
+    monkeypatch.setattr(xa, "_save_sidecar", real_save)
+
+    executions = xa._load_sidecar()["sf-quotebot"]["executions"]
+    assert len(executions) == 1
+    execution_id, incomplete = next(iter(executions.items()))
+    assert incomplete["approval_id"] is None
+    assert incomplete["approval_action"].endswith(f":{execution_id}")
+
+    from maverick.world_model import WorldModel
+    approvals = WorldModel().list_approvals()
+    assert len(approvals) == 1
+    assert approvals[0].action == incomplete["approval_action"]
+
+    replay = xa.execute("sf-quotebot", request)
+    assert replay["duplicate"] is True
+    assert replay["execution_id"] == execution_id
+    assert replay["approval_id"] == approvals[0].id
+    assert len(WorldModel().list_approvals()) == 1
+    repaired = xa._load_sidecar()["sf-quotebot"]["executions"][execution_id]
+    assert repaired["approval_id"] == approvals[0].id
+
+    assert WorldModel().decide_approval(
+        replay["approval_id"], "approved", decided_by="admin@corp.test"
+    ) is True
+    committed = xa.execute_commit("sf-quotebot", execution_id, _write_request())
+    assert committed["status"] == "executed"
+    assert len(conn.writes) == 1
+
+
 def test_execute_status_joins_the_live_approval_decision(monkeypatch):
     _wire_fakecrm(monkeypatch)
     _enroll(max_risk="high")

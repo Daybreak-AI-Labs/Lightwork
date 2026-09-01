@@ -1,0 +1,659 @@
+"""Strict authenticated API for the tenant-private no-code GRC studio."""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Callable, Mapping
+from dataclasses import asdict, is_dataclass
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import Path as ApiPath
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints
+from starlette.concurrency import run_in_threadpool
+
+from .auth import require_global_permission, require_permission
+
+_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
+_OP_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$"
+_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
+OpaqueId = Annotated[
+    str, StringConstraints(strict=True, min_length=1, max_length=128, pattern=_ID_PATTERN)
+]
+ObjectPath = Annotated[str, ApiPath(min_length=1, max_length=128, pattern=_ID_PATTERN)]
+OperationId = Annotated[
+    str, StringConstraints(strict=True, min_length=1, max_length=192, pattern=_OP_PATTERN)
+]
+Digest = Annotated[
+    str, StringConstraints(strict=True, min_length=64, max_length=64, pattern=_DIGEST_PATTERN)
+]
+State = Literal["draft", "in_review", "reviewed", "rejected", "approved", "published", "superseded"]
+ProjectionKind = Literal["questionnaire", "collector", "report"]
+
+_SECURE_HEADERS = {
+    "Cache-Control": "no-store, private, max-age=0",
+    "Pragma": "no-cache",
+    "X-Content-Type-Options": "nosniff",
+}
+_REQUIRED_STORE_METHODS = (
+    "create_version",
+    "replace_draft",
+    "submit_for_review",
+    "review",
+    "approve",
+    "publish",
+    "rollback",
+    "get_version",
+    "get_active",
+    "list_versions",
+    "history",
+    "export_version",
+    "import_version",
+    "preview_projection",
+    "apply_projection",
+    "retention_due",
+    "purge_expired",
+    "verify_integrity",
+    "create_recovery_backup",
+    "verify_recovery_backup",
+)
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class CreateVersionIn(_StrictModel):
+    blueprint: dict[str, Any]
+    expected_latest_version: int = Field(strict=True, ge=0, le=2_147_483_646)
+    operation_id: OperationId
+
+
+class ReplaceDraftIn(_StrictModel):
+    blueprint: dict[str, Any]
+    expected_revision: int = Field(strict=True, ge=1, le=2_147_483_647)
+    expected_integrity_sha256: Digest
+    operation_id: OperationId
+
+
+class VersionCASIn(_StrictModel):
+    expected_revision: int = Field(strict=True, ge=1, le=2_147_483_647)
+    expected_integrity_sha256: Digest
+    operation_id: OperationId
+
+
+class ReviewIn(VersionCASIn):
+    accepted: StrictBool
+    rationale_ref: OpaqueId
+
+
+class ApproveIn(VersionCASIn):
+    approval_ref: OpaqueId
+
+
+class PublishIn(VersionCASIn):
+    expected_active_version: int = Field(strict=True, ge=0, le=2_147_483_647)
+    expected_active_blueprint_sha256: Digest | None = None
+    expected_pointer_revision: int = Field(strict=True, ge=0, le=2_147_483_647)
+
+
+class RollbackIn(_StrictModel):
+    target_version: int = Field(strict=True, ge=1, le=2_147_483_647)
+    expected_target_blueprint_sha256: Digest
+    expected_active_version: int = Field(strict=True, ge=1, le=2_147_483_647)
+    expected_active_blueprint_sha256: Digest
+    expected_pointer_revision: int = Field(strict=True, ge=1, le=2_147_483_647)
+    rationale_ref: OpaqueId
+    operation_id: OperationId
+
+
+class ExportIn(_StrictModel):
+    studio_id: OpaqueId
+    version: int = Field(strict=True, ge=1, le=2_147_483_647)
+    operation_id: OperationId
+
+
+class ImportIn(_StrictModel):
+    envelope: dict[str, Any]
+    expected_latest_version: int = Field(strict=True, ge=0, le=2_147_483_646)
+    operation_id: OperationId
+
+
+class ProjectionIn(_StrictModel):
+    studio_id: OpaqueId
+    projection_kind: ProjectionKind
+    definition_id: OpaqueId
+    target_id: OpaqueId
+    target_revision: int = Field(strict=True, ge=1, le=2_147_483_647)
+    expected_active_version: int = Field(strict=True, ge=1, le=2_147_483_647)
+    expected_blueprint_sha256: Digest
+
+
+class ApplyProjectionIn(ProjectionIn):
+    operation_id: OperationId
+
+
+class PurgeIn(_StrictModel):
+    limit: int = Field(default=100, strict=True, ge=1, le=1_000)
+
+
+class GRCStudioDependencies:
+    def __init__(
+        self,
+        *,
+        store_factory: Callable[..., Any] | None = None,
+        enabled_probe: Callable[[str], bool] | None = None,
+        readiness_probe: Callable[[str], bool] | None = None,
+        target_authority_resolver_factory: Callable[..., Any] | None = None,
+        projection_applier_factory: Callable[..., Any] | None = None,
+    ) -> None:
+        for dependency in (
+            store_factory,
+            enabled_probe,
+            readiness_probe,
+            target_authority_resolver_factory,
+            projection_applier_factory,
+        ):
+            if dependency is not None and not callable(dependency):
+                raise TypeError("GRC studio dependency must be callable")
+        self.store_factory = store_factory
+        self.enabled_probe = enabled_probe
+        self.readiness_probe = readiness_probe
+        self.target_authority_resolver_factory = target_authority_resolver_factory
+        self.projection_applier_factory = projection_applier_factory
+
+
+def _ops():
+    from maverick import no_code_grc_studio as studio
+
+    return studio
+
+
+def _tenant_id() -> str:
+    from maverick.paths import current_tenant_id_strict
+
+    tenant = current_tenant_id_strict()
+    if tenant is None:
+        raise HTTPException(
+            status_code=409, detail="select an active tenant before using the GRC studio"
+        )
+    return tenant
+
+
+def _principal(request: Request, tenant_id: str) -> str:
+    from .auth import anonymous_local_access_allowed, caller_principal
+
+    subject = caller_principal(request)
+    if subject is None:
+        if not anonymous_local_access_allowed():
+            raise HTTPException(
+                status_code=401, detail="an authenticated principal is required for the GRC studio"
+            )
+        subject = "authorized-local-operator"
+    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
+        raise HTTPException(
+            status_code=401, detail="an authenticated principal is required for the GRC studio"
+        )
+    digest = hashlib.sha256(
+        f"lightwork.no-code-grc-studio.identity.v1:{tenant_id}:{subject.strip()}".encode()
+    ).hexdigest()
+    return f"grc-studio-principal-{digest[:40]}"
+
+
+def _dependency(request: Request, name: str, fallback: object) -> object:
+    return getattr(request.app.state, name, fallback)
+
+
+def _secure(response: Response) -> None:
+    for name, value in _SECURE_HEADERS.items():
+        response.headers[name] = value
+
+
+def _jsonable(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {key: _jsonable(item) for key, item in asdict(value).items()}
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def create_no_code_grc_studio_router(  # noqa: C901, PLR0915
+    dependencies: GRCStudioDependencies | None = None,
+) -> APIRouter:
+    deps = dependencies or GRCStudioDependencies()
+    router = APIRouter(prefix="/compliance/grc-studio", tags=["no-code-grc-studio"])
+
+    def probes(request: Request, tenant: str) -> tuple[bool, bool, bool]:
+        enabled_probe = _dependency(request, "grc_studio_enabled_probe", deps.enabled_probe)
+        readiness_probe = _dependency(request, "grc_studio_readiness_probe", deps.readiness_probe)
+        store_factory = _dependency(request, "grc_studio_store_factory", deps.store_factory)
+        try:
+            feature_enabled = enabled_probe(tenant) if callable(enabled_probe) else _ops().enabled()
+            configured = callable(store_factory) and callable(readiness_probe)
+            ready = readiness_probe(tenant) if feature_enabled and configured else False
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="GRC studio readiness is unavailable"
+            ) from exc
+        if type(feature_enabled) is not bool or type(ready) is not bool:
+            raise HTTPException(status_code=503, detail="GRC studio readiness is unavailable")
+        return feature_enabled, configured, ready
+
+    async def composition(request: Request):
+        tenant = _tenant_id()
+        feature_enabled, configured, ready = await run_in_threadpool(probes, request, tenant)
+        if not feature_enabled:
+            raise HTTPException(status_code=403, detail="GRC studio is disabled")
+        if not configured or ready is not True:
+            raise HTTPException(
+                status_code=503, detail="GRC studio operational readiness is not verified"
+            )
+        factory = _dependency(request, "grc_studio_store_factory", deps.store_factory)
+        principal = _principal(request, tenant)
+        try:
+            store = await run_in_threadpool(
+                factory,  # type: ignore[arg-type]
+                tenant_id=tenant,
+                principal_ref=principal,
+                request=request,
+            )
+            valid = store.tenant_id == tenant and all(
+                callable(getattr(store, name, None)) for name in _REQUIRED_STORE_METHODS
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="GRC studio authority is unavailable"
+            ) from exc
+        if not valid:
+            raise HTTPException(status_code=503, detail="GRC studio authority is unavailable")
+        return _ops(), tenant, store
+
+    async def call(ops, function, *args, **kwargs):
+        try:
+            return await run_in_threadpool(function, *args, **kwargs)
+        except ops.GRCStudioNotFound as exc:
+            raise HTTPException(
+                status_code=404, detail="GRC studio resource was not found"
+            ) from exc
+        except ops.GRCStudioPermissionDenied as exc:
+            raise HTTPException(
+                status_code=403, detail="GRC studio action is not authorized"
+            ) from exc
+        except ops.GRCStudioConflict as exc:
+            raise HTTPException(
+                status_code=409, detail="GRC studio action conflicts with current state"
+            ) from exc
+        except ops.GRCStudioValidationError as exc:
+            raise HTTPException(status_code=422, detail="GRC studio request is invalid") from exc
+        except ops.GRCStudioIntegrityError as exc:
+            raise HTTPException(
+                status_code=503, detail="GRC studio integrity verification failed"
+            ) from exc
+        except ops.GRCStudioConfigError as exc:
+            raise HTTPException(
+                status_code=503, detail="GRC studio dependency is unavailable"
+            ) from exc
+        except ops.GRCStudioError as exc:
+            raise HTTPException(status_code=503, detail="GRC studio operation failed") from exc
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="GRC studio dependency operation failed"
+            ) from exc
+
+    async def runtime_dependencies(request: Request, tenant: str):
+        resolver_factory = _dependency(
+            request,
+            "grc_studio_target_authority_resolver_factory",
+            deps.target_authority_resolver_factory,
+        )
+        applier_factory = _dependency(
+            request,
+            "grc_studio_projection_applier_factory",
+            deps.projection_applier_factory,
+        )
+        if not callable(resolver_factory):
+            raise HTTPException(
+                status_code=503, detail="GRC studio runtime target resolver is unavailable"
+            )
+        try:
+            resolver = await run_in_threadpool(resolver_factory, tenant_id=tenant, request=request)
+            applier = (
+                await run_in_threadpool(applier_factory, tenant_id=tenant, request=request)
+                if callable(applier_factory)
+                else None
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503, detail="GRC studio runtime adapter is unavailable"
+            ) from exc
+        if not callable(resolver) or (callable(applier_factory) and not callable(applier)):
+            raise HTTPException(status_code=503, detail="GRC studio runtime adapter is unavailable")
+        return resolver, applier
+
+    @router.get("/status")
+    async def status(request: Request, response: Response) -> dict[str, object]:
+        require_permission(request, "view")
+        tenant = _tenant_id()
+        feature_enabled, configured, ready = await run_in_threadpool(probes, request, tenant)
+        resolver = _dependency(
+            request,
+            "grc_studio_target_authority_resolver_factory",
+            deps.target_authority_resolver_factory,
+        )
+        applier = _dependency(
+            request, "grc_studio_projection_applier_factory", deps.projection_applier_factory
+        )
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-studio-status.v1",
+            "enabled": feature_enabled,
+            "configured": configured,
+            "ready": bool(feature_enabled and configured and ready),
+            "runtime_projection_preview_configured": callable(resolver),
+            "runtime_projection_apply_configured": callable(resolver) and callable(applier),
+            "store_opened_for_status": False,
+            "target_authority_resolved_for_status": False,
+            "arbitrary_code_supported": False,
+            "arbitrary_html_css_supported": False,
+            "caller_urls_supported": False,
+            "lifecycle": [
+                "draft",
+                "in_review",
+                "reviewed",
+                "approved",
+                "published",
+                "superseded",
+                "rejected",
+            ],
+            "projection_kinds": ["questionnaire", "collector", "report"],
+            "live_provider_acceptance_verified": False,
+        }
+
+    @router.get("")
+    async def list_versions(
+        request: Request,
+        response: Response,
+        studio_id: OpaqueId | None = Query(default=None),
+        state: State | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> dict[str, object]:
+        require_permission(request, "view")
+        ops, tenant, store = await composition(request)
+        rows = await call(
+            ops, store.list_versions, tenant, studio_id=studio_id, state=state, limit=limit
+        )
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-version-list.v1",
+            "count": len(rows),
+            "items": _jsonable(rows),
+        }
+
+    @router.post("/studios/{studio_id}/versions")
+    async def create_version(
+        request: Request, response: Response, studio_id: ObjectPath, body: CreateVersionIn
+    ) -> dict[str, object]:
+        require_permission(request, "operate")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops, store.create_version, tenant, studio_id, **body.model_dump(mode="python")
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.patch("/studios/{studio_id}/versions/{version}")
+    async def replace_draft(
+        request: Request,
+        response: Response,
+        studio_id: ObjectPath,
+        version: int,
+        body: ReplaceDraftIn,
+    ) -> dict[str, object]:
+        require_permission(request, "operate")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops, store.replace_draft, tenant, studio_id, version, **body.model_dump(mode="python")
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/studios/{studio_id}/versions/{version}/submit")
+    async def submit(
+        request: Request,
+        response: Response,
+        studio_id: ObjectPath,
+        version: int,
+        body: VersionCASIn,
+    ) -> dict[str, object]:
+        require_permission(request, "operate")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops,
+            store.submit_for_review,
+            tenant,
+            studio_id,
+            version,
+            **body.model_dump(mode="python"),
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/studios/{studio_id}/versions/{version}/review")
+    async def review(
+        request: Request, response: Response, studio_id: ObjectPath, version: int, body: ReviewIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "audit")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops, store.review, tenant, studio_id, version, **body.model_dump(mode="python")
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/studios/{studio_id}/versions/{version}/approve")
+    async def approve(
+        request: Request, response: Response, studio_id: ObjectPath, version: int, body: ApproveIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops, store.approve, tenant, studio_id, version, **body.model_dump(mode="python")
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/studios/{studio_id}/versions/{version}/publish")
+    async def publish(
+        request: Request, response: Response, studio_id: ObjectPath, version: int, body: PublishIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops, store.publish, tenant, studio_id, version, **body.model_dump(mode="python")
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/studios/{studio_id}/rollback")
+    async def rollback(
+        request: Request, response: Response, studio_id: ObjectPath, body: RollbackIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(
+            ops, store.rollback, tenant, studio_id, **body.model_dump(mode="python")
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.get("/studios/{studio_id}/active")
+    async def active(
+        request: Request, response: Response, studio_id: ObjectPath
+    ) -> dict[str, object]:
+        require_permission(request, "view")
+        ops, tenant, store = await composition(request)
+        pointer, version = await call(ops, store.get_active, tenant, studio_id)
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-active-result.v1",
+            "pointer": _jsonable(pointer),
+            "version": _jsonable(version),
+        }
+
+    @router.get("/studios/{studio_id}/versions/{version}")
+    async def get_version(
+        request: Request, response: Response, studio_id: ObjectPath, version: int
+    ) -> dict[str, object]:
+        require_permission(request, "view")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.get_version, tenant, studio_id, version)
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.get("/studios/{studio_id}/versions/{version}/history")
+    async def history(
+        request: Request, response: Response, studio_id: ObjectPath, version: int
+    ) -> dict[str, object]:
+        require_global_permission(request, "audit")
+        ops, tenant, store = await composition(request)
+        rows = await call(ops, store.history, tenant, studio_id, version)
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-history.v1",
+            "count": len(rows),
+            "items": _jsonable(rows),
+        }
+
+    @router.post("/operations/export")
+    async def export_version(
+        request: Request, response: Response, body: ExportIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "audit")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.export_version, tenant, **body.model_dump(mode="python"))
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/operations/import")
+    async def import_version(
+        request: Request, response: Response, body: ImportIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.import_version, tenant, **body.model_dump(mode="python"))
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/operations/projections/preview")
+    async def preview_projection(
+        request: Request, response: Response, body: ProjectionIn
+    ) -> dict[str, object]:
+        require_permission(request, "view")
+        ops, tenant, store = await composition(request)
+        resolver, _ = await runtime_dependencies(request, tenant)
+        authority = await call(
+            ops, resolver, tenant, body.projection_kind, body.target_id, body.target_revision
+        )
+        result = await call(
+            ops,
+            store.preview_projection,
+            tenant,
+            body.studio_id,
+            projection_kind=body.projection_kind,
+            definition_id=body.definition_id,
+            target_authority=authority,
+            expected_active_version=body.expected_active_version,
+            expected_blueprint_sha256=body.expected_blueprint_sha256,
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/operations/projections/apply")
+    async def apply_projection(
+        request: Request, response: Response, body: ApplyProjectionIn
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        resolver, applier = await runtime_dependencies(request, tenant)
+        if not callable(applier):
+            raise HTTPException(status_code=503, detail="GRC studio runtime applier is unavailable")
+        result = await call(
+            ops,
+            store.apply_projection,
+            tenant,
+            body.studio_id,
+            **body.model_dump(mode="python", exclude={"studio_id"}),
+            authority_resolver=resolver,
+            applier=applier,
+        )
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.get("/operations/integrity")
+    async def integrity(request: Request, response: Response) -> dict[str, object]:
+        require_global_permission(request, "audit")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.verify_integrity, tenant)
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.get("/operations/retention")
+    async def retention(
+        request: Request, response: Response, limit: int = Query(default=100, ge=1, le=1_000)
+    ) -> dict[str, object]:
+        require_global_permission(request, "audit")
+        ops, tenant, store = await composition(request)
+        rows = await call(ops, store.retention_due, tenant, limit=limit)
+        _secure(response)
+        return {
+            "schema": "lightwork.no-code-grc-retention-list.v1",
+            "count": len(rows),
+            "items": _jsonable(rows),
+        }
+
+    @router.post("/operations/retention/purge")
+    async def purge(request: Request, response: Response, body: PurgeIn) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.purge_expired, tenant, limit=body.limit)
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.post("/operations/recovery/backups")
+    async def backup(request: Request, response: Response) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.create_recovery_backup, tenant)
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    @router.get("/operations/recovery/backups/{backup_id}")
+    async def verify_backup(
+        request: Request, response: Response, backup_id: ObjectPath
+    ) -> dict[str, object]:
+        require_global_permission(request, "admin")
+        ops, tenant, store = await composition(request)
+        result = await call(ops, store.verify_recovery_backup, tenant, backup_id)
+        _secure(response)
+        return _jsonable(result)  # type: ignore[return-value]
+
+    return router
+
+
+router = create_no_code_grc_studio_router()
+
+__all__ = [
+    "GRCStudioDependencies",
+    "create_no_code_grc_studio_router",
+    "router",
+]

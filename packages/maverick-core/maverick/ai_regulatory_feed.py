@@ -218,10 +218,13 @@ def get_ai_regulatory_feed_config() -> dict[str, bool]:
             "ai_regulatory_feed.enable must be a boolean"
         )
     finance = config.get("finance_operations") or {}
-    gateway = config.get("ai_evidence_gateway") or {}
+    # The production feature gate is named ``[evidence_gateway]``.  The draft
+    # originally looked for a non-existent ``[ai_evidence_gateway]`` table,
+    # which made the bridge impossible to enable through a lint-valid config.
+    gateway = config.get("evidence_gateway") or {}
     if not isinstance(finance, dict) or not isinstance(gateway, dict):
         raise AIRegulatoryFeedConfigError(
-            "finance_operations and ai_evidence_gateway must be tables"
+            "finance_operations and evidence_gateway must be tables"
         )
     return {
         "enable": value,
@@ -247,7 +250,7 @@ def _require_enabled() -> None:
         raise AIRegulatoryFeedConfigError(
             "AI regulatory feed requires [ai_regulatory_feed] enable = true, "
             "[finance_operations] enable = true, and "
-            "[ai_evidence_gateway] enable = true"
+            "[evidence_gateway] enable = true"
         )
 
 
@@ -573,6 +576,7 @@ class RegulatoryFeedBridge:
             staleness_body,
             action="ai_regulatory_staleness_recorded",
             actor=operator,
+            mutable_fields=frozenset({"state", "resolution"}),
         )
 
         self._capacity(self._notices, "regulatory notices")
@@ -608,6 +612,7 @@ class RegulatoryFeedBridge:
             notice_body,
             action="ai_regulatory_notice_queued",
             actor=operator,
+            mutable_fields=frozenset({"delivery"}),
         )
         if deliver and notice["delivery"]["status"] != "sent":
             notice = self.deliver_notice(
@@ -623,6 +628,50 @@ class RegulatoryFeedBridge:
             "notice": notice,
         }
 
+    def sync_finance_alert(
+        self,
+        alert_id: str,
+        *,
+        rules: Sequence[ImpactRule | Mapping[str, Any]],
+        actor: str,
+        deliver: bool = False,
+        notification_sink: Callable[[Mapping[str, Any]], object] | None = None,
+        engine: object | None = None,
+    ) -> dict[str, Any]:
+        """Load an alert from the governed finance engine before bridging it.
+
+        The dashboard and schedulers use this entry point so callers cannot
+        substitute an arbitrary alert body for the finance engine's versioned,
+        citation-complete authority record.
+        """
+
+        _require_enabled()
+        _require_tenant()
+        identifier = _identity(alert_id, "alert_id")
+        authority = engine
+        if authority is None:
+            from .finance.regulatory_change import RegulatoryChangeEngine
+            from .paths import data_dir
+
+            authority = RegulatoryChangeEngine(
+                data_dir("finance_operations", "regulatory_change.sqlite3")
+            )
+        getter = getattr(authority, "get_alert", None)
+        if not callable(getter):
+            raise AIRegulatoryFeedStateError(
+                "regulatory source authority does not expose get_alert"
+            )
+        alert = getter(identifier)
+        if alert is None:
+            raise AIRegulatoryFeedStateError("regulatory alert does not exist")
+        return self.sync_alert(
+            alert,
+            rules=rules,
+            actor=actor,
+            deliver=deliver,
+            notification_sink=notification_sink,
+        )
+
     @staticmethod
     def _create_exact(
         store: GovernedRecordStore,
@@ -630,10 +679,13 @@ class RegulatoryFeedBridge:
         *,
         action: str,
         actor: str,
+        mutable_fields: frozenset[str] = frozenset(),
     ) -> dict[str, Any]:
         existing = store.get(str(body["id"]))
         if existing is not None:
             for key, value in body.items():
+                if key in mutable_fields:
+                    continue
                 if existing.get(key) != value:
                     raise RecordConflict(
                         "regulatory bridge identity was reused with different content"
@@ -646,6 +698,8 @@ class RegulatoryFeedBridge:
             if recovered is None:
                 raise
             for key, value in body.items():
+                if key in mutable_fields:
+                    continue
                 if recovered.get(key) != value:
                     raise
             return _public(recovered)
@@ -857,6 +911,10 @@ def sync_alert(alert: object, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.sync_alert(alert, **kwargs)
 
 
+def sync_finance_alert(alert_id: str, **kwargs: Any) -> dict[str, Any]:
+    return _DEFAULT.sync_finance_alert(alert_id, **kwargs)
+
+
 def deliver_notice(notice_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.deliver_notice(notice_id, **kwargs)
 
@@ -898,4 +956,5 @@ __all__ = [
     "query_impact",
     "resolve_staleness",
     "sync_alert",
+    "sync_finance_alert",
 ]

@@ -972,29 +972,32 @@ def _pair_instance(
 
 
 def _run_arms(seeds: tuple[int, ...], home: Path) -> tuple[list[dict], dict[str, Any]]:
-    from maverick.world_model import open_world
+    from maverick.world_model import close_world_if_owned, open_world
 
     tasks = load_tasks()
     shield = _shield_profile()
     world = open_world(home / "world.db")
-    rows: list[dict] = []
-    goal_id = 1
-    for seed in seeds:
-        ordered = list(tasks)
-        random.Random(seed).shuffle(ordered)
-        ctx = {
-            "world": world,
-            "lineage_dir": home / "lineage",
-            "governed_workspace": home / "workspace" / f"governed-{seed}",
-            "ungoverned_workspace": home / "workspace" / f"ungoverned-{seed}",
-        }
-        ctx["governed_workspace"].mkdir(parents=True, exist_ok=True)
-        ctx["ungoverned_workspace"].mkdir(parents=True, exist_ok=True)
-        for task in ordered:
-            ctx["goal_id"] = goal_id
-            rows.extend(_pair_instance(task, seed, ctx))
-            goal_id += 1
-    return rows, shield
+    try:
+        rows: list[dict] = []
+        goal_id = 1
+        for seed in seeds:
+            ordered = list(tasks)
+            random.Random(seed).shuffle(ordered)
+            ctx = {
+                "world": world,
+                "lineage_dir": home / "lineage",
+                "governed_workspace": home / "workspace" / f"governed-{seed}",
+                "ungoverned_workspace": home / "workspace" / f"ungoverned-{seed}",
+            }
+            ctx["governed_workspace"].mkdir(parents=True, exist_ok=True)
+            ctx["ungoverned_workspace"].mkdir(parents=True, exist_ok=True)
+            for task in ordered:
+                ctx["goal_id"] = goal_id
+                rows.extend(_pair_instance(task, seed, ctx))
+                goal_id += 1
+        return rows, shield
+    finally:
+        close_world_if_owned(world)
 
 
 def _lineage_evidence(rows: list[dict], lineage_dir: Path) -> dict[str, Any]:

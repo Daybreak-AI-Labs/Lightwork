@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}Consumer Trust Center Authority - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .tca-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+              gap:var(--space-4); }
+  .tca-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .tca-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .tca-stack textarea { min-height:18rem; font-family:var(--font-mono); }
+  .tca-output { min-height:28rem; max-height:56rem; overflow:auto; white-space:pre-wrap;
+                word-break:break-word; }
+  .tca-warning { border:2px solid var(--warn); padding:var(--space-3);
+                 border-radius:8px; background:var(--surface-2); }
+  .tca-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  @media (max-width:900px) { .tca-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Consumer Trust Center Authority</h1>
+<p>Authenticated control plane for the exact consumer/property/profile binding
+  behind Lightwork's public Trust Center.</p>
+<div class="tca-warning">
+  <strong>Every capability grant and rights-case authorization requires one
+    requester and two other, distinct approvers.</strong>
+  Tenant and operator identity come from authenticated server context. Consumer
+  binding, principal permission authority, and signing keys come only from
+  trusted runtime resolvers. This page never accepts raw identity, credentials,
+  signing-key values, legal prose, or free text.
+</div>
+
+{% if not consumer_trust_center_authority_enabled %}
+<section class="panel">
+  <h2>Trust Center authority disabled</h2>
+  <p>This surface fails closed until both
+    <code>[consent_preferences] enable = true</code> and
+    <code>[consent_preferences.trust_center] enable = true</code> are explicit.</p>
+</section>
+{% else %}
+<p><button class="btn" id="tca-load-status" type="button">Load honest status</button></p>
+<div class="tca-grid">
+  <section class="panel tca-stack">
+    <h2>Strict JSON authority workbench</h2>
+    <p>Opaque context, grant, authorization, and case references are allowed.
+      Unknown body fields are rejected. Exact revisions and idempotency keys are
+      required for every state change. Privacy-rights preparation accepts only
+      the safe enrolled client ID, property ID, and profile ID; the server
+      resolves every credential digest and the context reference.</p>
+    <label>Operation
+      <select id="tca-operation">
+        <option value="context-create" data-method="PUT" data-path="/contexts/{context_ref}">Context: enroll server binding</option>
+        <option value="context-get" data-method="GET" data-path="/contexts/{context_ref}">Context: get digest-only authority</option>
+        <option value="context-revise" data-method="PATCH" data-path="/contexts/{context_ref}">Context: revise exact binding and limits</option>
+        <option value="context-revoke" data-method="POST" data-path="/contexts/{context_ref}/revoke">Context: revoke with all live children</option>
+        <option value="rights-context-prepare" data-method="POST" data-path="/privacy-rights-contexts/prepare">Privacy rights: prepare exact enrolled context</option>
+        <option value="grant-propose" data-method="POST" data-path="/contexts/{context_ref}/capability-grants">Capability: propose grant</option>
+        <option value="grant-approve" data-method="POST" data-path="/capability-grants/{grant_ref}/approve">Capability: record next distinct approval</option>
+        <option value="grant-revoke" data-method="POST" data-path="/capability-grants/{grant_ref}/revoke">Capability: revoke</option>
+        <option value="rights-propose" data-method="POST" data-path="/contexts/{context_ref}/rights-authorizations">Rights case: propose explicit authorization</option>
+        <option value="rights-approve" data-method="POST" data-path="/rights-authorizations/{authorization_ref}/approve">Rights case: record next distinct approval</option>
+        <option value="rights-revoke" data-method="POST" data-path="/rights-authorizations/{authorization_ref}/revoke">Rights case: revoke</option>
+        <option value="history" data-method="GET" data-path="/history/{object_kind}/{object_ref}">Evidence: immutable object history</option>
+        <option value="export-create" data-method="POST" data-path="/contexts/{context_ref}/exports">Evidence: create and immediately verify signed metadata</option>
+        <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Evidence: read an integrity-verified signed export</option>
+        <option value="export-verify" data-method="POST" data-path="/exports/verify">Evidence: verify a returned signed export</option>
+        <option value="retention-due" data-method="GET" data-path="/retention/due?before={before}&amp;limit={limit}">Retention: inspect due contexts</option>
+        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired payloads</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state and audit chains</option>
+      </select>
+    </label>
+    <label>Path/query values as JSON object
+      <input class="input" id="tca-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="tca-body">{}</textarea>
+    </label>
+    <div class="tca-warning" id="tca-confirm-panel">
+      <label class="tca-confirm"><input id="tca-confirm" type="checkbox">
+        <span>I reviewed the exact binding, expiry, retention, revision, digest,
+          and requester/approver separation affected by this operation.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="tca-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <pre class="tca-output" id="tca-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/consent/trust-center-authority";
+  var operation = document.getElementById("tca-operation");
+  var paths = document.getElementById("tca-path-values");
+  var body = document.getElementById("tca-body");
+  var confirmation = document.getElementById("tca-confirm");
+  var confirmationPanel = document.getElementById("tca-confirm-panel");
+  var output = document.getElementById("tca-output");
+  var highImpact = new Set([
+    "context-create", "context-revise", "context-revoke", "rights-context-prepare", "grant-propose",
+    "grant-approve", "grant-revoke", "rights-propose", "rights-approve",
+    "rights-revoke", "export-create", "retention-purge"
+  ]);
+  var forbidden = new Set([
+    "tenant", "tenant_id", "actor", "actor_ref", "principal", "principal_ref",
+    "consumer", "consumer_identity", "raw_identity",
+    "credential", "credential_value", "signing_key", "signing_key_value",
+    "secret", "legal_prose", "free_text", "email", "phone", "name"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() {
+    return operation.options[operation.selectedIndex];
+  }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+    show("No request made.");
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      var value = values[key];
+      if ((typeof value !== "string" && typeof value !== "number") || String(value).length < 1) {
+        throw new Error("Missing closed path or query value: " + key);
+      }
+      return encodeURIComponent(String(value));
+    });
+  }
+  function rejectAuthoritySelectors(payload) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Request body must be a JSON object.");
+    }
+    Object.keys(payload).forEach(function (key) {
+      if (forbidden.has(key)) {
+        throw new Error("Server-derived or secret field is never accepted: " + key);
+      }
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {
+      method: method,
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {"Accept": "application/json", "Cache-Control": "no-store"}
+    };
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var responseText = await response.text();
+    var result;
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("tca-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("tca-submit").addEventListener("click", async function () {
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed state change before continuing.");
+      }
+      var route = selectedRoute();
+      var pathValues = JSON.parse(paths.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      rejectAuthoritySelectors(payload);
+      var path = buildPath(route.dataset.path, pathValues);
+      await run(route.dataset.method, path, payload);
+    } catch (error) { show(String(error)); }
+    finally {
+      confirmation.checked = false;
+      if (operation.value === "export-verify") { body.value = "{}"; }
+    }
+  });
+  updateConfirmation();
+}());
+</script>
+
+<section class="panel tcb-glass" aria-labelledby="tcb-heading">
+  <style>
+    .tcb-glass { margin-top:var(--space-5); border:1px solid color-mix(in srgb, var(--text) 16%, transparent);
+      background:linear-gradient(135deg, color-mix(in srgb, var(--surface-2) 82%, transparent),
+      color-mix(in srgb, var(--surface-1) 66%, transparent)); backdrop-filter:blur(22px) saturate(145%);
+      box-shadow:0 22px 65px color-mix(in srgb, #000 25%, transparent); }
+    .tcb-preview { min-height:12rem; display:grid; place-items:center; border-radius:1.25rem;
+      border:1px solid color-mix(in srgb, var(--text) 12%, transparent);
+      background:radial-gradient(circle at 15% 15%, rgba(255,255,255,.18), transparent 45%),
+      color-mix(in srgb, var(--surface-2) 72%, transparent); overflow:hidden; }
+    .tcb-preview img { max-width:min(80%,28rem); max-height:10rem; object-fit:contain; }
+  </style>
+  <h2 id="tcb-heading">Governed brand assets &amp; exact domains</h2>
+  <p>PNG/JPEG only. Assets remain encrypted and tenant-private until a different
+    principal reviews and activates the exact version. Custom domains require
+    injected DNS/TLS deployment evidence; a request host never selects a tenant.</p>
+  <div class="tca-grid">
+    <div class="tca-stack">
+      <label>Operation
+        <select id="tcb-operation">
+          <option data-method="GET" data-path="/status">Status</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions" data-file="true">Asset: propose version</option>
+          <option data-method="GET" data-path="/assets/{asset_id}/versions/{asset_version}">Asset: inspect</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/review">Asset: independent review</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/activate">Asset: activate</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/revoke">Asset: revoke</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/rotate-custody">Asset: rotate custody</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/challenges">Domain: challenge/recover</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/verify">Domain: verify DNS/TLS</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/activate">Domain: activate deployment</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/reverify">Domain: reverify</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/revoke">Domain: revoke</option>
+          <option data-method="PUT" data-path="/projections/{property_id}">Publication: bind brand projection</option>
+          <option data-method="POST" data-path="/projections/{property_id}/revoke">Publication: revoke projection</option>
+          <option data-method="POST" data-path="/retention/purge">Retention: purge ciphertext</option>
+        </select>
+      </label>
+      <label>Closed path values JSON <input class="input" id="tcb-path" value="{}"></label>
+      <label>Strict request JSON <textarea class="input" id="tcb-body">{}</textarea></label>
+      <label>PNG/JPEG file (proposal only) <input id="tcb-file" type="file" accept="image/png,image/jpeg"></label>
+      <label class="tca-confirm"><input id="tcb-confirm" type="checkbox">
+        <span>I reviewed the exact version, publication digest, retention, domain,
+          and independent-approval consequences.</span></label>
+      <button class="btn btn--primary" id="tcb-submit" type="button">Run governed operation</button>
+    </div>
+    <div class="tca-stack">
+      <div class="tcb-preview"><img id="tcb-preview-image" alt="Local brand preview" hidden></div>
+      <pre class="tca-output" id="tcb-output" aria-live="polite">No branding request made.</pre>
+    </div>
+  </div>
+</section>
+<script>
+(function () {
+  "use strict";
+  var base = "/api/v1/consent/trust-center-branding";
+  var operation = document.getElementById("tcb-operation");
+  var file = document.getElementById("tcb-file");
+  var output = document.getElementById("tcb-output");
+  var preview = document.getElementById("tcb-preview-image");
+  function show(value) { output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
+  function pathFor(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_all, key) {
+      if (!(key in values)) { throw new Error("Missing path value: " + key); }
+      return encodeURIComponent(String(values[key]));
+    });
+  }
+  function asBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = function () { reject(new Error("Unable to read selected file.")); };
+      reader.onload = function () { resolve(String(reader.result).split(",", 2)[1] || ""); };
+      reader.readAsDataURL(blob);
+    });
+  }
+  file.addEventListener("change", function () {
+    if (!file.files.length) { preview.hidden = true; return; }
+    preview.src = URL.createObjectURL(file.files[0]); preview.hidden = false;
+  });
+  document.getElementById("tcb-submit").addEventListener("click", async function () {
+    try {
+      if (!document.getElementById("tcb-confirm").checked) { throw new Error("Confirm the governed operation."); }
+      var route = operation.options[operation.selectedIndex];
+      var values = JSON.parse(document.getElementById("tcb-path").value || "{}");
+      var payload = JSON.parse(document.getElementById("tcb-body").value || "{}");
+      if (route.dataset.file === "true") {
+        if (!file.files.length) { throw new Error("Select one PNG or JPEG."); }
+        if (!["image/png", "image/jpeg"].includes(file.files[0].type)) { throw new Error("Only PNG/JPEG is accepted."); }
+        payload.content_base64 = await asBase64(file.files[0]); payload.media_type = file.files[0].type;
+      }
+      var options = {method:route.dataset.method, credentials:"same-origin", cache:"no-store",
+        headers:{"Accept":"application/json", "Cache-Control":"no-store"}};
+      if (options.method !== "GET") { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(payload); }
+      var response = await fetch(base + pathFor(route.dataset.path, values), options);
+      var result = await response.json();
+      if (!response.ok) { throw new Error(result.detail || ("HTTP " + response.status)); }
+      show(result);
+    } catch (error) { show(String(error)); }
+    finally { document.getElementById("tcb-confirm").checked = false; }
+  });
+}());
+</script>
+{% endif %}
+{% endblock %}

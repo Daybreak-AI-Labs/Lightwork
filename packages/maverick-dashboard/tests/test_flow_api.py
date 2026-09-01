@@ -2130,7 +2130,12 @@ def test_live_authoring_tool_cache_is_execution_identity_scoped(monkeypatch, tmp
 
 def test_draft_requires_provider(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr("maverick.config.any_provider_configured", lambda: False)
+    from fastapi import HTTPException
+
+    def unavailable(*, role=None):
+        raise HTTPException(status_code=400, detail=f"missing {role} route")
+
+    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", unavailable)
     r = _client().post("/api/v1/flows/draft", json={"description": "x"})
     assert r.status_code == 400
 
@@ -2241,7 +2246,12 @@ def test_chat_grounds_in_an_owned_run(monkeypatch, tmp_path):
 
 def test_chat_requires_provider(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr("maverick.config.any_provider_configured", lambda: False)
+    from fastapi import HTTPException
+
+    def unavailable(*, role=None):
+        raise HTTPException(status_code=400, detail=f"missing {role} route")
+
+    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", unavailable)
     r = _client().post("/api/v1/flows/chat", json={"message": "x", "flow": _FLOW})
     assert r.status_code == 400
 

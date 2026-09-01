@@ -10,8 +10,8 @@
   .gs__bar { height: 6px; border-radius: var(--radius-pill); background: var(--surface-2); overflow: hidden; }
   .gs__bar > i { display: block; height: 100%; background: var(--brand); border-radius: inherit; transition: width .3s ease; }
   .gs__steps { display: flex; flex-direction: column; gap: var(--space-3); list-style: none; margin: 0; padding: 0; }
-  .gs__step { display: flex; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); align-items: center; }
-  .gs__step--done { border-color: var(--brand-border); background: var(--brand-subtle); }
+  .gs__step { display: flex; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); align-items: center; }
+  .gs__step--done { --glass-tint: var(--brand-subtle); border-color: var(--brand-border); }
   .gs__mark { flex: none; width: 1.9rem; height: 1.9rem; border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
   .gs__step--done .gs__mark { background: var(--brand); color: var(--brand-fg); border-color: var(--brand); }
   .gs__body { flex: 1 1 auto; min-width: 0; }
