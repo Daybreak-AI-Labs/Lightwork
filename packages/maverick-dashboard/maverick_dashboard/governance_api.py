@@ -285,11 +285,29 @@ async def mark_substantial_modification(
 # --------------------------------------------------------------------------
 # AI literacy (Art. 4)
 # --------------------------------------------------------------------------
+async def _with_literacy_plane(
+    literacy: Any,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    status = await _call(literacy.literacy_plane_status)
+    return {
+        **payload,
+        "data_plane": "role_compatibility",
+        "authoritative_for_compliance": False,
+        "canonical_counts": (status.get("canonical") or {}).get("summary") or {},
+        "canonical_available": (status.get("canonical") or {}).get("available")
+        is True,
+        "reconciliation_required": bool(status.get("reconciliation_required")),
+        "reconciliation_notice": status.get("notice"),
+    }
+
+
 @router.get("/literacy/gaps")
 async def literacy_gaps(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     literacy = _module("ai_literacy", "ai_literacy")
-    return await _call(literacy.literacy_gaps)
+    gaps = await _call(literacy.literacy_gaps)
+    return await _with_literacy_plane(literacy, gaps)
 
 
 @router.get("/literacy/requirements")
@@ -297,7 +315,10 @@ async def literacy_requirements(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     literacy = _module("ai_literacy", "ai_literacy")
     rows = await _call(literacy.list_requirements)
-    return {"requirements": rows, "count": len(rows)}
+    return await _with_literacy_plane(
+        literacy,
+        {"requirements": rows, "count": len(rows)},
+    )
 
 
 @router.post("/literacy/requirements")
@@ -307,13 +328,14 @@ async def set_literacy_requirement(
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     literacy = _module("ai_literacy", "ai_literacy")
-    return await _call(
+    record = await _call(
         literacy.set_role_requirement,
         body.role,
         [row.model_dump() for row in body.trainings],
         actor=_actor(request),
         expected_revision=body.expected_revision,
     )
+    return await _with_literacy_plane(literacy, record)
 
 
 @router.post("/literacy/assignments")
@@ -323,13 +345,14 @@ async def assign_literacy_roles(
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     literacy = _module("ai_literacy", "ai_literacy")
-    return await _call(
+    record = await _call(
         literacy.assign_roles,
         body.person,
         body.roles,
         actor=_actor(request),
         expected_revision=body.expected_revision,
     )
+    return await _with_literacy_plane(literacy, record)
 
 
 @router.post("/literacy/completions")
@@ -339,7 +362,7 @@ async def record_literacy_completion(
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     literacy = _module("ai_literacy", "ai_literacy")
-    return await _call(
+    record = await _call(
         literacy.record_completion,
         body.person,
         body.training,
@@ -347,6 +370,7 @@ async def record_literacy_completion(
         evidence_ref=body.evidence_ref,
         actor=_actor(request),
     )
+    return await _with_literacy_plane(literacy, record)
 
 
 @router.get("/literacy/evidence")
@@ -354,7 +378,7 @@ async def literacy_evidence(request: Request) -> dict[str, Any]:
     require_permission(request, "operate")
     literacy = _module("ai_literacy", "ai_literacy")
     exported = await _call(literacy.export_evidence)
-    return {"evidence": exported}
+    return await _with_literacy_plane(literacy, {"evidence": exported})
 
 
 # --------------------------------------------------------------------------

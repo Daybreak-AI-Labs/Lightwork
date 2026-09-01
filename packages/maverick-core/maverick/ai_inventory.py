@@ -43,15 +43,19 @@ _ASSET_TYPES = frozenset({"model", "agent", "tool", "dataset", "provider"})
 _CONNECTORS = (
     "agentforce",
     "azure_ai_foundry",
+    "aws_sagemaker",
     "bedrock",
     "copilot_studio",
     "databricks_unity_catalog",
+    "hugging_face",
     "huggingface",
     "mlflow",
     "openai",
     "replicate",
+    "salesforce_agentforce",
     "sagemaker",
     "snowflake",
+    "snowflake_cortex",
     "vertex_ai",
 )
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -1822,15 +1826,19 @@ _PENDING_TO_PUBLIC = {
 _CONNECTOR_SOURCES = {
     "agentforce": "salesforce_agentforce",
     "azure_ai_foundry": "azure_ai_foundry",
+    "aws_sagemaker": "aws_sagemaker",
     "bedrock": "aws_bedrock",
     "copilot_studio": "microsoft_copilot_studio",
     "databricks_unity_catalog": "databricks_unity_catalog",
+    "hugging_face": "hugging_face_hub",
     "huggingface": "huggingface",
-    "mlflow": "mlflow",
+    "mlflow": "mlflow_model_registry",
     "openai": "openai",
     "replicate": "replicate",
+    "salesforce_agentforce": "salesforce_agentforce",
     "sagemaker": "aws_sagemaker",
     "snowflake": "snowflake",
+    "snowflake_cortex": "snowflake_cortex",
     "vertex_ai": "google_vertex_ai",
 }
 def _dependency_token(value: object) -> str:
@@ -2053,7 +2061,7 @@ class MLflowInventoryAdapter(_HttpAdapter):
     """MLflow tracking-server registered models and their latest versions."""
 
     name = "mlflow"
-    source = "mlflow"
+    source = "mlflow_model_registry"
 
     def __init__(
         self,
@@ -3385,6 +3393,24 @@ def build_configured_adapter(
             sleep=sleep,
             clock=clock,
         )
+    if connector in {
+        "aws_sagemaker",
+        "hugging_face",
+        "mlflow",
+        "salesforce_agentforce",
+        "snowflake_cortex",
+    }:
+        from .ai_inventory_connectors import build_second_wave_adapter
+
+        return build_second_wave_adapter(
+            connector,
+            enabled_connectors=config["connectors"],
+            transport=transport,
+            sagemaker_client=sagemaker_client,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
     if connector == "sagemaker":
         return SageMakerInventoryAdapter(
             sagemaker_client=sagemaker_client,
@@ -3398,7 +3424,6 @@ def build_configured_adapter(
         "copilot_studio": CopilotStudioInventoryAdapter,
         "databricks_unity_catalog": DatabricksUnityCatalogInventoryAdapter,
         "huggingface": HuggingFaceInventoryAdapter,
-        "mlflow": MLflowInventoryAdapter,
         "openai": OpenAIInventoryAdapter,
         "replicate": ReplicateInventoryAdapter,
         "snowflake": SnowflakeInventoryAdapter,

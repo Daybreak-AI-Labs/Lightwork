@@ -140,9 +140,13 @@ def test_recommendation_is_deterministic_from_severity():
     assert clean.recommendation == "acceptable"
 
 
-def test_review_without_a_model_still_produces_complete_language():
+def test_review_without_a_model_still_produces_complete_language(monkeypatch):
     # No provider key in the environment: every proposed clause must still be
     # our full template text, never an empty stub.
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("model unavailable in this deterministic test")
+
+    monkeypatch.setattr("maverick.llm.LLM", unavailable)
     r = pr.review_paper(DPA_TEXT, vendor="Acme", use_model=True)
     assert not r.drafted_with_model
     for c in r.gaps:

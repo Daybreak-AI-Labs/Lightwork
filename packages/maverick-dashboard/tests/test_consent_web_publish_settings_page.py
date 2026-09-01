@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+from html.parser import HTMLParser
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
+from fastapi.testclient import TestClient
+from maverick_dashboard import consent_web_publish_settings_page as page
+
+ROUTE = "/consent/publish-settings"
+PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
+
+
+class _Markup(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.tags.append((tag, dict(attrs)))
+
+
+@pytest.fixture()
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr(page, "_tenant_selected", lambda: None)
+    monkeypatch.setattr(page, "require_permission", lambda _request, _permission: None)
+    monkeypatch.setattr(page, "has_permission", lambda _request, _permission: True)
+    templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
+    templates.env.globals.update(
+        theme="dark",
+        font="default",
+        lang="en",
+        density="comfortable",
+        custom_theme_css="",
+        custom_theme_names=[],
+        dir="ltr",
+        nav_groups=[],
+        t=lambda key: key,
+    )
+    app = FastAPI()
+    app.include_router(page.create_consent_web_publish_settings_page_router(templates))
+    return TestClient(app, headers={"Origin": "http://testserver"})
+
+
+def test_page_is_store_free_liquid_glass_and_candid(client: TestClient) -> None:
+    response = client.get(ROUTE)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, private, max-age=0"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-frame-options"] == "DENY"
+    csp = response.headers["content-security-policy"]
+    for directive in (
+        "default-src 'none'",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "script-src 'self'",
+        "style-src 'self' 'nonce-",
+    ):
+        assert directive in csp
+    for text in (
+        "Website SDK publish settings",
+        "Property and publication revisions, digests",
+        "nonce values are never accepted, stored, or projected",
+        "Publication drift, withdrawal, or a non-web property",
+        "do not prove browser behavior",
+    ):
+        assert text in response.text
+    assert "backdrop-filter: blur(24px)" in response.text
+    assert "prefers-reduced-motion" in response.text
+    assert "forced-colors" in response.text
+    assert 'id="publish-settings-operations" disabled' in response.text
+
+
+def test_page_has_all_named_closed_settings_and_no_authority_inputs(
+    client: TestClient,
+) -> None:
+    response = client.get(ROUTE)
+    parser = _Markup()
+    parser.feed(response.text)
+    fields = {
+        value
+        for tag, attrs in parser.tags
+        if tag in {"input", "select", "textarea"}
+        for name in ("id", "name")
+        if isinstance((value := attrs.get(name)), str)
+    }
+    assert {
+        "sdk_version",
+        "geolocation_reconsent",
+        "analytics_tracking_enabled",
+        "analytics_category_assignments",
+        "common_trackers",
+        "cookie_same_site",
+        "cookie_domain_separation",
+        "spa_reload_on_route_change",
+        "csp_nonce_required",
+        "automatic_refresh_seconds",
+    }.issubset(fields)
+    for selected in fields:
+        for forbidden in (
+            "tenant",
+            "principal",
+            "property_revision",
+            "property_sha256",
+            "publication_revision",
+            "publication_sha256",
+            "bundle_sha256",
+            "retention",
+            "nonce_value",
+        ):
+            assert forbidden not in selected.lower()
+    scripts = [attrs.get("src") for tag, attrs in parser.tags if tag == "script"]
+    assert "/static/lightwork-consent-publish-settings.js" in scripts
+
+
+@pytest.mark.parametrize(
+    ("allowed", "admin_disabled", "audit_disabled"),
+    (
+        (frozenset(), True, True),
+        (frozenset({"admin"}), False, True),
+        (frozenset({"audit"}), True, False),
+        (frozenset({"admin", "audit"}), False, False),
+    ),
+)
+def test_page_server_renders_exact_role_controls(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    allowed: frozenset[str],
+    admin_disabled: bool,
+    audit_disabled: bool,
+) -> None:
+    monkeypatch.setattr(
+        page, "has_permission", lambda _request, permission: permission in allowed
+    )
+    response = client.get(ROUTE)
+    parser = _Markup()
+    parser.feed(response.text)
+    by_id = {
+        attrs["id"]: attrs
+        for _tag, attrs in parser.tags
+        if isinstance(attrs.get("id"), str)
+    }
+    for fieldset in (
+        "publish-settings-create-controls",
+        "publish-settings-lifecycle-controls",
+    ):
+        assert ("disabled" in by_id[fieldset]) is admin_disabled
+    assert (
+        "disabled" in by_id["publish-settings-audit-controls"]
+    ) is audit_disabled
+
+
+def test_page_rejects_query_material_and_requires_tenant(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert client.get(f"{ROUTE}?property_id=caller-selected").status_code == 404
+
+    def missing() -> None:
+        raise page.HTTPException(
+            status_code=409,
+            detail="select an active tenant before using web publish settings",
+        )
+
+    monkeypatch.setattr(page, "_tenant_selected", missing)
+    assert client.get(ROUTE).status_code == 409
+
+
+def test_page_client_is_bounded_and_has_no_browser_injection_channels() -> None:
+    source = (PACKAGE / "static" / "lightwork-consent-publish-settings.js").read_text(
+        encoding="utf-8"
+    )
+    for forbidden in (
+        "localStorage",
+        "sessionStorage",
+        "document.cookie",
+        ".innerHTML",
+        ".outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+        "tenant_id",
+        "principal_ref",
+        "property_revision",
+        "property_sha256",
+        "publication_revision",
+        "publication_sha256",
+        "csp_nonce_value",
+    ):
+        assert forbidden not in source
+    for required in (
+        "64 * 1024",
+        "512 * 1024",
+        "TextEncoder",
+        "response.body.getReader",
+        'cache: "no-store"',
+        'credentials: "same-origin"',
+        'redirect: "error"',
+        'referrerPolicy: "no-referrer"',
+        "operations.disabled = true",
+        "operations.disabled = false",
+        "textContent",
+    ):
+        assert required in source
+
+
+def test_page_assets_are_packaged() -> None:
+    for relative in (
+        "templates/consent_publish_settings.html",
+        "static/lightwork-consent-publish-settings.js",
+    ):
+        selected = PACKAGE / relative
+        assert selected.is_file()
+        assert selected.stat().st_size > 100

@@ -84,6 +84,17 @@ capture         = ["playwright>=1.40"]
 browser         = ["playwright>=1.40", "lxml>=5.0"]
 computer-use    = ["pillow>=12.3.0", "mss>=9.0", "pyautogui>=0.9.54"]
 pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
+# Bounded local parsers used by the AI Evidence Analysis workbench. Production
+# OCR invokes an operator-installed, absolute-path/SHA-pinned Tesseract binary;
+# it never discovers a binary from PATH. Legacy XLS dependencies are narrowly
+# pinned and runtime configuration must repeat their exact installed versions.
+evidence-analysis = [
+    "pypdf>=6.14.2",
+    "openpyxl>=3.1",
+    "pillow>=12.3.0",
+    "xlrd==2.0.2",
+    "olefile==0.47",
+]
 clipboard       = ["pyperclip>=1.8"]
 voice           = ["faster-whisper>=1.0"]
 # CLAP zero-shot audio understanding (tools/audio_understanding.py,

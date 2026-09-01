@@ -86,14 +86,19 @@ _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
 def _self_authenticated_path(path: str) -> bool:
     """Whether a route authenticates itself or bootstraps authentication.
 
-    ``/api/v1/external/`` is the bring-your-own-agent gateway: each route
-    enforces the caller's per-agent ``rest`` bearer from the trust registry
-    (see ``external_gateway.py``) — an Agentforce/Bedrock caller has no
-    dashboard credential. The trailing slash matters: the ADMIN surface at
-    ``/api/v1/external-agents`` stays under normal dashboard auth."""
+    ``/api/v1/external/`` contains self-authenticating external integrations.
+    Each route enforces its own scoped credential: an agent trust-registry
+    credential, a signed discovery-sensor identity, or an opaque vendor-portal
+    invitation (see ``external_gateway.py``). Those callers have no dashboard
+    credential. ``/api/v1/public/consent`` has a separate opaque public-client
+    and profile-capability contract. ``/api/v1/public/policies`` resolves an
+    opaque stable link and, for private links, a separate bearer capability.
+    The trailing slashes matter: the ADMIN surfaces stay under normal dashboard
+    authentication."""
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
         ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
-         "/auth/invite/", "/api/v1/external/")
+         "/auth/invite/", "/api/v1/external/",
+         "/api/v1/public/consent/", "/api/v1/public/policies/")
     )
 
 

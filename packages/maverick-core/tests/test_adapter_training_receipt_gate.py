@@ -1,4 +1,5 @@
 """Training-receipt interlock for governed adapter promotion."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -63,29 +64,17 @@ def _receipt(adapter_sha256: str) -> dict:
                 "model_id": evidence.base_model_id,
                 "revision": evidence.model_revision,
                 "license_id": evidence.base_model_license_id,
-                "license_evidence_sha256": (
-                    evidence.base_model_license_evidence_sha256
-                ),
-                "artifact_sha256": (
-                    evidence.runtime.base_model_artifact_sha256
-                ),
-                "artifact_manifest_sha256": (
-                    evidence.runtime.base_model_artifact_manifest_sha256
-                ),
-                "tokenizer_sha256": (
-                    evidence.runtime.base_model_tokenizer_sha256
-                ),
-                "artifact_format": (
-                    evidence.runtime.base_model_artifact_format
-                ),
+                "license_evidence_sha256": (evidence.base_model_license_evidence_sha256),
+                "artifact_sha256": (evidence.runtime.base_model_artifact_sha256),
+                "artifact_manifest_sha256": (evidence.runtime.base_model_artifact_manifest_sha256),
+                "tokenizer_sha256": (evidence.runtime.base_model_tokenizer_sha256),
+                "artifact_format": (evidence.runtime.base_model_artifact_format),
             },
             "adapter": {
                 "adapter_id": "privacy-reviewer-v1",
                 "artifact_sha256": adapter_sha256,
                 "artifact_format": evidence.runtime.adapter_artifact_format,
-                "checkpoint_sha256": (
-                    evidence.runtime.adapter_checkpoint_sha256
-                ),
+                "checkpoint_sha256": (evidence.runtime.adapter_checkpoint_sha256),
                 "runtime_compatibility_sha256": (
                     evidence.runtime.adapter_runtime_compatibility_sha256
                 ),
@@ -131,29 +120,19 @@ def _receipt_binding(adapter_sha256: str = "9" * 64) -> dict[str, str]:
         "base_model_id": base_model["model_id"],
         "base_model_revision": base_model["revision"],
         "base_model_license_id": base_model["license_id"],
-        "base_model_license_evidence_sha256": (
-            base_model["license_evidence_sha256"]
-        ),
+        "base_model_license_evidence_sha256": (base_model["license_evidence_sha256"]),
         "base_model_artifact_sha256": base_model["artifact_sha256"],
-        "base_model_artifact_manifest_sha256": (
-            base_model["artifact_manifest_sha256"]
-        ),
+        "base_model_artifact_manifest_sha256": (base_model["artifact_manifest_sha256"]),
         "base_model_tokenizer_sha256": base_model["tokenizer_sha256"],
         "base_model_artifact_format": base_model["artifact_format"],
         "adapter_artifact_format": adapter["artifact_format"],
         "adapter_checkpoint_sha256": adapter["checkpoint_sha256"],
-        "adapter_runtime_compatibility_sha256": (
-            adapter["runtime_compatibility_sha256"]
-        ),
+        "adapter_runtime_compatibility_sha256": (adapter["runtime_compatibility_sha256"]),
         "evaluation_protocol_sha256": evaluation["protocol_sha256"],
         "evaluation_run_sha256": evaluation["run_sha256"],
         "sealed_holdout_sha256": evaluation["sealed_holdout_sha256"],
-        "qualification_evidence_sha256": (
-            evaluation["qualification_evidence_sha256"]
-        ),
-        "qualification_policy_sha256": (
-            evaluation["qualification_policy_sha256"]
-        ),
+        "qualification_evidence_sha256": (evaluation["qualification_evidence_sha256"]),
+        "qualification_policy_sha256": (evaluation["qualification_policy_sha256"]),
     }
 
 
@@ -260,11 +239,14 @@ def test_receipt_gate_is_inert_when_model_improvement_is_disabled(
         lambda _receipt_id: pytest.fail("disabled gate read a receipt"),
     )
 
-    assert ar._verified_training_receipt_binding(
-        receipt_id=None,
-        manifest=manifest,
-        adapter_sha256=ar.payload_digest_dir(tmp_path / "adapter"),
-    ) is None
+    assert (
+        ar._verified_training_receipt_binding(
+            receipt_id=None,
+            manifest=manifest,
+            adapter_sha256=ar.payload_digest_dir(tmp_path / "adapter"),
+        )
+        is None
+    )
 
 
 def _qualification(adapter_sha256: str) -> q.QualificationEvidence:
@@ -345,25 +327,15 @@ def _model_improvement_binding(
         "base_model_id": measured.base_model_id,
         "base_model_revision": measured.model_revision,
         "base_model_license_id": measured.base_model_license_id,
-        "base_model_license_evidence_sha256": (
-            measured.base_model_license_evidence_sha256
-        ),
-        "base_model_artifact_sha256": (
-            measured.runtime.base_model_artifact_sha256
-        ),
+        "base_model_license_evidence_sha256": (measured.base_model_license_evidence_sha256),
+        "base_model_artifact_sha256": (measured.runtime.base_model_artifact_sha256),
         "base_model_artifact_manifest_sha256": (
             measured.runtime.base_model_artifact_manifest_sha256
         ),
-        "base_model_tokenizer_sha256": (
-            measured.runtime.base_model_tokenizer_sha256
-        ),
-        "base_model_artifact_format": (
-            measured.runtime.base_model_artifact_format
-        ),
+        "base_model_tokenizer_sha256": (measured.runtime.base_model_tokenizer_sha256),
+        "base_model_artifact_format": (measured.runtime.base_model_artifact_format),
         "adapter_artifact_format": measured.runtime.adapter_artifact_format,
-        "adapter_checkpoint_sha256": (
-            measured.runtime.adapter_checkpoint_sha256
-        ),
+        "adapter_checkpoint_sha256": (measured.runtime.adapter_checkpoint_sha256),
         "adapter_runtime_compatibility_sha256": (
             measured.runtime.adapter_runtime_compatibility_sha256
         ),
@@ -443,10 +415,13 @@ def test_qualification_is_evaluated_and_bound_into_approved_pointer(
     )
 
     assert qualification is not None
-    assert qualification["evidence_sha256"] == q.evaluate_qualification(
-        evidence,
-        policy,
-    ).evidence_sha256
+    assert (
+        qualification["evidence_sha256"]
+        == q.evaluate_qualification(
+            evidence,
+            policy,
+        ).evidence_sha256
+    )
     assert first != second
 
 
@@ -670,9 +645,7 @@ def test_deployment_attestation_refuses_runtime_tuple_drift(
             "model_digest": "b" * 64,
             "verified_at": 1.0,
             "model_improvement_runtime": actual,
-            "model_improvement_runtime_sha256": required[
-                "runtime_attestation_sha256"
-            ],
+            "model_improvement_runtime_sha256": required["runtime_attestation_sha256"],
         },
     }
 

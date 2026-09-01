@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.12.13"
       - name: Install ruff
-        run: python -m pip install 'ruff==0.15.15'
+        run: python -m pip install 'ruff==0.16.4'
       - name: Lint
         # Also enforces the C901 cyclomatic-complexity ceiling (max 20, see
         # pyproject [tool.ruff.lint.mccabe]). Functions already over it carry
@@ -316,8 +316,8 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           # Resolve all first-party base dependencies together so pip-audit
           # sees the complete cohort rather than a hand-reconstructed subset.
           python -m pip install \
@@ -353,7 +353,7 @@ jobs:
           # before auditing so the gate reflects our shipped dependency tree,
           # not a stale CVE in the runner's own tooling.
           python -m pip install --upgrade 'pip==26.2.1' 'setuptools==84.0.0'
-          python -m pip install 'pip-audit==2.10.0'
+          python -m pip install 'pip-audit==2.10.1'
           pip-audit
       - name: pip-audit every reviewed optional-dependency lock entry
         # The installed runtime above exercises the primary network surface.
@@ -463,8 +463,8 @@ jobs:
           SBOM_ENV="$RUNNER_TEMP/lightwork-ci-release-runtime"
           python -m venv "$SBOM_ENV"
           "$SBOM_ENV/bin/python" -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           python scripts/install_release_cohort.py \
             --source-root . \
             --target-python "$SBOM_ENV/bin/python" \
@@ -550,8 +550,8 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           # All local distributions are direct requirements in one resolver
           # transaction, so no sibling can fall back to a public lookalike and
           # every declared base dependency is present.
@@ -649,8 +649,8 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           python -m pip install \
             -e ./packages/maverick-core \
             -e ./packages/maverick-shield \
@@ -870,8 +870,8 @@ jobs:
         run: |
           set -x
           python -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge
           pip install \

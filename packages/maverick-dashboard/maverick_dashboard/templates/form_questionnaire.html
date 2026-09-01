@@ -1,7 +1,7 @@
-{% extends "base.html" %}
+{% extends "public_base.html" %}
 {% block title %}Questionnaire · Lightwork{% endblock %}
 {% block content %}
-<style>
+<style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
   .fq-wrap { max-width: 46rem; margin: 0 auto; }
   .fq-q { padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
   .fq-q fieldset { border: 0; padding: 0; margin: 0; }
@@ -13,7 +13,7 @@
   .fq-actions { margin-top: var(--space-4); display: flex; gap: var(--space-3);
                 align-items: center; }
 </style>
-<div class="fq-wrap">
+<section class="panel fq-wrap">
   <h1>{{ questionnaire.vendor }} — security &amp; risk questionnaire</h1>
   <p class="muted">Requested by your customer through their Lightwork
     governance platform. Answer each question honestly; you can add context
@@ -41,8 +41,8 @@
       <span id="fq-msg" role="status" aria-live="polite"></span>
     </div>
   </form>
-</div>
-<script>
+</section>
+<script{% if csp_script_nonce is defined %} nonce="{{ csp_script_nonce }}"{% endif %}>
   (function () {
     'use strict';
     var form = document.getElementById('fq-form');

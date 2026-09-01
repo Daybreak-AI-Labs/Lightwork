@@ -2902,5 +2902,3 @@ def dsar_fulfill_mint(fulfillment_id, expires_hours, max_reads, revision,
     except (KeyError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(link["response_path"])
-
-

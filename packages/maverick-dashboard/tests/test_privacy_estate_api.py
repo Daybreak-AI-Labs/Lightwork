@@ -280,6 +280,18 @@ def test_questionnaire_page_and_submission_without_automation_events():
     assert page.status_code == 200
     assert "Pied Piper" in page.text
     assert "Submit answers" in page.text
+    assert 'class="public-shell ' in page.text
+    assert 'class="panel fq-wrap"' in page.text
+    for internal_control in (
+        'id="sidebar"',
+        'id="halt-pill"',
+        'id="mv-copilot"',
+        'id="mv-copilot-fab"',
+        "/static/lightwork-copilot.js",
+        "/static/lightwork-ui.js",
+        "/static/lightwork-voice.js",
+    ):
+        assert internal_control not in page.text
     assert client.get("/form/not-a-real-token").status_code == 404
 
     # Submissions land even though automation events are disabled: the

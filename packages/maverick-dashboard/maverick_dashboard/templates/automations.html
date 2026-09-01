@@ -741,8 +741,11 @@
         var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data }),
         });
+        var j;
+        try { j = await r.json(); }
+        catch (e) { flowsMsg.textContent = 'Could not start run: invalid server response.'; return; }
         if (r.ok) { flowsMsg.textContent = 'Run queued.'; }
-        else { var j = await r.json().catch(function () { return {}; }); flowsMsg.textContent = j.detail || 'Could not start run.'; }
+        else { flowsMsg.textContent = j && typeof j.detail === 'string' ? j.detail : 'Could not start run.'; }
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not start run.'; }
     }

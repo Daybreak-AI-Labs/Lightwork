@@ -216,8 +216,8 @@ jobs:
           # maverick-* project name from the public package index.
           "$trusted_python" -I -m pip install --constraint \
             "$source_root/requirements/ci.txt" --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           "$trusted_python" -I -m pip install \
             --constraint "$source_root/requirements/ci.txt" \
             "$source_root/packages/maverick-core[all]" \

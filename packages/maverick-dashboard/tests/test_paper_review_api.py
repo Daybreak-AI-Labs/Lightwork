@@ -30,6 +30,10 @@ def _fresh(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    (tmp_path / "config.toml").write_text(
+        "[paper_review]\nuse_model = false\n",
+        encoding="utf-8",
+    )
     config.reset_config_cache()
     import maverick_dashboard.api as api
     api._world_cache.clear()

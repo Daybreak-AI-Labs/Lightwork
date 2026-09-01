@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Executive PDF Reports - Lightwork{% endblock %}
+{% block head_extra %}
+<style nonce="{{ csp_style_nonce }}">
+  .tper-shell {
+    --tper-glass: color-mix(in srgb, var(--panel) 70%, transparent);
+    --tper-soft: color-mix(in srgb, var(--panel) 52%, transparent);
+    --tper-edge: color-mix(in srgb, var(--text) 15%, transparent);
+    display: grid;
+    gap: var(--space-5);
+    isolation: isolate;
+  }
+  .tper-shell::before {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none; content: "";
+    background:
+      radial-gradient(circle at 10% 8%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 31rem),
+      radial-gradient(circle at 91% 23%, color-mix(in srgb, #22d3ee 14%, transparent), transparent 34rem),
+      radial-gradient(circle at 54% 96%, color-mix(in srgb, #a78bfa 12%, transparent), transparent 30rem);
+  }
+  .tper-hero, .tper-card, .tper-boundary, .tper-report {
+    border: 1px solid var(--tper-edge);
+    background: var(--tper-glass);
+    box-shadow: 0 20px 52px color-mix(in srgb, #000 20%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(145%);
+    backdrop-filter: blur(24px) saturate(145%);
+  }
+  .tper-hero {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, 23rem);
+    gap: var(--space-5); align-items: center; padding: clamp(1.35rem, 3vw, 2.7rem);
+    border-radius: 1.6rem; overflow: hidden;
+  }
+  .tper-kicker { margin: 0 0 .45rem; color: var(--accent); font-size: .75rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .tper-title { max-width: 15ch; margin: 0; font-size: clamp(2rem, 6vw, 4.5rem); line-height: .98; letter-spacing: -.045em; }
+  .tper-lede { max-width: 68ch; margin: 1rem 0 0; color: var(--text-muted); font-size: 1.03rem; line-height: 1.65; }
+  .tper-runtime, .tper-stack, .tper-form { display: grid; gap: .85rem; }
+  .tper-runtime { padding: 1.1rem; border: 1px solid var(--tper-edge); border-radius: 1.15rem; background: var(--tper-soft); }
+  .tper-row, .tper-actions, .tper-report__head { display: flex; gap: .7rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .tper-status, .tper-pill { display: inline-flex; width: fit-content; padding: .3rem .65rem; border: 1px solid var(--tper-edge); border-radius: 999px; background: var(--tper-soft); font-size: .72rem; font-weight: 800; text-transform: uppercase; }
+  .tper-status[data-state="ready"] { color: var(--success, #45c786); }
+  .tper-status[data-state="failed"] { color: var(--danger, #f06b75); }
+  .tper-boundary { padding: 1.2rem 1.4rem; border-left: .3rem solid var(--accent); border-radius: 1.15rem; color: var(--text-muted); }
+  .tper-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--space-4); }
+  .tper-card { grid-column: span 6; min-width: 0; padding: clamp(1rem, 2vw, 1.45rem); border-radius: 1.2rem; }
+  .tper-card--wide { grid-column: 1 / -1; }
+  .tper-card h2 { margin: 0 0 .65rem; }
+  .tper-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+  .tper-form label { display: grid; gap: .35rem; min-width: 0; color: var(--text-muted); font-size: .82rem; font-weight: 700; }
+  .tper-form .input, .tper-form textarea { width: 100%; min-width: 0; border-color: var(--tper-edge); background: color-mix(in srgb, var(--bg) 54%, transparent); }
+  .tper-form textarea { min-height: 9rem; resize: vertical; font-family: var(--font-mono, ui-monospace, monospace); }
+  .tper-help, .tper-muted { color: var(--text-muted); font-size: .86rem; line-height: 1.55; }
+  .tper-permission { display: grid; gap: .85rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+  .tper-reports { display: grid; gap: .85rem; }
+  .tper-report { padding: 1rem; border-radius: 1rem; }
+  .tper-report dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .35rem .7rem; margin: .7rem 0 0; font-size: .83rem; }
+  .tper-report dt { color: var(--text-muted); } .tper-report dd { margin: 0; overflow-wrap: anywhere; }
+  .tper-output { min-height: 8rem; max-height: 28rem; overflow: auto; padding: .9rem; border: 1px solid var(--tper-edge); border-radius: .8rem; background: color-mix(in srgb, var(--bg) 67%, transparent); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tper-shell :focus-visible { outline: .18rem solid color-mix(in srgb, var(--accent) 76%, white 24%); outline-offset: .16rem; }
+  @media (max-width: 860px) { .tper-hero { grid-template-columns: 1fr; } .tper-card { grid-column: 1 / -1; } }
+  @media (max-width: 560px) { .tper-fields { grid-template-columns: 1fr; } .tper-report dl { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { .tper-shell *, .tper-shell *::before, .tper-shell *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } }
+  @media (forced-colors: active) { .tper-hero, .tper-card, .tper-boundary, .tper-report { border: 1px solid CanvasText; background: Canvas; box-shadow: none; } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="tper-shell" id="tper-workbench" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
+  <section class="tper-hero" aria-labelledby="tper-title">
+    <div><p class="tper-kicker">Third-party management · TPM-18</p><h1 class="tper-title" id="tper-title">Executive reports with evidence underneath.</h1><p class="tper-lede">Create role-scoped, brandable PDF artifacts from exact lifecycle, intelligence, contract, engagement and collaboration records. Every source is revision-and-digest pinned; unavailable sources stay visible instead of becoming invented portfolio facts.</p></div>
+    <div class="tper-runtime" aria-label="Runtime status"><div class="tper-row"><strong>Reporting authority</strong><span class="tper-status" id="tper-runtime-state" data-state="checking">Checking</span></div><p class="tper-muted" id="tper-runtime-detail" role="status" aria-live="polite">Reading store-free readiness.</p><button class="btn" id="tper-refresh" type="button">Refresh reports</button></div>
+  </section>
+  <aside class="tper-boundary"><strong>Evidence boundary.</strong> The PDF renderer accepts only plain text and six-digit colors. Optional brand-asset reference/digest values are non-rendered provenance metadata: no logo bytes are resolved, fetched or embedded. It never renders caller HTML/CSS or fetches a URL. Local integrity does not establish live portfolio or customer acceptance.</aside>
+  <div class="tper-grid">
+    <section class="tper-card" aria-labelledby="tper-create-title">
+      <p class="tper-kicker">Compose · operator or auditor</p><h2 id="tper-create-title">Create governed PDF</h2>
+      <form class="tper-form" id="tper-create-form" autocomplete="off" novalidate>
+        <fieldset class="tper-permission" id="tper-create-controls"{% if not reports_can_create %} disabled aria-disabled="true"{% endif %}>
+          <div class="tper-fields"><label>Report reference (optional)<input class="input" name="report_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label><label>Idempotency key<input class="input" name="idempotency_key" minlength="8" maxlength="192" required></label><label>Organization name<input class="input" name="organization_name" maxlength="120" value="Lightwork" required></label><label>Report title<input class="input" name="report_title" maxlength="160" value="Third-party executive report" required></label><label>Footer text<input class="input" name="footer_text" maxlength="160" value="Confidential governance record" required></label><label>Primary color<input class="input" name="primary_color" type="color" value="#102a43" required></label><label>Accent color<input class="input" name="accent_color" type="color" value="#2cb1bc" required></label><label>Text color<input class="input" name="text_color" type="color" value="#243b53" required></label><label>Non-rendered brand asset metadata ref (optional)<input class="input" name="brand_asset_metadata_ref" maxlength="128"></label><label>Metadata SHA-256 (optional)<input class="input" name="brand_asset_metadata_sha256" minlength="64" maxlength="64"></label></div>
+          <label>Exact source selectors JSON<textarea class="input" name="selectors_json" maxlength="32768" spellcheck="false">[]</textarea></label>
+          <p class="tper-help">Each item has only <code>source_kind</code> and <code>source_id</code>. Allowed kinds: intelligence_vendor, intelligence_finding, lifecycle_assessment, lifecycle_record, contract_record, collaboration_invitation.</p>
+          <button class="btn btn--primary" type="submit">Create immutable report</button>
+        </fieldset>
+      </form>
+    </section>
+    <section class="tper-card" aria-labelledby="tper-download-title">
+      <p class="tper-kicker">Artifact · role-scoped viewer</p><h2 id="tper-download-title">Issue one-time download</h2>
+      <form class="tper-form" id="tper-download-form" autocomplete="off" novalidate><label>Report reference<input class="input" name="report_id" maxlength="128" required></label><label>Expected control revision<input class="input" name="expected_control_revision" type="number" min="1" max="2147483647" value="1" required></label><label>Idempotency key<input class="input" name="idempotency_key" minlength="8" maxlength="192" required></label><button class="btn btn--primary" type="submit">Download PDF</button></form>
+      <p class="tper-help">The raw token is returned once, redeemed in a POST body, and never stored by this page.</p>
+    </section>
+    <section class="tper-card" aria-labelledby="tper-revoke-title">
+      <p class="tper-kicker">Control · administrator</p><h2 id="tper-revoke-title">Revoke report</h2>
+      <form class="tper-form" id="tper-revoke-form" autocomplete="off" novalidate><fieldset class="tper-permission" id="tper-revoke-controls"{% if not reports_can_admin %} disabled aria-disabled="true"{% endif %}><label>Report reference<input class="input" name="report_id" maxlength="128" required></label><label>Expected control revision<input class="input" name="expected_control_revision" type="number" min="1" max="2147483647" required></label><label>Closed reason code<input class="input" name="reason_code" maxlength="128" required></label><label>Idempotency key<input class="input" name="idempotency_key" minlength="8" maxlength="192" required></label><button class="btn btn--danger" type="submit">Revoke artifact</button></fieldset></form>
+    </section>
+    <section class="tper-card" aria-labelledby="tper-audit-title">
+      <p class="tper-kicker">Assurance · auditor</p><h2 id="tper-audit-title">Verify report ledger</h2><div class="tper-actions"><button class="btn" id="tper-integrity" type="button"{% if not reports_can_audit %} disabled{% endif %}>Run integrity verification</button><button class="btn" id="tper-audit" type="button"{% if not reports_can_audit %} disabled{% endif %}>Load audit events</button></div>
+      <form class="tper-form" id="tper-purge-form" autocomplete="off" novalidate><fieldset class="tper-permission" id="tper-purge-controls"{% if not reports_can_admin %} disabled aria-disabled="true"{% endif %}><label>Maximum expired artifacts<input class="input" name="limit" type="number" min="1" max="1000" value="100" required></label><label>Idempotency key<input class="input" name="idempotency_key" minlength="8" maxlength="192" required></label><button class="btn" type="submit">Apply retention purge</button></fieldset></form>
+    </section>
+    <section class="tper-card tper-card--wide" aria-labelledby="tper-list-title"><div class="tper-report__head"><div><p class="tper-kicker">Portfolio</p><h2 id="tper-list-title">Accessible reports</h2></div><span class="tper-pill" id="tper-count">0 reports</span></div><div class="tper-reports" id="tper-reports"><p class="tper-muted">No reports loaded.</p></div></section>
+    <section class="tper-card tper-card--wide" aria-labelledby="tper-output-title"><p class="tper-kicker">Governed output</p><h2 id="tper-output-title">Current operation</h2><p class="tper-muted" id="tper-operation-status" role="status" aria-live="polite">No operation has run.</p><pre class="tper-output" id="tper-output" tabindex="0"></pre></section>
+  </div>
+  <noscript><p class="tper-boundary">JavaScript is required for this bounded API-backed workbench.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-third-party-executive-reports.js" defer></script>{% endblock %}

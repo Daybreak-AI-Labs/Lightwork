@@ -50,7 +50,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.13"
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           distribution: "temurin"
           java-version: "21.0.12+8.0.LTS"
@@ -58,8 +58,8 @@ jobs:
       - name: Install Lightwork (kernel + MCP server)
         run: |
           python -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           python -I -m pip install -e ./packages/maverick-core
           python -I -m pip install --no-deps -e ./packages/maverick-mcp
           python -I -m pip check

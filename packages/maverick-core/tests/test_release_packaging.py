@@ -524,9 +524,9 @@ def test_ci_constraints_cover_every_release_base_dependency():
         if name not in constraints
     }
     assert not missing, f"unconstrained release base dependencies: {missing}"
-    assert constraints["pywhispercpp"] == "1.5.0"
+    assert constraints["pywhispercpp"] == "1.5.1"
     assert constraints["openai"] == "2.46.0"
-    assert constraints["tqdm"] == "4.67.1"
+    assert constraints["tqdm"] == "4.70.0"
 
     dashboard = tomllib.loads(
         (
@@ -654,12 +654,12 @@ def test_release_cohort_dependency_environments_are_complete():
     for build_tool in (
         "pip==26.2.1",
         "setuptools==84.0.0",
-        "wheel==0.47.0",
-        "packaging==26.2",
+        "wheel==0.48.0",
+        "packaging==26.3",
     ):
         assert build_tool in binary_step
     assert "verify_release_runtime" in binary_step
-    assert "version('pywhispercpp') == '1.5.0'" in binary_step
+    assert "version('pywhispercpp') == '1.5.1'" in binary_step
 
     smoke_step = _workflow_step(
         release, "Smoke-test the binary covers all subcommands"
@@ -684,8 +684,8 @@ def test_release_cohort_dependency_environments_are_complete():
     for build_tool in (
         "pip==26.2.1",
         "setuptools==84.0.0",
-        "wheel==0.47.0",
-        "packaging==26.2",
+        "wheel==0.48.0",
+        "packaging==26.3",
     ):
         assert sbom_step.count(build_tool) == 2
 
@@ -791,8 +791,8 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
     for build_tool in (
         "pip==26.2.1",
         "setuptools==84.0.0",
-        "wheel==0.47.0",
-        "packaging==26.2",
+        "wheel==0.48.0",
+        "packaging==26.3",
         "build==1.5.0",
     ):
         assert build_tool in bootstrap_step
@@ -1149,10 +1149,10 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
         "bandit": "1.9.4",
         "cyclonedx-bom": "7.3.1",
         "detect-secrets": "1.5.0",
-        "pip-audit": "2.10.0",
+        "pip-audit": "2.10.1",
         "psycopg": "3.3.4",
         "psycopg-pool": "3.3.1",
-        "ruff": "0.15.15",
+        "ruff": "0.16.4",
         "vulture": "2.16",
     }
     assert {name: constraints.get(name) for name in expected} == expected
@@ -1420,7 +1420,7 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
     assert "'pip==26.2.1'" in workflow
     assert "'pytest==9.1.1'" in workflow
     assert "'certifi==2026.7.22'" in workflow
-    assert "'cryptography==50.0.0'" in workflow
+    assert "'cryptography==50.0.1'" in workflow
     assert "maturin-version: v1.14.1" in workflow
     assert workflow.count('toolchain: "1.97.1"') == 4
     assert "jetli/wasm-pack-action@" not in workflow
@@ -1703,7 +1703,7 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
         assert "runs-on: ubuntu-latest" not in workflow
         assert "runs-on: windows-latest" not in workflow
 
-    assert "pyinstaller==6.21.0" in release
+    assert "pyinstaller==6.22.2" in release
     assert "pyinstaller>=" not in release
     constraints = (
         REPO_ROOT / "requirements" / "ci.txt"
@@ -1712,7 +1712,7 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
         "altgraph==0.17.5",
         "macholib==1.16.4",
         "pefile==2024.8.26",
-        "pyinstaller-hooks-contrib==2026.6",
+        "pyinstaller-hooks-contrib==2026.7",
         "pywin32-ctypes==0.2.3",
     ):
         assert pinned_helper in constraints

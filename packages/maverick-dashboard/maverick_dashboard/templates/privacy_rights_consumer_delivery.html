@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Privacy Rights Consumer Delivery - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .prcd-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+               gap:var(--space-4); }
+  .prcd-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .prcd-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .prcd-stack textarea { min-height:16rem; font-family:var(--font-mono); }
+  .prcd-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
+                 word-break:break-word; }
+  .prcd-warning { border:2px solid var(--danger); padding:var(--space-3);
+                  border-radius:8px; background:var(--surface-2); }
+  .prcd-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  @media (max-width:900px) { .prcd-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Privacy Rights Consumer Delivery</h1>
+<p>Authenticated operator control plane for short-lived, one-time capabilities
+  bound to an exact closed rights case and exact response package.</p>
+<div class="prcd-warning">
+  <strong>A raw consumer capability appears only in the first mint response.
+    Copy it immediately; Lightwork stores only its digest and cannot replay it.</strong>
+  This surface never accepts a tenant, actor, consumer subject, object locator,
+  object credential, or encryption-key value. It exposes no consumer redeem,
+  server-grant claim, object-byte, network, provider-write, or list operation.
+</div>
+
+<section class="panel" aria-labelledby="prcd-production-heading">
+  <h2 id="prcd-production-heading">Production composition gates</h2>
+  <p>The stock runtime re-resolves the exact closed case and package, requires
+    a separately authenticated public profile plus independent reauthentication,
+    and reads only the pinned active package from the encrypted governed-document
+    vault. It checks the package digest and vault authority before grant issue,
+    before byte consumption, and again before returning the response.</p>
+  <p><strong>Fail-closed seam:</strong> operator minting remains unavailable until
+    the deployment supplies an independent operator-to-consumer identity mapping.
+    The case/package authority is never used as consumer identity proof.</p>
+</section>
+
+{% if not privacy_rights_consumer_delivery_enabled %}
+<section class="panel">
+  <h2>Consumer delivery disabled</h2>
+  <p>This surface fails closed until all three gates are explicit:
+    <code>[privacy_automation] enable = true</code>,
+    <code>[privacy_automation.rights_orchestration] enable = true</code>, and
+    <code>[privacy_automation.rights_consumer_delivery] enable = true</code>.</p>
+</section>
+{% else %}
+<p><button class="btn" id="prcd-load-status" type="button">Load honest status</button></p>
+<div class="prcd-grid">
+  <section class="panel prcd-stack">
+    <h2>Strict JSON operator workbench</h2>
+    <p>Tenant and principal come only from authenticated server context. The
+      consumer binding comes only from a trusted runtime resolver. Unknown
+      fields are rejected.</p>
+    <label>Operation
+      <select id="prcd-operation">
+        <option value="delivery-mint" data-method="PUT" data-path="/deliveries/{delivery_id}">Delivery: mint one-time capability</option>
+        <option value="delivery-get" data-method="GET" data-path="/deliveries/{delivery_id}">Delivery: get digest-only metadata</option>
+        <option value="delivery-revoke" data-method="POST" data-path="/deliveries/{delivery_id}/revoke">Delivery: revoke</option>
+        <option value="export-create" data-method="PUT" data-path="/deliveries/{delivery_id}/exports/{export_id}">Evidence: create signed metadata export</option>
+        <option value="export-get" data-method="GET" data-path="/exports/{export_id}">Evidence: get signed metadata export</option>
+        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge expired state</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
+      </select>
+    </label>
+    <label>Path values as JSON object
+      <input class="input" id="prcd-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="prcd-body">{}</textarea>
+    </label>
+    <div class="prcd-warning" id="prcd-confirm-panel">
+      <label class="prcd-confirm"><input id="prcd-confirm" type="checkbox">
+        <span>I reviewed the exact case/package pins, reauthentication receipt,
+          TTL, retention, revision, and bearer-issuance or revocation impact.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="prcd-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result and composition readiness</h2>
+    <pre class="prcd-output" id="prcd-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/privacy/rights-consumer-delivery";
+  var operation = document.getElementById("prcd-operation");
+  var paths = document.getElementById("prcd-path-values");
+  var body = document.getElementById("prcd-body");
+  var confirmation = document.getElementById("prcd-confirm");
+  var confirmationPanel = document.getElementById("prcd-confirm-panel");
+  var output = document.getElementById("prcd-output");
+  var highImpact = new Set([
+    "delivery-mint", "delivery-revoke", "export-create", "retention-purge"
+  ]);
+  var forbidden = new Set([
+    "tenant", "tenant_id", "actor", "actor_ref", "principal", "principal_ref",
+    "consumer", "consumer_subject", "consumer_subject_binding_sha256",
+    "capability", "server_grant", "object_ref", "encryption_key"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() {
+    return operation.options[operation.selectedIndex];
+  }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+    show("No request made.");
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      if (typeof values[key] !== "string" || !values[key]) {
+        throw new Error("Missing string path value: " + key);
+      }
+      return encodeURIComponent(values[key]);
+    });
+  }
+  function rejectAuthoritySelectors(payload) {
+    Object.keys(payload).forEach(function (key) {
+      if (forbidden.has(key)) {
+        throw new Error("Server-derived or secret field is never accepted: " + key);
+      }
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {
+      method: method,
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {"Accept": "application/json", "Cache-Control": "no-store"}
+    };
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var responseText = await response.text();
+    var result;
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("prcd-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("prcd-submit").addEventListener("click", async function () {
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed state change before continuing.");
+      }
+      var route = selectedRoute();
+      var pathValues = JSON.parse(paths.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      rejectAuthoritySelectors(payload);
+      var path = buildPath(route.dataset.path, pathValues);
+      await run(route.dataset.method, path, payload);
+    } catch (error) { show(String(error)); }
+    finally {
+      confirmation.checked = false;
+      if (operation.value === "delivery-mint") { body.value = "{}"; }
+    }
+  });
+  updateConfirmation();
+}());
+</script>
+{% endif %}
+{% endblock %}

@@ -69,6 +69,17 @@ Payload shapes (kind -> required fields, all events also carry
       approval_id:str, executor:str, error_kind:str
   env_hunt_response_execution_claimed: proposal_id:str, proposal_sha256:str,
       approval_id:str, executor:str, actor:str
+  unified_audit_projection: projection_event_id:str, projection_type:str,
+                     tenant_sha256:str, source_id:str, suite_id:str,
+                     source_schema_version:int, source_authority_revision:int,
+                     source_authority_sha256:str, source_sequence:int;
+                     ``source_record`` rows carry only stable record digests and
+                     a closed action code, while ``source_page_receipt`` rows
+                     carry the page/head/watermark/completeness commitments plus
+                     verifier, trust-root, key, anchor and retention commitments,
+                     raw_source_payload_persisted:false (digest-only custody
+                     projection of a domain-owned event; never raw source
+                     payloads, actors, or resource ids)
 """
 from __future__ import annotations
 
@@ -298,6 +309,13 @@ class EventKind:
     # JSON register alone. payload: subject_kind:str, subject:str, lens:str,
     # decision:str (accepted|needs_work), reviewer:str, result_status:str.
     ASSESSMENT_REVIEW = "assessment_review"
+    # Cross-suite audit custody. Domain stores remain authoritative; this event
+    # is the signed, append-once digest projection that makes their evidence
+    # visible to the tenant audit/SIEM/WORM plane. ``projection_event_id`` is a
+    # stable delivery identity. Stable record rows are separate from mandatory
+    # signed page receipts, including receipts for empty terminal snapshots.
+    # All source identities/content are closed codes or digests.
+    UNIFIED_AUDIT_PROJECTION = "unified_audit_projection"
     # A privacy record mutation. The originating record retains a durable
     # audit-outbox receipt until this event is accepted by the signed chain.
     PRIVACY_RECORD_CHANGED = "privacy_record_changed"

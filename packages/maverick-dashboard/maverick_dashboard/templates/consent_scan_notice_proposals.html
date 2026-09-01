@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Scan Disclosure Proposals · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .csnp-shell{max-width:1320px;margin:0 auto;padding:1.25rem}.csnp-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;margin-bottom:1rem}.csnp-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.csnp-hero h1{margin:.1rem 0}.csnp-links,.csnp-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.csnp-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:1rem}.csnp-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}.csnp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.csnp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}.csnp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.csnp-wide,.csnp-actions{grid-column:1/-1}.csnp-output{white-space:pre-wrap;word-break:break-word;max-height:42rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.csnp-warning{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}.csnp-boundary{border-left:3px solid var(--accent);padding-left:.75rem;margin:.5rem 0}.csnp-status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem;margin:.75rem 0}.csnp-status-item{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.6rem}.csnp-status-item strong{display:block;font-size:.78rem}.csnp-status-item span{font-size:.78rem;color:var(--muted)}@media(max-width:900px){.csnp-grid,.csnp-form,.csnp-status-grid{grid-template-columns:1fr}.csnp-wide,.csnp-actions{grid-column:auto}}
+</style>
+<div class="csnp-shell">
+  <header class="csnp-hero">
+    <div>
+      <div class="csnp-kicker">Reviewed scan governance</div>
+      <h1>Scan Disclosure Proposals</h1>
+      <p class="muted">Turn one server-enrolled, complete, independently reviewed scan into digest-only disclosure metadata with exact revision checks, three-person acceptance, recovery, and signed export.</p>
+    </div>
+    <nav class="csnp-links" aria-label="Scan proposal links">
+      <a class="btn" href="/consent">Consent</a>
+      <a class="btn" href="/consent/scan-inventory">Scan inventory</a>
+      <a class="btn" href="/consent/publishing">Consent publishing</a>
+    </nav>
+  </header>
+
+  {% if not consent_scan_notice_proposals_enabled %}
+  <div class="csnp-warning" role="status"><strong>Scan disclosure proposals disabled.</strong> Enable <code>[consent_preferences]</code>, <code>[consent_preferences.scanner]</code>, and <code>[consent_preferences.scanner.notice_proposals]</code> only after privacy, completeness, reviewer-independence, revocation, recovery, and signing-custody review.</div>
+  {% endif %}
+
+  <section class="csnp-card" aria-labelledby="csnp-boundaries">
+    <h2 id="csnp-boundaries">Authority and product boundaries</h2>
+    <p class="csnp-boundary">Tenant and human principal come only from authenticated server context. The selected property, report, inventory revision, and review-revocation set come only from a trusted runtime binding; this browser cannot submit them.</p>
+    <p class="csnp-boundary">The API accepts no hosts, origins, paths, URLs, query strings, raw scan findings, cookies, legal copy, notice text, signing-key value, provider destination, site target, or publication target.</p>
+    <p class="csnp-boundary">“Accept local baseline” changes only Lightwork’s desired structured-metadata baseline. It does not generate legal prose, mutate a site or app, call a provider, or publish a notice.</p>
+    <p class="csnp-boundary">Local and synthetic evidence is not browser-estate, customer, accessibility, legal, provider, or production interoperability acceptance.</p>
+    <div class="csnp-status-grid" aria-label="Runtime status">
+      <div class="csnp-status-item"><strong>Feature gate</strong><span id="csnp-gate">Checking…</span></div>
+      <div class="csnp-status-item"><strong>Source authority</strong><span id="csnp-authority">Checking…</span></div>
+      <div class="csnp-status-item"><strong>External side effects</strong><span>None in this adapter</span></div>
+    </div>
+  </section>
+
+  <p id="csnp-status" class="muted" role="status" aria-live="polite">No operation running.</p>
+  <div class="csnp-grid">
+    <section class="csnp-card">
+      <h2>Governed operation</h2>
+      <form id="csnp-form" class="csnp-form">
+        <label class="csnp-wide">Operation
+          <select class="input" name="operation">
+            <option value="status">Inspect safe runtime status</option>
+            <option value="propose">Create desired/no-change/reconcile proposal</option>
+            <option value="get">Get proposal</option>
+            <option value="rollback">Propose rollback to accepted metadata</option>
+            <option value="approve">Approve proposal (different administrator)</option>
+            <option value="revoke">Revoke my proposal approval</option>
+            <option value="accept">Accept local baseline (third administrator)</option>
+            <option value="export">Export signed structured metadata</option>
+            <option value="integrity">Verify scoped integrity</option>
+          </select>
+        </label>
+        <label class="csnp-wide">Proposal ID or accepted rollback proposal ID
+          <input class="input" name="proposal_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" autocomplete="off">
+        </label>
+        <label>Expected proposal revision
+          <input class="input" name="expected_proposal_revision" type="number" min="1" max="2147483647" value="1">
+        </label>
+        <label>Expected head revision
+          <input class="input" name="expected_head_revision" type="number" min="0" max="2147483647" value="0">
+        </label>
+        <label>Expected approval revision
+          <input class="input" name="expected_approval_revision" type="number" min="1" max="2147483647" value="1">
+        </label>
+        <label>Idempotency key
+          <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" autocomplete="off">
+        </label>
+        <label class="csnp-wide"><span><input name="acknowledge_local" type="checkbox"> I understand that acceptance is a local metadata baseline only and performs no legal-copy generation, site/app mutation, provider write, or notice publication.</span></label>
+        <div class="csnp-actions">
+          <button class="btn btn--primary" id="csnp-run" type="submit">Run selected operation</button>
+          <button class="btn" id="csnp-refresh" type="button">Refresh status</button>
+          <span class="muted">CAS and idempotency are mandatory for every mutation.</span>
+        </div>
+      </form>
+    </section>
+    <section class="csnp-card">
+      <h2>Content-free result</h2>
+      <pre id="csnp-output" class="csnp-output">No result. Only opaque identifiers, digests, closed classifications, counts, revisions, timestamps, and explicit boundary flags are permitted here.</pre>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/consent/scan-notice-proposals";
+  var configuredEnabled = {{ "true" if consent_scan_notice_proposals_enabled else "false" }};
+  var form = document.getElementById("csnp-form");
+  var status = document.getElementById("csnp-status");
+  var output = document.getElementById("csnp-output");
+  var gate = document.getElementById("csnp-gate");
+  var authority = document.getElementById("csnp-authority");
+  function value(name) { return form.elements[name].value.trim(); }
+  function integer(name) { return Number(value(name)); }
+  function proposalId() {
+    var id = value("proposal_id");
+    if (!id) { throw new Error("A proposal ID is required for this operation."); }
+    return encodeURIComponent(id);
+  }
+  function mutationKey() {
+    var key = value("idempotency_key");
+    if (!key) { throw new Error("An idempotency key is required for this operation."); }
+    return key;
+  }
+  async function call(path, options) {
+    var settings = options || {};
+    settings.headers = Object.assign({"Content-Type": "application/json"}, settings.headers || {});
+    var response = await fetch(API + path, settings);
+    var body;
+    try { body = await response.json(); }
+    catch (_error) { throw new Error("Request failed: the server returned an invalid JSON response."); }
+    if (!response.ok) {
+      throw new Error(body && typeof body.detail === "string" ? body.detail : ("HTTP " + response.status));
+    }
+    return body;
+  }
+  function show(result, message) {
+    output.textContent = JSON.stringify(result, null, 2);
+    status.textContent = message;
+  }
+  async function refreshStatus() {
+    status.textContent = "Checking server authority without reading inventory…";
+    try {
+      var result = await call("/status");
+      gate.textContent = result.enabled ? "Enabled" : "Disabled";
+      var server = result.server_authority || {};
+      var ready = server.binding_resolver_configured && server.revocation_resolver_configured && server.signing_key_resolver_configured;
+      authority.textContent = ready ? "Server binding installed" : "Server binding incomplete";
+      show(result, "Status loaded; inventory and network were not invoked.");
+    } catch (error) {
+      gate.textContent = configuredEnabled ? "Unavailable" : "Disabled";
+      authority.textContent = "Unavailable";
+      status.textContent = error.message;
+    }
+  }
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var operation = value("operation");
+    try {
+      var result;
+      if (operation === "status") { await refreshStatus(); return; }
+      if (!configuredEnabled) { throw new Error("Scan disclosure proposals are disabled."); }
+      if (operation === "integrity") {
+        result = await call("/integrity");
+      } else if (operation === "get") {
+        result = await call("/proposals/" + proposalId());
+      } else if (operation === "propose") {
+        result = await call("/proposals", {method: "POST", body: JSON.stringify({expected_head_revision: integer("expected_head_revision"), idempotency_key: mutationKey()})});
+      } else if (operation === "rollback") {
+        result = await call("/rollback-proposals/" + proposalId(), {method: "POST", body: JSON.stringify({expected_head_revision: integer("expected_head_revision"), idempotency_key: mutationKey()})});
+      } else if (operation === "approve") {
+        result = await call("/proposals/" + proposalId() + "/approve", {method: "POST", body: JSON.stringify({expected_proposal_revision: integer("expected_proposal_revision"), idempotency_key: mutationKey()})});
+      } else if (operation === "revoke") {
+        result = await call("/proposals/" + proposalId() + "/approval/revoke", {method: "POST", body: JSON.stringify({expected_proposal_revision: integer("expected_proposal_revision"), expected_approval_revision: integer("expected_approval_revision"), idempotency_key: mutationKey()})});
+      } else if (operation === "accept") {
+        if (!form.elements.acknowledge_local.checked) { throw new Error("Confirm the local-baseline-only boundary before acceptance."); }
+        result = await call("/proposals/" + proposalId() + "/accept-local", {method: "POST", body: JSON.stringify({expected_proposal_revision: integer("expected_proposal_revision"), expected_head_revision: integer("expected_head_revision"), acknowledge_local_baseline_only: true, idempotency_key: mutationKey()})});
+      } else if (operation === "export") {
+        result = await call("/proposals/" + proposalId() + "/exports", {method: "POST", body: JSON.stringify({idempotency_key: mutationKey()})});
+      } else {
+        throw new Error("The selected operation is not supported.");
+      }
+      show(result, "Operation completed inside the local structured-metadata authority.");
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+  document.getElementById("csnp-refresh").addEventListener("click", refreshStatus);
+  refreshStatus();
+}());
+</script>
+{% endblock %}

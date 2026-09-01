@@ -50,6 +50,7 @@ def _literacy_section(now: float, expiring_days: int) -> tuple[dict[str, Any], i
         if not ai_literacy.enabled():
             return {"enabled": False}, 0
         gaps = ai_literacy.literacy_gaps(now=now)
+        plane_status = ai_literacy.literacy_plane_status(now=now)
     except Exception:
         return {"enabled": False, "error": "unavailable"}, 0
     horizon = now + expiring_days * _DAY
@@ -66,14 +67,28 @@ def _literacy_section(now: float, expiring_days: int) -> tuple[dict[str, Any], i
     counts = gaps.get("counts") or {}
     missing = int(counts.get("missing") or 0)
     expired = int(counts.get("expired") or 0)
+    canonical = plane_status.get("canonical") or {}
+    canonical_summary = canonical.get("summary") or {}
+    canonical_gaps = int(canonical_summary.get("coverage_gaps") or 0)
+    reconciliation_required = bool(plane_status.get("reconciliation_required"))
     section = {
         "enabled": True,
         "missing": missing,
         "expired": expired,
         "expiring_soon": expiring,
+        "canonical_coverage_gaps": canonical_gaps,
+        "canonical_available": canonical.get("available") is True,
+        "data_plane": "role_compatibility",
+        "authoritative_for_compliance": False,
+        "unreconciled_ai_literacy_data": reconciliation_required,
+        "reconciliation_notice": plane_status.get("notice"),
         "citation": "Art. 4",
     }
-    return section, missing + expired + expiring
+    return (
+        section,
+        missing + expired + expiring + canonical_gaps
+        + (1 if reconciliation_required else 0),
+    )
 
 
 def _conformity_section(now: float) -> tuple[dict[str, Any], int]:

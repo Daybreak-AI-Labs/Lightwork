@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 try:
@@ -415,7 +416,7 @@ def test_public_pypi_consumer_is_disabled_until_namespace_is_reserved():
     assert "contents: read" in top_level
     assert "contents: write" not in resolver
     assert "pull-requests: write" not in resolver
-    assert "pip-tools==7.6.0" in resolver
+    assert "pip-tools==7.6.1" in resolver
     assert "runs-on: macos-15" in resolver
     assert '"--no-header"' in resolver
     assert '"--no-emit-index-url"' in resolver
@@ -703,6 +704,12 @@ def test_security_dependency_floors_cover_current_fixed_releases():
     _assert_floor(core_extras["langchain"], "langsmith", "0.8.18")
     _assert_floor(core_extras["computer-use"], "pillow", "12.3.0")
     _assert_floor(core_extras["pdf"], "pypdf", "6.14.2")
+    _assert_floor(core_extras["evidence-analysis"], "pypdf", "6.14.2")
+    _assert_floor(core_extras["evidence-analysis"], "pillow", "12.3.0")
+    assert all(
+        canonicalize_name(Requirement(item).name) != "pytesseract"
+        for item in core_extras["evidence-analysis"]
+    )
     _assert_floor(core_extras["dev"], "python-multipart", "0.0.31")
     _assert_floor(core_extras["dev"], "starlette", "1.3.1")
 

@@ -327,8 +327,8 @@ def test_typescript_client_dependency_and_ci_security_gates():
     for packaging_tool in (
         "'pip==26.2.1'",
         "'setuptools==84.0.0'",
-        "'wheel==0.47.0'",
-        "'packaging==26.2'",
+        "'wheel==0.48.0'",
+        "'packaging==26.3'",
     ):
         assert workflow.count(packaging_tool) == 2
     assert 'go-version: "1.26.6"' in workflow
@@ -352,8 +352,8 @@ def test_typescript_client_dependency_and_ci_security_gates():
         for packaging_tool in (
             "'pip==26.2.1'",
             "'setuptools==84.0.0'",
-            "'wheel==0.47.0'",
-            "'packaging==26.2'",
+            "'wheel==0.48.0'",
+            "'packaging==26.3'",
         ):
             assert packaging_tool in client_workflow
     assert "cargo run --locked" in (

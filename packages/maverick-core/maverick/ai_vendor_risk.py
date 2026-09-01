@@ -64,8 +64,30 @@ class AIVendorRiskError(RuntimeError):
     """Base failure for the governed AI vendor-risk authority."""
 
 
+class AIVendorRiskConfigError(AIVendorRiskError):
+    """The explicit AI vendor-risk product gate is unavailable."""
+
+
 class AIVendorRiskStateError(AIVendorRiskError):
     """Persisted or supplied AI vendor-risk evidence cannot be trusted."""
+
+
+def enabled() -> bool:
+    """Return the explicit default-off feature and model-risk dependency state."""
+
+    try:
+        from . import model_risk_assurance as mra
+        from .config import config_source_errors, load_global_config
+
+        config = load_global_config()
+        if config_source_errors(include_tenant=False) or not isinstance(config, dict):
+            return False
+        section = config.get("ai_vendor_risk")
+        if not isinstance(section, dict) or section.get("enable") is not True:
+            return False
+        return mra.enabled()
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -260,6 +282,12 @@ def _sha256(value: object) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
+def _digest(value: object, label: str) -> str:
+    if not isinstance(value, str) or not _DIGEST_RE.fullmatch(value):
+        raise ValueError(f"{label} must be a lowercase SHA-256 digest")
+    return value
+
+
 def _require_tenant() -> str:
     from .paths import current_tenant_id_strict
 
@@ -386,6 +414,22 @@ def _template_snapshot() -> tuple[dict[str, Any], str]:
     return {**policy, "custom": False}, digest
 
 
+def questionnaire() -> dict[str, Any]:
+    """Return the exact public questionnaire bound to new assessments."""
+
+    _require_tenant()
+    _, digest = _template_snapshot()
+    return {
+        "schema": "lightwork.ai-vendor-questionnaire.v1",
+        "template_revision": 1,
+        "template_digest": digest,
+        "title": AI_VENDOR_TEMPLATE.title,
+        "description": AI_VENDOR_TEMPLATE.description,
+        "questions": [asdict(question) for question in AI_VENDOR_QUESTIONS],
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+
+
 def _assessment_payload(record: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema": record.get("schema"),
@@ -488,7 +532,14 @@ def _validated_record(  # noqa: C901 - one complete persisted-record trust bound
         kind = source.get("kind")
         confidence = source.get("confidence")
         if (
-            kind not in {"manual", "document", "prior_approved", "missing"}
+            kind
+            not in {
+                "manual",
+                "vendor_attested",
+                "document",
+                "prior_approved",
+                "missing",
+            }
             or isinstance(confidence, bool)
             or not isinstance(confidence, (int, float))
             or not math.isfinite(float(confidence))
@@ -525,6 +576,15 @@ def _validated_record(  # noqa: C901 - one complete persisted-record trust bound
             )
         if kind == "manual" and float(confidence) != 1.0:
             raise AIVendorRiskStateError("manual AI vendor answer confidence is invalid")
+        if kind == "vendor_attested" and (
+            source.get("review_required") is not True
+            or float(confidence) != 0.75
+            or not isinstance(source.get("submission_sha256"), str)
+            or not _DIGEST_RE.fullmatch(source["submission_sha256"])
+        ):
+            raise AIVendorRiskStateError(
+                "vendor-attested AI vendor answer provenance is invalid"
+            )
         if kind == "missing" and (
             float(confidence) != 0.0 or answer.get("answer") != "unknown"
         ):
@@ -1072,14 +1132,17 @@ def draft_vendor_assessment(
     vendor: str,
     *,
     answers: Mapping[str, object] | None = None,
+    attested_answers: Mapping[str, object] | None = None,
+    attestation_sha256: str | None = None,
     document_results: Iterable[Mapping[str, Any]] | None = None,
     actor: str,
     use_prior: bool = True,
 ) -> dict[str, Any]:
     """Create a governed, deterministic AI vendor-risk draft.
 
-    Precedence is explicit: current manual answer, current document answer,
-    latest approved prior answer, then ``unknown``.  Only approved prior
+    Precedence is explicit: current internal manual answer, current
+    vendor-attested answer, current document answer, latest approved prior
+    answer, then ``unknown``. Only approved prior
     answers can be skipped, so a machine draft never becomes authority merely
     by being the newest record.
     """
@@ -1088,6 +1151,17 @@ def draft_vendor_assessment(
     name = _text(vendor, "vendor", 300)
     operator = _text(actor, "actor", 256)
     manual = _manual_answers(answers)
+    attested = _manual_answers(attested_answers)
+    attestation_digest: str | None = None
+    if attested:
+        attestation_digest = _digest(
+            attestation_sha256,
+            "attestation_sha256",
+        )
+    elif attestation_sha256 is not None:
+        raise ValueError(
+            "attestation_sha256 requires at least one vendor-attested answer"
+        )
     document, document_evidence = _document_candidates(document_results)
     plan = prior_answer_plan(name) if use_prior else {
         "prior_record_id": None,
@@ -1102,6 +1176,14 @@ def draft_vendor_assessment(
         if qid in manual:
             merged[qid] = dict(manual[qid])
             sources[qid] = {"kind": "manual", "confidence": 1.0}
+        elif qid in attested:
+            merged[qid] = dict(attested[qid])
+            sources[qid] = {
+                "kind": "vendor_attested",
+                "confidence": 0.75,
+                "review_required": True,
+                "submission_sha256": attestation_digest,
+            }
         elif qid in document:
             value = dict(document[qid])
             merged[qid] = {
@@ -1218,6 +1300,29 @@ def list_vendor_assessments(*, limit: int = 50) -> dict[str, Any]:
         "truncated": len(rows) > len(items),
         "limit": limit,
     }
+
+
+def find_vendor_assessment_by_attestation(
+    attestation_sha256: str,
+) -> dict[str, Any] | None:
+    """Resolve one portal attestation digest for crash-safe import recovery."""
+
+    _require_tenant()
+    digest = _digest(attestation_sha256, "attestation_sha256")
+    matches: list[dict[str, Any]] = []
+    for row in _bounded_records():
+        validated = _validated_record(row)
+        if any(
+            source.get("kind") == "vendor_attested"
+            and source.get("submission_sha256") == digest
+            for source in validated["answer_sources"].values()
+        ):
+            matches.append(validated)
+    if len(matches) > 1:
+        raise AIVendorRiskStateError(
+            "multiple AI vendor assessments claim one attestation digest"
+        )
+    return None if not matches else _public(matches[0])
 
 
 def review_vendor_assessment(
@@ -1353,15 +1458,19 @@ __all__ = [
     "AI_VENDOR_SCHEMA",
     "AI_VENDOR_TEMPLATE",
     "AIVendorRiskError",
+    "AIVendorRiskConfigError",
     "AIVendorRiskStateError",
     "NON_CERTIFICATION_NOTICE",
     "draft_vendor_assessment",
     "extract_answers_from_connected_document",
     "extract_answers_from_document",
+    "enabled",
+    "find_vendor_assessment_by_attestation",
     "get_vendor_assessment",
     "list_vendor_assessments",
     "model_risk_evidence_payload",
     "prior_answer_plan",
     "project_to_model_risk",
+    "questionnaire",
     "review_vendor_assessment",
 ]

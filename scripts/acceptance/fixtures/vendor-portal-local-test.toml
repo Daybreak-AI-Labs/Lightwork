@@ -1,0 +1,10 @@
+[client]
+id = "vendor-pilot"
+enforce = true
+
+[enterprise]
+mode = false
+
+[ai_vendor_risk]
+enable = true
+portal_enable = true

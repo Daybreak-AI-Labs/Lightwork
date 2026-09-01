@@ -470,6 +470,16 @@
     and completions. Ask an administrator to switch on <code>[ai_literacy]</code>.</p>
   {% else %}
   {% if literacy_error %}<p class="gov-alert">{{ literacy_error }}</p>{% endif %}
+  {% if literacy_plane_status.reconciliation_required %}
+  <p class="gov-alert"><strong>Reconciliation required.</strong> This workspace is
+    the role-compatibility intake plane, not the canonical compliance-evidence
+    authority. Its records are never promoted automatically. Add the provider,
+    content-version, expiry, and evidence-digest fields through the canonical
+    AI-literacy register before relying on them as compliance evidence.</p>
+  {% else %}
+  <p class="gov-muted">Operational role tracking is separate from the
+    privacy-minimising canonical evidence authority.</p>
+  {% endif %}
   {% if literacy_gaps and literacy_gaps.person_count %}
   <p>{{ literacy_gaps.person_count }} person(s) tracked —
     <span class="gov-chip gov-chip--good">{{ literacy_gaps.counts.current }} current</span>

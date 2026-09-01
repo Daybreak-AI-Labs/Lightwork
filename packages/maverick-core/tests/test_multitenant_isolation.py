@@ -57,6 +57,8 @@ def test_distinct_ids_never_collide_on_segment():
         data_dir(tenant="ACME")
     with pytest.raises(InvalidTenantError, match="cannot end"):
         data_dir(tenant="acme.")
+    with pytest.raises(InvalidTenantError, match="cannot end"):
+        data_dir(tenant="acme ")
 
 
 def test_active_tenant_scope_restores():
@@ -209,8 +211,8 @@ def test_encrypted_field_opaque_across_tenants(monkeypatch):
     crypto = pytest.importorskip("maverick.crypto_at_rest")
     enc = getattr(crypto, "encrypt", None) or getattr(crypto, "encrypt_field", None)
     dec = getattr(crypto, "decrypt", None) or getattr(crypto, "decrypt_field", None)
-    if enc is None or dec is None:
-        pytest.skip("crypto_at_rest encrypt/decrypt API not present")
+    assert enc is not None and dec is not None
+    monkeypatch.setenv("MAVERICK_ENCRYPT_PER_TENANT", "1")
     tok = set_tenant("acme")
     try:
         blob = enc("acme PII: alice@example.com")
@@ -220,6 +222,13 @@ def test_encrypted_field_opaque_across_tenants(monkeypatch):
     tok = set_tenant("acme")
     try:
         assert "alice@example.com" in dec(blob)
+    finally:
+        reset_tenant(tok)
+    # A different active tenant cannot authenticate tenant A's envelope.
+    tok = set_tenant("globex")
+    try:
+        with pytest.raises(crypto.EncryptionUnavailable):
+            dec(blob)
     finally:
         reset_tenant(tok)
     # The ciphertext itself never contains the plaintext.
