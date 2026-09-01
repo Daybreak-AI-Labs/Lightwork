@@ -278,6 +278,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--list", metavar="CLASS", help="print modules in a class")
     args = ap.parse_args(argv)
 
+    # Validate the request before the 15-second graph walk, not after it.
+    wanted = args.list.upper() if args.list else None
+    if wanted is not None and wanted not in {"PRODUCTION", "CI_ONLY", "CLI_ONLY",
+                                             "TEST_ONLY", "UNREACHED"}:
+        print(f"reachability: unknown class {args.list!r}", file=sys.stderr)
+        return 2
+
     table = classify()
     if not table:
         print("reachability: ERROR -- classified 0 modules; the package roots "
@@ -285,12 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     counts = summary(table)
 
-    if args.list:
-        wanted = args.list.upper()
-        if wanted not in {"PRODUCTION", "CI_ONLY", "CLI_ONLY", "TEST_ONLY",
-                          "UNREACHED"}:
-            print(f"reachability: unknown class {args.list!r}", file=sys.stderr)
-            return 2
+    if wanted is not None:
         try:
             for name, cls in sorted(table.items()):
                 if cls == wanted:

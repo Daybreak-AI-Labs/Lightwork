@@ -130,6 +130,10 @@ class EventKind:
     # short-lived capability token, so the Operating Record shows the scoped
     # credential each tool call actually ran under -- not just the run-long grant.
     TOKEN_EXCHANGE = "token_exchange"
+    # governance_denied and tool_call rows may carry optional regulatory tags
+    # (regulatory_compiler): ``obligation_id``/``regulation``/``article`` on a
+    # denial the compiled rules produced, ``obligations_checked`` (ids) on a
+    # call that ran while obligations covering it were active. Additive.
     GOVERNANCE_DENIED = "governance_denied"
     AUTONOMY_ESCALATED = "autonomy_escalated"
     AUTONOMY_GATED = "autonomy_gated"
@@ -138,6 +142,9 @@ class EventKind:
     CONSENT_RESULT  = "consent_result"
     SECRET_REDACTED = "secret_redacted"
     ERASE           = "erase"
+    # A bearer-verifiable receipt for one audited decision was minted
+    # (trust_receipt.py). Payload: day, row_hash, committed, key_id.
+    TRUST_RECEIPT_ISSUED = "trust_receipt_issued"
     # Data-retention enforcement deleted aged audit day-files / world rows. One
     # signed row per non-dry-run purge so a gap in the day-files (or shrunken
     # episode/event tables) is provably policy-driven retention, not tampering.
@@ -172,6 +179,13 @@ class EventKind:
     # payload: peer:str, direction:str (inbound|outbound), rule:str, reason:str,
     # correlation_id:str ("" when none).
     AGENT_TRUST_DENIED = "agent_trust_denied"
+    # Agent Control Plane: an operator verb (suspend / resume / contain /
+    # release / attenuate / halt / clear-halt) applied to a governed principal
+    # from the console or `maverick control-plane`. payload: verb:str,
+    # principal:str ("*" for a fleet verb), actor:str, ok:bool (what was
+    # CONFIRMED to land, not what was asked), detail:str; attenuate adds
+    # ceiling:dict (the narrowed deny_tools / max_risk / caps).
+    CONTROL_PLANE_ACTION = "control_plane_action"
     # Bring-your-own-agent gateway: enrollment lifecycle and the governed
     # traffic of agents that run on OTHER platforms (Agentforce, Bedrock, ...).
     # ENROLLED payload: external_agent, platform, department, enrolled_by.

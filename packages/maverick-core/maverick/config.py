@@ -2743,6 +2743,24 @@ def get_durable() -> dict:
     }
 
 
+def get_control_plane() -> dict:
+    """Return the ``[control_plane]`` section (the Agent Control Plane).
+
+    ``enable`` arms the mutating verbs of ``maverick.agent_control_plane``
+    (suspend / resume / contain / release / attenuate / halt) on the dashboard
+    console and ``maverick control-plane``; the roster, status and ledger
+    reads work regardless. Off by default so a deployment that never opted in
+    cannot have a principal revoked from a stray click. Env override:
+    ``MAVERICK_CONTROL_PLANE=1`` enables.
+    """
+    import os
+    cfg = load_config().get("control_plane", {}) or {}
+    enable = bool(cfg.get("enable", False))
+    if os.environ.get("MAVERICK_CONTROL_PLANE", "").strip() == "1":
+        enable = True
+    return {"enable": enable}
+
+
 def get_assessments() -> dict:
     """Return the ``[assessments]`` section (assessment flow assists).
 

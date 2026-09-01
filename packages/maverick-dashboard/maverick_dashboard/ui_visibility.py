@@ -318,6 +318,17 @@ PAGES: tuple[dict, ...] = (
         "floor": "operate",
         "default": "operate",
     },
+    # The Agent Control Plane: suspend / contain / attenuate / halt over every
+    # governed principal. Operate floor -- the page renders the verbs, and a
+    # viewer's read-only needs are met by the roster inside Fleet/Agents.
+    {
+        "path": "/agent-control-plane",
+        "label": "Agent Control Plane",
+        "group": "Govern",
+        "icon": "agents",
+        "floor": "operate",
+        "default": "operate",
+    },
     # The Privacy workspace: the module view over assessment records (PIA /
     # AIRA / vendor risk / framework readiness). Operate floor — records carry
     # answer bodies and reviewer threads, a tier above viewer summaries.

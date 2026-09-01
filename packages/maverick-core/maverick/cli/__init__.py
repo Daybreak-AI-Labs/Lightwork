@@ -6784,6 +6784,7 @@ def _soc2_posture_ready(evidence) -> bool:
 # so every shared helper and `main` is defined before the submodule decorators
 # run (@main.group/@main.command register onto `main` on import).
 from . import (  # noqa: E402,F401
+    _agent_control_plane_groups,
     _codec_groups,
     _compliance_groups,
     _connector_groups,

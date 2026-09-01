@@ -6,6 +6,10 @@ import pytest
 
 from scripts.acceptance import run_discovery_sensor_test_estate as runner
 
+# Eight concurrent sensor workers on one SQLite store; same reasoning as the
+# queue soak -- run alone on the box, not beside a second xdist worker.
+pytestmark = pytest.mark.heavy_concurrency
+
 
 def test_fixed_acceptance_exercises_three_sources_lifecycle_recovery_and_scale():
     report = runner.run_acceptance(synthetic_consent_confirmed=True)

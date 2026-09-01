@@ -1577,6 +1577,49 @@ here.
   verifier out as a standalone program that imports nothing from maverick and
   needs only Python plus `cryptography` — the "hand a regulator a USB stick"
   path.
+- **Trust receipts — bearer-verifiable evidence for one decision**
+  (`trust_receipt.py`, `trust_receipt_verify.py`, `maverick attest receipt
+  mint|verify|export-verifier`) — the unit below an attestation bundle: a
+  portable artifact for a single signed audit row ("`wire_transfer` was denied
+  under `deny_actions` for `agent:finance-1` at T", "`read_file` ran") that an
+  auditor, regulator or a customer's customer verifies offline with a public key
+  obtained out of band. The receipt embeds the row, every row that follows it
+  up to a chain tip, and — with `--checkpoint-dir` — the signed checkpoint that
+  committed that tip. Verification re-derives all of it: the envelope
+  signature, the row's own hash and signature, the **claim recomputed from the
+  row** (a stated claim that drifts from the row FAILS, however validly it was
+  re-signed), the hash links to the tip, and the checkpoint's agreement with
+  it. Three depths that are not synonyms: *signed* (a genuine row), *chained*
+  (provably linked to an issuer-committed tip), *anchored* (that commitment
+  matched a digest the verifier brought from OUTSIDE the receipt —
+  `--anchor-digest` or the checkpoint file via `--checkpoint-dir` — the only
+  depth at which history could not have been quietly re-committed afterwards).
+  The minter refuses a broken chain, never mutates the audit files, and stamps
+  `issuer.key_custody` so a co-located key is reported as integrity rather than
+  tamper-evidence. Point-in-time by design: a later lawful erasure re-signs the
+  day, and the verifier says so.
+- **Agent Control Plane — one console over every agent the runtime enforces**
+  (`agent_control_plane.py`, dashboard `/agent-control-plane`,
+  `maverick control-plane status|list|ledger|suspend|resume|contain|release|
+  attenuate|halt|clear-halt`, opt-in `[control_plane] enable` /
+  `MAVERICK_CONTROL_PLANE=1`) — the roster of every principal the deployment
+  governs (native runs by the `user:<id>` capability principal their goals run
+  under; external agents as `agent:<id>` from the trust registry) and one set
+  of operator verbs whose effects are the stores the runtime already consults
+  on its next tool call: **suspend/resume** land in the capability revocation
+  registry (a native subtree's next tool call is denied; an external agent's
+  trust entry is flipped to revoked as well so every surface refuses it),
+  **contain/release** drive the security plane's containment and the
+  bring-your-own-agent gateway's, **attenuate** narrows an external agent's
+  deny-tools / risk / budget / wall ceiling in the trust registry and refuses
+  any change that would widen it, and **halt/clear-halt** arm and disarm the
+  fleet killswitch every kernel checks at its tool boundary. No new
+  enforcement is added; each verb reports what it *confirmed* landed (a
+  revocation that did not persist is a failure, not a success with a
+  footnote), and each is one signed `control_plane_action` audit row carrying
+  the verb, the principal, the actor and the outcome. Reads (roster, status,
+  the principal's forensic ledger off the signed chain) work on every
+  deployment; the verbs refuse while the plane is off.
 - **Memory Guard — governed reads/writes (OWASP ASI06)** (`memory_guard.py`,
   opt-in `[memory_guard] enable` / `MAVERICK_MEMORY_GUARD`) — the screen
   between an agent and its memory store. Every fact write is stamped with
@@ -3371,6 +3414,31 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   forever otherwise),
   per-run file-write + tool quotas, `maverick compliance --strict`, CycloneDX
   SBOM in CI.
+- **Regulatory compiler — compliance by construction**
+  (`regulatory_compiler.py`, `maverick regulatory show|check|verify`,
+  `python -m maverick.regulatory_compiler --ci`) — a policy document says what
+  must not happen; this makes it *unable* to happen. Each regulation is a small
+  library of obligations — a citation, a scope (tool names or a risk floor) and
+  an effect — compiled into the same `Policy` the tool-call chokepoint already
+  evaluates (deny-wins, strictest-wins) plus a capability attenuation that can
+  only narrow and that every spawned child inherits. Shipped: **GDPR** (Art. 17
+  erasure only through the governed path — a direct write to a personal-data
+  store pauses for a human; Art. 32 a human confirms every outbound transfer;
+  Art. 22 no solely automated high-impact decision), **EU AI Act** (Art. 14
+  human oversight of every high-risk action), **HIPAA** (45 CFR 164.502(b)
+  minimum necessary — PHI never leaves through an ungoverned channel, as an
+  attenuation no ACL or role can widen). Activation is `[compliance] profiles`,
+  the switch the compliance profiles already use, with a wizard step. Two
+  things a document cannot do: **proof the gate was live** — every denial the
+  compiled rules produce is audited with `obligation_id`/`regulation`/`article`,
+  and every call that ran carries `obligations_checked`, so a trust receipt for
+  that row cites the regulation — and **anti-vacuity**: `verify` proves each
+  active obligation bites (every bound tool is a classified tool, the compiled
+  policy denies or pauses it, a floor catches a real tool, an attenuation
+  narrows a capability); the CI gate fails on a stale tool name or a silent
+  overlay and exits 2 when it inspected nothing. Conduct prohibitions (EU AI
+  Act Art. 5) stay the packs' hard refusals; this does not pretend a tool gate
+  covers them.
 - **Compliance mode profiles** — `[compliance] profiles = ["hipaa"]` turns on
   a cross-domain runtime posture (`compliance_profiles.py`): **HIPAA mode**
   asserts the 45 CFR Part 164 safeguards, names the protection floors it
