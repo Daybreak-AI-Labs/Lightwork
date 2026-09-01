@@ -87,6 +87,61 @@ def test_review_rejects_bad_lens(monkeypatch, tmp_path):
     assert r.status_code == 422  # schema pattern rejects it
 
 
+def test_stale_assessment_mutations_conflict_without_overwriting(monkeypatch, tmp_path):
+    name = _an_agent(monkeypatch, tmp_path)
+    if not name:
+        import pytest
+
+        pytest.skip("no packs discovered")
+    c = _client()
+    created = c.post(
+        f"/api/v1/assessments/agent/{name}/refresh",
+        json={"expected_revision": 0},
+    ).json()
+    stale_revision = created["revision"]
+    advanced = c.post(
+        f"/api/v1/assessments/agent/{name}/review",
+        json={
+            "expected_revision": stale_revision,
+            "lens": "privacy",
+            "decision": "needs_work",
+        },
+    )
+    assert advanced.status_code == 200
+
+    stale_requests = (
+        c.post(
+            f"/api/v1/assessments/agent/{name}/refresh",
+            json={"expected_revision": stale_revision},
+        ),
+        c.post(
+            f"/api/v1/assessments/agent/{name}/review",
+            json={
+                "expected_revision": stale_revision,
+                "lens": "security",
+                "decision": "accepted",
+            },
+        ),
+        c.post(
+            f"/api/v1/assessments/agent/{name}/evidence",
+            json={
+                "expected_revision": stale_revision,
+                "lens": "privacy",
+                "control": created["lenses"]["privacy"]["findings"][0]["control"],
+                "evidence": "stale reviewer note",
+            },
+        ),
+        c.delete(
+            f"/api/v1/assessments/agent/{name}",
+            params={"expected_revision": stale_revision},
+        ),
+    )
+    assert [response.status_code for response in stale_requests] == [409, 409, 409, 409]
+    latest = c.get(f"/api/v1/assessments/agent/{name}").json()
+    assert latest["revision"] == advanced.json()["revision"]
+    assert latest["lenses"]["security"]["status"] != "accepted"
+
+
 def test_sweep_endpoint(monkeypatch, tmp_path):
     name = _an_agent(monkeypatch, tmp_path)
     if not name:

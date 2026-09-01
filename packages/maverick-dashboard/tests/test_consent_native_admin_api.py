@@ -157,7 +157,21 @@ def test_public_receipt_keys_are_discoverable_without_ambient_authority(
     }
     application.include_router(native_api.create_consent_native_public_metadata_router())
     client = TestClient(application)
+    discovery_path = "/api/v1/public/consent/native/receipt-keys"
     path = "/api/v1/public/consent/native/receipt-keys/mobile-prod"
+
+    discovery = client.get(discovery_path)
+    assert discovery.status_code == 200, discovery.text
+    assert discovery.json() == {
+        "schema": "lightwork.native-consent-receipt-key-discovery.v1",
+        "method": "GET",
+        "application_ref_required": True,
+        "endpoint_template": (
+            "/api/v1/public/consent/native/receipt-keys/{application_ref}"
+        ),
+    }
+    assert discovery.headers["access-control-allow-origin"] == "*"
+    assert client.get(f"{discovery_path}?tenant_id=attacker").status_code == 404
 
     discovered = client.get(path)
     assert discovered.status_code == 200, discovered.text

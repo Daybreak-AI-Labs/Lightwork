@@ -18,6 +18,7 @@ def test_application_mounts_native_public_admin_and_receipt_key_routes(
         "/api/v1/public/consent/native/enroll",
         "/api/v1/public/consent/native/refresh",
         "/api/v1/public/consent/native/dispatch",
+        "/api/v1/public/consent/native/receipt-keys",
         "/api/v1/public/consent/native/receipt-keys/{application_ref}",
         "/api/v1/consent/native/applications",
         "/api/v1/consent/native/readiness",

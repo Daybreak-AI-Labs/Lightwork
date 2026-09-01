@@ -56,6 +56,7 @@ def event_paths(
     *, day: str | None = None, all_days: bool = False,
     since: str | None = None, until: str | None = None,
     tenant: str | None = None,
+    audit_dir: Path | None = None,
 ) -> list[Path]:
     """Return the tenant-aware audit day-files selected for reading.
 
@@ -71,8 +72,8 @@ def event_paths(
     if day is not None and not is_valid_day(day):
         raise ValueError(f"invalid audit day {day!r}: expected YYYY-MM-DD")
 
-    audit_dir = resolve_audit_dir(tenant)
-    if not audit_dir.exists() or not audit_dir.is_dir():
+    root = Path(audit_dir) if audit_dir is not None else resolve_audit_dir(tenant)
+    if not root.exists() or not root.is_dir():
         return []
 
     if since or until:
@@ -80,13 +81,13 @@ def event_paths(
         # sorts lexically, so a plain string compare on the file stem works.
         lo = since or "0000-00-00"
         hi = until or "9999-99-99"
-        return [p for p in day_files(audit_dir) if lo <= p.stem <= hi]
+        return [p for p in day_files(root) if lo <= p.stem <= hi]
     if all_days:
-        return day_files(audit_dir)
+        return day_files(root)
 
     # ``day`` was validated up front; default to today (UTC) when unset.
     d = day or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
-    return [audit_dir / f"{d}.ndjson"]
+    return [root / f"{d}.ndjson"]
 
 
 def iter_events(
@@ -96,6 +97,7 @@ def iter_events(
     since: str | None = None,
     until: str | None = None,
     tenant: str | None = None,
+    audit_dir: Path | None = None,
     strict: bool = False,
 ) -> Iterator[dict[str, Any]]:
     """Yield audit event dicts from the tenant-aware audit dir.
@@ -109,6 +111,7 @@ def iter_events(
     """
     for path in event_paths(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
+        audit_dir=audit_dir,
     ):
         # segment_text transparently decrypts a sealed (at-rest) segment.
         # Export/UI readers keep its fail-soft default; verification callers

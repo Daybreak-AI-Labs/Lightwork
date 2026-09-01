@@ -108,6 +108,8 @@
   'use strict';
   var msg = document.getElementById('cx-msg');
   var list = document.getElementById('cx-list');
+  var currentByName = {};
+  var editingName = '';
   function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
   {% include "_dash_helpers.js" %}
 
@@ -156,16 +158,32 @@
       return r.ok ? r.json() : { connections: [] };
     }).then(function (j) {
       var conns = j.connections || [];
+      currentByName = {};
+      conns.forEach(function (c) { currentByName[c.name] = c; });
       list.textContent = '';
       document.getElementById('cx-empty').hidden = conns.length > 0;
       conns.forEach(function (c) {
         var li = el('li', 'cx__row');
         li.appendChild(el('span', 'name', c.name));
         var scope = c.access === 'tenant' ? 'tenant use' : 'owner/granted use';
-        var readiness = c.last_test ? (c.last_test.authenticated ? ' · ready' : ' · not ready') : ' · untested';
-        var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)') + ' · ' + scope + readiness);
+        var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)') + ' · ' + scope);
         li.appendChild(meta);
-        li.appendChild(el('span', 'cx__badge ' + (c.has_token ? 'ok' : 'no'), c.has_token ? 'token set' : 'no token'));
+        li.appendChild(el('span', 'cx__badge ' + (c.has_token ? 'ok' : 'no'), c.has_token ? 'configuration saved' : 'saved without token'));
+        var readinessText = c.last_test ? (c.last_test.authenticated ? 'readiness verified' : 'readiness failed') : 'readiness untested';
+        li.appendChild(el('span', 'cx__badge ' + (c.last_test && c.last_test.authenticated ? 'ok' : 'no'), readinessText));
+        var edit = el('button', 'btn btn--ghost', 'Edit / rotate');
+        edit.type = 'button';
+        edit.addEventListener('click', function () {
+          editingName = c.name;
+          nameEl.value = c.name;
+          connEl.value = c.connector || '';
+          baseEl.value = c.base_url || '';
+          document.getElementById('cx-tenant-access').checked = c.access === 'tenant';
+          document.getElementById('cx-principals').value = (c.allowed_principals || []).join('\n');
+          document.getElementById('cx-token').value = '';
+          advanced.open = true;
+          say('Editing ' + c.name + '. Leave the token blank to keep it, or paste a replacement.');
+        });
         var test = el('button', 'btn btn--ghost', 'Test');
         test.type = 'button';
         test.addEventListener('click', function () {
@@ -183,21 +201,26 @@
           api('/api/v1/connections/' + encodeURIComponent(c.name), { method: 'DELETE' })
             .then(function () { load(); });
         });
-        li.appendChild(test); li.appendChild(del);
+        li.appendChild(edit); li.appendChild(test); li.appendChild(del);
         list.appendChild(li);
       });
     }).catch(function () { say('Could not load connections.', true); });
   }
 
   function readBody() {
-    return {
-      name: document.getElementById('cx-name').value.trim(),
-      connector: document.getElementById('cx-connector').value.trim(),
-      base_url: document.getElementById('cx-base').value.trim(),
-      token: document.getElementById('cx-token').value,
-      access: document.getElementById('cx-tenant-access').checked ? 'tenant' : 'owner',
-      allowed_principals: document.getElementById('cx-principals').value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean),
-    };
+    var name = document.getElementById('cx-name').value.trim();
+    var existing = currentByName[name];
+    var body = { name: name };
+    var token = document.getElementById('cx-token').value;
+    if (token || !existing) body.token = token;
+    if (!existing || editingName === name) {
+      body.connector = document.getElementById('cx-connector').value.trim();
+      body.base_url = document.getElementById('cx-base').value.trim();
+      body.access = document.getElementById('cx-tenant-access').checked ? 'tenant' : 'owner';
+      body.allowed_principals = document.getElementById('cx-principals').value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+    }
+    if (existing) body.expected_revision = existing.revision;
+    return body;
   }
 
   // Save, then (optionally) fire the reachability test for the just-saved one.
@@ -206,10 +229,19 @@
     if (!body.name) { say('Give the connection a name.', true); return; }
     say(thenTest ? 'Saving & testing…' : 'Saving…');
     return api('/api/v1/connections', { method: 'POST', body: JSON.stringify(body) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
       .then(function (res) {
-        if (!res.ok) { say(res.j.detail || 'Save failed', true); return; }
+        if (!res.ok) {
+          if (res.status === 409) {
+            say('This connection changed in another tab. The current record was reloaded; review it before saving again.', true);
+            load();
+            return;
+          }
+          say(res.j.detail || 'Save failed', true);
+          return;
+        }
         document.getElementById('cx-token').value = '';
+        editingName = '';
         if (!thenTest) { say('Saved ✓'); load(); return; }
         return api('/api/v1/connections/' + encodeURIComponent(body.name) + '/test', { method: 'POST' })
           .then(function (r) { return r.json(); })

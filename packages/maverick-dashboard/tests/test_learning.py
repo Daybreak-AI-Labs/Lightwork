@@ -44,6 +44,59 @@ def test_learning_api_reports_governed_components_on_and_dgm_off_by_default(
     }
 
 
+def test_feature_switches_use_live_subsystem_defaults(tmp_path, monkeypatch):
+    for name in (
+        "MAVERICK_DREAMING",
+        "MAVERICK_SELF_IMPROVEMENT",
+        "MAVERICK_SELF_HARNESS",
+        "MAVERICK_FLEET_MEMORY",
+        "MAVERICK_REHEARSAL",
+        "MAVERICK_FLOWS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick import dreaming, fleet_memory, rehearsal, self_harness, self_improvement
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
+    rows = {
+        row["section"]: row["enabled"]
+        for row in client.get("/api/v1/features/switches").json()["switches"]
+    }
+    assert rows["dreaming"] is dreaming.enabled() is True
+    assert rows["self_improvement"] is self_improvement.enabled() is True
+    assert rows["self_harness"] is self_harness.enabled() is True
+    assert rows["rehearsal"] is rehearsal.enabled() is True
+    assert rows["fleet_memory"] is fleet_memory.enabled()
+
+
+def test_feature_switch_read_after_write_and_environment_pin(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
+    disabled = client.post(
+        "/api/v1/features/switches",
+        json={"section": "dreaming", "enabled": False},
+    )
+    assert disabled.status_code == 200
+    assert disabled.json() == {"section": "dreaming", "enabled": False}
+
+    monkeypatch.setenv("MAVERICK_DREAMING", "1")
+    reset_config_cache()
+    refused = client.post(
+        "/api/v1/features/switches",
+        json={"section": "dreaming", "enabled": False},
+    )
+    assert refused.status_code == 409
+    rows = {
+        row["section"]: row["enabled"]
+        for row in client.get("/api/v1/features/switches").json()["switches"]
+    }
+    assert rows["dreaming"] is True
+
+
 def test_scoped_caller_does_not_see_deployment_wide_counts(tmp_path, monkeypatch):
     # A specific tenant (owner not None) must NOT see deployment-level learned
     # skills / grounded outcomes attributed as its own -- those are admin-only.

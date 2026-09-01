@@ -64,6 +64,9 @@ def _tenant_admin_headers() -> dict[str, str]:
         "/plugins",
         "/mcp",
         "/channels",
+        "/api/v1/plugins",
+        "/api/v1/mcp",
+        "/api/v1/channels",
         "/tenants",
         "/tenants/overview",
         "/api/v1/tenants/overview",
@@ -83,6 +86,22 @@ def test_tenant_admin_cannot_read_deployment_control_plane(path):
         reset_tenant(token)
 
     assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v1/plugins",
+        "/api/v1/mcp",
+        "/api/v1/channels",
+    ),
+)
+def test_global_admin_can_read_deployment_control_plane_api(path):
+    rbac.set_role("user:root", "admin")
+
+    response = client.get(path, headers={"Authorization": "Bearer root"})
+
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -113,6 +132,32 @@ def test_tenant_admin_cannot_mutate_deployment_control_plane(path, data, monkeyp
     token = set_tenant("acme")
     try:
         response = client.post(path, data=data, headers=headers, follow_redirects=False)
+    finally:
+        reset_tenant(token)
+
+    assert response.status_code == 403
+
+
+def test_plugin_install_authorizes_before_disclosing_opt_in_state(monkeypatch):
+    """A tenant admin must learn nothing about deployment install policy."""
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import app as app_mod
+
+    monkeypatch.delenv("MAVERICK_ALLOW_PLUGIN_INSTALL", raising=False)
+    monkeypatch.setattr(
+        app_mod,
+        "_plugin_install_enabled",
+        lambda: pytest.fail("install policy was inspected before global authorization"),
+    )
+    headers = _tenant_admin_headers()
+    token = set_tenant("acme")
+    try:
+        response = client.post(
+            "/plugins/install",
+            data={"name": "example"},
+            headers=headers,
+            follow_redirects=False,
+        )
     finally:
         reset_tenant(token)
 

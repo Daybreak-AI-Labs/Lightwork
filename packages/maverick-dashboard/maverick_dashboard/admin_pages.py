@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from . import auth
 
@@ -78,7 +79,29 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     allow_options = [(s, label_by_spec.get(s, "Allowed")) for s in sorted(allow)]
     picker_options = allow_options if allow else model_options
     from maverick_dashboard import settings_store
-    cfg_state = settings_store.state()
+    from maverick_dashboard.integration_readiness import (
+        IntegrationConfigurationUnavailable,
+        provider_readiness,
+        require_readable_config,
+    )
+
+    try:
+        require_readable_config()
+        cfg_state = settings_store.state()
+        if any(provider.get("source_errors") for provider in cfg_state["providers"]):
+            raise IntegrationConfigurationUnavailable(
+                "provider configuration source changed while it was read"
+            )
+    except IntegrationConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="integration configuration is unavailable",
+        ) from exc
+
+    for provider in cfg_state["providers"]:
+        provider["readiness"] = provider_readiness(
+            provider["name"], configured=provider["configured"]
+        )
     saved_msg = {
         "appearance": "Appearance updated.",
         "models": "Default model updated.",
@@ -86,11 +109,26 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "budget": "Spend cap updated.",
         "allowed": "Allowed models updated.",
         "providers": "Provider keys updated.",
+        "provider_test": "Provider readiness check finished.",
         "webhooks": "Webhook signing secret updated.",
         "capabilities": "Capabilities updated.",
         "features": "Features updated.",
         "visibility": "Page visibility updated.",
         "visibility_reset": "Page visibility reset to defaults.",
+    }.get(saved, "")
+    saved_section = {
+        "appearance": "general",
+        "budget": "general",
+        "models": "models",
+        "roles": "models",
+        "allowed": "models",
+        "providers": "integrations",
+        "provider_test": "integrations",
+        "webhooks": "integrations",
+        "capabilities": "controls",
+        "features": "controls",
+        "visibility": "access",
+        "visibility_reset": "access",
     }.get(saved, "")
     from maverick_dashboard import rbac, ui_visibility
     return _app().templates.TemplateResponse(request, "settings.html", {
@@ -108,6 +146,7 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "default_budget": DEFAULT_MAX_DOLLARS,
         "webhook_configured": _webhook_secret_configured(),
         "saved": saved_msg,
+        "saved_section": saved_section,
     })
 
 
@@ -233,14 +272,64 @@ async def settings_set_provider(
     api_key: str = Form(""),
     base_url: str = Form(""),
 ) -> RedirectResponse:
-    """Save a provider's API key / base URL to the dashboard config overlay
-    (0600). Empty fields are left unchanged (so re-saving a base URL never wipes
-    a key you can't see); resolved before env vars; config.toml is never written."""
+    """Rotate only provider fields this dashboard can make effective.
+
+    Tenant and operator overlays outrank the dashboard overlay. Refuse those
+    rotations with the exact controlling source, then verify the effective
+    credential generation before reporting success.
+    """
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
+    import hashlib
+    import hmac
+
+    from maverick import config
+
     from maverick_dashboard import settings_store
+    provider_name = provider.strip()
+    key_value = api_key.strip()
+    base_value = base_url.strip()
     try:
-        settings_store.set_provider(provider.strip(), api_key=api_key, base_url=base_url)
+        before = config.provider_configuration_state(provider_name)
+        if before["source_errors"]:
+            raise HTTPException(
+                status_code=503,
+                detail="provider configuration is unreadable; repair the active config source before rotating credentials",
+            )
+        blockers = []
+        if key_value and not before["dashboard_can_set_api_key"]:
+            blockers.append(f"API key is controlled by {before['api_key_source']}")
+        if base_value and not before["dashboard_can_set_base_url"]:
+            blockers.append(f"base URL is controlled by {before['base_url_source']}")
+        if blockers:
+            raise HTTPException(
+                status_code=409,
+                detail="; ".join(blockers) + "; rotate that source instead",
+            )
+        if not key_value and not base_value:
+            raise HTTPException(status_code=400, detail="enter a provider value to save")
+        settings_store.set_provider(
+            provider_name,
+            api_key=key_value,
+            base_url=base_value,
+        )
+        config.reset_config_cache()
+        observed = config.get_provider_config(provider_name) or {}
+        if key_value:
+            expected_digest = hashlib.sha256(key_value.encode("utf-8")).digest()
+            observed_digest = hashlib.sha256(
+                str(observed.get("api_key") or "").strip().encode("utf-8")
+            ).digest()
+            if not hmac.compare_digest(expected_digest, observed_digest):
+                raise HTTPException(
+                    status_code=409,
+                    detail="provider key was stored but is not the effective credential; review the active source",
+                )
+        if base_value and str(observed.get("base_url") or "").strip() != base_value:
+            raise HTTPException(
+                status_code=409,
+                detail="provider base URL was stored but is not the effective endpoint; review the active source",
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
     return RedirectResponse("/settings?saved=providers", status_code=303)
@@ -257,6 +346,28 @@ async def settings_clear_provider(request: Request, provider: str = Form(...)) -
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="unknown provider") from exc
     return RedirectResponse("/settings?saved=providers", status_code=303)
+
+
+@router.post("/settings/providers/test")
+async def settings_test_provider(
+    request: Request, provider: str = Form(...)
+) -> RedirectResponse:
+    """Run a bounded live provider probe and bind its receipt to this config."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from maverick import config
+
+    from maverick_dashboard.integration_readiness import test_provider
+
+    name = provider.strip().lower()
+    try:
+        state = config.provider_configuration_state(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="unknown provider") from exc
+    if not state["configured"]:
+        raise HTTPException(status_code=409, detail="provider is not configured")
+    await run_in_threadpool(test_provider, name)
+    return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 
 @router.post("/settings/capabilities")
@@ -385,6 +496,8 @@ async def users_set_role(
     try:
         rbac.set_role(principal.strip(), role.strip(),
                       actor=auth.caller_principal(request) or "local")
+    except rbac.RecoveryAuthorityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or role") from exc
     return RedirectResponse("/users?saved=set", status_code=303)
@@ -397,8 +510,11 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import rbac
-    rbac.remove_user(principal.strip(),
-                     actor=auth.caller_principal(request) or "local")
+    try:
+        rbac.remove_user(principal.strip(),
+                         actor=auth.caller_principal(request) or "local")
+    except rbac.RecoveryAuthorityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RedirectResponse("/users?saved=removed", status_code=303)
 
 
@@ -493,7 +609,8 @@ async def users_set_suites(request: Request) -> RedirectResponse:
     The grant store is GLOBAL control-plane data (like the role roster), so
     this requires the global admin role — a tenant-local admin may not scope
     users across the deployment. An empty selection is a valid grant meaning
-    "no departments"; use Remove to lift scoping entirely."""
+    "no departments". Removing an override is allowed only when the configured
+    default is no broader than the current grant."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import suite_grants
@@ -512,11 +629,15 @@ async def users_set_suites(request: Request) -> RedirectResponse:
 async def users_remove_suites(
     request: Request, principal: str = Form(...),
 ) -> RedirectResponse:
-    """Lift a user's department scoping (global admin only)."""
+    """Remove a department override without broadening access."""
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import suite_grants
-    suite_grants.remove_grant(principal.strip(),
-                              actor=auth.caller_principal(request) or "local")
+    try:
+        suite_grants.remove_grant(
+            principal.strip(), actor=auth.caller_principal(request) or "local"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 

@@ -2,10 +2,9 @@
   Shared module-gate banner: shown when a governance module's fail-closed
   [section] enable gate is off. Renders a plain-language explanation and a
   Turn on button wired (via the delegated .mg-on handler in lightwork-ui.js)
-  to POST /api/v1/features/modules -- the module comes on in-app, no config
-  file, no restart. The button renders for everyone; a non-admin's click
-  gets a loud "ask your administrator" in the aria-live error line (same
-  pattern as the learning-page switches). Config keys stay OUT of the UI.
+  to POST /api/v1/features/modules. This changes only the bounded enable-gate
+  chain; configuration completeness and runtime readiness remain separately
+  evidenced. Config keys stay OUT of the UI.
 
   Usage:
     {% from "_module_gate.html" import module_gate %}
@@ -14,16 +13,22 @@
 
   `section` must be a key of the API's module-switch registry
   (api._MODULE_SWITCHES); `detail` is optional extra copy about what turning
-  the module on unlocks or what to review first.
+  the module on unlocks or what to review first. Pass `can_activate=false`
+  when the page knows the caller is not a global administrator.
 #}
-{% macro module_gate(section, label, detail='') %}
+{% macro module_gate(section, label, detail='', can_activate=true) %}
 <div class="mg-banner" role="status" data-module-gate="{{ section }}">
   <strong>{{ label }} is turned off.</strong>
-  <span class="mg-copy">{{ detail or 'Everything on this page unlocks once it is on.' }}
-    Turning it on applies immediately and can be turned back off here any time.</span>
+  <span class="mg-copy">{{ detail or 'The module gate must be on before this workbench can operate.' }}
+    Turning it on applies immediately. It does not prove credentials,
+    dependencies, custody, tenant setup, or runtime acceptance.</span>
+  {% if can_activate %}
   <span class="mg-actions">
     <button type="button" class="btn btn--primary mg-on">Turn on {{ label|lower }}</button>
   </span>
+  {% else %}
+  <span class="mg-actions muted" role="note">A global administrator must turn this on.</span>
+  {% endif %}
   <span class="mg-err" role="alert" aria-live="assertive"></span>
 </div>
 {% endmacro %}

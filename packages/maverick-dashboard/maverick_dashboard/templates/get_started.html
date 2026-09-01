@@ -57,10 +57,12 @@
   {% if runtime_all_set %}
   <div class="mv-empty" style="margin-bottom: var(--space-5);">
     <p class="mv-empty__title">🎉 You’re runtime-ready</p>
-    <p class="mv-empty__body">Your workspace is configured and running.
-      Assurance deployment readiness is reported separately below. Manage
-      runtime work from <a href="/workflows">Workflows</a> and
-      <a href="/automations">Automations</a>.</p>
+    <p class="mv-empty__body">The offline runtime checklist is complete.
+      Live provider acceptance and assurance deployment readiness are reported
+      separately below.{% if can_operate %} Manage runtime work from
+      <a href="/workflows">Workflows</a> and
+      <a href="/automations">Automations</a>.{% else %} An operator can manage
+      workflows and automations; your access remains read-only.{% endif %}</p>
   </div>
   {% endif %}
 
@@ -149,7 +151,11 @@
           <code class="gs__command">{{ s.command }}</code>
         {% endif %}
       </div>
+      {% if s.allowed %}
       <a class="btn {% if s.done %}btn--ghost{% else %}btn--primary{% endif %} gs__cta" href="{{ s.cta }}">{{ s.cta_label }}</a>
+      {% else %}
+      <span class="muted gs__cta" role="note">{{ s.readonly_label }}</span>
+      {% endif %}
     </li>
     {% endfor %}
   </ol>
@@ -160,7 +166,12 @@
     <p>Use the Assurance Cockpit’s no-network demo only in an empty or dedicated
       demo tenant. Every generated record stays labeled synthetic and does not
       count as production assurance evidence.</p>
+    {% if can_operate %}
     <a class="btn btn--ghost" href="/security/assurance">Open Assurance Cockpit</a>
+    {% else %}
+    <p class="muted" role="note">An operator can open the Assurance Cockpit;
+      your onboarding view does not grant operating authority.</p>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

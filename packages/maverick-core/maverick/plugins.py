@@ -803,6 +803,127 @@ def discover_personas() -> dict[str, Callable[[], str]]:
     return out
 
 
+_STATUS_GROUPS = (
+    ("tools", "maverick.tools"),
+    ("channels", "maverick.channels"),
+    ("skills", "maverick.skills"),
+    ("personas", "maverick.personas"),
+)
+
+
+def _status_error(exc: BaseException) -> str:
+    """A bounded, secret-scrubbed plugin diagnostic safe for admin surfaces."""
+    from .secrets import scrub
+
+    detail = scrub(str(exc)).strip() or "plugin import failed"
+    return f"{type(exc).__name__}: {detail}"[:500]
+
+
+def _target_contract_error(group: str, target: Any) -> str:
+    """Mirror the public discovery functions' post-import contract checks."""
+    if target is None:
+        return "the entry point loaded no object"
+    if group == "maverick.tools" and not callable(target):
+        return "tool entry point must be callable"
+    if group == "maverick.channels" and isinstance(target, str):
+        return "channel entry point must load a channel class"
+    if group == "maverick.personas" and not callable(target):
+        return "persona entry point must be callable"
+    return ""
+
+
+def plugin_status_snapshot() -> dict[str, Any]:
+    """Truthful discovery, policy, configuration, and import state.
+
+    ``discovered`` means package metadata exposed an entry point;
+    ``configured`` means the effective config/env/dashboard allowlist selected
+    it; ``allowed`` means the selected entry point passed every trust gate; and
+    ``loaded`` means its target imported and satisfied the same kind-specific
+    contract used by ``discover_*``. Tool factories are intentionally not
+    invoked here because construction belongs to a per-run sandbox/world.
+    """
+    allow = _allowed_plugin_names()
+    try:
+        from .runtime_overrides import plugin_overlay
+
+        forced_on, forced_off = plugin_overlay()
+    except RuntimeOverridesSecurityError:
+        raise
+    except Exception:
+        forced_on, forced_off = set(), set()
+
+    groups: dict[str, list[dict[str, Any]]] = {
+        kind: [] for kind, _group in _STATUS_GROUPS
+    }
+    discovery_errors: list[dict[str, str]] = []
+    granted, enforce = _permission_policy()
+    embedded_disabled = no_cli()
+    for kind, group in _STATUS_GROUPS:
+        try:
+            eps = list(_entry_points(group))
+        except Exception as exc:
+            discovery_errors.append({"kind": kind, "error": _status_error(exc)})
+            continue
+        name_dists = _name_dist_map(eps)
+        for ep in eps:
+            name = str(getattr(ep, "name", "") or "")
+            dist = _ep_dist_name(ep)
+            configured = _allowed(name, dist, allow)
+            row: dict[str, Any] = {
+                "name": name,
+                "module": str(getattr(ep, "value", str(ep))),
+                "distribution": dist or "",
+                "discovered": True,
+                "configured": configured,
+                "allowed": False,
+                "loaded": False,
+                "state": "not_configured",
+                "load_error": "",
+                "forced": (
+                    "on" if name in forced_on else "off" if name in forced_off else None
+                ),
+            }
+            groups[kind].append(row)
+            if not configured:
+                row["load_error"] = "Not selected by the effective plugin allowlist."
+                continue
+            if embedded_disabled:
+                row["state"] = "runtime_disabled"
+                row["load_error"] = "Third-party loading is disabled in embedded mode."
+                continue
+            try:
+                row["allowed"] = _gate(
+                    ep, group, allow, name_dists, granted, enforce
+                )
+            except Exception as exc:
+                row["state"] = "policy_error"
+                row["load_error"] = _status_error(exc)
+                continue
+            if not row["allowed"]:
+                row["state"] = "policy_denied"
+                row["load_error"] = "Blocked by the effective plugin trust policy."
+                continue
+            try:
+                target = ep.load()
+            except Exception as exc:
+                row["state"] = "import_failed"
+                row["load_error"] = _status_error(exc)
+                continue
+            contract_error = _target_contract_error(group, target)
+            if contract_error:
+                row["state"] = "invalid_contract"
+                row["load_error"] = contract_error
+                continue
+            row["loaded"] = True
+            row["state"] = "loaded"
+
+    return {
+        "plugins": groups,
+        "allowlist_active": allow is not None,
+        "discovery_errors": discovery_errors,
+    }
+
+
 def installed_plugins() -> dict[str, list[str]]:
     """Snapshot of all plugin slots. Used by `maverick version --plugins`."""
     return {

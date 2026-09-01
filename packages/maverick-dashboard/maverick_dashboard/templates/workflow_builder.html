@@ -447,6 +447,12 @@
     var pbRefineBtn = document.getElementById('pb-refine-btn');
     var pbGovern = document.getElementById('pb-govern');
     var pbLintEl = document.getElementById('pb-lint');
+    // Track whether each editor has been opened independently of its current
+    // field contents. A user may intentionally clear every identifying field
+    // before comparing the other artifact type; content-based detection would
+    // then strand the first editor even though its preview still exists.
+    var templateWorkspaceStarted = false;
+    var playbookWorkspaceStarted = false;
     var existingNames = null;
     var pbLintTimer = null;
     // shared saved box
@@ -555,8 +561,8 @@
       // Switching artifact types must not strand an in-progress draft. Each
       // editor keeps its own fields; reveal the prior workspace again when the
       // operator switches back instead of requiring another provider call.
-      if (isTpl && (elName.value.trim() || elSteps.value.trim())) preview.hidden = false;
-      if (!isTpl && (pbName.value.trim() || pbPersona.value.trim())) pbPreview.hidden = false;
+      if (isTpl && templateWorkspaceStarted) preview.hidden = false;
+      if (!isTpl && playbookWorkspaceStarted) pbPreview.hidden = false;
       setStatus(!isTpl && !PACK_EDITING
         ? 'Draft mode — you can create and refine a first pass; an admin must validate and save it.'
         : '');
@@ -605,6 +611,7 @@
       return 'Save failed: ' + status;
     }
     function renderDraft(d) {
+      templateWorkspaceStarted = true;
       elName.value = d.name || '';
       elTitle.value = d.title || '';
       elSteps.value = d.body || '';
@@ -967,7 +974,7 @@
         var rm = document.createElement('button');
         rm.type = 'button';
         rm.className = 'btn btn--icon';
-        rm.setAttribute('aria-label', 'Delete this trigger');
+        rm.setAttribute('aria-label', 'Delete trigger ' + t.name);
         rm.title = 'Delete';
         rm.textContent = '✕';
         rm.addEventListener('click', function () { deleteTrigger(t.name, li); });
@@ -979,8 +986,20 @@
       if (!(await mvConfirm('Delete trigger “' + name + '”? Its webhook URL will stop working.'))) return;
       try {
         var resp = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (resp.ok) { if (li) li.remove(); mvToast('Trigger deleted'); } else { mvToast('Could not delete trigger', { error: true }); }
-      } catch (e) { mvToast('Could not delete trigger', { error: true }); }
+        if (resp.ok) {
+          if (li) li.remove();
+          mvToast('Trigger deleted');
+          return;
+        }
+        var body = await resp.json().catch(function () { return {}; });
+        var detail = body.detail || ('Could not delete trigger (' + resp.status + ').');
+        if (trigMsg) trigMsg.textContent = detail;
+        mvToast(detail, { error: true });
+      } catch (e) {
+        var message = 'Could not delete trigger — check your connection and try again.';
+        if (trigMsg) trigMsg.textContent = message;
+        mvToast(message, { error: true });
+      }
     }
     if (trigWrap) {
       trigName.addEventListener('input', updateTrigBtn);
@@ -1066,6 +1085,7 @@
     pbAddBtn.addEventListener('click', function () { addStep(); renumber(); schedulePbLint(); });
 
     function renderPlaybook(d) {
+      playbookWorkspaceStarted = true;
       pbName.value = d.name || '';
       pbDesc.value = d.description || '';
       pbPersona.value = d.persona || '';

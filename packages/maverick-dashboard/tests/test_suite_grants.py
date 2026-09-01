@@ -32,8 +32,11 @@ def test_store_roundtrip_and_validation(monkeypatch, tmp_path):
     suite_grants.set_suites("user:alice", [])
     assert suite_grants.get_grant("user:alice") == frozenset()
 
-    suite_grants.remove_grant("user:alice")
-    assert suite_grants.get_grant("user:alice") is None
+    # The absent deployment default is unrestricted, so deleting even an empty
+    # restriction would broaden access. Removal is refused and non-mutating.
+    with pytest.raises(ValueError, match="would broaden access"):
+        suite_grants.remove_grant("user:alice")
+    assert suite_grants.get_grant("user:alice") == frozenset()
 
     with pytest.raises(ValueError):
         suite_grants.set_suites("user:x", ["not_a_suite"])
@@ -98,6 +101,25 @@ def test_granted_suites_explicit_beats_config_default(monkeypatch, tmp_path):
     # An explicit grant wins over the default.
     suite_grants.set_suites("user:new", ["legal"])
     assert suite_grants.granted_suites("user:new") == frozenset({"legal"})
+
+
+def test_remove_grant_only_uses_a_no_broader_default(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    import maverick.config as config
+    from maverick_dashboard import suite_grants
+
+    suite_grants.set_suites("user:fin", ["finance", "tax"])
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {"dashboard": {"default_suites": ["finance"]}},
+    )
+
+    suite_grants.remove_grant("user:fin")
+
+    assert suite_grants.get_grant("user:fin") is None
+    assert suite_grants.granted_suites("user:fin") == frozenset({"finance"})
 
 
 # ---------- HTTP enforcement ----------
@@ -233,8 +255,10 @@ def test_admin_manages_grants_via_api(monkeypatch, tmp_path):
     assert "finance" in body["suites"]
     assert body["default_suites"] is None
 
-    assert c.delete("/api/v1/users/user:fin/suites").status_code == 204
-    assert suite_grants.get_grant("user:fin") is None
+    removed = c.delete("/api/v1/users/user:fin/suites")
+    assert removed.status_code == 409
+    assert "would broaden access" in removed.json()["detail"]
+    assert suite_grants.get_grant("user:fin") == frozenset({"finance"})
 
 
 def test_grant_api_requires_global_admin(monkeypatch, tmp_path):
@@ -268,8 +292,9 @@ def test_users_page_manages_department_access(monkeypatch, tmp_path):
                   data={"principal": "user:fin", "suites": ["bogus"]}).status_code == 400
 
     r = c.post("/users/suites/remove", data={"principal": "user:fin"})
-    assert r.status_code == 200
-    assert suite_grants.get_grant("user:fin") is None
+    assert r.status_code == 409
+    assert "would broaden access" in r.json()["detail"]
+    assert suite_grants.get_grant("user:fin") == frozenset({"finance", "tax"})
 
 
 def test_users_page_preselects_current_grant(monkeypatch, tmp_path):

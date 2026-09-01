@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from fastapi.testclient import TestClient
+
 
 def _client():
     from maverick_dashboard.app import app
@@ -32,6 +34,54 @@ def test_404_json_for_api(monkeypatch, tmp_path):
     resp = client.get("/api/v1/does-not-exist")
     assert resp.status_code == 404
     assert resp.headers["content-type"].startswith("application/json")
+
+
+def test_browser_http_errors_are_branded_and_actionable(monkeypatch):
+    """Ordinary authorization/conflict/outage failures must not strand a
+    browser user on a raw JSON document."""
+    from fastapi import HTTPException
+    from maverick_dashboard import app as dash_app
+
+    for status in (403, 409, 503):
+        path = f"/__http_error_{status}"
+
+        async def fail(code=status):
+            raise HTTPException(status_code=code, detail="internal detail is not UI")
+
+        dash_app.app.add_api_route(path, fail, methods=["GET"])
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    client = TestClient(dash_app.app, raise_server_exceptions=False)
+    expected = {
+        403: "Permission required",
+        409: "Refresh before continuing",
+        503: "Temporarily unavailable",
+    }
+    for status, heading in expected.items():
+        response = client.get(
+            f"/__http_error_{status}", headers={"Accept": "text/html"}
+        )
+        assert response.status_code == status
+        assert response.headers["content-type"].startswith("text/html")
+        assert heading in response.text
+        assert "Reload this page" in response.text
+        assert "internal detail is not UI" not in response.text
+
+
+def test_non_browser_http_error_contract_stays_json(monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import app as dash_app
+
+    async def fail_api():
+        raise HTTPException(status_code=409, detail="revision mismatch")
+
+    dash_app.app.add_api_route("/__api_conflict", fail_api, methods=["GET"])
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    response = TestClient(dash_app.app).get(
+        "/__api_conflict", headers={"Accept": "application/json"}
+    )
+    assert response.status_code == 409
+    assert response.json() == {"detail": "revision mismatch"}
 
 
 def test_unhandled_exception_renders_500(monkeypatch, tmp_path):

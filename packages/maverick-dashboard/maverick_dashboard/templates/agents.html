@@ -650,15 +650,15 @@
           var preview = members.slice(0, 3).map(function (m) { return memberLabel(m, d.key); }).join(' · ');
           if (n > 3) preview += ' +' + (n - 3) + ' more';
           var deploy = d.entitled
-            ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Deploy team</button>'
-            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Deploy team</button><span class="dept__addon">paid add-on</span>';
+            ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);">Deploy team</button>'
+            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" aria-label="Deploy ' + esc(d.title) + ' team" style="font-size:var(--text-sm);">Deploy team</button><span class="dept__addon">paid add-on</span>';
           return '<div class="dept" data-key="' + esc(d.key) + '">'
             + '<div class="dept__head"><span class="dept__avatar">' + esc(initials(d.title)) + '</span>'
             + '<span><div class="dept__name">' + esc(d.title) + '</div>'
             + '<div class="dept__sub">' + esc(d.charter || (n + ' specialists')) + '</div></span></div>'
             + (preview ? '<p class="dept__preview">' + esc(preview) + '</p>' : '')
             + '<div class="dept__foot">' + deploy
-            + '<button type="button" class="btn btn--ghost dep-details" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Details</button></div>'
+            + '<button type="button" class="btn btn--ghost dep-details" data-key="' + esc(d.key) + '" aria-label="View ' + esc(d.title) + ' details" style="font-size:var(--text-sm);">Details</button></div>'
             + '<div class="dep-msg muted" role="status" aria-live="polite" style="font-size:var(--text-xs);margin-top:var(--space-2);"></div>'
             + '</div>';
         }).join('');
@@ -702,7 +702,8 @@
           ul.appendChild(li);
         }
         document.getElementById('dept-dlg-msg').textContent = '';
-        dlgDeploy.disabled = false;
+        dlgDeploy.disabled = dlgDeploy.dataset.inFlight === 'true';
+        dlgDeploy.setAttribute('aria-label', 'Deploy ' + (d.title || key) + ' team');
         dlg.showModal();
       }
       host.addEventListener('click', function (e) {
@@ -712,37 +713,73 @@
         if (card && !e.target.closest('button') && !e.target.closest('a')) openDept(card.dataset.key);
       });
       document.getElementById('dept-dlg-close').addEventListener('click', function () { dlg.close(); });
-      dlgDeploy.addEventListener('click', function () {
+      dlgDeploy.addEventListener('click', async function () {
         if (!dlgKey) return;
+        if (dlgDeploy.dataset.inFlight === 'true') return;
+        dlgDeploy.dataset.inFlight = 'true';
+        var title = (byKey[dlgKey] && byKey[dlgKey].title) || dlgKey;
+        if (!(await mvConfirm(
+          'Deploy the ' + title + ' team? This creates an operational fleet and its specialists.',
+          { okText: 'Deploy team' }
+        ))) { delete dlgDeploy.dataset.inFlight; return; }
         var msg = document.getElementById('dept-dlg-msg');
         dlgDeploy.disabled = true;
+        dlgDeploy.setAttribute('aria-busy', 'true');
         msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…';
         fetch('/api/v1/departments/' + encodeURIComponent(dlgKey) + '/deploy',
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then(function (r) { return r.json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
-            dlgDeploy.disabled = false;
             if (res.ok) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; }
             else { msg.style.color = 'var(--danger)'; msg.textContent = (res.j && res.j.detail) || ('Could not deploy (' + res.status + ').'); }
           })
-          .catch(function () { dlgDeploy.disabled = false; msg.style.color = 'var(--danger)'; msg.textContent = 'Could not deploy — check your connection.'; });
+          .catch(function (error) {
+            msg.style.color = 'var(--danger)';
+            msg.textContent = error && error.name !== 'TypeError' && error.message
+              ? error.message
+              : 'Could not deploy — check your connection and try again.';
+          })
+          .finally(function () {
+            delete dlgDeploy.dataset.inFlight;
+            dlgDeploy.removeAttribute('aria-busy');
+            dlgDeploy.disabled = false;
+          });
       });
 
-      host.addEventListener('click', function (e) {
+      host.addEventListener('click', async function (e) {
         var btn = e.target.closest('.dep-deploy');
         if (!btn) return;
+        if (btn.dataset.inFlight === 'true') return;
+        btn.dataset.inFlight = 'true';
         var card = btn.closest('.dept');
         var msg = card && card.querySelector('.dep-msg');
-        btn.disabled = true; if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…'; }
+        var title = (byKey[btn.dataset.key] && byKey[btn.dataset.key].title) || btn.dataset.key;
+        if (!(await mvConfirm(
+          'Deploy the ' + title + ' team? This creates an operational fleet and its specialists.',
+          { okText: 'Deploy team' }
+        ))) { delete btn.dataset.inFlight; return; }
+        btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+        if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…'; }
         fetch('/api/v1/departments/' + encodeURIComponent(btn.dataset.key) + '/deploy',
               { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
           .then(function (r) { return r.json().catch(function () { throw new Error('Request failed: the server returned an invalid JSON response.'); }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
           .then(function (res) {
-            btn.disabled = false;
             if (res.ok) { if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; } }
             else if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = (res.j && res.j.detail) || ('Could not deploy (' + res.status + ').'); }
           })
-          .catch(function () { btn.disabled = false; if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Could not deploy — check your connection.'; } });
+          .catch(function (error) {
+            if (msg) {
+              msg.style.color = 'var(--danger)';
+              msg.textContent = error && error.name !== 'TypeError' && error.message
+                ? error.message
+                : 'Could not deploy — check your connection and try again.';
+            }
+          })
+          .finally(function () {
+            delete btn.dataset.inFlight;
+            btn.removeAttribute('aria-busy');
+            btn.disabled = false;
+          });
       });
     })();
   </script>
@@ -810,10 +847,24 @@
           workflow: gatherWorkflow(),
         };
       }
+      function beginMutation(button) {
+        if (button.dataset.inFlight === 'true') return false;
+        button.dataset.inFlight = 'true';
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        return true;
+      }
+      function finishMutation(button) {
+        delete button.dataset.inFlight;
+        button.removeAttribute('aria-busy');
+        button.disabled = false;
+      }
       async function call(method, path, body) {
         const opts = { method, headers: {} };
         if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-        const r = await fetch(path, opts);
+        let r;
+        try { r = await fetch(path, opts); }
+        catch (error) { throw new Error('Could not reach the server — check your connection and try again.'); }
         let data;
         try { data = await r.json(); }
         catch (e) { throw new Error('Request failed: the server returned an invalid JSON response.'); }
@@ -834,26 +885,41 @@
           show(error instanceof Error ? error.message : 'Request failed.', false);
         }
       });
-      document.getElementById('btn-save').addEventListener('click', async () => {
+      const saveBtn = document.getElementById('btn-save');
+      saveBtn.addEventListener('click', async () => {
+        const name = targetName();
+        if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
+        if (!beginMutation(saveBtn)) return;
         try {
-          const name = targetName();
-          if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
+          if (!(await mvConfirm(
+            (creating ? 'Create custom agent “' : 'Deploy specialist “') + name + '”? Its saved authority and workflow become available to operators.',
+            { okText: creating ? 'Create agent' : 'Deploy specialist' }
+          ))) return;
           await call('POST', `/api/v1/agents/${name}/override`, payload());
           show(creating ? 'Custom agent created.' : 'Deployed.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
           show(error instanceof Error ? error.message : 'Request failed.', false);
+        } finally {
+          finishMutation(saveBtn);
         }
       });
       const resetBtn = document.getElementById('btn-reset');
       if (resetBtn) resetBtn.addEventListener('click', async () => {
+        const name = targetName();
+        if (!name || !beginMutation(resetBtn)) return;
         try {
-          const name = targetName();
+          if (!(await mvConfirm(
+            'Reset specialist “' + name + '” to its built-in definition? Custom authority and workflow edits will be removed.',
+            { okText: 'Reset specialist' }
+          ))) return;
           await call('DELETE', `/api/v1/agents/${name}/override`);
           show('Reverted to built-in.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {
           show(error instanceof Error ? error.message : 'Request failed.', false);
+        } finally {
+          finishMutation(resetBtn);
         }
       });
     })();

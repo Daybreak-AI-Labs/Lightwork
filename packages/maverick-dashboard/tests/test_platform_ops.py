@@ -132,7 +132,8 @@ def test_partner_registry_check_and_rollup():
     r = client.post("/api/v1/partner/tenants",
                     json={"name": "Acme Hospitality",
                           "base_url": "http://127.0.0.1:9",   # closed port
-                          "token": "sekret", "theme": "acme-light"})
+                          "token": "sekret", "theme": "acme-light",
+                          "trusted_test_estate_loopback": True})
     assert r.status_code == 201, r.text
     row = r.json()
     assert row["has_token"] is True and "token" not in row

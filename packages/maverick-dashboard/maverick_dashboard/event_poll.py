@@ -13,6 +13,122 @@ from collections.abc import Callable
 from typing import Any
 
 
+class EventSourceAdmissionError(RuntimeError):
+    """A stored event-source configuration crossed a host-resource boundary."""
+
+
+def event_source_authority(source: str, config: dict) -> str:
+    """Return the request authority required to admit one event source.
+
+    This classification is request-independent so the HTTP create/manual-poll
+    paths and request-less scheduler cannot disagree about which sources touch
+    process credentials or the local filesystem.
+    """
+    cfg = dict(config or {})
+    uses_tenant_oauth = bool(str(cfg.get("provider") or "").strip())
+    uses_process_github_token = source == "github_issues" and not uses_tenant_oauth
+    if source == "imap_email" or source == "file_dir" or uses_process_github_token:
+        return "global_admin"
+    if uses_tenant_oauth:
+        return "tenant_admin"
+    return "operate"
+
+
+def admit_event_source_config(source: str, config: dict) -> dict:
+    """Return a poll-safe copy of ``config`` or fail closed.
+
+    Relative ``file_dir`` paths are rooted in the active tenant's dedicated
+    ``event-input`` directory. Existing symlinks/junctions are resolved on every
+    admission, so a legacy row, a post-save edit, or a reparse point that now
+    escapes that root is refused before the source can enumerate host files.
+    The returned path is canonical, ensuring the poll uses exactly the path
+    that was checked.
+    """
+    cfg = dict(config or {})
+    if source != "file_dir":
+        return cfg
+
+    import os
+    from pathlib import Path
+
+    from maverick.paths import data_dir
+
+    raw_path = str(cfg.get("path") or "").strip()
+    if not raw_path:
+        raise EventSourceAdmissionError("file_dir source needs a 'path'")
+    glob = str(cfg.get("glob") or "*")
+    glob_path = Path(glob)
+    if glob_path.is_absolute() or ".." in glob_path.parts:
+        raise EventSourceAdmissionError(
+            "file_dir glob must be relative and cannot traverse parent directories"
+        )
+
+    try:
+        configured_root = data_dir("event-input")
+        is_junction = getattr(configured_root, "is_junction", lambda: False)
+        if configured_root.exists() and (
+            configured_root.is_symlink() or is_junction()
+        ):
+            raise EventSourceAdmissionError(
+                "tenant event-input root must not be a symlink or reparse point"
+            )
+        root = configured_root.resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        candidate = candidate.resolve(strict=False)
+    except EventSourceAdmissionError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise EventSourceAdmissionError(
+            "file_dir path could not be resolved safely"
+        ) from exc
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise EventSourceAdmissionError(
+            f"file_dir path must stay under the tenant event-input root: {root}"
+        ) from exc
+    cfg["path"] = os.fspath(candidate)
+    return cfg
+
+
+def _require_stored_event_source_authority(owner: str, authority: str) -> None:
+    """Revalidate host-resource authority for request-less polling.
+
+    ``stored_automation_identity`` proves ordinary operate authority. Sources
+    that consume a tenant OAuth credential or a deployment-wide process/file
+    resource retain their stronger admin requirement on every scheduled poll;
+    durable trigger possession is not a perpetual privilege grant.
+    """
+    if authority == "operate":
+        return
+
+    import os
+
+    from maverick_dashboard import rbac
+    from maverick_dashboard.auth import (
+        AutomationAuthorizationError,
+        anonymous_local_access_allowed,
+        global_role_for_principal,
+        role_for_principal,
+    )
+
+    if anonymous_local_access_allowed():
+        return
+    # Static-token requests deliberately persist this reserved execution owner;
+    # the token itself is the deployment-global operator credential.
+    if owner == "user:local" and os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        return
+    role = (
+        global_role_for_principal(owner)
+        if authority == "global_admin"
+        else role_for_principal(owner)
+    )
+    if "admin" not in rbac.permissions_for(role):
+        raise AutomationAuthorizationError("trigger authorization unavailable")
+
+
 def _safe_error(exc: BaseException, *, fallback: str = "operation failed") -> str:
     """Return a bounded, secret-scrubbed error safe for API notes/history."""
     from maverick.secrets import scrub
@@ -194,11 +310,18 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 if tenant:
                     assert_tenant_active(tenant)
                 stored_automation_identity(owner)
+                authority = event_source_authority(
+                    str(trig.get("source") or ""), trig.get("config") or {}
+                )
+                _require_stored_event_source_authority(owner, authority)
+                admitted_config = admit_event_source_config(
+                    str(trig.get("source") or ""), trig.get("config") or {}
+                )
                 # A world/model store is tenant-scoped. Resolve a factory only
                 # after the durable trigger tenant has been restored.
                 active_world = world() if callable(world) else world
-                res = poll_source(trig["source"], trig["config"], trig["cursor"])
-            except EventSourceError as e:
+                res = poll_source(trig["source"], admitted_config, trig["cursor"])
+            except (EventSourceAdmissionError, EventSourceError) as e:
                 detail = _safe_error(e, fallback="event source unavailable")
                 summary["poll_error"] = True
                 summary["notes"].append(f"poll failed: {detail}")

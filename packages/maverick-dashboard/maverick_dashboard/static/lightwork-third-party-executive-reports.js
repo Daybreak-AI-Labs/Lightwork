@@ -15,6 +15,9 @@
   var apiBase = root.dataset.apiBase;
   var statusNode = document.getElementById("tper-operation-status");
   var outputNode = document.getElementById("tper-output");
+  var mutationControls = Array.prototype.slice.call(
+    document.querySelectorAll("[data-tper-mutation]")
+  );
 
   function failure(message) { var error = new Error(message); return error; }
   function identifier(value, label, optional) {
@@ -84,6 +87,16 @@
     outputNode.textContent = payload === undefined ? "" : JSON.stringify(payload, null, 2);
   }
   function busy(label) { statusNode.textContent = label; outputNode.textContent = ""; }
+  function setMutationReady(ready) {
+    mutationControls.forEach(function (controls) {
+      var authorized = controls.dataset.authorized === "true" &&
+        root.dataset.moduleEnabled === "true";
+      var disabled = !authorized || ready !== true;
+      controls.disabled = disabled;
+      controls.toggleAttribute("disabled", disabled);
+      controls.setAttribute("aria-disabled", disabled ? "true" : "false");
+    });
+  }
   function formObject(form) { return Object.fromEntries(new FormData(form).entries()); }
   function textElement(tag, value) { var node = document.createElement(tag); node.textContent = String(value); return node; }
   function renderReports(payload) {
@@ -105,11 +118,12 @@
   async function refresh() {
     try {
       var state = await requestJson("/status");
+      setMutationReady(state.ready === true);
       var mark = document.getElementById("tper-runtime-state"); var detail = document.getElementById("tper-runtime-detail");
       mark.dataset.state = state.ready ? "ready" : "failed"; mark.textContent = state.ready ? "Ready" : (state.enabled ? "Not ready" : "Disabled");
       detail.textContent = state.ready ? "Tenant report composition is ready. Live portfolio acceptance remains unverified." : "Enable and configure the tenant report composition before creating artifacts.";
       var reports = await requestJson("/reports?limit=100"); renderReports(reports); show("Reports refreshed.", reports);
-    } catch (error) { document.getElementById("tper-runtime-state").dataset.state = "failed"; document.getElementById("tper-runtime-state").textContent = "Unavailable"; show(error.message, { error: true }); }
+    } catch (error) { setMutationReady(false); document.getElementById("tper-runtime-state").dataset.state = "failed"; document.getElementById("tper-runtime-state").textContent = "Unavailable"; show(error.message, { error: true }); }
   }
   document.getElementById("tper-create-form").addEventListener("submit", async function (event) {
     event.preventDefault(); try { busy("Creating immutable report…"); var values = formObject(event.currentTarget); var metadataRef = identifier(values.brand_asset_metadata_ref, "Brand asset metadata reference", true); var metadataDigest = String(values.brand_asset_metadata_sha256 || "").trim().toLowerCase() || null; if ((metadataRef === null) !== (metadataDigest === null) || (metadataDigest !== null && !DIGEST_PATTERN.test(metadataDigest))) { throw failure("Brand asset metadata reference and exact SHA-256 must be provided together; asset bytes are not rendered."); }

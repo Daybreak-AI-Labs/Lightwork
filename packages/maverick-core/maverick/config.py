@@ -553,6 +553,90 @@ def get_provider_config(provider: str) -> dict:
     return cfg.get("providers", {}).get(provider, {})
 
 
+def provider_configuration_state(provider: str) -> dict[str, Any]:
+    """Return a redacted, field-level provenance snapshot for one provider.
+
+    Runtime provider clients prefer the effective config table (base config,
+    dashboard overlay, operator overlay, then tenant overlay) and use provider
+    environment variables only when the corresponding config field is empty.
+    Settings, Permissions, and credential-rotation UI use this one resolver so
+    they cannot claim a dashboard key is active while a higher-precedence
+    tenant/operator value still wins. No credential value is returned.
+    """
+    name = str(provider or "").strip().lower()
+    _load_wizard_env()
+    layers: list[tuple[str, Path | None]] = [
+        ("config.toml", config_path()),
+        ("dashboard", dashboard_overrides_path()),
+    ]
+    operator_overlay = os.environ.get(CONFIG_OVERLAY_ENV, "").strip()
+    if operator_overlay:
+        layers.append(("operator overlay", Path(operator_overlay).expanduser()))
+    layers.append(("tenant config", tenant_config_path()))
+
+    effective: dict[str, Any] = {}
+    field_sources: dict[str, str] = {}
+    dashboard_set = False
+    for source, path in layers:
+        if path is None or not path.exists():
+            continue
+        loaded = _load_config_file(path)
+        providers = loaded.get("providers") if isinstance(loaded, dict) else None
+        table = providers.get(name) if isinstance(providers, dict) else None
+        if not isinstance(table, dict):
+            continue
+        if source == "dashboard" and table:
+            dashboard_set = True
+        for field, value in table.items():
+            effective[field] = value
+            field_sources[str(field)] = source
+
+    def _text(value: object) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return str(value).strip() if value else ""
+
+    key_present = bool(_text(effective.get("api_key")))
+    key_source = field_sources.get("api_key") if key_present else None
+    key_env = None
+    if not key_present:
+        for env_name in PROVIDER_KEY_ENV_MAP.get(name, ()):
+            if os.environ.get(env_name, "").strip():
+                key_present = True
+                key_env = env_name
+                key_source = f"environment:{env_name}"
+                break
+
+    base_url = _text(effective.get("base_url"))
+    base_source = field_sources.get("base_url") if base_url else None
+    if not base_url:
+        for env_name in PROVIDER_BASE_URL_ENV_MAP.get(name, ()):
+            value = os.environ.get(env_name, "").strip()
+            if value:
+                base_url = value
+                base_source = f"environment:{env_name}"
+                break
+
+    sources = [source for source in (key_source, base_source) if source]
+    via = " + ".join(dict.fromkeys(sources)) or None
+    protected_sources = {"operator overlay", "tenant config"}
+    return {
+        "name": name,
+        "configured": bool(key_present or base_url),
+        "api_key_configured": key_present,
+        "api_key_source": key_source,
+        "api_key_env": key_env,
+        "base_url_configured": bool(base_url),
+        "base_url": base_url,
+        "base_url_source": base_source,
+        "via": via,
+        "dashboard_set": dashboard_set,
+        "dashboard_can_set_api_key": key_source not in protected_sources,
+        "dashboard_can_set_base_url": base_source not in protected_sources,
+        "source_errors": config_source_errors(),
+    }
+
+
 # Canonical provider -> API-key env var(s). These values are safe to pass as
 # the provider client's ``api_key`` argument; non-key credentials (for example
 # Azure's pre-fetched Entra token) belong in PROVIDER_CREDENTIAL_ENV_MAP below.
@@ -594,8 +678,19 @@ PROVIDER_CREDENTIAL_ENV_VARS = tuple(
 # Self-hosted endpoints configured by env var (the mechanism each provider's
 # docstring documents). Ollama has no env var: its only custom-URL surface is
 # ``[providers.ollama] base_url`` in config, covered below.
-PROVIDER_BASE_URL_ENV_VARS = (
-    "VLLM_BASE_URL", "TGI_BASE_URL", "OPENAI_COMPATIBLE_BASE_URL",
+PROVIDER_BASE_URL_ENV_MAP: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_BASE_URL",),
+    "openai": ("OPENAI_BASE_URL",),
+    "moonshot": ("MOONSHOT_BASE_URL",),
+    "deepseek": ("DEEPSEEK_BASE_URL",),
+    "xai": ("XAI_BASE_URL",),
+    "tgi": ("TGI_BASE_URL",),
+    "vllm": ("VLLM_BASE_URL",),
+    "azure": ("AZURE_OPENAI_ENDPOINT",),
+    "openai_compatible": ("OPENAI_COMPATIBLE_BASE_URL",),
+}
+PROVIDER_BASE_URL_ENV_VARS = tuple(
+    dict.fromkeys(value for values in PROVIDER_BASE_URL_ENV_MAP.values() for value in values)
 )
 
 
@@ -2684,7 +2779,7 @@ def get_assessments() -> dict:
     }
 
 
-def get_value() -> dict:
+def get_value(*, config: dict | None = None) -> dict:
     """Return the ``[value]`` section: the client's own cost/value assumptions
     for the savings (ROI) report.
 
@@ -2704,7 +2799,10 @@ def get_value() -> dict:
     an out-of-box ROI claim is defensible, not inflated.
     Env override: ``MAVERICK_VALUE_HOURLY_RATE`` / ``MAVERICK_VALUE_HOURS``.
     """
-    cfg = load_config().get("value", {}) or {}
+    # ``config`` lets control-plane callers compare the deployment-global
+    # assumptions with the active tenant's effective view without changing
+    # tenant context or duplicating the normalization rules below.
+    cfg = (load_config() if config is None else config).get("value", {}) or {}
 
     def _pos(v: object, default: float) -> float:
         try:

@@ -57,25 +57,49 @@
 
   <div class="section-head"><h2>Your cost &amp; value inputs</h2></div>
   <div class="panel">
+    {% if value_resolution.effective_source == 'tenant_override' %}
+      <p class="sv-note" id="sv-precedence" role="status">
+        <strong>Active tenant override:</strong> this report currently uses the
+        effective value of {{ cfg.currency }} {{ cfg.hourly_rate }}/hour and
+        {{ cfg.hours_per_task }} hours/task. The deployment-wide defaults are
+        {{ value_resolution.global_assumptions.currency }}
+        {{ value_resolution.global_assumptions.hourly_rate }}/hour and
+        {{ value_resolution.global_assumptions.hours_per_task }} hours/task.
+        Tenant-owned fields that continue to win after a global save:
+        <code>{{ value_resolution.tenant_override_fields | join(', ') }}</code>.
+      </p>
+    {% else %}
+      <p class="sv-note" id="sv-precedence">
+        Effective source: deployment-wide defaults. Current value is
+        {{ cfg.currency }} {{ cfg.hourly_rate }}/hour and
+        {{ cfg.hours_per_task }} hours/task.
+      </p>
+    {% endif %}
+    {% if not can_manage_assumptions %}
+      <p class="sv-note" id="sv-permission-note">
+        Read only: changing deployment-wide savings assumptions requires a
+        global operator or administrator role.
+      </p>
+    {% endif %}
     <form id="sv-assumptions">
       <div class="sv-form">
         <div class="field">
           <label for="sv-rate">Human hourly rate (fully loaded, $)</label>
           <input id="sv-rate" name="hourly_rate" type="number" min="0" step="0.01"
-                 value="{{ cfg.hourly_rate }}" required>
+                 value="{{ cfg.hourly_rate }}" required{% if not can_manage_assumptions %} disabled{% endif %}>
         </div>
         <div class="field">
           <label for="sv-hours">Human hours per completed task</label>
           <input id="sv-hours" name="hours_per_task" type="number" min="0" step="0.1"
-                 value="{{ cfg.hours_per_task }}" required>
+                 value="{{ cfg.hours_per_task }}" required{% if not can_manage_assumptions %} disabled{% endif %}>
         </div>
         <div class="field">
           <label for="sv-currency">Currency</label>
           <input id="sv-currency" name="currency" type="text" maxlength="8"
-                 pattern="[A-Za-z]{3,8}" value="{{ cfg.currency }}">
+                 pattern="[A-Za-z]{3,8}" value="{{ cfg.currency }}"{% if not can_manage_assumptions %} disabled{% endif %}>
         </div>
         <div class="field">
-          <button type="submit" class="btn btn--primary">Save &amp; recalculate</button>
+          <button type="submit" class="btn btn--primary"{% if not can_manage_assumptions %} disabled{% endif %}>Save &amp; recalculate</button>
         </div>
       </div>
       <p class="sv-note">These are <em>your</em> numbers: what an hour of comparable human work
@@ -107,13 +131,13 @@
             <input class="sv-dept-input" type="number" min="0" step="0.01"
                    name="rate::{{ d.department }}" value="{{ d.hourly_rate }}"
                    form="sv-assumptions"
-                   aria-label="Hourly rate for {{ d.department }}">
+                   aria-label="Hourly rate for {{ d.department }}"{% if not can_manage_assumptions %} disabled{% endif %}>
           </td>
           <td>
             <input class="sv-dept-input" type="number" min="0" step="0.1"
                    name="hours::{{ d.department }}" value="{{ d.hours_per_task }}"
                    form="sv-assumptions"
-                   aria-label="Hours per task for {{ d.department }}">
+                   aria-label="Hours per task for {{ d.department }}"{% if not can_manage_assumptions %} disabled{% endif %}>
           </td>
           <td>${{ '{:,.2f}'.format(d.human_cost) }}</td>
           <td>${{ '{:,.2f}'.format(d.agent_cost) }}</td>

@@ -78,8 +78,14 @@
     if (!btn) return;
     var allOn = {{ 'true' if snap.components_on == snap.components_total else 'false' }};
     btn.addEventListener('click', async function () {
+      if (btn.dataset.inFlight === 'true') return;
+      btn.dataset.inFlight = 'true';
       var msg = document.getElementById('lrn-enable-msg');
-      btn.disabled = true; msg.textContent = 'Applying…';
+      var action = allOn ? 'Turn every learning system off?' : 'Turn every learning system on?';
+      if (!(await mvConfirm(action + ' This changes the deployment-wide learning posture.', {
+        okText: allOn ? 'Turn all off' : 'Turn all on'
+      }))) { delete btn.dataset.inFlight; return; }
+      btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Applying…';
       try {
         var r = await fetch('/api/v1/learning', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -89,11 +95,14 @@
           var b = await r.json().catch(function () { return {}; });
           msg.textContent = r.status === 403
             ? 'Only an administrator can change this — ask yours to flip it.'
-            : (b.detail || ('Could not update (' + r.status + ').'));
-          btn.disabled = false; return;
+            : (b.detail || ('Could not update learning posture (HTTP ' + r.status + '). Try again.'));
+          delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false; return;
         }
         location.reload();   // re-render with the new on/off state
-      } catch (e) { msg.textContent = 'Could not reach the server.'; btn.disabled = false; }
+      } catch (e) {
+        msg.textContent = 'Could not reach the server — check your connection and try again.';
+        delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
+      }
     });
   })();
   </script>
@@ -149,25 +158,40 @@
       members = JSON.parse(document.getElementById('lrn-switch-members').textContent) || {};
     } catch (e) { /* advisory only */ }
 
-    function flip(sw, btn, err) {
-      btn.disabled = true; err.textContent = '';
-      fetch('/api/v1/features/switches', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ section: sw.section, enabled: !sw.enabled }),
-      }).then(function (r) {
+    async function flip(sw, btn, err) {
+      if (btn.dataset.inFlight === 'true') return;
+      btn.dataset.inFlight = 'true';
+      var next = !sw.enabled;
+      var impact = next
+        ? 'It immediately resumes this learning system across the deployment.'
+        : 'It immediately pauses this learning system across the deployment without deleting prior learning.';
+      if (!(await mvConfirm(
+        (next ? 'Turn on “' : 'Turn off “') + sw.label + '” for this deployment? ' + impact,
+        { okText: next ? 'Turn on system' : 'Turn off system' }
+      ))) { delete btn.dataset.inFlight; return; }
+      btn.disabled = true; btn.setAttribute('aria-busy', 'true'); err.textContent = '';
+      try {
+        var r;
+        try {
+          r = await fetch('/api/v1/features/switches', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ section: sw.section, enabled: next }),
+          });
+        } catch (networkError) {
+          throw new Error('Could not reach the server — check your connection and try again.');
+        }
         if (r.status === 403) {
           throw new Error('Only an administrator can change this — ask yours to flip it.');
         }
         if (!r.ok) {
-          return r.json().catch(function () { return {}; }).then(function (b) {
-            throw new Error(b.detail || ('Could not update (' + r.status + ').'));
-          });
+          var body = await r.json().catch(function () { return {}; });
+          throw new Error(body.detail || ('Could not update “' + sw.label + '” (HTTP ' + r.status + '). Try again.'));
         }
         location.reload();   // re-render the whole page with the new state
-      }).catch(function (e) {
-        err.textContent = (e && e.message) || 'Could not reach the server.';
-        btn.disabled = false;
-      });
+      } catch (e) {
+        err.textContent = (e && e.message) || 'Could not reach the server — check your connection and try again.';
+        delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
+      }
     }
 
     function row(sw) {
@@ -246,9 +270,15 @@
       (function () {
         var btn = document.getElementById('lrn-flows-on');
         if (!btn) return;
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', async function () {
+          if (btn.dataset.inFlight === 'true') return;
+          btn.dataset.inFlight = 'true';
           var msg = document.getElementById('lrn-flows-msg');
-          btn.disabled = true; msg.textContent = 'Turning on…';
+          if (!(await mvConfirm(
+            'Turn on the flow engine for this deployment? Scheduled and triggered workflows may begin running.',
+            { okText: 'Turn on engine' }
+          ))) { delete btn.dataset.inFlight; return; }
+          btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Turning on…';
           fetch('/api/v1/features/switches', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ section: 'flows', enabled: true }),
@@ -256,11 +286,17 @@
             if (r.status === 403) {
               throw new Error('Only an administrator can turn this on — ask yours to flip it.');
             }
-            if (!r.ok) throw new Error('Could not turn the flow engine on (' + r.status + ').');
-            location.reload();
+            if (!r.ok) {
+              return r.json().catch(function () { return {}; }).then(function (body) {
+                throw new Error(body.detail || ('Could not turn the flow engine on (HTTP ' + r.status + '). Try again.'));
+              });
+            }
+            location.reload(); return null;
           }).catch(function (e) {
-            msg.textContent = (e && e.message) || 'Could not reach the server.';
-            btn.disabled = false;
+            msg.textContent = e && e.name !== 'TypeError' && e.message
+              ? e.message
+              : 'Could not reach the server — check your connection and try again.';
+            delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
           });
         });
       })();
@@ -286,10 +322,26 @@
           var btn = document.getElementById(id);
           if (!btn) return;
           btn.addEventListener('click', async function () {
+            if (btn.dataset.inFlight === 'true') return;
+            btn.dataset.inFlight = 'true';
             var msg = document.getElementById('lrn-auto-msg');
             var next = btn.getAttribute('data-on') !== 'true';
+            var prompt;
+            var okText;
+            if (field === 'auto_apply') {
+              prompt = next
+                ? 'Enable automatic application of proven workflow improvements? Future accepted changes may be deployed without another human click.'
+                : 'Disable automatic application of workflow improvements? Existing deployed changes remain, while future accepted changes will wait for a human.';
+              okText = next ? 'Enable auto-apply' : 'Disable auto-apply';
+            } else {
+              prompt = next
+                ? 'Enable automatic rollback of measured workflow regressions? The deployment may revert a harmful self-improvement without another human click.'
+                : 'Disable automatic rollback of workflow regressions? Deployed self-improvements will lose this automatic safety net.';
+              okText = next ? 'Enable auto-revert' : 'Disable auto-revert';
+            }
+            if (!(await mvConfirm(prompt, { okText: okText }))) { delete btn.dataset.inFlight; return; }
             var body = {}; body[field] = next;
-            btn.disabled = true; msg.textContent = 'Applying…';
+            btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Applying…';
             try {
               var r = await fetch('/api/v1/learning/flow-autonomy', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -299,11 +351,14 @@
                 var b = await r.json().catch(function () { return {}; });
                 msg.textContent = r.status === 403
                   ? 'Only an administrator can change this — ask yours to flip it.'
-                  : (b.detail || ('Could not update (' + r.status + ').'));
-                btn.disabled = false; return;
+                  : (b.detail || ('Could not update workflow autonomy (HTTP ' + r.status + '). Try again.'));
+                delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false; return;
               }
               location.reload();
-            } catch (e) { msg.textContent = 'Could not reach the server.'; btn.disabled = false; }
+            } catch (e) {
+              msg.textContent = 'Could not reach the server — check your connection and try again.';
+              delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
+            }
           });
         }
         wire('lrn-auto-evolve', 'auto_evolve');
@@ -346,12 +401,17 @@
         var btn = document.getElementById('lrn-dgm');
         if (!btn) return;
         btn.addEventListener('click', async function () {
+          if (btn.dataset.inFlight === 'true') return;
+          btn.dataset.inFlight = 'true';
           var msg = document.getElementById('lrn-dgm-msg');
           var next = btn.getAttribute('data-on') !== 'true';
-          if (next && !window.confirm(
-            'Enable research-only DGM? It may propose and sandbox-evaluate code, but cannot deploy it.'
-          )) return;
-          btn.disabled = true; msg.textContent = 'Applying…';
+          var prompt = next
+            ? 'Enable research-only DGM for this deployment? It may propose and sandbox-evaluate code, but cannot deploy it.'
+            : 'Disable research-only DGM for this deployment? New research cycles will be blocked; archived candidates and evidence are retained.';
+          if (!(await mvConfirm(prompt, { okText: next ? 'Enable research' : 'Disable research' }))) {
+            delete btn.dataset.inFlight; return;
+          }
+          btn.disabled = true; btn.setAttribute('aria-busy', 'true'); msg.textContent = 'Applying…';
           try {
             var r = await fetch('/api/v1/learning/dgm', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -362,12 +422,13 @@
             });
             if (!r.ok) {
               var body = await r.json().catch(function () { return {}; });
-              msg.textContent = body.detail || 'Could not update DGM control.';
-              btn.disabled = false; return;
+              msg.textContent = body.detail || ('Could not update DGM control (HTTP ' + r.status + '). Try again.');
+              delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false; return;
             }
             location.reload();
           } catch (e) {
-            msg.textContent = 'Could not reach the server.'; btn.disabled = false;
+            msg.textContent = 'Could not reach the server — check your connection and try again.';
+            delete btn.dataset.inFlight; btn.removeAttribute('aria-busy'); btn.disabled = false;
           }
         });
       })();

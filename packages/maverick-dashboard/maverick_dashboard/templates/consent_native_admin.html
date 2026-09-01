@@ -18,6 +18,12 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not native_module_enabled %}
+{{ module_gate('consent_preferences.native_sdk', 'Native consent SDK',
+               detail='Activates the native-consent control plane; receipt-signing custody, attestation and required callbacks must still pass readiness.',
+               can_activate=native_can_admin) }}
+{% endif %}
 <div class="nca-shell" id="nca-root" data-admin-api-base="{{ admin_api_base }}" data-public-keys-base="{{ public_keys_base }}" data-copilot-page="{{ page_path }}" data-can-audit="{{ 'true' if native_can_audit else 'false' }}" data-can-admin="{{ 'true' if native_can_admin else 'false' }}">
   <section class="nca-hero nca-glass" aria-labelledby="nca-title">
     <div><p class="nca-kicker">Attested devices · exact publications · offline-verifiable receipts</p><h1 class="nca-title" id="nca-title">Native consent</h1><p class="nca-lede">Operate the stock mobile and OTT/CTV consent runtime without making the browser an authority. Tenant, principal, publication, service-client, device and receipt-signing authority are re-derived on the server.</p></div>

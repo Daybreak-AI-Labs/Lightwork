@@ -315,6 +315,37 @@ def verify_ed25519(pubkey_hex: str, sig_hex: str, message: bytes) -> bool:
         return False
 
 
+def sign_detached_digest(digest_hex: str) -> dict[str, str]:
+    """Sign one SHA-256 digest with the active audit identity.
+
+    Evidence exports use this detached form so the exported bytes are bound to
+    the same rotating Ed25519 trust registry as audit rows without appending an
+    artificial event to the operating log.  The caller remains responsible for
+    stating whether the key has independent/off-host custody.
+    """
+    if not isinstance(digest_hex, str) or not re.fullmatch(r"[0-9a-f]{64}", digest_hex):
+        raise ValueError("detached audit digest must be lowercase SHA-256 hex")
+    if not _have_crypto():
+        raise RuntimeError("cryptography is required for detached audit signing")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+
+    private_raw, public_raw, key_id = _load_or_create_keypair()
+    signer = ed25519.Ed25519PrivateKey.from_private_bytes(private_raw)
+    derived = signer.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    if derived != public_raw or hashlib.sha256(derived).hexdigest()[:16] != key_id:
+        raise ValueError("audit signing identity is inconsistent")
+    return {
+        "algorithm": "Ed25519-SHA256",
+        "digest": digest_hex,
+        "key_id": key_id,
+        "signature": signer.sign(bytes.fromhex(digest_hex)).hex(),
+    }
+
+
 def _generate_keypair() -> tuple[bytes, bytes, str]:
     """Return (private_key_bytes, public_key_bytes, key_id)."""
     if not _have_crypto():
@@ -903,14 +934,20 @@ def _segment_text(path: Path) -> str:
 
 
 def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
-    path: Path, pubkey_hex: str | None = None
+    path: Path,
+    pubkey_hex: str | None = None,
+    *,
+    segment: str | None = None,
 ) -> list[ChainBreak]:
     """Walk every line; verify chain links + signatures.
 
     If ``pubkey_hex`` is None, the verifier looks up each row's
     ``key_id`` against ~/.maverick/audit/keys/<keyid>.pub.
 
-    Returns a list of breaks. Empty list = chain intact.
+    Returns a list of breaks. Empty list = chain intact. Proof-producing
+    callers that already opened a sealed segment may pass its authenticated
+    plaintext through ``segment`` so verification and aggregation operate on
+    the exact same immutable bytes rather than reading the file twice.
     """
     if not _have_crypto():
         return [ChainBreak(0, "no_crypto", "cryptography not installed")]
@@ -956,11 +993,14 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
         pubkey_cache[key_id] = obj
         return obj
 
-    try:
-        text = _segment_text(path)
-    # failure-policy: fail_closed
-    except Exception as e:
-        return [ChainBreak(0, "unreadable_segment", str(e))]
+    if segment is None:
+        try:
+            text = _segment_text(path)
+        # failure-policy: fail_closed
+        except Exception as e:
+            return [ChainBreak(0, "unreadable_segment", str(e))]
+    else:
+        text = segment
 
     with io.StringIO(text) as f:
         for n, line in enumerate(f, start=1):
@@ -1568,6 +1608,7 @@ def _reanchor_file_locked(
 
 __all__ = [
     "AuditSigner",
+    "sign_detached_digest",
     "trusted_audit_public_keys",
     "verify_chain",
     "verify_ed25519",

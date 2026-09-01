@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="/static/lightwork-consent-global-opt-out.css">
 {% endblock %}
 {% block content %}
-<main class="goo-shell" id="global-opt-out-shell"
+<div class="goo-shell" id="global-opt-out-shell"
       data-api-base="{{ api_base }}" data-copilot-page="/consent/global-opt-out">
   <header class="goo-hero glass-surface">
     <div>
@@ -165,7 +165,7 @@
   </fieldset>
 
   <noscript><p class="goo-boundary glass-surface">JavaScript is required for this bounded administrative workbench.</p></noscript>
-</main>
+</div>
 {% endblock %}
 {% block scripts_extra %}
 <script src="/static/lightwork-consent-global-opt-out.js" defer></script>

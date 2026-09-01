@@ -574,10 +574,13 @@ def set_section_enable(section: str, enabled: bool) -> None:
 # enable). The single authority the /features/switches API trusts for
 # module switching; anything not listed stays config-file-only.
 MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
+    "ai_evidence_analysis",
+    "assessment_evidence_autopopulation",
     "consent_preferences",
     "consent_preferences.analytics",
     "consent_preferences.delivery",
     "consent_preferences.experiments",
+    "consent_preferences.native_sdk",
     "consent_preferences.profile_data",
     "consent_preferences.public_api",
     "consent_preferences.publishing",
@@ -592,6 +595,7 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "data_use_governance.enforcement",
     "data_use_governance.snowflake",
     "dsar_fulfillment",
+    "external_agents",
     "finance_operations",
     "governance_agents",
     "privacy_automation",
@@ -606,6 +610,7 @@ MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
     "tech_risk_compliance.scope_actions",
     "tech_risk_compliance.scoping",
     "third_party_management",
+    "third_party_management.executive_reports",
     "third_party_management.intelligence",
     "third_party_management.lifecycle",
     "third_party_management.lifecycle.portal",
@@ -1204,24 +1209,20 @@ def state() -> dict:
         name = p["name"]
         ov = ov_providers.get(name) or {}
         raw = raw_providers.get(name) or {}
-        env_set = any(os.environ.get(v) for v in p["env"])
+        effective = config.provider_configuration_state(name)
         key = ov.get("api_key") or raw.get("api_key")
-        base = ov.get("base_url") or raw.get("base_url")
-        if ov.get("api_key") or ov.get("base_url"):
-            via = "dashboard"
-        elif raw.get("api_key") or raw.get("base_url"):
-            via = "config.toml"
-        elif env_set:
-            via = "environment"
-        else:
-            via = None
         providers.append({
             "name": name, "label": p["label"], "base_url_field": p["base_url"],
-            "configured": bool(key or base or env_set), "via": via,
+            "configured": effective["configured"], "via": effective["via"],
             "key_hint": _mask(key) if (ov.get("api_key") or raw.get("api_key")) else None,
-            "base_url": base or "",
+            "base_url": effective["base_url"],
             "env_hint": ", ".join(p["env"]) if p["env"] else "",
-            "dashboard_set": bool(ov),
+            "dashboard_set": effective["dashboard_set"],
+            "api_key_source": effective["api_key_source"],
+            "base_url_source": effective["base_url_source"],
+            "dashboard_can_set_api_key": effective["dashboard_can_set_api_key"],
+            "dashboard_can_set_base_url": effective["dashboard_can_set_base_url"],
+            "source_errors": effective["source_errors"],
         })
     caps_eff = config.get_capabilities()
     feats_eff = config.get_features()

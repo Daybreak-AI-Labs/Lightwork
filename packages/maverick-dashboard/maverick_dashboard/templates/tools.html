@@ -14,7 +14,7 @@
                copy='The tool registry could not be read — the details are
                      shown below.') }}
     {% else %}
-      {{ state('Current state', (tools | length) ~ ' tool(s) available',
+      {{ state('Current state', tool_page.catalog_total ~ ' tool(s) available',
                badge='governed', badge_class='ok',
                copy='This list already reflects your organization\'s allow,
                      deny and rate-limit rules — nothing outside it can be
@@ -25,12 +25,38 @@
   <div class="panel">
     {% if error %}
       <p style="color: var(--danger);">Could not build the tool list: <code>{{ error }}</code></p>
-    {% elif tools %}
+    {% else %}
+      <form method="get" action="/tools" aria-label="Search registered tools"
+            style="display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; margin-bottom: var(--space-3);">
+        <label for="tool-query" style="display: grid; gap: var(--space-1);">
+          <span>Search tools</span>
+          <input class="input" id="tool-query" name="q" type="search"
+                 maxlength="128" value="{{ tool_page.query }}"
+                 placeholder="Name or description" />
+        </label>
+        <label for="tool-per-page" style="display: grid; gap: var(--space-1);">
+          <span>Results per page</span>
+          <input class="input" id="tool-per-page" name="per_page" type="number"
+                 min="1" max="100" value="{{ tool_page.per_page }}" />
+        </label>
+        <button class="btn" type="submit">Search</button>
+        {% if tool_page.query %}<a class="btn btn--ghost" href="/tools">Clear</a>{% endif %}
+      </form>
+      <p class="muted" role="status">
+        {% if tool_page.returned %}
+          Showing {{ tool_page.first }}–{{ tool_page.last }} of
+          {{ tool_page.filtered_total }} matching tools
+        {% else %}
+          Showing 0 of {{ tool_page.filtered_total }} matching tools
+        {% endif %}
+        ({{ tool_page.catalog_total }} registered).
+      </p>
+    {% if tools %}
       <table>
         <thead><tr><th scope="col">name</th><th scope="col">description</th></tr></thead>
         <tbody>
         {% for t in tools %}
-          <tr>
+          <tr class="tool-row">
             <td><code>{{ t.name }}</code></td>
             <td class="muted" style="font-size: 0.85rem;">{{ t.description }}</td>
           </tr>
@@ -38,7 +64,25 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted">No tools registered.</p>
+      <p class="muted">
+        {% if tool_page.query %}No tools match this search.
+        {% else %}No tools registered.{% endif %}
+      </p>
+    {% endif %}
+    {% if tool_page.page_count > 1 %}
+      <nav aria-label="Registered tool pages"
+           style="display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3);">
+        {% if tool_page.page > 1 %}
+          <a class="btn btn--ghost"
+             href="/tools?q={{ tool_page.query | urlencode }}&amp;per_page={{ tool_page.per_page }}&amp;page={{ tool_page.page - 1 }}">Previous</a>
+        {% endif %}
+        <span class="muted">Page {{ tool_page.page }} of {{ tool_page.page_count }}</span>
+        {% if tool_page.page < tool_page.page_count %}
+          <a class="btn btn--ghost"
+             href="/tools?q={{ tool_page.query | urlencode }}&amp;per_page={{ tool_page.per_page }}&amp;page={{ tool_page.page + 1 }}">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
     {% endif %}
   </div>
 {% endblock %}

@@ -1382,6 +1382,57 @@ def _canonical_context_path(path: str) -> str:
     return path
 
 
+def _registered_page_context(path: str) -> CopilotPageContext | None:
+    """Build closed, page-specific help for registry pages without bespoke copy.
+
+    Rich hand-authored contexts continue to win.  This fallback keeps every
+    newly registered dashboard module from silently inheriting the unrelated
+    generic home-page guide while preserving the closed-registry boundary.
+    """
+
+    from .ui_visibility import PAGES
+
+    page = next((item for item in PAGES if item.get("path") == path), None)
+    if page is None:
+        return None
+    title = str(page.get("label") or "Lightwork page")
+    group = str(page.get("group") or "workspace")
+    floor = str(page.get("floor") or "view")
+    authority = {
+        "view": "This page is viewable with read access; its mutation endpoints may require more authority.",
+        "operate": "Using this page's operations requires current operator authority.",
+        "audit": "This page is limited to authorized audit review.",
+        "admin": "This page is a deployment administration surface and requires global administrator authority.",
+    }.get(floor, "The server rechecks current authority for every operation.")
+    return _ensure_read_only(
+        CopilotPageContext(
+            path=path,
+            title=title,
+            summary=(
+                f"{title} is part of Lightwork's {group} workspace. It presents "
+                "the records, status, and bounded controls for this module."
+            ),
+            capabilities=(
+                f"Inspect the {title} records and status available to your current role.",
+                "Use the page's labeled controls when the server confirms both authority and readiness.",
+            ),
+            boundaries=(
+                authority,
+                "A rendered control or local status does not prove an external action, complete coverage, or customer acceptance.",
+            ),
+            next_steps=(
+                "Read the page status and evidence boundary before selecting an operation.",
+                "After any permitted operation, verify the returned result and retained evidence before relying on it.",
+            ),
+            suggested_questions=(
+                f"What can I inspect on {title}?",
+                "What authority and readiness does this page require?",
+                "What should I verify after an operation?",
+            ),
+        )
+    )
+
+
 def context_for_page(page: object) -> CopilotPageContext:
     """Resolve a browser-proposed path to a closed server-owned context."""
 
@@ -1396,7 +1447,8 @@ def context_for_page(page: object) -> CopilotPageContext:
         or "\\" in path
     ):
         return _GENERIC
-    return _CONTEXT_BY_PATH.get(_canonical_context_path(path), _GENERIC)
+    canonical = _canonical_context_path(path)
+    return _CONTEXT_BY_PATH.get(canonical) or _registered_page_context(canonical) or _GENERIC
 
 
 def public_context(

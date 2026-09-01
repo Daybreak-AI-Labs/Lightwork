@@ -188,7 +188,7 @@
       </form>
       {% if ai_vendor_items %}
       <div class="assurance-table"><table><caption>Latest bounded assessments</caption><thead><tr><th>Vendor</th><th>Risk</th><th>Status</th><th>Review</th></tr></thead><tbody>
-      {% for row in ai_vendor_items %}<tr><td>{{ row.vendor }}</td><td>{{ row.risk_rating }}</td><td>{{ row.status }}</td><td>{% if gateway_admin and row.status == 'pending_review' %}<button type="button" data-vendor-review="{{ row.id }}" data-revision="{{ row.revision }}">Review</button>{% elif gateway_admin and row.status == 'approved' %}<button type="button" data-vendor-project="{{ row.id }}">Project to asset</button>{% else %}{{ row.revision }}{% endif %}</td></tr>{% endfor %}
+      {% for row in ai_vendor_items %}<tr><td>{{ row.vendor }}</td><td>{{ row.risk_rating }}</td><td>{{ row.status }}</td><td>{% if gateway_admin and row.status == 'pending_review' %}<button type="button" data-vendor-review="{{ row.id }}" data-revision="{{ row.revision }}" aria-label="Review {{ row.vendor }} assessment">Review</button>{% elif gateway_admin and row.status == 'approved' %}<button type="button" data-vendor-project="{{ row.id }}" aria-label="Project {{ row.vendor }} assessment to asset">Project to asset</button>{% else %}{{ row.revision }}{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
       {% else %}<p class="assurance-empty">No vendor assessments are available for this tenant.</p>{% endif %}
       {% if gateway_admin %}
@@ -1076,6 +1076,7 @@
   const buttons = Array.from(
     panel.querySelectorAll("button[data-policy-action]")
   ).slice(0, 320);
+  let actionInFlight = false;
   const safeDetail = async (response, fallback) => {
     const raw = (await response.text()).slice(0, 4096);
     try {
@@ -1088,6 +1089,7 @@
     }
   };
   buttons.forEach(button => button.addEventListener("click", async () => {
+    if (actionInFlight) return;
     const action = button.dataset.policyAction || "";
     const identity = button.dataset.policyId || "";
     const revision = Number(button.dataset.policyRevision || "0");
@@ -1124,20 +1126,37 @@
       status.textContent = "Unsupported policy-pack action.";
       return;
     }
+    actionInFlight = true;
+    if (action === "activate") {
+      const target = button.textContent.trim().replace(/^Activate\s+/, "");
+      if (!(await mvConfirm(
+        `Activate policy pack “${target}” on the global channel? Every subscribed tenant may receive this governed version.`,
+        {okText: "Activate globally"}
+      ))) {
+        actionInFlight = false;
+        return;
+      }
+    }
     buttons.forEach(item => { item.disabled = true; });
     button.setAttribute("aria-busy", "true");
     status.textContent = `Applying ${action} as an explicit administrator action…`;
     try {
       const response = await fetch(endpoint, options);
       if (!response.ok) {
-        throw new Error(await safeDetail(response, "Policy-pack action failed"));
+        throw new Error(await safeDetail(
+          response,
+          `Policy-pack ${action} failed (HTTP ${response.status}). Try again.`
+        ));
       }
       status.textContent = "Governed policy-pack state updated. Refreshing…";
       window.location.reload();
     } catch (error) {
-      status.textContent = error instanceof Error
+      status.textContent = error instanceof TypeError
+        ? "Could not reach the server — check your connection and try again."
+        : error instanceof Error
         ? error.message.slice(0, 240)
         : "Policy-pack action failed.";
+      actionInFlight = false;
       buttons.forEach(item => { item.disabled = false; });
       button.removeAttribute("aria-busy");
     }
@@ -1150,16 +1169,30 @@
   const snapshotButton = document.getElementById("portfolio-snapshot-refresh");
   const snapshotStatus = document.getElementById("portfolio-snapshot-status");
   if (snapshotButton) snapshotButton.addEventListener("click", async () => {
+    if (snapshotButton.dataset.inFlight === "true") return;
+    snapshotButton.dataset.inFlight = "true";
+    const period = {{ portfolio_report.period_id|default("", true)|tojson }};
+    if (!(await mvConfirm(
+      `Publish the governed portfolio-risk snapshot for “${period || "current quarter"}”? This creates or revises the quarter's auditable record.`,
+      {okText: "Publish snapshot"}
+    ))) {
+      delete snapshotButton.dataset.inFlight;
+      return;
+    }
     snapshotButton.disabled = true;
+    snapshotButton.setAttribute("aria-busy", "true");
     if (snapshotStatus) snapshotStatus.textContent = "Publishing governed snapshot…";
     try {
       const listResponse = await fetch(
         "/api/v1/security/assurance/portfolio-risk/snapshots",
         {credentials: "same-origin"}
       );
-      if (!listResponse.ok) throw new Error("Could not read current snapshots");
-      const listing = await listResponse.json();
-      const period = {{ portfolio_report.period_id|default("", true)|tojson }};
+      if (!listResponse.ok) {
+        const detail = await listResponse.json().catch(() => ({}));
+        throw new Error(detail.detail ||
+          `Could not read current snapshots (HTTP ${listResponse.status}). Try again.`);
+      }
+      const listing = await listResponse.json().catch(() => ({}));
       const current = (listing.snapshots || []).find(
         item => item.period_id === period
       );
@@ -1175,12 +1208,17 @@
           })
         }
       );
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.detail || "Snapshot failed");
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail ||
+        `Snapshot publication failed (HTTP ${response.status}). Try again.`);
       if (snapshotStatus) snapshotStatus.textContent = "Snapshot published. Refreshing…";
       window.location.reload();
     } catch (error) {
-      if (snapshotStatus) snapshotStatus.textContent = error.message || "Snapshot failed.";
+      if (snapshotStatus) snapshotStatus.textContent = error instanceof TypeError
+        ? "Could not reach the server — check your connection and try again."
+        : (error.message || "Snapshot failed.");
+      delete snapshotButton.dataset.inFlight;
+      snapshotButton.removeAttribute("aria-busy");
       snapshotButton.disabled = false;
     }
   });

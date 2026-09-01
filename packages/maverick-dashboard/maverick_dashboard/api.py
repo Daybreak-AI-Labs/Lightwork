@@ -243,7 +243,10 @@ def _require_halt_permission(request: Request) -> None:
     In shared Postgres mode the halt row is fleet-wide and untenanted, so toggling
     it is a global control-plane action reserved for dashboard admins.
     """
-    require_permission(request, "admin" if _shared_halt_backend() else "operate")
+    if _shared_halt_backend():
+        require_global_permission(request, "admin")
+    else:
+        require_permission(request, "operate")
 
 
 _PERF_SLA_CACHE_TTL_SECONDS = 60.0
@@ -326,18 +329,25 @@ async def list_tenants(request: Request) -> list[TenantOut]:
 
 @router.get("/workspace/active-tenant")
 async def get_active_tenant(request: Request) -> dict:
-    """The tenant this dashboard currently works in, and where the binding
-    came from -- the environment pin outranks the in-app selection."""
+    """The caller's workspace tenant and the binding that selected it."""
     require_permission(request, "view")
     import os
 
-    from maverick_dashboard import settings_store
+    from maverick_dashboard import settings_store, workspace_tenants
 
-    selected = await run_in_threadpool(settings_store.active_tenant)
+    principal = caller_principal(request)
+    if principal:
+        selected = await run_in_threadpool(
+            workspace_tenants.get_selection, principal
+        )
+        selection_source = "principal_selection"
+    else:
+        selected = await run_in_threadpool(settings_store.active_tenant)
+        selection_source = "local_selection"
     env_tenant = os.environ.get("MAVERICK_TENANT", "").strip() or None
     return {
         "tenant_id": env_tenant or selected,
-        "source": "env" if env_tenant else ("selection" if selected else None),
+        "source": "env" if env_tenant else (selection_source if selected else None),
         "selected": selected,
         "env_tenant": env_tenant,
     }
@@ -345,22 +355,92 @@ async def get_active_tenant(request: Request) -> dict:
 
 @router.put("/workspace/active-tenant")
 async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
-    """Select (or clear, with ``tenant_id: null``) the workspace tenant every
-    tenant-scoped workbench runs as. Persists through the same settings
-    overlay as the rest of the in-app configuration -- no server files, no
-    restart. The store validates the id against the tenant registry."""
-    require_global_permission(request, "admin")
-    from maverick import config as _cfg
+    """Select or clear this caller's tenant-scoped workspace.
 
-    from maverick_dashboard import settings_store
+    Authenticated users may select only tenants where they hold a membership;
+    global tenant administrators may select any active tenant. Genuine local
+    mode and the static operator token retain the single-operator persisted
+    selection. A preference never grants access by itself.
+    """
+    require_permission(request, "view")
+    from maverick import config as _cfg
+    from maverick.tenant import registry as tenant_registry
+
+    from maverick_dashboard import settings_store, workspace_tenants
+
+    principal = caller_principal(request)
+    tenant_id = body.tenant_id
+    previous_tenant: str | None
+    if principal:
+        previous_tenant = await run_in_threadpool(
+            workspace_tenants.get_selection, principal
+        )
+        if tenant_id is not None:
+            rec = await run_in_threadpool(tenant_registry.get_tenant, tenant_id)
+            if (
+                rec is None
+                or not rec.active
+                or not await run_in_threadpool(
+                    workspace_tenants.principal_can_select, principal, tenant_id
+                )
+            ):
+                # Keep tenant existence confidential from principals without a
+                # membership while still giving a useful picker failure.
+                raise HTTPException(
+                    status_code=404, detail="no such accessible active tenant"
+                )
+        await run_in_threadpool(
+            workspace_tenants.set_selection, principal, tenant_id
+        )
+        source = "principal_selection"
+    else:
+        require_global_permission(request, "admin")
+        previous_tenant = await run_in_threadpool(settings_store.active_tenant)
+        try:
+            await run_in_threadpool(settings_store.set_active_tenant, tenant_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _cfg.reset_config_cache()
+        source = "local_selection"
+
+    # Workspace selection changes the confidentiality boundary for every
+    # tenant-scoped page and mutation that follows. Anchor the human decision
+    # in the deployment-global chain; on an explicit custody/policy refusal,
+    # restore the previous selection so the state cannot change unaudited.
+    from maverick.audit import AuditRefused, EventKind, audit_event
 
     try:
-        await run_in_threadpool(settings_store.set_active_tenant, body.tenant_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    _cfg.reset_config_cache()
-    selected = await run_in_threadpool(settings_store.active_tenant)
-    return {"tenant_id": selected, "source": "selection" if selected else None}
+        await run_in_threadpool(
+            audit_event,
+            EventKind.WORKSPACE_SELECTED,
+            agent=principal or "local",
+            _global=True,
+            actor=principal or "local",
+            previous_tenant=previous_tenant,
+            tenant=tenant_id,
+            source=source,
+        )
+    except AuditRefused as exc:
+        try:
+            if principal:
+                await run_in_threadpool(
+                    workspace_tenants.set_selection, principal, previous_tenant
+                )
+            else:
+                await run_in_threadpool(
+                    settings_store.set_active_tenant, previous_tenant
+                )
+                _cfg.reset_config_cache()
+        except Exception as rollback_exc:
+            raise HTTPException(
+                status_code=500,
+                detail="audit refused workspace selection and rollback failed",
+            ) from rollback_exc
+        raise HTTPException(
+            status_code=503,
+            detail="audit custody refused workspace selection; previous workspace restored",
+        ) from exc
+    return {"tenant_id": tenant_id, "source": source if tenant_id else None}
 
 
 @router.get("/workforce/posture")
@@ -905,6 +985,38 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     except ValueError as e:
         # Already exists, or an invalid/over-long id.
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    # Provisioning creates a new confidentiality boundary. Record it in the
+    # deployment-global audit chain and undo the roster publication on a strict
+    # custody refusal. The empty workspace directory may remain as a harmless
+    # private reservation; it is not selectable without the roster entry.
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        await run_in_threadpool(
+            audit_event,
+            EventKind.TENANT_CREATED,
+            agent=caller_principal(request) or "local",
+            _global=True,
+            actor=caller_principal(request) or "local",
+            tenant=rec.id,
+            plan=rec.plan,
+            max_daily_dollars=rec.max_daily_dollars,
+        )
+    except AuditRefused as exc:
+        try:
+            await run_in_threadpool(
+                tenant_registry.delete_tenant, rec.id, purge=False
+            )
+        except Exception as rollback_exc:
+            raise HTTPException(
+                status_code=500,
+                detail="audit refused tenant creation and rollback failed",
+            ) from rollback_exc
+        raise HTTPException(
+            status_code=503,
+            detail="audit custody refused tenant creation; tenant was not published",
+        ) from exc
     return _to_tenant_out(rec)
 
 
@@ -1087,11 +1199,16 @@ async def set_user_suites(
 
 @router.delete("/users/{principal}/suites", status_code=204)
 async def remove_user_suites(request: Request, principal: str) -> Response:
-    """Lift a user's department scoping (back to unrestricted/default)."""
+    """Remove an override only when the deployment fallback is no broader."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
 
-    suite_grants.remove_grant(principal, actor=caller_principal(request) or "local")
+    try:
+        suite_grants.remove_grant(
+            principal, actor=caller_principal(request) or "local"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
@@ -3489,10 +3606,20 @@ def _probe_tenant(t: dict) -> dict:
     """One synchronous probe of a client deployment: /health for liveness
     and latency, /value.json (best-effort) for the agent's own counted value
     ledger. Never raises -- the fleet view shows the error instead."""
+    from urllib.parse import urlsplit
+
     from maverick.tools import _ssrf
 
     base = t["base_url"].rstrip("/")
     headers = {"Authorization": f"Bearer {t['token']}"} if t.get("token") else {}
+
+    def governed_get(url: str):
+        if not t.get("trusted_test_estate_loopback"):
+            return _ssrf.safe_get(url, headers=headers, timeout=4)
+        host = urlsplit(base).hostname or ""
+        with _ssrf.allow_private_hosts([host]):
+            return _ssrf.safe_get(url, headers=headers, timeout=4)
+
     out: dict = {
         "checked_at": time.time(),
         "ok": False,
@@ -3504,7 +3631,7 @@ def _probe_tenant(t: dict) -> dict:
     }
     t0 = time.monotonic()
     try:
-        r = _ssrf.safe_get(f"{base}/health", headers=headers, timeout=4)
+        r = governed_get(f"{base}/health")
         out["latency_ms"] = round((time.monotonic() - t0) * 1000, 1)
         out["ok"] = r.status_code == 200
         if not out["ok"]:
@@ -3514,7 +3641,7 @@ def _probe_tenant(t: dict) -> dict:
         out["error"] = str(exc)[:200]
         return out
     try:
-        v = _ssrf.safe_get(f"{base}/value.json", headers=headers, timeout=4)
+        v = governed_get(f"{base}/value.json")
         if v.status_code == 200:
             d = v.json()
             out["agent"] = str(d.get("agent", ""))[:60]
@@ -3527,9 +3654,7 @@ def _probe_tenant(t: dict) -> dict:
     except Exception:  # value ledger is optional on older agents
         pass
     try:
-        x = _ssrf.safe_get(
-            f"{base}/api/v1/external-agents", headers=headers, timeout=4
-        )
+        x = governed_get(f"{base}/api/v1/external-agents")
         if x.status_code == 200:
             st = (x.json() or {}).get("status") or {}
             out["external"] = {
@@ -3560,15 +3685,19 @@ async def partner_add_tenant(request: Request, body: PartnerTenantIn) -> dict:
     require_permission(request, "admin")
     from . import partner_store
 
-    row = await run_in_threadpool(
-        lambda: partner_store.upsert_tenant(
-            name=body.name,
-            base_url=body.base_url,
-            token=body.token,
-            theme=body.theme,
-            notes=body.notes,
+    try:
+        row = await run_in_threadpool(
+            lambda: partner_store.upsert_tenant(
+                name=body.name,
+                base_url=body.base_url,
+                token=body.token,
+                theme=body.theme,
+                notes=body.notes,
+                trusted_test_estate_loopback=body.trusted_test_estate_loopback,
+            )
         )
-    )
+    except partner_store.PartnerEndpointRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return partner_store.public_row(row)
 
 
@@ -3643,7 +3772,62 @@ def _binder_finance_section() -> dict:
     structural SoD lint, and the license renewal runway."""
     from maverick.license_registry import runway
 
-    return {"posture": _finance_posture(), "sod": _finance_sod(), "licenses": runway()}
+    return {
+        "scope": "current_snapshot",
+        "posture": _finance_posture(),
+        "sod": _finance_sod(),
+        "licenses": runway(),
+    }
+
+
+_BINDER_UNVERIFIABLE_REASONS = frozenset({"unsigned", "no_crypto", "no_pubkey"})
+
+
+def _binder_break(break_item) -> dict[str, object]:
+    return {
+        "line": int(getattr(break_item, "line_no", 0) or 0),
+        "reason": str(getattr(break_item, "reason", "unknown")),
+        "detail": str(getattr(break_item, "detail", ""))[:2000],
+    }
+
+
+def _binder_verdict(breaks: list[dict], *, has_records: bool) -> str:
+    reasons = {str(item.get("reason") or "unknown") for item in breaks}
+    if reasons - _BINDER_UNVERIFIABLE_REASONS:
+        return "broken"
+    if reasons & {"no_crypto", "no_pubkey"}:
+        return "unverifiable"
+    if "unsigned" in reasons:
+        return "unsigned"
+    return "verified" if has_records else "empty"
+
+
+def _binder_artifact(payload: dict, *, signing_enabled: bool) -> dict[str, object]:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    artifact: dict[str, object] = {
+        "binder_id": digest[:32],
+        "canonicalization": "Lightwork sorted compact JSON v1 (UTF-8, sorted keys)",
+        "digest_algorithm": "SHA-256",
+        "digest": digest,
+        "signature_state": "unsigned",
+        "independent_key_custody_verified": False,
+    }
+    if signing_enabled:
+        try:
+            from maverick.audit.signing import sign_detached_digest
+
+            artifact.update(sign_detached_digest(digest))
+            artifact["signature_state"] = "signed"
+        except (ImportError, OSError, RuntimeError, ValueError):
+            artifact["signature_state"] = "unavailable"
+    return artifact
 
 
 def _binder_payload(days: int = 90) -> dict:
@@ -3654,7 +3838,9 @@ def _binder_payload(days: int = 90) -> dict:
     Nothing here is narrative -- every number has a record behind it."""
     from maverick.assessment import acceptance_metrics, list_saved
     from maverick.audit import default_audit_log
-    from maverick.audit.signing import verify_chain
+    from maverick.audit.reader import day_files
+    from maverick.audit.sealing import segment_text
+    from maverick.audit.signing import ChainBreak, verify_anchors, verify_chain
 
     now = time.time()
     cutoff = now - days * 86400
@@ -3664,80 +3850,134 @@ def _binder_payload(days: int = 90) -> dict:
     first_ts: float | None = None
     last_ts: float | None = None
     events_seen = 0
-    for path in sorted(log.audit_dir.glob("*.ndjson")):
-        try:
-            day_ts = (
-                _dt.datetime.strptime(path.stem, "%Y-%m-%d")
-                .replace(tzinfo=_dt.timezone.utc)
-                .timestamp()
-            )
-        except ValueError:
+    start_day = time.strftime("%Y-%m-%d", time.gmtime(cutoff))
+    end_day = time.strftime("%Y-%m-%d", time.gmtime(now))
+    for path in day_files(log.audit_dir):
+        if not (start_day <= path.stem <= end_day):
             continue
-        if day_ts < cutoff - 86400:
-            continue
-        breaks = [
-            {"line": b.line_no, "reason": b.reason, "detail": str(getattr(b, "detail", ""))[:200]}
-            for b in verify_chain(path)
-        ]
-        rows = 0
+        physical_rows = 0
+        valid_rows = 0
+        scoped_rows = 0
         try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                rows += 1
-                try:
-                    e = json.loads(line)
-                except ValueError:
-                    continue
-                events_seen += 1
-                kinds[str(e.get("kind", "?"))] = kinds.get(str(e.get("kind", "?")), 0) + 1
-                ts = float(e.get("ts") or 0)
-                if ts:
-                    first_ts = ts if first_ts is None else min(first_ts, ts)
-                    last_ts = ts if last_ts is None else max(last_ts, ts)
-        except OSError:
-            pass
+            plaintext = segment_text(path, fail_soft=False)
+            raw_breaks = verify_chain(path, segment=plaintext)
+        except Exception as exc:  # fail closed: an unreadable segment is evidence state
+            plaintext = ""
+            raw_breaks = [ChainBreak(0, "unreadable_segment", str(exc))]
+        breaks = [_binder_break(item) for item in raw_breaks]
+        for line_number, line in enumerate(plaintext.splitlines(), start=1):
+            if not line.strip():
+                continue
+            physical_rows += 1
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            valid_rows += 1
+            try:
+                ts = float(event.get("ts"))
+            except (TypeError, ValueError):
+                breaks.append(
+                    {
+                        "line": line_number,
+                        "reason": "unscoped_timestamp",
+                        "detail": "event cannot be placed in the requested evidence window",
+                    }
+                )
+                continue
+            if not (cutoff <= ts <= now):
+                continue
+            scoped_rows += 1
+            events_seen += 1
+            kind = str(event.get("kind") or "?")
+            kinds[kind] = kinds.get(kind, 0) + 1
+            first_ts = ts if first_ts is None else min(first_ts, ts)
+            last_ts = ts if last_ts is None else max(last_ts, ts)
+        verdict = _binder_verdict(breaks, has_records=bool(valid_rows))
         chain.append(
-            {"day": path.stem, "events": rows, "intact": not breaks, "breaks": breaks[:20]}
+            {
+                "day": path.stem,
+                "events": scoped_rows,
+                "records_in_file": valid_rows,
+                "physical_rows": physical_rows,
+                "verdict": verdict,
+                "intact": True if verdict == "verified" else False if verdict == "broken" else None,
+                "breaks": breaks,
+            }
         )
 
-    w = _world()
-    approvals = [
-        {
-            "id": a.id,
-            "action": a.action,
-            "risk": a.risk,
-            "status": a.status,
-            "requested_by": a.requested_by,
-            "requested_at": a.requested_at,
-            "decided_by": a.decided_by,
-            "decided_at": a.decided_at,
-            "approvals_required": a.approvals_required,
-        }
-        for a in w.list_approvals(limit=300)
-        if float(a.requested_at or 0) >= cutoff
-    ]
+    try:
+        anchor_breaks = [_binder_break(item) for item in verify_anchors(log.audit_dir)]
+    except (OSError, RuntimeError, ValueError) as exc:
+        anchor_breaks = [
+            {
+                "line": 0,
+                "reason": "anchor_verification_unavailable",
+                "detail": str(exc)[:2000],
+            }
+        ]
+    all_breaks = [item for file_row in chain for item in file_row["breaks"]]
+    all_breaks.extend(anchor_breaks)
+    chain_verdict = _binder_verdict(all_breaks, has_records=bool(chain))
 
-    assessments = [
-        {
-            "id": s["id"],
-            "type": s["type"],
-            "subject": s["subject"],
-            "inherent": s["inherent_risk"],
-            "residual": s["residual_risk"],
-            "status": s["status"],
-            "revision": s["revision"],
-            "template_digest": (s.get("template_digest") or "")[:16],
-            "created_at": s["created_at"],
-            "decided_at": s.get("decided_at"),
-            "review_due": s.get("review_due"),
-        }
-        for s in list_saved()[:300]
-    ]
+    w = _world()
+    approvals = []
+    # A regulator-facing export must disclose every record in its exact window;
+    # it must not silently inherit the UI feed's default limit.
+    for approval in w.list_approvals(limit=2_147_483_647):
+        if not (cutoff <= float(approval.requested_at or 0) <= now):
+            continue
+        state = w.approval_state(approval.id) or {}
+        approvals.append(
+            {
+                "id": approval.id,
+                "action": approval.action,
+                "risk": approval.risk,
+                "status": approval.status,
+                "requested_by": approval.requested_by,
+                "requested_at": approval.requested_at,
+                "decided_by": approval.decided_by,
+                "decided_at": approval.decided_at,
+                "approvals_required": approval.approvals_required,
+                "approved_count": int(state.get("approved_count") or 0),
+                "approvers": list(state.get("approvers") or []),
+                "audit_pending_count": int(state.get("audit_pending_count") or 0),
+                "effective": bool(state.get("effective")),
+            }
+        )
+
+    assessments = []
+    for saved in list_saved():
+        activity_at = max(
+            float(saved.get("created_at") or 0),
+            float(saved.get("decided_at") or 0),
+        )
+        if not (cutoff <= activity_at <= now):
+            continue
+        assessments.append(
+            {
+                "id": saved["id"],
+                "type": saved["type"],
+                "subject": saved["subject"],
+                "inherent": saved["inherent_risk"],
+                "residual": saved["residual_risk"],
+                "status": saved["status"],
+                "revision": saved["revision"],
+                "template_digest": saved.get("template_digest") or "",
+                "created_at": saved["created_at"],
+                "decided_at": saved.get("decided_at"),
+                "review_due": saved.get("review_due"),
+            }
+        )
 
     from maverick import privacy_ops
 
-    registers: dict = {"enabled": privacy_ops.enabled()}
+    registers: dict = {
+        "enabled": privacy_ops.enabled(),
+        "scope": "current_snapshot",
+    }
     if registers["enabled"]:
         dsar_rows = privacy_ops.list_dsars()
         registers.update(
@@ -3751,34 +3991,69 @@ def _binder_payload(days: int = 90) -> dict:
             }
         )
 
-    return {
+    payload = {
+        "schema_version": 2,
         "window_days": days,
+        "window": {
+            "since": cutoff,
+            "until": now,
+            "event_scope": "exact_timestamp_window",
+            "snapshot_sections": ["privacy_registers", "finance"],
+        },
         "generated_at": now,
         "chain": {
             "files": chain,
-            "intact": all(c["intact"] for c in chain) if chain else None,
+            "verdict": chain_verdict,
+            "intact": (
+                True
+                if chain_verdict == "verified"
+                else False
+                if chain_verdict == "broken"
+                else None
+            ),
             "events": events_seen,
             "first_ts": first_ts,
             "last_ts": last_ts,
             "kinds": dict(sorted(kinds.items(), key=lambda kv: -kv[1])),
+            "anchor_breaks": anchor_breaks,
+            "independent_custody_verified": False,
         },
         "approvals": approvals,
+        "approvals_total": len(approvals),
+        "approvals_truncated": False,
         "assessments": assessments,
+        "assessments_total": len(assessments),
+        "assessments_truncated": False,
         "registers": registers,
-        "learning": acceptance_metrics(),
-        # Finance evidence: control coverage, not an audit opinion — the
-        # disclaimer travels with the numbers. Plus the SoD lint and the
-        # regulatory-license renewal runway.
+        "learning": {
+            "scope": "exact_decision_window",
+            **acceptance_metrics(since=cutoff, until=now),
+        },
         "finance": _binder_finance_section(),
     }
+    payload["artifact"] = _binder_artifact(
+        payload,
+        signing_enabled=bool(log.signing_enabled),
+    )
+    return payload
 
 
 @router.get("/audit/binder")
-async def audit_binder(request: Request, days: int = 90) -> dict:
+async def audit_binder(request: Request, days: int = 90) -> JSONResponse:
     """The evidence pack as JSON -- the machine-readable twin of the
     /audit/binder page. Audit-gated like the log it summarizes."""
     require_permission(request, "audit")
-    return await run_in_threadpool(_binder_payload, max(1, min(days, 730)))
+    payload = await run_in_threadpool(_binder_payload, max(1, min(days, 730)))
+    binder_id = str(payload.get("artifact", {}).get("binder_id") or "snapshot")
+    return JSONResponse(
+        payload,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f'attachment; filename="lightwork-audit-binder-{binder_id}.json"'
+            ),
+        },
+    )
 
 
 @router.get("/assess/question-roi")
@@ -4946,7 +5221,11 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
             expected_owner=owner,
             access=payload.access,
             allowed_principals=payload.allowed_principals,
+            expected_revision=payload.expected_revision,
+            require_revision=True,
         )
+    except connections.ConnectionVersionConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -7404,7 +7683,9 @@ def _resolve_generated_tool(name: str):
 @router.get("/learned")
 async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
-    return _learned_snapshot(include_pending_items=has_permission(request, "admin"))
+    return _learned_snapshot(
+        include_pending_items=has_global_permission(request, "admin")
+    )
 
 
 @router.delete("/generated-tools/{name}", status_code=204)
@@ -7465,7 +7746,7 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
     loop's ground truth is an ``admin`` action (same rung as pulling a
     generated tool); bearer/same-origin is enforced centrally by the
     middleware (POST is a mutating method)."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick import self_harness_eval as ev
     from maverick.self_harness import settings
 
@@ -7540,20 +7821,66 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     """
     require_permission(request, "view")
     from maverick import savings as savings_mod
-    from maverick.config import get_value
 
     days = max(1, min(int(days), 730))
-    cfg = get_value()
+    resolution = _value_assumptions_resolution()
+    cfg = resolution["effective_assumptions"]
     report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg)
     return {
         "enabled": cfg["enable"],
         "report": savings_mod.to_dict(report),
-        "assumptions": {
-            "hourly_rate": cfg["hourly_rate"],
-            "hours_per_task": cfg["hours_per_task"],
-            "currency": cfg["currency"],
-            "departments": cfg["departments"],
-        },
+        # Keep ``assumptions`` as the backwards-compatible effective value.
+        # The additional fields make precedence explicit when a tenant config
+        # wins over the dashboard-managed global default.
+        "assumptions": cfg,
+        **resolution,
+    }
+
+
+def _value_assumptions_resolution() -> dict:
+    """Report global defaults and the active tenant's effective assumptions.
+
+    Savings assumptions are stored in the deployment-global dashboard overlay,
+    while an active tenant config has higher precedence.  Returning only the
+    post-merge value made a successful global save look as though it changed a
+    tenant-owned override.  Keep both values and identify the exact tenant
+    fields that participate in the effective result.
+    """
+    from maverick.config import (
+        get_value,
+        load_config,
+        load_global_config,
+        tenant_config_path,
+    )
+
+    global_assumptions = get_value(config=load_global_config())
+    effective_assumptions = get_value()
+    tenant_override_fields: list[str] = []
+    tenant_path = tenant_config_path()
+    if tenant_path is not None and tenant_path.exists():
+        tenant_value = (load_config(tenant_path).get("value") or {})
+        if isinstance(tenant_value, dict):
+            for name in ("enable", "hourly_rate", "hours_per_task", "currency"):
+                if name in tenant_value:
+                    tenant_override_fields.append(name)
+            departments = tenant_value.get("departments") or {}
+            if isinstance(departments, dict):
+                for department, override in sorted(departments.items()):
+                    if not isinstance(override, dict):
+                        continue
+                    for name in ("hourly_rate", "hours_per_task"):
+                        if name in override:
+                            tenant_override_fields.append(
+                                f"departments.{department}.{name}"
+                            )
+
+    return {
+        "global_assumptions": global_assumptions,
+        "effective_assumptions": effective_assumptions,
+        "effective_source": (
+            "tenant_override" if tenant_override_fields else "global"
+        ),
+        "tenant_override_fields": tenant_override_fields,
     }
 
 
@@ -7562,10 +7889,10 @@ async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) ->
     """Persist the client's cost/value inputs (their hourly rate and human
     hours per task, plus per-department overrides) to the dashboard overlay --
     the same [value] section config.toml carries, so the wizard and the UI
-    stay one source of truth. Operate-gated: these numbers become the ROI
-    story a client repeats to their CFO."""
-    require_permission(request, "operate")
-    from maverick.config import get_value, reset_config_cache
+    stay one source of truth. Global-operate-gated: a tenant-local role cannot
+    alter the assumptions used by other tenants."""
+    require_global_permission(request, "operate")
+    from maverick.config import reset_config_cache
 
     from . import settings_store
 
@@ -7591,15 +7918,12 @@ async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) ->
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     reset_config_cache()
-    cfg = get_value()
+    resolution = _value_assumptions_resolution()
+    cfg = resolution["effective_assumptions"]
     return {
         "saved": True,
-        "assumptions": {
-            "hourly_rate": cfg["hourly_rate"],
-            "hours_per_task": cfg["hours_per_task"],
-            "currency": cfg["currency"],
-            "departments": cfg["departments"],
-        },
+        "assumptions": cfg,
+        **resolution,
     }
 
 
@@ -7778,12 +8102,20 @@ async def halt_set(request: Request, payload: HaltIn) -> None:
     # to every replica (the file only halts this one). Only on a shared backend
     # (Postgres): on single-host SQLite the file halt is the whole mechanism and
     # the killswitch doesn't consult the shared row. Best-effort -- a shared-store
-    # error must not fail the local arm, which already took effect above.
+    # error keeps the local stop armed but MUST be reported: a 204 would tell
+    # the operator that every replica stopped when propagation actually failed.
     if _shared_halt_backend():
         try:
             _world().arm_halt(reason, source="dashboard", armed_by=caller_principal(request) or "")
-        except Exception:
+        except Exception as exc:
             log.warning("cluster-wide halt arm failed (local file halt still set)", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "local halt is armed, but cluster-wide propagation failed; "
+                    "other replicas may still be running"
+                ),
+            ) from exc
 
 
 @router.delete("/halt", status_code=204)
@@ -7793,19 +8125,53 @@ async def halt_clear(request: Request) -> None:
     from maverick.killswitch import _halt_file_path, clear
 
     p = _halt_file_path()
+    # Clearing expands authority, so validate the local cross-process barrier
+    # first and leave the file/shared stop in place if it is unavailable.
+    try:
+        clear()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="halt remains armed because the local clear barrier failed",
+        ) from exc
+
+    shared = _shared_halt_backend()
+    if shared:
+        try:
+            _world().disarm_halt()
+        except Exception as exc:
+            log.warning("cluster-wide halt clear failed", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "cluster-wide halt remains armed; the local halt file was "
+                    "not cleared"
+                ),
+            ) from exc
+
     if p.exists():
         try:
             p.unlink()
-        except OSError as e:
-            raise HTTPException(status_code=500, detail=f"cannot remove halt file: {e}") from e
-    clear()
-    # Clear the cluster-wide halt too (Postgres only; see halt_set). Best-effort
-    # so a shared-store error doesn't block clearing the local halt.
-    if _shared_halt_backend():
-        try:
-            _world().disarm_halt()
-        except Exception:
-            log.warning("cluster-wide halt clear failed", exc_info=True)
+        except OSError as exc:
+            # The file still stops this replica. Restore the shared stop when
+            # possible so a local filesystem failure cannot silently resume
+            # the rest of the fleet.
+            if shared:
+                try:
+                    _world().arm_halt(
+                        "local halt clear failed; fail-safe cluster re-arm",
+                        source="dashboard-clear-rollback",
+                        armed_by=caller_principal(request) or "",
+                    )
+                except Exception:
+                    log.critical(
+                        "cluster halt rollback failed after local clear failure",
+                        exc_info=True,
+                    )
+            raise HTTPException(
+                status_code=503,
+                detail="halt remains armed locally because its file could not be removed",
+            ) from exc
 
 
 @router.post("/goals/{goal_id}/cancel", status_code=204)
@@ -8209,54 +8575,35 @@ async def revoke_goal_share(request: Request, goal_id: int, link_id: int) -> dic
 
 
 @router.get("/plugins")
-async def list_plugins() -> dict:
-    """Discovered + allow-listed plugins, broken out by kind."""
+async def list_plugins(request: Request) -> dict:
+    """Return discovery, configuration, trust-gate, and import status."""
+    require_global_permission(request, "admin")
     try:
-        from maverick.plugins import _allowed_plugin_names, _entry_points
+        from maverick.plugins import plugin_status_snapshot
+
+        from maverick_dashboard.integration_readiness import plugin_readiness
+
+        snapshot = plugin_status_snapshot()
+        for items in snapshot["plugins"].values():
+            for item in items:
+                item["readiness"] = plugin_readiness(item)
+        return snapshot
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"plugin discovery failed: {e}") from e
-    allow = _allowed_plugin_names()
-    out: dict[str, list[dict]] = {
-        "tools": [],
-        "channels": [],
-        "skills": [],
-        "personas": [],
-    }
-    for kind, group in (
-        ("tools", "maverick.tools"),
-        ("channels", "maverick.channels"),
-        ("skills", "maverick.skills"),
-        ("personas", "maverick.personas"),
-    ):
-        try:
-            for ep in _entry_points(group):
-                out[kind].append(
-                    {
-                        "name": ep.name,
-                        "module": getattr(ep, "value", str(ep)),
-                        "enabled": allow is None or ep.name in allow,
-                    }
-                )
-        except Exception:
-            continue
-    return {"plugins": out, "allowlist_active": allow is not None}
+        detail = f"plugin discovery failed ({type(e).__name__})"
+        raise HTTPException(status_code=500, detail=detail) from e
 
 
 @router.get("/mcp")
-async def list_mcp_servers() -> dict:
-    """Configured MCP servers from ~/.maverick/config.toml."""
+async def list_mcp_servers(request: Request) -> dict:
+    """Effective MCP inventory with typed readiness evidence."""
+    require_global_permission(request, "admin")
     try:
-        from maverick.config import load_config
+        from maverick_dashboard.integration_readiness import mcp_inventory
 
-        cfg = (load_config() or {}).get("mcp_servers") or {}
+        return {"servers": mcp_inventory()}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"config read failed: {e}") from e
-    return {
-        "servers": [
-            {"name": name, "command": s.get("command"), "args": s.get("args", [])}
-            for name, s in cfg.items()
-        ],
-    }
+        detail = f"MCP inventory failed ({type(e).__name__})"
+        raise HTTPException(status_code=500, detail=detail) from e
 
 
 @router.get("/tools")
@@ -8667,45 +9014,18 @@ def _govern_event_source_config(request: Request, source: str, config: dict) -> 
     which consume process credentials or local filesystem access are instead
     deployment control-plane capabilities and require a global admin.
     """
-    cfg = dict(config or {})
-    uses_tenant_oauth = bool(str(cfg.get("provider") or "").strip())
-    uses_process_github_token = source == "github_issues" and not uses_tenant_oauth
-    if source == "imap_email" or source == "file_dir" or uses_process_github_token:
+    from maverick_dashboard import event_poll
+
+    authority = event_poll.event_source_authority(source, config)
+    if authority == "global_admin":
         require_global_permission(request, "admin")
-    elif uses_tenant_oauth:
+    elif authority == "tenant_admin":
         require_permission(request, "admin")
 
-    if source != "file_dir":
-        return cfg
-
-    from pathlib import Path
-
-    from maverick.paths import data_dir
-
-    raw_path = str(cfg.get("path") or "").strip()
-    if not raw_path:
-        raise HTTPException(status_code=400, detail="file_dir source needs a 'path'")
-    glob = str(cfg.get("glob") or "*")
-    glob_path = Path(glob)
-    if glob_path.is_absolute() or ".." in glob_path.parts:
-        raise HTTPException(
-            status_code=400,
-            detail="file_dir glob must be relative and cannot traverse parent directories",
-        )
-    root = data_dir("event-input").resolve(strict=False)
-    candidate = Path(raw_path).expanduser()
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    candidate = candidate.resolve(strict=False)
     try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"file_dir path must stay under the tenant event-input root: {root}",
-        ) from exc
-    cfg["path"] = os.fspath(candidate)
-    return cfg
+        return event_poll.admit_event_source_config(source, config)
+    except event_poll.EventSourceAdmissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _owned_event_triggers(request: Request) -> list[dict]:
@@ -9373,7 +9693,7 @@ async def list_model_cost_tiers(request: Request) -> dict:
 async def set_model_cost_tier_endpoint(request: Request, body: ModelCostTierIn) -> dict:
     """Set (or clear, with band=null) a model's cost band. Admin-gated: it
     shapes routing economics deployment-wide."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
     await run_in_threadpool(settings_store.set_model_cost_tier, body.model, body.band)
@@ -9426,6 +9746,40 @@ _FEATURE_SWITCHES: dict = {
 }
 
 
+def _live_feature_switch_states() -> dict[str, bool]:
+    """Resolve switch state through each subsystem's production predicate.
+
+    Config-table presence is not authority: governed learning defaults on,
+    flows/hunters default off, environment flags can pin a value, and fleet
+    memory also applies entitlement policy. This map is the read-after-write
+    truth used by both list and mutation responses.
+    """
+    from maverick import (
+        dreaming,
+        entity_graph,
+        env_hunt,
+        fleet_memory,
+        platform_hunt,
+        rehearsal,
+        self_harness,
+        self_improvement,
+    )
+    from maverick import flow as flows
+
+    predicates = {
+        "dreaming": dreaming.enabled,
+        "self_improvement": self_improvement.enabled,
+        "self_harness": self_harness.enabled,
+        "fleet_memory": fleet_memory.enabled,
+        "rehearsal": rehearsal.enabled,
+        "flows": flows.enabled,
+        "threat_hunt": platform_hunt.enabled,
+        "env_hunt": env_hunt.enabled,
+        "entity_graph": entity_graph.enabled,
+    }
+    return {section: bool(predicates[section]()) for section in _FEATURE_SWITCHES}
+
+
 @router.get("/features/switches")
 async def list_feature_switches(request: Request) -> dict:
     """Every in-app switchable system with its label, plain-language
@@ -9434,12 +9788,18 @@ async def list_feature_switches(request: Request) -> dict:
     from maverick import config as _cfg
 
     def _read() -> list[dict]:
-        loaded = _cfg.load_config() or {}
+        # Load first so wizard-managed env is present before live predicates.
+        _cfg.load_config()
+        live = _live_feature_switch_states()
         out = []
         for section, (label, description) in _FEATURE_SWITCHES.items():
-            enabled = bool((loaded.get(section) or {}).get("enable", False))
             out.append(
-                {"section": section, "label": label, "description": description, "enabled": enabled}
+                {
+                    "section": section,
+                    "label": label,
+                    "description": description,
+                    "enabled": live[section],
+                }
             )
         return out
 
@@ -9469,14 +9829,34 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
             expected_revision=current["revision"],
         )
         await security_api.update_security_config(request, update)
-        return {"section": body.section, "enabled": bool(body.enabled)}
+        actual = await run_in_threadpool(_live_feature_switch_states)
+        return {"section": body.section, "enabled": actual[body.section]}
     from maverick_dashboard import settings_store
 
     await run_in_threadpool(settings_store.set_section_enable, body.section, bool(body.enabled))
     from maverick import config as _cfg
 
     _cfg.reset_config_cache()
-    return {"section": body.section, "enabled": bool(body.enabled)}
+    actual = await run_in_threadpool(_live_feature_switch_states)
+    effective = actual[body.section]
+    if effective != bool(body.enabled):
+        # Do not leave an ineffective dashboard value that looks like a pending
+        # change. Match the controlling live state and tell the operator why
+        # their requested transition was not accepted.
+        await run_in_threadpool(
+            settings_store.set_section_enable,
+            body.section,
+            effective,
+        )
+        _cfg.reset_config_cache()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{body.section} is controlled by a higher-precedence environment, "
+                "entitlement, or policy source; change that source instead"
+            ),
+        )
+    return {"section": body.section, "enabled": effective}
 
 
 # In-app governance-module switches. Each key is the dotted config path of a
@@ -9514,6 +9894,14 @@ _MODULE_SWITCHES: dict[str, dict] = {
     "consent_preferences.public_api": {
         "label": "Consent public clients",
         "requires": ("consent_preferences", "consent_preferences.publishing"),
+    },
+    "consent_preferences.native_sdk": {
+        "label": "Native consent SDK",
+        "requires": (
+            "consent_preferences",
+            "consent_preferences.publishing",
+            "consent_preferences.public_api",
+        ),
     },
     "consent_preferences.scanner": {
         "label": "Consent application scanning",
@@ -9570,6 +9958,18 @@ _MODULE_SWITCHES: dict[str, dict] = {
     "finance_operations": {
         "label": "Finance operations",
         "requires": (),
+    },
+    "external_agents": {
+        "label": "External-agent governance",
+        "requires": (),
+    },
+    "ai_evidence_analysis": {
+        "label": "AI evidence analysis",
+        "requires": (),
+    },
+    "assessment_evidence_autopopulation": {
+        "label": "Assessment evidence proposals",
+        "requires": ("ai_evidence_analysis",),
     },
     "governance_agents": {
         "label": "Governance agents",
@@ -9638,6 +10038,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Third-party intelligence",
         "requires": ("third_party_management",),
     },
+    "third_party_management.executive_reports": {
+        "label": "Executive vendor reports",
+        "requires": ("third_party_management",),
+    },
     "vendor_management": {
         "label": "Vendor management",
         "requires": (),
@@ -9645,13 +10049,35 @@ _MODULE_SWITCHES: dict[str, dict] = {
 }
 
 
-def _module_path_enabled(loaded: dict, path: str) -> bool:
+# Readiness receipts are process-local and bound to an HMAC of the exact
+# effective configuration roots for the module.  The random key means the
+# public fingerprint cannot be used to test guesses about stored secrets, and
+# a restart intentionally returns to ``unverified`` until a fresh probe runs.
+_MODULE_FINGERPRINT_KEY = os.urandom(32)
+
+
+class _ModuleConfigurationUnavailable(RuntimeError):
+    """Module state cannot be read without inventing a safe-looking default."""
+
+
+def _module_path_enable_state(loaded: dict, path: str) -> str:
     node: object = loaded
     for part in path.split("."):
         if not isinstance(node, dict):
-            return False
-        node = node.get(part)
-    return isinstance(node, dict) and bool(node.get("enable", False))
+            return "invalid"
+        if part not in node:
+            return "disabled"
+        node = node[part]
+    if not isinstance(node, dict):
+        return "invalid"
+    enabled = node.get("enable", False)
+    if type(enabled) is not bool:
+        return "invalid"
+    return "enabled" if enabled else "disabled"
+
+
+def _module_path_enabled(loaded: dict, path: str) -> bool:
+    return _module_path_enable_state(loaded, path) == "enabled"
 
 
 def _module_switch_enabled(loaded: dict, section: str) -> bool:
@@ -9659,25 +10085,263 @@ def _module_switch_enabled(loaded: dict, section: str) -> bool:
     return all(_module_path_enabled(loaded, p) for p in chain)
 
 
+def _module_config_fingerprint(loaded: dict, section: str) -> str:
+    chain = (*_MODULE_SWITCHES[section]["requires"], section)
+    roots = sorted({path.split(".", 1)[0] for path in chain})
+    material = {root: loaded.get(root) for root in roots}
+    encoded = json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hmac.new(_MODULE_FINGERPRINT_KEY, encoded, hashlib.sha256).hexdigest()
+
+
+def _module_activation_state(loaded: dict, section: str) -> dict:
+    requirements = tuple(_MODULE_SWITCHES[section]["requires"])
+    chain = (*requirements, section)
+    path_states = {path: _module_path_enable_state(loaded, path) for path in chain}
+    invalid = [path for path, state in path_states.items() if state == "invalid"]
+    missing = [path for path in requirements if path_states[path] != "enabled"]
+    target_enabled = path_states[section] == "enabled"
+    if invalid:
+        status = "failed"
+        detail = "One or more enable gates have an invalid configuration shape."
+    elif not target_enabled:
+        status = "disabled"
+        detail = "The module's own enable gate is off."
+    elif missing:
+        status = "incomplete"
+        detail = "The module is on, but one or more required parent gates are off."
+    else:
+        status = "enabled"
+        detail = (
+            "The complete enable-gate chain is on. This does not prove runtime "
+            "readiness."
+        )
+    return {
+        "status": status,
+        "enabled": status == "enabled",
+        "target_enabled": target_enabled,
+        "requirements": list(requirements),
+        "missing_requirements": missing,
+        "invalid_paths": invalid,
+        "detail": detail,
+        "fingerprint": _module_config_fingerprint(loaded, section),
+    }
+
+
+def _module_configuration_state(loaded: dict, section: str) -> dict:
+    """Validate known closed config contracts without opening a runtime store."""
+
+    try:
+        if section == "ai_evidence_analysis":
+            from .ai_evidence_analysis_composition import ai_evidence_analysis_settings
+
+            configured = ai_evidence_analysis_settings(loaded) is not None
+        elif section == "assessment_evidence_autopopulation":
+            from .ai_evidence_analysis_composition import ai_evidence_analysis_settings
+            from .assessment_evidence_autopopulation_composition import (
+                assessment_evidence_autopopulation_settings,
+            )
+
+            configured = (
+                ai_evidence_analysis_settings(loaded) is not None
+                and assessment_evidence_autopopulation_settings(loaded) is not None
+            )
+        elif section == "consent_preferences.native_sdk":
+            from .consent_native_composition import native_consent_settings
+
+            configured = native_consent_settings(loaded) is not None
+        elif section == "third_party_management.executive_reports":
+            from maverick.third_party_executive_reports import (
+                ThirdPartyExecutiveReportConfig,
+            )
+
+            configured = ThirdPartyExecutiveReportConfig.from_mapping(loaded).enable is True
+        elif section == "external_agents":
+            configured = True
+        else:
+            return {
+                "status": "unverified",
+                "configured": None,
+                "ready": None,
+                "detail": (
+                    "The gate is on; this module has no bounded readiness receipt "
+                    "in this endpoint."
+                ),
+                "evidence": {
+                    "kind": "enable_gate_only",
+                    "runtime_verified": False,
+                },
+            }
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        return {
+            "status": "incomplete",
+            "configured": False,
+            "ready": False,
+            "detail": "The module's closed configuration contract is incomplete.",
+            "evidence": {
+                "kind": "configuration_contract",
+                "error_type": type(exc).__name__,
+                "runtime_verified": False,
+            },
+        }
+    if not configured:
+        return {
+            "status": "incomplete",
+            "configured": False,
+            "ready": False,
+            "detail": "The module's closed configuration contract is incomplete.",
+            "evidence": {
+                "kind": "configuration_contract",
+                "runtime_verified": False,
+            },
+        }
+    return {
+        "status": "configured",
+        "configured": True,
+        "ready": None,
+        "detail": (
+            "The closed configuration contract is valid. Runtime operation has "
+            "not been inferred."
+        ),
+        "evidence": {
+            "kind": "configuration_contract",
+            "runtime_verified": False,
+        },
+    }
+
+
+def _module_readiness_state(
+    request: Request,
+    loaded: dict,
+    section: str,
+    activation: dict,
+) -> dict:
+    activation_status = activation["status"]
+    if activation_status == "failed":
+        return {
+            "status": "failed",
+            "configured": False,
+            "ready": False,
+            "detail": "Readiness cannot be evaluated from invalid enable gates.",
+            "evidence": {"kind": "activation_contract", "runtime_verified": False},
+        }
+    if activation_status != "enabled":
+        return {
+            "status": "blocked",
+            "configured": False,
+            "ready": False,
+            "detail": "Complete the module's enable-gate chain before readiness.",
+            "evidence": {"kind": "activation_contract", "runtime_verified": False},
+        }
+
+    configured = _module_configuration_state(loaded, section)
+    if configured["status"] == "incomplete":
+        return configured
+
+    receipts = getattr(request.app.state, "module_readiness_evidence", None)
+    receipt = receipts.get(section) if isinstance(receipts, dict) else None
+    if isinstance(receipt, dict):
+        status = receipt.get("status")
+        checked_at = receipt.get("checked_at")
+        detail = receipt.get("detail")
+        now = time.time()
+        receipt_valid = (
+            receipt.get("activation_fingerprint") == activation["fingerprint"]
+            and status in {"ready", "incomplete", "failed"}
+            and not isinstance(checked_at, bool)
+            and isinstance(checked_at, (int, float))
+            and 0 < float(checked_at) <= now + 300
+            and isinstance(detail, str)
+            and bool(detail.strip())
+        )
+        if receipt_valid:
+            return {
+                "status": status,
+                "configured": configured["configured"],
+                "ready": status == "ready",
+                "detail": detail.strip()[:240],
+                "evidence": {
+                    "kind": "runtime_receipt",
+                    "checked_at": float(checked_at),
+                    "runtime_verified": status == "ready",
+                },
+            }
+    return configured
+
+
+def _module_state(request: Request, loaded: dict, section: str, meta: dict) -> dict:
+    activation = _module_activation_state(loaded, section)
+    return {
+        "section": section,
+        "label": meta["label"],
+        # Compatibility field: its narrow meaning is effective gate state.
+        "enabled": activation["enabled"],
+        "activation": activation,
+        "readiness": _module_readiness_state(
+            request,
+            loaded,
+            section,
+            activation,
+        ),
+    }
+
+
+def _load_module_config() -> dict:
+    from maverick import config as config_module
+
+    try:
+        loaded = config_module.load_config()
+        source_errors = config_module.config_source_errors(include_tenant=True)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise _ModuleConfigurationUnavailable from exc
+    if source_errors or not isinstance(loaded, dict):
+        raise _ModuleConfigurationUnavailable
+    return loaded
+
+
+def module_activation_enabled(section: str) -> bool:
+    """Fail-closed effective gate state for server-rendered module banners."""
+
+    if section not in _MODULE_SWITCHES:
+        return False
+    try:
+        loaded = _load_module_config()
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except _ModuleConfigurationUnavailable:
+        return False
+    return _module_activation_state(loaded, section)["enabled"] is True
+
+
 @router.get("/features/modules")
 async def list_module_switches(request: Request) -> dict:
     """Every in-app switchable governance module with its effective state
     (a module reads as ON only when its whole requirement chain is on)."""
     require_permission(request, "view")
-    from maverick import config as _cfg
 
     def _read() -> list[dict]:
-        loaded = _cfg.load_config() or {}
+        loaded = _load_module_config()
         return [
-            {
-                "section": section,
-                "label": meta["label"],
-                "enabled": _module_switch_enabled(loaded, section),
-            }
+            _module_state(request, loaded, section, meta)
             for section, meta in _MODULE_SWITCHES.items()
         ]
 
-    return {"modules": await run_in_threadpool(_read)}
+    try:
+        modules = await run_in_threadpool(_read)
+    except _ModuleConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="module configuration is unavailable; no state was inferred",
+        ) from exc
+    return {"modules": modules}
 
 
 @router.post("/features/modules")
@@ -9690,6 +10354,13 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
     meta = _MODULE_SWITCHES.get(body.section)
     if meta is None:
         raise HTTPException(status_code=400, detail=f"unknown module {body.section!r}")
+    try:
+        await run_in_threadpool(_load_module_config)
+    except _ModuleConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="module configuration is unavailable; settings were not changed",
+        ) from exc
     from maverick_dashboard import settings_store
 
     paths = (
@@ -9699,14 +10370,32 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
         await run_in_threadpool(settings_store.set_module_enables, paths, bool(body.enabled))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except (
+        OSError,
+        TypeError,
+        settings_store.SecuritySuiteConfigUnavailable,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="module settings are unavailable; no state was overwritten",
+        ) from exc
     from maverick import config as _cfg
 
     _cfg.reset_config_cache()
-    loaded = _cfg.load_config() or {}
-    return {
-        "section": body.section,
-        "enabled": _module_switch_enabled(loaded, body.section),
-    }
+    try:
+        loaded = await run_in_threadpool(_load_module_config)
+    except _ModuleConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="the saved module state could not be verified",
+        ) from exc
+    state = _module_state(request, loaded, body.section, meta)
+    if state["enabled"] is not bool(body.enabled):
+        raise HTTPException(
+            status_code=409,
+            detail="the requested module gate state did not become effective",
+        )
+    return state
 
 
 def _probe_container_daemon(binary: str) -> dict:
@@ -9825,7 +10514,12 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     from .copilot_context import context_for_page, public_context
 
     permissions = _copilot_permissions(request)
-    return public_context(context_for_page(page), permissions)
+    result = public_context(context_for_page(page), permissions)
+    configured = bool(_any_provider_key_set())
+    result["model_provider_configured"] = configured
+    if not configured:
+        result["provider_setup"] = _copilot_provider_setup(permissions)
+    return result
 
 
 def _copilot_permissions(request: Request) -> frozenset[str]:
@@ -9839,6 +10533,20 @@ def _copilot_permissions(request: Request) -> frozenset[str]:
     if has_global_permission(request, "admin"):
         permissions.add("admin")
     return frozenset(permissions)
+
+
+def _copilot_provider_setup(permissions: frozenset[str]) -> dict[str, str]:
+    """Return only an in-app recovery destination, qualified by authority."""
+
+    if "admin" in permissions:
+        return {
+            "href": "/settings#settings-integrations",
+            "label": "Configure a model provider in Settings",
+        }
+    return {
+        "href": "/start",
+        "label": "Open the in-app setup guide",
+    }
 
 
 @router.post("/copilot")
@@ -9876,6 +10584,7 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
             "reply": built_in_reply(context, msg, permissions),
             "mode": "built_in",
             "page_context": public_context(context, permissions),
+            "provider_setup": _copilot_provider_setup(permissions),
         }
 
     require_provider_or_400(role="orchestrator")
@@ -10224,19 +10933,33 @@ async def delete_role_override(role: str, request: Request) -> dict:
 
 
 @router.get("/channels")
-async def list_channels() -> dict:
-    """Enabled channels from ~/.maverick/config.toml."""
+async def list_channels(request: Request) -> dict:
+    """Configured channel inventory with typed local/live readiness."""
+    require_global_permission(request, "admin")
     try:
-        from maverick.config import load_config
+        from maverick_dashboard.integration_readiness import require_readable_config
 
-        cfg = (load_config() or {}).get("channels") or {}
+        cfg = require_readable_config().get("channels") or {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"config read failed: {e}") from e
-    return {
-        "channels": [
-            {"name": name, "enabled": bool(c.get("enabled", True))} for name, c in cfg.items()
-        ],
-    }
+        raise HTTPException(
+            status_code=500,
+            detail=f"channel inventory failed ({type(e).__name__})",
+        ) from e
+    from maverick_dashboard.integration_readiness import channel_readiness
+
+    channels = []
+    for name, value in cfg.items():
+        channel = value if isinstance(value, dict) else {"enabled": bool(value)}
+        configured = bool(channel.get("enabled", False))
+        channels.append(
+            {
+                "name": name,
+                "configured": configured,
+                "enabled": configured,
+                "readiness": channel_readiness(name, channel),
+            }
+        )
+    return {"channels": channels}
 
 
 @router.get("/audit/tail")
@@ -10254,32 +10977,66 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
     from maverick_dashboard.app import safe_audit_day
 
     n = max(1, min(int(n or 100), 1000))
-    return {"events": default_audit_log().tail(n, day=safe_audit_day(day))}
+    safe_day = safe_audit_day(day)
+    if day not in (None, "") and safe_day is None:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid audit day; expected a real date in YYYY-MM-DD format",
+        )
+    return {"events": default_audit_log().tail(n, day=safe_day)}
 
 
 @router.get("/audit/grep")
 async def audit_grep(request: Request, pattern: str, day: str | None = None) -> dict:
-    """Search recent audit events for the given literal pattern.
+    """Search every readable event in one audit day for a literal pattern.
 
     Audit-gated (see :func:`audit_tail`). Intentionally uses bounded, literal
     (case-insensitive) matching rather than a user-supplied regex: a regex over
-    the HTTP surface invites catastrophic-backtracking ReDoS that blocks the
-    dashboard event loop. Bounds the scan to the most recent 1000 events and
-    caps results at 200.
+    the HTTP surface invites catastrophic-backtracking ReDoS. The selected day
+    is scanned completely in a worker thread; at most 200 matching rows are
+    returned, with explicit scan/match/truncation counts so a capped response
+    can never be mistaken for a complete result set.
     """
     require_permission(request, "audit")
     if not pattern:
         raise HTTPException(status_code=400, detail="pattern is required")
     if len(pattern) > 200:
         raise HTTPException(status_code=400, detail="pattern too long")
-    from maverick.audit import default_audit_log
+    from maverick.audit import default_audit_log, iter_events
 
     from maverick_dashboard.app import safe_audit_day
 
-    events = default_audit_log().tail(1000, day=safe_audit_day(day))
-    needle = pattern.lower()
-    matches = [e for e in events if needle in json.dumps(e, ensure_ascii=False).lower()]
-    return {"events": matches[:200]}
+    safe_day = safe_audit_day(day)
+    if day not in (None, "") and safe_day is None:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid audit day; expected a real date in YYYY-MM-DD format",
+        )
+    effective_day = safe_day or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+    needle = pattern.casefold()
+    audit_dir = default_audit_log().audit_dir
+
+    def _scan() -> dict:
+        matches: list[dict] = []
+        scanned = 0
+        total_matches = 0
+        for event in iter_events(day=effective_day, audit_dir=audit_dir):
+            scanned += 1
+            if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
+                total_matches += 1
+                if len(matches) < 200:
+                    matches.append(event)
+        return {
+            "events": matches,
+            "scanned": scanned,
+            "total_matches": total_matches,
+            "returned": len(matches),
+            "truncated": total_matches > len(matches),
+            "scan_complete": True,
+            "scope": {"day": effective_day},
+        }
+
+    return await run_in_threadpool(_scan)
 
 
 @router.get("/replay/{goal_id}")
@@ -10558,11 +11315,22 @@ async def compliance_packet_download(request: Request) -> Response:
 
 
 @router.get("/permissions")
-async def permissions() -> dict:
-    """Everything the agent is currently allowed to do (read-only)."""
-    from maverick_dashboard.app import _permissions_snapshot
+async def permissions(
+    q: str = Query(default="", max_length=128),
+    state: str = Query(default="all"),
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=100, ge=1, le=100),
+) -> dict:
+    """Bounded, filterable view of what the agent may currently attempt."""
+    from maverick_dashboard.app import _permissions_snapshot, _permissions_tool_page
 
-    return _permissions_snapshot()
+    return _permissions_tool_page(
+        _permissions_snapshot(),
+        q=q,
+        state=state,
+        page=page,
+        per_page=per_page,
+    )
 
 
 @router.post("/permissions/tools/{name}/disable", status_code=204)
@@ -10582,13 +11350,13 @@ async def disable_tool(request: Request, name: str) -> None:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/permissions/tools/{name}/enable", status_code=204)
-async def enable_tool(request: Request, name: str) -> None:
+@router.post("/permissions/tools/{name}/enable")
+async def enable_tool(request: Request, name: str) -> dict:
     """Clear a dashboard-set tool override.
 
-    Only clears overrides set here; a tool denied in config.toml itself
-    stays denied (the response is still 204 — the overlay no longer
-    denies it, config does).
+    Only clears overrides set here. The response returns the freshly resolved
+    effective state so a config ACL that still denies the tool cannot be
+    optimistically shown as enabled.
     """
     require_permission(request, "operate")
     from maverick.runtime_overrides import enable_tool as _enable
@@ -10597,6 +11365,24 @@ async def enable_tool(request: Request, name: str) -> None:
         _enable(name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick_dashboard.app import _permissions_snapshot, _tool_permission_row
+
+    tool = next(
+        (row for row in _permissions_snapshot()["tools"] if row["name"] == name),
+        None,
+    )
+    return {
+        "tool": tool
+        or _tool_permission_row(
+            name,
+            catalog_present=False,
+            base_acl_allowed=False,
+            effective_acl_allowed=False,
+            base_acl_detail=(
+                "the override was cleared, but this tool is not in the current catalog"
+            ),
+        )
+    }
 
 
 @router.get("/approvals")

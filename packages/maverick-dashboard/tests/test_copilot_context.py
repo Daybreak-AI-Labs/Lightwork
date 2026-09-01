@@ -83,6 +83,22 @@ def test_registry_paths_are_unique_and_match_expected_pages() -> None:
     assert set(registered) == set(CANONICAL_CONTEXTS)
 
 
+def test_every_registered_dashboard_page_gets_page_specific_copilot_help() -> None:
+    from maverick_dashboard.ui_visibility import PAGES
+
+    explicit = {context.path for context in copilot_context._CONTEXTS}
+    for page in PAGES:
+        context = copilot_context.context_for_page(page["path"])
+        assert context.path == page["path"]
+        assert context.summary
+        assert context.capabilities
+        assert context.next_steps
+        assert copilot_context._READ_ONLY_BOUNDARY in context.boundaries
+        if page["path"] not in explicit:
+            assert context.title == page["label"]
+            assert page["group"] in context.summary
+
+
 @pytest.mark.parametrize(
     "page",
     [

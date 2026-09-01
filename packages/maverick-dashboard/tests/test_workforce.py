@@ -84,6 +84,68 @@ def test_workforce_page_renders():
     assert "/workforce" in r.text
 
 
+def test_workforce_distinguishes_catalog_from_deployment(monkeypatch):
+    from maverick import connections, fleet
+    from maverick.fleet import Fleet, FleetAgent
+
+    monkeypatch.setattr(
+        fleet,
+        "list_fleets",
+        lambda: [
+            Fleet(
+                name="dept-finance",
+                owner="",
+                agents=(FleetAgent(name="analyst", role="operator", domain="finance"),),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        connections,
+        "list_connections",
+        lambda owner=None: [
+            {"connector": "slack"},
+            {"connector": "slack"},
+            {"connector": "servicenow"},
+        ],
+    )
+
+    r = client.get("/workforce")
+
+    assert r.status_code == 200
+    assert "1 specialists deployed" in r.text
+    assert "2 have a saved configuration" in r.text
+    assert "specialists on staff" not in r.text
+    assert "connectors wired" not in r.text
+    assert "catalog specialists available" in r.text
+
+
+def test_workforce_explains_missing_department_charter_without_overclaiming(monkeypatch):
+    from maverick import connections, departments, fleet
+
+    incomplete = departments.Department(
+        key="finance",
+        title="Finance",
+        charter="",
+        members=["finance_fixture"],
+    )
+    monkeypatch.setattr(departments, "list_departments", lambda: [incomplete])
+    monkeypatch.setattr(departments, "department_entitled", lambda _key: True)
+    monkeypatch.setattr(fleet, "list_fleets", list)
+    monkeypatch.setattr(connections, "list_connections", lambda owner=None: [])
+
+    r = client.get("/workforce")
+
+    assert r.status_code == 200
+    assert (
+        "Catalog charter not provided. Review the available specialist roster before deployment."
+        in r.text
+    )
+    assert "1 catalog specialists available" in r.text
+    assert "0 specialists deployed" in r.text
+    assert "specialists on staff" not in r.text
+    assert "connectors wired" not in r.text
+
+
 # --- deploy a department as a fleet (paid add-on) ---
 
 def test_departments_list_reports_entitlement():

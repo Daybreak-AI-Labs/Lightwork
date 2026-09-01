@@ -89,6 +89,40 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
     assert f"'nonce-{nonces[0]}'" in csp
 
 
+def test_download_starts_as_an_explained_disabled_button(client: TestClient) -> None:
+    response = client.get(ROUTE)
+    parser = _Markup()
+    parser.feed(response.text)
+    matches = [
+        (tag, attrs)
+        for tag, attrs in parser.tags
+        if attrs.get("id") == "cbj-download"
+    ]
+
+    assert matches == [
+        (
+            "button",
+            {
+                "class": "btn",
+                "id": "cbj-download",
+                "type": "button",
+                "disabled": None,
+                "aria-describedby": "cbj-download-hint",
+            },
+        )
+    ]
+    assert 'id="cbj-download-hint" role="status"' in response.text
+    assert "Select a job to make its export available." in response.text
+
+    source = (
+        PACKAGE / "static" / "lightwork-consent-bulk-jobs.js"
+    ).read_text(encoding="utf-8")
+    assert 'var downloadUrl = ""' in source
+    assert "download.disabled = !canAudit" in source
+    assert "global.location.assign(downloadUrl)" in source
+    assert "download.href" not in source
+
+
 @pytest.mark.parametrize(
     ("permissions", "audit", "admin"),
     (

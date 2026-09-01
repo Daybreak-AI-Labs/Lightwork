@@ -4,6 +4,12 @@
   <link rel="stylesheet" href="/static/lightwork-ai-evidence-analysis.css">
 {% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
+{% if not evidence_module_enabled %}
+{{ module_gate('ai_evidence_analysis', 'AI evidence analysis',
+               detail='Activates the evidence-analysis gate; gateway policy, media limits, parser isolation and reviewer authority remain separately checked.',
+               can_activate=evidence_can_activate) }}
+{% endif %}
 <div class="evidence-workbench" id="evidence-shell" data-api-base="{{ api_base }}">
   <section class="hero hero--solo evidence-hero">
     <div>

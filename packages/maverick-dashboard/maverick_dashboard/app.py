@@ -31,6 +31,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     WebSocket,
@@ -94,6 +95,9 @@ from .health_routes import (
     readiness_response as _readiness_response,
 )
 from .oidc_login import router as oidc_login_router
+from .route_identity import (
+    stabilize_effective_route_names as _stabilize_effective_route_names,
+)
 
 _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
@@ -248,10 +252,34 @@ def _nav_context(request: Request) -> dict:
     groups = ui_visibility.nav_groups(role)
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
-    return {"nav_groups": groups, "show_settings_link": show_settings}
+    return {
+        "nav_groups": groups,
+        "show_settings_link": show_settings,
+        "can_create_goal": has_permission(request, "operate"),
+    }
 
 
 templates.context_processors.append(_nav_context)
+
+
+def _workspace_context(request: Request) -> dict:
+    """Expose the request-bound tenant to the shell's stale-tab guard."""
+    try:
+        from maverick.paths import current_tenant_id
+
+        tenant_id = current_tenant_id() or ""
+    except Exception:  # pragma: no cover -- shell rendering stays fail-soft
+        tenant_id = ""
+    source = str(getattr(request.state, "workspace_tenant_source", "") or "")
+    return {
+        "workspace_tenant_id": tenant_id,
+        "workspace_tenant_selection": tenant_id
+        if source in {"local_selection", "principal_selection"}
+        else "",
+    }
+
+
+templates.context_processors.append(_workspace_context)
 # Requestless renders (rare; legacy paths) still get a complete sidebar.
 from . import ui_visibility as _ui_visibility  # noqa: E402
 
@@ -642,6 +670,43 @@ def enforce_page_visibility(
     raise HTTPException(status_code=403, detail="this page is not enabled for your role")
 
 
+async def enforce_expected_workspace_tenant(
+    request: Request = None,  # type: ignore[assignment]
+) -> None:
+    """Reject a stale browser mutation after the selected workspace changed.
+
+    Each rendered page carries the tenant it was rendered under. The shared UI
+    client adds that value to fetches and native forms. Comparing it after
+    authentication has established the request's current principal-scoped
+    selection prevents an old tab from silently writing into a newly selected
+    tenant. Bearer/API clients and public cross-origin contracts remain on their
+    explicit authority paths and are not made dependent on browser state.
+    """
+    if request is None or request.method in _CSRF_SAFE_METHODS:
+        return
+    expected = str(
+        getattr(request.state, "workspace_expected_tenant", "") or ""
+    )
+    if not expected or not _is_same_origin(request):
+        return
+    supplied = request.headers.get("x-lightwork-expected-tenant", "").strip()
+    content_type = request.headers.get("content-type", "").lower()
+    if not supplied and (
+        content_type.startswith("application/x-www-form-urlencoded")
+        or content_type.startswith("multipart/form-data")
+    ):
+        form = await request.form()
+        supplied = str(form.get("_expected_tenant") or "").strip()
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "the active workspace changed after this page loaded; reload "
+                "the page and review the action before trying again"
+            ),
+        )
+
+
 app = FastAPI(
     title="Lightwork Dashboard + REST API",
     description="Local browser UI plus REST API for programmatic access.",
@@ -653,6 +718,7 @@ app = FastAPI(
     # the established principal.
     dependencies=[
         Depends(require_principal_in_request_context),
+        Depends(enforce_expected_workspace_tenant),
         Depends(enforce_page_visibility),
     ],
     lifespan=_lifespan,
@@ -1801,12 +1867,15 @@ def _wants_html(request: Request) -> bool:
         ("/api/", "/openapi", "/healthz", "/livez", "/readyz", "/metrics")
     ):
         return False
-    return "text/html" in accept or "*/*" in accept
+    # Browser navigations explicitly advertise text/html. Generic HTTP clients
+    # commonly send only */* and must retain the machine-readable JSON error
+    # contract even when they call a non-/api form compatibility route.
+    return "text/html" in accept
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Branded HTML for browser 404s; JSON for API callers."""
+    """Branded, actionable HTML for browser failures; JSON for API callers."""
     if exc.status_code == 404 and _wants_html(request):
         return templates.TemplateResponse(
             request,
@@ -1825,6 +1894,54 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         from .tenant_select_page import tenant_select_response
 
         return tenant_select_response(request, templates, detail=str(exc.detail))
+    if _wants_html(request):
+        status = int(exc.status_code)
+        title, message = {
+            400: (
+                "Check this request",
+                "Lightwork could not use the submitted value. Review the fields and try again.",
+            ),
+            401: (
+                "Sign in required",
+                "Your session or access token is missing or no longer valid. Sign in again, then retry.",
+            ),
+            403: (
+                "Permission required",
+                "Your current role cannot use this page or action. Switch to an authorized workspace or ask an administrator for access.",
+            ),
+            409: (
+                "Refresh before continuing",
+                "The workspace or record changed after this page loaded. Reload it to see the current state before retrying.",
+            ),
+            429: (
+                "Too many requests",
+                "Lightwork is protecting this service from overload. Wait briefly, then retry.",
+            ),
+            503: (
+                "Temporarily unavailable",
+                "A required service or control is unavailable. Your action was not confirmed; retry after service is restored.",
+            ),
+        }.get(
+            status,
+            (
+                "Request could not be completed",
+                "Lightwork stopped before confirming this action. Return to the page and try again.",
+            ),
+        )
+        if status == 400 and str(exc.detail or "").startswith("Invalid audit day"):
+            message = "Enter a real audit date in YYYY-MM-DD format, then try again."
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {
+                "status": status,
+                "title": title,
+                "message": message,
+                "path": request.url.path,
+            },
+            status_code=status,
+            headers=exc.headers,
+        )
     return JSONResponse(
         {"detail": exc.detail},
         status_code=exc.status_code,
@@ -1985,16 +2102,17 @@ async def security_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def bind_active_tenant(request: Request, call_next):
-    """Scope each request to the dashboard's selected active tenant.
+    """Scope local-operator requests to the shared dashboard selection.
 
     The tenant-scoped workbenches (consent, privacy discovery, third-party,
     ...) refuse to run unbound. Before this middleware the only ways to bind
     were the MAVERICK_TENANT env var or an enterprise client binding -- a
     config-file/environment step, which the dashboard promises not to need.
-    The Settings-persisted selection fills the same slot, and only that slot:
-    an explicit env/context binding still wins, and a selection that names a
-    tenant since suspended or deleted is ignored rather than trusted, so the
-    registry stays the authority on who may do work.
+    The operator-wide Settings selection remains valid only in genuine local
+    auth-off mode or for the authenticated static dashboard token. End-user
+    selections are principal-scoped and are bound later by the authentication
+    dependency, after membership can be verified. An explicit env/context
+    binding still wins in every mode.
     """
     from maverick.paths import current_tenant_id, reset_tenant, set_tenant
 
@@ -2004,6 +2122,16 @@ async def bind_active_tenant(request: Request, call_next):
         # tenant FLOOR for one-client deployments) -- and each outranks the
         # dashboard selection, which must never widen an existing scope.
         if current_tenant_id() is not None:
+            return None
+        from maverick_dashboard.auth import (
+            _dashboard_token_authenticated,
+            anonymous_local_access_allowed,
+        )
+
+        if not (
+            anonymous_local_access_allowed()
+            or _dashboard_token_authenticated(request)
+        ):
             return None
         from maverick_dashboard import settings_store
 
@@ -2017,6 +2145,8 @@ async def bind_active_tenant(request: Request, call_next):
     selected = await run_in_threadpool(_stored_selection)
     if not selected:
         return await call_next(request)
+    request.state.workspace_tenant_source = "local_selection"
+    request.state.workspace_expected_tenant = selected
     token = set_tenant(selected)
     try:
         return await call_next(request)
@@ -2400,6 +2530,7 @@ async def workforce_page(request: Request) -> HTMLResponse:
     Per-department governed reviews load from /api/v1/departments/{key}/review.
     """
     from maverick.departments import department_entitled, list_departments
+    from maverick.fleet import list_fleets
     from maverick.marketplace.storefront import connector_marketplace
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals
@@ -2412,6 +2543,36 @@ async def workforce_page(request: Request) -> HTMLResponse:
     depts = scope_to_suites(request, list_departments(), suite_of=lambda d: d.key, keep_none=False)
     owner = goal_owner_filter(request)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
+    # Catalog capacity is not deployment state.  Count only persisted fleet
+    # agents that belong to one of the departments visible to this caller.
+    visible_department_keys = {d.key for d in depts}
+    try:
+        deployed_fleets = list_fleets()
+    except Exception:
+        deployed_fleets = []
+    if owner is not None:
+        deployed_fleets = [fleet for fleet in deployed_fleets if fleet.owner == owner]
+    deployed_specialists = sum(
+        1
+        for fleet in deployed_fleets
+        for agent in fleet.agents
+        if agent.domain in visible_department_keys
+    )
+
+    # A saved connection is configured, but it is not necessarily reachable.
+    # Keep this count separate from the much larger connector catalog.
+    try:
+        from maverick.connections import list_connections
+
+        configured_connectors = len(
+            {
+                str(connection.get("connector") or "").strip().lower()
+                for connection in list_connections(owner=owner)
+                if str(connection.get("connector") or "").strip()
+            }
+        )
+    except Exception:
+        configured_connectors = 0
     # The delivery/spend/leader charts render client-side from
     # GET /api/v1/dashboards/workforce.
     return templates.TemplateResponse(
@@ -2422,7 +2583,9 @@ async def workforce_page(request: Request) -> HTMLResponse:
             "entitlements": {d.key: department_entitled(d.key) for d in depts},
             "firm": firm,
             "pack_total": sum(d.headcount for d in depts),
+            "deployed_specialists": deployed_specialists,
             "connector_total": connector_marketplace()["total"],
+            "configured_connectors": configured_connectors,
         },
     )
 
@@ -2733,7 +2896,9 @@ async def learned_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "learned.html",
-        _learned_snapshot(include_pending_items=has_permission(request, "admin")),
+        _learned_snapshot(
+            include_pending_items=has_global_permission(request, "admin")
+        ),
     )
 
 
@@ -4505,10 +4670,12 @@ async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     from real completed work and the client's OWN cost/value inputs (their
     hourly rate + human hours per task, editable right on the page)."""
     from maverick import savings as savings_mod
-    from maverick.config import get_value
+
+    from .api import _value_assumptions_resolution
 
     days = max(1, min(days, 730))
-    cfg = get_value()
+    resolution = _value_assumptions_resolution()
+    cfg = resolution["effective_assumptions"]
     report = savings_mod.compute(_world(), window_days=days, cfg=cfg)
     return templates.TemplateResponse(
         request,
@@ -4517,6 +4684,8 @@ async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
             "days": days,
             "cfg": cfg,
             "report": savings_mod.to_dict(report),
+            "value_resolution": resolution,
+            "can_manage_assumptions": has_global_permission(request, "operate"),
         },
     )
 
@@ -4607,14 +4776,42 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
     )
 
 
+def _provider_integration_inventory() -> list[dict]:
+    from maverick_dashboard import settings_store
+    from maverick_dashboard.integration_readiness import (
+        IntegrationConfigurationUnavailable,
+        provider_readiness,
+        require_readable_config,
+    )
+
+    require_readable_config()
+    rows = settings_store.state()["providers"]
+    if any(row.get("source_errors") for row in rows):
+        raise IntegrationConfigurationUnavailable(
+            "provider configuration source changed while it was read"
+        )
+    for row in rows:
+        row["readiness"] = provider_readiness(
+            row["name"], configured=row["configured"]
+        )
+    return rows
+
+
 @app.get("/providers", response_class=HTMLResponse)
 async def providers_page(request: Request) -> HTMLResponse:
     from maverick.provider_health import get as _health
 
+    try:
+        inventory = _provider_integration_inventory()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="provider inventory is unavailable",
+        ) from exc
     return templates.TemplateResponse(
         request,
         "providers.html",
-        {"rows": _health().snapshot()},
+        {"inventory": inventory, "rows": _health().snapshot()},
     )
 
 
@@ -4654,8 +4851,15 @@ async def audit_page(request: Request) -> HTMLResponse:
         n = max(1, min(int(request.query_params.get("n") or 200), 1000))
     except (TypeError, ValueError):
         n = 200
-    day = safe_audit_day(request.query_params.get("day"))
-    events = default_audit_log().tail(n, day=day)
+    raw_day = request.query_params.get("day")
+    day = safe_audit_day(raw_day)
+    if raw_day not in (None, "") and day is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid audit day. Enter a real date in YYYY-MM-DD format.",
+        )
+    audit_log = default_audit_log()
+    events = audit_log.tail(n, day=day)
     # Distinct kinds in this tail (for the filter dropdown), computed before
     # filtering so every available kind stays selectable; then optionally
     # narrow to one kind (e.g. shield_block, tool_call).
@@ -4666,7 +4870,14 @@ async def audit_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "audit.html",
-        {"events": events, "n": n, "day": day, "kind": kind, "kinds": kinds},
+        {
+            "events": events,
+            "n": n,
+            "day": day,
+            "kind": kind,
+            "kinds": kinds,
+            "audit_signing_enabled": bool(audit_log.signing_enabled),
+        },
     )
 
 
@@ -4756,11 +4967,19 @@ async def external_agents_page(request: Request) -> HTMLResponse:
     and watch their governed runs/spend land on the Operating Record."""
     from maverick import external_agents as xa
 
+    enabled = xa.enabled()
+    entitled = xa.entitled()
+
     return templates.TemplateResponse(
         request,
         "external_agents.html",
         {
-            "enabled": xa.enabled(),
+            "enabled": enabled,
+            "external_agents_entitled": entitled,
+            "external_agents_can_manage": (
+                enabled and entitled and has_permission(request, "admin")
+            ),
+            "external_agents_can_activate": has_global_permission(request, "admin"),
             "status": xa.status(),
             "agents": xa.roster(),
             "platforms": xa.PLATFORMS,
@@ -5388,53 +5607,44 @@ async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
 
 @app.get("/plugins", response_class=HTMLResponse)
 async def plugins_page(request: Request) -> HTMLResponse:
-    """Discovered + enabled plugins."""
+    """Show discovery, configuration, trust-gate, and import status."""
     require_global_permission(request, "admin")
     try:
-        from maverick.plugins import _allowed_plugin_names, _entry_points
-        from maverick.runtime_overrides import plugin_overlay
+        from maverick.plugins import installable_plugins, plugin_status_snapshot
+
+        from maverick_dashboard.integration_readiness import plugin_readiness
+
+        snapshot = plugin_status_snapshot()
+        for items in snapshot["plugins"].values():
+            for item in items:
+                item["readiness"] = plugin_readiness(item)
+        installable = installable_plugins()
     except Exception:
         return templates.TemplateResponse(
             request,
             "plugins.html",
-            {"groups": {}, "allowlist_active": False, "error": "plugin discovery failed"},
+            {
+                "groups": {},
+                "allowlist_active": False,
+                "error": "Plugin discovery failed.",
+                "installable": [],
+                "install_enabled": _plugin_install_enabled(),
+                "install_env_forced_off": _plugin_install_env_state() is False,
+                "plugins_can_admin": has_global_permission(request, "admin"),
+            },
         )
-    allow = _allowed_plugin_names()
-    on, off = plugin_overlay()
-    groups: dict[str, list[dict]] = {}
-    for label, group in (
-        ("tools", "maverick.tools"),
-        ("channels", "maverick.channels"),
-        ("skills", "maverick.skills"),
-        ("personas", "maverick.personas"),
-    ):
-        items: list[dict] = []
-        try:
-            for ep in _entry_points(group):
-                items.append(
-                    {
-                        "name": ep.name,
-                        "module": getattr(ep, "value", str(ep)),
-                        "enabled": allow is None or ep.name in allow,
-                        "forced": "on" if ep.name in on else "off" if ep.name in off else None,
-                    }
-                )
-        except Exception:
-            pass
-        groups[label] = items
-    try:
-        from maverick.plugins import installable_plugins
-
-        installable = installable_plugins()
-    except Exception:  # pragma: no cover -- never break the page
-        installable = []
+    discovery_errors = snapshot.get("discovery_errors") or []
+    error = "; ".join(
+        f"{item.get('kind', 'plugin')}: {item.get('error', 'discovery failed')}"
+        for item in discovery_errors
+    ) or None
     return templates.TemplateResponse(
         request,
         "plugins.html",
         {
-            "groups": groups,
-            "allowlist_active": allow is not None,
-            "error": None,
+            "groups": snapshot["plugins"],
+            "allowlist_active": snapshot["allowlist_active"],
+            "error": error,
             "installable": installable,
             "install_enabled": _plugin_install_enabled(),
             "install_env_forced_off": _plugin_install_env_state() is False,
@@ -5583,35 +5793,21 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
     no config.toml editing needed."""
     require_global_permission(request, "admin")
     try:
-        from maverick.config import load_config
+        from maverick_dashboard.integration_readiness import mcp_inventory
 
-        cfg_servers = (load_config() or {}).get("mcp_servers") or {}
-    except Exception:
-        cfg_servers = {}
-    try:
-        from maverick.runtime_overrides import mcp_overlay
-
-        overlay = mcp_overlay()
+        rows = mcp_inventory()
     except RuntimeOverridesSecurityError:
         raise
-    except Exception:
-        overlay = {}
-
-    def _row(name: str, s: dict, source: str) -> dict:
-        return {
-            "name": name,
-            "transport": "http" if s.get("url") else "stdio",
-            "command": s.get("command") or "",
-            "args": s.get("args") or [],
-            "url": s.get("url") or "",
-            "source": source,
-            "removable": source == "dashboard",
-        }
-
-    rows = [_row(n, s, "config") for n, s in cfg_servers.items() if isinstance(s, dict)]
-    # overlay servers not shadowed by config (config wins, matching the kernel)
-    rows += [_row(n, s, "dashboard") for n, s in overlay.items() if n not in cfg_servers]
-    saved_msg = {"add": "MCP server added.", "remove": "MCP server removed."}.get(saved, "")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="MCP inventory is unavailable",
+        ) from exc
+    saved_msg = {
+        "add": "MCP server added.",
+        "remove": "MCP server removed.",
+        "test": "MCP readiness check finished.",
+    }.get(saved, "")
     return templates.TemplateResponse(
         request,
         "mcp.html",
@@ -5686,11 +5882,43 @@ async def mcp_remove(request: Request, name: str = Form(...)) -> RedirectRespons
     return RedirectResponse("/mcp?saved=remove", status_code=303)
 
 
+@app.post("/mcp/test")
+async def mcp_test(request: Request, name: str = Form(...)) -> RedirectResponse:
+    """Run a bounded initialize/tools-list handshake for one configured server."""
+    _require_same_origin(request)
+    require_global_permission(request, "admin")
+    from maverick_dashboard.integration_readiness import mcp_server_config, test_mcp
+
+    server = (name or "").strip()
+    spec = mcp_server_config(server)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="no such MCP server")
+    await test_mcp(server, spec)
+    return RedirectResponse("/mcp?saved=test", status_code=303)
+
+
 @app.get("/tools", response_class=HTMLResponse)
-async def tools_page(request: Request) -> HTMLResponse:
-    """Tools the agent currently has registered (post-ACL, post-rate-limit)."""
+async def tools_page(
+    request: Request,
+    q: str = Query(default="", max_length=128),
+    page: int = Query(default=1, ge=1, le=100_000),
+    per_page: int = Query(default=50, ge=1, le=100),
+) -> HTMLResponse:
+    """Bounded registered-tool inventory (post-ACL, post-rate-limit)."""
     tools: list[dict] = []
     error = None
+    query = q.strip()
+    tool_page = {
+        "query": query,
+        "page": page,
+        "per_page": per_page,
+        "catalog_total": 0,
+        "filtered_total": 0,
+        "returned": 0,
+        "page_count": 1,
+        "first": 0,
+        "last": 0,
+    }
     try:
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
@@ -5698,19 +5926,222 @@ async def tools_page(request: Request) -> HTMLResponse:
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
-        tools = [
+        catalog = [
             {"name": t.name, "description": (t.description or "")[:240]}
             for t in sorted(reg.all(), key=lambda x: x.name)
         ]
+        folded = query.casefold()
+        filtered = [
+            tool
+            for tool in catalog
+            if not folded
+            or folded in tool["name"].casefold()
+            or folded in tool["description"].casefold()
+        ]
+        page_count = max(1, (len(filtered) + per_page - 1) // per_page)
+        if page > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail="tool page exceeds the available search results",
+            )
+        start = (page - 1) * per_page
+        tools = filtered[start : start + per_page]
+        tool_page = {
+            "query": query,
+            "page": page,
+            "per_page": per_page,
+            "catalog_total": len(catalog),
+            "filtered_total": len(filtered),
+            "returned": len(tools),
+            "page_count": page_count,
+            "first": start + 1 if tools else 0,
+            "last": start + len(tools),
+        }
     except RuntimeOverridesSecurityError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     return templates.TemplateResponse(
         request,
         "tools.html",
-        {"tools": tools, "error": error},
+        {"tools": tools, "error": error, "tool_page": tool_page},
     )
+
+
+_TOOL_PREREQUISITE_STATES = {"ready", "blocked", "unknown", "not_required"}
+
+
+def _tool_prerequisite(status: str, detail: str) -> dict:
+    """One closed readiness dimension for a registered tool."""
+    normalized = str(status or "unknown").strip().lower()
+    if normalized not in _TOOL_PREREQUISITE_STATES:
+        normalized = "unknown"
+        detail = "invalid readiness evidence was rejected"
+    return {
+        "status": normalized,
+        "ready": (
+            True
+            if normalized in {"ready", "not_required"}
+            else False
+            if normalized == "blocked"
+            else None
+        ),
+        "detail": str(detail)[:240],
+    }
+
+
+def _tool_permission_row(
+    name: str,
+    *,
+    catalog_present: bool,
+    base_acl_allowed: bool,
+    effective_acl_allowed: bool | None = None,
+    overlay_blocked: bool = False,
+    provider_status: str = "unknown",
+    connection_status: str = "unknown",
+    feature_policy_status: str = "unknown",
+    sandbox_status: str = "unknown",
+    sandbox_constructed: bool = False,
+    base_acl_detail: str = "",
+) -> dict:
+    """Build a fail-closed, dimensioned tool-usability statement.
+
+    The current registry does not declare provider, connection, or feature
+    dependencies per tool.  Those dimensions therefore stay ``unknown`` until
+    a caller supplies explicit evidence; catalog presence and ACL admission can
+    never silently stand in for them.
+    """
+
+    def dependency(status: str, label: str) -> dict:
+        normalized = str(status or "unknown").strip().lower()
+        detail = {
+            "ready": f"required {label} is explicitly ready",
+            "blocked": f"required {label} is blocked or unready",
+            "not_required": f"{label} is explicitly not required",
+            "unknown": (
+                f"required-{label} dependency metadata is not declared for this tool"
+            ),
+        }.get(normalized, f"{label} readiness evidence is invalid")
+        return _tool_prerequisite(normalized, detail)
+
+    sandbox_normalized = str(sandbox_status or "unknown").strip().lower()
+    sandbox_detail = {
+        "ready": (
+            "sandbox construction and tool-level readiness are explicitly verified"
+        ),
+        "blocked": "sandbox construction or readiness is blocked",
+        "not_required": "this tool explicitly does not require a sandbox",
+        "unknown": (
+            "sandbox constructed, but tool-level execution readiness was not probed"
+            if sandbox_constructed
+            else "sandbox construction/readiness evidence is unavailable"
+        ),
+    }.get(sandbox_normalized, "sandbox evidence is invalid")
+    if effective_acl_allowed is None:
+        effective_acl_allowed = base_acl_allowed and not overlay_blocked
+    prerequisites = {
+        "provider": dependency(provider_status, "provider"),
+        "connection": dependency(connection_status, "connection"),
+        "feature_policy": dependency(
+            feature_policy_status,
+            "feature/module policy",
+        ),
+        "base_acl": _tool_prerequisite(
+            "ready" if base_acl_allowed else "blocked",
+            base_acl_detail
+            or (
+                "tool is admitted by the effective base ACL"
+                if base_acl_allowed
+                else "tool is blocked by the effective base ACL"
+            ),
+        ),
+        "dashboard_override": _tool_prerequisite(
+            "blocked" if overlay_blocked else "ready",
+            (
+                "tool is blocked by the dashboard runtime override"
+                if overlay_blocked
+                else "no dashboard runtime override blocks this tool"
+            ),
+        ),
+        "effective_acl": _tool_prerequisite(
+            "ready" if effective_acl_allowed else "blocked",
+            (
+                "the production ACL resolver admits this tool"
+                if effective_acl_allowed
+                else "the production ACL resolver blocks this tool"
+            ),
+        ),
+        "sandbox": _tool_prerequisite(
+            sandbox_normalized,
+            sandbox_detail,
+        ),
+    }
+    blocked = [
+        key for key, value in prerequisites.items() if value["status"] == "blocked"
+    ]
+    unknown = [
+        key for key, value in prerequisites.items() if value["status"] == "unknown"
+    ]
+    usable = bool(
+        catalog_present
+        and not blocked
+        and not unknown
+        and all(
+            value["status"] in {"ready", "not_required"}
+            for value in prerequisites.values()
+        )
+    )
+    if not catalog_present:
+        state = "not_in_catalog"
+        reason = "tool is not present in the assembled catalog"
+    elif any(
+        dimension in blocked
+        for dimension in ("base_acl", "dashboard_override", "effective_acl")
+    ):
+        state = "policy_blocked"
+        reason = (
+            prerequisites["base_acl"]["detail"]
+            if "base_acl" in blocked
+            else prerequisites["dashboard_override"]["detail"]
+            if "dashboard_override" in blocked
+            else prerequisites["effective_acl"]["detail"]
+        )
+    elif blocked:
+        state = "prerequisite_blocked"
+        reason = "blocked prerequisite(s): " + ", ".join(blocked)
+    elif unknown:
+        state = "readiness_unknown"
+        reason = (
+            "usability is unverified; unknown prerequisite(s): "
+            + ", ".join(unknown)
+        )
+    else:
+        state = "usable"
+        reason = "every declared prerequisite is ready"
+    return {
+        "name": str(name),
+        # Backward compatibility only: ``enabled`` now aliases strict usability,
+        # not the narrower ACL-admission result.
+        "enabled": usable,
+        "usable": usable,
+        "catalog_present": bool(catalog_present),
+        "configured": None,
+        "provider_ready": prerequisites["provider"]["ready"],
+        "connection_ready": prerequisites["connection"]["ready"],
+        "feature_policy_allowed": prerequisites["feature_policy"]["ready"],
+        "base_acl_allowed": prerequisites["base_acl"]["ready"] is True,
+        "policy_allowed": prerequisites["effective_acl"]["ready"] is True,
+        "overlay_blocked": bool(overlay_blocked),
+        "sandbox_constructed": bool(sandbox_constructed),
+        "sandbox_ready": prerequisites["sandbox"]["ready"],
+        "runtime_ready": None,
+        "prerequisites": prerequisites,
+        "unready_dimensions": blocked + unknown,
+        "state": state,
+        "reason": reason,
+    }
 
 
 def _permissions_snapshot() -> dict:
@@ -5729,6 +6160,7 @@ def _permissions_snapshot() -> dict:
         "network": "open",
         "plugins": [],
         "providers": [],
+        "provider_states": [],
         "retention": {},
         "overlay_denied": [],
         "error": None,
@@ -5757,7 +6189,24 @@ def _permissions_snapshot() -> dict:
             "with no filesystem/network isolation. Use the docker or podman "
             "backend for untrusted goals."
         )
-    snap["providers"] = sorted((cfg.get("providers") or {}).keys())
+    try:
+        from maverick.config import provider_configuration_state
+
+        from maverick_dashboard.settings_store import PROVIDERS
+
+        snap["provider_states"] = [
+            provider_configuration_state(spec["name"]) for spec in PROVIDERS
+        ]
+        snap["providers"] = sorted(
+            state["name"]
+            for state in snap["provider_states"]
+            if state["configured"]
+        )
+    except Exception as e:
+        snap["provider_states"] = []
+        snap["error"] = (snap["error"] or "") + (
+            f" provider state: {type(e).__name__}: {e}"
+        )
     snap["channels"] = [
         {"name": n, "enabled": bool(c.get("enabled", True))}
         for n, c in (cfg.get("channels") or {}).items()
@@ -5774,23 +6223,78 @@ def _permissions_snapshot() -> dict:
     except Exception:
         snap["overlay_denied"] = []
 
-    # Live registry = the true set of tools after ACL + rate-limit +
-    # overlay filtering. A tool present here is genuinely callable.
+    # Capture the catalog before ACL filtering, then apply the exact production
+    # ACL resolver. Registry presence proves only that a tool implementation was
+    # assembled and admitted by policy; it does NOT prove credentials,
+    # dependency health, network reachability, or a successful live call.
+    sandbox_constructed = False
+    sandbox_status = "unknown"
+    base_policy_allowed: set[str] = set()
     try:
+        from maverick.safety.tool_acl import apply_to_registry, filter_tools, resolve_max_risk
+        from maverick.safety.tool_risk import tools_exceeding
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
 
         wm = _world()  # honor the configured backend (SQLite or Postgres)
-        reg = base_registry(world=wm, sandbox=build_sandbox())
-        enabled = {t.name for t in reg.all()}
+        sandbox = build_sandbox()
+        sandbox_constructed = True
+        reg = base_registry(
+            world=wm,
+            sandbox=sandbox,
+            _skip_tool_acl=True,
+        )
+        catalog = {t.name for t in reg.all()}
+        allowed = set(sec.get("allowed_tools") or [])
+        denied = set(sec.get("denied_tools") or [])
+        max_risk = resolve_max_risk()
+        if max_risk:
+            denied |= tools_exceeding(catalog, max_risk)
+        base_policy_allowed = filter_tools(
+            catalog,
+            allowed=allowed,
+            denied=denied,
+        )
+        apply_to_registry(reg)
+        policy_allowed = {t.name for t in reg.all()}
     except RuntimeOverridesSecurityError:
         raise
     except Exception as e:
         snap["error"] = (snap["error"] or "") + f" registry: {type(e).__name__}: {e}"
-        enabled = set()
-    # Show enabled tools + the overlay-denied ones (so the user can re-enable).
-    names = sorted(enabled | set(snap["overlay_denied"]))
-    snap["tools"] = [{"name": n, "enabled": n in enabled} for n in names]
+        catalog = set()
+        policy_allowed = set()
+        sandbox_status = "blocked"
+    # Show every assembled catalog tool, including policy-denied rows. Runtime
+    # readiness remains explicitly unverified until a typed readiness receipt
+    # exists for that connector/tool.
+    names = sorted(catalog | set(snap["overlay_denied"]))
+    snap["tools"] = []
+    for name in names:
+        admitted = name in policy_allowed
+        base_admitted = name in base_policy_allowed
+        overlay_blocked = name in snap["overlay_denied"]
+        if overlay_blocked:
+            acl_detail = (
+                "tool is admitted by the configured base ACL"
+                if base_admitted
+                else "tool is blocked by the configured base ACL or risk policy"
+            )
+        elif not base_admitted:
+            acl_detail = "blocked by the configured base ACL or risk policy"
+        else:
+            acl_detail = "tool is admitted by the configured base ACL"
+        snap["tools"].append(
+            _tool_permission_row(
+                name,
+                catalog_present=name in catalog,
+                base_acl_allowed=base_admitted,
+                effective_acl_allowed=admitted,
+                overlay_blocked=overlay_blocked,
+                sandbox_status=sandbox_status,
+                sandbox_constructed=sandbox_constructed,
+                base_acl_detail=acl_detail,
+            )
+        )
 
     try:
         from maverick.plugins import installed_plugins
@@ -5803,13 +6307,77 @@ def _permissions_snapshot() -> dict:
     return snap
 
 
+def _permissions_tool_page(
+    snapshot: dict,
+    *,
+    q: str = "",
+    state: str = "all",
+    page: int = 1,
+    per_page: int = 50,
+) -> dict:
+    """Return a bounded, filterable tool slice without mutating ``snapshot``."""
+
+    query = q.strip().casefold()
+    if len(query) > 128:
+        raise HTTPException(status_code=400, detail="tool search is limited to 128 characters")
+    selected_state = state.strip().lower() or "all"
+    if selected_state not in {"all", "admitted", "blocked"}:
+        raise HTTPException(status_code=400, detail="state must be all, admitted, or blocked")
+    if page < 1 or per_page < 1 or per_page > 100:
+        raise HTTPException(status_code=400, detail="invalid tool page bounds")
+
+    catalog = list(snapshot.get("tools") or [])
+    filtered = [
+        tool
+        for tool in catalog
+        if (
+            not query
+            or query in str(tool.get("name") or "").casefold()
+            or query in str(tool.get("reason") or "").casefold()
+        )
+        and (
+            selected_state == "all"
+            or bool(tool.get("policy_allowed")) == (selected_state == "admitted")
+        )
+    ]
+    start = (page - 1) * per_page
+    result = dict(snapshot)
+    result["tools"] = filtered[start : start + per_page]
+    result["tool_page"] = {
+        "query": q.strip(),
+        "state": selected_state,
+        "page": page,
+        "per_page": per_page,
+        "catalog_total": len(catalog),
+        "admitted_total": sum(bool(tool.get("policy_allowed")) for tool in catalog),
+        "filtered_total": len(filtered),
+        "returned": len(result["tools"]),
+        "page_count": max(1, (len(filtered) + per_page - 1) // per_page),
+        "complete": start == 0 and len(result["tools"]) == len(filtered),
+    }
+    return result
+
+
 @app.get("/permissions", response_class=HTMLResponse)
-async def permissions_page(request: Request) -> HTMLResponse:
+async def permissions_page(
+    request: Request,
+    q: str = Query(default="", max_length=128),
+    state: str = Query(default="all"),
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=100),
+) -> HTMLResponse:
     """What Lightwork can do — tools, capabilities, channels, data flow."""
+    perm = _permissions_tool_page(
+        _permissions_snapshot(),
+        q=q,
+        state=state,
+        page=page,
+        per_page=per_page,
+    )
     return templates.TemplateResponse(
         request,
         "permissions.html",
-        {"perm": _permissions_snapshot()},
+        {"perm": perm},
     )
 
 
@@ -6087,19 +6655,50 @@ async def channels_page(request: Request, saved: str = "") -> HTMLResponse:
         return out
 
     try:
-        from maverick.config import load_config
+        from maverick_dashboard import settings_store
+        from maverick_dashboard.integration_readiness import (
+            channel_readiness,
+            require_readable_config,
+        )
 
-        channels = _display_channels((load_config() or {}).get("channels") or {})
-    except Exception:
-        channels = {}
-    from maverick_dashboard import settings_store
-
-    managed = settings_store.channels_state()
+        effective_channels = require_readable_config().get("channels") or {}
+        channels = _display_channels(effective_channels)
+        managed = settings_store.channels_state()
+        for channel in managed:
+            raw = effective_channels.get(channel["name"])
+            raw = raw if isinstance(raw, dict) else {}
+            channel["configured"] = bool(raw.get("enabled", False))
+            channel["readiness"] = channel_readiness(channel["name"], raw)
+        channel_inventory = []
+        for name, safe in channels.items():
+            raw = effective_channels.get(name)
+            raw = raw if isinstance(raw, dict) else {"enabled": bool(raw)}
+            channel_inventory.append(
+                {
+                    "name": name,
+                    "enabled": bool(raw.get("enabled", False)),
+                    "configured": bool(raw.get("enabled", False)),
+                    "detail": safe,
+                    "readiness": channel_readiness(name, raw),
+                }
+            )
+    except RuntimeOverridesSecurityError:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="channel inventory is unavailable",
+        ) from exc
     saved_msg = {"save": "Channel updated.", "clear": "Channel reset."}.get(saved, "")
     return templates.TemplateResponse(
         request,
         "channels.html",
-        {"channels": channels, "managed": managed, "saved": saved_msg},
+        {
+            "channels": channels,
+            "channel_inventory": channel_inventory,
+            "managed": managed,
+            "saved": saved_msg,
+        },
     )
 
 
@@ -6141,7 +6740,19 @@ async def channels_clear(request: Request, channel: str = Form(...)) -> Redirect
 async def providers_api() -> JSONResponse:
     from maverick.provider_health import get as _health
 
-    return JSONResponse({"providers": _health().snapshot()})
+    try:
+        inventory = _provider_integration_inventory()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="provider inventory is unavailable",
+        ) from exc
+    return JSONResponse(
+        {
+            "providers": inventory,
+            "health": _health().snapshot(),
+        }
+    )
 
 
 @app.websocket("/ws/v1/runs/{goal_id}/events")
@@ -6735,6 +7346,8 @@ async def shield_calibration_api() -> JSONResponse:
 
 @app.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request) -> HTMLResponse:
+    from .onboarding_state import selected_model_routes_ready
+
     recent = _world().list_goals(owner=goal_owner_filter(request), limit=10, order="desc")
     # "Use template" on /templates links here with ?title=&description= to
     # prefill the form (never auto-start; the user reviews, edits, submits).
@@ -6747,6 +7360,7 @@ async def chat_page(request: Request) -> HTMLResponse:
             "recent": recent,
             "prefill_title": prefill_title,
             "prefill_description": prefill_description,
+            "model_route_ready": selected_model_routes_ready(),
         },
     )
 
@@ -6755,8 +7369,12 @@ async def chat_page(request: Request) -> HTMLResponse:
 # bare root renders it too; the overview/stats view lives at /overview. This is
 # a distinct handler rather than a second decorator on chat_page so the route
 # name stays unique (duplicate names collide as OpenAPI operationIds).
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request) -> HTMLResponse:
+@app.get("/", response_class=HTMLResponse, response_model=None)
+async def home(request: Request) -> HTMLResponse | RedirectResponse:
+    from .onboarding_state import selected_model_routes_ready
+
+    if not selected_model_routes_ready():
+        return RedirectResponse("/start", status_code=303)
     return await chat_page(request)
 
 
@@ -8471,6 +9089,17 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-navfinder.js")
+async def shell_navfinder_js() -> FileResponse:
+    """Accessible registry-backed sidebar search and command palette."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-navfinder.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/static/lightwork-ai-evidence-analysis.css")
 async def ai_evidence_analysis_stylesheet() -> FileResponse:
     """Scoped layout additions for the shared-shell evidence workbench."""
@@ -8870,7 +9499,11 @@ async def get_started_page(request: Request) -> HTMLResponse:
     agent built? anything run or automated?) so it self-completes as you go."""
     from .onboarding_state import build
 
-    state = build(_world())
+    state = build(
+        _world(),
+        can_configure=has_global_permission(request, "admin"),
+        can_operate=has_permission(request, "operate"),
+    )
     return templates.TemplateResponse(
         request,
         "get_started.html",
@@ -8946,8 +9579,16 @@ async def connections_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "connections.html", {})
 
 
-@app.get("/flows/designer", response_class=HTMLResponse)
-@app.get("/flows/designer/{flow_id}", response_class=HTMLResponse)
+@app.get(
+    "/flows/designer",
+    response_class=HTMLResponse,
+    name="flow_designer_create_page",
+)
+@app.get(
+    "/flows/designer/{flow_id}",
+    response_class=HTMLResponse,
+    name="flow_designer_edit_page",
+)
 async def flow_designer_page(
     request: Request, flow_id: str = "", from_template: str = ""
 ) -> HTMLResponse:
@@ -9398,6 +10039,11 @@ def main() -> None:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info", log_config=None)
     else:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+
+# This must remain after every route declaration so lazy included-router
+# contexts and request-scope route objects receive the same final identity.
+_stabilize_effective_route_names(app)
 
 
 if __name__ == "__main__":

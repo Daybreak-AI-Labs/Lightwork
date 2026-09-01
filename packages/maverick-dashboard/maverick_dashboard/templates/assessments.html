@@ -173,6 +173,29 @@
     target.textContent = text || '';
     target.style.color = error ? 'var(--danger)' : 'var(--muted)';
   }
+  function mutationFailure(result, assessment, fallback) {
+    if (!result || result.status !== 409) {
+      detailMessage(responseDetail(result, fallback), true);
+      return;
+    }
+    var target = document.getElementById('as-detail-msg');
+    if (!target) return;
+    target.textContent = '';
+    target.style.color = 'var(--danger)';
+    var explanation = document.createElement('span');
+    explanation.textContent = 'This assessment changed in another tab. Reload the latest revision before retrying. ';
+    target.appendChild(explanation);
+    var reloadButton = document.createElement('button');
+    reloadButton.type = 'button';
+    reloadButton.className = 'btn btn--ghost';
+    reloadButton.id = 'as-reload-current';
+    reloadButton.textContent = 'Reload latest assessment';
+    reloadButton.addEventListener('click', function () {
+      reloadButton.disabled = true;
+      open(assessment.kind, assessment.subject, reloadButton);
+    });
+    target.appendChild(reloadButton);
+  }
 
   function statusPill(a) {
     return '<span class="pill status-' + esc(a.status) + '">' + esc((a.status || '').replace('_', ' ')) + '</span>';
@@ -262,7 +285,7 @@
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/refresh', {
         method: 'POST', body: JSON.stringify({ expected_revision: a.revision })
       }).then(responseData).then(function (result) {
-        if (!result.ok) { detailMessage(responseDetail(result, 'Re-assessment failed.'), true); return; }
+        if (!result.ok) { mutationFailure(result, a, 'Re-assessment failed.'); return; }
         renderDetail(result.data); reload();
       }).catch(function () { detailMessage('Re-assessment failed.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
@@ -275,7 +298,7 @@
         .then(function (response) {
           if (response.ok) { detailCard.hidden = true; current = null; reload(); return null; }
           return responseData(response).then(function (result) {
-            detailMessage(responseDetail(result, 'Delete failed.'), true);
+            mutationFailure(result, a, 'Delete failed.');
           });
         }).catch(function () { detailMessage('Delete failed.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
@@ -286,7 +309,7 @@
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/review',
         { method: 'POST', body: JSON.stringify({ expected_revision: a.revision, lens: lens, decision: decision, cadence_days: isNaN(cad) ? 0 : cad }) })
         .then(responseData).then(function (result) {
-          if (!result.ok) { detailMessage(responseDetail(result, 'Review was not saved.'), true); return; }
+          if (!result.ok) { mutationFailure(result, a, 'Review was not saved.'); return; }
           renderDetail(result.data); reload();
         }).catch(function () { detailMessage('Review was not saved.', true); })
         .finally(function () { if (button.isConnected) button.disabled = false; });
@@ -308,7 +331,7 @@
         jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/evidence',
           { method: 'POST', body: JSON.stringify({ expected_revision: a.revision, lens: el.dataset.lens, control: el.dataset.control, evidence: vals.note }) })
           .then(responseData).then(function (result) {
-            if (!result.ok) { detailMessage(responseDetail(result, 'Evidence was not saved.'), true); return; }
+            if (!result.ok) { mutationFailure(result, a, 'Evidence was not saved.'); return; }
             renderDetail(result.data); reload();
           }).catch(function () { detailMessage('Evidence was not saved.', true); })
           .finally(function () { if (el.isConnected) el.disabled = false; });
@@ -316,10 +339,22 @@
     });
   }
 
-  function open(kind, subject) {
+  function open(kind, subject, retryButton) {
     jfetch('/api/v1/assessments/' + kind + '/' + encodeURIComponent(subject))
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (a) { if (a) { renderDetail(a); reloadListSelection(); detailCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
+      .then(responseData)
+      .then(function (result) {
+        if (!result.ok) {
+          detailMessage(responseDetail(result, 'Could not reload the latest assessment.'), true);
+          return;
+        }
+        renderDetail(result.data);
+        reloadListSelection();
+        detailCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }).catch(function () {
+        detailMessage('Could not reload the latest assessment — check your connection and try again.', true);
+      }).finally(function () {
+        if (retryButton && retryButton.isConnected) retryButton.disabled = false;
+      });
   }
 
   var lastItems = [];

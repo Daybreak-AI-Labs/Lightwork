@@ -8,7 +8,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import _dashboard_token_authenticated, has_permission, require_permission
+from .auth import (
+    _dashboard_token_authenticated,
+    has_global_permission,
+    has_permission,
+    require_permission,
+)
 
 PAGE_PATH = "/third-party/executive-reports"
 API_BASE = "/api/v1/third-party/executive-reports"
@@ -69,6 +74,8 @@ def create_third_party_executive_reports_page_router(
         ):
             raise HTTPException(status_code=404, detail="executive report workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
+        from .api import module_activation_enabled
+
         response = templates.TemplateResponse(
             request,
             "third_party_executive_reports.html",
@@ -82,6 +89,11 @@ def create_third_party_executive_reports_page_router(
                 ),
                 "reports_can_audit": _report_has_permission(request, "audit"),
                 "reports_can_admin": _report_has_permission(request, "admin"),
+                "reports_can_download": _report_has_permission(request, "view"),
+                "reports_can_activate": has_global_permission(request, "admin"),
+                "reports_module_enabled": module_activation_enabled(
+                    "third_party_management.executive_reports"
+                ),
             },
         )
         for name, value in _HEADERS.items():

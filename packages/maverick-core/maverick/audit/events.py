@@ -151,6 +151,14 @@ class EventKind:
     # not a silent edit. payload: tenant, field ("plan"|"quota"), old, new.
     TENANT_PLAN_CHANGED = "tenant_plan_changed"
     TENANT_QUOTA_CHANGED = "tenant_quota_changed"
+    # Deployment-global tenant/workspace control-plane decisions. These are
+    # deliberately separate from tenant-local work so provisioning and a
+    # caller changing the active confidentiality boundary cannot disappear
+    # with (or be attributed only to) the selected tenant's audit chain.
+    # TENANT_CREATED payload: tenant, plan, max_daily_dollars, actor.
+    # WORKSPACE_SELECTED payload: actor, previous_tenant, tenant, source.
+    TENANT_CREATED = "tenant_created"
+    WORKSPACE_SELECTED = "workspace_selected"
     # A user's dashboard access changed: privilege role (global or per-tenant),
     # department (suite) grant, or one atomic SCIM group-authority mutation.
     # One row per change makes who-granted-whom-what-when provable instead of a

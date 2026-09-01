@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import Literal
 
+from maverick.tenant.registry import DEFAULT_TENANT_DAILY_DOLLARS
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _HUNTER_BATCH_BYTES = 16 * 1024 * 1024
@@ -445,18 +446,22 @@ class ExternalCredentialIn(BaseModel):
 
 
 class ConnectionIn(BaseModel):
-    """Create/replace a named SaaS connection: the connector it credentials, its
-    base URL, and an API token (sealed at rest, never returned). ``name`` lets
-    one connector have several accounts (salesforce / salesforce-eu)."""
+    """Create or patch a named SaaS connection.
+
+    Omitted fields preserve existing values.  An update supplies the public
+    ``expected_revision`` from the preceding read so token rotation cannot race
+    another administrator and cannot erase connector/access metadata.
+    """
     name: str = Field(..., min_length=1, max_length=64)
-    connector: str = Field("", max_length=64)
-    base_url: str = Field("", max_length=2048)
-    token: str = Field("", max_length=8192)
+    connector: str | None = Field(None, max_length=64)
+    base_url: str | None = Field(None, max_length=2048)
+    token: str | None = Field(None, max_length=8192)
     # Credential use is separate from credential management. Owner is the
     # least-privilege default; tenant sharing must be explicit, and named grants
     # can admit selected principals without exposing the token itself.
-    access: str = Field("owner", pattern="^(owner|tenant)$")
-    allowed_principals: list[str] = Field(default_factory=list, max_length=100)
+    access: str | None = Field(None, pattern="^(owner|tenant)$")
+    allowed_principals: list[str] | None = Field(None, max_length=100)
+    expected_revision: str | None = Field(None, min_length=1, max_length=128)
 
 
 class FlowSaveIn(BaseModel):
@@ -698,7 +703,11 @@ class TenantCreateIn(BaseModel):
     id: str = Field(..., max_length=128)
     plan: str = Field("free", pattern="^(free|pro|enterprise)$")
     display_name: str = Field("", max_length=200)
-    max_daily_dollars: float = Field(0.0, ge=0.0)
+    max_daily_dollars: float = Field(
+        DEFAULT_TENANT_DAILY_DOLLARS,
+        ge=0.0,
+        description="Daily USD spend cap; 0 explicitly selects unlimited.",
+    )
 
 
 class TenantPlanIn(BaseModel):
@@ -1540,6 +1549,7 @@ class PartnerTenantIn(BaseModel):
     token: str = Field("", max_length=300)
     theme: str = Field("", max_length=60)
     notes: str = Field("", max_length=500)
+    trusted_test_estate_loopback: bool = False
 
 
 class FeatureSwitchIn(BaseModel):

@@ -343,7 +343,9 @@
             <button class="btn" id="cbj-load-detail" type="button">Detail</button>
             <button class="btn" id="cbj-load-progress" type="button">Progress</button>
             <button class="btn" id="cbj-load-history" type="button">History</button>
-            <a class="btn" id="cbj-download" href="#" download aria-disabled="true">Download export</a>
+            <button class="btn" id="cbj-download" type="button" disabled
+                    aria-describedby="cbj-download-hint">Download export</button>
+            <span class="muted" id="cbj-download-hint" role="status">Select a job to make its export available.</span>
           </div>
           <fieldset class="cbj-permission" id="cbj-job-admin-controls"{% if not bulk_jobs_can_admin %} disabled aria-disabled="true"{% endif %}>
             <div class="cbj-actions"><button class="btn" id="cbj-run-job" type="button">Run next batch</button><button class="btn btn--danger" id="cbj-cancel-job" type="button">Cancel job</button></div>

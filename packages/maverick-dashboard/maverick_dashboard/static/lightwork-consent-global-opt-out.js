@@ -41,7 +41,12 @@
       }
       settings.headers = Object.assign({ "Content-Type": "application/json" }, settings.headers);
     }
-    var response = await fetch(apiBase + path, settings);
+    var response;
+    try {
+      response = await fetch(apiBase + path, settings);
+    } catch (_error) {
+      throw new Error("Could not reach the server — check your connection and try again.");
+    }
     var declared = Number(response.headers.get("content-length") || "0");
     if (declared > MAX_RESPONSE_BYTES) {
       throw new Error("Response exceeds the 256 KiB workbench bound.");
@@ -178,8 +183,19 @@
   async function updateConfiguration() {
     var form = element("goo-config-form");
     var id = inputValue(element("goo-lifecycle-form"), "configuration_id");
+    var button = element("goo-update");
     if (!id) return setOperation("Select a configuration before updating it.", "failed");
+    if (button && button.dataset.inFlight === "true") return;
+    if (button) button.dataset.inFlight = "true";
     try {
+      if (!(await window.mvConfirm(
+        "Update and rebind Global Opt-Out configuration “" + id + "”? The new governed version replaces its current channel and device binding.",
+        { okText: "Update configuration" }
+      ))) return;
+      if (button) {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+      }
       var value = await call("/configurations/" + encodeURIComponent(id), {
         method: "PUT",
         body: JSON.stringify(configurationPayload(form, false))
@@ -188,6 +204,12 @@
       setOperation("Configuration version updated and rebound.", "ready", value);
     } catch (error) {
       setOperation(error.message, "failed");
+    } finally {
+      if (button) {
+        delete button.dataset.inFlight;
+        button.removeAttribute("aria-busy");
+        button.disabled = false;
+      }
     }
   }
 
@@ -214,12 +236,25 @@
   async function stateChange(action) {
     var form = element("goo-lifecycle-form");
     var id = inputValue(form, "configuration_id");
+    var button = element(action === "activate" ? "goo-activate" : "goo-revoke");
+    if (button && button.dataset.inFlight === "true") return;
     var payload = {
       expected_revision: Number(inputValue(form, "expected_revision")),
       idempotency_key: inputValue(form, "idempotency_key")
     };
     if (!id) return setOperation("Enter a configuration ID.", "failed");
+    if (button) button.dataset.inFlight = "true";
     try {
+      var prompt = action === "activate"
+        ? "Activate Global Opt-Out configuration “" + id + "”? Its governed mobile and email experiences become eligible for use."
+        : "Revoke Global Opt-Out configuration “" + id + "”? Its governed experiences stop being eligible for new use.";
+      if (!(await window.mvConfirm(prompt, {
+        okText: action === "activate" ? "Activate configuration" : "Revoke configuration"
+      }))) return;
+      if (button) {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+      }
       var value = await call(
         "/configurations/" + encodeURIComponent(id) + "/" + action,
         { method: "POST", body: JSON.stringify(payload) }
@@ -228,6 +263,12 @@
       setOperation("Configuration " + action + "d.", "ready", value);
     } catch (error) {
       setOperation(error.message, "failed");
+    } finally {
+      if (button) {
+        delete button.dataset.inFlight;
+        button.removeAttribute("aria-busy");
+        button.disabled = false;
+      }
     }
   }
 
@@ -245,8 +286,18 @@
     }
   }
 
-  async function maintenance(path, message) {
+  async function maintenance(path, message, buttonId, confirmation) {
+    var button = element(buttonId);
+    if (button && button.dataset.inFlight === "true") return;
+    if (button) button.dataset.inFlight = "true";
     try {
+      if (confirmation && !(await window.mvConfirm(confirmation.message, {
+        okText: confirmation.okText
+      }))) return;
+      if (button) {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+      }
       setOperation(
         message,
         "ready",
@@ -254,6 +305,12 @@
       );
     } catch (error) {
       setOperation(error.message, "failed");
+    } finally {
+      if (button) {
+        delete button.dataset.inFlight;
+        button.removeAttribute("aria-busy");
+        button.disabled = false;
+      }
     }
   }
 
@@ -278,10 +335,13 @@
     }
   });
   on("goo-retry-audit", "click", function () {
-    maintenance("/maintenance/retry-audit", "Signed audit outbox retry completed.");
+    maintenance("/maintenance/retry-audit", "Signed audit outbox retry completed.", "goo-retry-audit");
   });
   on("goo-purge", "click", function () {
-    maintenance("/maintenance/purge", "Expired retention purge completed.");
+    maintenance("/maintenance/purge", "Expired retention purge completed.", "goo-purge", {
+      message: "Purge expired Global Opt-Out retention records for this tenant? Current records and immutable audit evidence are retained.",
+      okText: "Purge expired records"
+    });
   });
 
   refreshStatus();

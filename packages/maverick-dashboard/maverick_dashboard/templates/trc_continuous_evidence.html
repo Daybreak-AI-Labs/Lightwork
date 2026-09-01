@@ -58,8 +58,8 @@
       <h1>Continuous Evidence Operations</h1>
       <p>Operate exact, independently approved collector definitions and tenant enrollments for local SOC 2 observations plus AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security streams, and Okta policy posture.</p>
       <div class="trc-actions">
-        <button class="btn btn--primary" id="trc-refresh" type="button">Refresh live posture</button>
-        <button class="btn" id="trc-run-cycle" type="button">Run one bounded scheduler cycle</button>
+        <button class="btn btn--primary" id="trc-refresh" type="button"{% if not trc_continuous_evidence_enabled %} disabled aria-disabled="true"{% endif %}>Refresh live posture</button>
+        <button class="btn" id="trc-run-cycle" type="button" disabled aria-disabled="true">Run one bounded scheduler cycle</button>
         <a class="btn" href="/compliance">Back to Compliance</a>
       </div>
       <p id="trc-live-status" role="status" aria-live="polite">No request made.</p>
@@ -139,6 +139,7 @@
   var output = document.getElementById("trc-output");
   var confirmation = document.getElementById("trc-confirm");
   var confirmationPanel = document.getElementById("trc-confirm-panel");
+  var runCycle = document.getElementById("trc-run-cycle");
   var highImpact = new Set(["definition-register", "definition-approve", "definition-retire", "enrollment-create", "enrollment-state", "enqueue", "job-requeue", "retention"]);
   var forbiddenKeys = new Set(["tenant", "tenant_id", "principal", "principal_ref", "actor", "actor_ref", "provider", "origin", "url", "scope_ref", "source_ref", "credential", "credential_env", "secret", "raw_evidence", "raw_payload", "compliance_status", "certified"]);
 
@@ -148,6 +149,12 @@
   }
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function setCycleReady(ready) {
+    var disabled = ready !== true;
+    runCycle.disabled = disabled;
+    runCycle.toggleAttribute("disabled", disabled);
+    runCycle.setAttribute("aria-disabled", disabled ? "true" : "false");
   }
   function containsForbidden(value) {
     if (!value || typeof value !== "object") { return false; }
@@ -189,6 +196,7 @@
   async function refresh() {
     setText("trc-live-status", "Loading bounded readiness without provider I/O…");
     var result = await request("GET", "/status", {});
+    setCycleReady(Boolean(result.scheduler && result.scheduler.running === true));
     show(result);
     var stock = result.stock_collectors || {};
     var configured = Array.isArray(stock.configured_stock_collector_ids) ? stock.configured_stock_collector_ids.length : 0;
@@ -203,7 +211,7 @@
   }
 
   document.getElementById("trc-refresh").addEventListener("click", function () {
-    refresh().catch(function (error) { setText("trc-live-status", String(error)); show(String(error)); });
+    refresh().catch(function (error) { setCycleReady(false); setText("trc-live-status", String(error)); show(String(error)); });
   });
   document.getElementById("trc-run-cycle").addEventListener("click", function () {
     setText("trc-live-status", "Running one bounded server-authorized cycle…");
@@ -233,7 +241,7 @@
     } catch (error) { setText("trc-live-status", String(error)); show(String(error)); }
   });
   updateConfirmation();
-  refresh().catch(function (error) { setText("trc-live-status", String(error)); });
+  refresh().catch(function (error) { setCycleReady(false); setText("trc-live-status", String(error)); });
 }());
 </script>
 {% endif %}

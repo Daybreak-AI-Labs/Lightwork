@@ -64,6 +64,11 @@ ACTIVE = "active"
 SUSPENDED = "suspended"
 _STATUSES = frozenset({ACTIVE, SUSPENDED})
 
+# A newly provisioned tenant must start with a real spend boundary.  ``0``
+# remains the explicit representation of unlimited for backwards compatibility,
+# but callers now have to choose it rather than receiving it by omission.
+DEFAULT_TENANT_DAILY_DOLLARS = 5.0
+
 # Serializes the roster load-modify-save across threads in this process; the
 # cross_process_lock below extends that across processes (the registry is edited
 # from both the CLI and the dashboard, which are separate processes).
@@ -278,9 +283,13 @@ def get_tenant(tenant_id: str) -> TenantRecord | None:
 
 def create_tenant(
     tenant_id: str, *, plan: str = "free", display_name: str = "",
-    max_daily_dollars: float = 0.0,
+    max_daily_dollars: float = DEFAULT_TENANT_DAILY_DOLLARS,
 ) -> TenantRecord:
-    """Provision a tenant + its workspace dir. Raises ValueError if it exists."""
+    """Provision a tenant + its workspace with a bounded default spend cap.
+
+    Passing ``max_daily_dollars=0`` is the explicit opt-in to an unlimited
+    tenant. Raises :class:`ValueError` if the tenant already exists.
+    """
     tid = _validate_id(tenant_id)
     quota = _quota_value(max_daily_dollars)
     # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
@@ -539,9 +548,10 @@ def tenant_over_quota(tenant_id: str | None) -> str | None:
     """Human-readable reason when ``tenant_id`` is over its provisioned
     daily-spend cap, else None.
 
-    The cap is ``max_daily_dollars`` on the tenant's roster record (set via
-    ``maverick tenant quota``); 0/unset, an unprovisioned tenant, or no
-    roster all mean "no cap" — enforcement is opt-in per tenant.
+    The cap is ``max_daily_dollars`` on the tenant's roster record. New tenants
+    receive :data:`DEFAULT_TENANT_DAILY_DOLLARS`; ``0`` is reserved for an
+    explicit unlimited choice. An unprovisioned tenant or no roster still means
+    "no cap" for compatibility with single-tenant operation.
     """
     tid = _lookup_id(tenant_id)
     if not tid:
@@ -816,7 +826,8 @@ def tenant_remaining_today(tenant_id: str | None) -> float | None:
 
 
 __all__ = [
-    "ACTIVE", "SUSPENDED", "TenantRecord", "TenantSuspended", "UnknownTenant",
+    "ACTIVE", "SUSPENDED", "DEFAULT_TENANT_DAILY_DOLLARS", "TenantRecord",
+    "TenantSuspended", "UnknownTenant",
     "TenantRegistryError",
     "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",

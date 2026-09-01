@@ -346,6 +346,8 @@
     var listCount = document.getElementById("cbj-list-count");
     var controlForm = document.getElementById("cbj-job-control-form");
     var download = document.getElementById("cbj-download");
+    var downloadHint = document.getElementById("cbj-download-hint");
+    var downloadUrl = "";
     var latestStatus = null;
 
     function formValues(form) { return Object.fromEntries(new FormData(form).entries()); }
@@ -461,11 +463,18 @@
       list.appendChild(dd);
     }
 
+    function makeDownloadAvailable(jobId) {
+      downloadUrl = apiBase + "/" + encodeURIComponent(jobId) + "/download";
+      download.disabled = !canAudit;
+      downloadHint.textContent = canAudit
+        ? "Export ready for job " + String(jobId).slice(0, 128) + "."
+        : "Global audit authority is required to download this export.";
+    }
+
     function selectJob(jobId, revision) {
       controlForm.elements.job_id.value = jobId;
       controlForm.elements.expected_revision.value = revision || "";
-      download.href = apiBase + "/" + encodeURIComponent(jobId) + "/download";
-      download.setAttribute("aria-disabled", "false");
+      makeDownloadAvailable(jobId);
     }
 
     function renderJobs(payload) {
@@ -551,17 +560,20 @@
           || latestStatus.operations[event.target.value] !== true;
       }
     });
-    document.getElementById("cbj-load-detail").addEventListener("click", handle(function () {
+    document.getElementById("cbj-load-detail").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      return runOperation("Load job detail", function () { return request("/" + encodeURIComponent(jobId)); });
+      await runOperation("Load job detail", function () { return request("/" + encodeURIComponent(jobId)); });
+      makeDownloadAvailable(jobId);
     }));
-    document.getElementById("cbj-load-progress").addEventListener("click", handle(function () {
+    document.getElementById("cbj-load-progress").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      return runOperation("Load job progress", function () { return request("/" + encodeURIComponent(jobId) + "/progress"); });
+      await runOperation("Load job progress", function () { return request("/" + encodeURIComponent(jobId) + "/progress"); });
+      makeDownloadAvailable(jobId);
     }));
-    document.getElementById("cbj-load-history").addEventListener("click", handle(function () {
+    document.getElementById("cbj-load-history").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      return runOperation("Load immutable history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
+      await runOperation("Load immutable history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
+      makeDownloadAvailable(jobId);
     }));
     document.getElementById("cbj-run-job").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
@@ -583,8 +595,14 @@
       selectJob(jobId, result.revision);
       await refreshJobs();
     }));
-    download.addEventListener("click", function (event) {
-      if (download.getAttribute("aria-disabled") !== "false" || !canAudit) { event.preventDefault(); }
+    controlForm.elements.job_id.addEventListener("input", function () {
+      downloadUrl = "";
+      download.disabled = true;
+      downloadHint.textContent = "Select or load this job before downloading its export.";
+    });
+    download.addEventListener("click", function () {
+      if (download.disabled || !canAudit || !downloadUrl) { return; }
+      global.location.assign(downloadUrl);
     });
     document.getElementById("cbj-load-credits").addEventListener("click", handle(async function () {
       var result = await runOperation("Load credit detail", function () { return request("/credits/detail"); });

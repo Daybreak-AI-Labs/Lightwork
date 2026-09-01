@@ -2,16 +2,17 @@
 {% block title %}Tool servers · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% from "_integration_readiness.html" import integration_readiness %}
+  {% set verified = servers | selectattr('readiness.live.status', 'equalto', 'verified') | list %}
   {% call hero('Workforce capability', 'Tool servers',
                subtitle='Connected systems',
                lede='Tool servers extend what your workforce can reach —
                      connected and managed right here.') %}
-    {{ state('Current state', (servers | length) ~ ' server(s) connected',
-             badge='live' if servers else 'none yet',
-             badge_class='ok' if servers else 'idle',
-             copy='Each server gives your agents a new set of tools —
-                   calendars, CRMs, file systems and more. Changes made here
-                   apply from the next goal.') }}
+    {{ state('Current state', (servers | length) ~ ' configured; ' ~ (verified | length) ~ ' live verified',
+             badge='live verified' if verified else 'verification unknown',
+             badge_class='ok' if verified else 'idle',
+             copy='Saving a server only configures it. A bounded initialize and
+                   tools/list handshake is required before it is shown live verified.') }}
   {% endcall %}
 
   {% if saved %}
@@ -30,6 +31,7 @@
           <th scope="col">Command / URL</th>
           <th scope="col">Args</th>
           <th scope="col">Source</th>
+          <th scope="col">Readiness</th>
           <th scope="col">Action</th>
         </tr></thead>
         <tbody>
@@ -43,11 +45,18 @@
               {% if s.source == 'dashboard' %}<span class="badge active">added here</span>
               {% else %}<span class="muted">platform</span>{% endif %}
             </td>
+            <td>{{ integration_readiness(s.readiness) }}</td>
             <td>
+              <form method="post" action="/mcp/test" style="margin: 0 0 var(--space-2);">
+                <input type="hidden" name="name" value="{{ s.name }}" />
+                <button type="submit" class="btn btn--primary">Test readiness</button>
+              </form>
               {% if s.removable %}
               <form method="post" action="/mcp/remove" style="margin: 0;">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--ghost" title="Remove this server">Remove</button>
+                <button type="submit" class="btn btn--ghost"
+                        aria-label="Remove {{ s.name }} MCP server"
+                        title="Remove this server">Remove</button>
               </form>
               {% else %}<span class="muted">managed by your administrator</span>{% endif %}
             </td>
@@ -64,8 +73,8 @@
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Runs a command on this machine that provides tools to your agents.
-      Connected the moment you save — live for your workforce from the next
-      goal.
+      Saving configures the command for the next goal; use Test readiness to
+      prove its dependency and MCP handshake.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
@@ -100,8 +109,8 @@
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Connects to a tool server hosted elsewhere, using its web address.
-      Connected the moment you save — live for your workforce from the next
-      goal.
+      Saving records the endpoint. It remains live-unverified until the bounded
+      MCP handshake succeeds.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">

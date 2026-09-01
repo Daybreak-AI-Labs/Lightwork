@@ -13,17 +13,22 @@ def _iso(monkeypatch, tmp_path):
 
 
 def test_add_then_read_stdio_server():
+    import maverick.runtime_overrides as ro
     from maverick.runtime_overrides import add_mcp_server, mcp_overlay
+
     stored = add_mcp_server("filesystem", {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        "env": {"API_BASE": "https://example.com"},
+        "env": {"API_TOKEN": "stdio-secret-value"},
     })
     assert stored["command"] == "npx"
+    persisted = ro.OVERRIDES_PATH.read_text(encoding="utf-8")
+    assert "stdio-secret-value" not in persisted
+    assert "MVKAR1:" in persisted
     overlay = mcp_overlay()
     assert "filesystem" in overlay
     assert overlay["filesystem"]["args"][0] == "-y"
-    assert overlay["filesystem"]["env"]["API_BASE"] == "https://example.com"
+    assert overlay["filesystem"]["env"]["API_TOKEN"] == "stdio-secret-value"
 
 
 def test_add_http_server_roundtrips_via_toml():

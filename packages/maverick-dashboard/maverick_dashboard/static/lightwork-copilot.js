@@ -12,9 +12,10 @@
   var form = document.getElementById("mv-copilot-form");
   var input = document.getElementById("mv-copilot-input");
   var note = document.getElementById("mv-copilot-note");
+  var providerSetup = document.getElementById("mv-copilot-provider-setup");
   var sendButton = document.getElementById("mv-copilot-send");
   if (!fab || !panel || !closeButton || !tips || !prompts || !log ||
-      !form || !input || !note || !sendButton) return;
+      !form || !input || !note || !sendButton || !providerSetup) return;
 
   var history = [];
   var opener = null;
@@ -68,6 +69,17 @@
       });
   }
 
+  function renderProviderSetup(payload) {
+    var setup = payload && payload.provider_setup;
+    var href = setup && typeof setup.href === "string" ? setup.href : "";
+    var label = setup && typeof setup.label === "string" ? setup.label : "";
+    var allowed = href === "/start" || href === "/settings#settings-integrations";
+    providerSetup.hidden = !allowed;
+    if (!allowed) return;
+    providerSetup.setAttribute("href", href);
+    providerSetup.textContent = label || "Open the in-app setup guide";
+  }
+
   async function loadContext() {
     if (contextLoaded) return;
     contextLoaded = true;
@@ -78,7 +90,9 @@
         {headers: {Accept: "application/json"}, credentials: "same-origin", cache: "no-store"}
       );
       if (!response.ok) throw new Error("context unavailable");
-      renderContext(await response.json());
+      var payload = await response.json();
+      renderContext(payload);
+      renderProviderSetup(payload);
     } catch (_error) {
       note.textContent = "Using the local page guide.";
     }
@@ -140,6 +154,7 @@
       history.push({role: "user", content: message});
       history = history.slice(-6);
       if (payload.page_context) renderContext(payload.page_context);
+      renderProviderSetup(payload);
       if (payload.mode === "built_in_fallback") {
         note.textContent = "Model provider unavailable — using the built-in page guide.";
       } else if (payload.mode === "built_in") {

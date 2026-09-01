@@ -3,6 +3,54 @@
    the DOM is ready without defer. First section: reusable feedback
    primitives (mvToast/mvConfirm/mvForm/mvCopy). Second: halt pill, goal
    form, sidebar + preferences behaviors. */
+    // Bind every same-origin browser mutation to the workspace this document
+    // was rendered under. A selection changed in another tab then receives a
+    // server-side 409 instead of writing into the newly selected tenant.
+    (function () {
+      var meta = document.querySelector('meta[name="lightwork-workspace-tenant"]');
+      var expected = meta ? String(meta.getAttribute('content') || '').trim() : '';
+      window.mvWorkspaceTenant = expected;
+      if (!expected) return;
+
+      var nativeFetch = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        var opts = init ? Object.assign({}, init) : {};
+        var method = String(opts.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        var unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+        var rawUrl = input instanceof Request ? input.url : input;
+        var sameOrigin = false;
+        try { sameOrigin = new URL(String(rawUrl), window.location.href).origin === window.location.origin; }
+        catch (e) { sameOrigin = false; }
+        if (!unsafe || !sameOrigin) return nativeFetch(input, init);
+
+        var headers = new Headers(opts.headers || (input instanceof Request ? input.headers : undefined));
+        if (!headers.has('X-Lightwork-Expected-Tenant')) {
+          headers.set('X-Lightwork-Expected-Tenant', expected);
+        }
+        opts.headers = headers;
+        if (input instanceof Request) return nativeFetch(new Request(input, opts));
+        return nativeFetch(input, opts);
+      };
+
+      document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        var method = String(form.method || 'get').toUpperCase();
+        if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return;
+        var sameOrigin = false;
+        try { sameOrigin = new URL(form.action || window.location.href, window.location.href).origin === window.location.origin; }
+        catch (e) { sameOrigin = false; }
+        if (!sameOrigin) return;
+        var field = form.querySelector('input[name="_expected_tenant"]');
+        if (!field) {
+          field = document.createElement('input');
+          field.type = 'hidden'; field.name = '_expected_tenant';
+          form.appendChild(field);
+        }
+        field.value = expected;
+      }, true);
+    })();
+
     // Reusable feedback primitives, on every page that extends base.html.
     // Prefer these over the browser's native dialogs. Contract: docs/ui-primitives.md.
     //   window.mvToast(message, {error}) -> transient status/alert toast
@@ -193,40 +241,84 @@
       const pill = document.getElementById('halt-pill');
       const label = document.getElementById('halt-label');
       if (!pill || !label) return;
-      let armed = false;
+      // A failed read is not equivalent to a cleared stop.  Keep an explicit
+      // unknown state so the shell can never invite a mutation based on a
+      // fabricated answer.
+      let haltState = 'unknown';
+      let pending = false;
+      function render(state, detail) {
+        haltState = state;
+        const armed = state === 'armed';
+        const known = state === 'armed' || state === 'clear';
+        pill.classList.toggle('armed', armed);
+        pill.classList.toggle('unavailable', !known);
+        label.textContent = detail || (armed
+          ? 'STOPPED — click to resume'
+          : state === 'clear' ? 'Stop all' : 'Stop status unavailable');
+        pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
+        pill.setAttribute('aria-disabled', (!known || pending) ? 'true' : 'false');
+      }
+      render('unknown', 'checking');
       async function refresh() {
         try {
           const r = await fetch('/api/v1/halt');
           if (!r.ok) throw new Error('halt status ' + r.status);
           const j = await r.json();
-          armed = !!j.active;
-          pill.classList.toggle('armed', armed);
-          label.textContent = armed ? 'STOPPED — click to resume' : 'Stop all';
-          pill.setAttribute('aria-pressed', armed ? 'true' : 'false');
+          render(j.active ? 'armed' : 'clear');
+          return true;
         } catch (e) {
-          // Keep the last known state on a transient poll failure — resetting the
-          // label to "Stop all" while leaving aria-pressed="true" would desync the
-          // visible and announced state. Seed a neutral state only if we never
-          // had one.
-          if (!pill.hasAttribute('aria-pressed')) {
-            label.textContent = 'Stop all';
-            pill.setAttribute('aria-pressed', 'false');
-          }
+          // Preserve a previously verified state during an ordinary poll
+          // outage.  If no state was ever verified, or a mutation just failed
+          // with an ambiguous outcome, the caller sets/keeps unknown.
+          if (haltState === 'unknown') render('unknown');
+          return false;
         }
       }
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
-        if (armed) {
-          await fetch('/api/v1/halt', { method: 'DELETE' });
-        } else {
-          if (!(await mvConfirm('Stop all work? Every running goal pauses safely at its next step and waits for you to resume.', { okText: 'Stop all work' }))) return;
-          await fetch('/api/v1/halt', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({reason: 'manual via dashboard'}),
-          });
+        if (pending || haltState === 'unknown') {
+          mvToast('Emergency stop status is unavailable. Retry after the dashboard can verify it.', { error: true });
+          return;
         }
-        await refresh();
+        const wasArmed = haltState === 'armed';
+        try {
+          let response;
+          if (wasArmed) {
+            pending = true;
+            render(haltState, 'Resuming…');
+            response = await fetch('/api/v1/halt', { method: 'DELETE' });
+          } else {
+            if (!(await mvConfirm('Stop all work? Every running goal pauses safely at its next step and waits for you to resume.', { okText: 'Stop all work' }))) return;
+            pending = true;
+            render(haltState, 'Stopping…');
+            response = await fetch('/api/v1/halt', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({reason: 'manual via dashboard'}),
+            });
+          }
+          if (!response.ok) {
+            // A failed arm may still have stopped this replica, and a failed
+            // clear may still have changed one backend.  Do not display the
+            // pre-request state as verified until a fresh read succeeds.
+            haltState = 'unknown';
+            let detail = 'Emergency stop change failed (error ' + response.status + ').';
+            try {
+              const body = await response.json();
+              if (body && body.detail) detail = String(body.detail);
+            } catch (parseError) { /* keep the bounded fallback */ }
+            mvToast(detail, { error: true });
+          } else {
+            render(wasArmed ? 'clear' : 'armed');
+          }
+        } catch (e) {
+          haltState = 'unknown';
+          mvToast('Emergency stop change failed: the dashboard is unreachable.', { error: true });
+        } finally {
+          pending = false;
+        }
+        const verified = await refresh();
+        if (!verified && haltState === 'unknown') render('unknown');
       });
       pill.addEventListener('keydown', function(ev) {
         // role="button" must activate on Space; the native <a href>

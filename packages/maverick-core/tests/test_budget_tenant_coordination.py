@@ -29,7 +29,9 @@ def _isolate(tmp_path, monkeypatch):
 def test_remaining_today_none_without_cap():
     assert registry.tenant_remaining_today(None) is None
     assert registry.tenant_remaining_today("ghost") is None   # unprovisioned
-    registry.create_tenant("acme", plan="free")               # provisioned, no cap
+    registry.create_tenant(
+        "acme", plan="free", max_daily_dollars=0
+    )  # explicitly provisioned without a cap
     assert registry.tenant_remaining_today("acme") is None
 
 

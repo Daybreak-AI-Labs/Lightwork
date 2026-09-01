@@ -5012,8 +5012,13 @@ def _iter_saved_raw():
             yield data
 
 
-def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
-                       months: int = 12) -> dict:
+def acceptance_metrics(
+    *,
+    types: frozenset[str] | set[str] | None = None,
+    months: int = 12,
+    since: float | None = None,
+    until: float | None = None,
+) -> dict:
     """Reviewer-acceptance KPIs over decided assessments -- the measurable
     learning loop. FIRST-PASS means approved with no follow-up thread: the
     reviewer accepted the agent's draft as-is. QUALIFIED is approved after
@@ -5039,6 +5044,11 @@ def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
         if status not in ("approved", "rejected") \
                 or not data.get("decided_at"):
             continue
+        at = float(data["decided_at"])
+        if since is not None and at < float(since):
+            continue
+        if until is not None and at > float(until):
+            continue
         decided += 1
         fups = data.get("followups") or []
         if status == "rejected":
@@ -5048,7 +5058,6 @@ def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
         else:
             first_pass += 1
         created = float(data.get("created_at") or 0)
-        at = float(data["decided_at"])
         if created and at >= created:
             latencies.append((at - created) / 86400.0)
         row = trend.get(time.strftime("%Y-%m", time.gmtime(at)))

@@ -47,7 +47,10 @@ PAGES: tuple[dict, ...] = (
         "group": "Operate",
         "icon": "check",
         "floor": "view",
-        "default": "operate",
+        # The root route sends every unconfigured installation here.  Keep
+        # the guide visible to read-only users; the page projects their
+        # authority and never turns its setup links into mutation grants.
+        "default": "view",
     },
     {
         "path": "/chat",

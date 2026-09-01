@@ -38,6 +38,7 @@ def test_create_list_get_roundtrip():
     assert body["id"] == "acme"
     assert body["plan"] == "enterprise"
     assert body["status"] == "active"
+    assert body["max_daily_dollars"] == 5.0
     # The response tells the operator where to drop acme's own config.toml.
     assert body["config_path"].endswith("/config.toml")
     assert "tenants/acme/" in body["config_path"].replace("\\", "/")
@@ -45,6 +46,63 @@ def test_create_list_get_roundtrip():
     # It shows up in the list and is fetchable.
     assert any(t["id"] == "acme" for t in client.get("/api/v1/admin/tenants").json())
     assert client.get("/api/v1/admin/tenants/acme").json()["plan"] == "enterprise"
+
+
+def test_create_is_anchored_in_global_audit(monkeypatch):
+    import maverick.audit as audit
+
+    calls = []
+    monkeypatch.setattr(
+        audit,
+        "record_global",
+        lambda kind, **payload: calls.append((kind, payload)) or True,
+    )
+    response = client.post(
+        "/api/v1/admin/tenants",
+        json={"id": "audited", "plan": "enterprise", "max_daily_dollars": 12},
+    )
+
+    assert response.status_code == 201, response.text
+    assert calls == [
+        (
+            audit.EventKind.TENANT_CREATED,
+            {
+                "agent": "local",
+                "goal_id": None,
+                "actor": "local",
+                "tenant": "audited",
+                "plan": "enterprise",
+                "max_daily_dollars": 12.0,
+            },
+        )
+    ]
+
+
+def test_audit_refusal_rolls_back_tenant_publication(monkeypatch):
+    import maverick.audit as audit
+
+    def refuse(*_args, **_kwargs):
+        raise audit.AuditRefused("custody unavailable")
+
+    monkeypatch.setattr(audit, "record_global", refuse)
+    response = client.post("/api/v1/admin/tenants", json={"id": "unlogged"})
+
+    assert response.status_code == 503
+    assert "not published" in response.json()["detail"]
+    assert client.get("/api/v1/admin/tenants/unlogged").status_code == 404
+
+
+def test_unlimited_tenant_quota_requires_explicit_zero():
+    bounded = client.post("/api/v1/admin/tenants", json={"id": "bounded"})
+    unlimited = client.post(
+        "/api/v1/admin/tenants",
+        json={"id": "explicit-unlimited", "max_daily_dollars": 0},
+    )
+
+    assert bounded.status_code == 201
+    assert bounded.json()["max_daily_dollars"] == 5.0
+    assert unlimited.status_code == 201
+    assert unlimited.json()["max_daily_dollars"] == 0.0
 
 
 def test_duplicate_is_409():

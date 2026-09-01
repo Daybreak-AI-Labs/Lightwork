@@ -92,6 +92,60 @@ def test_provider_post_redacts_and_persists(monkeypatch, tmp_path):
     assert "9999" in body                                # only the masked hint
 
 
+def test_tenant_provider_source_is_displayed_and_dashboard_rotation_refused(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+
+    tenant_path = config.tenant_config_path()
+    assert tenant_path is not None
+    tenant_path.parent.mkdir(parents=True, exist_ok=True)
+    tenant_path.write_text(
+        '[providers.openai]\napi_key = "tenant-secret"\n',  # pragma: allowlist secret
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    state = config.provider_configuration_state("openai")
+    assert state["api_key_source"] == "tenant config"
+    assert state["dashboard_can_set_api_key"] is False
+    page = c.get("/settings").text
+    assert "API key is controlled by tenant config" in page
+
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "dashboard-secret"},  # pragma: allowlist secret
+    )
+    assert response.status_code == 409
+    assert "rotate that source" in response.json()["detail"]
+    assert config.get_provider_config("openai")["api_key"] == "tenant-secret"  # pragma: allowlist secret
+
+
+def test_environment_key_can_be_replaced_and_effective_digest_is_verified(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "environment-secret")  # pragma: allowlist secret
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+
+    before = config.provider_configuration_state("openai")
+    assert before["api_key_source"] == "environment:OPENAI_API_KEY"
+    assert before["dashboard_can_set_api_key"] is True
+
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "rotated-secret"},  # pragma: allowlist secret
+    )
+    assert response.status_code == 200, response.text
+    after = config.provider_configuration_state("openai")
+    assert after["api_key_source"] == "dashboard"
+    assert config.get_provider_config("openai")["api_key"] == "rotated-secret"  # pragma: allowlist secret
+
+
 def test_toggle_endpoints(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
     from maverick import config

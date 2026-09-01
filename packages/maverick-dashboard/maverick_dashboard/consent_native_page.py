@@ -62,6 +62,8 @@ def create_consent_native_page_router(templates: Jinja2Templates) -> APIRouter:
                 detail="native consent workbench unavailable",
             )
         nonce = secrets.token_urlsafe(18)
+        from .api import module_activation_enabled
+
         response = templates.TemplateResponse(
             request,
             "consent_native_admin.html",
@@ -72,6 +74,9 @@ def create_consent_native_page_router(templates: Jinja2Templates) -> APIRouter:
                 "csp_style_nonce": nonce,
                 "native_can_audit": has_global_permission(request, "audit"),
                 "native_can_admin": has_global_permission(request, "admin"),
+                "native_module_enabled": module_activation_enabled(
+                    "consent_preferences.native_sdk"
+                ),
             },
         )
         for name, value in _HEADERS.items():

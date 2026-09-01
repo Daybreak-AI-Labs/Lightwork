@@ -179,6 +179,10 @@ def test_gateway_404s_while_disabled(monkeypatch):
                   json={"tool": "crm_update"})
     assert r.status_code == 404
     assert bare.get("/api/v1/external/openapi.json").status_code == 404
+    page = client.get("/external-agents")
+    assert page.status_code == 200
+    assert 'href="/api/v1/external/openapi.json"' not in page.text
+    assert "gateway description is unavailable while the gateway is off" in page.text
 
 
 def test_openapi_artifact_describes_every_gateway_operation():
@@ -583,6 +587,7 @@ def test_console_page_renders_roster_and_forms():
     assert "data-xa-mint" in page
     assert "Salesforce Agentforce" in page
     assert "Connect your platform" in page
+    assert 'href="/api/v1/external/openapi.json"' in page
 
 
 def test_admin_mutations_are_csrf_gated_but_gateway_is_not():

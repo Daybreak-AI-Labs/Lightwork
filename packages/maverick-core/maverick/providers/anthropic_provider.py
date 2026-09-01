@@ -301,7 +301,24 @@ class AnthropicClient:
             kw["default_headers"] = dict(default_headers)
         timeout = llm_http_timeout()
         if timeout is not None:
-            kw["timeout"] = timeout
+            # Anthropic 1.x deliberately ships against ``httpx2`` while the
+            # rest of Lightwork still uses ``httpx``.  Passing an
+            # ``httpx.Timeout`` across that SDK boundary is accepted by the
+            # constructor but is later treated as a scalar delay, producing a
+            # ``float + Timeout`` TypeError in the transport.  Always rebuild
+            # the value with the timeout class exported by the installed SDK;
+            # this remains compatible with older Anthropic releases where the
+            # exported class was the ordinary httpx timeout.
+            sdk_timeout = getattr(anthropic, "Timeout", None)
+            if sdk_timeout is None:  # pragma: no cover - legacy SDK fallback
+                kw["timeout"] = float(timeout.read)
+            else:
+                kw["timeout"] = sdk_timeout(
+                    connect=timeout.connect,
+                    read=timeout.read,
+                    write=timeout.write,
+                    pool=timeout.pool,
+                )
         self.client = anthropic.Anthropic(**kw)
         self.aclient = anthropic.AsyncAnthropic(**kw)
 

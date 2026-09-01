@@ -7,6 +7,9 @@ installer whose success carries no information.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -34,6 +37,57 @@ def test_explicit_config_path_wins_and_keeps_env_adjacent(monkeypatch, tmp_path)
     assert config_dir == target.parent
     assert config_file == target
     assert env_file == target.parent / ".env"
+
+
+def test_fast_setup_writes_and_smoke_reads_the_explicit_config(tmp_path):
+    """Exercise the real writer/loader contract in a fresh interpreter."""
+    target = tmp_path / "operator" / "lightwork.toml"
+    isolated_home = tmp_path / "profile"
+    installer_root = Path(__file__).resolve().parents[1]
+    core_root = Path(__file__).resolve().parents[3] / "packages" / "maverick-core"
+    script = f"""
+from pathlib import Path
+from maverick_installer import wizard
+
+wizard.preflight = lambda: True
+wizard.welcome = lambda: None
+wizard._docker_available = lambda: False
+result = wizard.run_fast()
+
+from maverick.config import config_path, load_config
+expected = Path({str(target)!r})
+assert result == 0
+assert wizard.CONFIG_FILE == expected
+assert config_path() == expected
+assert expected.is_file()
+assert load_config()["sandbox"]["backend"] == "local"
+"""
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(isolated_home),
+            "USERPROFILE": str(isolated_home),
+            "MAVERICK_HOME": str(tmp_path / "ignored-home"),
+            "MAVERICK_CONFIG": str(target),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": os.pathsep.join((str(installer_root), str(core_root))),
+        }
+    )
+    env.pop("ANTHROPIC_API_KEY", None)
+
+    completed = subprocess.run(  # noqa: S603 - exact interpreter and test script
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def _stub(monkeypatch, tmp_path: Path, *, smoke: bool):

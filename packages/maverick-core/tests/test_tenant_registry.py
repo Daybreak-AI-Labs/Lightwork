@@ -20,6 +20,14 @@ def test_create_lists_and_makes_workspace(tmp_path):
     assert (tmp_path / "tenants" / "acme").exists()
 
 
+def test_create_defaults_to_bounded_quota_and_zero_is_explicit_unlimited():
+    bounded = tr.create_tenant("bounded")
+    unlimited = tr.create_tenant("unlimited", max_daily_dollars=0)
+
+    assert bounded.max_daily_dollars == tr.DEFAULT_TENANT_DAILY_DOLLARS == 5.0
+    assert unlimited.max_daily_dollars == 0.0
+
+
 def test_create_duplicate_rejected():
     tr.create_tenant("acme")
     with pytest.raises(ValueError):

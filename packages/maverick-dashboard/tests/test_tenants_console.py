@@ -26,7 +26,11 @@ def test_tenants_page_renders_and_nav(monkeypatch, tmp_path):
 
 def test_empty_state(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    assert "No tenants provisioned" in _client().get("/tenants").text
+    text = _client().get("/tenants").text
+    assert "No tenants provisioned" in text
+    assert "enter 0 only for unlimited" in text
+    assert 'name="max_daily_dollars"' in text
+    assert 'value="5"' in text
 
 
 def test_lists_provisioned_tenants(monkeypatch, tmp_path):

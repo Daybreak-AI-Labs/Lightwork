@@ -96,6 +96,59 @@ def test_connection_use_policy_roundtrips_without_token(monkeypatch, tmp_path):
     assert "token" not in body and "never-return-me" not in r.text
 
 
+def test_token_only_rotation_preserves_metadata_and_requires_fresh_revision(
+    monkeypatch, tmp_path
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import connections
+
+    c = _client()
+    created = c.post(
+        "/api/v1/connections",
+        json={
+            "name": "shared",
+            "connector": "salesforce",
+            "base_url": "https://tenant.example",
+            "token": "old",
+            "access": "tenant",
+            "allowed_principals": ["agent:finance"],
+        },
+    ).json()
+
+    missing = c.post(
+        "/api/v1/connections", json={"name": "shared", "token": "missing"}
+    )
+    assert missing.status_code == 409
+
+    rotated = c.post(
+        "/api/v1/connections",
+        json={
+            "name": "shared",
+            "token": "new",
+            "expected_revision": created["revision"],
+        },
+    )
+    assert rotated.status_code == 201, rotated.text
+    body = rotated.json()
+    assert body["connector"] == "salesforce"
+    assert body["base_url"] == "https://tenant.example"
+    assert body["access"] == "tenant"
+    assert body["allowed_principals"] == ["agent:finance"]
+    assert body["revision"] != created["revision"]
+    assert connections.get_connection("shared")["token"] == "new"
+
+    stale = c.post(
+        "/api/v1/connections",
+        json={
+            "name": "shared",
+            "token": "stale",
+            "expected_revision": created["revision"],
+        },
+    )
+    assert stale.status_code == 409
+    assert connections.get_connection("shared")["token"] == "new"
+
+
 @pytest.mark.parametrize(
     ("status", "authenticated"),
     [(200, True), (204, True), (302, False), (401, False), (403, False), (404, False)],
