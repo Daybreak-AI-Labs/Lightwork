@@ -10,6 +10,7 @@ config loader.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from maverick import workspace_journal as wj
@@ -163,7 +164,12 @@ def test_revert_refuses_restore_through_symlink(workdir, journal_on, tmp_path):
     victim = tmp_path / "victim.txt"
     victim.write_text("untouched")
     (workdir / "a.txt").unlink()
-    (workdir / "a.txt").symlink_to(victim)
+    try:
+        (workdir / "a.txt").symlink_to(victim)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
     res = wj.revert_goal()
     assert victim.read_text() == "untouched"
     assert res["skipped"] == 1

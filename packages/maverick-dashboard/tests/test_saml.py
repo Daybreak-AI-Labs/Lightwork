@@ -263,7 +263,10 @@ def test_saml_only_session_reaches_protected_route_and_anonymous_is_denied(
         "mvk_session",
         saml_mod.mint_session_cookie("alice@example.com", secret=SECRET),
     )
-    assert authenticated.get("/api/v1/providers").status_code == 200
+    # The raw inventory is global-admin-only; a valid default-viewer session is
+    # authenticated (403 rather than 401) and can still reach the redacted page.
+    assert authenticated.get("/api/v1/providers").status_code == 403
+    assert authenticated.get("/providers").status_code == 200
 
 
 # --- ACS --------------------------------------------------------------------

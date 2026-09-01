@@ -698,20 +698,6 @@ class ActiveTenantIn(BaseModel):
     tenant_id: str | None = Field(None, max_length=128)
 
 
-class SandboxBackendIn(BaseModel):
-    """Select the execution sandbox backend from the dashboard."""
-    backend: str = Field(..., pattern="^(local|docker|podman)$")
-    # Explicit acknowledgement for the un-isolated backend: switching TO
-    # "local" runs model-driven shell on the host, so it never happens on a
-    # bare click.
-    acknowledge_local_risk: bool = False
-
-
-class ActiveTenantIn(BaseModel):
-    """Select (or, with ``None``, clear) the dashboard's active tenant."""
-    tenant_id: str | None = Field(None, max_length=128)
-
-
 class TenantCreateIn(BaseModel):
     """Provision a new tenant (admin only)."""
     id: str = Field(..., max_length=128)

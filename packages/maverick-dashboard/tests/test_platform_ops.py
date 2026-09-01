@@ -128,7 +128,8 @@ def test_audit_binder_payload_and_page():
 
 
 # --- partner fleet ----------------------------------------------------------
-def test_partner_registry_check_and_rollup():
+def test_partner_registry_check_and_rollup(monkeypatch):
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "true")
     r = client.post("/api/v1/partner/tenants",
                     json={"name": "Acme Hospitality",
                           "base_url": "http://127.0.0.1:9",   # closed port

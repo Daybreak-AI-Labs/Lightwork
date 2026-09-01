@@ -757,6 +757,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/compliance/grc-studio",
         "label": "No-code GRC Studio",
+        "aliases": "workflow builder governance risk compliance studio",
         "group": "Govern",
         "icon": "compliance",
         "floor": "view",
@@ -1210,7 +1211,14 @@ def nav_groups(role: str | None) -> list[dict]:
         else:
             g = {"label": page["group"], "links": []}
             groups.append(g)
-        g["links"].append({"href": page["path"], "label": page["label"], "icon": page["icon"]})
+        g["links"].append(
+            {
+                "href": page["path"],
+                "label": page["label"],
+                "icon": page["icon"],
+                "aliases": page.get("aliases", ""),
+            }
+        )
     return groups
 
 

@@ -36,13 +36,30 @@ class SecuritySuiteConfigUnavailable(RuntimeError):
     """The security-suite overlay cannot be read without risking data loss."""
 
 
-def _locked():
+class ProviderRotationConflict(RuntimeError):
+    """Provider authority changed or rejected a dashboard credential rotation."""
+
+
+class ProviderConfigurationUnavailable(RuntimeError):
+    """Provider authority could not be inspected or restored safely."""
+
+
+def _locked(*, strict: bool = False):
     from contextlib import ExitStack
 
     from maverick.file_lock import cross_process_lock
     stack = ExitStack()
-    stack.enter_context(_SETTINGS_LOCK)
-    stack.enter_context(cross_process_lock(config.dashboard_overrides_path()))
+    try:
+        stack.enter_context(_SETTINGS_LOCK)
+        stack.enter_context(
+            cross_process_lock(config.dashboard_overrides_path(), strict=strict)
+        )
+    except BaseException:
+        # ``ExitStack`` is not itself entered until the caller's ``with``. If
+        # the second acquisition fails here, release the already-held
+        # in-process lock instead of wedging every later settings mutation.
+        stack.close()
+        raise
     return stack
 
 
@@ -511,6 +528,273 @@ def set_provider(name: str, api_key: str | None = None, base_url: str | None = N
         if not pcfg:
             data["providers"].pop(name, None)
         _write(data)
+
+
+def _provider_authority_fingerprint(name: str) -> str:
+    """Digest only provider sources that outrank the dashboard overlay.
+
+    The digest is deliberately one-way because those source tables can contain
+    credentials.  It binds a rotation to the operator/tenant generations that
+    were authorized without ever returning or logging their values.
+    """
+    import hashlib
+
+    # Resolve installer-persisted environment before reading interpolated
+    # operator material, matching provider_configuration_state().
+    config._load_wizard_env()
+    sources: list[tuple[str, Path]] = []
+    operator = os.environ.get(config.CONFIG_OVERLAY_ENV, "").strip()
+    if operator:
+        sources.append(("operator", Path(operator).expanduser()))
+    tenant = config.tenant_config_path()
+    if tenant is not None:
+        sources.append(("tenant", tenant))
+
+    authority: list[dict] = []
+    for source, path in sources:
+        loaded = config._load_config_file(path)
+        providers = loaded.get("providers") if isinstance(loaded, dict) else None
+        if providers is not None and not isinstance(providers, dict):
+            raise ProviderConfigurationUnavailable(
+                f"{source} provider configuration is invalid"
+            )
+        table = providers.get(name) if isinstance(providers, dict) else None
+        if (
+            isinstance(providers, dict)
+            and name in providers
+            and not isinstance(table, dict)
+        ):
+            raise ProviderConfigurationUnavailable(
+                f"{source} provider configuration is invalid"
+            )
+        authority.append(
+            {
+                "source": source,
+                "path": str(path.absolute()),
+                "provider": table,
+            }
+        )
+    encoded = json.dumps(
+        authority,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _verify_provider_rotation(
+    *,
+    authority_expected: str,
+    authority_after: str,
+    authority_after_confirm: str,
+    observed_state: dict,
+    observed: object,
+    key_value: str,
+    base_value: str,
+) -> None:
+    """Reject a post-commit generation that is not the authorized one."""
+    import hashlib
+    import hmac
+
+    if observed_state["source_errors"]:
+        raise ProviderConfigurationUnavailable(
+            "provider configuration became unreadable during rotation"
+        )
+    if not isinstance(observed, dict):
+        raise ProviderConfigurationUnavailable(
+            "effective provider configuration is invalid"
+        )
+    if not (
+        authority_expected == authority_after == authority_after_confirm
+    ):
+        raise ProviderRotationConflict(
+            "provider configuration changed while the rotation was committing"
+        )
+    if key_value:
+        expected_digest = hashlib.sha256(key_value.encode("utf-8")).digest()
+        observed_digest = hashlib.sha256(
+            str(observed.get("api_key") or "").strip().encode("utf-8")
+        ).digest()
+        if not hmac.compare_digest(expected_digest, observed_digest):
+            raise ProviderRotationConflict(
+                "provider key is not the effective credential; review the active source"
+            )
+    if base_value and str(observed.get("base_url") or "").strip() != base_value:
+        raise ProviderRotationConflict(
+            "provider base URL is not the effective endpoint; review the active source"
+        )
+
+
+def _restore_provider_overlay(
+    *,
+    path: Path,
+    existed: bool,
+    previous_bytes: bytes | None,
+    previous_mode: int | None,
+) -> None:
+    """Restore the exact pre-rotation dashboard generation under its lock."""
+    if existed:
+        if previous_bytes is None or previous_mode is None:
+            raise ProviderConfigurationUnavailable(
+                "provider rollback state is unavailable"
+            )
+        from maverick.file_lock import atomic_write_bytes
+
+        atomic_write_bytes(path, previous_bytes, mode=previous_mode)
+    else:
+        path.unlink(missing_ok=True)
+    config.reset_config_cache()
+
+
+def rotate_provider(
+    name: str,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> dict:
+    """Atomically publish a provider rotation only when it becomes effective.
+
+    The entire dashboard read/modify/verify/rollback transaction holds the
+    settings lock.  A one-way fingerprint detects an operator or tenant source
+    changing while the transaction is in flight.  Any rejected post-write
+    verification restores the exact preceding overlay generation before this
+    function returns.
+    """
+    import copy
+    if name not in _PROVIDER_NAMES:
+        raise ValueError("unknown provider")
+    key_value = str(api_key or "").strip()
+    base_value = str(base_url or "").strip()
+    if not key_value and not base_value:
+        raise ValueError("enter a provider value to save")
+
+    try:
+        # Provider credentials are security-sensitive shared state. Refuse the
+        # rotation when the filesystem cannot provide a real cross-process
+        # lock; a process-local fallback could let two workers clobber a
+        # successfully verified credential generation.
+        with _locked(strict=True):
+            overlay_path: Path | None = None
+            overlay_existed = False
+            before_overlay: dict | None = None
+            before_bytes: bytes | None = None
+            before_mode: int | None = None
+            mutation_attempted = False
+            try:
+                overlay_path = config.dashboard_overrides_path()
+                overlay_existed = overlay_path.exists()
+                if overlay_existed:
+                    import stat
+
+                    before_bytes = overlay_path.read_bytes()
+                    before_mode = stat.S_IMODE(overlay_path.stat().st_mode)
+                before_overlay = _load_overlay_for_update()
+                # Keep the sealed generation for byte-equivalent rollback, but
+                # authenticate every ciphertext before changing anything. A
+                # corrupt provider or unrelated secret must not be overwritten
+                # into an apparently healthy generation by a rotation.
+                _unseal_overlay(copy.deepcopy(before_overlay))
+
+                config.reset_config_cache()
+                authority_before = _provider_authority_fingerprint(name)
+                before = config.provider_configuration_state(name)
+                authority_confirm = _provider_authority_fingerprint(name)
+                if before["source_errors"]:
+                    raise ProviderConfigurationUnavailable(
+                        "provider configuration is unreadable; repair the active "
+                        "config source before rotating credentials"
+                    )
+                if authority_before != authority_confirm:
+                    raise ProviderRotationConflict(
+                        "provider configuration changed while the rotation was being authorized"
+                    )
+
+                blockers = []
+                if key_value and not before["dashboard_can_set_api_key"]:
+                    blockers.append(
+                        f"API key is controlled by {before['api_key_source']}"
+                    )
+                if base_value and not before["dashboard_can_set_base_url"]:
+                    blockers.append(
+                        f"base URL is controlled by {before['base_url_source']}"
+                    )
+                if blockers:
+                    raise ProviderRotationConflict(
+                        "; ".join(blockers) + "; rotate that source instead"
+                    )
+
+                data = copy.deepcopy(before_overlay)
+                provider_table = data.setdefault("providers", {}).setdefault(name, {})
+                if key_value:
+                    provider_table["api_key"] = key_value
+                if base_value:
+                    provider_table["base_url"] = base_value
+
+                # Recheck immediately before commit. The post-commit check below is
+                # still required because higher-authority files do not share this
+                # dashboard lock.
+                if authority_confirm != _provider_authority_fingerprint(name):
+                    raise ProviderRotationConflict(
+                        "provider configuration changed before the rotation could commit"
+                    )
+                # atomic_write_text may replace the file before a later flush
+                # or directory-sync error is reported. Treat any attempted
+                # write as published so every failure takes the rollback path.
+                mutation_attempted = True
+                _write(data)
+                config.reset_config_cache()
+
+                authority_after = _provider_authority_fingerprint(name)
+                observed_state = config.provider_configuration_state(name)
+                observed = config.get_provider_config(name) or {}
+                authority_after_confirm = _provider_authority_fingerprint(name)
+                _verify_provider_rotation(
+                    authority_expected=authority_confirm,
+                    authority_after=authority_after,
+                    authority_after_confirm=authority_after_confirm,
+                    observed_state=observed_state,
+                    observed=observed,
+                    key_value=key_value,
+                    base_value=base_value,
+                )
+                return observed_state
+            except Exception as exc:
+                if mutation_attempted:
+                    try:
+                        if overlay_path is None or before_overlay is None:
+                            raise ProviderConfigurationUnavailable(
+                                "provider rollback state is unavailable"
+                            )
+                        _restore_provider_overlay(
+                            path=overlay_path,
+                            existed=overlay_existed,
+                            previous_bytes=before_bytes,
+                            previous_mode=before_mode,
+                        )
+                    except Exception as rollback_exc:
+                        raise ProviderConfigurationUnavailable(
+                            "provider rotation failed and the previous dashboard "
+                            "configuration could not be restored"
+                        ) from rollback_exc
+                if isinstance(
+                    exc,
+                    (ProviderConfigurationUnavailable, ProviderRotationConflict),
+                ):
+                    raise
+                raise ProviderConfigurationUnavailable(
+                    "provider configuration is unavailable; the rotation was "
+                    "not committed"
+                ) from exc
+    except (ProviderConfigurationUnavailable, ProviderRotationConflict):
+        raise
+    except Exception as exc:
+        # Lock acquisition, path inspection, and any failure before the inner
+        # transaction are still recoverable configuration outages to the API,
+        # never raw 500s.
+        raise ProviderConfigurationUnavailable(
+            "provider configuration is unavailable; settings were not changed"
+        ) from exc
 
 
 def clear_provider(name: str) -> None:
@@ -1278,7 +1562,9 @@ def channels_state() -> list[dict]:
 __all__ = [
     "PROVIDERS", "CAPABILITY_DEFAULTS", "CAPABILITY_INFO",
     "FEATURE_DEFAULTS", "FEATURE_INFO", "CHANNELS",
-    "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "clear_provider",
+    "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "rotate_provider",
+    "clear_provider", "ProviderRotationConflict",
+    "ProviderConfigurationUnavailable",
     "SecuritySuiteConfigUnavailable", "SecuritySuiteRevisionConflict",
     "security_suite_revision",
     "set_dgm", "set_ekko", "set_security_suite",

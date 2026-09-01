@@ -59,8 +59,18 @@ def test_tenant_role_changes_are_audited(_audit_dir):
         ("tenant_role", "acme", "admin", None)]
 
 
-def test_suite_grant_changes_are_audited(_audit_dir):
+def test_suite_grant_changes_are_audited(_audit_dir, monkeypatch):
+    import maverick.config as config
     from maverick_dashboard import suite_grants
+
+    # Removing an explicit grant is safe only when the configured fallback is
+    # no broader than that grant.  Keep this test about the audit transition,
+    # while preserving the fail-closed privilege-boundary contract.
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {"dashboard": {"default_suites": ["finance"]}},
+    )
     suite_grants.set_suites("user:fin", ["finance", "tax"], actor="user:boss")
     suite_grants.set_suites("user:fin", ["tax", "finance"], actor="user:boss")  # no-op
     suite_grants.remove_grant("user:fin", actor="user:boss")

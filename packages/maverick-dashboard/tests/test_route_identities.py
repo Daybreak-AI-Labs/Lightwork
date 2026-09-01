@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.testclient import TestClient
-from maverick_dashboard.route_identity import stabilize_effective_route_names
+from maverick_dashboard.route_identity import (
+    iter_compatible_route_contexts,
+    stabilize_effective_route_names,
+)
 
 
 def _effective_routes() -> Iterator[Any]:
@@ -20,6 +24,22 @@ def _effective_routes() -> Iterator[Any]:
             yield from effective_route_contexts()
         else:
             yield route
+
+
+def test_compatible_route_traversal_recurses_without_fastapi_helper() -> None:
+    nested = APIRouter()
+
+    @nested.get("/nested")
+    async def nested_route() -> dict[str, bool]:
+        return {"ok": True}
+
+    direct = SimpleNamespace(path="/direct", methods={"GET"})
+    legacy_wrapper = SimpleNamespace(original_router=nested)
+
+    routes = list(iter_compatible_route_contexts((direct, legacy_wrapper)))
+
+    assert direct in routes
+    assert any(getattr(route, "path", None) == "/nested" for route in routes)
 
 
 def _effective_value(route: Any, attribute: str) -> Any:

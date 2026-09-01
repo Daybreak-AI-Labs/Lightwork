@@ -244,6 +244,7 @@ templates.context_processors.append(_theme_context)
 # exactly as before.
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
+    from .api import _shared_halt_backend
 
     try:
         role = caller_role(request)
@@ -252,10 +253,22 @@ def _nav_context(request: Request) -> dict:
     groups = ui_visibility.nav_groups(role)
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
+    # A deployment-wide halt backend is a global control even when the caller
+    # is an administrator inside one tenant.  Keep the shell's affordance in
+    # lock-step with the API rather than discovering this only after a 403.
+    try:
+        can_halt = (
+            has_global_permission(request, "admin")
+            if _shared_halt_backend()
+            else has_permission(request, "operate")
+        )
+    except Exception:  # pragma: no cover -- shell rendering stays fail-closed
+        can_halt = False
     return {
         "nav_groups": groups,
         "show_settings_link": show_settings,
         "can_create_goal": has_permission(request, "operate"),
+        "can_halt": can_halt,
     }
 
 
@@ -2603,7 +2616,10 @@ async def learning_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "learning.html",
-        {"snap": _learning_snapshot(request)},
+        {
+            "snap": _learning_snapshot(request),
+            "learning_can_manage": has_global_permission(request, "admin"),
+        },
     )
 
 
@@ -6379,7 +6395,11 @@ async def permissions_page(
     return templates.TemplateResponse(
         request,
         "permissions.html",
-        {"perm": perm},
+        {
+            "perm": perm,
+            "permissions_can_manage_sandbox": has_global_permission(request, "admin"),
+            "permissions_can_manage_tools": has_permission(request, "operate"),
+        },
     )
 
 
@@ -6739,7 +6759,11 @@ async def channels_clear(request: Request, channel: str = Form(...)) -> Redirect
 
 
 @app.get("/api/v1/providers")
-async def providers_api() -> JSONResponse:
+async def providers_api(request: Request) -> JSONResponse:
+    # This is the raw deployment inventory, including effective base URLs and
+    # config-source diagnostics. It is a global control-plane resource, not a
+    # tenant-scoped readiness summary.
+    require_global_permission(request, "admin")
     from maverick.provider_health import get as _health
 
     try:

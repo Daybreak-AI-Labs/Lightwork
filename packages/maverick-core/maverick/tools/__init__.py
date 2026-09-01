@@ -1385,8 +1385,12 @@ def base_registry(
     # never set this private flag; the default remains fail-closed ACL
     # enforcement and the permissions snapshot applies the same resolver to
     # the introspection registry immediately after capturing catalog names.
-    if not _skip_tool_acl:
-        _apply_tool_acl(reg, channel=channel, user_id=user_id)
+    _apply_tool_acl_unless_skipped(
+        reg,
+        skip=_skip_tool_acl,
+        channel=channel,
+        user_id=user_id,
+    )
     _apply_deferred_loading(reg)
 
     # Route external connector WRITES through durable governed transactions.
@@ -1484,6 +1488,18 @@ def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | No
     except Exception as e:  # pragma: no cover
         import logging as _logging
         _logging.getLogger(__name__).warning("tool_acl: %s", e)
+
+
+def _apply_tool_acl_unless_skipped(
+    reg: ToolRegistry,
+    *,
+    skip: bool,
+    channel: str | None,
+    user_id: str | None,
+) -> None:
+    """Keep the private catalog-introspection bypass out of registry flow."""
+    if not skip:
+        _apply_tool_acl(reg, channel=channel, user_id=user_id)
 
 
 def _apply_mcp_tools(reg: ToolRegistry, mcp_clients: list | None) -> None:

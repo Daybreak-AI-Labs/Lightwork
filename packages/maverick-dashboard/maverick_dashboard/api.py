@@ -3608,6 +3608,50 @@ async def license_evidence(request: Request, license_id: str, body: LicenseNoteI
 # ---- partner fleet (multi-tenant console) ----------------------------------
 
 
+def _partner_test_estate_loopback_enabled() -> bool:
+    """Whether an operator explicitly enabled the narrow loopback exception.
+
+    This policy is intentionally resolved only from deployment-authority
+    sources (the process environment or base/operator config), never from the
+    active tenant overlay or a request body.  A corrupt authority source fails
+    closed.
+    """
+    raw = os.environ.get(
+        "MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", ""
+    ).strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    try:
+        from maverick import config
+
+        policy = config.load_governed_records_config().get("partner") or {}
+        if config.governed_records_config_source_errors():
+            return False
+        return isinstance(policy, dict) and policy.get(
+            "allow_test_estate_loopback"
+        ) is True
+    except Exception:
+        return False
+
+
+def _require_partner_test_estate_loopback(
+    request: Request, rows: list[dict] | tuple[dict, ...]
+) -> None:
+    """Authorize a loopback enrollment/probe before consulting operator policy."""
+    if not any(bool(row.get("trusted_test_estate_loopback")) for row in rows):
+        return
+    # Authorize first so a tenant-local admin cannot use this endpoint to learn
+    # whether the deployment operator enabled a sensitive test-estate escape.
+    require_global_permission(request, "admin")
+    if not _partner_test_estate_loopback_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "partner test-estate loopback access is disabled by operator policy"
+            ),
+        )
+
+
 def _probe_tenant(t: dict) -> dict:
     """One synchronous probe of a client deployment: /health for liveness
     and latency, /value.json (best-effort) for the agent's own counted value
@@ -3622,6 +3666,12 @@ def _probe_tenant(t: dict) -> dict:
     def governed_get(url: str):
         if not t.get("trusted_test_estate_loopback"):
             return _ssrf.safe_get(url, headers=headers, timeout=4)
+        # Defense in depth for request-less/background callers and legacy rows:
+        # persisted row data is never sufficient to reactivate the exception.
+        if not _partner_test_estate_loopback_enabled():
+            raise RuntimeError(
+                "partner test-estate loopback access is disabled by operator policy"
+            )
         host = urlsplit(base).hostname or ""
         with _ssrf.allow_private_hosts([host]):
             return _ssrf.safe_get(url, headers=headers, timeout=4)
@@ -3691,6 +3741,16 @@ async def partner_add_tenant(request: Request, body: PartnerTenantIn) -> dict:
     require_permission(request, "admin")
     from . import partner_store
 
+    _require_partner_test_estate_loopback(
+        request,
+        [
+            {
+                "trusted_test_estate_loopback": (
+                    body.trusted_test_estate_loopback
+                )
+            }
+        ],
+    )
     try:
         row = await run_in_threadpool(
             lambda: partner_store.upsert_tenant(
@@ -3733,6 +3793,7 @@ async def partner_check_tenant(request: Request, tenant_id: str) -> dict:
     )
     if row is None:
         raise HTTPException(status_code=404, detail="no such tenant")
+    _require_partner_test_estate_loopback(request, [row])
     result = await run_in_threadpool(_probe_tenant, row)
     await run_in_threadpool(partner_store.record_check, row["id"], result)
     return {"tenant": partner_store.public_row({**row, "last_check": result})}
@@ -3748,6 +3809,7 @@ async def partner_fleet(request: Request, check: int = 0) -> dict:
 
     rows = await run_in_threadpool(partner_store.list_tenants)
     if check:
+        _require_partner_test_estate_loopback(request, rows)
         for row in rows:
             result = await run_in_threadpool(_probe_tenant, row)
             await run_in_threadpool(partner_store.record_check, row["id"], result)
@@ -4764,18 +4826,33 @@ async def assessment_risk_trend(
     type: str = "",
 ) -> dict:
     """A subject's residual-risk history across successive assessments -- the
-    re-review delta (risk moving up or down over time), oldest first."""
+    re-review delta (risk moving up or down over time), oldest first. Equal
+    timestamps keep a stable display order but report unknown direction."""
     require_permission(request, "view")
     from maverick.assessment import risk_trend
 
     rows = await run_in_threadpool(risk_trend, subject[:300], type[:40])
     direction = ""
+    direction_reason = ""
     if len(rows) >= 2:
-        rank = {"minimal": 0, "low": 1, "medium": 2, "high": 3}
-        a = rank.get(rows[-2]["residual_risk"], 0)
-        b = rank.get(rows[-1]["residual_risk"], 0)
-        direction = "up" if b > a else "down" if b < a else "flat"
-    return {"subject": subject, "type": type, "trend": rows, "direction": direction}
+        if rows[-2]["created_at"] == rows[-1]["created_at"]:
+            # The persisted id gives tied records a stable display order, not
+            # a causal order.  Never turn that random identifier order into a
+            # claimed risk movement.
+            direction = "unknown"
+            direction_reason = "the latest assessments share a timestamp; their order is not provable"
+        else:
+            rank = {"minimal": 0, "low": 1, "medium": 2, "high": 3}
+            a = rank.get(rows[-2]["residual_risk"], 0)
+            b = rank.get(rows[-1]["residual_risk"], 0)
+            direction = "up" if b > a else "down" if b < a else "flat"
+    return {
+        "subject": subject,
+        "type": type,
+        "trend": rows,
+        "direction": direction,
+        "direction_reason": direction_reason,
+    }
 
 
 _BULK_IMPORT_MAX_ROWS = 500
@@ -5200,7 +5277,13 @@ async def list_connections_endpoint(request: Request) -> dict:
     _require_connections()
     from maverick import connections
 
-    return {"connections": connections.list_connections(owner=_request_identity(request))}
+    try:
+        rows = connections.list_connections(owner=_request_identity(request))
+    except connections.ConnectionStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from exc
+    return {"connections": rows}
 
 
 @router.post("/connections", status_code=201)
@@ -5230,6 +5313,10 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
             expected_revision=payload.expected_revision,
             require_revision=True,
         )
+    except connections.ConnectionStoreUnavailable as e:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from e
     except connections.ConnectionVersionConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except PermissionError as e:
@@ -5249,7 +5336,12 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     _require_connections()
     from maverick import connections
 
-    rec = connections.get_connection(name)
+    try:
+        rec = connections.get_connection(name)
+    except connections.ConnectionStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from exc
     # Owner-scope like list/delete/create: a non-admin can only test their own
     # connection (else a name-guess is a cross-owner reachability oracle AND
     # sends another owner's token). A 404 (not 403) so it can't confirm the name.
@@ -5272,6 +5364,11 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             raise HTTPException(
                 status_code=409,
                 detail="connection changed while its readiness probe was running",
+            ) from exc
+        except connections.ConnectionStoreUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="connection credential registry is unavailable",
             ) from exc
 
     base = str(rec.get("base_url") or "").rstrip("/")
@@ -5387,7 +5484,15 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
     _require_connections()
     from maverick import connections
 
-    if not connections.delete_connection(name, owner=_request_identity(request)):
+    try:
+        deleted = connections.delete_connection(
+            name, owner=_request_identity(request)
+        )
+    except connections.ConnectionStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail="no connection with that name")
     return {"deleted": connections.normalize_name(name)}
 

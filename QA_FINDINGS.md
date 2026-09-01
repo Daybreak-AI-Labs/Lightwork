@@ -7,9 +7,9 @@ item means the implementation and its focused regression test
 are both present on this branch; broad-suite and rendered-browser acceptance are
 tracked separately at the end.
 
-PR #2407 is merged. Reconciliation against the latest origin merge remains a
-separate pending verification step; the evidence below describes the current
-working tree rather than the old draft-PR snapshot.
+PR #2407 is merged. This branch includes the current `origin/main` generation
+`f3042d94` through merge `de393c30`; the evidence below describes the
+reconciled working tree rather than the old draft-PR snapshot.
 
 Status markers:
 
@@ -207,6 +207,57 @@ Status markers:
 - [x] **QA-069 — Accessible repeated actions (P2).** Repeated Deploy/Disable/etc.
   buttons include the target name in their accessible label.
 
+## Final continuity, authority, and recovery pass
+
+- [x] **QA-070 — Global-control affordance truth (P1).** Emergency halt,
+  learning, and sandbox controls render read-only without global authority,
+  while tenant operators retain tenant-scoped tool admission.
+- [x] **QA-071 — Destructive bulk/report safety (P1).** Consent bulk jobs and
+  executive-report revoke/purge actions use target-specific confirmations,
+  single-flight guards, opener-focus restoration, and control-state recovery.
+- [x] **QA-072 — Async draft ownership (P1).** A completed Workflow Builder
+  response remains attached to the Template/Agent mode that initiated it,
+  cannot replace a newly selected mode, and does not scroll a hidden result
+  into view.
+- [x] **QA-073 — Assessment read-failure recovery (P1).** Register/detail load
+  failures remain visible and actionable rather than silently producing an
+  empty or stale interface.
+- [x] **QA-074 — Partner loopback dual authority and revocation (P1).** Exact-IP
+  loopback test estates require both global-admin authority and operator opt-in;
+  every saved-row live probe rechecks that policy and fails before network I/O
+  after opt-in is revoked.
+- [x] **QA-075 — Connection-registry corruption containment (P1).** Only a
+  missing registry means empty; malformed, unreadable, or unauthenticated
+  ciphertext fails closed across list/create/test/delete, returns a recoverable
+  `503`, and is never overwritten.
+- [x] **QA-076 — Provider-inventory confidentiality (P1).** Raw provider and
+  configuration-source inventory requires global authority, while authenticated
+  viewers retain access to the redacted provider page.
+- [x] **QA-077 — Verified provider rotation and exact rollback (P1).** Rotation
+  binds to higher-authority configuration state, requires a real cross-process
+  lock, verifies the effective credential after publication, and atomically
+  restores the exact prior bytes and mode on conflict or failure.
+- [x] **QA-078 — Deterministic history without false causality (P1).** Equal
+  assessment timestamps have stable display/limit ordering, but risk direction
+  is reported unknown when causal review order cannot be proven.
+- [x] **QA-079 — Inclusive worker-lease expiry (P1).** A job at its exact lease
+  deadline is reclaimable, while attempt fencing rejects a late stale worker.
+- [x] **QA-080 — Workspace-picker continuity and redirect safety (P1).** The
+  picker has one H1 and resumes the original or supplied same-origin path after
+  selection; external, protocol-relative, backslash, control-character, and
+  oversized targets are rejected.
+- [x] **QA-081 — Version-compatible effective-route traversal (P1).** Route
+  inspection supports both lazy route contexts and legacy included-router
+  shapes without requiring a newer FastAPI helper.
+- [x] **QA-082 — Workflow discoverability and naming coherence (P2).** Searching
+  for “Workflow Builder” finds the visible GRC Studio destination, and the
+  Workflow Builder document title matches its H1.
+- [x] **QA-083 — Error-page heading integrity (P2).** Branded browser 404/500
+  pages render exactly one primary heading without leaking exception detail.
+- [x] **QA-084 — Learning-scope labeling (P2).** UI language distinguishes core
+  learning components from separate feature switches and no longer implies one
+  aggregate controls every learning system.
+
 ## Focused regression evidence
 
 Each finding maps to at least one exact focused regression in the current
@@ -278,9 +329,24 @@ working tree.
 - **QA-064** — `packages/maverick-dashboard/tests/test_qa_flow_accessibility.py::test_qa_064_flow_designer_keyboard_selection_movement_and_pan`
 - **QA-065** — `packages/maverick-dashboard/tests/test_qa_flow_accessibility.py::test_qa_065_generated_property_condition_and_approval_controls_are_named`
 - **QA-066** — `packages/maverick-dashboard/tests/test_qa_flow_accessibility.py::test_qa_066_workflow_picker_traps_escape_tab_and_restores_opener`
-- **QA-067** — `packages/maverick-dashboard/tests/test_qa_accessibility_cluster.py::test_extending_pages_leave_the_main_landmark_to_base`
+- **QA-067** — `packages/maverick-dashboard/tests/test_qa_accessibility_cluster.py::test_extending_pages_leave_the_main_landmark_to_base`; `packages/maverick-dashboard/tests/test_error_pages.py::test_browser_500_has_a_single_primary_heading`; `packages/maverick-dashboard/tests/test_workspace_tenant.py::test_picker_honors_only_safe_local_return_targets`
 - **QA-068** — `packages/maverick-dashboard/tests/test_chat_attachments.py::test_chat_page_has_attach_control`
 - **QA-069** — `packages/maverick-dashboard/tests/test_qa_accessibility_cluster.py::test_repeated_actions_include_their_target`
+- **QA-070** — `packages/maverick-dashboard/tests/test_ui_capability_recovery.py::test_tenant_operator_controls_do_not_leak_global_authority`
+- **QA-071** — `packages/maverick-dashboard/tests/test_ui_capability_recovery.py::test_destructive_clients_confirm_exact_targets_and_recover_single_flight`
+- **QA-072** — `packages/maverick-dashboard/tests/test_ui_capability_recovery.py::test_async_drafts_and_assessment_failures_stay_with_visible_context`
+- **QA-073** — `packages/maverick-dashboard/tests/test_ui_capability_recovery.py::test_async_drafts_and_assessment_failures_stay_with_visible_context`
+- **QA-074** — `packages/maverick-dashboard/tests/test_partner_endpoint_admission.py::test_loopback_request_cannot_enable_operator_policy`; `packages/maverick-dashboard/tests/test_partner_endpoint_admission.py::test_revoked_loopback_policy_blocks_every_live_probe_before_network`; `packages/maverick-dashboard/tests/test_app_global_control_plane_authz.py::test_tenant_admin_cannot_enroll_loopback_partner_even_when_operator_enabled`
+- **QA-075** — `packages/maverick-core/tests/test_connections.py::test_corrupt_store_fails_closed_without_overwrite`; `packages/maverick-core/tests/test_connections.py::test_decryption_failure_fails_closed_without_overwrite`; `packages/maverick-dashboard/tests/test_connections_api.py::test_corrupt_connection_registry_returns_503_without_overwrite`
+- **QA-076** — `packages/maverick-dashboard/tests/test_app_global_control_plane_authz.py::test_tenant_admin_cannot_read_deployment_control_plane`; `packages/maverick-dashboard/tests/test_app_global_control_plane_authz.py::test_global_admin_can_read_deployment_control_plane_api`
+- **QA-077** — `packages/maverick-dashboard/tests/test_settings_providers.py::test_provider_rotation_rollback_restores_exact_bytes_and_mode`; `packages/maverick-dashboard/tests/test_settings_providers.py::test_provider_rotation_refuses_process_local_lock_fallback`; `packages/maverick-dashboard/tests/test_settings_providers.py::test_provider_rotation_post_write_read_failure_rolls_back_with_503`
+- **QA-078** — `packages/maverick-core/tests/test_assessment.py::test_equal_timestamp_history_has_canonical_order_and_limit`; `packages/maverick-dashboard/tests/test_privacy_program_depth.py::test_equal_timestamp_trend_does_not_infer_direction_from_random_ids`
+- **QA-079** — `packages/maverick-core/tests/test_audit_concurrency_fixes.py::test_stale_complete_does_not_clobber_reclaimed_job`; `packages/maverick-core/tests/test_audit_concurrency_fixes.py::test_stale_fail_does_not_reschedule_reclaimed_job`
+- **QA-080** — `packages/maverick-dashboard/tests/test_workspace_tenant.py::test_picker_honors_only_safe_local_return_targets`; `packages/maverick-dashboard/tests/test_workspace_tenant.py::test_picker_quick_workspace_creates_selects_and_recovers_original_url`
+- **QA-081** — `packages/maverick-dashboard/tests/test_route_identities.py::test_compatible_route_traversal_recurses_without_fastapi_helper`; `packages/maverick-dashboard/tests/test_ui_visibility_fresh_process_smoke.py::test_every_registered_static_page_survives_fresh_html_process`
+- **QA-082** — `packages/maverick-dashboard/tests/test_sidebar_navfinder.py::test_page_finder_accepts_the_workflow_name_for_the_grc_builder`; `packages/maverick-dashboard/tests/test_workflow_builder.py::test_workflow_builder_page_renders`
+- **QA-083** — `packages/maverick-dashboard/tests/test_error_pages.py::test_404_html_for_browser`; `packages/maverick-dashboard/tests/test_error_pages.py::test_browser_500_has_a_single_primary_heading`
+- **QA-084** — `packages/maverick-dashboard/tests/test_learning.py::test_learning_page_renders_the_moat`; `packages/maverick-dashboard/tests/test_learning.py::test_learning_page_has_enable_button`
 
 ## Verification gates
 

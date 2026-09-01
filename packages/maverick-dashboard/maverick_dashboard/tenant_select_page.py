@@ -20,7 +20,28 @@ from fastapi.templating import Jinja2Templates
 PAGE_PATH = "/workspace/tenant"
 
 
-def _page_context(request: Request, detail: str = "") -> dict:
+def _safe_return_path(value: str | None) -> str:
+    """Return a same-origin browser destination or an empty fallback.
+
+    A leading backslash can be normalized into a protocol-relative URL by a
+    browser, so the usual single-leading-slash check is not sufficient on its
+    own.  Keep this boundary aligned with the login redirect guards.
+    """
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return ""
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return ""
+    if not all(ord(char) >= 0x20 and char != "\x7f" for char in value):
+        return ""
+    return value
+
+
+def _page_context(
+    request: Request,
+    detail: str = "",
+    *,
+    return_to: str = "",
+) -> dict:
     import os
 
     from maverick.tenant.registry import list_tenants
@@ -66,6 +87,7 @@ def _page_context(request: Request, detail: str = "") -> dict:
         "is_admin": is_admin,
         "can_select": not principal or is_admin or bool(tenants),
         "membership_filtered": principal is not None and not is_admin,
+        "return_to": _safe_return_path(return_to),
     }
 
 
@@ -80,7 +102,12 @@ def tenant_select_response(
     return templates.TemplateResponse(
         request,
         "tenant_select.html",
-        _page_context(request, detail),
+        _page_context(
+            request,
+            detail,
+            return_to=request.url.path
+            + (f"?{request.url.query}" if request.url.query else ""),
+        ),
         status_code=409,
     )
 
@@ -98,7 +125,7 @@ def create_tenant_select_page_router(templates: Jinja2Templates) -> APIRouter:
         return templates.TemplateResponse(
             request,
             "tenant_select.html",
-            _page_context(request),
+            _page_context(request, return_to=request.query_params.get("next", "")),
         )
 
     return router

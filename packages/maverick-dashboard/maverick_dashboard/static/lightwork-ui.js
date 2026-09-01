@@ -241,6 +241,7 @@
       const pill = document.getElementById('halt-pill');
       const label = document.getElementById('halt-label');
       if (!pill || !label) return;
+      const canHalt = pill.dataset.canHalt === 'true';
       // A failed read is not equivalent to a cleared stop.  Keep an explicit
       // unknown state so the shell can never invite a mutation based on a
       // fabricated answer.
@@ -253,10 +254,16 @@
         pill.classList.toggle('armed', armed);
         pill.classList.toggle('unavailable', !known);
         label.textContent = detail || (armed
-          ? 'STOPPED — click to resume'
-          : state === 'clear' ? 'Stop all' : 'Stop status unavailable');
-        pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
-        pill.setAttribute('aria-disabled', (!known || pending) ? 'true' : 'false');
+          ? (canHalt ? 'STOPPED — click to resume' : 'STOPPED')
+          : state === 'clear'
+            ? (canHalt ? 'Stop all' : 'Stop status: clear')
+            : 'Stop status unavailable');
+        if (canHalt) {
+          pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
+        } else {
+          pill.removeAttribute('aria-pressed');
+        }
+        pill.setAttribute('aria-disabled', (!canHalt || !known || pending) ? 'true' : 'false');
       }
       render('unknown', 'checking');
       async function refresh() {
@@ -276,6 +283,10 @@
       }
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
+        if (!canHalt) {
+          mvToast('Read only: a global administrator is required to stop or resume all work.', { error: true });
+          return;
+        }
         if (pending || haltState === 'unknown') {
           mvToast('Emergency stop status is unavailable. Retry after the dashboard can verify it.', { error: true });
           return;
@@ -323,7 +334,7 @@
       pill.addEventListener('keydown', function(ev) {
         // role="button" must activate on Space; the native <a href>
         // already handles Enter. Stop Space from scrolling the page.
-        if (ev.key === ' ' || ev.key === 'Spacebar') {
+        if (canHalt && (ev.key === ' ' || ev.key === 'Spacebar')) {
           ev.preventDefault();
           pill.click();
         }

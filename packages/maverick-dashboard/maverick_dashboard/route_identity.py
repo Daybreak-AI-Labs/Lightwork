@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter, defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +33,30 @@ class _EffectiveRoute:
     methods: tuple[str, ...]
     endpoint_module: str
     endpoint_qualname: str
+
+
+def iter_compatible_route_contexts(
+    routes: Sequence[BaseRoute | Any],
+) -> Iterator[Any]:
+    """Yield effective leaf routes without FastAPI-version coupling.
+
+    FastAPI 0.141 added the public ``fastapi.routing.iter_route_contexts``
+    helper together with lazy included routers, but the dashboard's supported
+    baseline starts at 0.110.  Newer lazy wrappers expose their own
+    ``effective_route_contexts`` method; older releases already expose flat
+    leaf routes.  The recursive ``original_router`` fallback also covers an
+    included-router wrapper without importing any non-baseline FastAPI symbol.
+    """
+    for route in routes:
+        effective_route_contexts = getattr(route, "effective_route_contexts", None)
+        if callable(effective_route_contexts):
+            yield from effective_route_contexts()
+            continue
+        included = getattr(route, "original_router", None)
+        if isinstance(included, APIRouter):
+            yield from iter_compatible_route_contexts(included.routes)
+            continue
+        yield route
 
 
 def _iter_routers(router: APIRouter) -> Iterator[APIRouter]:
@@ -83,37 +107,27 @@ def _endpoint_identity(context: Any, original_route: BaseRoute) -> tuple[str, st
 def _effective_routes(app: FastAPI) -> list[_EffectiveRoute]:
     owners = _route_owners(app.router)
     effective: list[_EffectiveRoute] = []
-    for top_level_route in app.routes:
-        contexts: Iterator[Any]
-        effective_route_contexts = getattr(
-            top_level_route, "effective_route_contexts", None
+    for context in iter_compatible_route_contexts(app.routes):
+        original_route = getattr(context, "original_route", context)
+        name = str(_effective_value(context, original_route, "name") or "route")
+        path = str(_effective_value(context, original_route, "path") or "")
+        methods = tuple(
+            sorted(_effective_value(context, original_route, "methods") or ())
         )
-        if callable(effective_route_contexts):
-            contexts = effective_route_contexts()
-        else:
-            contexts = iter((top_level_route,))
-
-        for context in contexts:
-            original_route = getattr(context, "original_route", context)
-            name = str(_effective_value(context, original_route, "name") or "route")
-            path = str(_effective_value(context, original_route, "path") or "")
-            methods = tuple(
-                sorted(_effective_value(context, original_route, "methods") or ())
+        endpoint_module, endpoint_qualname = _endpoint_identity(
+            context, original_route
+        )
+        effective.append(
+            _EffectiveRoute(
+                original_route=original_route,
+                owner=owners[id(original_route)],
+                name=name,
+                path=path,
+                methods=methods,
+                endpoint_module=endpoint_module,
+                endpoint_qualname=endpoint_qualname,
             )
-            endpoint_module, endpoint_qualname = _endpoint_identity(
-                context, original_route
-            )
-            effective.append(
-                _EffectiveRoute(
-                    original_route=original_route,
-                    owner=owners[id(original_route)],
-                    name=name,
-                    path=path,
-                    methods=methods,
-                    endpoint_module=endpoint_module,
-                    endpoint_qualname=endpoint_qualname,
-                )
-            )
+        )
     return effective
 
 

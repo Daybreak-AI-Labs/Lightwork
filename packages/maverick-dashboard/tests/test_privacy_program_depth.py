@@ -23,9 +23,17 @@ def _fresh_world(tmp_path, monkeypatch):
     api._world_cache.clear()
 
 
-def _seed(subject="Acme Corp", type_="vendor_risk", risky=True):
+def _seed(
+    subject="Acme Corp",
+    type_="vendor_risk",
+    risky=True,
+    *,
+    created_at: float | None = None,
+):
     from maverick.assessment import AssessmentSession, get_template, save_session
     s = AssessmentSession(type=type_, subject=subject)
+    if created_at is not None:
+        s.created_at = created_at
     for q in get_template(type_).questions:
         s.record(q.id, q.risk_answer if risky
                  else ("no" if q.risk_answer == "yes" else "yes"))
@@ -131,14 +139,28 @@ def test_trigger_review_forces_due_and_renewal_flips_due():
 
 # --- B12 vendor risk trend -------------------------------------------------
 def test_risk_trend_endpoint_reports_direction():
-    _seed("TrendCo", risky=True)      # older: high
-    _seed("TrendCo", risky=False)     # newer: minimal
+    _seed("TrendCo", risky=True, created_at=100.0)      # older: high
+    _seed("TrendCo", risky=False, created_at=101.0)     # newer: minimal
     d = client.get("/api/v1/assess/trend",
                    params={"subject": "TrendCo", "type": "vendor_risk"}).json()
     assert len(d["trend"]) == 2
     assert d["trend"][0]["residual_risk"] == "high"
     assert d["trend"][-1]["residual_risk"] == "minimal"
     assert d["direction"] == "down"
+
+
+def test_equal_timestamp_trend_does_not_infer_direction_from_random_ids():
+    _seed("Tied TrendCo", risky=True, created_at=200.0)
+    _seed("Tied TrendCo", risky=False, created_at=200.0)
+
+    data = client.get(
+        "/api/v1/assess/trend",
+        params={"subject": "Tied TrendCo", "type": "vendor_risk"},
+    ).json()
+
+    assert len(data["trend"]) == 2
+    assert data["direction"] == "unknown"
+    assert "order is not provable" in data["direction_reason"]
 
 
 # --- B13 bulk import -------------------------------------------------------
@@ -206,3 +228,4 @@ def test_review_popout_carries_lifecycle_controls():
     assert 'id="arv-accept"' in html and 'id="arv-trigger"' in html
     assert "/accept-risk" in html and "/trigger-review" in html
     assert "/api/v1/assess/trend" in html   # trend line in the pop-out
+    assert "review order unknown" in html

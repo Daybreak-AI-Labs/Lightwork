@@ -17,6 +17,9 @@ def _isolated_partner_registry(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(home))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    monkeypatch.delenv(
+        "MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", raising=False
+    )
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     from maverick import config
     from maverick.tenant import kms
@@ -106,6 +109,8 @@ def test_partner_save_rejects_mixed_public_private_dns_answer(monkeypatch):
 def test_trusted_test_estate_exception_cannot_authorize_a_hostname(monkeypatch):
     from maverick.tools import _ssrf
 
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "1")
+
     def should_not_resolve(_host, _port):
         raise AssertionError("a trusted-test hostname must be rejected before DNS")
 
@@ -121,6 +126,8 @@ def test_trusted_test_estate_exception_cannot_authorize_a_hostname(monkeypatch):
 
 def test_trusted_test_estate_exception_is_limited_to_exact_loopback(monkeypatch):
     from maverick.tools import _ssrf
+
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "1")
 
     monkeypatch.setattr(
         _ssrf.socket,
@@ -147,6 +154,8 @@ def test_trusted_test_estate_exception_admits_exact_loopback_literal(
 ):
     from maverick.tools import _ssrf
 
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "1")
+
     monkeypatch.setattr(
         _ssrf.socket,
         "getaddrinfo",
@@ -157,6 +166,55 @@ def test_trusted_test_estate_exception_admits_exact_loopback_literal(
 
     assert response.status_code == 201, response.text
     assert response.json()["trusted_test_estate_loopback"] is True
+
+
+def test_loopback_request_cannot_enable_operator_policy(monkeypatch):
+    from maverick.tools import _ssrf
+    from maverick_dashboard import partner_store
+
+    monkeypatch.setattr(
+        _ssrf.socket,
+        "getaddrinfo",
+        lambda _host, _port: _address_info("127.0.0.1"),
+    )
+
+    response = _post(
+        "http://127.0.0.1:9000", trusted_test_estate_loopback=True
+    )
+
+    assert response.status_code == 403, response.text
+    assert partner_store.list_tenants() == []
+
+
+def test_revoked_loopback_policy_blocks_every_live_probe_before_network(monkeypatch):
+    from maverick.tools import _ssrf
+
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "1")
+    monkeypatch.setattr(
+        _ssrf.socket,
+        "getaddrinfo",
+        lambda _host, _port: _address_info("127.0.0.1"),
+    )
+    enrolled = _post(
+        "http://127.0.0.1:9000", trusted_test_estate_loopback=True
+    )
+    assert enrolled.status_code == 201, enrolled.text
+    tenant_id = enrolled.json()["id"]
+
+    monkeypatch.delenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK")
+
+    def network_must_not_run(*_args, **_kwargs):
+        raise AssertionError("revoked loopback policy reached the network")
+
+    monkeypatch.setattr(_ssrf, "safe_get", network_must_not_run)
+
+    check = client.post(f"/api/v1/partner/tenants/{tenant_id}/check")
+    fleet = client.get("/api/v1/partner/fleet", params={"check": "1"})
+
+    assert check.status_code == 403, check.text
+    assert fleet.status_code == 403, fleet.text
+    assert "disabled by operator policy" in check.json()["detail"]
+    assert "disabled by operator policy" in fleet.json()["detail"]
 
 
 def test_partner_save_preserves_valid_public_https_path(monkeypatch):

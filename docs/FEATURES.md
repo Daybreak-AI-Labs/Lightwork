@@ -571,7 +571,11 @@ here.
   multi-tenant view for a partner operating client deployments: registry
   (admin-gated writes; tokens never echoed), live `/health` +
   `/value.json` probes per tenant, white-label theme per row, and fleet
-  rollups of the agents' own counted value ledgers.
+  rollups of the agents' own counted value ledgers. Public endpoints are the
+  default. Exact-IP loopback test estates additionally require both a global
+  admin and an operator opt-in (`[partner] allow_test_estate_loopback = true`
+  or `MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK=1`); tenant configuration or
+  request data cannot grant that exception.
 - **Learning KPI** (`acceptance_metrics`, on the command center and the
   binder) — first-pass acceptance (approved with no follow-up thread = the
   reviewer took the agent's draft as-is), qualified-after-follow-ups,

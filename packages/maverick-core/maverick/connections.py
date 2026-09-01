@@ -43,6 +43,10 @@ class ConnectionVersionConflict(RuntimeError):
     """The credential changed after a caller began an operation on it."""
 
 
+class ConnectionStoreUnavailable(RuntimeError):
+    """The sealed connection registry could not be authenticated or read safely."""
+
+
 def enabled() -> bool:
     from .config import env_flag
     if env_flag("MAVERICK_CONNECTIONS"):
@@ -65,15 +69,25 @@ def _load() -> dict[str, dict]:
     path = _path()
     try:
         ensure_private_file(path)
-    except OSError:
-        return {}
-    try:
         raw = unseal_text_for_tenant(current_tenant_id(), atomic_read_bytes(path))
         data = json.loads(raw)
-        if not isinstance(data, dict):
-            return {}
-    except (FileNotFoundError, ValueError, OSError):
+        if (
+            not isinstance(data, dict)
+            or any(
+                not isinstance(name, str) or not isinstance(record, dict)
+                for name, record in data.items()
+            )
+        ):
+            raise ValueError("connection registry root must be an object")
+    except FileNotFoundError:
+        # Absence is the sole legitimate empty-store state. Every other read or
+        # authentication failure may conceal live credentials and must prevent
+        # a later load/modify/save from replacing them.
         return {}
+    except Exception as exc:
+        raise ConnectionStoreUnavailable(
+            "connection credential registry is unavailable; no records were changed"
+        ) from exc
     return data
 
 
@@ -398,5 +412,5 @@ __all__ = [
     "enabled", "set_connection", "get_connection", "delete_connection",
     "list_connections", "resolve", "normalize_name", "bind_principal",
     "current_principal",
-    "record_test_result", "ConnectionVersionConflict",
+    "record_test_result", "ConnectionVersionConflict", "ConnectionStoreUnavailable",
 ]

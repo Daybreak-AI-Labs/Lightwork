@@ -34,6 +34,37 @@ def test_set_list_get_delete_roundtrip():
     assert connections.list_connections() == []
 
 
+@pytest.mark.parametrize(
+    "corrupt_payload",
+    (b"not-json", b"[]", b'{"existing":"not-a-record"}'),
+)
+def test_corrupt_store_fails_closed_without_overwrite(corrupt_payload):
+    path = connections._path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(corrupt_payload)
+
+    with pytest.raises(connections.ConnectionStoreUnavailable, match="unavailable"):
+        connections.set_connection("replacement", token="must-not-persist")
+
+    assert path.read_bytes() == corrupt_payload
+
+
+def test_decryption_failure_fails_closed_without_overwrite(monkeypatch):
+    connections.set_connection("existing", token="original")
+    path = connections._path()
+    original_ciphertext = path.read_bytes()
+
+    def reject_ciphertext(_tenant, _blob):
+        raise ValueError("authentication failed")
+
+    monkeypatch.setattr(connections, "unseal_text_for_tenant", reject_ciphertext)
+
+    with pytest.raises(connections.ConnectionStoreUnavailable, match="unavailable"):
+        connections.set_connection("replacement", token="must-not-persist")
+
+    assert path.read_bytes() == original_ciphertext
+
+
 def test_token_only_patch_preserves_connection_metadata():
     created = connections.set_connection(
         "acme",

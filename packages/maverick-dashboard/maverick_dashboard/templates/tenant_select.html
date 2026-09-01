@@ -30,7 +30,7 @@
   {% endif %}
 
   <div class="panel">
-    <h2 style="text-transform:none; letter-spacing:0;">Workspace tenant</h2>
+    <h1 class="page-title" style="text-transform:none; letter-spacing:0;">Workspace tenant</h1>
     <p class="muted" style="max-width: 640px;">
       A tenant is the workspace all tenant-scoped workbenches (consent, privacy
       discovery, third parties, …) read and write — each tenant keeps its own
@@ -119,6 +119,12 @@
 (function () {
   'use strict';
   var errBox = document.getElementById('tsel-err');
+  var returnTo = {{ return_to|tojson }};
+
+  function resume() {
+    if (returnTo) location.assign(returnTo);
+    else location.reload();
+  }
 
   function fail(box, e) {
     box.textContent = (e && e.message) || 'Could not reach the server.';
@@ -144,7 +150,7 @@
   document.querySelectorAll('.tsel-pick').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       errBox.textContent = ''; btn.disabled = true;
-      try { await select(btn.getAttribute('data-tenant')); location.reload(); }
+      try { await select(btn.getAttribute('data-tenant')); resume(); }
       catch (e) { fail(errBox, e); btn.disabled = false; }
     });
   });
@@ -166,7 +172,7 @@
       });
       await jsonOrDetail(r, 'Could not create the tenant');
       await select(payload.id);
-      location.reload();
+      resume();
     } catch (e) { fail(box, e); if (btn) btn.disabled = false; }
   }
 

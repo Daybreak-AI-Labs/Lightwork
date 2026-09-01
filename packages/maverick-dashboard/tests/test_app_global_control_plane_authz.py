@@ -67,6 +67,7 @@ def _tenant_admin_headers() -> dict[str, str]:
         "/api/v1/plugins",
         "/api/v1/mcp",
         "/api/v1/channels",
+        "/api/v1/providers",
         "/tenants",
         "/tenants/overview",
         "/api/v1/tenants/overview",
@@ -94,6 +95,7 @@ def test_tenant_admin_cannot_read_deployment_control_plane(path):
         "/api/v1/plugins",
         "/api/v1/mcp",
         "/api/v1/channels",
+        "/api/v1/providers",
     ),
 )
 def test_global_admin_can_read_deployment_control_plane_api(path):
@@ -157,6 +159,31 @@ def test_plugin_install_authorizes_before_disclosing_opt_in_state(monkeypatch):
             data={"name": "example"},
             headers=headers,
             follow_redirects=False,
+        )
+    finally:
+        reset_tenant(token)
+
+    assert response.status_code == 403
+
+
+def test_tenant_admin_cannot_enroll_loopback_partner_even_when_operator_enabled(
+    monkeypatch,
+):
+    """Both authorities are required: operator opt-in is not tenant authority."""
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "1")
+    headers = _tenant_admin_headers()
+    token = set_tenant("acme")
+    try:
+        response = client.post(
+            "/api/v1/partner/tenants",
+            headers=headers,
+            json={
+                "name": "local test estate",
+                "base_url": "http://127.0.0.1:9000",
+                "trusted_test_estate_loopback": True,
+            },
         )
     finally:
         reset_tenant(token)

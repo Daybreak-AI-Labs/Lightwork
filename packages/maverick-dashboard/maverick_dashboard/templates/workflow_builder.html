@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}workflow builder · Lightwork{% endblock %}
+{% block title %}Workflow builder · Lightwork{% endblock %}
 {% block content %}
 <style>
   .wf { max-width: 860px; margin-inline: auto; }
@@ -610,7 +610,7 @@
       }
       return 'Save failed: ' + status;
     }
-    function renderDraft(d) {
+    function renderDraft(d, shouldScroll) {
       templateWorkspaceStarted = true;
       elName.value = d.name || '';
       elTitle.value = d.title || '';
@@ -619,7 +619,9 @@
       elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : 5;
       if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
       preview.hidden = false; pbPreview.hidden = true; savedBox.hidden = true;
-      preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (shouldScroll !== false) {
+        preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
     function stepsFromBody(body) {
       // Recover the ordered steps from the numbered "## Steps" markdown so a
@@ -1084,7 +1086,7 @@
     }
     pbAddBtn.addEventListener('click', function () { addStep(); renumber(); schedulePbLint(); });
 
-    function renderPlaybook(d) {
+    function renderPlaybook(d, shouldScroll) {
       playbookWorkspaceStarted = true;
       pbName.value = d.name || '';
       pbDesc.value = d.description || '';
@@ -1098,7 +1100,9 @@
       renumber();
       pbPreview.hidden = false; preview.hidden = true; savedBox.hidden = true;
       schedulePbLint();
-      pbPreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (shouldScroll !== false) {
+        pbPreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     function collectPlaybook() {
@@ -1347,17 +1351,31 @@
         }
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) { setStatus(data.detail || ('Draft failed: ' + resp.status), true); return; }
+        var completedStatus;
+        var draftStillVisible = mode === draftMode;
         if (draftMode === 'playbook') {
-          renderPlaybook(data);
-          setStatus('Draft ready — review the persona, tools, and gated steps, then save.'
-            + playbookNoteSuffix(data));
+          renderPlaybook(data, draftStillVisible);
+          completedStatus = 'Draft ready — review the persona, tools, and gated steps, then save.'
+            + playbookNoteSuffix(data);
         } else {
           // Only a successful fresh draft becomes a new-template workspace.
           // Empty briefs, provider errors, and network failures leave the edit
           // name, generation and hidden wall cap intact.
           wfEditingName = null; wfEditGeneration = null; wfEditWall = null;
-          renderDraft(data);
-          setStatus('Draft ready — review and edit below, then save.');
+          renderDraft(data, draftStillVisible);
+          completedStatus = 'Draft ready — review and edit below, then save.';
+        }
+        // The request belongs to the form selected when Draft was pressed.
+        // If the operator switched forms while it was in flight, retain the
+        // completed draft in its own workspace without replacing the form now
+        // on screen. Switching back reveals it through setForm's continuity
+        // flags, without another provider request.
+        if (mode !== draftMode) {
+          setForm(mode);
+          setStatus((draftMode === 'playbook' ? 'Agent' : 'Workflow') +
+            ' draft ready. Switch back to review it.');
+        } else {
+          setStatus(completedStatus);
         }
       } catch (e) {
         setStatus('Could not reach the drafting service.', true);

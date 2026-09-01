@@ -43,9 +43,12 @@ def test_tenant_over_quota_fires_at_cap(monkeypatch, tmp_path):
     assert reason and "daily spend cap" in reason and "$5.50" in reason
 
 
-def test_zero_cap_means_no_enforcement(monkeypatch, tmp_path):
+def test_explicit_zero_cap_means_no_enforcement(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
-    create_tenant("free")
+    # New tenants are deliberately bounded by default. Zero is the explicit
+    # unlimited contract only while optional plan-cap enforcement is off.
+    monkeypatch.setenv("MAVERICK_ENFORCE_PLAN_CAPS", "0")
+    create_tenant("free", max_daily_dollars=0)
     ledger = UsageLedger(data_dir("usage", "ledger.json", tenant="free"))
     ledger.record("user:x", 999.0, 1, 1)
     assert tenant_over_quota("free") is None

@@ -1,9 +1,21 @@
 """Branded 404 / 500 error pages — council polish pass."""
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
-from fastapi.testclient import TestClient
+
+@pytest.fixture(autouse=True)
+def _restore_test_routes():
+    """Keep temporary exception routes from contaminating later app tests."""
+    from maverick_dashboard import app as dash_app
+
+    original_routes = list(dash_app.app.router.routes)
+    yield
+    dash_app.app.router.routes[:] = original_routes
+    mark_routes_changed = getattr(dash_app.app.router, "_mark_routes_changed", None)
+    if callable(mark_routes_changed):
+        mark_routes_changed()
 
 
 def _client():
@@ -21,6 +33,7 @@ def test_404_html_for_browser(monkeypatch, tmp_path):
     assert resp.status_code == 404
     assert "404" in resp.text
     assert "/this/does/not/exist" in resp.text
+    assert resp.text.count("<h1") == 1
     # Branded chrome present (nav, halt pill).
     assert "halt-pill" in resp.text
 
@@ -48,7 +61,12 @@ def test_browser_http_errors_are_branded_and_actionable(monkeypatch):
         async def fail(code=status):
             raise HTTPException(status_code=code, detail="internal detail is not UI")
 
-        dash_app.app.add_api_route(path, fail, methods=["GET"])
+        dash_app.app.add_api_route(
+            path,
+            fail,
+            methods=["GET"],
+            name=f"test_http_error_{status}",
+        )
 
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = TestClient(dash_app.app, raise_server_exceptions=False)
@@ -66,6 +84,25 @@ def test_browser_http_errors_are_branded_and_actionable(monkeypatch):
         assert heading in response.text
         assert "Reload this page" in response.text
         assert "internal detail is not UI" not in response.text
+
+
+def test_browser_500_has_a_single_primary_heading(monkeypatch, tmp_path):
+    from maverick import world_model
+    from maverick_dashboard import app as dash_app
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+
+    async def fail():
+        raise RuntimeError("internal detail")
+
+    dash_app.app.add_api_route("/__server_error", fail, methods=["GET"])
+    response = TestClient(dash_app.app, raise_server_exceptions=False).get(
+        "/__server_error", headers={"Accept": "text/html"}
+    )
+    assert response.status_code == 500
+    assert response.text.count("<h1") == 1
+    assert "internal detail" not in response.text
 
 
 def test_non_browser_http_error_contract_stays_json(monkeypatch):
@@ -95,7 +132,6 @@ def test_unhandled_exception_renders_500(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     # TestClient re-raises unhandled exceptions by default; disable so
     # our exception handler can produce the branded page.
-    from fastapi.testclient import TestClient
     client = TestClient(dash_app.app, raise_server_exceptions=False)
     resp = client.get("/__boom", headers={"Accept": "text/html"})
     assert resp.status_code == 500

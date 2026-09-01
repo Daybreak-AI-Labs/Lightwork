@@ -166,8 +166,8 @@ def test_audit_grep_scans_complete_day_and_reports_result_cap(monkeypatch, tmp_p
     """A match outside the old 1,000-row tail remains discoverable, while a
     capped response says exactly how much evidence was scanned and omitted."""
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick.audit.writer import AuditLog
     import maverick.audit.writer as writer
+    from maverick.audit.writer import AuditLog
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()

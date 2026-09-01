@@ -4972,7 +4972,16 @@ def list_saved() -> list[dict]:
                 "acceptance_expired": acc_expired,
             }
         )
-    return sorted(out, key=lambda r: r["created_at"], reverse=True)
+    # Filesystem enumeration order is undefined.  A timestamp can legitimately
+    # tie (notably on Windows), so use the persisted record identity as a
+    # canonical secondary key.  This cannot reconstruct unknowable causal
+    # order for legacy ties, but it keeps trend direction and limit membership
+    # stable across processes and filesystems.
+    return sorted(
+        out,
+        key=lambda r: (r["created_at"], r["id"]),
+        reverse=True,
+    )
 
 
 def risk_trend(subject: str, assessment_type: str = "", *, limit: int = 12) -> list[dict]:
@@ -4988,7 +4997,7 @@ def risk_trend(subject: str, assessment_type: str = "", *, limit: int = 12) -> l
         if str(r["subject"]).strip().lower() == subj
         and (not assessment_type or r["type"] == assessment_type)
     ]
-    rows.sort(key=lambda r: r["created_at"])
+    rows.sort(key=lambda r: (r["created_at"], r["id"]))
     return [
         {
             "id": r["id"],

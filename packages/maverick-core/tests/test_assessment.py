@@ -191,6 +191,37 @@ def test_saved_heads_are_bounded_read_only_and_disclose_exact_total(tmp_path, mo
     assert "_audit_pending" not in rows[0]
 
 
+def test_equal_timestamp_history_has_canonical_order_and_limit():
+    from maverick.assessment import (
+        AssessmentSession,
+        list_saved,
+        risk_trend,
+        save_session,
+    )
+
+    # Save in deliberately non-lexical order.  Equal wall-clock timestamps are
+    # possible on real filesystems, so neither list order nor trend truncation
+    # may inherit Path.glob() enumeration order.
+    for assessment_id in ("tie-c", "tie-a", "tie-b"):
+        save_session(
+            AssessmentSession(
+                type="vendor_risk",
+                subject="Tied Clock Vendor",
+                id=assessment_id,
+                created_at=100.0,
+            )
+        )
+
+    assert [row["id"] for row in list_saved()] == ["tie-c", "tie-b", "tie-a"]
+    assert [
+        row["id"] for row in risk_trend("Tied Clock Vendor", "vendor_risk")
+    ] == ["tie-a", "tie-b", "tie-c"]
+    assert [
+        row["id"]
+        for row in risk_trend("Tied Clock Vendor", "vendor_risk", limit=2)
+    ] == ["tie-b", "tie-c"]
+
+
 def test_record_rejects_bad_answer_and_unknown_question():
     from maverick.assessment import AssessmentSession
 

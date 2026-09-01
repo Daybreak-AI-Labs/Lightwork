@@ -185,6 +185,8 @@ def test_browser_409_renders_the_picker_api_keeps_json():
     assert r.status_code == 409
     assert r.headers["content-type"].startswith("text/html")
     assert "Workspace tenant" in r.text
+    assert '<h1 class="page-title"' in r.text
+    assert 'var returnTo = "/consent/publish-settings";' in r.text
     assert "select an active tenant" in r.text  # the gate's own message
 
     r = client.get(
@@ -207,6 +209,24 @@ def test_picker_page_lists_tenants_and_marks_selection():
     # Admin controls are wired to the workspace API and tenant provisioning.
     assert "/api/v1/workspace/active-tenant" in t
     assert "/api/v1/admin/tenants" in t
+
+
+def test_picker_honors_only_safe_local_return_targets():
+    safe = client.get("/workspace/tenant?next=%2Fsettings%3Ftab%3Daccess")
+    assert safe.status_code == 200
+    assert '<h1 class="page-title"' in safe.text
+    assert 'var returnTo = "/settings?tab=access";' in safe.text
+    assert "if (returnTo) location.assign(returnTo);" in safe.text
+
+    for unsafe in (
+        "https://attacker.invalid/path",
+        "//attacker.invalid/path",
+        "/\\attacker.invalid/path",
+    ):
+        denied = client.get("/workspace/tenant", params={"next": unsafe})
+        assert denied.status_code == 200
+        assert 'var returnTo = "";' in denied.text
+        assert "attacker.invalid" not in denied.text
 
 
 def test_picker_quick_workspace_creates_selects_and_recovers_original_url():

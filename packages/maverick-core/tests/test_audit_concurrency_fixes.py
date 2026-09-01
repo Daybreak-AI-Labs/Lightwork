@@ -18,10 +18,12 @@ def _q():
 
 def test_stale_complete_does_not_clobber_reclaimed_job():
     q = _q()
-    q.enqueue("k", {"x": 1})
-    a = q.claim()                  # worker A, attempts=1
-    q.reclaim_stale(0)             # lease expires -> back to pending
-    b = q.claim()                  # worker B re-claims, attempts=2
+    q.enqueue("k", {"x": 1}, run_at=100.0)
+    a = q.claim(now=100.0)          # worker A, attempts=1
+    assert a is not None
+    assert q.reclaim_stale(0, now=100.0) == 1
+    b = q.claim(now=100.0)          # worker B re-claims, attempts=2
+    assert b is not None
     assert a.attempts != b.attempts
     # A finished late; its fenced completion must be rejected.
     assert q.complete(a.id, expected_attempts=a.attempts) is False
@@ -31,10 +33,12 @@ def test_stale_complete_does_not_clobber_reclaimed_job():
 
 def test_stale_fail_does_not_reschedule_reclaimed_job():
     q = _q()
-    q.enqueue("k", {})
-    a = q.claim()
-    q.reclaim_stale(0)
-    b = q.claim()
+    q.enqueue("k", {}, run_at=100.0)
+    a = q.claim(now=100.0)
+    assert a is not None
+    assert q.reclaim_stale(0, now=100.0) == 1
+    b = q.claim(now=100.0)
+    assert b is not None
     assert q.fail(a.id, "boom", expected_attempts=a.attempts) is False
     assert q.fail(b.id, "boom", expected_attempts=b.attempts) is True
 

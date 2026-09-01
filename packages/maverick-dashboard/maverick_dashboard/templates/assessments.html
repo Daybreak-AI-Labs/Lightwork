@@ -83,6 +83,8 @@
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">⬇ Export CSV</a>
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=json" target="_blank" rel="noopener">⬇ JSON</a>
   </div>
+  <p class="muted" id="as-page-msg" role="status" aria-live="polite" aria-atomic="true"
+     style="min-height:1.25rem; margin:calc(-1 * var(--space-2)) 0 var(--space-3);"></p>
 
   <div class="as-grid">
     <!-- LEFT: the register + detail -->
@@ -141,6 +143,7 @@
   var detailEl = document.getElementById('as-detail');
   var tplSel = document.getElementById('as-template');
   var draftMsg = document.getElementById('as-draft-msg');
+  var pageMsg = document.getElementById('as-page-msg');
   var current = null;   // {kind, subject}
 
   // Escape for both element-content and quoted-attribute contexts: the old
@@ -167,9 +170,12 @@
     if (typeof detail === 'string') return detail;
     return fallback || ('Request failed (' + ((result && result.status) || 'network') + ').');
   }
+  function pageMessage(text, error) {
+    pageMsg.textContent = text || '';
+    pageMsg.style.color = error ? 'var(--danger)' : 'var(--muted)';
+  }
   function detailMessage(text, error) {
-    var target = document.getElementById('as-detail-msg');
-    if (!target) return;
+    var target = document.getElementById('as-detail-msg') || pageMsg;
     target.textContent = text || '';
     target.style.color = error ? 'var(--danger)' : 'var(--muted)';
   }
@@ -249,6 +255,7 @@
   }
 
   function renderDetail(a) {
+    pageMessage('', false);
     current = { kind: a.kind, subject: a.subject };
     detailCard.hidden = false;
     var drift = a.drift_note ? '<div class="drift">⚠ ' + esc(a.drift_note) + '</div>' : '';
@@ -340,10 +347,12 @@
   }
 
   function open(kind, subject, retryButton) {
+    pageMessage('Loading assessment “' + subject + '”…', false);
     jfetch('/api/v1/assessments/' + kind + '/' + encodeURIComponent(subject))
       .then(responseData)
       .then(function (result) {
         if (!result.ok) {
+          pageMessage('', false);
           detailMessage(responseDetail(result, 'Could not reload the latest assessment.'), true);
           return;
         }
@@ -351,6 +360,7 @@
         reloadListSelection();
         detailCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }).catch(function () {
+        pageMessage('', false);
         detailMessage('Could not reload the latest assessment — check your connection and try again.', true);
       }).finally(function () {
         if (retryButton && retryButton.isConnected) retryButton.disabled = false;
@@ -363,9 +373,14 @@
   function reload() {
     return jfetch('/api/v1/assessments').then(function (r) {
       if (r.status === 403) { listEl.innerHTML = '<div class="as-empty">Assessments are audit-level — sign in with an audit or admin role to view.</div>'; return null; }
-      return r.ok ? r.json() : null;
+      if (!r.ok) {
+        pageMessage('Could not load the assessment register (HTTP ' + r.status + '). Reload to try again.', true);
+        return null;
+      }
+      return r.json();
     }).then(function (j) {
       if (!j) return;
+      pageMessage('', false);
       lastItems = j.assessments || [];
       renderList(lastItems);
       renderDue(j.due || []);
@@ -376,6 +391,12 @@
           tplSel.appendChild(o);
         });
       }
+    }).catch(function () {
+      pageMessage('Could not load the assessment register — check your connection and reload to try again.', true);
+      if (!lastItems.length) {
+        listEl.innerHTML = '<div class="as-empty">The assessment register is temporarily unavailable.</div>';
+      }
+      return null;
     });
   }
 

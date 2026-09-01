@@ -38,6 +38,11 @@
       container backend can only be selected while its daemon is reachable,
       so a switch never strands your goals on a dead runtime.
     </p>
+    {% if not permissions_can_manage_sandbox %}
+    <p class="muted" role="note">
+      Read only: changing the deployment-wide sandbox backend requires a global administrator.
+    </p>
+    {% endif %}
     <div id="sbx-rows" aria-live="polite"><p class="muted">Checking the container runtimes…</p></div>
     <p id="sbx-err" role="alert" aria-live="assertive"
        style="color: var(--danger); font-weight: var(--font-medium); margin: var(--space-2) 0 0; white-space: pre-wrap;"></p>
@@ -47,8 +52,10 @@
     'use strict';
     var rows = document.getElementById('sbx-rows');
     var err = document.getElementById('sbx-err');
+    var canManageSandbox = {{ 'true' if permissions_can_manage_sandbox else 'false' }};
 
     function pick(backend) {
+      if (!canManageSandbox) return;
       err.textContent = '';
       var body = { backend: backend };
       if (backend === 'local') {
@@ -93,9 +100,14 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn' + (info.available && name !== 'local' ? ' btn--primary' : '');
-        btn.textContent = 'Use ' + name;
-        btn.disabled = !info.available;
-        btn.addEventListener('click', function () { pick(name); });
+        btn.textContent = canManageSandbox ? 'Use ' + name : 'Read only';
+        btn.disabled = !info.available || !canManageSandbox;
+        btn.setAttribute('aria-disabled', btn.disabled ? 'true' : 'false');
+        if (canManageSandbox) {
+          btn.addEventListener('click', function () { pick(name); });
+        } else {
+          btn.title = 'A global administrator is required to change the sandbox backend.';
+        }
         li.appendChild(btn);
       }
       return li;
@@ -125,6 +137,11 @@
 
   <div class="section-head"><h2>Tools</h2></div>
   <div class="panel">
+    {% if not permissions_can_manage_tools %}
+    <p class="muted" role="note">
+      Read only: changing tool admission requires an operator or administrator for this tenant.
+    </p>
+    {% endif %}
     <form method="get" action="/permissions" class="perm-filter" aria-label="Filter tools">
       <label for="perm-query">Search catalog</label>
       <input class="input" id="perm-query" name="q" type="search" maxlength="128"
@@ -172,7 +189,9 @@
               {% else %}<span class="badge blocked perm-overall">blocked</span>{% endif %}
             </td>
             <td>
-              {% if t.overlay_blocked %}
+              {% if not permissions_can_manage_tools %}
+                <span class="muted" title="An operator or administrator is required to change tool admission.">Read only</span>
+              {% elif t.overlay_blocked %}
                 <button class="perm-toggle" data-name="{{ t.name }}" data-action="enable"
                         aria-label="Clear dashboard block for {{ t.name }} tool">Clear dashboard block</button>
               {% elif t.base_acl_allowed %}

@@ -18,6 +18,7 @@
   var mutationControls = Array.prototype.slice.call(
     document.querySelectorAll("[data-tper-mutation]")
   );
+  var destructiveInFlight = false;
 
   function failure(message) { var error = new Error(message); return error; }
   function identifier(value, label, optional) {
@@ -87,6 +88,41 @@
     outputNode.textContent = payload === undefined ? "" : JSON.stringify(payload, null, 2);
   }
   function busy(label) { statusNode.textContent = label; outputNode.textContent = ""; }
+  function confirmDestructive(message, okText) {
+    if (typeof window.mvConfirm === "function") {
+      return window.mvConfirm(message, { okText: okText });
+    }
+    return Promise.resolve(window.confirm(message));
+  }
+  async function runDestructive(form, label, prompt, okText, functionValue) {
+    if (destructiveInFlight) {
+      show("Another report mutation is already running. Wait for it to finish.", { error: true });
+      return;
+    }
+    destructiveInFlight = true;
+    root.dataset.destructiveInFlight = "true";
+    var controls = [];
+    var disabledBefore = [];
+    try {
+      if (!(await confirmDestructive(prompt, okText))) { return; }
+      // Leave the opener enabled while the modal is active so the shared
+      // confirmation primitive can restore focus to it. Single-flight state
+      // already prevents another report mutation while the modal is open.
+      controls = Array.prototype.slice.call(form.querySelectorAll("button, input, select, textarea"));
+      disabledBefore = controls.map(function (control) { return control.disabled; });
+      controls.forEach(function (control) { control.disabled = true; });
+      form.setAttribute("aria-busy", "true");
+      busy(label);
+      await functionValue();
+    } catch (error) {
+      show(error.message, { error: true });
+    } finally {
+      controls.forEach(function (control, index) { control.disabled = disabledBefore[index]; });
+      form.removeAttribute("aria-busy");
+      destructiveInFlight = false;
+      delete root.dataset.destructiveInFlight;
+    }
+  }
   function setMutationReady(ready) {
     mutationControls.forEach(function (controls) {
       var authorized = controls.dataset.authorized === "true" &&
@@ -136,8 +172,60 @@
       var response = await fetch(apiBase + "/downloads/redeem", { method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error", referrerPolicy: "no-referrer", headers: { "Accept": "application/pdf", "Content-Type": "application/json" }, body: JSON.stringify({ token: grant.token }) }); var bytes = await readBounded(response, MAX_PDF_BYTES); grant.token = null; if (!response.ok || response.headers.get("Content-Type") !== "application/pdf") { throw failure("PDF download failed."); } var url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })); var link = document.createElement("a"); link.href = url; link.download = "third-party-report-" + reportId + ".pdf"; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url); show("PDF downloaded and one-time token consumed.", { report_id: reportId, bytes: bytes.byteLength });
     } catch (error) { show(error.message, { error: true }); }
   });
-  document.getElementById("tper-revoke-form").addEventListener("submit", async function (event) { event.preventDefault(); try { var values = formObject(event.currentTarget); var reportId = identifier(values.report_id, "Report reference", false); var result = await requestJson("/reports/" + encodeURIComponent(reportId) + "/revoke", { method: "POST", body: JSON.stringify({ expected_control_revision: integer(values.expected_control_revision, "Control revision", 2147483647), reason_code: identifier(values.reason_code, "Reason code", false), idempotency_key: operation(values.idempotency_key) }) }); show("Report revoked.", result); await refresh(); } catch (error) { show(error.message, { error: true }); } });
-  document.getElementById("tper-purge-form").addEventListener("submit", async function (event) { event.preventDefault(); try { var values = formObject(event.currentTarget); var result = await requestJson("/maintenance/purge", { method: "POST", body: JSON.stringify({ limit: integer(values.limit, "Purge limit", 1000), idempotency_key: operation(values.idempotency_key) }) }); show("Retention purge completed.", result); await refresh(); } catch (error) { show(error.message, { error: true }); } });
+  document.getElementById("tper-revoke-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    try {
+      var values = formObject(form);
+      var reportId = identifier(values.report_id, "Report reference", false);
+      var controlRevision = integer(values.expected_control_revision, "Control revision", 2147483647);
+      var reasonCode = identifier(values.reason_code, "Reason code", false);
+      var idempotencyKey = operation(values.idempotency_key);
+      await runDestructive(
+        form,
+        "Revoking report artifact…",
+        "Revoke executive report “" + reportId + "” at control revision " + controlRevision +
+          " for reason “" + reasonCode + "”? Existing download grants will stop working.",
+        "Revoke this report",
+        async function () {
+          var result = await requestJson("/reports/" + encodeURIComponent(reportId) + "/revoke", {
+            method: "POST",
+            body: JSON.stringify({
+              expected_control_revision: controlRevision,
+              reason_code: reasonCode,
+              idempotency_key: idempotencyKey
+            })
+          });
+          show("Report revoked.", result);
+          await refresh();
+        }
+      );
+    } catch (error) { show(error.message, { error: true }); }
+  });
+  document.getElementById("tper-purge-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = event.currentTarget;
+    try {
+      var values = formObject(form);
+      var limit = integer(values.limit, "Purge limit", 1000);
+      var idempotencyKey = operation(values.idempotency_key);
+      await runDestructive(
+        form,
+        "Purging expired report artifacts…",
+        "Permanently purge up to " + limit +
+          " expired executive report artifacts? Purged artifacts cannot be downloaded or restored.",
+        "Purge expired reports",
+        async function () {
+          var result = await requestJson("/maintenance/purge", {
+            method: "POST",
+            body: JSON.stringify({ limit: limit, idempotency_key: idempotencyKey })
+          });
+          show("Retention purge completed.", result);
+          await refresh();
+        }
+      );
+    } catch (error) { show(error.message, { error: true }); }
+  });
   document.getElementById("tper-integrity").addEventListener("click", async function () { try { busy("Verifying report ledger…"); show("Integrity verification completed.", await requestJson("/integrity")); } catch (error) { show(error.message, { error: true }); } });
   document.getElementById("tper-audit").addEventListener("click", async function () { try { busy("Loading audit history…"); show("Audit history loaded.", await requestJson("/audit?limit=100")); } catch (error) { show(error.message, { error: true }); } });
   document.getElementById("tper-refresh").addEventListener("click", refresh);

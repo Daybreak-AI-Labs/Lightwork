@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 
 from maverick_dashboard import app as dashboard_app
 from maverick_dashboard import settings_store, ui_visibility
+from maverick_dashboard.route_identity import iter_compatible_route_contexts
 
 
 report_path = Path(sys.argv[1])
@@ -61,10 +62,10 @@ if len(pages) != len(set(pages)):
     failures.append("ui_visibility.PAGES contains duplicate paths")
 
 registered_get: set[str] = set()
-for route in dashboard_app.app.routes:
+for route in iter_compatible_route_contexts(dashboard_app.app.routes):
     path = getattr(route, "path", None)
     methods = set(getattr(route, "methods", ()) or ())
-    if isinstance(path, str) and ("GET" in methods or type(route).__name__ == "Mount"):
+    if isinstance(path, str) and "GET" in methods:
         registered_get.add(path)
 missing_routes = sorted(set(pages) - registered_get)
 if missing_routes:

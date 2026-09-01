@@ -802,6 +802,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/workflow-builder")
     assert r.status_code == 200
+    assert "<title>Workflow builder · Lightwork</title>" in r.text
     assert '<h1 class="page-title">Workflow builder</h1>' in r.text
     assert 'id="wf-draft-btn"' in r.text
     assert "/api/v1/workflows/draft" in r.text

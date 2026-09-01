@@ -13,6 +13,7 @@ class _NavFinderMarkup(HTMLParser):
         self.in_finder = 0
         self.sidebar_hrefs: list[str] = []
         self.finder_hrefs: list[str] = []
+        self.finder_search: dict[str, str] = {}
         self.ids: dict[str, dict[str, str | None]] = {}
         self.scripts: list[str] = []
 
@@ -34,6 +35,7 @@ class _NavFinderMarkup(HTMLParser):
             self.sidebar_hrefs.append(values["href"])
         if self.in_finder and "data-navfinder-target" in values:
             self.finder_hrefs.append(values["href"])
+            self.finder_search[values["href"]] = values.get("data-search") or ""
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "aside" and self.in_sidebar:
@@ -90,3 +92,11 @@ def test_page_finder_destinations_exactly_match_visible_sidebar_registry(monkeyp
     assert all(href.startswith("/") for href in markup.finder_hrefs)
     assert "#" not in markup.finder_hrefs
     assert not any(href.startswith("//") for href in markup.finder_hrefs)
+
+
+def test_page_finder_accepts_the_workflow_name_for_the_grc_builder(monkeypatch, tmp_path):
+    markup = _overview_markup(monkeypatch, tmp_path)
+
+    search_terms = markup.finder_search["/compliance/grc-studio"].lower()
+    assert "workflow" in search_terms
+    assert "builder" in search_terms

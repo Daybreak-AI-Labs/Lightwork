@@ -259,7 +259,7 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
-    assert 'id="lrn-enable"' in t and "Turn all learning off" in t
+    assert 'id="lrn-enable"' in t and "Turn core learning off" in t
 
 
 def test_dgm_is_a_separate_acknowledged_research_toggle(tmp_path, monkeypatch):
@@ -425,7 +425,8 @@ def test_learning_page_has_separate_dgm_risk_card(tmp_path, monkeypatch):
 def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
-    assert "learning systems are on" in t
+    assert "core learning components are on" in t
+    assert "separate feature switches appear below" in t
     # The static tiles became a live board: the accumulated-judgement card
     # and its container render client-side from /api/v1/learning.
     assert "Accumulated judgement" in t

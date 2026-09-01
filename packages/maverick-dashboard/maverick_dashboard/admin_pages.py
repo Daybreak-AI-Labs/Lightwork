@@ -280,58 +280,24 @@ async def settings_set_provider(
     """
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
-    import hashlib
-    import hmac
-
-    from maverick import config
-
     from maverick_dashboard import settings_store
     provider_name = provider.strip()
     key_value = api_key.strip()
     base_value = base_url.strip()
     try:
-        before = config.provider_configuration_state(provider_name)
-        if before["source_errors"]:
-            raise HTTPException(
-                status_code=503,
-                detail="provider configuration is unreadable; repair the active config source before rotating credentials",
-            )
-        blockers = []
-        if key_value and not before["dashboard_can_set_api_key"]:
-            blockers.append(f"API key is controlled by {before['api_key_source']}")
-        if base_value and not before["dashboard_can_set_base_url"]:
-            blockers.append(f"base URL is controlled by {before['base_url_source']}")
-        if blockers:
-            raise HTTPException(
-                status_code=409,
-                detail="; ".join(blockers) + "; rotate that source instead",
-            )
-        if not key_value and not base_value:
-            raise HTTPException(status_code=400, detail="enter a provider value to save")
-        settings_store.set_provider(
+        settings_store.rotate_provider(
             provider_name,
             api_key=key_value,
             base_url=base_value,
         )
-        config.reset_config_cache()
-        observed = config.get_provider_config(provider_name) or {}
-        if key_value:
-            expected_digest = hashlib.sha256(key_value.encode("utf-8")).digest()
-            observed_digest = hashlib.sha256(
-                str(observed.get("api_key") or "").strip().encode("utf-8")
-            ).digest()
-            if not hmac.compare_digest(expected_digest, observed_digest):
-                raise HTTPException(
-                    status_code=409,
-                    detail="provider key was stored but is not the effective credential; review the active source",
-                )
-        if base_value and str(observed.get("base_url") or "").strip() != base_value:
-            raise HTTPException(
-                status_code=409,
-                detail="provider base URL was stored but is not the effective endpoint; review the active source",
-            )
+    except settings_store.ProviderConfigurationUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except settings_store.SecuritySuiteConfigUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except settings_store.ProviderRotationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="unknown provider") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse("/settings?saved=providers", status_code=303)
 
 

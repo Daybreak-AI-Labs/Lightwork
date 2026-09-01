@@ -133,4 +133,3 @@ def test_permissions_api_and_page_never_claim_blocked_tools_are_usable(
     assert 'data-base-acl-state="blocked"' in page_response.text
     assert 'data-sandbox-state="blocked"' in page_response.text
     assert "Available to attempt" not in page_response.text
-

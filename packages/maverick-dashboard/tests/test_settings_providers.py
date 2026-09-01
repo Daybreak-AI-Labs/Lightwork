@@ -99,6 +99,7 @@ def test_tenant_provider_source_is_displayed_and_dashboard_rotation_refused(
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
     c = _client(monkeypatch, tmp_path)
     from maverick import config
+    from maverick_dashboard import settings_store
 
     tenant_path = config.tenant_config_path()
     assert tenant_path is not None
@@ -122,6 +123,231 @@ def test_tenant_provider_source_is_displayed_and_dashboard_rotation_refused(
     assert response.status_code == 409
     assert "rotate that source" in response.json()["detail"]
     assert config.get_provider_config("openai")["api_key"] == "tenant-secret"  # pragma: allowlist secret
+    assert "openai" not in settings_store.load_overlay().get("providers", {})
+
+
+def test_post_commit_provider_mismatch_rolls_back_dashboard_overlay(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    monkeypatch.setattr(
+        config,
+        "get_provider_config",
+        lambda _name: {"api_key": "higher-authority-secret"},
+    )
+
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "rejected-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 409, response.text
+    assert not config.dashboard_overrides_path().exists()
+    assert "openai" not in settings_store.load_overlay().get("providers", {})
+
+
+def test_provider_authority_fingerprint_change_prevents_persisted_rotation(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    generations = iter(("stable", "stable", "stable", "changed", "changed"))
+    monkeypatch.setattr(
+        settings_store,
+        "_provider_authority_fingerprint",
+        lambda _name: next(generations),
+    )
+
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "rejected-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 409, response.text
+    assert not config.dashboard_overrides_path().exists()
+    assert "openai" not in settings_store.load_overlay().get("providers", {})
+
+
+def test_provider_rotation_decryption_failure_is_recoverable_503(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    settings_store.set_provider(
+        "anthropic",
+        api_key="existing-secret",  # pragma: allowlist secret
+    )
+    path = config.dashboard_overrides_path()
+    before = path.read_bytes()
+
+    def unreadable(_data):
+        raise ValueError("ciphertext authentication failed")
+
+    monkeypatch.setattr(settings_store, "_unseal_overlay", unreadable)
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "new-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 503, response.text
+    assert "new-secret" not in response.text  # pragma: allowlist secret
+    assert path.read_bytes() == before
+
+
+def test_provider_rotation_post_write_read_failure_rolls_back_with_503(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    settings_store.set_provider(
+        "anthropic",
+        api_key="existing-secret",  # pragma: allowlist secret
+    )
+    path = config.dashboard_overrides_path()
+    before = path.read_bytes()
+    real_state = config.provider_configuration_state
+    calls = 0
+
+    def fail_after_publish(name):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise OSError("provider config read failed")
+        return real_state(name)
+
+    monkeypatch.setattr(config, "provider_configuration_state", fail_after_publish)
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "new-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 503, response.text
+    assert calls == 2
+    assert path.read_bytes() == before
+
+
+def test_provider_rotation_publish_io_failure_rolls_back_with_503(
+    monkeypatch, tmp_path
+):
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick_dashboard import settings_store
+
+    settings_store.set_provider(
+        "anthropic",
+        api_key="existing-secret",  # pragma: allowlist secret
+    )
+    path = config.dashboard_overrides_path()
+    before = path.read_bytes()
+    real_write = settings_store._write
+    calls = 0
+
+    def publish_then_fail(data):
+        nonlocal calls
+        calls += 1
+        real_write(data)
+        if calls == 1:
+            raise OSError("directory sync failed after replace")
+
+    monkeypatch.setattr(settings_store, "_write", publish_then_fail)
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "new-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 503, response.text
+    assert calls == 1  # rollback restores the byte-exact snapshot directly
+    assert path.read_bytes() == before
+
+
+def test_provider_rotation_rollback_restores_exact_bytes_and_mode(
+    monkeypatch, tmp_path
+):
+    import os
+    import stat
+
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config
+
+    path = config.dashboard_overrides_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = (
+        b"# retained operator comment\n"
+        b"[future_extension]\n"
+        b"opaque = { version = 9, values = [\"a\", \"b\"] }\n"
+    )
+    path.write_bytes(original)
+    os.chmod(path, 0o600)
+    original_mode = stat.S_IMODE(path.stat().st_mode)
+    config.reset_config_cache()
+
+    monkeypatch.setattr(
+        config,
+        "get_provider_config",
+        lambda _name: {"api_key": "higher-authority-secret"},
+    )
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "rejected-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 409, response.text
+    assert path.read_bytes() == original
+    assert stat.S_IMODE(path.stat().st_mode) == original_mode
+
+
+def test_provider_rotation_refuses_process_local_lock_fallback(
+    monkeypatch, tmp_path
+):
+    from contextlib import contextmanager
+
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    from maverick import config, file_lock
+
+    path = config.dashboard_overrides_path()
+
+    @contextmanager
+    def unavailable_lock(_target, *, strict=False):
+        assert strict is True
+        raise RuntimeError("cross-process lock backend is unavailable")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(file_lock, "cross_process_lock", unavailable_lock)
+    response = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "new-secret"},  # pragma: allowlist secret
+    )
+
+    assert response.status_code == 503, response.text
+    assert not path.exists()
+
+    # A failed strict acquisition must not retain the process lock and wedge
+    # later dashboard settings operations.
+    monkeypatch.undo()
+    _no_provider_env(monkeypatch)
+    c = _client(monkeypatch, tmp_path)
+    follow_up = c.post(
+        "/settings/providers",
+        data={"provider": "openai", "api_key": "recovered-secret"},  # pragma: allowlist secret
+        follow_redirects=False,
+    )
+    assert follow_up.status_code == 303, follow_up.text
 
 
 def test_environment_key_can_be_replaced_and_effective_digest_is_verified(
