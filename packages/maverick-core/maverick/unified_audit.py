@@ -321,11 +321,19 @@ class UnifiedAuditConfig:
             "max_attempts",
             "retry_backoff_seconds",
             "poll_seconds",
+            # Parsed by unified_audit_custody.  Keep the projection dataclass
+            # independent from the optional custody composition while allowing
+            # the nested table in the same signed feature authority.
+            "custody",
         }
         unknown = sorted(str(key) for key in section if key not in allowed)
         if unknown:
             raise UnifiedAuditConfigError("unknown [audit.unified] key: " + ", ".join(unknown))
-        values = {key: section[key] for key in allowed if key in section}
+        values = {
+            key: section[key]
+            for key in allowed - {"custody"}
+            if key in section
+        }
         return cls(**values)
 
 

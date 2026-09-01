@@ -5,6 +5,16 @@
     operational records. A recorded status, deadline, export, preview, or
     routing decision is not a legal conclusion, compliance certification, or
     proof that an external system accepted anything.</p>
+  <div class="assurance-actions">
+    <button class="btn btn--ghost" id="governance-operations-load-all" type="button"
+            aria-describedby="governance-operations-load-all-status">
+      Load all module summaries
+    </button>
+    <span class="assurance-muted" id="governance-operations-load-all-status"
+          role="status" aria-live="polite">
+      Module summaries load as they approach the viewport or receive keyboard focus.
+    </span>
+  </div>
 
   <div class="assurance-grid">
     <section id="ai-literacy-panel" aria-labelledby="ai-literacy-title">
@@ -2956,23 +2966,65 @@
     }
   };
 
-  loadLiteracyRequirements();
-  loadIncidents();
-  loadIntakes();
-  loadCostCollectors();
-  loadCost();
-  loadPolicyManagement();
-  loadAIExplanations();
-  loadInsurabilityProfiles();
-  loadConformityCases();
-  loadRegulatedPackages();
-  loadBenchmarkContributions();
-  loadBenchmarkReports();
-  loadDiscoverySensors();
-  loadDiscoveryObservations();
-  loadIdentityGovernanceConnectors();
-  loadMediaProvenanceCapabilities();
-  loadMediaProvenanceRecords();
-  loadGrcEvents();
+  // Load each large assurance module only when it approaches the viewport.
+  // A module is observed once, so navigation/scrolling cannot fan out repeat
+  // reads. Older browsers retain a bounded eager fallback.
+  const panelLoaders = [
+    ["ai-literacy-panel", [loadLiteracyRequirements]],
+    ["article-73-panel", [loadIncidents]],
+    ["ai-business-intake-panel", [loadIntakes]],
+    ["ai-cost-roi-panel", [loadCostCollectors, loadCost]],
+    ["ai-policy-management-panel", [loadPolicyManagement]],
+    ["ai-explainability-panel", [loadAIExplanations]],
+    ["ai-insurability-panel", [loadInsurabilityProfiles]],
+    ["ai-conformity-panel", [loadConformityCases]],
+    ["ai-regulated-package-workbench", [loadRegulatedPackages]],
+    ["ai-benchmark-panel", [loadBenchmarkContributions, loadBenchmarkReports]],
+    ["ai-discovery-sensors-panel", [loadDiscoverySensors, loadDiscoveryObservations]],
+    ["ai-identity-governance-panel", [loadIdentityGovernanceConnectors]],
+    ["ai-media-provenance-panel", [loadMediaProvenanceCapabilities, loadMediaProvenanceRecords]],
+    ["grc-outbound-panel", [loadGrcEvents]],
+  ];
+  const loadedPanels = new Set();
+  let panelObserver = null;
+  const loadPanel = item => {
+    if (!item || loadedPanels.has(item[0])) return Promise.resolve([]);
+    loadedPanels.add(item[0]);
+    const panel = byId(item[0]);
+    if (panelObserver && panel) panelObserver.unobserve(panel);
+    return Promise.all(item[1].map(loader => Promise.resolve().then(loader)));
+  };
+  const loadAllButton = byId("governance-operations-load-all");
+  if (loadAllButton) loadAllButton.addEventListener("click", async () => {
+    loadAllButton.disabled = true;
+    loadAllButton.setAttribute("aria-busy", "true");
+    setStatus("governance-operations-load-all-status", "Loading all bounded module summaries…");
+    try {
+      await Promise.all(panelLoaders.map(loadPanel));
+      setStatus("governance-operations-load-all-status", "All module summary requests completed.");
+    } catch (_error) {
+      setStatus("governance-operations-load-all-status", "One or more module summaries failed safely.");
+    } finally {
+      loadAllButton.disabled = false;
+      loadAllButton.removeAttribute("aria-busy");
+    }
+  });
+  if ("IntersectionObserver" in window) {
+    panelObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const selected = panelLoaders.find(item => item[0] === entry.target.id);
+        if (selected) void loadPanel(selected);
+      });
+    }, {rootMargin: "240px 0px"});
+    panelLoaders.forEach(item => {
+      const panel = byId(item[0]);
+      if (!panel) return;
+      panel.addEventListener("focusin", () => { void loadPanel(item); }, {once: true});
+      panelObserver.observe(panel);
+    });
+  } else {
+    void Promise.all(panelLoaders.map(loadPanel));
+  }
 })();
 </script>

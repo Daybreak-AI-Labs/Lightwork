@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from maverick import privacy_rights_orchestration as rights
+from maverick import privacy_rights_source_worker as source_worker
 from maverick_dashboard import privacy_rights_orchestration_api as api
 
 API = "/api/v1/privacy/rights-orchestration"
@@ -150,13 +151,24 @@ def test_status_is_store_free_honest_and_feature_off_is_403(environment) -> None
     assert status["estate_completeness_claimed"] is False
     assert status["live_provider_acceptance_verified"] is False
     assert status["live_customer_acceptance_verified"] is False
-    assert status["callback_transport_worker_implemented"] is False
-    assert status["callbacks_are_worker_intent_only"] is True
+    assert status["callback_transport_worker_implemented"] is True
+    assert status["callbacks_are_worker_intent_only"] is False
+    assert status["source_runtime"]["ready"] is False
+    assert status["status_request_opened_store"] is False
+    assert status["status_request_resolved_secret"] is False
     assert state["factory_calls"] == []
 
     state["enabled"] = False
     assert client.get(f"{API}/status").json()["enabled"] is False
     assert client.get(f"{API}/sources").status_code == 403
+    assert client.post(
+        f"{API}/source-runtime/run",
+        json={"run_id": "disabled-source-run"},
+    ).status_code == 403
+    assert client.post(
+        f"{API}/source-runtime/reconcile",
+        json={"run_id": "disabled-source-reconcile"},
+    ).status_code == 403
 
 
 def test_exact_tenant_principal_and_raw_to_hmac_non_echo_boundary(environment) -> None:
@@ -288,6 +300,10 @@ def test_claim_is_only_live_lease_response_and_exports_omit_callbacks(environmen
     callback = claim.json()["items"][0]
     live_token = callback["lease_token"]
     assert live_token
+    listed = client.get(f"{API}/callbacks")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["count"] == 1
+    assert "lease_token" not in listed.json()["items"][0]
 
     exported = client.put(
         f"{API}/cases/case-callback/exports/export-callback",
@@ -361,7 +377,94 @@ def test_claim_is_only_live_lease_response_and_exports_omit_callbacks(environmen
     calls = state["permission_calls"]
     assert isinstance(calls, list)
     assert calls.count(("global", "admin")) >= 6
+    assert ("global", "audit") in calls
     assert ("tenant", "operate") in calls
+
+
+def test_stock_source_worker_and_reconciler_are_admin_wired_without_route_secrets(
+    environment,
+) -> None:
+    client, _database, state = environment
+    calls: list[tuple[str, dict[str, object]]] = []
+    factory_calls: list[dict[str, object]] = []
+
+    class Runtime(source_worker.PrivacyRightsSourceWorker):
+        def __init__(self) -> None:
+            pass
+
+        def run_once(self, tenant_id: str, **kwargs):
+            calls.append((tenant_id, kwargs))
+            return source_worker.WorkBatchResult(
+                tenant_id=tenant_id,
+                claimed=2,
+                completed=1,
+                not_found=1,
+                retried=0,
+                dead_lettered=0,
+                ambiguous=0,
+                provider_writes_possible=True,
+            )
+
+        def reconcile_once(self, tenant_id: str, **kwargs):
+            calls.append((tenant_id, kwargs))
+            return source_worker.ReconciliationBatchResult(
+                tenant_id=tenant_id,
+                inspected=1,
+                resolved=1,
+                requeued=0,
+                still_ambiguous=0,
+                errors=0,
+            )
+
+    def factory(**kwargs):
+        factory_calls.append(kwargs)
+        return Runtime()
+
+    client.app.state.privacy_rights_source_worker_factory = factory
+    client.app.state.privacy_rights_source_readiness_probe = lambda tenant: {
+        "schema": "lightwork.privacy-rights-source-readiness.v1",
+        "tenant_id": tenant,
+        "enabled": True,
+        "configured": True,
+        "ready": True,
+        "status_probe_opened_store": False,
+        "status_probe_invoked_provider": False,
+        "status_probe_resolved_secret": False,
+        "live_provider_acceptance_verified": False,
+    }
+    status = client.get(f"{API}/status").json()
+    assert status["source_runtime"]["ready"] is True
+
+    run = client.post(
+        f"{API}/source-runtime/run",
+        json={
+            "run_id": "provider-run-1",
+            "limit": 2,
+            "lease_seconds": 45,
+            "retry_delay_seconds": 10,
+        },
+    )
+    assert run.status_code == 200, run.text
+    assert run.json()["completed"] == 1
+    assert run.json()["raw_subject_persisted"] is False
+    reconcile = client.post(
+        f"{API}/source-runtime/reconcile",
+        json={
+            "run_id": "provider-reconcile-1",
+            "limit": 2,
+            "retry_delay_seconds": 10,
+        },
+    )
+    assert reconcile.status_code == 200, reconcile.text
+    assert reconcile.json()["resolved"] == 1
+    assert reconcile.json()["provider_writes_performed"] is False
+    assert len(factory_calls) == 2
+    assert all(call["tenant_id"] == "tenant-a" for call in factory_calls)
+    assert all("credential" not in call for call in factory_calls)
+    assert calls[0][0] == "tenant-a"
+    permission_calls = state["permission_calls"]
+    assert isinstance(permission_calls, list)
+    assert permission_calls.count(("global", "admin")) >= 2
 
 
 def test_operate_opener_can_close_after_distinct_admin_approval(environment) -> None:
@@ -483,9 +586,12 @@ def test_major_routes_and_network_free_adapter_surface(environment) -> None:
         f"{API}/cases/{{case_id}}/sources/{{source_id}}/plan",
         f"{API}/tasks/{{task_id}}/approve-destructive",
         f"{API}/callbacks/claim",
+        f"{API}/callbacks",
         f"{API}/callbacks/{{callback_id}}/fail",
         f"{API}/callbacks/{{callback_id}}/acknowledge",
         f"{API}/callbacks/{{callback_id}}/requeue",
+        f"{API}/source-runtime/run",
+        f"{API}/source-runtime/reconcile",
         f"{API}/cases/{{case_id}}/sources/{{source_id}}/phases/{{phase}}/evidence/{{evidence_id}}",
         f"{API}/cases/{{case_id}}/manifests/{{manifest_id}}",
         f"{API}/cases/{{case_id}}/packages/{{package_id}}",

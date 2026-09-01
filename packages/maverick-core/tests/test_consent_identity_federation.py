@@ -483,3 +483,126 @@ def test_injected_oidc_verifier_uses_exact_jwks_origin_and_kid_without_fetching(
     )
     assert result.status == "authorized"
     assert resolutions == [("https://keys.example.test", "consent-key-1")]
+
+
+def test_unlink_recovers_revokes_evidence_and_relink_needs_fresh_pairing(
+    material,
+    monkeypatch,
+):
+    _clock, preferences, pairing, base = material
+    verifier = "u" * 64
+    challenge = pairing.begin_pairing(
+        base[digest("client:target")],
+        code_challenge=pkce(verifier),
+        ttl_seconds=300,
+    )
+    pairing.authorize_pairing(
+        challenge.pairing_code,
+        oidc_nonce=challenge.oidc_nonce,
+        oidc_token="unlink-authority-token",
+        source=base[digest("client:source")],
+        settings=settings(),
+        oidc_verifier=verifier_for(),
+        subject_digest_key=b"k" * 32,
+    )
+    pairing.redeem_pairing(
+        challenge.pairing_code,
+        code_verifier=verifier,
+        target=base[digest("client:target")],
+    )
+    authority = preferences.get_profile_authority("tenant-a", "target-profile")
+    target = replace(
+        base[digest("client:target")],
+        profile_revision=int(authority["revision"]),
+    )
+    original_save = pairing._save_record
+    interrupted = False
+
+    def interrupt_finalize(connection, record, *, expected_revision, now):
+        nonlocal interrupted
+        if (
+            not interrupted
+            and record.get("status") == "revoked"
+            and record.get("unlink_operation_key_sha256")
+        ):
+            interrupted = True
+            raise RuntimeError("simulated interruption after core unlink")
+        return original_save(
+            connection,
+            record,
+            expected_revision=expected_revision,
+            now=now,
+        )
+
+    monkeypatch.setattr(pairing, "_save_record", interrupt_finalize)
+    with pytest.raises(RuntimeError, match="after core unlink"):
+        pairing.unlink_current_identity(
+            target,
+            expected_profile_revision=target.profile_revision,
+            expected_link_revision=int(authority["link_revision"]),
+            idempotency_key="unlink-target-1",
+            reason_sha256=digest("consumer-requested-unlink"),
+            settings=settings(),
+        )
+    current = preferences.get_profile_authority("tenant-a", "target-profile")
+    assert current["link_status"] == "unlinked"
+    monkeypatch.setattr(pairing, "_save_record", original_save)
+    recovered_target = replace(target, profile_revision=int(current["revision"]))
+    recovered = pairing.unlink_current_identity(
+        recovered_target,
+        expected_profile_revision=target.profile_revision,
+        expected_link_revision=int(authority["link_revision"]),
+        idempotency_key="unlink-target-1",
+        reason_sha256=digest("consumer-requested-unlink"),
+        settings=settings(),
+    )
+    assert recovered["link_status"] == "unlinked"
+    assert pairing.unlink_current_identity(
+        recovered_target,
+        expected_profile_revision=target.profile_revision,
+        expected_link_revision=int(authority["link_revision"]),
+        idempotency_key="unlink-target-1",
+        reason_sha256=digest("consumer-requested-unlink"),
+        settings=settings(),
+    ) == recovered
+    with pytest.raises(ConsentIdentityFederationConflict, match="rebound"):
+        pairing.unlink_current_identity(
+            recovered_target,
+            expected_profile_revision=target.profile_revision,
+            expected_link_revision=int(authority["link_revision"]),
+            idempotency_key="unlink-target-1",
+            reason_sha256=digest("different-reason"),
+            settings=settings(),
+        )
+    with pytest.raises(ConsentIdentityFederationDenied, match="fresh identity"):
+        pairing.resolve_redeemed_identity_evidence(recovered_target)
+
+    fresh_verifier = "w" * 64
+    fresh = pairing.begin_pairing(
+        recovered_target,
+        code_challenge=pkce(fresh_verifier),
+        ttl_seconds=300,
+    )
+    source_authority = preferences.get_profile_authority("tenant-a", "source-profile")
+    pairing.authorize_pairing(
+        fresh.pairing_code,
+        oidc_nonce=fresh.oidc_nonce,
+        oidc_token="fresh-relink-authority-token",
+        source=replace(
+            base[digest("client:source")],
+            profile_revision=int(source_authority["revision"]),
+        ),
+        settings=settings(),
+        oidc_verifier=verifier_for(),
+        subject_digest_key=b"k" * 32,
+    )
+    pairing.redeem_pairing(
+        fresh.pairing_code,
+        code_verifier=fresh_verifier,
+        target=recovered_target,
+    )
+    history = preferences.get_profile_link_history("tenant-a", "target-profile")
+    assert history["events"][0]["action"] == "relinked"
+    assert preferences.get_profile_authority("tenant-a", "target-profile")[
+        "link_status"
+    ] == "linked"

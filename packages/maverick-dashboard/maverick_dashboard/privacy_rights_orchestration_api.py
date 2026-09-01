@@ -146,6 +146,21 @@ class ClaimCallbacksIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class SourceWorkerRunIn(_StrictModel):
+    run_id: IdempotencyKey
+    # Omitted values are supplied by the tenant's server-owned source-adapter
+    # configuration. Explicit values may only narrow those deployment caps.
+    limit: int | None = Field(default=None, ge=1, le=100)
+    lease_seconds: int | None = Field(default=None, ge=1, le=3_600)
+    retry_delay_seconds: int | None = Field(default=None, ge=0, le=604_800)
+
+
+class SourceReconciliationRunIn(_StrictModel):
+    run_id: IdempotencyKey
+    limit: int | None = Field(default=None, ge=1, le=100)
+    retry_delay_seconds: int | None = Field(default=None, ge=0, le=604_800)
+
+
 class FailCallbackIn(RevisionIn):
     lease_token: LeaseToken
     error_code: ErrorCode
@@ -358,18 +373,110 @@ def create_privacy_rights_orchestration_router(  # noqa: C901, PLR0915
             PrivacyRightsOrchestrationStore,
         )
 
+        probe = getattr(
+            request.app.state,
+            "privacy_rights_source_readiness_probe",
+            None,
+        )
+        try:
+            source_runtime = (
+                await run_in_threadpool(probe, tenant)
+                if callable(probe)
+                else {
+                    "schema": "lightwork.privacy-rights-source-readiness.v1",
+                    "tenant_id": tenant,
+                    "enabled": False,
+                    "configured": False,
+                    "ready": False,
+                    "status_probe_opened_store": False,
+                    "status_probe_invoked_provider": False,
+                    "status_probe_resolved_secret": False,
+                    "live_provider_acceptance_verified": False,
+                }
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            source_runtime = {
+                "schema": "lightwork.privacy-rights-source-readiness.v1",
+                "tenant_id": tenant,
+                "enabled": False,
+                "configured": False,
+                "ready": False,
+                "status_probe_opened_store": False,
+                "status_probe_invoked_provider": False,
+                "status_probe_resolved_secret": False,
+                "live_provider_acceptance_verified": False,
+            }
+        store_boundaries = dict(
+            PrivacyRightsOrchestrationStore.product_boundaries()
+        )
         return {
             "schema": "lightwork.privacy-rights-orchestration-status.v1",
             "enabled": _enabled(),
             "principal_ref": principal,
-            **PrivacyRightsOrchestrationStore.product_boundaries(),
+            "store_capabilities": store_boundaries,
+            "network_io": bool(source_runtime.get("configured")),
+            "provider_writes": bool(
+                source_runtime.get("provider_writes_possible")
+            ),
+            "identity_verification_performed": False,
+            "response_delivery_performed": False,
+            "raw_subject_persisted": False,
+            "raw_external_request_ref_persisted": False,
+            "credential_values_persisted": False,
+            "provider_origins_persisted": False,
+            "estate_completeness_claimed": False,
+            "live_provider_acceptance_verified": False,
             "live_customer_acceptance_verified": False,
-            "callback_transport_worker_implemented": False,
-            "callbacks_are_worker_intent_only": True,
+            "callback_transport_worker_implemented": True,
+            "stock_provider_contracts": [
+                "google_workspace_users",
+                "microsoft_graph_users",
+                "salesforce_contacts",
+                "servicenow_users",
+            ],
+            "source_runtime": source_runtime,
+            "callbacks_are_worker_intent_only": False,
+            "callbacks_require_source_runtime_readiness": True,
             "status_request_external_network_io": False,
+            "status_request_opened_store": False,
+            "status_request_resolved_secret": False,
             "case_open_raw_references_hmac_only": True,
             "claim_is_only_live_lease_token_response": True,
         }
+
+    def source_worker(request: Request, tenant: str, principal: str):
+        factory = getattr(
+            request.app.state,
+            "privacy_rights_source_worker_factory",
+            None,
+        )
+        if not callable(factory):
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-rights source worker is unavailable",
+            )
+        try:
+            selected = factory(
+                tenant_id=tenant,
+                principal_ref=principal,
+                request=request,
+            )
+            from maverick.privacy_rights_source_worker import (
+                PrivacyRightsSourceWorker,
+            )
+
+            if not isinstance(selected, PrivacyRightsSourceWorker):
+                raise TypeError("source worker factory returned an invalid worker")
+            return selected
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-rights source worker is unavailable",
+            ) from exc
 
     @router.put("/sources/{source_id}")
     async def enroll_source(request: Request, source_id: ObjectPath, body: SourceEnrollmentIn):
@@ -487,6 +594,78 @@ def create_privacy_rights_orchestration_router(  # noqa: C901, PLR0915
         ops, tenant, store = authority(request)
         items = await call(ops, store.claim_callbacks, tenant, **body.model_dump())
         return {"items": _jsonable(items), "count": len(items)}
+
+    @router.get("/callbacks")
+    async def list_callbacks(
+        request: Request,
+        state: Literal[
+            "pending", "leased", "acked", "ambiguous", "dead_letter"
+        ]
+        | None = None,
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ):
+        require_global_permission(request, "audit")
+        ops, tenant, store = authority(request)
+        items = await call(
+            ops,
+            store.list_callbacks,
+            tenant,
+            state=state,
+            limit=limit,
+        )
+        return {
+            "items": [_without_lease(item) for item in items],
+            "count": len(items),
+        }
+
+    @router.post("/source-runtime/run")
+    async def run_source_worker(request: Request, body: SourceWorkerRunIn):
+        require_global_permission(request, "admin")
+        _ops()
+        tenant = _tenant_id()
+        principal = _principal(request, tenant)
+        selected = source_worker(request, tenant, principal)
+        try:
+            result = await run_in_threadpool(
+                selected.run_once,
+                tenant,
+                worker_ref=principal,
+                **body.model_dump(),
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-rights source worker run failed",
+            ) from exc
+        return _jsonable(result)
+
+    @router.post("/source-runtime/reconcile")
+    async def reconcile_source_worker(
+        request: Request,
+        body: SourceReconciliationRunIn,
+    ):
+        require_global_permission(request, "admin")
+        _ops()
+        tenant = _tenant_id()
+        principal = _principal(request, tenant)
+        selected = source_worker(request, tenant, principal)
+        try:
+            result = await run_in_threadpool(
+                selected.reconcile_once,
+                tenant,
+                worker_ref=principal,
+                **body.model_dump(),
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-rights source reconciliation failed",
+            ) from exc
+        return _jsonable(result)
 
     @router.post("/callbacks/{callback_id}/fail")
     async def fail_callback(request: Request, callback_id: ObjectPath, body: FailCallbackIn):

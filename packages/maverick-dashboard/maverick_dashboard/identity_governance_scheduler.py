@@ -117,6 +117,8 @@ _provider_locks_guard = threading.Lock()
 _provider_locks: dict[tuple[str, str], threading.Lock] = {}
 _default_engine_lock = threading.Lock()
 _default_engine: IdentityGovernanceScheduler | None = None
+_composed_engine_factory_lock = threading.Lock()
+_composed_engine_factory: Callable[[object], object | None] | None = None
 
 
 class IdentityGovernanceScheduleError(ValueError):
@@ -1517,10 +1519,37 @@ def default_scheduler() -> IdentityGovernanceScheduler:
     return _engine()
 
 
+def install_composed_engine_factory(
+    factory: Callable[[object], object | None],
+) -> None:
+    """Install the lazy production engine builder used inside tenant scope."""
+
+    if not callable(factory):
+        raise TypeError("identity-governance composed engine factory must be callable")
+    global _composed_engine_factory
+    with _composed_engine_factory_lock:
+        _composed_engine_factory = factory
+
+
+def _configured_engine(section: object) -> IdentityGovernanceScheduler:
+    with _composed_engine_factory_lock:
+        factory = _composed_engine_factory
+    if factory is None:
+        return _engine()
+    selected = factory(section)
+    if selected is None:
+        return _engine()
+    if not isinstance(selected, IdentityGovernanceScheduler):
+        raise TypeError(
+            "identity-governance composed engine factory returned an invalid engine"
+        )
+    return selected
+
+
 def configured_scheduler_status(section: object) -> dict[str, Any]:
     """Read sanitized status from the singleton used by the supervisor."""
 
-    return _engine().status(section)
+    return _configured_engine(section).status(section)
 
 
 def run_configured_collection(
@@ -1530,7 +1559,7 @@ def run_configured_collection(
 ) -> dict[str, Any]:
     """Run one current-tenant collection cycle without starting a thread."""
 
-    return _engine().run_configured(section, actor=actor)
+    return _configured_engine(section).run_configured(section, actor=actor)
 
 
 def _load_tenant_section() -> dict[str, Any]:
@@ -1557,11 +1586,15 @@ def scheduler_cycle(
 
     from .automation_queue import _run_for_active_tenants
 
-    selected_engine = engine if engine is not None else _engine()
     loader = section_loader if section_loader is not None else _load_tenant_section
+    run = (
+        (lambda: engine.run_configured(loader(), actor=actor))
+        if engine is not None
+        else (lambda: run_configured_collection(loader(), actor=actor))
+    )
     return _run_for_active_tenants(
         "identity-governance collection",
-        lambda: selected_engine.run_configured(loader(), actor=actor),
+        run,
     )
 
 
@@ -1667,6 +1700,7 @@ __all__ = [
     "configured_schedules",
     "default_scheduler",
     "digest_snapshot",
+    "install_composed_engine_factory",
     "run_configured_collection",
     "scheduler_cycle",
     "scheduler_poll_seconds",

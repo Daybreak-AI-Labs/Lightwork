@@ -30,10 +30,16 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({text: input.value, kinds: selected || []}),
         });
-        let d = {};
-        try { d = await res.json(); } catch (e) {}
+        let d;
+        try { d = await res.json(); }
+        catch (e) {
+          const msg = "Request failed: the server returned an invalid JSON response.";
+          badge.className = "badge failure"; badge.textContent = msg;
+          mvToast(msg, { error: true });
+          return;
+        }
         if (!res.ok) {
-          const msg = (d && d.detail) ? d.detail : ("Preview failed (" + res.status + ").");
+          const msg = d && typeof d.detail === "string" ? d.detail : ("Preview failed (" + res.status + ").");
           badge.className = "badge failure"; badge.textContent = msg;
           mvToast(msg, { error: true });
           return;

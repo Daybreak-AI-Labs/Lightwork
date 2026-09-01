@@ -2786,6 +2786,70 @@ class ContinuousEvidenceStore:
             connection.commit()
         return result
 
+    def unified_audit_records(self):
+        """Return the canonical continuous-evidence audit as digest-only records."""
+
+        from .unified_audit import GENESIS_SHA256, build_source_record
+
+        # Verify the complete persisted graph first; the page reader performs a
+        # second capture and rejects drift before accepting any projection.
+        self.verify_integrity()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM trc_audit WHERE tenant_sha256=? ORDER BY sequence",
+                (self._tenant_sha256,),
+            ).fetchall()
+        previous_integrity = GENESIS_SHA256
+        previous_record = GENESIS_SHA256
+        records = []
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload, integrity = self._decode(row, "evidence audit")
+            action_name = str(payload.get("action") or "")
+            if (
+                payload.get("schema") != AUDIT_SCHEMA
+                or payload.get("tenant_sha256") != self._tenant_sha256
+                or payload.get("sequence") != expected_sequence
+                or int(row["sequence"]) != expected_sequence
+                or payload.get("previous_integrity_sha256")
+                != previous_integrity
+            ):
+                raise ContinuousEvidenceIntegrityError(
+                    "continuous-evidence audit chain is discontinuous"
+                )
+            actor_sha256 = _digest(
+                payload.get("actor_sha256"),
+                "audit actor_sha256",
+            )
+            subject_sha256 = _digest(
+                payload.get("subject_sha256"),
+                "audit subject_sha256",
+            )
+            source_action = (
+                "approval_granted"
+                if "approved" in action_name
+                else "evidence_recorded"
+                if any(
+                    token in action_name
+                    for token in ("collection", "observation", "run_completed")
+                )
+                else "control_evaluated"
+                if "definition" in action_name
+                else "status_changed"
+            )
+            record = build_source_record(
+                sequence=expected_sequence,
+                occurred_at=float(payload["created_at"]),
+                action=source_action,
+                actor_sha256=actor_sha256,
+                resource_sha256=subject_sha256,
+                payload_sha256=integrity,
+                previous_sha256=previous_record,
+            )
+            records.append(record)
+            previous_integrity = integrity
+            previous_record = record.record_sha256
+        return tuple(records)
+
     def verify_integrity(self) -> IntegrityVerification:
         self._check_gate()
         try:

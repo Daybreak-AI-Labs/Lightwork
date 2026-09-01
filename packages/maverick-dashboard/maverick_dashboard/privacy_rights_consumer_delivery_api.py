@@ -380,6 +380,35 @@ def create_privacy_rights_consumer_delivery_router(  # noqa: C901
             RightsConsumerDeliveryStore,
         )
 
+        composition: Mapping[str, object] = {
+            "schema": "lightwork.privacy-rights-consumer-delivery-composition-status.v1",
+            "enabled": False,
+            "ready": False,
+            "operator_mint_ready": False,
+            "public_delivery_ready": False,
+            "identity_inferred_from_package": False,
+            "status_probe_opened_tenant_storage": False,
+            "status_probe_resolved_secret_value": False,
+        }
+        readiness_probe = getattr(
+            request.app.state,
+            "privacy_rights_consumer_delivery_readiness_probe",
+            None,
+        )
+        if callable(readiness_probe):
+            try:
+                value = readiness_probe(tenant, request)
+                if (
+                    isinstance(value, Mapping)
+                    and value.get("schema")
+                    == "lightwork.privacy-rights-consumer-delivery-composition-status.v1"
+                ):
+                    composition = dict(value)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                pass
+
         return {
             "schema": "lightwork.privacy-rights-consumer-delivery-status.v1",
             "enabled": _enabled(),
@@ -387,11 +416,15 @@ def create_privacy_rights_consumer_delivery_router(  # noqa: C901
             **RightsConsumerDeliveryStore.product_boundaries(),
             "raw_capability_returned_only_on_initial_mint": True,
             "capability_list_or_replay_endpoint_exposed": False,
-            "public_consumer_endpoint_exposed": False,
+            "public_consumer_endpoint_exposed": (
+                composition.get("stock_vault_package_adapter_installed") is True
+                and composition.get("public_subject_binding_resolver_installed") is True
+            ),
             "tenant_or_principal_selector_accepted": False,
             "consumer_binding_selector_accepted": False,
             "live_customer_acceptance_verified": False,
             "status_request_opens_tenant_storage": False,
+            "production_composition": composition,
         }
 
     @router.put(

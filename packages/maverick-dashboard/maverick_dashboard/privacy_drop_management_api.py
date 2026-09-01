@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -96,13 +96,20 @@ class DROPManagementDependencies:
         store_factory: Callable[..., Any] | None = None,
         authority_resolver: Callable[..., Any] | None = None,
         enabled_probe: Callable[[str], bool] | None = None,
+        readiness_probe: Callable[[str], bool] | None = None,
     ) -> None:
-        for dependency in (store_factory, authority_resolver, enabled_probe):
+        for dependency in (
+            store_factory,
+            authority_resolver,
+            enabled_probe,
+            readiness_probe,
+        ):
             if dependency is not None and not callable(dependency):
                 raise TypeError("DROP management dependency must be callable")
         self.store_factory = store_factory
         self.authority_resolver = authority_resolver
         self.enabled_probe = enabled_probe
+        self.readiness_probe = readiness_probe
 
 
 def _ops():
@@ -261,6 +268,9 @@ def _record_out(
         "internal_case_id": value.internal_case_id,
         "authority_sha256": value.authority_sha256,
         "outcome_evidence_sha256": value.outcome_evidence_sha256,
+        "principal_key_revision": value.principal_key_revision,
+        "status_actor_key_revision": value.status_actor_key_revision,
+        "status_reviewer_key_revision": value.status_reviewer_key_revision,
         "created_at": value.created_at,
         "updated_at": value.updated_at,
         "retained_until": value.retained_until,
@@ -277,12 +287,43 @@ def create_privacy_drop_management_router(  # noqa: C901 - explicit trust-bounda
     def capability(request: Request, ops: Any, tenant: str) -> tuple[bool, bool]:
         return _probe_status(request, deps, ops, tenant)
 
+    async def readiness(
+        request: Request,
+        tenant: str,
+        *,
+        enabled: bool,
+        configured: bool,
+    ) -> tuple[bool, bool]:
+        """Evaluate the deployment-owned readiness authority without side effects."""
+
+        readiness_probe = _dependency(
+            request,
+            "privacy_drop_management_readiness_probe",
+            deps.readiness_probe,
+        )
+        if not enabled or not configured or not callable(readiness_probe):
+            return False, False
+        try:
+            readiness_result = await run_in_threadpool(readiness_probe, tenant)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="DROP management readiness is unavailable",
+            ) from exc
+        if type(readiness_result) is not bool:
+            raise HTTPException(
+                status_code=503,
+                detail="DROP management readiness is unavailable",
+            )
+        return True, readiness_result
+
     async def composition(request: Request, *, resolver_required: bool = True):
         ops = _ops()
         tenant = _tenant_id()
         enabled, _configured = capability(request, ops, tenant)
         _require_enabled(enabled)
-        actor = _principal(request, tenant)
         factory = _dependency(
             request,
             "privacy_drop_management_store_factory",
@@ -298,6 +339,19 @@ def create_privacy_drop_management_router(  # noqa: C901 - explicit trust-bounda
                 status_code=503,
                 detail="DROP management composition is unavailable",
             )
+        configured = bool(callable(factory) and callable(resolver))
+        _checked, readiness_verified = await readiness(
+            request,
+            tenant,
+            enabled=enabled,
+            configured=configured,
+        )
+        if readiness_verified is not True:
+            raise HTTPException(
+                status_code=503,
+                detail="DROP management operational readiness is not verified",
+            )
+        actor = _principal(request, tenant)
         try:
             store = await run_in_threadpool(
                 factory,
@@ -417,18 +471,74 @@ def create_privacy_drop_management_router(  # noqa: C901 - explicit trust-bounda
             "privacy_drop_record_authority_resolver",
             deps.authority_resolver,
         )
+        configured = bool(callable(factory) and callable(resolver))
+        readiness_probe = _dependency(
+            request,
+            "privacy_drop_management_readiness_probe",
+            deps.readiness_probe,
+        )
+        readiness_checked, readiness_verified = await readiness(
+            request,
+            tenant,
+            enabled=is_enabled,
+            configured=configured,
+        )
+        readiness_reporter = _dependency(
+            request,
+            "privacy_drop_management_readiness_report",
+            None,
+        )
+        readiness_report: Mapping[str, object] = {}
+        if is_enabled and configured and callable(readiness_reporter):
+            try:
+                value = await run_in_threadpool(readiness_reporter, tenant)
+                if not isinstance(value, Mapping):
+                    raise TypeError("DROP readiness report is invalid")
+                readiness_report = dict(value)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="DROP management readiness is unavailable",
+                ) from exc
+        configured_for_attempt = bool(
+            readiness_report.get("configured_for_attempt", configured)
+        )
+        locally_operational = bool(
+            readiness_report.get("locally_operational", readiness_verified)
+        )
         _secure(response)
         return {
             "schema": "lightwork.privacy-drop-management-status.v1",
             "enabled": is_enabled,
-            "ready": bool(is_enabled and callable(factory) and callable(resolver)),
+            "configured": configured,
+            "configured_for_attempt": configured_for_attempt,
+            "locally_operational": locally_operational,
+            "request_executable": bool(readiness_report.get("request_executable", False)),
+            "request_execution_blocker": str(
+                readiness_report.get("request_execution_blocker", "readiness_unverified")
+            ),
+            "ready": bool(is_enabled and configured_for_attempt and locally_operational),
             "configuration": {
                 "custom_enabled_probe_configured": custom_probe,
                 "store_factory_configured": callable(factory),
                 "authority_resolver_configured": callable(resolver),
-                "store_opened_for_status": False,
+                "operational_readiness_probe_configured": callable(readiness_probe),
+                "operational_readiness_checked": readiness_checked,
+                "operational_readiness_verified": readiness_verified,
+                "store_opened_for_status": bool(readiness_report),
                 "record_authority_resolved_for_status": False,
             },
+            "authority_counts": {
+                "active_brokers": int(readiness_report.get("active_brokers", 0)),
+                "active_records": int(readiness_report.get("active_records", 0)),
+                "approved_outcomes": int(readiness_report.get("approved_outcomes", 0)),
+            },
+            "scheduler": readiness_report.get(
+                "scheduler",
+                {"installed": False, "running": False, "healthy": False},
+            ),
             "request_types": ["DataDeletion", "OptOut"],
             "terminal_statuses": ["DELETED", "EXEMPTED", "NOT_FOUND", "OPTED_OUT"],
             "raw_identity_fields_accepted": False,

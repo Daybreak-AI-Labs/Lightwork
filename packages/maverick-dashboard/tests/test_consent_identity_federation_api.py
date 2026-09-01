@@ -373,6 +373,8 @@ def test_narrow_browser_to_tv_pairing_flow_has_no_consumer_selectors(tmp_path):
         "/api/v1/public/consent/identity/pairings/authorize",
         "/api/v1/public/consent/identity/pairings/redeem",
         "/api/v1/public/consent/identity/pairings/revoke",
+        "/api/v1/public/consent/identity/link",
+        "/api/v1/public/consent/identity/link/unlink",
     }
     identity_schema = str({path: app.openapi()["paths"][path] for path in identity_paths}).lower()
     assert "tenant_id" not in identity_schema
@@ -459,3 +461,44 @@ def test_narrow_browser_to_tv_pairing_flow_has_no_consumer_selectors(tmp_path):
         json={"code_challenge": challenge(verifier)},
     )
     assert wrong_service.status_code == 401
+
+    current_link = http.get(
+        "/api/v1/public/consent/identity/link",
+        headers=target_headers,
+    )
+    assert current_link.status_code == 200
+    assert current_link.json()["linked"] is True
+    authority = preferences.get_profile_authority("tenant-a", "profile-target")
+    unlink_body = {
+        "expected_profile_revision": authority["revision"],
+        "expected_link_revision": authority["link_revision"],
+        "idempotency_key": "public-unlink-1",
+        "reason_sha256": digest("consumer-unlink"),
+    }
+    unlinked = http.post(
+        "/api/v1/public/consent/identity/link/unlink",
+        headers=target_headers,
+        json=unlink_body,
+    )
+    assert unlinked.status_code == 200, unlinked.text
+    assert unlinked.json()["pairing_revoked"] is True
+    assert unlinked.json()["receipt_histories_merged"] is False
+    replayed = http.post(
+        "/api/v1/public/consent/identity/link/unlink",
+        headers=target_headers,
+        json=unlink_body,
+    )
+    assert replayed.status_code == 200
+    assert replayed.json() == unlinked.json()
+    after = http.get(
+        "/api/v1/public/consent/identity/link",
+        headers=target_headers,
+    )
+    assert after.status_code == 200
+    assert after.json()["status"] == "unlinked"
+    forbidden_selector = http.post(
+        "/api/v1/public/consent/identity/link/unlink",
+        headers=target_headers,
+        json={**unlink_body, "tenant_id": "tenant-a"},
+    )
+    assert forbidden_selector.status_code == 422

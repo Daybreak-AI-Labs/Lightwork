@@ -52,6 +52,83 @@ def test_get_full_record_for_the_popout():
     assert rec["subject"] == "Acme CRM"
     assert rec["answers"]["pia_necessity"]["answer"] == "no"
     assert rec["result"]["findings"], "the risk answer must yield a finding"
+    assert rec["show_all_details"] is True
+    assert rec["score_profile"]["scoring_method"] == "transparent_max_severity"
+    contribution = next(
+        item
+        for item in rec["score_profile"]["questions"]
+        if item["question_id"] == "pia_necessity"
+    )
+    assert contribution["contribution_kind"] == "risk_finding"
+    assert contribution["contribution_bps"] > 0
+
+
+def test_lightweight_and_score_profile_projections_are_explicit():
+    s = _saved_session()
+
+    summary = client.get(
+        f"/api/v1/assess/sessions/{s.id}",
+        params={"showAllDetails": "false"},
+    )
+    assert summary.status_code == 200
+    body = summary.json()
+    assert body["schema"] == "lightwork.assessment-record-summary.v1"
+    assert body["show_all_details"] is False
+    assert body["id"] == s.id
+    assert "answers" not in body
+    assert "score_profile" not in body
+    assert body["direct_path"].startswith("/assessments?")
+
+    score = client.get(f"/api/v1/assess/sessions/{s.id}/score-profile")
+    assert score.status_code == 200
+    profile = score.json()
+    assert profile["assessment_id"] == s.id
+    assert profile["assessment_revision"] == 1
+    assert profile["answered"] == 1
+    assert profile["total"] == len(profile["questions"])
+
+
+def test_ai_answer_metadata_is_cited_persisted_and_does_not_change_answer():
+    s = _saved_session()
+    source_sha256 = "a" * 64
+    response = client.put(
+        f"/api/v1/assess/sessions/{s.id}/answers/pia_necessity/ai-metadata",
+        json={
+            "confidence": 0.73,
+            "flags": ["human_review_required", "source_incomplete"],
+            "source_kind": "document_evidence",
+            "source_ref": "evidence-object-17",
+            "source_sha256": source_sha256,
+            "expected_revision": 1,
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["answer_changed"] is False
+    assert payload["assessment_revision"] == 2
+    assert payload["ai_metadata"]["confidence"] == 0.73
+    assert payload["ai_metadata"]["source"] == {
+        "kind": "document_evidence",
+        "ref": "evidence-object-17",
+        "sha256": source_sha256,
+    }
+
+    record = client.get(f"/api/v1/assess/sessions/{s.id}").json()
+    assert record["answers"]["pia_necessity"]["answer"] == "no"
+    assert record["answers"]["pia_necessity"]["ai_metadata"] == payload["ai_metadata"]
+
+    stale = client.put(
+        f"/api/v1/assess/sessions/{s.id}/answers/pia_necessity/ai-metadata",
+        json={
+            "confidence": 0.5,
+            "flags": [],
+            "source_kind": "agent_draft",
+            "source_ref": "run-22",
+            "source_sha256": "b" * 64,
+            "expected_revision": 1,
+        },
+    )
+    assert stale.status_code == 409
 
 
 def test_get_unknown_record_404():

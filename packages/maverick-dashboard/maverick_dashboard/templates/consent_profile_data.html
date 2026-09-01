@@ -10,7 +10,7 @@
   .cpd-stack textarea { min-height:20rem; font-family:var(--font-mono); }
   .cpd-output { min-height:28rem; max-height:56rem; overflow:auto; white-space:pre-wrap;
                 word-break:break-word; }
-  .cpd-warning { border:2px solid var(--warning,#a66a00); padding:var(--space-3);
+  .cpd-warning { border:2px solid var(--warn); padding:var(--space-3);
                  border-radius:8px; background:var(--surface-2); margin:var(--space-3) 0; }
   .cpd-boundary { border-left:3px solid var(--accent); padding-left:var(--space-3); }
   .cpd-confirm { display:flex; flex-direction:row !important; gap:var(--space-2) !important;
@@ -121,7 +121,7 @@ var examples={
 function parseObject(raw,label){var value;try{value=JSON.parse(raw);}catch(_error){throw new Error(label+" must be valid JSON.");}if(!value||typeof value!=="object"||Array.isArray(value))throw new Error(label+" must be a JSON object.");return value;}
 function selected(){return operation.options[operation.selectedIndex];}
 function pathFor(template,values){return template.replace(/\{([a-z_]+)\}/g,function(_match,name){var value=values[name];if((typeof value!=="string"&&typeof value!=="number")||!REF.test(String(value)))throw new Error("Path value "+name+" is missing or invalid.");return encodeURIComponent(String(value));});}
-async function request(path,options){var response=await fetch(API+path,Object.assign({credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/json"}},options||{})),payload={};try{payload=await response.json();}catch(_error){}if(!response.ok)throw new Error(typeof payload.detail==="string"?payload.detail:"Operation failed with HTTP "+response.status+".");return payload;}
+async function request(path,options){var response=await fetch(API+path,Object.assign({credentials:"same-origin",headers:{"Accept":"application/json","Content-Type":"application/json"}},options||{})),payload;try{payload=await response.json();}catch(_error){throw new Error("Request failed: the server returned an invalid JSON response.");}if(!response.ok)throw new Error(payload&&typeof payload.detail==="string"?payload.detail:"Operation failed with HTTP "+response.status+".");return payload;}
 function show(payload,message){output.textContent=JSON.stringify(payload,null,2);status.textContent=message;}
 function fail(error){status.textContent=error instanceof Error?error.message:"Operation failed.";}
 document.getElementById("cpd-load-status").addEventListener("click",async function(){try{show(await request("/status"),"Status and integrity loaded.");}catch(error){fail(error);}});

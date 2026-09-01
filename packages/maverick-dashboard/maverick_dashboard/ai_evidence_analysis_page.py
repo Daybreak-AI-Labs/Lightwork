@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import require_permission
+from .auth import has_permission, require_permission
 
-_TEMPLATES = Jinja2Templates(directory=str(Path(__file__).with_name("templates")))
 _HEADERS = {
     "Cache-Control": "no-store, private, max-age=0",
     "Pragma": "no-cache",
     "Content-Security-Policy": (
         "default-src 'none'; base-uri 'none'; connect-src 'self'; "
         "font-src 'none'; form-action 'none'; frame-ancestors 'none'; "
-        "img-src 'none'; manifest-src 'none'; media-src 'none'; "
+        "img-src 'self'; manifest-src 'none'; media-src 'none'; "
         "object-src 'none'; script-src 'self'; style-src 'self'; "
         "worker-src 'none'"
     ),
@@ -44,8 +43,11 @@ def _tenant_selected() -> None:
         )
 
 
-def create_ai_evidence_analysis_page_router() -> APIRouter:
+def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRouter:
     """Create the standalone page router; rendering performs no store access."""
+
+    if not isinstance(templates, Jinja2Templates):
+        raise TypeError("AI evidence workbench requires a Jinja template authority")
 
     router = APIRouter(tags=["ai-evidence-analysis-workbench"])
 
@@ -57,20 +59,33 @@ def create_ai_evidence_analysis_page_router() -> APIRouter:
     async def workbench(request: Request) -> HTMLResponse:
         require_permission(request, "view")
         _tenant_selected()
-        if request.query_params:
+        if any(
+            key not in {"theme", "density", "font", "lang"}
+            for key in request.query_params
+        ):
             raise HTTPException(status_code=404, detail="workbench unavailable")
-        response = _TEMPLATES.TemplateResponse(
+        style_nonce = secrets.token_urlsafe(18)
+        response = templates.TemplateResponse(
             request,
             "ai_evidence_analysis.html",
-            {"api_base": "/api/v1/ai-evidence-analysis"},
+            {
+                "api_base": "/api/v1/ai-evidence-analysis",
+                "csp_style_nonce": style_nonce,
+                "evidence_can_operate": has_permission(request, "operate"),
+                "evidence_can_audit": has_permission(request, "audit"),
+                "evidence_can_admin": has_permission(request, "admin"),
+            },
         )
         for name, value in _HEADERS.items():
+            if name == "Content-Security-Policy":
+                value = value.replace(
+                    "style-src 'self'",
+                    f"style-src 'self' 'nonce-{style_nonce}'",
+                )
             response.headers[name] = value
         return response
 
     return router
 
 
-router = create_ai_evidence_analysis_page_router()
-
-__all__ = ["create_ai_evidence_analysis_page_router", "router"]
+__all__ = ["create_ai_evidence_analysis_page_router"]

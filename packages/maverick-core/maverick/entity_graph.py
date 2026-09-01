@@ -46,7 +46,11 @@ skills depend on it?" is :func:`blast_radius` on the goal.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import math
 import re
 import sqlite3
 import threading
@@ -61,6 +65,45 @@ CONCEPT_KINDS = ("vendor", "system", "person", "document", "clause", "agent")
 RECORD_KINDS = ("assessment", "dpa_review", "paper_review",
                 "security_review", "ai_system", "dsar", "incident",
                 "goal", "episode", "skill")
+
+# The inventory projection is deliberately closed.  If a future graph builder
+# emits a new relationship, inventory reconciliation reports the graph as
+# unavailable until this vocabulary is reviewed; it must never silently turn
+# arbitrary stored text into a public relationship type.
+RELATION_KINDS = (
+    "answered_by",
+    "approved_by",
+    "assesses",
+    "assigned_to",
+    "clause_conflicting",
+    "clause_missing",
+    "clause_present",
+    "clause_unclear",
+    "concerns_subject",
+    "covers_document",
+    "decided_by",
+    "distilled_from",
+    "from_assessment",
+    "owned_by",
+    "part_of",
+    "performed_by",
+    "produced_redline",
+    "provided_by",
+    "registers",
+    "rejected_by",
+    "reported_by",
+    "reviewed_by",
+    "reviews",
+    "sent_back_by",
+    "supersedes",
+    "supports",
+)
+
+INVENTORY_PROVENANCE_SCHEMA = "lightwork.entity-graph-inventory-provenance.v1"
+INVENTORY_ENTITY_SCHEMA = "lightwork.shared-governance-inventory-entity.v1"
+INVENTORY_RELATIONSHIP_SCHEMA = (
+    "lightwork.shared-governance-inventory-relationship.v1"
+)
 
 _DEFAULT_STALENESS_SECONDS = 60.0
 _MAX_EDGES_PER_RECORD = 64
@@ -867,5 +910,301 @@ def stats() -> dict:
         conn.close()
 
 
-__all__ = ["CONCEPT_KINDS", "RECORD_KINDS", "enabled", "rebuild", "refresh",
-           "neighborhood", "dossier", "why", "blast_radius", "stats"]
+class EntityGraphInventoryError(RuntimeError):
+    """The exact, minimized inventory projection cannot be established."""
+
+
+def _inventory_json(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    except (RecursionError, TypeError, UnicodeError, ValueError) as exc:
+        raise EntityGraphInventoryError(
+            "entity_graph_integrity_unverified"
+        ) from exc
+
+
+def _inventory_ref(key: bytes, value: object) -> str:
+    return hmac.new(key, _inventory_json(value), hashlib.sha256).hexdigest()
+
+
+def _inventory_bound(value: object, label: str, upper: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= upper
+    ):
+        raise EntityGraphInventoryError(f"{label}_invalid")
+    return value
+
+
+def inventory_provenance_manifest(  # noqa: C901 - explicit closed projection validation
+    *,
+    tenant_id: str,
+    reference_key: bytes,
+    max_entities: int = 10_000,
+    max_relationships: int = 20_000,
+) -> dict[str, object]:
+    """Return a bounded, digest-only projection of exact graph provenance.
+
+    Names, aliases, record ids and relationship detail never leave the graph.
+    Stable tenant-keyed HMAC references let successive inventory snapshots join
+    exact identities without permitting fuzzy identity resolution or exposing
+    low-entropy names through an unhashed dictionary-attack surface.
+
+    The graph's source readers historically treat optional source failures as
+    an empty plane.  Consequently this projection *never* promotes itself to
+    complete: it reports ``source_completeness_unverified`` even when every
+    stored graph row verifies.  The shared inventory can use the lineage while
+    preserving that important limitation.
+    """
+
+    from .file_lock import ensure_private_file
+    from .paths import canonical_tenant_id, data_dir, tenant_scope
+
+    tenant = canonical_tenant_id(tenant_id)
+    if not isinstance(reference_key, bytes) or len(reference_key) < 32:
+        raise EntityGraphInventoryError("entity_graph_reference_key_invalid")
+    entity_limit = _inventory_bound(max_entities, "max_entities", 100_000)
+    relationship_limit = _inventory_bound(
+        max_relationships,
+        "max_relationships",
+        200_000,
+    )
+
+    try:
+        with tenant_scope(tenant=tenant):
+            result = rebuild()
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise EntityGraphInventoryError("entity_graph_unavailable") from exc
+    if result.get("enabled") is not True:
+        raise EntityGraphInventoryError("entity_graph_disabled")
+
+    path = data_dir("entity_graph", "graph.db", tenant=tenant)
+    try:
+        ensure_private_file(path)
+        conn = _connect(path)
+    except (OSError, sqlite3.Error) as exc:
+        raise EntityGraphInventoryError("entity_graph_unavailable") from exc
+
+    try:
+        conn.executescript(_SCHEMA)
+        meta = conn.execute(
+            "SELECT value FROM meta WHERE key='rebuilt_at'"
+        ).fetchone()
+        if meta is None:
+            raise EntityGraphInventoryError("entity_graph_head_unavailable")
+        try:
+            rebuilt_at = float(meta["value"])
+        except (TypeError, ValueError) as exc:
+            raise EntityGraphInventoryError(
+                "entity_graph_head_unavailable"
+            ) from exc
+        if not math.isfinite(rebuilt_at) or rebuilt_at <= 0:
+            raise EntityGraphInventoryError("entity_graph_head_unavailable")
+
+        entity_count = int(
+            conn.execute("SELECT COUNT(*) AS n FROM entities").fetchone()["n"]
+        )
+        relationship_count = int(
+            conn.execute("SELECT COUNT(*) AS n FROM edges").fetchone()["n"]
+        )
+
+        # Commit to the complete graph in bounded memory, including aliases
+        # that influence exact identity and every private field omitted below.
+        authority = hmac.new(reference_key, digestmod=hashlib.sha256)
+
+        def commit(label: str, row: tuple[object, ...]) -> None:
+            encoded = _inventory_json([label, *row])
+            authority.update(len(encoded).to_bytes(8, "big"))
+            authority.update(encoded)
+
+        cursor = conn.execute(
+            "SELECT id,kind,canonical,display FROM entities "
+            "ORDER BY kind,canonical,id"
+        )
+        for row in cursor:
+            if row["kind"] not in CONCEPT_KINDS + RECORD_KINDS:
+                raise EntityGraphInventoryError(
+                    "entity_graph_schema_unrecognized"
+                )
+            commit(
+                "entity",
+                (row["id"], row["kind"], row["canonical"], row["display"]),
+            )
+        cursor = conn.execute(
+            "SELECT entity_id,alias FROM aliases ORDER BY entity_id,alias"
+        )
+        for row in cursor:
+            commit("alias", (row["entity_id"], row["alias"]))
+        cursor = conn.execute(
+            "SELECT id,src,rel,dst,record_type,record_id,valid_from,"
+            "valid_to,detail FROM edges ORDER BY id"
+        )
+        for row in cursor:
+            if (
+                row["rel"] not in RELATION_KINDS
+                or row["record_type"] not in RECORD_KINDS
+                or not isinstance(row["record_id"], str)
+                or not row["record_id"]
+            ):
+                raise EntityGraphInventoryError(
+                    "entity_graph_schema_unrecognized"
+                )
+            commit(
+                "relationship",
+                (
+                    row["id"],
+                    row["src"],
+                    row["rel"],
+                    row["dst"],
+                    row["record_type"],
+                    row["record_id"],
+                    row["valid_from"],
+                    row["valid_to"],
+                    row["detail"],
+                ),
+            )
+        authority_sha256 = authority.hexdigest()
+
+        selected_rows = conn.execute(
+            "SELECT id,kind,canonical FROM entities "
+            "ORDER BY kind,canonical,id LIMIT ?",
+            (entity_limit,),
+        ).fetchall()
+        refs: dict[int, str] = {}
+        entities: list[dict[str, object]] = []
+        tenant_sha256 = hashlib.sha256(tenant.encode("utf-8")).hexdigest()
+        for row in selected_rows:
+            entity_ref = _inventory_ref(
+                reference_key,
+                {
+                    "schema": INVENTORY_ENTITY_SCHEMA,
+                    "tenant_sha256": tenant_sha256,
+                    "origin": "entity_graph",
+                    "entity_kind": row["kind"],
+                    "canonical": row["canonical"],
+                },
+            )
+            refs[int(row["id"])] = entity_ref
+            entities.append(
+                {
+                    "schema": INVENTORY_ENTITY_SCHEMA,
+                    "entity_ref_sha256": entity_ref,
+                    "entity_kind": row["kind"],
+                    "origin": "entity_graph",
+                }
+            )
+
+        relationships: list[dict[str, object]] = []
+        if refs and relationship_limit:
+            # Iterate instead of building a caller-sized SQL IN clause.  The
+            # output and retained state remain bounded even for a large graph.
+            cursor = conn.execute(
+                "SELECT id,src,rel,dst,record_type,record_id,valid_from,"
+                "valid_to,detail FROM edges ORDER BY id"
+            )
+            for row in cursor:
+                source_ref = refs.get(int(row["src"]))
+                target_ref = refs.get(int(row["dst"]))
+                if source_ref is None or target_ref is None:
+                    continue
+                provenance_ref = _inventory_ref(
+                    reference_key,
+                    {
+                        "schema": INVENTORY_PROVENANCE_SCHEMA,
+                        "tenant_sha256": tenant_sha256,
+                        "record_type": row["record_type"],
+                        "record_id": row["record_id"],
+                    },
+                )
+                material = {
+                    "schema": INVENTORY_RELATIONSHIP_SCHEMA,
+                    "source_entity_ref_sha256": source_ref,
+                    "relation_type": row["rel"],
+                    "target_entity_ref_sha256": target_ref,
+                    "provenance_record_type": row["record_type"],
+                    "provenance_ref_sha256": provenance_ref,
+                    "valid_from": row["valid_from"],
+                    "valid_to": row["valid_to"],
+                    "detail_sha256": _inventory_ref(
+                        reference_key,
+                        {
+                            "schema": INVENTORY_PROVENANCE_SCHEMA,
+                            "tenant_sha256": tenant_sha256,
+                            "detail": row["detail"],
+                        },
+                    ),
+                }
+                relationships.append(
+                    {
+                        **material,
+                        "relationship_ref_sha256": _inventory_ref(
+                            reference_key,
+                            material,
+                        ),
+                        "relationship_kind": "entity_graph_edge",
+                        "origin": "entity_graph",
+                    }
+                )
+                if len(relationships) >= relationship_limit:
+                    break
+
+        limitations = {"source_completeness_unverified"}
+        if entity_count > len(entities):
+            limitations.add("entity_limit")
+        if relationship_count > len(relationships):
+            limitations.add("relationship_limit")
+        return {
+            "schema": INVENTORY_PROVENANCE_SCHEMA,
+            "state": "partial",
+            "observed_at": rebuilt_at,
+            "graph_integrity_sha256": authority_sha256,
+            "entity_count": entity_count,
+            "relationship_count": relationship_count,
+            "projected_entity_count": len(entities),
+            "projected_relationship_count": len(relationships),
+            "limitations": sorted(limitations),
+            "entities": entities,
+            "relationships": relationships,
+            "raw_names_included": False,
+            "raw_aliases_included": False,
+            "raw_record_ids_included": False,
+            "raw_relationship_detail_included": False,
+            "fuzzy_identity_merging_performed": False,
+        }
+    except EntityGraphInventoryError:
+        raise
+    except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
+        raise EntityGraphInventoryError(
+            "entity_graph_integrity_unverified"
+        ) from exc
+    finally:
+        conn.close()
+
+
+__all__ = [
+    "CONCEPT_KINDS",
+    "EntityGraphInventoryError",
+    "INVENTORY_ENTITY_SCHEMA",
+    "INVENTORY_PROVENANCE_SCHEMA",
+    "INVENTORY_RELATIONSHIP_SCHEMA",
+    "RECORD_KINDS",
+    "RELATION_KINDS",
+    "blast_radius",
+    "dossier",
+    "enabled",
+    "inventory_provenance_manifest",
+    "neighborhood",
+    "rebuild",
+    "refresh",
+    "stats",
+    "why",
+]

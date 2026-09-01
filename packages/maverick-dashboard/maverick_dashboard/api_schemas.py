@@ -6,6 +6,7 @@ Importing here changes no behavior: these are pure data schemas.
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -832,6 +833,33 @@ class AssessmentCommentIn(BaseModel):
     )
 
 
+class AssessmentAnswerAiMetadataIn(BaseModel):
+    """Cited metadata for AI assistance on one already-saved answer."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    confidence: float = Field(ge=0, le=1)
+    flags: list[
+        Literal[
+            "human_review_required",
+            "low_confidence",
+            "source_incomplete",
+            "source_stale",
+            "source_conflict",
+            "human_edited",
+        ]
+    ] = Field(default_factory=list, max_length=16)
+    source_kind: Literal[
+        "assessment_memory",
+        "document_evidence",
+        "agent_draft",
+        "imported_record",
+    ]
+    source_ref: str = Field(min_length=1, max_length=256)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_revision: int = Field(ge=1, le=2**31 - 1)
+
+
 class TemplateQuestionIn(BaseModel):
     """One questionnaire question in a custom template."""
     id: str = Field("", max_length=60)
@@ -1386,8 +1414,20 @@ class FeatureSwitchIn(BaseModel):
     enabled: bool
 
 
+class CopilotHistoryItem(BaseModel):
+    """One bounded prior turn accepted by the read-only platform Copilot."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2_000)
+
+
 class CopilotIn(BaseModel):
-    """One turn of the platform copilot (the lower-right helper)."""
-    message: str
-    page: str = ""
-    history: list = []
+    """One page-bound turn of the platform Copilot."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    message: str = Field(min_length=1, max_length=2_000)
+    page: str = Field(default="", max_length=200)
+    history: list[CopilotHistoryItem] = Field(default_factory=list, max_length=6)

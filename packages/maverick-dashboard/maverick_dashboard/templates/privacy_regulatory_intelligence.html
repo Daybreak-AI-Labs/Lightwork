@@ -5,7 +5,8 @@
   .pri-shell{max-width:1480px;margin:0 auto;padding:1.25rem}.pri-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start}.pri-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.pri-hero h1{margin:.1rem 0}.pri-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin-top:1rem}.pri-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}.pri-card h2{font-size:1rem;margin:.1rem 0 .75rem}.pri-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.pri-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.pri-form .wide,.pri-actions{grid-column:1/-1}.pri-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.pri-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}.pri-boundary{border-color:#a33}.pri-note{font-size:.8rem;color:var(--muted)}.pri-result{white-space:pre-wrap;word-break:break-word;max-height:52rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.pri-status{min-height:1.4rem;margin:.6rem 0}.pri-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.35rem}.pri-checks label{display:flex;gap:.3rem;align-items:center;color:inherit}.pri-checks input{width:auto}.pri-bounds{margin:.5rem 0 0;padding-left:1.25rem}.pri-bounds li{margin:.25rem 0}
   @media(max-width:980px){.pri-grid,.pri-form,.pri-checks{grid-template-columns:1fr}.pri-form .wide,.pri-actions{grid-column:auto}.pri-hero{display:block}}
 </style>
-<div class="pri-shell">
+<fieldset class="pri-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if privacy_regulatory_intelligence_enabled else 'false' }}"{% if not privacy_regulatory_intelligence_enabled %} disabled aria-disabled="true"{% endif %}>
+  <legend class="sr-only">Privacy regulatory intelligence workbench</legend>
   <header class="pri-hero">
     <div>
       <div class="pri-kicker">Licensed-source research authority</div>
@@ -137,7 +138,7 @@
       </section>
     </div>
   </div>
-</div>
+</fieldset>
 <script>
 (function(){
   "use strict";
@@ -148,7 +149,7 @@
   function optional(form,name){var item=value(form,name);return item||null;}
   function list(form,name){return value(form,name).split(",").map(function(item){return item.trim();}).filter(Boolean);}
   function checked(form,name){return Array.from(form.querySelectorAll('input[name="'+name+'"]:checked')).map(function(item){return item.value;});}
-  async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body={};try{body=await response.json();}catch(_error){}if(!response.ok){throw new Error(body.detail||("HTTP "+response.status));}return body;}
+  async function call(path,options){var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{})),body;try{body=await response.json();}catch(_error){throw new Error("Request failed: the server returned an invalid JSON response.");}if(!response.ok){throw new Error(body&&typeof body.detail==="string"?body.detail:("HTTP "+response.status));}return body;}
   function show(body,message){result.textContent=JSON.stringify(body,null,2);status.textContent=message;result.focus();}
   function fail(error){status.textContent=error.message;}
   async function sha256(text){var bytes=new TextEncoder().encode(text),digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest)).map(function(byte){return byte.toString(16).padStart(2,"0");}).join("");}

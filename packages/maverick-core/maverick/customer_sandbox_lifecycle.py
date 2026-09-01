@@ -344,7 +344,12 @@ _EXPORT_SCHEMAS: Mapping[str, Mapping[str, object]] = {
         "ott_ctv_rights": _ENABLE_ONLY,
         "drop_management": {
             "enable": _EXPORT_LEAF,
+            "principal_binding_key_ref": _EXPORT_DROP,
             "retention_seconds": _EXPORT_LEAF,
+            "scheduler_enable": _EXPORT_LEAF,
+            "scheduler_interval_seconds": _EXPORT_LEAF,
+            "scheduler_jitter_seconds": _EXPORT_LEAF,
+            "scheduler_retry_max_seconds": _EXPORT_LEAF,
         },
         "notice_governance": _ENABLE_ONLY,
     },

@@ -1931,6 +1931,46 @@ class AIGovernanceLoopStore:
                     "idempotent operation is not bound to source history"
                 )
 
+    def verify_unified_audit_history(self) -> dict[str, object]:
+        """Verify every case plus the tenant-wide unified-audit projection."""
+
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            try:
+                cases = connection.execute(
+                    "SELECT * FROM agl_cases WHERE tenant_id=? ORDER BY asset_id",
+                    (self.tenant_id,),
+                ).fetchall()
+                history_count = 0
+                for case in cases:
+                    count, _tip = self._verify_asset_history(
+                        connection,
+                        case,
+                        str(case["asset_id"]),
+                    )
+                    history_count += count
+                audit_count, audit_tip = self._verify_audit_history(connection)
+                self._verify_operations(connection)
+                if history_count != audit_count:
+                    raise AIGovernanceLoopIntegrityError(
+                        "unified-audit coverage does not match verified case history"
+                    )
+                connection.commit()
+                return {
+                    "schema": "lightwork.ai-governance-loop-unified-audit-integrity.v1",
+                    "tenant_id": self.tenant_id,
+                    "valid": True,
+                    "case_count": len(cases),
+                    "history_count": history_count,
+                    "unified_audit_count": audit_count,
+                    "unified_audit_tip_sha256": audit_tip,
+                    "raw_payloads_returned": False,
+                }
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+
     def verify_integrity(self, asset_id: str) -> dict[str, object]:
         asset = _token(asset_id, "asset_id")
         with self._connect() as connection:

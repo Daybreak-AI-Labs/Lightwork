@@ -9,7 +9,7 @@
   .ga-stack textarea { min-height:18rem; font-family:var(--font-mono); }
   .ga-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
                word-break:break-word; }
-  .ga-warning { border:2px solid var(--warning); padding:var(--space-3);
+  .ga-warning { border:2px solid var(--warn); padding:var(--space-3);
                 border-radius:8px; background:var(--surface-2); }
   .ga-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
   .ga-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));
@@ -49,41 +49,77 @@
     composes independent policy, evidence, adapter and dispatch authorities.</p>
 </section>
 {% else %}
-<p><button class="btn" id="ga-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="ga-load-status" type="button">Load composition status</button></p>
+<p id="ga-readiness-note" role="status">Operation controls stay disabled until
+  status confirms that each required server composition is configured for an
+  attempt. This check does not open the store, call a provider, or establish
+  operational readiness.</p>
+{% if not governance_can_operate %}
+<p>Tenant operator actions are hidden because this caller has view-only access.</p>
+{% endif %}
+{% if not governance_can_admin %}
+<p>Global administrator operations are hidden for this caller.</p>
+{% endif %}
+{% if not governance_can_audit %}
+<p>Integrity verification is hidden because global audit permission is required.</p>
+{% endif %}
 <div class="ga-grid">
   <section class="panel ga-stack">
     <h2>Strict JSON operator workbench</h2>
     <p>Use opaque source references for analysis. The server resolves the
       corresponding bytes; raw document or incident content is rejected.</p>
-    <label>Operation
-      <select id="ga-operation">
-        <option value="policy-publish" data-method="PUT" data-path="/policies/{policy_id}">Policy: publish independently approved revision</option>
-        <option value="policy-revoke" data-method="POST" data-path="/policies/{policy_id}/revoke">Policy: revoke</option>
-        <option value="analysis" data-method="PUT" data-path="/runs/{run_id}/analysis">Run: analyze server-resolved evidence</option>
-        <option value="run-get" data-method="GET" data-path="/runs/{run_id}">Run: get</option>
-        <option value="run-list" data-method="GET" data-path="/runs">Run: list</option>
-        <option value="review" data-method="POST" data-path="/runs/{run_id}/review">Run: enrolled human review</option>
-        <option value="execute" data-method="POST" data-path="/runs/{run_id}/execute">Run: execute approved action</option>
-        <option value="recover" data-method="POST" data-path="/runs/{run_id}/recover">Run: recover exact idempotent execution</option>
-        <option value="run-revoke" data-method="POST" data-path="/runs/{run_id}/revoke">Run: revoke</option>
-        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge terminal runs</option>
-        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify chain</option>
-      </select>
-    </label>
-    <label>Path values as JSON object
-      <input class="input" id="ga-path-values" value="{}" autocomplete="off">
-    </label>
-    <label>Strict request body as JSON
-      <textarea class="input" id="ga-body">{}</textarea>
-    </label>
-    <div class="ga-warning" id="ga-confirm-panel">
-      <label class="ga-confirm"><input id="ga-confirm" type="checkbox">
-        <span>I reviewed the exact tenant, policy, revision, cited evidence,
-          human authority and proposed effect. I understand that analysis does
-          not itself authorize execution.</span>
+    <fieldset id="ga-operation-controls" disabled aria-disabled="true">
+      <legend>Permission-scoped operations</legend>
+      <label>Operation
+        <select id="ga-operation">
+          {% if governance_can_admin %}
+          <option value="policy-publish" data-status-key="policy_publish" data-method="PUT" data-path="/policies/{policy_id}" disabled>Policy: publish independently approved revision</option>
+          <option value="policy-revoke" data-status-key="policy_revoke" data-method="POST" data-path="/policies/{policy_id}/revoke" disabled>Policy: revoke</option>
+          {% endif %}
+          {% if governance_can_operate %}
+          <option value="analysis" data-status-key="analysis" data-method="PUT" data-path="/runs/{run_id}/analysis" disabled>Run: analyze server-resolved evidence</option>
+          {% endif %}
+          <option value="run-get" data-status-key="run_read" data-method="GET" data-path="/runs/{run_id}" disabled>Run: get</option>
+          <option value="run-list" data-status-key="run_read" data-method="GET" data-path="/runs" disabled>Run: list</option>
+          {% if governance_can_operate %}
+          <option value="review" data-status-key="review" data-method="POST" data-path="/runs/{run_id}/review" disabled>Run: enrolled human review</option>
+          {% endif %}
+          {% if governance_can_admin %}
+          <option value="execute" data-status-key="execution" data-method="POST" data-path="/runs/{run_id}/execute" disabled>Run: execute approved action</option>
+          <option value="recover" data-status-key="recovery" data-method="POST" data-path="/runs/{run_id}/recover" disabled>Run: recover exact idempotent execution</option>
+          <option value="run-revoke" data-status-key="run_revoke" data-method="POST" data-path="/runs/{run_id}/revoke" disabled>Run: revoke</option>
+          <option value="retention-purge" data-status-key="retention_purge" data-method="POST" data-path="/retention/purge" disabled>Retention: purge terminal runs</option>
+          <option value="maintenance-readiness" data-status-key="maintenance_readiness" data-method="GET" data-path="/maintenance/readiness" disabled>Maintenance: perform local operational readiness probe</option>
+          <option value="adapter-rotate" data-status-key="maintenance_bindings" data-method="POST" data-path="/maintenance/adapters/{agent_kind}/rotate" disabled>Maintenance: rotate analysis adapter authority</option>
+          <option value="adapter-revoke" data-status-key="maintenance_bindings" data-method="POST" data-path="/maintenance/adapters/{agent_kind}/revoke" disabled>Maintenance: revoke analysis adapter authority</option>
+          <option value="dispatcher-rotate" data-status-key="maintenance_bindings" data-method="POST" data-path="/maintenance/dispatchers/{agent_kind}/rotate" disabled>Maintenance: rotate internal dispatcher authority</option>
+          <option value="dispatcher-revoke" data-status-key="maintenance_bindings" data-method="POST" data-path="/maintenance/dispatchers/{agent_kind}/revoke" disabled>Maintenance: revoke internal dispatcher authority</option>
+          <option value="custody-rotate" data-status-key="maintenance_custody" data-method="POST" data-path="/maintenance/custody/rotate" disabled>Maintenance: rotate recovery-token custody key</option>
+          <option value="custody-retire" data-status-key="maintenance_custody" data-method="POST" data-path="/maintenance/custody/{revision}/retire" disabled>Maintenance: retire unused custody-key revision</option>
+          <option value="token-revoke" data-status-key="maintenance_custody" data-method="POST" data-path="/maintenance/tokens/{run_id}/revoke" disabled>Maintenance: revoke run recovery token</option>
+          <option value="token-reconcile" data-status-key="maintenance_custody" data-method="POST" data-path="/maintenance/tokens/reconcile" disabled>Maintenance: reconcile recovery-token custody</option>
+          {% endif %}
+          {% if governance_can_audit %}
+          <option value="integrity" data-status-key="integrity" data-method="GET" data-path="/integrity" disabled>Integrity: verify chain</option>
+          <option value="intent-list" data-status-key="maintenance_intents" data-method="GET" data-path="/maintenance/intents" disabled>Maintenance: list minimized internal-action intents</option>
+          {% endif %}
+        </select>
       </label>
-    </div>
-    <button class="btn btn--primary" id="ga-submit" type="button">Run selected operation</button>
+      <label>Path values as JSON object
+        <input class="input" id="ga-path-values" value="{}" autocomplete="off">
+      </label>
+      <label>Strict request body as JSON
+        <textarea class="input" id="ga-body">{}</textarea>
+      </label>
+      <div class="ga-warning" id="ga-confirm-panel">
+        <label class="ga-confirm"><input id="ga-confirm" type="checkbox">
+          <span>I reviewed the exact tenant, policy, revision, cited evidence,
+            human authority and proposed effect. I understand that analysis does
+            not itself authorize execution.</span>
+        </label>
+      </div>
+      <button class="btn btn--primary" id="ga-submit" type="button">Run selected operation</button>
+    </fieldset>
   </section>
   <section class="panel">
     <h2>Result</h2>
@@ -95,19 +131,67 @@
 (function () {
   "use strict";
   var API = "/api/v1/governance-agents";
+  var MAX_RESPONSE_BYTES = 64 * 1024;
+  var controls = document.getElementById("ga-operation-controls");
   var operation = document.getElementById("ga-operation");
   var paths = document.getElementById("ga-path-values");
   var body = document.getElementById("ga-body");
   var confirmation = document.getElementById("ga-confirm");
   var confirmationPanel = document.getElementById("ga-confirm-panel");
   var output = document.getElementById("ga-output");
+  var readinessNote = document.getElementById("ga-readiness-note");
   var highImpact = new Set([
     "policy-publish", "policy-revoke", "analysis", "review", "execute",
-    "recover", "run-revoke", "retention-purge"
+    "recover", "run-revoke", "retention-purge", "adapter-rotate",
+    "adapter-revoke", "dispatcher-rotate", "dispatcher-revoke",
+    "custody-rotate", "custody-retire", "token-revoke", "token-reconcile"
   ]);
 
   function show(value) {
     output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function invalidResponse() {
+    return new Error("The server returned an invalid bounded JSON response.");
+  }
+  function responseTooLarge() {
+    return new Error("The server response exceeded the 64 KiB display limit.");
+  }
+  async function cancelBody(stream) {
+    if (!stream || typeof stream.cancel !== "function") return;
+    try { await stream.cancel(); }
+    catch (_error) { /* The bounded request has already failed closed. */ }
+  }
+  async function boundedResponseText(response) {
+    var declared = response.headers && response.headers.get("Content-Length");
+    if (declared && /^\d+$/.test(declared) && Number(declared) > MAX_RESPONSE_BYTES) {
+      await cancelBody(response.body);
+      throw responseTooLarge();
+    }
+    if (!response.body || typeof response.body.getReader !== "function") {
+      throw invalidResponse();
+    }
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder("utf-8", {fatal: false});
+    var received = 0;
+    var text = "";
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > MAX_RESPONSE_BYTES) {
+        try { await reader.cancel(); }
+        catch (_error) { /* The size violation remains authoritative. */ }
+        throw responseTooLarge();
+      }
+      text += decoder.decode(chunk.value, {stream: true});
+    }
+    return text + decoder.decode();
+  }
+  async function readBoundedJson(response) {
+    var text = await boundedResponseText(response);
+    if (!text) return {};
+    try { return JSON.parse(text); }
+    catch (_error) { throw invalidResponse(); }
   }
   function selectedRoute() { return operation.options[operation.selectedIndex]; }
   function updateConfirmation() {
@@ -122,21 +206,73 @@
       return encodeURIComponent(values[key]);
     });
   }
-  async function run(method, path, payload) {
-    var options = {method: method, headers: {"Accept": "application/json"}};
+  async function request(method, path, payload) {
+    var options = {
+      method: method,
+      headers: {"Accept": "application/json"},
+      credentials: "same-origin",
+      cache: "no-store"
+    };
     if (method !== "GET") {
       options.headers["Content-Type"] = "application/json";
       options.body = JSON.stringify(payload);
     }
     var response = await fetch(API + path, options);
-    var text = await response.text();
-    var result;
-    try { result = text ? JSON.parse(text) : {}; } catch (_error) { result = {detail: text}; }
-    show({status: response.status, ok: response.ok, result: result});
+    return {
+      status: response.status,
+      ok: response.ok,
+      result: await readBoundedJson(response)
+    };
+  }
+  async function run(method, path, payload) {
+    var result = await request(method, path, payload);
+    show(result);
+    return result;
+  }
+  function lockControls(message) {
+    controls.disabled = true;
+    controls.setAttribute("aria-disabled", "true");
+    Array.prototype.forEach.call(operation.options, function (option) {
+      option.disabled = true;
+    });
+    readinessNote.textContent = message;
+  }
+  function applyStatus(envelope) {
+    var result = envelope.result;
+    var composition = result && result.composition;
+    var configured = composition && composition.operations_configured_for_attempt;
+    if (!envelope.ok || result.schema !== "lightwork.governance-agent-status.v1" ||
+        !composition || composition.assessment !== "configured_for_attempt_only" ||
+        composition.status_opened_store !== false ||
+        composition.operational_verification_performed !== false ||
+        !configured || typeof configured !== "object") {
+      throw invalidResponse();
+    }
+    var firstEnabled = null;
+    Array.prototype.forEach.call(operation.options, function (option) {
+      option.disabled = configured[option.dataset.statusKey] !== true;
+      if (!option.disabled && firstEnabled === null) firstEnabled = option;
+    });
+    if (firstEnabled === null) {
+      lockControls("No rendered operation has all required server composition configured for an attempt. No operational verification was performed.");
+      return;
+    }
+    operation.value = firstEnabled.value;
+    controls.disabled = false;
+    controls.setAttribute("aria-disabled", "false");
+    readinessNote.textContent = "Enabled options have callable server composition configured for an attempt only. This status did not open the store, call a provider, or verify operational readiness.";
+    updateConfirmation();
   }
 
   document.getElementById("ga-load-status").addEventListener("click", function () {
-    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+    lockControls("Checking server composition. Controls remain disabled.");
+    request("GET", "/status", {}).then(function (result) {
+      show(result);
+      applyStatus(result);
+    }).catch(function (error) {
+      lockControls("Composition status could not be verified. Controls remain disabled.");
+      show(error instanceof Error ? error.message : "The status request failed.");
+    });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("ga-submit").addEventListener("click", function () {
@@ -154,9 +290,14 @@
         }
       });
       var path = buildPath(route.dataset.path, pathValues);
-      run(route.dataset.method, path, payload).catch(function (error) { show(String(error)); });
-    } catch (error) { show(String(error)); }
+       run(route.dataset.method, path, payload).catch(function (error) {
+         show(error instanceof Error ? error.message : "The operation request failed.");
+       });
+    } catch (error) {
+      show(error instanceof Error ? error.message : "The operation could not be prepared.");
+    }
   });
+  lockControls("Load composition status before selecting an operation. No operational verification has been performed.");
   updateConfirmation();
 }());
 </script>

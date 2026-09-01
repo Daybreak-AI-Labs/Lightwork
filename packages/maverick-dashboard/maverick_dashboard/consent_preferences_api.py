@@ -353,6 +353,73 @@ async def link_profiles(request: Request, body: LinkProfilesIn) -> dict:
     )
 
 
+@router.get("/profiles/{profile_id}/identity-link")
+async def profile_identity_link(request: Request, profile_id: str) -> dict:
+    """Inspect current link authority without returning the subject digest."""
+
+    require_permission(request, "view")
+    ops = _ops()
+    tenant_id = _tenant_id()
+    authority = await _call(
+        ops,
+        _store(tenant_id).get_profile_authority,
+        tenant_id,
+        profile_id,
+    )
+    return {
+        "profile_id": authority["profile_id"],
+        "identity_kind": authority["identity_kind"],
+        "profile_revision": authority["revision"],
+        "status": authority["link_status"],
+        "link_revision": authority["link_revision"],
+        "linked_known_profile_id": authority["linked_known_profile_id"],
+        "last_known_profile_id": authority["last_known_profile_id"],
+        "link_id": authority["link_id"],
+        "link_sha256": authority["link_sha256"],
+        "record_sha256": authority["link_record_sha256"],
+        "retention_until": authority["link_retention_until"],
+        "receipt_histories_merged": False,
+    }
+
+
+@router.get("/profiles/{profile_id}/identity-link/history")
+async def profile_identity_link_history(
+    request: Request,
+    profile_id: str,
+    limit: int = Query(100, ge=1, le=500),
+) -> dict:
+    require_permission(request, "view")
+    ops = _ops()
+    tenant_id = _tenant_id()
+    return _jsonable(
+        await _call(
+            ops,
+            _store(tenant_id).get_profile_link_history,
+            tenant_id,
+            profile_id,
+            limit=limit,
+        )
+    )
+
+
+@router.get("/identity-links/integrity")
+async def identity_link_integrity(
+    request: Request,
+    limit: int = Query(500, ge=1, le=500),
+) -> dict:
+    require_permission(request, "view")
+    ops = _ops()
+    tenant_id = _tenant_id()
+    return _jsonable(
+        await _call(
+            ops,
+            _store(tenant_id).verify_profile_link_integrity,
+            tenant_id,
+            limit=limit,
+        )
+    )
+
+
 @router.post("/profiles/{profile_id}/preferences", status_code=201)
 async def record_preferences(
     request: Request,

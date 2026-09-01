@@ -108,9 +108,12 @@
     var settings = options || {};
     settings.headers = Object.assign({"Content-Type": "application/json"}, settings.headers || {});
     var response = await fetch(API + path, settings);
-    var body = {};
-    try { body = await response.json(); } catch (_error) { body = {}; }
-    if (!response.ok) { throw new Error(body.detail || ("HTTP " + response.status)); }
+    var body;
+    try { body = await response.json(); }
+    catch (_error) { throw new Error("Request failed: the server returned an invalid JSON response."); }
+    if (!response.ok) {
+      throw new Error(body && typeof body.detail === "string" ? body.detail : ("HTTP " + response.status));
+    }
     return body;
   }
   function show(result, message) {

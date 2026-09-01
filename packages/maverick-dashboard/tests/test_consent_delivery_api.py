@@ -178,7 +178,7 @@ def test_sync_constructs_delivery_from_receipt_authority_only(authorities) -> No
 
 
 def test_dispatch_is_explicit_admin_operation_with_server_derived_worker(authorities) -> None:
-    _preferences, _delivery, dispatched, _config = authorities
+    preferences, delivery, dispatched, _config = authorities
     result = _ok(
         client.post(
             f"{API}/dispatch",
@@ -194,6 +194,138 @@ def test_dispatch_is_explicit_admin_operation_with_server_derived_worker(authori
     assert dispatched[0][0] == "tenant-a"
     assert dispatched[0][1] == ["crm"]
     assert dispatched[0][2]["worker_id"].startswith("delivery-api-")
+    assert dispatched[0][2]["preference_store"] is preferences
+    assert dispatched[0][2]["delivery_store"] is delivery
+    assert dispatched[0][2]["transport"] is None
+
+
+def _write_salesforce_destination_config(config_path: Path) -> None:
+    config_path.write_text(
+        "[consent_preferences]\n"
+        "enable = true\n"
+        "[consent_preferences.delivery]\n"
+        "enable = true\n"
+        "max_attempts = 6\n"
+        "retry_base_seconds = 5\n"
+        "retry_max_seconds = 3600\n"
+        "[consent_preferences.delivery.destinations]\n"
+        "enable = true\n"
+        'enabled_providers = ["salesforce"]\n'
+        "timeout_seconds = 10.0\n"
+        "max_response_bytes = 65536\n"
+        "[consent_preferences.delivery.destinations.salesforce]\n"
+        'destination_id = "salesforce"\n'
+        'origin = "https://tenant.my.salesforce.com"\n'
+        'credential_secret_ref = "$SALESFORCE_CONSENT_TOKEN"\n'
+        "credential_revision = 1\n"
+        'api_version = "v65.0"\n'
+        'object_api_name = "Lightwork_Consent_Event__c"\n'
+        'external_id_field = "Lightwork_Message_Id__c"\n'
+        'payload_digest_field = "Lightwork_Payload_SHA256__c"\n',
+        encoding="utf-8",
+    )
+
+
+def test_named_destination_routes_and_lazy_composition_are_mounted(authorities) -> None:
+    assert callable(app.state.consent_destination_runtime_factory)
+    assert callable(app.state.consent_destination_readiness_probe)
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/consent/delivery/destination-adapters/status" in paths
+    assert "/api/v1/consent/delivery/destination-adapters/{destination_id}/reconcile" in paths
+
+    status = _ok(client.get(f"{API}/destination-adapters/status"))
+    assert status["enabled"] is False
+    assert status["ready"] is False
+    assert status["credential_values_resolved"] is False
+    assert status["provider_session_opened"] is False
+    assert status["live_provider_acceptance_verified"] is False
+
+
+def test_named_destination_dispatch_uses_stock_reconciliation_authority(
+    authorities,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _preferences, _delivery, dispatched, config_path = authorities
+    _write_salesforce_destination_config(config_path)
+    monkeypatch.setenv("SALESFORCE_CONSENT_TOKEN", "placed-not-resolved")
+    monkeypatch.delattr(
+        app.state,
+        "consent_destination_reconciliation_authority_factory",
+        raising=False,
+    )
+    from maverick import config
+
+    config.reset_config_cache()
+    response = client.post(
+        f"{API}/dispatch",
+        json={
+            "destination_ids": ["salesforce"],
+            "sync_limit": 100,
+            "delivery_limit": 10,
+            "lease_seconds": 60.0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(dispatched) == 1
+    transport = dispatched[0][2]["transport"]
+    assert transport.readiness()["reconciliation_supported"] == {
+        "salesforce": True
+    }
+
+
+def test_named_destination_dispatch_passes_ready_transport_and_same_stores(
+    authorities,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preferences, delivery, dispatched, config_path = authorities
+    _write_salesforce_destination_config(config_path)
+    monkeypatch.setenv("SALESFORCE_CONSENT_TOKEN", "placed-not-resolved")
+
+    class Reconciler:
+        def inspect(self, _probe):
+            raise AssertionError("dispatch construction must not reconcile")
+
+    monkeypatch.setattr(
+        app.state,
+        "consent_destination_reconciliation_authority_factory",
+        lambda *, tenant_id: Reconciler(),
+        raising=False,
+    )
+    from maverick import config
+
+    config.reset_config_cache()
+    result = _ok(
+        client.post(
+            f"{API}/dispatch",
+            json={
+                "destination_ids": ["salesforce"],
+                "sync_limit": 100,
+                "delivery_limit": 10,
+                "lease_seconds": 60.0,
+            },
+        )
+    )
+    assert result["live_external_acceptance"] is False
+    kwargs = dispatched[0][2]
+    assert kwargs["preference_store"] is preferences
+    assert kwargs["delivery_store"] is delivery
+    assert kwargs["transport"].registry.binding("salesforce").tenant_id == "tenant-a"
+
+
+def test_consent_delivery_page_exposes_named_adapter_workbench(authorities) -> None:
+    response = client.get("/consent/delivery")
+    assert response.status_code == 200
+    source = response.text
+    for provider in (
+        "Salesforce",
+        "Marketo",
+        "Adobe Experience Platform",
+        "Snowflake",
+    ):
+        assert provider in source
+    assert "cd-adapter-status" in source
+    assert "cd-adapter-reconcile" in source
+    assert "/destination-adapters" in source
 
 
 def test_delivery_api_is_tenant_scoped_strict_and_default_off(

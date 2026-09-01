@@ -14,6 +14,10 @@
     .aud-sig summary:hover { color: var(--text); }
     .aud-sig[open] summary { margin-bottom: 4px; }
     .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); }
+    .aud-custody-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
+    .aud-custody-metric { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--surface-1) 78%, transparent); }
+    .aud-custody-metric strong { display: block; margin-top: var(--space-1); }
+    .aud-custody-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
   </style>
 
   {% from "_hero.html" import hero, state %}
@@ -30,6 +34,81 @@
                    linked to the one before — any tampering breaks the
                    chain.') }}
   {% endcall %}
+
+  <section class="panel" aria-labelledby="audit-custody-title">
+    <div class="aud-custody-actions">
+      <div style="flex: 1 1 32rem;">
+        <div class="muted" style="font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em;">Production custody composition</div>
+        <h2 id="audit-custody-title">Unified audit custody</h2>
+        <p>Read-only readiness for the exact-tenant checkpoint, WORM, signing,
+          anchor, and at-least-once SIEM composition. Automatic day sealing
+          remains an operator-controlled action.</p>
+      </div>
+      <button class="btn" id="audit-custody-refresh" type="button">Refresh custody status</button>
+    </div>
+    <p id="audit-custody-status" role="status" aria-live="polite" class="muted">Custody status has not loaded.</p>
+    <div class="aud-custody-grid" aria-label="Unified audit custody readiness">
+      <div class="aud-custody-metric"><span class="muted">Composition</span><strong id="audit-custody-enabled">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">Checkpoint</span><strong id="audit-custody-checkpoint">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">WORM</span><strong id="audit-custody-worm">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">SIEM delivery</span><strong id="audit-custody-siem">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">Independent production proof</span><strong id="audit-custody-proof">Not verified</strong></div>
+    </div>
+    <p class="muted" style="margin-top: var(--space-3);">A ready local composition does not prove off-host key custody, S3 Object Lock, SIEM interoperability, recovery/scale, or customer acceptance.</p>
+  </section>
+
+  <script>
+    (function () {
+      const refresh = document.getElementById('audit-custody-refresh');
+      const status = document.getElementById('audit-custody-status');
+      const enabled = document.getElementById('audit-custody-enabled');
+      const checkpoint = document.getElementById('audit-custody-checkpoint');
+      const worm = document.getElementById('audit-custody-worm');
+      const siem = document.getElementById('audit-custody-siem');
+      const proof = document.getElementById('audit-custody-proof');
+      function yesNo(value, yes, no) { return value === true ? yes : no; }
+      async function loadCustody() {
+        refresh.disabled = true;
+        status.style.color = 'var(--muted)';
+        status.textContent = 'Checking exact-tenant custody readiness…';
+        try {
+          const response = await fetch('/api/v1/audit/unified/status', {
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin'
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(function () { return {}; });
+            throw new Error(body.detail || ('HTTP ' + response.status));
+          }
+          const body = await response.json();
+          const custody = body && typeof body.custody === 'object' ? body.custody : {};
+          const ready = custody.ready === true;
+          enabled.textContent = ready ? 'Ready' : (custody.enabled === true ? 'Not ready' : 'Disabled');
+          checkpoint.textContent = yesNo(custody.checkpoint_enabled, 'Enabled', 'Disabled');
+          worm.textContent = custody.worm_enabled === true ? ('Enabled · ' + String(custody.worm_provider || 'configured')) : 'Disabled';
+          siem.textContent = custody.siem_enabled === true ? 'At least once' : 'Disabled';
+          const productionProof = custody.independent_operation_verified === true &&
+            custody.off_host_key_custody_verified === true &&
+            custody.s3_object_lock_acceptance_verified === true &&
+            custody.siem_acceptance_verified === true &&
+            custody.live_customer_acceptance_verified === true;
+          proof.textContent = productionProof ? 'Verified' : 'Not verified';
+          status.textContent = ready
+            ? 'Local custody composition is configuration-ready; external acceptance remains separate.'
+            : (body.enabled === true ? 'Unified audit is enabled, but custody is disabled or not ready.' : 'Unified audit projection and custody are disabled for this tenant.');
+        } catch (error) {
+          status.style.color = 'var(--danger)';
+          status.textContent = 'Custody readiness unavailable: ' + String(error && error.message ? error.message : error);
+          enabled.textContent = checkpoint.textContent = worm.textContent = siem.textContent = 'Unavailable';
+          proof.textContent = 'Not verified';
+        } finally {
+          refresh.disabled = false;
+        }
+      }
+      refresh.addEventListener('click', loadCustody);
+      loadCustody();
+    })();
+  </script>
 
   <div class="panel">
     <form method="get" action="/audit" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">

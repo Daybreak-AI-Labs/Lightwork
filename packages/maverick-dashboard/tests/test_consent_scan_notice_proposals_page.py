@@ -166,10 +166,13 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
     assert page["floor"] == "operate"
     assert page["in_nav"] is False
 
-    templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    assert '"/consent/scan-notice-proposals"' in (templates / "base.html").read_text(
-        encoding="utf-8"
+    from maverick_dashboard.copilot_context import context_for_page
+
+    assert (
+        context_for_page("/consent/scan-notice-proposals").path
+        == "/consent/scan-notice-proposals"
     )
+    templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
     assert 'href="/consent/scan-notice-proposals"' in (
         templates / "consent_preferences.html"
     ).read_text(encoding="utf-8")

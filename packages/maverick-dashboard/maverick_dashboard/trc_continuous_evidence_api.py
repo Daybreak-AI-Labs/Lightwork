@@ -293,6 +293,29 @@ def create_trc_continuous_evidence_router(  # noqa: C901
             isinstance(scheduler_status, Mapping)
             and scheduler_status.get("custom_collector_dependencies_injected") is True
         )
+        stock_probe = getattr(
+            request.app.state,
+            "trc_stock_evidence_readiness_probe",
+            None,
+        )
+        stock_readiness: Mapping[str, object] | None = None
+        if callable(stock_probe):
+            try:
+                candidate = await run_in_threadpool(stock_probe, _tenant_id())
+                if isinstance(candidate, Mapping):
+                    stock_readiness = candidate
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                stock_readiness = {
+                    "schema": "lightwork.trc-stock-collector-production-readiness.v1",
+                    "enabled": False,
+                    "ready": False,
+                    "error_code": "stock_collector_readiness_unavailable",
+                    "status_secret_resolution": False,
+                    "status_provider_network_io": False,
+                    "live_provider_acceptance_verified": False,
+                }
         return {
             "schema": "lightwork.trc-continuous-evidence-status.v1",
             "enabled": _enabled(),
@@ -300,12 +323,51 @@ def create_trc_continuous_evidence_router(  # noqa: C901
             "provider_network_io_in_core": False,
             "collector_dependency_injection_supported": True,
             "custom_collector_dependencies_injected": custom_dependencies,
+            "stock_collectors": stock_readiness,
             "raw_provider_payload_persisted": False,
             "raw_credentials_persisted": False,
             "compliance_conclusions_written": False,
             "control_implementation_mutated": False,
             "certification_performed": False,
             "live_provider_acceptance_verified": False,
+        }
+
+    @router.post("/scheduler/run-once")
+    async def run_scheduler_once(request: Request):
+        """Run one bounded supervisor cycle using server-installed authority."""
+
+        require_global_permission(request, "admin")
+        scheduler = getattr(
+            request.app.state,
+            "trc_continuous_evidence_scheduler",
+            None,
+        )
+        run_once = getattr(scheduler, "run_once", None)
+        if not callable(run_once):
+            raise HTTPException(
+                status_code=503,
+                detail="continuous-evidence scheduler is unavailable",
+            )
+        try:
+            cycle = await run_in_threadpool(run_once)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            if "already_running" in str(exc):
+                raise HTTPException(
+                    status_code=409,
+                    detail="continuous-evidence scheduler cycle is already running",
+                ) from exc
+            raise HTTPException(
+                status_code=503,
+                detail="continuous-evidence scheduler cycle failed",
+            ) from exc
+        return {
+            "schema": "lightwork.trc-continuous-evidence-manual-cycle.v1",
+            "executed": cycle is not None,
+            "cycle": _jsonable(cycle) if cycle is not None else None,
+            "provider_acceptance_claimed": False,
+            "estate_completeness_claimed": False,
         }
 
     @router.put("/definitions/{definition_id}/versions/{version}")

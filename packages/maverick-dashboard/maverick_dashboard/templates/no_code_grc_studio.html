@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}No-code GRC Studio - Lightwork{% endblock %}
+{% block head_extra %}
+<style nonce="{{ csp_style_nonce }}">
+  .grcs-shell {
+    --grcs-glass: color-mix(in srgb, var(--panel) 68%, transparent);
+    --grcs-soft: color-mix(in srgb, var(--panel) 48%, transparent);
+    --grcs-edge: color-mix(in srgb, var(--text) 15%, transparent);
+    --grcs-focus: color-mix(in srgb, var(--accent) 78%, white 22%);
+    position: relative; isolation: isolate; display: grid; gap: var(--space-5);
+  }
+  .grcs-shell::before {
+    position: fixed; inset: 0; z-index: -1; content: ""; pointer-events: none;
+    background:
+      radial-gradient(circle at 8% 8%, color-mix(in srgb, #38bdf8 18%, transparent), transparent 30rem),
+      radial-gradient(circle at 88% 15%, color-mix(in srgb, #a78bfa 18%, transparent), transparent 32rem),
+      radial-gradient(circle at 48% 92%, color-mix(in srgb, #34d399 13%, transparent), transparent 28rem);
+  }
+  .grcs-hero, .grcs-card, .grcs-boundary, .grcs-version, .grcs-runtime {
+    border: 1px solid var(--grcs-edge); background: var(--grcs-glass);
+    box-shadow: 0 18px 50px color-mix(in srgb, #000 22%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 13%, transparent);
+    -webkit-backdrop-filter: blur(26px) saturate(150%); backdrop-filter: blur(26px) saturate(150%);
+  }
+  .grcs-hero { display: grid; grid-template-columns: minmax(0,1fr) minmax(17rem,25rem); gap: var(--space-5); align-items: center; padding: clamp(1.4rem,3vw,2.7rem); border-radius: 1.6rem; overflow: hidden; }
+  .grcs-kicker { margin: 0 0 .45rem; color: var(--accent); font-size: .74rem; font-weight: 850; letter-spacing: .13em; text-transform: uppercase; }
+  .grcs-title { max-width: 16ch; margin: 0; font-size: clamp(2.1rem,6vw,4.6rem); line-height: .96; letter-spacing: -.05em; }
+  .grcs-lede { max-width: 72ch; margin: 1rem 0 0; color: var(--text-muted); font-size: 1.04rem; line-height: 1.65; }
+  .grcs-runtime { display: grid; gap: .85rem; min-width: 0; padding: 1.15rem; border-radius: 1.15rem; background: var(--grcs-soft); }
+  .grcs-head, .grcs-actions, .grcs-runtime-row, .grcs-version-head { display: flex; gap: .75rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .grcs-mark, .grcs-pill { display: inline-flex; align-items: center; gap: .4rem; width: fit-content; padding: .32rem .65rem; border: 1px solid var(--grcs-edge); border-radius: 999px; background: var(--grcs-soft); font-size: .72rem; font-weight: 800; text-transform: uppercase; }
+  .grcs-mark::before { width: .54rem; height: .54rem; border-radius: 50%; content: ""; background: currentColor; }
+  .grcs-mark[data-state="ready"] { color: var(--success,#45c786); }
+  .grcs-mark[data-state="failed"] { color: var(--danger,#f06b75); }
+  .grcs-mark[data-state="checking"] { color: var(--warn); }
+  .grcs-boundary { padding: clamp(1.1rem,2vw,1.65rem); border-left: .3rem solid var(--accent); border-radius: 1.15rem; }
+  .grcs-boundary h2, .grcs-card h2, .grcs-card h3 { margin: 0 0 .65rem; }
+  .grcs-boundary ul { display: grid; gap: .45rem; margin: .65rem 0 0; padding-left: 1.2rem; color: var(--text-muted); }
+  .grcs-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); gap: var(--space-4); }
+  .grcs-card { grid-column: span 6; min-width: 0; padding: clamp(1rem,2vw,1.45rem); border-radius: 1.2rem; }
+  .grcs-card--wide { grid-column: 1/-1; }
+  .grcs-card--third { grid-column: span 4; }
+  .grcs-form, .grcs-form-grid, .grcs-stack { display: grid; gap: .85rem; }
+  .grcs-form-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .grcs-form label, .grcs-label { display: grid; gap: .38rem; min-width: 0; color: var(--text-muted); font-size: .82rem; font-weight: 700; }
+  .grcs-form :where(.input,.select,textarea), .grcs-label .input { width: 100%; min-width: 0; border-color: var(--grcs-edge); background: color-mix(in srgb,var(--bg) 54%,transparent); }
+  .grcs-form textarea { min-height: 18rem; resize: vertical; font-family: var(--font-mono,ui-monospace,monospace); font-size: .76rem; line-height: 1.5; }
+  .grcs-composer { display: grid; gap: 1rem; margin: 1rem 0; }
+  .grcs-composer>details { border: 1px solid var(--grcs-edge); border-radius: 1rem; background: var(--grcs-soft); overflow: clip; }
+  .grcs-composer>details>summary { padding: .9rem 1rem; }
+  .grcs-composer-panel { display: grid; gap: .8rem; padding: 0 1rem 1rem; }
+  .grcs-definition-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,15rem),1fr)); gap: .7rem; }
+  .grcs-definition { display: grid; gap: .35rem; padding: .75rem; border: 1px solid var(--grcs-edge); border-radius: .8rem; background: color-mix(in srgb,var(--bg) 42%,transparent); }
+  .grcs-definition strong,.grcs-definition span { min-width: 0; overflow-wrap: anywhere; }
+  .grcs-definition span { color: var(--text-muted); font-size: .77rem; }
+  .grcs-empty { margin: 0; color: var(--text-muted); font-size: .82rem; }
+  .grcs-mini-actions { display: flex; gap: .55rem; flex-wrap: wrap; }
+  .grcs-mini-actions .btn { padding: .55rem .75rem; font-size: .78rem; }
+  .grcs-muted, .grcs-help { margin: .4rem 0; color: var(--text-muted); font-size: .86rem; line-height: 1.55; }
+  .grcs-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .grcs-fieldset[disabled] { opacity: .62; }
+  .grcs-check { display: flex !important; grid-template-columns: auto 1fr; gap: .55rem !important; align-items: flex-start; }
+  .grcs-check input { margin-top: .18rem; }
+  .grcs-versions { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,20rem),1fr)); gap: .85rem; margin-top: 1rem; }
+  .grcs-version { display: grid; gap: .7rem; min-width: 0; padding: 1rem; border-radius: 1rem; background: var(--grcs-soft); }
+  .grcs-version h3 { margin: 0; overflow-wrap: anywhere; font-size: 1rem; }
+  .grcs-version dl { display: grid; grid-template-columns: max-content minmax(0,1fr); gap: .3rem .7rem; margin: 0; font-size: .77rem; }
+  .grcs-version dt { color: var(--text-muted); }
+  .grcs-version dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono,ui-monospace,monospace); }
+  .grcs-output { max-height: 34rem; overflow: auto; margin: .8rem 0 0; padding: 1rem; border: 1px solid var(--grcs-edge); border-radius: .9rem; background: color-mix(in srgb,var(--bg) 72%,transparent); color: var(--text); font-size: .76rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .grcs-shell :where(button,input,select,textarea,summary,[tabindex]):focus-visible { outline: 3px solid var(--grcs-focus); outline-offset: 3px; }
+  .grcs-shell summary { cursor: pointer; font-weight: 750; }
+  @media (max-width: 940px) { .grcs-hero { grid-template-columns: 1fr; } .grcs-card,.grcs-card--third { grid-column: 1/-1; } }
+  @media (max-width: 640px) { .grcs-form-grid { grid-template-columns: 1fr; } .grcs-actions>.btn { width: 100%; } }
+  @media (prefers-reduced-motion: reduce) { .grcs-shell *,.grcs-shell *::before,.grcs-shell *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  @media (forced-colors: active) { .grcs-hero,.grcs-card,.grcs-boundary,.grcs-version,.grcs-runtime { border: 1px solid CanvasText; background: Canvas; } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="grcs-shell" id="grc-studio-shell" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}" data-can-operate="{{ 'true' if studio_can_operate else 'false' }}" data-can-audit="{{ 'true' if studio_can_audit else 'false' }}" data-can-admin="{{ 'true' if studio_can_admin else 'false' }}">
+  <section class="grcs-hero" aria-labelledby="grcs-title">
+    <div>
+      <p class="grcs-kicker">Technology risk and compliance</p>
+      <h1 class="grcs-title" id="grcs-title">No-code GRC studio</h1>
+      <p class="grcs-lede">Design tenant-private GRC objects, forms, safe rules, collector bindings and report views as a closed declarative blueprint. Every release moves through versioned review, independent approval, publish and exact rollback authority.</p>
+    </div>
+    <div class="grcs-runtime" aria-labelledby="grcs-runtime-title">
+      <p class="grcs-kicker" id="grcs-runtime-title">Tenant runtime</p>
+      <div class="grcs-runtime-row"><strong id="grcs-readiness">Checking…</strong><span class="grcs-mark" id="grcs-status-mark" data-state="checking">Checking</span></div>
+      <p class="grcs-muted" id="grcs-readiness-detail" role="status" aria-live="polite">Reading store-free readiness before enabling controls.</p>
+      <button class="btn" id="grcs-refresh-status" type="button">Refresh status</button>
+    </div>
+  </section>
+
+  <aside class="grcs-boundary" aria-labelledby="grcs-boundary-title">
+    <p class="grcs-kicker">Closed authority boundary</p><h2 id="grcs-boundary-title">Configuration without executable surface area</h2>
+    <ul>
+      <li>The DSL carries opaque references, enumerated types, bounded literals and exact digests—never code, expressions, HTML, CSS, URLs, credentials or provider endpoints.</li>
+      <li>Author, reviewer and approver must be three distinct principals. Every lifecycle and active-pointer change uses exact revision and integrity compare-and-swap.</li>
+      <li>Questionnaire, collector and report projections are side-effect free until a server-owned target resolver and applier bind the exact published blueprint and target revision.</li>
+      <li>Local composition does not imply live provider, customer, auditor or regulator acceptance.</li>
+    </ul>
+  </aside>
+
+  <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-status-title">
+    <div class="grcs-head"><div><p class="grcs-kicker">Readiness first</p><h2 id="grcs-status-title">Server composition</h2></div></div>
+    <details><summary>Runtime composition details</summary><pre class="grcs-output" id="grcs-status-output" tabindex="0"></pre></details>
+  </section>
+
+  <fieldset class="grcs-fieldset" id="grcs-operations" disabled>
+    <legend class="sr-only">GRC studio operations</legend>
+    <div class="grcs-grid">
+      <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-register-title">
+        <div class="grcs-head"><div><p class="grcs-kicker">Version register</p><h2 id="grcs-register-title">Tenant blueprints</h2></div><span class="grcs-pill" id="grcs-list-count">0 versions</span></div>
+        <form class="grcs-form" id="grcs-filter-form" autocomplete="off" novalidate>
+          <div class="grcs-form-grid"><label>Studio ID<input class="input" name="studio_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}"></label><label>Lifecycle state<select class="select" name="state"><option value="">All states</option><option>draft</option><option>in_review</option><option>reviewed</option><option>approved</option><option>published</option><option>superseded</option><option>rejected</option></select></label><label>Maximum results<input class="input" name="limit" type="number" min="1" max="1000" value="100"></label></div>
+          <button class="btn btn--primary" type="submit">Load versions</button>
+        </form>
+        <p class="grcs-muted" id="grcs-list-status" role="status" aria-live="polite">No register query has run.</p><div class="grcs-versions" id="grcs-version-list"></div>
+      </section>
+
+      <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-builder-title">
+        <p class="grcs-kicker">Builder · author</p><h2 id="grcs-builder-title">Create or replace a complete blueprint</h2>
+        <p class="grcs-help">Use the guided composer to assemble objects, fields, forms, safe rules, collector bindings and reports. It emits the closed server schema; no scripting, URLs, templates or provider credentials are accepted.</p>
+        <form class="grcs-form" id="grcs-builder-form" autocomplete="off" novalidate>
+          <fieldset class="grcs-fieldset"{% if not studio_can_operate %} disabled aria-disabled="true"{% endif %}>
+            <div class="grcs-form-grid"><label>Mode<select class="select" name="mode"><option value="create">Create next version</option><option value="replace">Replace existing draft</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Blueprint name reference<input class="input" name="name_ref" maxlength="128" required></label><label>Description reference (optional)<input class="input" name="description_ref" maxlength="128"></label><label>Version / expected latest<input class="input" name="version" type="number" min="0" max="2147483647" value="0" required></label><label>Expected revision for replacement<input class="input" name="expected_revision" type="number" min="1" max="2147483647"></label><label>Expected integrity digest for replacement<input class="input" name="expected_integrity_sha256" minlength="64" maxlength="64"></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
+
+            <div class="grcs-composer" aria-label="Guided no-code blueprint composer">
+              <details open><summary>1. Objects</summary><div class="grcs-composer-panel"><div class="grcs-form-grid"><label>Object ID<input class="input" id="grcs-object-id" maxlength="128"></label><label>Kind<select class="select" id="grcs-object-kind"><option>asset</option><option>assessment</option><option>control</option><option>evidence</option><option>issue</option><option>policy</option><option selected>risk</option><option>vendor</option><option>custom</option></select></label><label>Label reference<input class="input" id="grcs-object-label" maxlength="128"></label><label>Description reference (optional)<input class="input" id="grcs-object-description" maxlength="128"></label></div><button class="btn" id="grcs-add-object" type="button">Add object</button><div class="grcs-definition-list" id="grcs-object-list"></div></div></details>
+
+              <details><summary>2. Fields</summary><div class="grcs-composer-panel"><div class="grcs-form-grid"><label>Object ID<input class="input" id="grcs-field-object" maxlength="128"></label><label>Field ID<input class="input" id="grcs-field-id" maxlength="128"></label><label>Label reference<input class="input" id="grcs-field-label" maxlength="128"></label><label>Type<select class="select" id="grcs-field-type"><option>boolean</option><option>date</option><option>decimal</option><option>digest</option><option>evidence_ref</option><option>integer</option><option>multi_choice</option><option>record_ref</option><option selected>single_choice</option><option>text_ref</option><option>timestamp</option></select></label><label>Sensitivity<select class="select" id="grcs-field-sensitivity"><option>public</option><option selected>internal</option><option>confidential</option><option>restricted</option></select></label><label>Options (comma-separated opaque values)<input class="input" id="grcs-field-options" maxlength="4096"></label><label>Reference kind (reference fields only)<input class="input" id="grcs-field-reference" maxlength="128"></label><label>Default (blank means none)<input class="input" id="grcs-field-default" maxlength="128"></label><label class="grcs-check"><input id="grcs-field-required" type="checkbox"><span>Required field</span></label></div><button class="btn" id="grcs-add-field" type="button">Add field</button><div class="grcs-definition-list" id="grcs-field-list"></div></div></details>
+
+              <details><summary>3. Forms and sections</summary><div class="grcs-composer-panel"><p class="grcs-help">Repeat a form ID to append another uniquely named section.</p><div class="grcs-form-grid"><label>Form ID<input class="input" id="grcs-form-id" maxlength="128"></label><label>Object ID<input class="input" id="grcs-form-object" maxlength="128"></label><label>Title reference<input class="input" id="grcs-form-title" maxlength="128"></label><label>Section ID<input class="input" id="grcs-section-id" maxlength="128"></label><label>Section label reference<input class="input" id="grcs-section-label" maxlength="128"></label><label>Field IDs (comma-separated)<input class="input" id="grcs-section-fields" maxlength="4096"></label></div><button class="btn" id="grcs-add-form" type="button">Add form section</button><div class="grcs-definition-list" id="grcs-form-list"></div></div></details>
+
+              <details><summary>4. Declarative rules</summary><div class="grcs-composer-panel"><p class="grcs-help">Repeat a rule ID to append another condition and action under the same all/any mode.</p><div class="grcs-form-grid"><label>Rule ID<input class="input" id="grcs-rule-id" maxlength="128"></label><label>Object ID<input class="input" id="grcs-rule-object" maxlength="128"></label><label>Match mode<select class="select" id="grcs-rule-mode"><option>all</option><option>any</option></select></label><label>Condition field<input class="input" id="grcs-condition-field" maxlength="128"></label><label>Condition operator<select class="select" id="grcs-condition-operator"><option>equals</option><option>not_equals</option><option>greater_than</option><option>greater_or_equal</option><option>less_than</option><option>less_or_equal</option><option>contains</option><option>is_set</option></select></label><label>Condition value (blank for is_set)<input class="input" id="grcs-condition-value" maxlength="128"></label><label>Action ID<input class="input" id="grcs-action-id" maxlength="128"></label><label>Action type<select class="select" id="grcs-action-type"><option>set_default</option><option selected>set_required</option><option>set_visibility</option><option>set_severity</option><option>emit_task_ref</option></select></label><label>Target field (blank for emit_task_ref)<input class="input" id="grcs-action-target" maxlength="128"></label><label>Action value<input class="input" id="grcs-action-value" maxlength="128"></label></div><button class="btn" id="grcs-add-rule" type="button">Add rule step</button><div class="grcs-definition-list" id="grcs-rule-list"></div></div></details>
+
+              <details><summary>5. Continuous-evidence collector bindings</summary><div class="grcs-composer-panel"><p class="grcs-help">Repeat a binding ID to append a unique field mapping while retaining the pinned collector authority.</p><div class="grcs-form-grid"><label>Binding ID<input class="input" id="grcs-binding-id" maxlength="128"></label><label>Collector ID<input class="input" id="grcs-collector-id" maxlength="128"></label><label>Collector version<input class="input" id="grcs-collector-version" type="number" min="1"></label><label>Collector integrity digest<input class="input" id="grcs-collector-digest" minlength="64" maxlength="64"></label><label>Object ID<input class="input" id="grcs-binding-object" maxlength="128"></label><label>Source path segments (comma-separated)<input class="input" id="grcs-source-path" maxlength="2048"></label><label>Target field ID<input class="input" id="grcs-mapping-target" maxlength="128"></label><label>Mapping mode<select class="select" id="grcs-mapping-mode"><option>replace</option><option>append</option></select></label><label>Control references (comma-separated)<input class="input" id="grcs-control-refs" maxlength="4096"></label></div><button class="btn" id="grcs-add-binding" type="button">Add collector mapping</button><div class="grcs-definition-list" id="grcs-binding-list"></div></div></details>
+
+              <details><summary>6. Report and view definitions</summary><div class="grcs-composer-panel"><p class="grcs-help">Repeat a view ID to append optional filters and sorts while retaining its selected columns and groups.</p><div class="grcs-form-grid"><label>View ID<input class="input" id="grcs-view-id" maxlength="128"></label><label>Object ID<input class="input" id="grcs-view-object" maxlength="128"></label><label>Title reference<input class="input" id="grcs-view-title" maxlength="128"></label><label>Column field IDs (comma-separated)<input class="input" id="grcs-view-columns" maxlength="4096"></label><label>Group field IDs (comma-separated, optional)<input class="input" id="grcs-view-groups" maxlength="2048"></label><label>Filter field (optional)<input class="input" id="grcs-filter-field" maxlength="128"></label><label>Filter operator<select class="select" id="grcs-filter-operator"><option>equals</option><option>not_equals</option><option>greater_than</option><option>greater_or_equal</option><option>less_than</option><option>less_or_equal</option><option>contains</option><option selected>is_set</option></select></label><label>Filter value (blank for is_set)<input class="input" id="grcs-filter-value" maxlength="128"></label><label>Sort field (optional)<input class="input" id="grcs-sort-field" maxlength="128"></label><label>Sort direction<select class="select" id="grcs-sort-direction"><option>ascending</option><option>descending</option></select></label></div><button class="btn" id="grcs-add-view" type="button">Add report definition</button><div class="grcs-definition-list" id="grcs-view-list"></div></div></details>
+            </div>
+
+            <div class="grcs-mini-actions"><button class="btn" id="grcs-compose-blueprint" type="button">Generate closed blueprint</button><button class="btn" id="grcs-load-blueprint" type="button">Load advanced JSON into composer</button><button class="btn" id="grcs-reset-composer" type="button">Reset composer</button></div>
+            <details><summary>Advanced closed-schema JSON</summary><p class="grcs-help">Generated by the visual composer. Advanced operators may load a same-schema blueprint; the server still performs authoritative closed-schema validation.</p><label>Closed blueprint JSON<textarea class="input" name="blueprint_json" maxlength="1048576" required></textarea></label></details>
+            <button class="btn btn--primary" type="submit">Validate and save draft</button>
+          </fieldset>
+        </form>
+      </section>
+
+      <section class="grcs-card" aria-labelledby="grcs-lifecycle-title">
+        <p class="grcs-kicker">Governed lifecycle</p><h2 id="grcs-lifecycle-title">Review, approve and publish</h2>
+        <form class="grcs-form" id="grcs-lifecycle-form" autocomplete="off" novalidate>
+          <div class="grcs-form-grid"><label>Action<select class="select" name="action"><option value="submit">Submit</option><option value="review-accept">Accept review</option><option value="review-reject">Reject review</option><option value="approve">Approve</option><option value="publish">Publish</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Version<input class="input" name="version" type="number" min="1" required></label><label>Expected revision<input class="input" name="expected_revision" type="number" min="1" required></label><label>Expected version integrity<input class="input" name="expected_integrity_sha256" minlength="64" maxlength="64" required></label><label>Rationale / approval reference<input class="input" name="authority_ref" maxlength="128"></label><label>Expected active version<input class="input" name="expected_active_version" type="number" min="0" value="0"></label><label>Expected active digest<input class="input" name="expected_active_blueprint_sha256" minlength="64" maxlength="64"></label><label>Expected pointer revision<input class="input" name="expected_pointer_revision" type="number" min="0" value="0"></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
+          <button class="btn btn--primary" id="grcs-lifecycle-submit" type="submit">Run exact lifecycle transition</button>
+        </form>
+      </section>
+
+      <section class="grcs-card" aria-labelledby="grcs-rollback-title">
+        <p class="grcs-kicker">Release recovery</p><h2 id="grcs-rollback-title">Rollback active authority</h2>
+        <form class="grcs-form" id="grcs-rollback-form" autocomplete="off" novalidate>
+          <fieldset class="grcs-fieldset"{% if not studio_can_admin %} disabled aria-disabled="true"{% endif %}>
+            <div class="grcs-form-grid"><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Target version<input class="input" name="target_version" type="number" min="1" required></label><label>Target blueprint digest<input class="input" name="expected_target_blueprint_sha256" minlength="64" maxlength="64" required></label><label>Current active version<input class="input" name="expected_active_version" type="number" min="1" required></label><label>Current active digest<input class="input" name="expected_active_blueprint_sha256" minlength="64" maxlength="64" required></label><label>Pointer revision<input class="input" name="expected_pointer_revision" type="number" min="1" required></label><label>Rationale reference<input class="input" name="rationale_ref" maxlength="128" required></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
+            <label class="grcs-check"><input name="confirmation" type="checkbox" required><span>I understand rollback changes the active authority atomically to an exact prior release.</span></label><button class="btn" type="submit">Rollback release</button>
+          </fieldset>
+        </form>
+      </section>
+
+      <section class="grcs-card" aria-labelledby="grcs-inspect-title">
+        <p class="grcs-kicker">Read and audit</p><h2 id="grcs-inspect-title">Inspect active, version or history</h2>
+        <form class="grcs-form" id="grcs-inspect-form" autocomplete="off" novalidate><div class="grcs-form-grid"><label>Read type<select class="select" name="read_type"><option value="active">Active release</option><option value="version">Exact version</option><option value="history">Version history</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Version (version/history only)<input class="input" name="version" type="number" min="1"></label></div><button class="btn" type="submit">Load governed record</button></form>
+      </section>
+
+      <section class="grcs-card" aria-labelledby="grcs-projection-title">
+        <p class="grcs-kicker">Runtime projection</p><h2 id="grcs-projection-title">Preview or apply a consumer-bound definition</h2>
+        <form class="grcs-form" id="grcs-projection-form" autocomplete="off" novalidate>
+          <div class="grcs-form-grid"><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Projection kind<select class="select" name="projection_kind"><option value="questionnaire">Questionnaire</option><option value="collector">Collector</option><option value="report">Report</option></select></label><label>Definition ID<input class="input" name="definition_id" maxlength="128" required></label><label>Server-enrolled target ID<input class="input" name="target_id" maxlength="128" required></label><label>Target revision<input class="input" name="target_revision" type="number" min="1" required></label><label>Active studio version<input class="input" name="expected_active_version" type="number" min="1" required></label><label>Active blueprint digest<input class="input" name="expected_blueprint_sha256" minlength="64" maxlength="64" required></label><label>Apply operation ID (apply only)<input class="input" name="operation_id" maxlength="192"></label></div>
+          <div class="grcs-mini-actions"><button class="btn btn--primary" name="projection_action" value="preview" type="submit">Preview exact projection</button><button class="btn" id="grcs-projection-apply" name="projection_action" value="apply" type="submit"{% if not studio_can_admin %} disabled{% endif %}>Apply through server authority</button></div>
+        </form>
+      </section>
+
+      <section class="grcs-card" aria-labelledby="grcs-transfer-title">
+        <p class="grcs-kicker">Portability</p><h2 id="grcs-transfer-title">Authenticated export or import</h2>
+        <form class="grcs-form" id="grcs-export-form" autocomplete="off" novalidate><div class="grcs-form-grid"><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Version<input class="input" name="version" type="number" min="1" required></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div><button class="btn" type="submit"{% if not studio_can_audit %} disabled{% endif %}>Export signed envelope</button></form>
+        <form class="grcs-form" id="grcs-import-form" autocomplete="off" novalidate><fieldset class="grcs-fieldset"{% if not studio_can_admin %} disabled{% endif %}><label>Export envelope JSON<textarea class="input" name="envelope_json" maxlength="2097152" required>{}</textarea></label><div class="grcs-form-grid"><label>Expected latest version<input class="input" name="expected_latest_version" type="number" min="0" required></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div><button class="btn" type="submit">Import as new draft</button></fieldset></form>
+      </section>
+
+      <section class="grcs-card grcs-card--third" aria-labelledby="grcs-integrity-title"><p class="grcs-kicker">Integrity · auditor</p><h2 id="grcs-integrity-title">Verify tenant ledger</h2><button class="btn" id="grcs-integrity" type="button"{% if not studio_can_audit %} disabled{% endif %}>Run integrity verification</button></section>
+      <section class="grcs-card grcs-card--third" aria-labelledby="grcs-retention-title"><p class="grcs-kicker">Retention · auditor</p><h2 id="grcs-retention-title">Retention queue</h2><label class="grcs-label">Maximum<input class="input" id="grcs-retention-limit" type="number" min="1" max="1000" value="100"></label><div class="grcs-mini-actions"><button class="btn" id="grcs-retention" type="button"{% if not studio_can_audit %} disabled{% endif %}>Load due records</button><button class="btn" id="grcs-retention-purge" type="button"{% if not studio_can_admin %} disabled{% endif %}>Purge due records</button></div></section>
+      <section class="grcs-card grcs-card--third" aria-labelledby="grcs-recovery-title"><p class="grcs-kicker">Recovery · administrator</p><h2 id="grcs-recovery-title">Verified backup custody</h2><p class="grcs-help">The destination is server configured and never accepted from this page.</p><button class="btn" id="grcs-backup" type="button"{% if not studio_can_admin %} disabled{% endif %}>Create recovery backup</button><form class="grcs-form" id="grcs-backup-verify-form" autocomplete="off" novalidate><label>Backup ID<input class="input" name="backup_id" maxlength="128" required></label><button class="btn" type="submit"{% if not studio_can_admin %} disabled{% endif %}>Verify recovery backup</button></form></section>
+
+      <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-output-title"><p class="grcs-kicker">Governed output</p><h2 id="grcs-output-title">Current operation</h2><p class="grcs-muted" id="grcs-operation-status" role="status" aria-live="polite">No operation has run.</p><pre class="grcs-output" id="grcs-operation-output" tabindex="0"></pre></section>
+    </div>
+  </fieldset>
+  <noscript><p class="grcs-boundary">JavaScript is required for this bounded API-backed workbench.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-no-code-grc-studio.js" defer></script>{% endblock %}

@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-from collections.abc import Callable
+import shutil
+from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -28,6 +29,14 @@ _OPERATION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _METADATA_HEADER = "x-lightwork-evidence-metadata"
 _MAX_METADATA_HEADER_CHARACTERS = 4_096
+_MEDIA_NAME_BY_TYPE = {
+    "image/jpeg": "jpeg",
+    "application/pdf": "pdf",
+    "image/png": "png",
+    "text/plain": "text",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+}
 _SECURE_HEADERS = {
     "Cache-Control": "no-store, private, max-age=0",
     "Pragma": "no-cache",
@@ -111,13 +120,23 @@ class AiEvidenceAnalysisDependencies:
         store_for: Callable[[str, str, Request], Any] | None = None,
         enabled_probe: Callable[[str], bool] | None = None,
         lifetime_for: Callable[[str, str, Request], tuple[float, float]] | None = None,
+        status_settings_for: Callable[[str], Mapping[str, object]] | None = None,
+        maintenance_for: Callable[..., Any] | None = None,
     ) -> None:
-        for dependency in (store_for, enabled_probe, lifetime_for):
+        for dependency in (
+            store_for,
+            enabled_probe,
+            lifetime_for,
+            status_settings_for,
+            maintenance_for,
+        ):
             if dependency is not None and not callable(dependency):
                 raise TypeError("AI evidence-analysis dependency must be callable")
         self.store_for = store_for
         self.enabled_probe = enabled_probe
         self.lifetime_for = lifetime_for
+        self.status_settings_for = status_settings_for
+        self.maintenance_for = maintenance_for
 
 
 def _ops():
@@ -185,6 +204,112 @@ def _probe_status(
             detail="AI evidence-analysis configuration is unavailable",
         )
     return enabled, True
+
+
+def _tenant_status_settings(
+    request: Request,
+    dependencies: AiEvidenceAnalysisDependencies,
+    tenant_id: str,
+    evidence: Any,
+    *,
+    enabled: bool,
+) -> tuple[dict[str, int], dict[str, object], bool, bool]:
+    resolver = _selected_callable(
+        request,
+        "ai_evidence_analysis_status_settings_resolver",
+        dependencies.status_settings_for,
+    )
+    if not enabled or not callable(resolver):
+        return {}, {}, callable(resolver), False
+    try:
+        result = resolver(tenant_id)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="AI evidence-analysis media policy is unavailable",
+        ) from exc
+    expected = {
+        "schema",
+        "supported_media",
+        "enabled_media_names",
+        "parser_sandbox_configured",
+        "ocr_configured",
+        "legacy_xls_configured",
+        "authority_history_capacity",
+        "authority_retention_seconds",
+        "store_opened",
+        "runtime_parser_probe_performed",
+    }
+    if not isinstance(result, Mapping) or set(result) != expected:
+        raise HTTPException(
+            status_code=503,
+            detail="AI evidence-analysis media policy is unavailable",
+        )
+    raw_media = result.get("supported_media")
+    names = result.get("enabled_media_names")
+    booleans = (
+        result.get("parser_sandbox_configured"),
+        result.get("ocr_configured"),
+        result.get("legacy_xls_configured"),
+        result.get("store_opened"),
+        result.get("runtime_parser_probe_performed"),
+    )
+    if (
+        result.get("schema") != "lightwork.ai-evidence.tenant-status-settings.v1"
+        or not isinstance(raw_media, Mapping)
+        or not isinstance(names, list)
+        or not names
+        or len(names) != len(set(names))
+        or any(not isinstance(name, str) or not name for name in names)
+        or any(type(value) is not bool for value in booleans)
+        or result.get("store_opened") is not False
+        or result.get("runtime_parser_probe_performed") is not False
+        or not isinstance(result.get("authority_history_capacity"), int)
+        or isinstance(result.get("authority_history_capacity"), bool)
+        or not 4 <= int(result["authority_history_capacity"]) <= 1_000_000
+        or not isinstance(result.get("authority_retention_seconds"), int)
+        or isinstance(result.get("authority_retention_seconds"), bool)
+        or not 3_600 <= int(result["authority_retention_seconds"]) <= 315_360_000
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="AI evidence-analysis media policy is unavailable",
+        )
+    media: dict[str, int] = {}
+    for media_type, maximum in raw_media.items():
+        if (
+            not isinstance(media_type, str)
+            or media_type not in evidence.SUPPORTED_MEDIA_TYPES
+            or not isinstance(maximum, int)
+            or isinstance(maximum, bool)
+            or not 1 <= maximum <= evidence.artifact_byte_limit(media_type)
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="AI evidence-analysis media policy is unavailable",
+            )
+        media[media_type] = maximum
+    if (
+        not media
+        or set(names) != {_MEDIA_NAME_BY_TYPE[media_type] for media_type in media}
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="AI evidence-analysis media policy is unavailable",
+        )
+    projected = {
+        "enabled_media_names": list(names),
+        "parser_sandbox_configured": result["parser_sandbox_configured"],
+        "ocr_configured": result["ocr_configured"],
+        "legacy_xls_configured": result["legacy_xls_configured"],
+        "authority_history_capacity": result["authority_history_capacity"],
+        "authority_retention_seconds": result["authority_retention_seconds"],
+        "store_opened_for_status": False,
+        "runtime_parser_probe_performed_for_status": False,
+    }
+    return dict(sorted(media.items())), projected, True, True
 
 
 def _metadata(request: Request) -> AnalyzeUploadMetadata:
@@ -561,24 +686,78 @@ def create_ai_evidence_analysis_router(  # noqa: C901 - route-local trust bounda
             "pypdf": importlib.util.find_spec("pypdf") is not None,
             "openpyxl": importlib.util.find_spec("openpyxl") is not None,
             "pillow": importlib.util.find_spec("PIL") is not None,
-            "pytesseract": importlib.util.find_spec("pytesseract") is not None,
         }
+        external_parser_binaries = {
+            # The Python wrapper alone cannot perform OCR.  Report the external
+            # executable separately so package installation is never presented
+            # as usable image OCR.
+            "tesseract": shutil.which("tesseract") is not None,
+        }
+        (
+            supported_media,
+            tenant_media_policy,
+            media_policy_probe_configured,
+            media_policy_resolved,
+        ) = _tenant_status_settings(
+            request,
+            deps,
+            tenant,
+            evidence,
+            enabled=enabled,
+        )
+        configured_for_operation_attempt = bool(
+            enabled and callable(factory) and callable(lifetime_resolver)
+        )
+        readiness_probe = _selected_callable(
+            request,
+            "ai_evidence_analysis_readiness_probe",
+            None,
+        )
+        composition_ready = False
+        if enabled and callable(readiness_probe):
+            try:
+                readiness_result = readiness_probe(tenant)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI evidence-analysis readiness is unavailable",
+                ) from exc
+            if type(readiness_result) is not bool:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI evidence-analysis readiness is unavailable",
+                )
+            composition_ready = readiness_result
+        ready = bool(composition_ready and media_policy_resolved)
+        legacy_xls_configured = bool(
+            tenant_media_policy.get("legacy_xls_configured", False)
+        )
+        ocr_configured = bool(tenant_media_policy.get("ocr_configured", False))
         return {
             "schema": "lightwork.ai-evidence.api-status.v1",
             "enabled": enabled,
-            "ready": bool(enabled and callable(factory) and callable(lifetime_resolver)),
+            # The installed probe is side-effect free and verifies previously
+            # provisioned local authorities/stores without opening new ones.
+            "ready": ready,
+            "configured_for_operation_attempt": configured_for_operation_attempt,
+            "operational_composition_verified": ready,
             "configuration": {
                 "enabled_probe_configured": probe_configured,
                 "store_factory_configured": callable(factory),
                 "lifetime_policy_configured": callable(lifetime_resolver),
                 "store_opened_for_status": False,
                 "selected_adapter_authorities_resolved_for_status": False,
+                "tenant_media_policy_probe_configured": (
+                    media_policy_probe_configured
+                ),
+                "tenant_media_policy_resolved_for_status": media_policy_resolved,
             },
-            "supported_media": {
-                media_type: evidence.artifact_byte_limit(media_type)
-                for media_type in sorted(evidence.SUPPORTED_MEDIA_TYPES)
-            },
+            "supported_media": supported_media,
+            "tenant_media_policy": tenant_media_policy,
             "local_parser_packages_detected": parser_packages,
+            "external_parser_binaries_detected": external_parser_binaries,
             "boundaries": {
                 "upload_transport": "bounded_raw_request_body",
                 "multipart_temp_spooling_used": False,
@@ -587,7 +766,14 @@ def create_ai_evidence_analysis_router(  # noqa: C901 - route-local trust bounda
                 "ephemeral_memory_zeroization_guaranteed": False,
                 "human_review_required": True,
                 "legal_or_compliance_conclusion": evidence.LEGAL_OR_COMPLIANCE_CONCLUSION,
-                "legacy_xls_local_parser_available": False,
+                "supported_media_scope": "tenant_enabled_only",
+                "legacy_xls_local_parser_configured": legacy_xls_configured,
+                "legacy_xls_local_parser_available": bool(
+                    ready and legacy_xls_configured
+                ),
+                "ocr_local_parser_configured": ocr_configured,
+                "ocr_local_parser_available": bool(ready and ocr_configured),
+                "local_parser_customer_acceptance_verified": False,
                 "adapter_selection_caller_controlled": False,
                 "tenant_or_actor_caller_fields_accepted": False,
             },
@@ -603,7 +789,33 @@ def create_ai_evidence_analysis_router(  # noqa: C901 - route-local trust bounda
         valid_until, retained_until = lifetime(request, tenant, actor)
         metadata = _metadata(request)
         media_type = _media_type(request, evidence)
-        content = await _bounded_content(request, evidence.artifact_byte_limit(media_type))
+        maximum = evidence.artifact_byte_limit(media_type)
+        limit_resolver = _selected_callable(
+            request,
+            "ai_evidence_analysis_artifact_limit_resolver",
+            None,
+        )
+        if callable(limit_resolver):
+            try:
+                configured_limit = limit_resolver(tenant, media_type)
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI evidence-analysis upload policy is unavailable",
+                ) from exc
+            if (
+                isinstance(configured_limit, bool)
+                or not isinstance(configured_limit, int)
+                or not 1 <= configured_limit <= maximum
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI evidence-analysis upload policy is unavailable",
+                )
+            maximum = configured_limit
+        content = await _bounded_content(request, maximum)
         artifact = evidence.EvidenceArtifact(
             artifact_id=metadata.artifact_id,
             media_type=media_type,
@@ -743,6 +955,51 @@ def create_ai_evidence_analysis_router(  # noqa: C901 - route-local trust bounda
     async def purge(request: Request, response: Response, body: PurgeIn):
         require_permission(request, "admin")
         evidence, tenant, _actor, store = authority(request)
+        maintenance = _selected_callable(
+            request,
+            "ai_evidence_analysis_maintenance_runner",
+            deps.maintenance_for,
+        )
+        if callable(maintenance):
+            result = await call(evidence, maintenance, tenant, limit=body.limit)
+            try:
+                payload = {
+                    "schema": result.schema,
+                    "analysis_ids": list(result.purged_analysis_ids),
+                    "analyses": result.purged_analyses,
+                    "history_records": result.purged_history_records,
+                    "operations": result.purged_operations,
+                    "analyses_before": result.analyses_before,
+                    "analyses_after": result.analyses_after,
+                    "authority_registry_records_before": (
+                        result.registry_records_before
+                    ),
+                    "authority_registry_records_after": result.registry_records,
+                    "live_authorities": result.live_authorities,
+                    "retained_expired_authorities": (
+                        result.retained_expired_authorities
+                    ),
+                    "authority_tombstones": result.authority_tombstones,
+                    "compacted_authorities": result.compacted_authorities,
+                    "compacted_authority_records": (
+                        result.compacted_authority_records
+                    ),
+                    "purged_authority_tombstones": (
+                        result.purged_authority_tombstones
+                    ),
+                    "authority_compaction_anchor_sha256": (
+                        result.authority_compaction_anchor_sha256
+                    ),
+                    "integrity_verified": result.integrity_verified,
+                    "as_of": "server_clock",
+                }
+            except (AttributeError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="AI evidence-analysis result contract is unavailable",
+                ) from exc
+            _secure(response)
+            return payload
         result = await call(evidence, store.purge_expired, tenant, limit=body.limit)
         try:
             payload = {

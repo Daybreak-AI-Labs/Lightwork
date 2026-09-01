@@ -162,10 +162,11 @@ def test_status_is_store_free_honest_exact_gate_and_authenticated(environment) -
         "pii_persisted",
         "secret_values_persisted",
         "live_acceptance_verified",
-        "publication_transport_worker_implemented",
         "status_request_external_network_io",
     ):
         assert status[boundary] is False
+    assert status["publication_transport_worker_implemented"] is True
+    assert status["publication_runtime_configured"] is False
     assert status["provider_neutral"] is True
     assert status["publication_intents_are_worker_intent_only"] is True
     assert status["regulatory_reference_resolver_required"] is True
@@ -187,6 +188,56 @@ def test_status_is_store_free_honest_exact_gate_and_authenticated(environment) -
         headers={"X-Test-No-Principal": "1"},
     )
     assert unauthenticated.status_code == 401
+
+
+def test_publication_runtime_status_and_run_once_are_tenant_derived(
+    environment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _database, state = environment
+    requested: list[str] = []
+    client.app.state.privacy_notice_publication_readiness_probe = lambda tenant: {
+        "schema": "lightwork.privacy-notice-publication-readiness.v1",
+        "tenant_id": tenant,
+        "configured": True,
+        "configuration_preflight_ready": True,
+        "status_opened_tenant_store": False,
+    }
+    client.app.state.privacy_notice_publication_scheduler_status = lambda: {
+        "schema": "lightwork.privacy-notice-publication-scheduler-status.v1",
+        "running": True,
+        "status_opened_tenant_store": False,
+    }
+    from maverick_dashboard import privacy_notice_publication_scheduler as scheduler
+
+    def run_once(_app, tenant):
+        requested.append(tenant)
+        return {
+            "tenants_considered": 1,
+            "tenants_executed": 1,
+            "applied": 1,
+            "provider_network_io": False,
+        }
+
+    monkeypatch.setattr(scheduler, "run_once_for_tenant", run_once)
+    status = client.get(f"{API}/publication-runtime/status")
+    assert status.status_code == 200
+    assert status.json()["readiness"]["tenant_id"] == "tenant-a"
+    assert status.json()["provider_network_io"] is False
+
+    rejected = client.post(
+        f"{API}/publication-runtime/run-once",
+        json={"tenant_id": "tenant-b", "property_id": "wrong"},
+    )
+    assert rejected.status_code == 422
+    assert requested == []
+
+    executed = client.post(f"{API}/publication-runtime/run-once", json={})
+    assert executed.status_code == 200
+    assert requested == ["tenant-a"]
+    assert executed.json()["request_selected_target"] is False
+    assert executed.json()["site_mutation"] is False
+    assert ("global", "admin") in state["permission_calls"]
 
 
 def test_exact_tenant_principal_binding_spoof_rejection_and_generic_not_found(

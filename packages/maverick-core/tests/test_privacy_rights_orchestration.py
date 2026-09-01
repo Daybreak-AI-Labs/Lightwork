@@ -660,6 +660,180 @@ def test_callback_lease_recovery_dead_letter_requeue_and_ack(authority) -> None:
     assert receipt.provider_evidence_sha256 == digest("provider-receipt")
 
 
+def test_ambiguous_provider_outcome_requires_exact_reconciliation(authority) -> None:
+    store, _actor, clock = authority
+    enroll_all(store, "tenant-a", "crm", key="source-ambiguous")
+    case = open_verified(store, clock, "tenant-a", "case-ambiguous", ["access"])
+    task = store.plan_source_tasks(
+        "tenant-a",
+        case.case_id,
+        "crm",
+        phases=["discover"],
+        max_attempts=3,
+        expected_case_revision=case.revision,
+        idempotency_key="plan-ambiguous",
+    )[0]
+    assert store.get_task("tenant-a", task.task_id) == task
+
+    claimed = store.claim_callbacks(
+        "tenant-a",
+        limit=1,
+        lease_seconds=10,
+        idempotency_key="claim-ambiguous-1",
+    )[0]
+    ambiguous = store.mark_callback_ambiguous(
+        "tenant-a",
+        claimed.callback_id,
+        lease_token=claimed.lease_token or "",
+        operation_sha256=digest("provider-operation-1"),
+        operation_ref="provider-op:1",
+        error_code="provider_outcome_unknown",
+        expected_revision=claimed.revision,
+        idempotency_key="ambiguous-1",
+    )
+    assert ambiguous.state == "ambiguous"
+    assert ambiguous.ambiguous_operation_sha256 == digest("provider-operation-1")
+    assert ambiguous.lease_token is None
+    assert store.list_callbacks("tenant-a", state="ambiguous") == (ambiguous,)
+    assert store.list_callbacks("tenant-a", limit=1) == (ambiguous,)
+
+    clock.advance(30)
+    assert (
+        store.claim_callbacks(
+            "tenant-a",
+            limit=1,
+            lease_seconds=10,
+            idempotency_key="claim-must-not-replay",
+        )
+        == ()
+    )
+
+    unknown = store.reconcile_ambiguous_callback(
+        "tenant-a",
+        ambiguous.callback_id,
+        disposition="unknown",
+        provider_evidence_sha256=digest("reconcile-unknown"),
+        provider_evidence_ref="reconcile:unknown",
+        retry_delay_seconds=0,
+        expected_revision=ambiguous.revision,
+        idempotency_key="reconcile-unknown",
+    )
+    assert unknown.state == "ambiguous"
+    assert unknown.ambiguous_operation_sha256 == digest("reconcile-unknown")
+
+    absent = store.reconcile_ambiguous_callback(
+        "tenant-a",
+        ambiguous.callback_id,
+        disposition="absent",
+        provider_evidence_sha256=digest("reconcile-absent"),
+        provider_evidence_ref="reconcile:absent",
+        retry_delay_seconds=5,
+        expected_revision=unknown.revision,
+        idempotency_key="reconcile-absent",
+    )
+    assert absent.state == "pending"
+    assert absent.ambiguous_operation_sha256 is None
+    assert (
+        store.claim_callbacks(
+            "tenant-a",
+            limit=1,
+            lease_seconds=10,
+            idempotency_key="claim-before-backoff",
+        )
+        == ()
+    )
+
+    clock.advance(5)
+    retried = store.claim_callbacks(
+        "tenant-a",
+        limit=1,
+        lease_seconds=10,
+        idempotency_key="claim-after-reconciliation",
+    )[0]
+    second_ambiguous = store.mark_callback_ambiguous(
+        "tenant-a",
+        retried.callback_id,
+        lease_token=retried.lease_token or "",
+        operation_sha256=digest("provider-operation-2"),
+        operation_ref="provider-op:2",
+        error_code="provider_outcome_unknown",
+        expected_revision=retried.revision,
+        idempotency_key="ambiguous-2",
+    )
+    applied = store.reconcile_ambiguous_callback(
+        "tenant-a",
+        retried.callback_id,
+        disposition="applied",
+        provider_evidence_sha256=digest("reconcile-applied"),
+        provider_evidence_ref="reconcile:applied",
+        retry_delay_seconds=0,
+        expected_revision=second_ambiguous.revision,
+        idempotency_key="reconcile-applied",
+    )
+    assert applied.state == "acked"
+    assert applied.acknowledgement_sha256 == digest("reconcile-applied")
+    assert applied.ambiguous_at is None
+    completed_task = store.get_task("tenant-a", task.task_id)
+    assert completed_task.state == "complete"
+    assert completed_task.evidence_id is not None
+    assert store.list_callbacks("tenant-a", state="ambiguous") == ()
+
+
+def test_provider_callback_and_evidence_complete_atomically(authority) -> None:
+    store, _actor, clock = authority
+    enroll_all(store, "tenant-a", "crm", key="source-atomic")
+    case = open_verified(store, clock, "tenant-a", "case-atomic", ["access"])
+    task = store.plan_source_tasks(
+        "tenant-a",
+        case.case_id,
+        "crm",
+        phases=["discover"],
+        expected_case_revision=case.revision,
+        idempotency_key="plan-atomic",
+    )[0]
+    claimed = store.claim_callbacks(
+        "tenant-a",
+        limit=1,
+        lease_seconds=30,
+        idempotency_key="claim-atomic",
+    )[0]
+
+    callback, evidence = store.complete_callback(
+        "tenant-a",
+        claimed.callback_id,
+        lease_token=claimed.lease_token or "",
+        acknowledgement_sha256=digest("atomic-ack"),
+        acknowledgement_ref="provider:atomic-ack",
+        evidence_status="complete",
+        provider_evidence_sha256=digest("atomic-evidence"),
+        record_count=2,
+        opaque_ref="provider:atomic-evidence",
+        expected_revision=claimed.revision,
+        idempotency_key="complete-atomic",
+    )
+    assert callback.state == "acked"
+    assert evidence.evidence_id.startswith("evidence:")
+    completed_task = store.get_task("tenant-a", task.task_id)
+    assert completed_task.state == "complete"
+    assert completed_task.evidence_id == evidence.evidence_id
+
+    replay = store.complete_callback(
+        "tenant-a",
+        claimed.callback_id,
+        lease_token=claimed.lease_token or "",
+        acknowledgement_sha256=digest("atomic-ack"),
+        acknowledgement_ref="provider:atomic-ack",
+        evidence_status="complete",
+        provider_evidence_sha256=digest("atomic-evidence"),
+        record_count=2,
+        opaque_ref="provider:atomic-evidence",
+        expected_revision=claimed.revision,
+        idempotency_key="complete-atomic",
+    )
+    assert replay == (callback, evidence)
+    assert store.verify_integrity("tenant-a").verified_records > 0
+
+
 def test_completeness_manifest_names_enrolled_covered_and_uncovered(authority) -> None:
     store, _actor, clock = authority
     enroll_all(store, "tenant-a", "crm", key="crm")

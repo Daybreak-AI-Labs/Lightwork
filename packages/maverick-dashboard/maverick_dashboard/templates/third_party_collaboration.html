@@ -9,7 +9,7 @@
   .tpc-stack textarea { min-height:19rem; font-family:var(--font-mono); }
   .tpc-output { min-height:24rem; max-height:54rem; overflow:auto; white-space:pre-wrap;
                 word-break:break-word; }
-  .tpc-warning { border:2px solid var(--warning); padding:var(--space-3);
+  .tpc-warning { border:2px solid var(--warn); padding:var(--space-3);
                  border-radius:8px; background:var(--surface-2); }
   .tpc-danger { border-color:var(--danger); }
   @media (max-width:900px) { .tpc-grid { grid-template-columns:1fr; } }
@@ -112,7 +112,15 @@
     var response = await fetch(API + path, options);
     var text = await response.text();
     var result;
-    try { result = text ? JSON.parse(text) : {}; } catch (_error) { result = {detail:text}; }
+    try {
+      if (!text) { throw new Error("empty response"); }
+      result = JSON.parse(text);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
     show({status:response.status, ok:response.ok, result:result});
   }
   document.getElementById("tpc-load-status").addEventListener("click", function () {

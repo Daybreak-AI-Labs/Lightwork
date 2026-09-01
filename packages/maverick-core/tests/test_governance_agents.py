@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, replace
 
 import pytest
+from maverick import config as maverick_config
+from maverick import governance_agents as governance_agent_module
 from maverick.budget import Budget
 from maverick.governance_agents import (
     ACTION_CODES,
@@ -23,12 +25,15 @@ from maverick.governance_agents import (
     GovernanceAgentPermissionDenied,
     GovernanceAgentQuotaExceeded,
     GovernanceAgentStore,
+    GovernanceAgentTenantSnapshot,
+    GovernanceAgentValidationError,
     GovernanceContextItem,
     build_adapter_authority,
     build_dispatcher_authority,
     build_execution_outcome,
     build_finding,
     execution_receipt_signing_payload,
+    load_governance_agent_tenant_snapshot,
 )
 
 
@@ -356,6 +361,258 @@ def test_store_fails_closed_when_gate_is_disabled(tmp_path):
 
     with pytest.raises(GovernanceAgentConfigError, match="disabled"):
         GovernanceAgentStore(tmp_path / "disabled.sqlite3", config_gate=disabled)
+
+
+def test_tenant_snapshot_canonicalizes_agents_and_only_narrows_defaults():
+    snapshot = load_governance_agent_tenant_snapshot(
+        "tenant-a",
+        {
+            "governance_agents": {
+                "enable": True,
+                "enabled_agents": ["program_copilot", "breach_response"],
+                "max_context_items": 1,
+                "max_context_bytes": 1_024,
+                "max_output_bytes": 1_024,
+                "retention_seconds": 3_600,
+            }
+        },
+    )
+    assert snapshot.enabled_agents == ("breach_response", "program_copilot")
+    assert snapshot.limits.max_context_items == 1
+    assert snapshot.limits.max_context_bytes == 1_024
+    assert snapshot.limits.max_output_bytes == 1_024
+    assert snapshot.limits.retention_seconds == 3_600
+
+    expanded = load_governance_agent_tenant_snapshot(
+        "tenant-a",
+        {
+            "governance_agents": {
+                "enable": True,
+                "max_context_items": 1_000,
+                "max_context_bytes": 10_485_760,
+                "max_output_bytes": 1_048_576,
+                "retention_seconds": 315_360_000,
+            }
+        },
+    )
+    assert expanded.enabled_agents == tuple(sorted(AGENT_KINDS))
+    assert expanded.limits == GovernanceAgentLimits()
+
+
+def test_tenant_snapshot_rechecks_source_errors_after_config_load(monkeypatch):
+    state = {"loaded": False}
+
+    def load_config():
+        state["loaded"] = True
+        return {"governance_agents": {"enable": True}}
+
+    def source_errors():
+        return {"tenant-config.toml": "invalid"} if state["loaded"] else {}
+
+    monkeypatch.setattr(maverick_config, "load_config", load_config)
+    monkeypatch.setattr(maverick_config, "config_source_errors", source_errors)
+    with pytest.raises(GovernanceAgentConfigError, match="unreadable"):
+        load_governance_agent_tenant_snapshot("tenant-a")
+
+    state["loaded"] = False
+    assert governance_agent_module.enabled() is False
+
+
+def test_tenant_snapshot_blocks_disabled_agent_before_approval_resolution(tmp_path):
+    resolver_calls: list[tuple[str, str, int]] = []
+    snapshot = GovernanceAgentTenantSnapshot(
+        tenant_id="tenant-a",
+        enabled_agents=("breach_response",),
+        limits=GovernanceAgentLimits(retention_seconds=3_600),
+    )
+
+    def approvers(tenant_id: str, policy_id: str, revision: int):
+        resolver_calls.append((tenant_id, policy_id, revision))
+        return ("reviewer-a", "reviewer-b")
+
+    store = GovernanceAgentStore(
+        tmp_path / "agent-allowlist.sqlite3",
+        config_gate=lambda: None,
+        principal_resolver=lambda: "publisher",
+        policy_approver_resolver=approvers,
+        tenant_snapshot_resolver=lambda _tenant: snapshot,
+    )
+    with pytest.raises(GovernanceAgentConfigError, match="kind is disabled"):
+        store.publish_policy(
+            "tenant-a",
+            policy_id="vendor",
+            revision=1,
+            agent_kind="third_party_risk",
+            allowed_capabilities=tuple(sorted(CAPABILITY_REGISTRY["third_party_risk"])),
+            required_approvals=1,
+            execution_enabled=False,
+            approver_principals=("reviewer-a", "reviewer-b"),
+            valid_until=2_000.0,
+            idempotency_key="publish:vendor",
+        )
+    assert resolver_calls == []
+
+
+def test_tenant_snapshot_lower_context_limit_prevents_adapter_execution(tmp_path):
+    snapshot = load_governance_agent_tenant_snapshot(
+        "tenant-a",
+        {
+            "governance_agents": {
+                "enable": True,
+                "enabled_agents": ["breach_response"],
+                "max_context_items": 1,
+                "max_context_bytes": 1_024,
+                "retention_seconds": 3_600,
+            }
+        },
+    )
+    principal = MutablePrincipal()
+    clock = MutableClock()
+    adapter_calls: list[str] = []
+    base_adapter = adapter_for("breach_response")
+
+    def counting_adapter(**kwargs):
+        adapter_calls.append("called")
+        return base_adapter(**kwargs)
+
+    selected_authority = authority("breach_response", clock)
+    store = GovernanceAgentStore(
+        tmp_path / "lower-context-limit.sqlite3",
+        config_gate=lambda: None,
+        principal_resolver=principal,
+        policy_approver_resolver=lambda _tenant, _policy, _revision: (
+            "reviewer-a",
+            "reviewer-b",
+        ),
+        analysis_binding_resolver=lambda _tenant, _kind: (
+            selected_authority,
+            counting_adapter,
+        ),
+        tenant_snapshot_resolver=lambda _tenant: snapshot,
+        clock=clock,
+    )
+    publish(store, principal, clock, execution_enabled=False)
+    principal.value = "requester"
+    second = GovernanceContextItem(
+        item_id="evidence:2",
+        source_kind="incident",
+        source_ref="incident:456",
+        source_revision=1,
+        collected_at=999.0,
+        content=b"second item",
+    )
+    with pytest.raises(GovernanceAgentValidationError, match="item bound"):
+        store.submit_run(
+            "tenant-a",
+            run_id="run:too-many-items",
+            policy_id="policy:one",
+            policy_revision=1,
+            capability="containment_plan",
+            context=(*context(), second),
+            adapter_authority=selected_authority,
+            adapter=counting_adapter,
+            idempotency_key="submit:too-many-items",
+        )
+    assert adapter_calls == []
+
+    with pytest.raises(GovernanceAgentValidationError, match="byte bound"):
+        store.submit_run(
+            "tenant-a",
+            run_id="run:too-many-bytes",
+            policy_id="policy:one",
+            policy_revision=1,
+            capability="containment_plan",
+            context=context(b"x" * 1_025),
+            adapter_authority=selected_authority,
+            adapter=counting_adapter,
+            idempotency_key="submit:too-many-bytes",
+        )
+    assert adapter_calls == []
+
+    run = store.submit_run(
+        "tenant-a",
+        run_id="run:within-limits",
+        policy_id="policy:one",
+        policy_revision=1,
+        capability="containment_plan",
+        context=context(b"within limits"),
+        adapter_authority=selected_authority,
+        adapter=counting_adapter,
+        idempotency_key="submit:within-limits",
+    )
+    assert adapter_calls == ["called"]
+    assert run.retained_until == clock.value + 3_600
+
+
+def test_tenant_snapshot_lower_output_limit_is_enforced(tmp_path):
+    snapshot = load_governance_agent_tenant_snapshot(
+        "tenant-a",
+        {
+            "governance_agents": {
+                "enable": True,
+                "enabled_agents": ["breach_response"],
+                "max_output_bytes": 1_024,
+                "retention_seconds": 3_600,
+            }
+        },
+    )
+    principal = MutablePrincipal()
+    clock = MutableClock()
+    selected_authority = authority("breach_response", clock)
+    adapter_calls: list[str] = []
+
+    def oversized_adapter(**_kwargs):
+        adapter_calls.append("called")
+        return GovernanceAgentAnalysis(
+            findings=tuple(
+                build_finding(
+                    agent_kind="breach_response",
+                    finding_id=f"finding:{index:02d}",
+                    finding_code=sorted(FINDING_CODES["breach_response"])[0],
+                    severity="high",
+                    evidence_item_ids=("evidence:1",),
+                    recommended_action_code=sorted(
+                        ACTION_CODES["breach_response"]
+                    )[0],
+                    rationale_code="evidence_sufficient",
+                    confidence_bps=8_000,
+                )
+                for index in range(10)
+            ),
+            limitations=(),
+            complete=True,
+        )
+
+    store = GovernanceAgentStore(
+        tmp_path / "lower-output-limit.sqlite3",
+        config_gate=lambda: None,
+        principal_resolver=principal,
+        policy_approver_resolver=lambda _tenant, _policy, _revision: (
+            "reviewer-a",
+            "reviewer-b",
+        ),
+        analysis_binding_resolver=lambda _tenant, _kind: (
+            selected_authority,
+            oversized_adapter,
+        ),
+        tenant_snapshot_resolver=lambda _tenant: snapshot,
+        clock=clock,
+    )
+    publish(store, principal, clock, execution_enabled=False)
+    principal.value = "requester"
+    with pytest.raises(GovernanceAgentValidationError, match="canonical byte bound"):
+        store.submit_run(
+            "tenant-a",
+            run_id="run:oversized-output",
+            policy_id="policy:one",
+            policy_revision=1,
+            capability="containment_plan",
+            context=context(),
+            adapter_authority=selected_authority,
+            adapter=oversized_adapter,
+            idempotency_key="submit:oversized-output",
+        )
+    assert adapter_calls == ["called"]
 
 
 def test_policy_requires_independent_approvers(harness):

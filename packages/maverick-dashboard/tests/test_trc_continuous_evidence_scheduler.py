@@ -374,3 +374,20 @@ def test_lifespan_attachment_starts_stops_and_exposes_scheduler_status():
         assert runtime.stopped is False
 
     assert runtime.stopped is True
+
+
+def test_attachment_prefers_installed_stock_scheduler_factory():
+    app = FastAPI()
+    runtime = TrcContinuousEvidenceScheduler(
+        tenant_supplier=lambda: (),
+        config_loader=dict,
+        tenant_config_loader=dict,
+    )
+    calls = []
+    app.state.trc_stock_evidence_scheduler_factory = (
+        lambda: calls.append("factory") or runtime
+    )
+
+    assert attach_trc_continuous_evidence_scheduler(app) is runtime
+    assert calls == ["factory"]
+    assert app.state.trc_continuous_evidence_scheduler is runtime

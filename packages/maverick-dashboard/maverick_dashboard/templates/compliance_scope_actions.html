@@ -138,8 +138,15 @@
     var response = await fetch(API + path, options);
     var responseText = await response.text();
     var result;
-    try { result = responseText ? JSON.parse(responseText) : {}; }
-    catch (_error) { result = {detail: responseText}; }
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
     show({status: response.status, ok: response.ok, result: result});
   }
 

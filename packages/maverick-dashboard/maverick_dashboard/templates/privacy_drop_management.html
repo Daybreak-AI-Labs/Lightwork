@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}California DROP Requests - Lightwork{% endblock %}
+{% block content %}
+<div class="governance-workbench" id="drop-workbench" data-api-base="{{ api_base }}">
+  <section class="hero">
+    <div>
+      <p class="hero-kicker">Privacy rights operations</p>
+      <h1 class="hero-title">California DROP requests</h1>
+      <p class="hero-lede">
+        Bridge an independently enrolled DROP record into the governed privacy-rights
+        workflow and retain an evidence-backed outcome.
+      </p>
+    </div>
+    <div class="hero-statebox">
+      <span class="hero-statebox__label">Tenant runtime</span>
+      <div class="hero-statebox__row">
+        <strong id="drop-readiness">Checking…</strong>
+        <button class="btn" id="drop-refresh" type="button">Refresh</button>
+      </div>
+      <p class="hero-statebox__copy" id="drop-readiness-detail" role="status"
+         aria-live="polite">Loading the server-owned composition.</p>
+    </div>
+  </section>
+
+  <aside class="boundary governance-boundary" aria-labelledby="drop-boundary-title">
+    <p class="hero-kicker">Authority boundary</p>
+    <h2 id="drop-boundary-title">No subject identity enters this page</h2>
+    <ul>
+      <li>Broker registration, subject binding, DSAR composition, and outcome evidence are resolved by the server.</li>
+      <li>Only the external DROP ID and closed lifecycle operation are selected here.</li>
+      <li>A terminal status is refused unless independent outcome evidence matches the enrolled authority.</li>
+      <li>Local records do not prove live California DROP interoperability or legal acceptance.</li>
+    </ul>
+  </aside>
+
+  <section class="panel governance-status" aria-labelledby="drop-status-title">
+    <div class="section-head">
+      <h2 id="drop-status-title">Honest runtime status</h2>
+      <span class="badge pending" id="drop-status-badge">Checking</span>
+    </div>
+    <details class="governance-details">
+      <summary>Runtime composition details</summary>
+      <pre class="governance-output" id="drop-status-output" tabindex="0"></pre>
+    </details>
+  </section>
+
+  <fieldset class="governance-fieldset" id="drop-operations" disabled>
+    <legend class="sr-only">DROP request operations</legend>
+    <div class="governance-grid">
+      <section class="panel" aria-labelledby="drop-create-title">
+        <p class="hero-kicker">Step 1</p>
+        <h2 id="drop-create-title">Create governed request</h2>
+        <form id="drop-create-form" autocomplete="off">
+          <fieldset class="permission-fieldset" id="drop-create-controls"{% if not drop_can_operate %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Create governed DROP request</legend>
+          <label>External DROP ID
+            <input class="input" name="drop_id" type="number" min="1"
+                   max="2147483647" step="1" required>
+          </label>
+          <div class="governance-form-grid">
+            <label>Request type
+              <select class="select" name="request_type" required>
+                <option value="DataDeletion">Data deletion</option>
+                <option value="OptOut">Opt out</option>
+              </select>
+            </label>
+            <label>Language
+              <input class="input" name="language" value="en" minlength="2"
+                     maxlength="12" pattern="[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?" required>
+            </label>
+          </div>
+          <label>Approved template UUID
+            <input class="input mono" name="template_id" maxlength="36" required>
+          </label>
+          <label>Idempotency key
+            <input class="input mono" name="idempotency_key" maxlength="192" required>
+          </label>
+          <button class="btn btn--primary" type="submit">Create request</button>
+          </fieldset>
+        </form>
+        {% if not drop_can_operate %}<p class="muted">Operator permission is required to create a governed DROP request.</p>{% endif %}
+      </section>
+
+      <section class="panel" aria-labelledby="drop-inspect-title">
+        <p class="hero-kicker">Step 2</p>
+        <h2 id="drop-inspect-title">Inspect current request</h2>
+        <form id="drop-get-form" autocomplete="off">
+          <label>External DROP ID
+            <input class="input" name="drop_id" type="number" min="1"
+                   max="2147483647" step="1" required>
+          </label>
+          <button class="btn" type="submit">Load current record</button>
+        </form>
+        {% if drop_can_audit %}
+          <button class="btn" id="drop-integrity" type="button">Verify integrity chain</button>
+        {% else %}
+          <p class="muted">Global audit permission is required to verify the integrity chain.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel" aria-labelledby="drop-close-title">
+        <p class="hero-kicker">Step 3 · administrator</p>
+        <h2 id="drop-close-title">Record evidence-backed outcome</h2>
+        {% if drop_can_admin %}
+        <form id="drop-update-form" autocomplete="off">
+          <div class="governance-form-grid">
+            <label>External DROP ID
+              <input class="input" name="drop_id" type="number" min="1"
+                     max="2147483647" step="1" required>
+            </label>
+            <label>Expected revision
+              <input class="input" name="expected_revision" type="number"
+                     min="1" max="2147483647" step="1" required>
+            </label>
+          </div>
+          <label>Terminal status
+            <select class="select" name="status" required>
+              <option value="DELETED">Deleted</option>
+              <option value="OPTED_OUT">Opted out</option>
+              <option value="EXEMPTED">Exempted</option>
+              <option value="NOT_FOUND">Not found</option>
+            </select>
+          </label>
+          <label>Idempotency key
+            <input class="input mono" name="idempotency_key" maxlength="192" required>
+          </label>
+          <label class="governance-confirmation">
+            <input name="confirmation" type="checkbox" required>
+            <span>I verified the exact DROP record, current revision, and independently
+              resolved outcome evidence before closing this request.</span>
+          </label>
+          <button class="btn btn--danger" type="submit">Record terminal status</button>
+        </form>
+        {% else %}
+          <p class="muted">Global administrator permission is required to record a terminal status.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel governance-result" aria-labelledby="drop-result-title">
+        <p class="hero-kicker">Governed result</p>
+        <h2 id="drop-result-title">Operation output</h2>
+        <p id="drop-operation-status" class="muted" role="status" aria-live="polite">
+          No operation has run.
+        </p>
+        <pre class="governance-output" id="drop-operation-output" tabindex="0"></pre>
+      </section>
+    </div>
+  </fieldset>
+
+  <section class="panel governance-status" aria-labelledby="drop-authority-title">
+    <div class="section-head">
+      <div>
+        <p class="hero-kicker">Local authority plane</p>
+        <h2 id="drop-authority-title">Broker, record, outcome, and key authority</h2>
+      </div>
+      {% if drop_can_audit %}
+      <div class="hero-statebox__row">
+        <button class="btn" id="drop-authorities" type="button">List authorities</button>
+        <button class="btn" id="drop-revisions" type="button">Key revisions</button>
+        <button class="btn" id="drop-authority-integrity" type="button">Verify authority</button>
+      </div>
+      {% endif %}
+    </div>
+    <p class="muted">Mutations are durable proposals. A different authenticated administrator must approve each proposal. Secret-provider references are accepted; key material is never displayed.</p>
+  </section>
+
+  {% if drop_can_admin %}
+  <fieldset class="governance-fieldset" id="drop-authority-operations" disabled>
+    <legend class="sr-only">DROP authority administration</legend>
+    <div class="governance-grid">
+      <section class="panel" aria-labelledby="drop-broker-title">
+        <p class="hero-kicker">Administrator proposal</p>
+        <h2 id="drop-broker-title">Broker authority</h2>
+        <form id="drop-broker-form" autocomplete="off">
+          <label>Action
+            <select class="select" name="action" required>
+              <option value="enroll_broker">Enroll broker</option>
+              <option value="revoke_broker">Revoke broker</option>
+            </select>
+          </label>
+          <label>Broker reference<input class="input mono" name="broker_ref" maxlength="192" required></label>
+          <label>Registration SHA-256<input class="input mono" name="registration_sha256" pattern="[0-9a-f]{64}" maxlength="64"></label>
+          <label>Evidence SHA-256<input class="input mono" name="evidence_sha256" pattern="[0-9a-f]{64}" maxlength="64" required></label>
+          <div class="governance-form-grid">
+            <label>Valid until (Unix seconds)<input class="input" name="valid_until" type="number" min="1" step="any"></label>
+            <label>Expected version<input class="input" name="expected_version" type="number" min="0" max="2147483646" step="1" value="0" required></label>
+          </div>
+          <label>Idempotency key<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <button class="btn btn--primary" type="submit">Propose broker change</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="drop-record-title">
+        <p class="hero-kicker">Administrator proposal</p>
+        <h2 id="drop-record-title">DROP record authority</h2>
+        <form id="drop-record-form" autocomplete="off">
+          <label>Action
+            <select class="select" name="action" required>
+              <option value="import_record">Import record</option>
+              <option value="revoke_record">Revoke record</option>
+            </select>
+          </label>
+          <div class="governance-form-grid">
+            <label>External DROP ID<input class="input" name="drop_id" type="number" min="1" max="2147483647" step="1" required></label>
+            <label>Expected version<input class="input" name="expected_version" type="number" min="0" max="2147483646" step="1" value="0" required></label>
+          </div>
+          <label>Broker reference<input class="input mono" name="broker_ref" maxlength="192"></label>
+          <label>Broker registration SHA-256<input class="input mono" name="registration_binding_digest" pattern="[0-9a-f]{64}" maxlength="64"></label>
+          <label>Opaque subject-binding SHA-256<input class="input mono" name="binding_digest" pattern="[0-9a-f]{64}" maxlength="64"></label>
+          <div class="governance-form-grid">
+            <label>Request type<select class="select" name="request_type"><option value="DataDeletion">Data deletion</option><option value="OptOut">Opt out</option></select></label>
+            <label>Language<input class="input" name="language" value="en" maxlength="12"></label>
+            <label>Record revision<input class="input" name="record_revision" type="number" min="1" max="2147483647" step="1" value="1"></label>
+            <label>Valid until (Unix seconds)<input class="input" name="valid_until" type="number" min="1" step="any"></label>
+          </div>
+          <label>Approved template UUID<input class="input mono" name="template_id" maxlength="36"></label>
+          <label>Import/revocation evidence SHA-256<input class="input mono" name="evidence_sha256" pattern="[0-9a-f]{64}" maxlength="64" required></label>
+          <label>Idempotency key<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <button class="btn btn--primary" type="submit">Propose record change</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="drop-outcome-title">
+        <p class="hero-kicker">Administrator proposal</p>
+        <h2 id="drop-outcome-title">Independent outcome evidence</h2>
+        <form id="drop-outcome-form" autocomplete="off">
+          <div class="governance-form-grid">
+            <label>External DROP ID<input class="input" name="drop_id" type="number" min="1" max="2147483647" step="1" required></label>
+            <label>Status<select class="select" name="status" required><option value="DELETED">Deleted</option><option value="OPTED_OUT">Opted out</option><option value="EXEMPTED">Exempted</option><option value="NOT_FOUND">Not found</option></select></label>
+            <label>Evidence revision<input class="input" name="evidence_revision" type="number" min="1" max="2147483647" step="1" value="1" required></label>
+            <label>Expected version<input class="input" name="expected_version" type="number" min="0" max="2147483646" step="1" value="0" required></label>
+            <label>Observed at (Unix seconds)<input class="input" name="observed_at" type="number" min="1" step="any" required></label>
+            <label>Valid until (Unix seconds)<input class="input" name="valid_until" type="number" min="1" step="any" required></label>
+          </div>
+          <label>Evidence SHA-256<input class="input mono" name="evidence_sha256" pattern="[0-9a-f]{64}" maxlength="64" required></label>
+          <div class="governance-form-grid">
+            <label><input name="deletion_verified" type="checkbox"> Deletion verified</label>
+            <label><input name="opt_out_verified" type="checkbox"> Opt-out verified</label>
+            <label><input name="search_complete" type="checkbox"> Search complete</label>
+            <label><input name="exemption_approved" type="checkbox"> Exemption approved</label>
+            <label><input name="provider_operations_complete" type="checkbox"> Provider operations complete</label>
+          </div>
+          <label>Idempotency key<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <button class="btn btn--primary" type="submit">Propose outcome</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="drop-key-title">
+        <p class="hero-kicker">Administrator proposal</p>
+        <h2 id="drop-key-title">Principal-binding key lifecycle</h2>
+        <form id="drop-key-form" autocomplete="off">
+          <label>Action<select class="select" name="action" required><option value="rotate_key">Rotate key</option><option value="retire_key">Retire previous revision</option><option value="revoke_key">Revoke previous revision</option><option value="record_key_migration">Record migration</option></select></label>
+          <label>New secret-provider reference<input class="input mono" name="new_key_ref" maxlength="256" placeholder="kms://… or env:NAME"></label>
+          <div class="governance-form-grid">
+            <label>Expected current revision<input class="input" name="expected_current_revision" type="number" min="1" max="2147483647" step="1"></label>
+            <label>Revision to retire/revoke<input class="input" name="key_revision" type="number" min="1" max="2147483647" step="1"></label>
+            <label>From revision<input class="input" name="from_revision" type="number" min="1" max="2147483647" step="1"></label>
+            <label>To revision<input class="input" name="to_revision" type="number" min="1" max="2147483647" step="1"></label>
+            <label>Objects migrated<input class="input" name="objects_migrated" type="number" min="0" max="1000000" step="1"></label>
+            <label>Remaining dependencies<input class="input" name="remaining_dependencies" type="number" min="0" max="1000000" step="1"></label>
+          </div>
+          <label>Migration reference<input class="input mono" name="migration_id" maxlength="192"></label>
+          <label>Idempotency key<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <button class="btn btn--danger" type="submit">Propose key operation</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="drop-approval-title">
+        <p class="hero-kicker">Different administrator</p>
+        <h2 id="drop-approval-title">Approve a proposal</h2>
+        <form id="drop-approval-form" autocomplete="off">
+          <label>Proposal UUID<input class="input mono" name="proposal_id" maxlength="36" required></label>
+          <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" max="1" step="1" value="1" required></label>
+          <label>Approval idempotency key<input class="input mono" name="idempotency_key" maxlength="192" required></label>
+          <label class="governance-confirmation"><input name="confirmation" type="checkbox" required><span>I am not the proposer and independently reviewed the bounded evidence.</span></label>
+          <button class="btn btn--danger" type="submit">Approve and apply</button>
+        </form>
+      </section>
+    </div>
+  </fieldset>
+  {% else %}
+  <p class="muted">Global administrator permission is required to propose or approve authority changes.</p>
+  {% endif %}
+
+  <noscript><p class="boundary">JavaScript is required for this operator workbench.</p></noscript>
+</div>
+{% endblock %}
+{% block scripts_extra %}
+  <script src="/static/lightwork-privacy-drop-management.js" defer></script>
+{% endblock %}

@@ -68,6 +68,16 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             },
         }
     }
+    app.state.trc_stock_evidence_readiness_probe = lambda tenant: {
+        "schema": "lightwork.trc-stock-collector-production-readiness.v1",
+        "tenant_seen": tenant,
+        "enabled": True,
+        "ready": False,
+        "missing_stock_collector_ids": ["aws_security_hub_v1"],
+        "status_secret_resolution": False,
+        "status_provider_network_io": False,
+        "live_provider_acceptance_verified": False,
+    }
     app.include_router(api.router, prefix="/api/v1")
     client = TestClient(
         app,
@@ -84,11 +94,40 @@ def test_status_is_candid_and_does_not_open_store(environment):
     assert body["enabled"] is True
     assert body["collector_dependency_injection_supported"] is True
     assert body["custom_collector_dependencies_injected"] is False
+    assert body["stock_collectors"]["tenant_seen"] == "tenant-a"
+    assert body["stock_collectors"]["ready"] is False
+    assert body["stock_collectors"]["status_secret_resolution"] is False
     assert body["compliance_conclusions_written"] is False
     assert body["control_implementation_mutated"] is False
     assert body["certification_performed"] is False
     assert body["live_provider_acceptance_verified"] is False
     assert database.exists() is False
+
+
+def test_manual_scheduler_cycle_uses_only_server_installed_runtime(environment):
+    client, _database, state = environment
+    calls = []
+
+    class Scheduler:
+        def status(self):
+            return {"custom_collector_dependencies_injected": True}
+
+        def run_once(self):
+            calls.append("run")
+            return {"jobs_completed": 2, "jobs_incomplete": 1}
+
+    client.app.state.trc_continuous_evidence_scheduler = Scheduler()
+    response = client.post(f"{API}/scheduler/run-once")
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema": "lightwork.trc-continuous-evidence-manual-cycle.v1",
+        "executed": True,
+        "cycle": {"jobs_completed": 2, "jobs_incomplete": 1},
+        "provider_acceptance_claimed": False,
+        "estate_completeness_claimed": False,
+    }
+    assert calls == ["run"]
+    assert state["permission_calls"][-1] == "admin"
 
 
 def test_definition_approval_enrollment_and_job_operator_flow(environment):

@@ -1061,6 +1061,8 @@ class IdentityGovernanceRecordStore(Protocol):
 
     def get(self, record_id: str) -> dict[str, Any] | None: ...
 
+    def list(self, *, limit: int | None = None) -> list[dict[str, Any]]: ...
+
     def create(
         self,
         record: dict[str, Any],
@@ -1260,6 +1262,8 @@ class NormalizedIdentityChangeCoupler:
         tenant_sha256: str,
         risk_sink: ChangeSink | None = None,
         alert_sink: ChangeSink | None = None,
+        asset_binding_resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]]
+        | None = None,
         store: IdentityGovernanceRecordStore | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -1273,6 +1277,9 @@ class NormalizedIdentityChangeCoupler:
                 raise TypeError(f"{name} sink must be callable")
             if sink is not None:
                 self._sinks[name] = sink
+        if asset_binding_resolver is not None and not callable(asset_binding_resolver):
+            raise TypeError("asset binding resolver must be callable")
+        self._asset_binding_resolver = asset_binding_resolver
         self._store = store
         self._clock = clock
 
@@ -1300,7 +1307,7 @@ class NormalizedIdentityChangeCoupler:
                 }
             )[:32]
         )
-        return {
+        event = {
             "schema": CHANGE_EVENT_SCHEMA,
             "event_id": event_id,
             "tenant_sha256": change["tenant_sha256"],
@@ -1322,6 +1329,28 @@ class NormalizedIdentityChangeCoupler:
             "source_complete": False,
             "live_acceptance_verified": False,
         }
+        if self._asset_binding_resolver is None:
+            return event
+        try:
+            manifest = self._asset_binding_resolver(dict(change))
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise IdentityGovernanceDeliveryError(
+                "identity_change_asset_binding_unavailable"
+            ) from None
+        if not isinstance(manifest, Mapping):
+            raise IdentityGovernanceDeliveryError(
+                "identity_change_asset_binding_invalid"
+            )
+        from .ai_identity_governance_outcomes import asset_event_from_change_event
+
+        try:
+            return asset_event_from_change_event(event, manifest)
+        except (TypeError, ValueError, IdentityGovernanceControlError):
+            raise IdentityGovernanceDeliveryError(
+                "identity_change_asset_binding_invalid"
+            ) from None
 
     def _admit(
         self,
@@ -1515,6 +1544,12 @@ class NormalizedIdentityChangeCoupler:
             "enabled": self._enabled,
             "configured_sinks": sorted(self._sinks),
             "runtime_available": self._enabled and bool(self._sinks),
+            "asset_binding_resolver_attached": (
+                self._asset_binding_resolver is not None
+            ),
+            "downstream_outcomes_possible": bool(
+                self._sinks and self._asset_binding_resolver is not None
+            ),
             "idempotent_resume": True,
             "provider_writes": False,
             "risk_score_generated": False,
@@ -2341,6 +2376,738 @@ class GovernedPurviewWritebackService:
         }
 
 
+_AUTHORITY_REGISTRY_SCHEMA = "lightwork.identity_governance.authority-registry-record.v1"
+_CHANGE_REQUEST_SCHEMA = "lightwork.identity_governance.change-request.v1"
+_REGISTRY_KINDS = frozenset(
+    {
+        "agent_authority",
+        "federation_binding",
+        "capability_rule",
+        "purview_asset_binding",
+        "capability_mapping",
+    }
+)
+
+
+def _default_authority_registry_store() -> IdentityGovernanceRecordStore:
+    from .governed_records import GovernedRecordStore
+
+    return GovernedRecordStore(
+        "identity_governance_authority_registry",
+        "IGAR",
+        "identity_governance_authority_registry_record",
+    )
+
+
+def _registry_id(tenant_sha256: str, kind: str, key: object) -> str:
+    return "IGAR-" + _sha256(
+        {
+            "schema": _AUTHORITY_REGISTRY_SCHEMA,
+            "tenant_sha256": tenant_sha256,
+            "kind": kind,
+            "key": key,
+        }
+    )[:32]
+
+
+def _authority_payload(authority: AgentPrincipalAuthority) -> dict[str, Any]:
+    return {
+        "tenant_sha256": authority.tenant_sha256,
+        "principal_ref": authority.principal_ref,
+        "authority_binding_sha256": authority.authority_binding_sha256,
+        "revision": authority.revision,
+    }
+
+
+def _federation_binding_payload(
+    binding: AgentPrincipalFederationBinding,
+) -> dict[str, Any]:
+    return {
+        "tenant_sha256": binding.tenant_sha256,
+        "provider": binding.provider,
+        "principal_ref": binding.principal_ref,
+        "provider_subject_id": binding.provider_subject_id,
+        "authority_binding_sha256": binding.authority_binding_sha256,
+        "authority_revision": binding.authority_revision,
+        "binding_sha256": binding.binding_sha256,
+    }
+
+
+def _capability_rule_payload(rule: CapabilityRule) -> dict[str, Any]:
+    return {
+        "tenant_sha256": rule.tenant_sha256,
+        "provider": rule.provider,
+        "permission_id": rule.permission_id,
+        "capabilities": list(rule.capabilities),
+        "revision": rule.revision,
+        "rule_sha256": rule.rule_sha256,
+    }
+
+
+def _purview_asset_payload(binding: PurviewAssetBinding) -> dict[str, Any]:
+    return {
+        "tenant_sha256": binding.tenant_sha256,
+        "asset_id": binding.asset_id,
+        "binding_sha256": binding.binding_sha256,
+        "revision": binding.revision,
+        "classification_codes": list(binding.classification_codes),
+    }
+
+
+def _capability_mapping_payload(mapping: IdentityCapabilityMapping) -> dict[str, Any]:
+    return {
+        "schema": mapping.schema,
+        "tenant_sha256": mapping.tenant_sha256,
+        "provider": mapping.provider,
+        "principal_ref": mapping.principal_ref,
+        "authority_binding_sha256": mapping.authority_binding_sha256,
+        "authority_revision": mapping.authority_revision,
+        "federation_binding_sha256": mapping.federation_binding_sha256,
+        "capabilities": list(mapping.capabilities),
+        "unmapped_permission_count": mapping.unmapped_permission_count,
+        "mapping_revision": mapping.mapping_revision,
+        "rules_sha256": mapping.rules_sha256,
+        "mapping_sha256": mapping.mapping_sha256,
+        "source_sha256": mapping.source_sha256,
+        "observed_at": mapping.observed_at,
+        "expires_at": mapping.expires_at,
+        "live_acceptance_verified": False,
+    }
+
+
+class IdentityGovernanceAuthorityRegistry:
+    """Durable, tenant-bound control authorities and ephemeral mappings.
+
+    Enrollment is intentionally a server-side provisioning API.  The dashboard
+    only receives the exact pseudonymous identifiers needed to resolve an
+    already-enrolled record; it cannot create authorities, provider bindings,
+    capability rules, asset bindings, or persistence paths.
+    """
+
+    def __init__(
+        self,
+        *,
+        tenant_sha256: str,
+        store: IdentityGovernanceRecordStore | None = None,
+        max_records: int = 10_000,
+        mapping_retention_seconds: float = 86_400.0,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.tenant_sha256 = _digest(tenant_sha256, "tenant_sha256")
+        if (
+            isinstance(max_records, bool)
+            or not isinstance(max_records, int)
+            or not 1 <= max_records <= 10_000
+        ):
+            raise ValueError("authority registry max_records must be between 1 and 10000")
+        if (
+            isinstance(mapping_retention_seconds, bool)
+            or not isinstance(mapping_retention_seconds, (int, float))
+            or not math.isfinite(float(mapping_retention_seconds))
+            or not 300.0 <= float(mapping_retention_seconds) <= 31_622_400.0
+        ):
+            raise ValueError(
+                "authority registry mapping retention must be between 300 and 31622400"
+            )
+        if not callable(clock):
+            raise TypeError("authority registry clock must be callable")
+        selected = store if store is not None else _default_authority_registry_store()
+        for method in ("get", "list", "create", "update"):
+            if not callable(getattr(selected, method, None)):
+                raise TypeError("authority registry store is invalid")
+        self._records = selected
+        self._max_records = max_records
+        self._mapping_retention_seconds = float(mapping_retention_seconds)
+        self._clock = clock
+
+    def _now(self) -> float:
+        try:
+            return _timestamp(self._clock(), "clock")
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise IdentityGovernanceStateError("authority_registry_clock_invalid") from None
+
+    def _validate_record(
+        self,
+        record: Mapping[str, Any],
+        *,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        selected_kind = record.get("kind")
+        if (
+            record.get("schema") != _AUTHORITY_REGISTRY_SCHEMA
+            or selected_kind not in _REGISTRY_KINDS
+            or (kind is not None and selected_kind != kind)
+            or record.get("tenant_sha256") != self.tenant_sha256
+            or record.get("status") not in {"active", "purged"}
+        ):
+            raise IdentityGovernanceStateError("authority_registry_record_invalid")
+        payload = record.get("payload")
+        if not isinstance(payload, Mapping):
+            raise IdentityGovernanceStateError("authority_registry_record_invalid")
+        if record.get("payload_sha256") != _sha256(payload):
+            raise IdentityGovernanceStateError("authority_registry_integrity_failed")
+        return dict(record)
+
+    def _upsert(
+        self,
+        *,
+        kind: str,
+        key: object,
+        payload: Mapping[str, Any],
+        actor: str,
+        expected_record_revision: int | None,
+    ) -> dict[str, Any]:
+        if kind not in _REGISTRY_KINDS or kind == "capability_mapping":
+            raise ValueError("authority registry kind is invalid")
+        if not isinstance(actor, str) or not actor.strip() or len(actor) > 512:
+            raise ValueError("authority registry actor is invalid")
+        if payload.get("tenant_sha256") != self.tenant_sha256:
+            raise IdentityGovernanceBindingError("authority_registry_tenant_mismatch")
+        record_id = _registry_id(self.tenant_sha256, kind, key)
+        payload_value = dict(payload)
+        payload_sha256 = _sha256(payload_value)
+        existing = self._records.get(record_id)
+        if existing is None:
+            if expected_record_revision not in (None, 0):
+                raise IdentityGovernanceStaleBinding("authority_registry_revision_stale")
+            record = {
+                "id": record_id,
+                "schema": _AUTHORITY_REGISTRY_SCHEMA,
+                "tenant_sha256": self.tenant_sha256,
+                "kind": kind,
+                "status": "active",
+                "payload": payload_value,
+                "payload_sha256": payload_sha256,
+                "live_acceptance_verified": False,
+            }
+            try:
+                return self._records.create(
+                    record,
+                    action=f"enroll_identity_governance_{kind}",
+                    actor=actor.strip(),
+                    max_records=self._max_records,
+                )
+            except RecordConflict as exc:
+                concurrent = self._records.get(record_id)
+                if concurrent is None:
+                    raise IdentityGovernanceStateError(
+                        "authority_registry_admission_failed"
+                    ) from exc
+                existing = concurrent
+        current = self._validate_record(existing, kind=kind)
+        if (
+            current.get("status") == "active"
+            and current.get("payload_sha256") == payload_sha256
+        ):
+            return current
+        revision = _record_revision(current)
+        if expected_record_revision != revision:
+            raise IdentityGovernanceStaleBinding("authority_registry_revision_stale")
+
+        def mutate(value: dict[str, Any]) -> None:
+            value["status"] = "active"
+            value["payload"] = payload_value
+            value["payload_sha256"] = payload_sha256
+            value["live_acceptance_verified"] = False
+
+        try:
+            updated = self._records.update(
+                record_id,
+                mutate,
+                expected_revision=revision,
+                action=f"replace_identity_governance_{kind}",
+                actor=actor.strip(),
+            )
+        except RecordConflict as exc:
+            raise IdentityGovernanceStaleBinding(
+                "authority_registry_revision_stale"
+            ) from exc
+        if updated is None:
+            raise IdentityGovernanceStateError("authority_registry_record_missing")
+        return self._validate_record(updated, kind=kind)
+
+    def enroll_authority(
+        self,
+        authority: AgentPrincipalAuthority,
+        *,
+        actor: str,
+        expected_record_revision: int | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(authority, AgentPrincipalAuthority):
+            raise TypeError("authority must be an AgentPrincipalAuthority")
+        return self._upsert(
+            kind="agent_authority",
+            key=authority.principal_ref,
+            payload=_authority_payload(authority),
+            actor=actor,
+            expected_record_revision=expected_record_revision,
+        )
+
+    def enroll_federation_binding(
+        self,
+        binding: AgentPrincipalFederationBinding,
+        *,
+        actor: str,
+        expected_record_revision: int | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(binding, AgentPrincipalFederationBinding):
+            raise TypeError("binding must be an AgentPrincipalFederationBinding")
+        return self._upsert(
+            kind="federation_binding",
+            key=(binding.principal_ref, binding.provider),
+            payload=_federation_binding_payload(binding),
+            actor=actor,
+            expected_record_revision=expected_record_revision,
+        )
+
+    def enroll_capability_rule(
+        self,
+        rule: CapabilityRule,
+        *,
+        actor: str,
+        expected_record_revision: int | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(rule, CapabilityRule):
+            raise TypeError("rule must be a CapabilityRule")
+        return self._upsert(
+            kind="capability_rule",
+            key=(rule.provider, rule.permission_id),
+            payload=_capability_rule_payload(rule),
+            actor=actor,
+            expected_record_revision=expected_record_revision,
+        )
+
+    def enroll_purview_asset(
+        self,
+        binding: PurviewAssetBinding,
+        *,
+        actor: str,
+        expected_record_revision: int | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(binding, PurviewAssetBinding):
+            raise TypeError("binding must be a PurviewAssetBinding")
+        return self._upsert(
+            kind="purview_asset_binding",
+            key=binding.asset_id,
+            payload=_purview_asset_payload(binding),
+            actor=actor,
+            expected_record_revision=expected_record_revision,
+        )
+
+    def _get_active(self, *, kind: str, key: object) -> Mapping[str, Any] | None:
+        record = self._records.get(_registry_id(self.tenant_sha256, kind, key))
+        if record is None:
+            return None
+        current = self._validate_record(record, kind=kind)
+        if current.get("status") != "active":
+            return None
+        payload = current["payload"]
+        assert isinstance(payload, Mapping)
+        return payload
+
+    def resolve_authority(
+        self,
+        tenant_sha256: str,
+        principal_ref: str,
+    ) -> AgentPrincipalAuthority | None:
+        if _digest(tenant_sha256, "tenant_sha256") != self.tenant_sha256:
+            raise IdentityGovernanceBindingError("authority_registry_tenant_mismatch")
+        principal = _pseudonymous(principal_ref, "principal_ref", prefixes={"prn"})
+        payload = self._get_active(kind="agent_authority", key=principal)
+        return AgentPrincipalAuthority(**dict(payload)) if payload is not None else None
+
+    def resolve_federation_binding(
+        self,
+        tenant_sha256: str,
+        principal_ref: str,
+        provider: str,
+    ) -> AgentPrincipalFederationBinding | None:
+        if _digest(tenant_sha256, "tenant_sha256") != self.tenant_sha256:
+            raise IdentityGovernanceBindingError("authority_registry_tenant_mismatch")
+        principal = _pseudonymous(principal_ref, "principal_ref", prefixes={"prn"})
+        selected_provider = _provider(provider, federation_only=True)
+        payload = self._get_active(
+            kind="federation_binding",
+            key=(principal, selected_provider),
+        )
+        return (
+            AgentPrincipalFederationBinding(**dict(payload))
+            if payload is not None
+            else None
+        )
+
+    def resolve_purview_asset(
+        self,
+        tenant_sha256: str,
+        asset_id: str,
+    ) -> PurviewAssetBinding | None:
+        if _digest(tenant_sha256, "tenant_sha256") != self.tenant_sha256:
+            raise IdentityGovernanceBindingError("authority_registry_tenant_mismatch")
+        asset = _pseudonymous(asset_id, "asset_id", prefixes={"ast"})
+        payload = self._get_active(kind="purview_asset_binding", key=asset)
+        return PurviewAssetBinding(**dict(payload)) if payload is not None else None
+
+    def capability_rules(self) -> tuple[CapabilityRule, ...]:
+        rules: list[CapabilityRule] = []
+        rows = self._records.list(limit=self._max_records + 1)
+        if len(rows) > self._max_records:
+            raise IdentityGovernanceStateError("authority_registry_capacity_exceeded")
+        for row in rows:
+            current = self._validate_record(row)
+            if current.get("kind") != "capability_rule" or current.get("status") != "active":
+                continue
+            payload = dict(current["payload"])
+            expected_sha = payload.pop("rule_sha256", None)
+            rule = CapabilityRule(**payload)
+            if expected_sha != rule.rule_sha256:
+                raise IdentityGovernanceStateError("authority_registry_integrity_failed")
+            rules.append(rule)
+        return tuple(
+            sorted(
+                rules,
+                key=lambda value: (
+                    value.tenant_sha256,
+                    value.provider,
+                    value.permission_id,
+                ),
+            )
+        )
+
+    def store(self, mapping: IdentityCapabilityMapping) -> bool:
+        if not isinstance(mapping, IdentityCapabilityMapping):
+            raise TypeError("mapping must be an IdentityCapabilityMapping")
+        if mapping.tenant_sha256 != self.tenant_sha256:
+            raise IdentityGovernanceBindingError("capability_mapping_tenant_mismatch")
+        payload = _capability_mapping_payload(mapping)
+        record_id = _registry_id(
+            self.tenant_sha256,
+            "capability_mapping",
+            mapping.mapping_sha256,
+        )
+        existing = self._records.get(record_id)
+        if existing is not None:
+            current = self._validate_record(existing, kind="capability_mapping")
+            if (
+                current.get("status") != "active"
+                or current.get("payload_sha256") != _sha256(payload)
+            ):
+                raise IdentityGovernanceIdempotencyConflict(
+                    "capability_mapping_registry_conflict"
+                )
+            return True
+        record = {
+            "id": record_id,
+            "schema": _AUTHORITY_REGISTRY_SCHEMA,
+            "tenant_sha256": self.tenant_sha256,
+            "kind": "capability_mapping",
+            "status": "active",
+            "payload": payload,
+            "payload_sha256": _sha256(payload),
+            "purge_after": mapping.expires_at + self._mapping_retention_seconds,
+            "live_acceptance_verified": False,
+        }
+        try:
+            self._records.create(
+                record,
+                action="retain_identity_capability_mapping",
+                actor=mapping.principal_ref,
+                max_records=self._max_records,
+            )
+        except RecordConflict as exc:
+            concurrent = self._records.get(record_id)
+            if concurrent is None:
+                raise IdentityGovernanceStateError(
+                    "capability_mapping_registry_unavailable"
+                ) from exc
+            current = self._validate_record(concurrent, kind="capability_mapping")
+            if current.get("payload_sha256") != _sha256(payload):
+                raise IdentityGovernanceIdempotencyConflict(
+                    "capability_mapping_registry_conflict"
+                ) from exc
+        return True
+
+    def get(
+        self,
+        tenant_sha256: str,
+        principal_ref: str,
+        mapping_sha256: str,
+    ) -> IdentityCapabilityMapping | None:
+        if _digest(tenant_sha256, "tenant_sha256") != self.tenant_sha256:
+            raise IdentityGovernanceBindingError("authority_registry_tenant_mismatch")
+        principal = _pseudonymous(principal_ref, "principal_ref", prefixes={"prn"})
+        mapping_digest = _digest(mapping_sha256, "mapping_sha256")
+        payload = self._get_active(
+            kind="capability_mapping",
+            key=mapping_digest,
+        )
+        if payload is None:
+            return None
+        mapping = IdentityCapabilityMapping(**dict(payload))
+        if mapping.principal_ref != principal or mapping.mapping_sha256 != mapping_digest:
+            raise IdentityGovernanceBindingError("capability_mapping_registry_mismatch")
+        return mapping
+
+    def purge_expired_mappings(self, *, actor: str, limit: int = 100) -> int:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1_000:
+            raise ValueError("mapping purge limit must be between 1 and 1000")
+        now = self._now()
+        purged = 0
+        rows = self._records.list(limit=self._max_records + 1)
+        if len(rows) > self._max_records:
+            raise IdentityGovernanceStateError("authority_registry_capacity_exceeded")
+        for row in rows:
+            if purged >= limit:
+                break
+            current = self._validate_record(row)
+            if current.get("kind") != "capability_mapping" or current.get("status") != "active":
+                continue
+            purge_after = current.get("purge_after")
+            if (
+                isinstance(purge_after, bool)
+                or not isinstance(purge_after, (int, float))
+                or float(purge_after) > now
+            ):
+                continue
+            payload = current["payload"]
+            assert isinstance(payload, Mapping)
+            tombstone = {
+                "tenant_sha256": self.tenant_sha256,
+                "principal_ref": payload.get("principal_ref"),
+                "mapping_sha256": payload.get("mapping_sha256"),
+                "purged_at": now,
+            }
+
+            def mutate(value: dict[str, Any], selected=tombstone) -> None:
+                value["status"] = "purged"
+                value["payload"] = selected
+                value["payload_sha256"] = _sha256(selected)
+
+            try:
+                updated = self._records.update(
+                    str(current["id"]),
+                    mutate,
+                    expected_revision=_record_revision(current),
+                    action="purge_identity_capability_mapping",
+                    actor=actor,
+                )
+            except RecordConflict:
+                continue
+            if updated is not None:
+                self._validate_record(updated, kind="capability_mapping")
+                purged += 1
+        return purged
+
+    def status(self) -> dict[str, Any]:
+        counts = dict.fromkeys(sorted(_REGISTRY_KINDS), 0)
+        write_capabilities: set[str] = set()
+        rows = self._records.list(limit=self._max_records + 1)
+        if len(rows) > self._max_records:
+            raise IdentityGovernanceStateError("authority_registry_capacity_exceeded")
+        for row in rows:
+            current = self._validate_record(row)
+            if current.get("status") != "active":
+                continue
+            kind = str(current["kind"])
+            counts[kind] += 1
+            if kind == "capability_rule":
+                payload = current["payload"]
+                assert isinstance(payload, Mapping)
+                capabilities = payload.get("capabilities")
+                if isinstance(capabilities, (list, tuple)):
+                    write_capabilities.update(str(value) for value in capabilities)
+        purview_ready = bool(
+            counts["agent_authority"]
+            and counts["federation_binding"]
+            and counts["purview_asset_binding"]
+            and {
+                "purview.classification.write",
+                "purview.classification.rollback",
+            }.issubset(write_capabilities)
+        )
+        return {
+            "schema": "lightwork.identity_governance.authority-registry-status.v1",
+            "tenant_sha256": self.tenant_sha256,
+            "counts": counts,
+            "purview_authority_ready": purview_ready,
+            "cas_enforced": True,
+            "integrity_digests_verified": True,
+            "mapping_retention_seconds": self._mapping_retention_seconds,
+            "browser_enrollment_supported": False,
+            "raw_identity_retained": False,
+            "credentials_retained": False,
+            "live_acceptance_verified": False,
+        }
+
+    def verify_integrity(self) -> dict[str, Any]:
+        status = self.status()
+        return {
+            "schema": "lightwork.identity_governance.authority-registry-integrity.v1",
+            "tenant_sha256": self.tenant_sha256,
+            "record_count": sum(status["counts"].values()),
+            "verified": True,
+            "live_acceptance_verified": False,
+        }
+
+
+def _default_change_request_store(sink: DeliverySinkName) -> IdentityGovernanceRecordStore:
+    from .governed_records import GovernedRecordStore
+
+    return GovernedRecordStore(
+        f"identity_governance_{sink}_requests",
+        "IGRQ",
+        f"identity_governance_{sink}_request",
+    )
+
+
+class GovernedIdentityChangeRequestSink:
+    """Durably queue one digest-only risk or alert request and acknowledge it."""
+
+    def __init__(
+        self,
+        *,
+        tenant_sha256: str,
+        sink: DeliverySinkName,
+        store: IdentityGovernanceRecordStore | None = None,
+        max_records: int = 10_000,
+    ) -> None:
+        self._tenant_sha256 = _digest(tenant_sha256, "tenant_sha256")
+        if sink not in {"dynamic_risk", "alert"}:
+            raise ValueError("identity change request sink is unsupported")
+        if (
+            isinstance(max_records, bool)
+            or not isinstance(max_records, int)
+            or not 1 <= max_records <= 10_000
+        ):
+            raise ValueError("identity change request max_records is invalid")
+        selected = store if store is not None else _default_change_request_store(sink)
+        for method in ("get", "create"):
+            if not callable(getattr(selected, method, None)):
+                raise TypeError("identity change request store is invalid")
+        self._sink = sink
+        self._store = selected
+        self._max_records = max_records
+
+    def __call__(self, event: Mapping[str, Any]) -> ChangeDeliveryAck:
+        expected = {
+            "schema",
+            "event_id",
+            "tenant_sha256",
+            "provider",
+            "change_sha256",
+            "slot",
+            "observed_at",
+            "change_kind",
+            "previous_snapshot_sha256",
+            "current_snapshot_sha256",
+            "counts",
+            "configuration_changed",
+            "provider_tenant_changed",
+            "digests_truncated",
+            "risk_assessment_required",
+            "alert_candidate",
+            "source_complete",
+            "live_acceptance_verified",
+        }
+        if not isinstance(event, Mapping) or set(event) != expected:
+            raise ValueError("identity change request shape is unsupported")
+        tenant = _digest(event.get("tenant_sha256"), "tenant_sha256")
+        if tenant != self._tenant_sha256:
+            raise IdentityGovernanceBindingError("identity_change_request_tenant_mismatch")
+        if (
+            event.get("schema") != CHANGE_EVENT_SCHEMA
+            or event.get("source_complete") is not False
+            or event.get("live_acceptance_verified") is not False
+            or event.get("risk_assessment_required") is not True
+            or event.get("alert_candidate") is not True
+        ):
+            raise ValueError("identity change request contains unsupported claims")
+        event_id = str(event.get("event_id") or "")
+        if not re.fullmatch(r"IGCE-[0-9a-f]{32}", event_id):
+            raise ValueError("identity change event id is invalid")
+        event_sha256 = _sha256(event)
+        idempotency_sha256 = _sha256({"event_id": event_id, "sink": self._sink})
+        record_id = "IGRQ-" + idempotency_sha256[:32]
+        receipt_sha256 = _sha256(
+            {
+                "schema": _CHANGE_REQUEST_SCHEMA,
+                "tenant_sha256": tenant,
+                "sink": self._sink,
+                "event_id": event_id,
+                "event_sha256": event_sha256,
+                "idempotency_sha256": idempotency_sha256,
+            }
+        )
+        existing = self._store.get(record_id)
+        if existing is not None:
+            if (
+                existing.get("tenant_sha256") != tenant
+                or existing.get("sink") != self._sink
+                or existing.get("event_sha256") != event_sha256
+                or existing.get("receipt_sha256") != receipt_sha256
+            ):
+                raise IdentityGovernanceIdempotencyConflict(
+                    "identity_change_request_conflict"
+                )
+        else:
+            record = {
+                "id": record_id,
+                "schema": _CHANGE_REQUEST_SCHEMA,
+                "tenant_sha256": tenant,
+                "sink": self._sink,
+                "event_id": event_id,
+                "event_sha256": event_sha256,
+                "change_sha256": _digest(event.get("change_sha256"), "change_sha256"),
+                "provider": _provider(event.get("provider")),
+                "current_snapshot_sha256": _digest(
+                    event.get("current_snapshot_sha256"),
+                    "current_snapshot_sha256",
+                ),
+                "idempotency_sha256": idempotency_sha256,
+                "receipt_sha256": receipt_sha256,
+                "status": "pending_human_or_service_assessment",
+                "risk_score_generated": False,
+                "provider_write_performed": False,
+                "live_acceptance_verified": False,
+            }
+            try:
+                self._store.create(
+                    record,
+                    action=f"queue_identity_change_{self._sink}_request",
+                    actor="system:identity-governance-change-coupler",
+                    max_records=self._max_records,
+                )
+            except RecordConflict as exc:
+                concurrent = self._store.get(record_id)
+                if concurrent is None or concurrent.get("event_sha256") != event_sha256:
+                    raise IdentityGovernanceIdempotencyConflict(
+                        "identity_change_request_conflict"
+                    ) from exc
+        return ChangeDeliveryAck(
+            schema=CHANGE_DELIVERY_ACK_SCHEMA,
+            sink=self._sink,
+            event_id=event_id,
+            idempotency_sha256=idempotency_sha256,
+            receipt_sha256=receipt_sha256,
+            accepted=True,
+            live_acceptance_verified=False,
+        )
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "schema": "lightwork.identity_governance.change-request-sink-status.v1",
+            "sink": self._sink,
+            "runtime_available": True,
+            "durable_request_queue": True,
+            "delivery_mode": "durable_assessment_request_handoff",
+            "downstream_consumer_attached": False,
+            "risk_score_generated": False,
+            "provider_writes": False,
+            "live_acceptance_verified": False,
+        }
+
+
 __all__ = [
     "AgentPrincipalAuthority",
     "AgentPrincipalFederationBinding",
@@ -2357,8 +3124,10 @@ __all__ = [
     "EntraAgentPrincipalFederationAdapter",
     "FederationObservationRequest",
     "GovernedPurviewWritebackService",
+    "GovernedIdentityChangeRequestSink",
     "IdentityCapabilityMapper",
     "IdentityCapabilityMapping",
+    "IdentityGovernanceAuthorityRegistry",
     "IdentityGovernanceAuthorizationError",
     "IdentityGovernanceBindingError",
     "IdentityGovernanceControlConfigError",

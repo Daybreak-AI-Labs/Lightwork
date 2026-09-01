@@ -265,6 +265,32 @@ def test_public_upload_limits_and_store_binding_are_exact(tmp_path: Path) -> Non
         evidence.artifact_byte_limit(123)  # type: ignore[arg-type]
 
 
+def test_current_analysis_heads_are_bounded_tenant_exact_and_status_filtered(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(tmp_path)
+    artifact = _artifact()
+    _register(environment, artifact)
+    record = _analyze(environment, artifact)
+
+    assert environment.store.context_record_count(TENANT) == 1
+    assert environment.store.list_analyses(TENANT, limit=1) == (record,)
+    assert environment.store.list_analyses(
+        TENANT,
+        status="pending_review",
+        limit=1,
+    ) == (record,)
+    assert environment.store.list_analyses(
+        TENANT,
+        status="review_approved",
+        limit=1,
+    ) == ()
+    with pytest.raises(evidence.EvidenceAnalysisNotFound):
+        environment.store.list_analyses("tenant-beta", limit=1)
+    with pytest.raises(evidence.EvidenceAnalysisValidationError, match="unsupported"):
+        environment.store.list_analyses(TENANT, status="invented", limit=1)
+
+
 def test_text_analysis_is_digest_only_transparent_and_human_gated(tmp_path: Path) -> None:
     environment = _environment(tmp_path)
     artifact = _artifact()

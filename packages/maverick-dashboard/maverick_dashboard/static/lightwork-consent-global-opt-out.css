@@ -1,0 +1,289 @@
+.goo-shell {
+  --goo-glass: color-mix(in srgb, var(--panel, #111827) 72%, transparent);
+  --goo-glass-soft: color-mix(in srgb, var(--panel, #111827) 56%, transparent);
+  --goo-line: color-mix(in srgb, var(--text, #f8fafc) 17%, transparent);
+  --goo-aqua: color-mix(in srgb, var(--accent, #67e8f9) 34%, transparent);
+  --goo-violet: color-mix(in srgb, #a78bfa 24%, transparent);
+  display: grid;
+  gap: 1.2rem;
+  isolation: isolate;
+  max-width: 94rem;
+  margin-inline: auto;
+  position: relative;
+}
+
+.goo-shell::before,
+.goo-shell::after {
+  border-radius: 999px;
+  content: "";
+  filter: blur(4rem);
+  inset: auto;
+  opacity: .45;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+.goo-shell::before {
+  background: var(--goo-aqua);
+  block-size: 20rem;
+  inline-size: 20rem;
+  inset-block-start: 2rem;
+  inset-inline-end: 2rem;
+}
+
+.goo-shell::after {
+  background: var(--goo-violet);
+  block-size: 24rem;
+  inline-size: 24rem;
+  inset-block-start: 28rem;
+  inset-inline-start: -5rem;
+}
+
+.goo-hero,
+.goo-panel,
+.goo-boundary,
+.goo-subpanel {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, #fff 9%, transparent), transparent 42%),
+    var(--goo-glass);
+  border: 1px solid var(--goo-line);
+  box-shadow:
+    0 1.1rem 3.2rem color-mix(in srgb, #020617 30%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+}
+
+.goo-hero,
+.goo-panel,
+.goo-boundary {
+  border-radius: 1.4rem;
+}
+
+.goo-hero {
+  align-items: center;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  overflow: hidden;
+  padding: clamp(1.4rem, 4vw, 3rem);
+  position: relative;
+}
+
+.goo-hero h1 {
+  font-size: clamp(2.1rem, 6vw, 4.4rem);
+  letter-spacing: -.045em;
+  line-height: .98;
+  margin: .15rem 0 .8rem;
+}
+
+.goo-lead {
+  font-size: clamp(1rem, 1.5vw, 1.15rem);
+  line-height: 1.65;
+  margin: 0;
+  max-width: 74ch;
+}
+
+.goo-orb {
+  background:
+    radial-gradient(circle at 30% 25%, color-mix(in srgb, #fff 72%, transparent), transparent 20%),
+    conic-gradient(from 210deg, var(--accent, #67e8f9), #a78bfa, #38bdf8, var(--accent, #67e8f9));
+  border: 1px solid color-mix(in srgb, #fff 46%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 0 4rem var(--goo-aqua),
+    inset -.8rem -1rem 2rem color-mix(in srgb, #020617 30%, transparent),
+    inset .5rem .7rem 1.4rem color-mix(in srgb, #fff 28%, transparent);
+  block-size: clamp(5rem, 11vw, 9rem);
+  inline-size: clamp(5rem, 11vw, 9rem);
+}
+
+.goo-boundary,
+.goo-panel {
+  padding: clamp(1rem, 2vw, 1.45rem);
+}
+
+.goo-boundary {
+  border-inline-start: .34rem solid var(--accent, #67e8f9);
+}
+
+.goo-boundary h2,
+.goo-panel h2 {
+  margin-block-start: .15rem;
+}
+
+.goo-boundary ul {
+  margin-block-end: 0;
+}
+
+.goo-status {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.goo-span {
+  grid-column: 1 / -1;
+}
+
+.goo-grid {
+  border: 0;
+  display: grid;
+  gap: 1.2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
+.goo-config,
+.goo-result {
+  grid-column: 1 / -1;
+}
+
+.goo-form,
+.goo-form fieldset {
+  border: 0;
+  display: grid;
+  gap: .9rem;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
+.goo-row,
+.goo-channel-grid {
+  display: grid;
+  gap: .85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.goo-subpanel {
+  background: var(--goo-glass-soft);
+  border-radius: 1.05rem;
+  display: grid;
+  gap: .75rem;
+  padding: 1rem;
+}
+
+.goo-subpanel legend {
+  font-weight: 700;
+  padding-inline: .2rem;
+}
+
+.goo-shell label:not(.goo-check) {
+  color: var(--muted, #94a3b8);
+  display: grid;
+  font-size: .83rem;
+  gap: .3rem;
+}
+
+.goo-shell textarea.input {
+  min-block-size: 6.5rem;
+  resize: vertical;
+}
+
+.goo-check {
+  align-items: center;
+  display: flex;
+  gap: .5rem;
+}
+
+.goo-options {
+  align-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+}
+
+.goo-options legend {
+  grid-column: 1 / -1;
+}
+
+.goo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+}
+
+.goo-output {
+  background: color-mix(in srgb, #020617 48%, transparent);
+  border: 1px solid var(--goo-line);
+  border-radius: 1rem;
+  max-block-size: 34rem;
+  min-block-size: 8rem;
+  overflow: auto;
+  padding: 1rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#goo-runtime-status[data-state="ready"],
+#goo-operation-status[data-state="ready"] {
+  color: var(--success, #4ade80);
+}
+
+#goo-runtime-status[data-state="failed"],
+#goo-operation-status[data-state="failed"] {
+  color: var(--danger, #fb7185);
+}
+
+.goo-shell :focus-visible {
+  outline: .2rem solid var(--accent, #67e8f9);
+  outline-offset: .18rem;
+}
+
+@media (max-width: 58rem) {
+  .goo-grid,
+  .goo-row,
+  .goo-channel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .goo-config,
+  .goo-result {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 40rem) {
+  .goo-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .goo-orb {
+    display: none;
+  }
+
+  .goo-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .goo-span {
+    grid-column: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goo-shell *,
+  .goo-shell *::before,
+  .goo-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .001ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .goo-hero,
+  .goo-panel,
+  .goo-boundary,
+  .goo-subpanel,
+  .goo-output {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+
+  .goo-orb {
+    display: none;
+  }
+}

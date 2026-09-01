@@ -296,6 +296,15 @@ class _MemoryCursor:
                 )
                 self.rowcount = 1
             return
+        if sql.startswith("DELETE FROM governed_records"):
+            key = (str(values[0]), str(values[1]), str(values[2]))
+            current = self.database.rows.get(key)
+            if current is None or current[0] != int(values[3]):
+                self.rowcount = 0
+            else:
+                del self.database.rows[key]
+                self.rowcount = 1
+            return
         if sql.startswith("SELECT record_id, revision"):
             tenant, namespace = str(values[0]), str(values[1])
             matches = [
@@ -722,6 +731,10 @@ def test_postgres_round_trip_cas_tenant_scope_and_encrypted_payload(
         assert [row["title"] for row in store.list()] == ["beta"]
     with tenant_scope(tenant="alpha"):
         assert [row["title"] for row in store.list()] == ["sensitive-title"]
+        assert store.delete(record_id, expected_revision=updated["revision"]) is True
+        assert store.get(record_id) is None
+    with tenant_scope(tenant="beta"):
+        assert store.get(record_id)["title"] == "beta"
 
     point_queries = [
         (sql, params)

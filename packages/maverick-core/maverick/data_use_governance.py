@@ -2539,6 +2539,102 @@ class DataUseGovernanceStore:
                 "bundle_sha256": _sha256(bundle_semantic),
             }
 
+    def unified_audit_records(self, tenant_id: str):
+        """Return a digest-only chain over the immutable mutation ledger.
+
+        Every core authority mutation passes through ``_run_idempotent``.
+        Provider-audit, compiler and external enforcement histories remain
+        separate sources, so this is deliberately not full-suite coverage.
+        """
+
+        from .unified_audit import GENESIS_SHA256, build_source_record
+
+        tenant = self._tenant(tenant_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT rowid,namespace,key_sha256,request_sha256,result_json,"
+                "result_sha256,created_at FROM data_use_idempotency "
+                "WHERE tenant_id=? ORDER BY rowid",
+                (tenant,),
+            ).fetchall()
+        exact_namespaces = frozenset(
+            {
+                "put_asset",
+                "put_field",
+                "put_lineage",
+                "publish_machine_label",
+                "retire_machine_label",
+                "assign_machine_label",
+                "put_policy_version",
+                "activate_policy",
+                "retire_policy",
+                "request_policy_exception",
+                "review_policy_exception",
+                "close_policy_exception",
+                "create_data_use_request",
+                "authorize_data_use_request",
+            }
+        )
+        policy_namespaces = frozenset(
+            {
+                "put_policy_version",
+                "activate_policy",
+                "retire_policy",
+                "request_policy_exception",
+                "review_policy_exception",
+                "close_policy_exception",
+            }
+        )
+        actor_sha256 = hashlib.sha256(
+            b"lightwork.data-use-governance.idempotency-authority.v1"
+        ).hexdigest()
+        previous = GENESIS_SHA256
+        records = []
+        for sequence, row in enumerate(rows, start=1):
+            namespace = str(row["namespace"])
+            if namespace not in exact_namespaces and not namespace.startswith(
+                "put_context:"
+            ):
+                raise DataUseCorruptionError(
+                    "stored mutation namespace is outside the closed authority"
+                )
+            result = _loads(row["result_json"], "idempotency result")
+            if (
+                not isinstance(result, dict)
+                or _canonical(result).decode("ascii") != row["result_json"]
+            ):
+                raise DataUseCorruptionError(
+                    "stored idempotency result is not canonical"
+                )
+            result_sha256 = str(row["result_sha256"])
+            if not hmac.compare_digest(result_sha256, _sha256(result)):
+                raise DataUseCorruptionError(
+                    "stored idempotency result digest does not match"
+                )
+            key_sha256 = _digest(row["key_sha256"], "idempotency key digest")
+            _digest(row["request_sha256"], "idempotency request digest")
+            action = (
+                "policy_changed"
+                if namespace in policy_namespaces
+                else "decision_recorded"
+                if namespace == "authorize_data_use_request"
+                else "request_submitted"
+                if namespace == "create_data_use_request"
+                else "record_changed"
+            )
+            record = build_source_record(
+                sequence=sequence,
+                occurred_at=float(row["created_at"]),
+                action=action,
+                actor_sha256=actor_sha256,
+                resource_sha256=key_sha256,
+                payload_sha256=result_sha256,
+                previous_sha256=previous,
+            )
+            records.append(record)
+            previous = record.record_sha256
+        return tuple(records)
+
     def status(self) -> dict[str, Any]:
         return {
             "schema": "lightwork.data-use.governance-status.v1",

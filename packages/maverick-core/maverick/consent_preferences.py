@@ -40,6 +40,8 @@ SCHEMA_VERSION = 1
 RECEIPT_SCHEMA = "lightwork.consent-preference-receipt.v1"
 OUTBOX_SCHEMA = "lightwork.consent-preference-outbox.v1"
 EXPORT_SCHEMA = "lightwork.consent-preference-export.v1"
+LINK_AUTHORITY_SCHEMA = "lightwork.consent-profile-link-authority.v1"
+LINK_EVENT_SCHEMA = "lightwork.consent-profile-link-event.v1"
 
 _REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _IDEMPOTENCY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}\Z")
@@ -55,6 +57,7 @@ _MAX_OBSERVATIONS = 512
 _MAX_LINKED_PROFILES = 128
 _MAX_DECISION_RECEIPTS = 4096
 _MAX_READ_LIMIT = 500
+_MAX_LINK_EVENTS = 10_000
 _LAWFUL_BASES = frozenset(
     {
         "consent",
@@ -71,6 +74,8 @@ _TRACKER_KINDS = frozenset({"web_tracker", "mobile_sdk"})
 _TRACKER_STATUSES = frozenset({"approved", "blocked", "retired"})
 _ASSERTION_SOURCES = frozenset({"client", "edge", "operator", "sdk", "header"})
 _PRIVACY_SIGNALS = frozenset({"gpc", "dnt"})
+_LINK_STATUSES = frozenset({"linked", "unlinked"})
+_LINK_ACTIONS = frozenset({"linked", "unlinked", "relinked", "account_transition"})
 
 
 class ConsentPreferencesError(RuntimeError):
@@ -373,8 +378,18 @@ def _decision_from_receipts(
     version: int,
     profile_revision: int,
     evaluated: float,
+    lifecycle_overrides: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> EnforcementDecision | None:
     for row in rows:
+        override = (lifecycle_overrides or {}).get(str(row["receipt_id"]), {})
+        clear_expiration = override.get("clear_expiration") is True
+        reactivation_at = override.get("reactivation_at")
+        reactivated = (
+            isinstance(reactivation_at, (int, float))
+            and not isinstance(reactivation_at, bool)
+            and math.isfinite(float(reactivation_at))
+            and float(reactivation_at) <= evaluated
+        )
         choices = _loads(row["choices_json"], "receipt choices")
         if not isinstance(choices, list):
             return EnforcementDecision(False, "untrusted_receipt")
@@ -387,7 +402,7 @@ def _decision_from_receipts(
                 and item.get("channel") in {channel, "all"}
                 and item.get("vendor_id") in {vendor, "all"}
             ):
-                expiry = item.get("expires_at")
+                expiry = None if clear_expiration or reactivated else item.get("expires_at")
                 if expiry is None or (
                     isinstance(expiry, (int, float))
                     and not isinstance(expiry, bool)
@@ -528,6 +543,59 @@ class ConsentPreferenceStore:
                     PRIMARY KEY (tenant, link_id),
                     UNIQUE (tenant, anonymous_profile_id)
                 );
+                CREATE TABLE IF NOT EXISTS consent_profile_link_current (
+                    tenant TEXT NOT NULL,
+                    anonymous_profile_id TEXT NOT NULL,
+                    known_profile_id TEXT NOT NULL,
+                    link_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('linked', 'unlinked')),
+                    revision INTEGER NOT NULL,
+                    link_sha256 TEXT NOT NULL,
+                    authority_sha256 TEXT NOT NULL,
+                    audit_evidence_sha256 TEXT NOT NULL,
+                    operation_key_sha256 TEXT NOT NULL,
+                    record_sha256 TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    retention_until REAL,
+                    PRIMARY KEY (tenant, anonymous_profile_id)
+                );
+                CREATE INDEX IF NOT EXISTS consent_profile_link_current_known
+                    ON consent_profile_link_current(tenant, known_profile_id, status);
+                CREATE TABLE IF NOT EXISTS consent_profile_link_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant TEXT NOT NULL,
+                    anonymous_profile_id TEXT NOT NULL,
+                    known_profile_id TEXT NOT NULL,
+                    link_id TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (
+                        action IN ('linked', 'unlinked', 'relinked', 'account_transition')
+                    ),
+                    link_revision INTEGER NOT NULL,
+                    link_sha256 TEXT NOT NULL,
+                    authority_sha256 TEXT NOT NULL,
+                    audit_evidence_sha256 TEXT NOT NULL,
+                    actor_sha256 TEXT NOT NULL,
+                    reason_sha256 TEXT,
+                    previous_event_sha256 TEXT,
+                    event_sha256 TEXT NOT NULL UNIQUE,
+                    created_at REAL NOT NULL,
+                    retention_until REAL,
+                    UNIQUE (tenant, anonymous_profile_id, link_revision)
+                );
+                CREATE INDEX IF NOT EXISTS consent_profile_link_event_history
+                    ON consent_profile_link_events(
+                        tenant, anonymous_profile_id, link_revision DESC
+                    );
+                CREATE TABLE IF NOT EXISTS consent_profile_lifecycle (
+                    tenant TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('active', 'deleted')),
+                    reason_code TEXT,
+                    actor_sha256 TEXT NOT NULL,
+                    record_sha256 TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (tenant, profile_id)
+                );
                 CREATE TABLE IF NOT EXISTS consent_receipts (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     tenant TEXT NOT NULL,
@@ -550,6 +618,18 @@ class ConsentPreferenceStore:
                 );
                 CREATE INDEX IF NOT EXISTS consent_receipts_profile
                     ON consent_receipts(tenant, profile_id, sequence DESC);
+                CREATE TABLE IF NOT EXISTS consent_receipt_lifecycle (
+                    tenant TEXT NOT NULL,
+                    receipt_id TEXT NOT NULL,
+                    profile_id TEXT NOT NULL,
+                    reactivation_at REAL,
+                    clear_expiration INTEGER NOT NULL CHECK (clear_expiration IN (0, 1)),
+                    revision INTEGER NOT NULL,
+                    actor_sha256 TEXT NOT NULL,
+                    record_sha256 TEXT NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (tenant, receipt_id)
+                );
                 CREATE TABLE IF NOT EXISTS consent_idempotency (
                     tenant TEXT NOT NULL,
                     namespace TEXT NOT NULL,
@@ -633,6 +713,12 @@ class ConsentPreferenceStore:
                 CREATE TRIGGER IF NOT EXISTS consent_links_no_delete
                     BEFORE DELETE ON consent_profile_links
                     BEGIN SELECT RAISE(ABORT, 'identity links are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS consent_link_events_no_update
+                    BEFORE UPDATE ON consent_profile_link_events
+                    BEGIN SELECT RAISE(ABORT, 'identity link history is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS consent_link_events_no_delete
+                    BEFORE DELETE ON consent_profile_link_events
+                    BEGIN SELECT RAISE(ABORT, 'identity link history is immutable'); END;
                 CREATE TRIGGER IF NOT EXISTS consent_policies_no_update
                     BEFORE UPDATE ON consent_policies
                     BEGIN SELECT RAISE(ABORT, 'consent policies are immutable'); END;
@@ -645,6 +731,12 @@ class ConsentPreferenceStore:
                 CREATE TRIGGER IF NOT EXISTS consent_idempotency_no_delete
                     BEFORE DELETE ON consent_idempotency
                     BEGIN SELECT RAISE(ABORT, 'idempotency claims are immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS consent_outbox_no_update
+                    BEFORE UPDATE ON consent_outbox
+                    BEGIN SELECT RAISE(ABORT, 'consent outbox is immutable'); END;
+                CREATE TRIGGER IF NOT EXISTS consent_outbox_no_delete
+                    BEFORE DELETE ON consent_outbox
+                    BEGIN SELECT RAISE(ABORT, 'consent outbox is immutable'); END;
                 """
             )
             conn.execute(
@@ -657,6 +749,402 @@ class ConsentPreferenceStore:
             ).fetchone()
             if existing is None or existing["value"] != str(SCHEMA_VERSION):
                 raise ConsentPreferencesError("unsupported consent store schema")
+            self._backfill_profile_link_authority(conn)
+
+    @staticmethod
+    def _link_current_body(
+        *,
+        tenant: str,
+        anonymous_profile_id: str,
+        known_profile_id: str,
+        link_id: str,
+        status: str,
+        revision: int,
+        link_sha256: str,
+        authority_sha256: str,
+        audit_evidence_sha256: str,
+        operation_key_sha256: str,
+        updated_at: float,
+        retention_until: float | None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": LINK_AUTHORITY_SCHEMA,
+            "tenant_sha256": hashlib.sha256(tenant.encode("utf-8")).hexdigest(),
+            "anonymous_profile_id": anonymous_profile_id,
+            "known_profile_id": known_profile_id,
+            "link_id": link_id,
+            "status": status,
+            "revision": revision,
+            "link_sha256": link_sha256,
+            "authority_sha256": authority_sha256,
+            "audit_evidence_sha256": audit_evidence_sha256,
+            "operation_key_sha256": operation_key_sha256,
+            "updated_at": updated_at,
+            "retention_until": retention_until,
+        }
+
+    @classmethod
+    def _link_current(cls, row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        body = cls._link_current_body(
+            tenant=str(row["tenant"]),
+            anonymous_profile_id=str(row["anonymous_profile_id"]),
+            known_profile_id=str(row["known_profile_id"]),
+            link_id=str(row["link_id"]),
+            status=str(row["status"]),
+            revision=int(row["revision"]),
+            link_sha256=str(row["link_sha256"]),
+            authority_sha256=str(row["authority_sha256"]),
+            audit_evidence_sha256=str(row["audit_evidence_sha256"]),
+            operation_key_sha256=str(row["operation_key_sha256"]),
+            updated_at=float(row["updated_at"]),
+            retention_until=(
+                float(row["retention_until"])
+                if row["retention_until"] is not None
+                else None
+            ),
+        )
+        if (
+            body["status"] not in _LINK_STATUSES
+            or body["revision"] < 1
+            or not all(
+                _DIGEST_RE.fullmatch(str(body[name]))
+                for name in (
+                    "link_sha256",
+                    "authority_sha256",
+                    "audit_evidence_sha256",
+                    "operation_key_sha256",
+                )
+            )
+            or not hmac.compare_digest(_sha256(body), str(row["record_sha256"]))
+        ):
+            raise ConsentPreferencesError("stored profile link authority integrity failed")
+        return {**body, "record_sha256": str(row["record_sha256"])}
+
+    @staticmethod
+    def _link_event_body(
+        *,
+        tenant: str,
+        anonymous_profile_id: str,
+        known_profile_id: str,
+        link_id: str,
+        action: str,
+        link_revision: int,
+        link_sha256: str,
+        authority_sha256: str,
+        audit_evidence_sha256: str,
+        actor_sha256: str,
+        reason_sha256: str | None,
+        previous_event_sha256: str | None,
+        created_at: float,
+        retention_until: float | None,
+    ) -> dict[str, Any]:
+        return {
+            "schema": LINK_EVENT_SCHEMA,
+            "tenant_sha256": hashlib.sha256(tenant.encode("utf-8")).hexdigest(),
+            "anonymous_profile_id": anonymous_profile_id,
+            "known_profile_id": known_profile_id,
+            "link_id": link_id,
+            "action": action,
+            "link_revision": link_revision,
+            "link_sha256": link_sha256,
+            "authority_sha256": authority_sha256,
+            "audit_evidence_sha256": audit_evidence_sha256,
+            "actor_sha256": actor_sha256,
+            "reason_sha256": reason_sha256,
+            "previous_event_sha256": previous_event_sha256,
+            "created_at": created_at,
+            "retention_until": retention_until,
+        }
+
+    @classmethod
+    def _verified_link_events(
+        cls,
+        conn: sqlite3.Connection,
+        tenant: str,
+        anonymous_profile_id: str,
+    ) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            "SELECT * FROM consent_profile_link_events WHERE tenant = ? AND "
+            "anonymous_profile_id = ? ORDER BY link_revision LIMIT ?",
+            (tenant, anonymous_profile_id, _MAX_LINK_EVENTS + 1),
+        ).fetchall()
+        if len(rows) > _MAX_LINK_EVENTS:
+            raise ConsentPreferencesError("profile link history bound exceeded")
+        previous: str | None = None
+        verified: list[dict[str, Any]] = []
+        expected_revision = 1
+        for row in rows:
+            body = cls._link_event_body(
+                tenant=str(row["tenant"]),
+                anonymous_profile_id=str(row["anonymous_profile_id"]),
+                known_profile_id=str(row["known_profile_id"]),
+                link_id=str(row["link_id"]),
+                action=str(row["action"]),
+                link_revision=int(row["link_revision"]),
+                link_sha256=str(row["link_sha256"]),
+                authority_sha256=str(row["authority_sha256"]),
+                audit_evidence_sha256=str(row["audit_evidence_sha256"]),
+                actor_sha256=str(row["actor_sha256"]),
+                reason_sha256=(
+                    str(row["reason_sha256"])
+                    if row["reason_sha256"] is not None
+                    else None
+                ),
+                previous_event_sha256=(
+                    str(row["previous_event_sha256"])
+                    if row["previous_event_sha256"] is not None
+                    else None
+                ),
+                created_at=float(row["created_at"]),
+                retention_until=(
+                    float(row["retention_until"])
+                    if row["retention_until"] is not None
+                    else None
+                ),
+            )
+            event_sha = _sha256(body)
+            if (
+                body["action"] not in _LINK_ACTIONS
+                or body["link_revision"] != expected_revision
+                or body["previous_event_sha256"] != previous
+                or not hmac.compare_digest(event_sha, str(row["event_sha256"]))
+            ):
+                raise ConsentPreferencesError("stored profile link history integrity failed")
+            for name in (
+                "link_sha256",
+                "authority_sha256",
+                "audit_evidence_sha256",
+                "actor_sha256",
+            ):
+                if not _DIGEST_RE.fullmatch(str(body[name])):
+                    raise ConsentPreferencesError(
+                        "stored profile link history integrity failed"
+                    )
+            if body["reason_sha256"] is not None and not _DIGEST_RE.fullmatch(
+                str(body["reason_sha256"])
+            ):
+                raise ConsentPreferencesError("stored profile link history integrity failed")
+            previous = event_sha
+            expected_revision += 1
+            verified.append({**body, "event_sha256": event_sha})
+        return verified
+
+    @classmethod
+    def _insert_link_event(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        tenant: str,
+        anonymous_profile_id: str,
+        known_profile_id: str,
+        link_id: str,
+        action: str,
+        link_revision: int,
+        link_sha256: str,
+        authority_sha256: str,
+        audit_evidence_sha256: str,
+        actor_sha256: str,
+        reason_sha256: str | None,
+        created_at: float,
+        retention_until: float | None,
+    ) -> str:
+        events = cls._verified_link_events(conn, tenant, anonymous_profile_id)
+        previous = events[-1]["event_sha256"] if events else None
+        if link_revision != len(events) + 1:
+            raise ConsentConflict("profile link revision changed")
+        body = cls._link_event_body(
+            tenant=tenant,
+            anonymous_profile_id=anonymous_profile_id,
+            known_profile_id=known_profile_id,
+            link_id=link_id,
+            action=action,
+            link_revision=link_revision,
+            link_sha256=link_sha256,
+            authority_sha256=authority_sha256,
+            audit_evidence_sha256=audit_evidence_sha256,
+            actor_sha256=actor_sha256,
+            reason_sha256=reason_sha256,
+            previous_event_sha256=previous,
+            created_at=created_at,
+            retention_until=retention_until,
+        )
+        event_sha = _sha256(body)
+        conn.execute(
+            "INSERT INTO consent_profile_link_events(tenant,anonymous_profile_id,"
+            "known_profile_id,link_id,action,link_revision,link_sha256,"
+            "authority_sha256,audit_evidence_sha256,actor_sha256,reason_sha256,"
+            "previous_event_sha256,event_sha256,created_at,retention_until) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                tenant,
+                anonymous_profile_id,
+                known_profile_id,
+                link_id,
+                action,
+                link_revision,
+                link_sha256,
+                authority_sha256,
+                audit_evidence_sha256,
+                actor_sha256,
+                reason_sha256,
+                previous,
+                event_sha,
+                created_at,
+                retention_until,
+            ),
+        )
+        return event_sha
+
+    @staticmethod
+    def _assert_current_link_history(
+        current: Mapping[str, Any],
+        events: Sequence[Mapping[str, Any]],
+    ) -> None:
+        if len(events) != int(current["revision"]):
+            raise ConsentPreferencesError("profile link authority history is incomplete")
+        tail = events[-1] if events else None
+        expected_actions = (
+            {"linked", "relinked", "account_transition"}
+            if current["status"] == "linked"
+            else {"unlinked"}
+        )
+        if (
+            tail is None
+            or tail.get("action") not in expected_actions
+            or tail.get("known_profile_id") != current["known_profile_id"]
+            or tail.get("link_id") != current["link_id"]
+            or not hmac.compare_digest(
+                str(tail.get("link_sha256", "")),
+                str(current["link_sha256"]),
+            )
+            or not hmac.compare_digest(
+                str(tail.get("authority_sha256", "")),
+                str(current["authority_sha256"]),
+            )
+            or not hmac.compare_digest(
+                str(tail.get("audit_evidence_sha256", "")),
+                str(current["audit_evidence_sha256"]),
+            )
+        ):
+            raise ConsentPreferencesError("profile link authority history changed")
+
+    @classmethod
+    def _insert_link_current(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        tenant: str,
+        anonymous_profile_id: str,
+        known_profile_id: str,
+        link_id: str,
+        status: str,
+        revision: int,
+        link_sha256: str,
+        authority_sha256: str,
+        audit_evidence_sha256: str,
+        operation_key_sha256: str,
+        updated_at: float,
+        retention_until: float | None,
+    ) -> str:
+        body = cls._link_current_body(
+            tenant=tenant,
+            anonymous_profile_id=anonymous_profile_id,
+            known_profile_id=known_profile_id,
+            link_id=link_id,
+            status=status,
+            revision=revision,
+            link_sha256=link_sha256,
+            authority_sha256=authority_sha256,
+            audit_evidence_sha256=audit_evidence_sha256,
+            operation_key_sha256=operation_key_sha256,
+            updated_at=updated_at,
+            retention_until=retention_until,
+        )
+        record_sha = _sha256(body)
+        conn.execute(
+            "INSERT INTO consent_profile_link_current(tenant,anonymous_profile_id,"
+            "known_profile_id,link_id,status,revision,link_sha256,authority_sha256,"
+            "audit_evidence_sha256,operation_key_sha256,record_sha256,updated_at,"
+            "retention_until) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                tenant,
+                anonymous_profile_id,
+                known_profile_id,
+                link_id,
+                status,
+                revision,
+                link_sha256,
+                authority_sha256,
+                audit_evidence_sha256,
+                operation_key_sha256,
+                record_sha,
+                updated_at,
+                retention_until,
+            ),
+        )
+        return record_sha
+
+    def _backfill_profile_link_authority(self, conn: sqlite3.Connection) -> None:
+        legacy_authority = hashlib.sha256(b"consent-link-legacy-authority-v1").hexdigest()
+        legacy_audit = hashlib.sha256(b"consent-link-legacy-audit-v1").hexdigest()
+        legacy_actor = hashlib.sha256(b"consent-link-legacy-migration-v1").hexdigest()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rows = conn.execute(
+                "SELECT links.* FROM consent_profile_links AS links LEFT JOIN "
+                "consent_profile_link_current AS current ON current.tenant = links.tenant "
+                "AND current.anonymous_profile_id = links.anonymous_profile_id "
+                "WHERE current.anonymous_profile_id IS NULL ORDER BY links.tenant, "
+                "links.anonymous_profile_id"
+            ).fetchall()
+            for row in rows:
+                tenant = str(row["tenant"])
+                anonymous = str(row["anonymous_profile_id"])
+                known = str(row["known_profile_id"])
+                link_id = str(row["link_id"])
+                link_sha = str(row["link_sha256"])
+                created_at = float(row["created_at"])
+                operation = hashlib.sha256(
+                    f"legacy-link\0{tenant}\0{link_id}".encode()
+                ).hexdigest()
+                self._insert_link_event(
+                    conn,
+                    tenant=tenant,
+                    anonymous_profile_id=anonymous,
+                    known_profile_id=known,
+                    link_id=link_id,
+                    action="linked",
+                    link_revision=1,
+                    link_sha256=link_sha,
+                    authority_sha256=legacy_authority,
+                    audit_evidence_sha256=legacy_audit,
+                    actor_sha256=legacy_actor,
+                    reason_sha256=None,
+                    created_at=created_at,
+                    retention_until=None,
+                )
+                self._insert_link_current(
+                    conn,
+                    tenant=tenant,
+                    anonymous_profile_id=anonymous,
+                    known_profile_id=known,
+                    link_id=link_id,
+                    status="linked",
+                    revision=1,
+                    link_sha256=link_sha,
+                    authority_sha256=legacy_authority,
+                    audit_evidence_sha256=legacy_audit,
+                    operation_key_sha256=operation,
+                    updated_at=created_at,
+                    retention_until=None,
+                )
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
 
     @staticmethod
     def _tenant(value: object) -> str:
@@ -857,6 +1345,215 @@ class ConsentPreferenceStore:
                 raise
         return {**body, "policy_sha256": digest}
 
+    def unlink_profile(  # noqa: PLR0913 - explicit independent authorities
+        self,
+        tenant_id: str,
+        anonymous_profile_id: str,
+        *,
+        expected_anonymous_revision: int,
+        expected_known_revision: int,
+        expected_link_revision: int,
+        idempotency_key: str,
+        identity_evidence_sha256: str,
+        audit_evidence_sha256: str,
+        actor_sha256: str,
+        reason_sha256: str,
+        retention_until: float,
+    ) -> dict[str, Any]:
+        """Unlink one anonymous profile under exact, independently evidenced CAS."""
+
+        tenant = self._tenant(tenant_id)
+        anonymous = _text(anonymous_profile_id, "anonymous_profile_id")
+        anonymous_revision = _expected_revision(expected_anonymous_revision)
+        known_revision = _expected_revision(expected_known_revision)
+        link_revision = _expected_revision(expected_link_revision)
+        identity_evidence = _digest(
+            identity_evidence_sha256,
+            "identity_evidence_sha256",
+        )
+        audit_evidence = _digest(audit_evidence_sha256, "audit_evidence_sha256")
+        actor = _digest(actor_sha256, "actor_sha256")
+        reason = _digest(reason_sha256, "reason_sha256")
+        if hmac.compare_digest(identity_evidence, audit_evidence):
+            raise ConsentValidationError(
+                "identity and independent audit evidence must differ"
+            )
+        retained_until = _timestamp(retention_until, "retention_until")
+        assert retained_until is not None
+        _raw_idem, key_sha = self._idem_key(idempotency_key)
+        request = {
+            "anonymous_profile_id": anonymous,
+            "expected_anonymous_revision": anonymous_revision,
+            "expected_known_revision": known_revision,
+            "expected_link_revision": link_revision,
+            "identity_evidence_sha256": identity_evidence,
+            "audit_evidence_sha256": audit_evidence,
+            "actor_sha256": actor,
+            "reason_sha256": reason,
+            "retention_until": retained_until,
+        }
+        request_sha = _sha256(request)
+        now = _timestamp(self._clock(), "clock")
+        assert now is not None
+        if retained_until <= now:
+            raise ConsentValidationError("profile link retention must be in the future")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._idempotent_result(
+                    conn,
+                    tenant=tenant,
+                    namespace="profile.unlink",
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                )
+                if replay is not None:
+                    conn.execute("COMMIT")
+                    return replay
+                anonymous_row = self._profile_row(conn, tenant, anonymous)
+                if (
+                    anonymous_row["identity_kind"] != "anonymous"
+                    or self._profile_lifecycle(conn, tenant, anonymous)["status"]
+                    != "active"
+                ):
+                    raise ConsentConflict("anonymous profile is not active")
+                if int(anonymous_row["revision"]) != anonymous_revision:
+                    raise ConsentConflict("anonymous profile revision changed")
+                current_row = conn.execute(
+                    "SELECT * FROM consent_profile_link_current WHERE tenant = ? "
+                    "AND anonymous_profile_id = ?",
+                    (tenant, anonymous),
+                ).fetchone()
+                current = self._link_current(current_row)
+                if current is None or current["status"] != "linked":
+                    raise ConsentConflict("anonymous profile is not currently linked")
+                if int(current["revision"]) != link_revision:
+                    raise ConsentConflict("profile link revision changed")
+                events = self._verified_link_events(conn, tenant, anonymous)
+                self._assert_current_link_history(current, events)
+                known = str(current["known_profile_id"])
+                known_row = self._profile_row(conn, tenant, known)
+                if (
+                    known_row["identity_kind"] != "known"
+                    or self._profile_lifecycle(conn, tenant, known)["status"] != "active"
+                ):
+                    raise ConsentConflict("known profile is not active")
+                if int(known_row["revision"]) != known_revision:
+                    raise ConsentConflict("known profile revision changed")
+                first = conn.execute(
+                    "UPDATE consent_profiles SET revision = revision + 1 "
+                    "WHERE tenant = ? AND profile_id = ? AND revision = ?",
+                    (tenant, known, known_revision),
+                )
+                second = conn.execute(
+                    "UPDATE consent_profiles SET revision = revision + 1 "
+                    "WHERE tenant = ? AND profile_id = ? AND revision = ?",
+                    (tenant, anonymous, anonymous_revision),
+                )
+                if first.rowcount != 1 or second.rowcount != 1:
+                    raise ConsentConflict("profile unlink changed concurrently")
+                next_link_revision = link_revision + 1
+                current_body = self._link_current_body(
+                    tenant=tenant,
+                    anonymous_profile_id=anonymous,
+                    known_profile_id=known,
+                    link_id=str(current["link_id"]),
+                    status="unlinked",
+                    revision=next_link_revision,
+                    link_sha256=str(current["link_sha256"]),
+                    authority_sha256=identity_evidence,
+                    audit_evidence_sha256=audit_evidence,
+                    operation_key_sha256=key_sha,
+                    updated_at=now,
+                    retention_until=retained_until,
+                )
+                current_sha = _sha256(current_body)
+                changed = conn.execute(
+                    "UPDATE consent_profile_link_current SET status = 'unlinked', "
+                    "revision = ?, authority_sha256 = ?, audit_evidence_sha256 = ?, "
+                    "operation_key_sha256 = ?, record_sha256 = ?, updated_at = ?, "
+                    "retention_until = ? WHERE tenant = ? AND anonymous_profile_id = ? "
+                    "AND status = 'linked' AND revision = ? AND record_sha256 = ?",
+                    (
+                        next_link_revision,
+                        identity_evidence,
+                        audit_evidence,
+                        key_sha,
+                        current_sha,
+                        now,
+                        retained_until,
+                        tenant,
+                        anonymous,
+                        link_revision,
+                        current["record_sha256"],
+                    ),
+                )
+                if changed.rowcount != 1:
+                    raise ConsentConflict("profile link changed concurrently")
+                event_sha = self._insert_link_event(
+                    conn,
+                    tenant=tenant,
+                    anonymous_profile_id=anonymous,
+                    known_profile_id=known,
+                    link_id=str(current["link_id"]),
+                    action="unlinked",
+                    link_revision=next_link_revision,
+                    link_sha256=str(current["link_sha256"]),
+                    authority_sha256=identity_evidence,
+                    audit_evidence_sha256=audit_evidence,
+                    actor_sha256=actor,
+                    reason_sha256=reason,
+                    created_at=now,
+                    retention_until=retained_until,
+                )
+                result = {
+                    "anonymous_profile_id": anonymous,
+                    "previous_known_profile_id": known,
+                    "link_id": str(current["link_id"]),
+                    "link_sha256": str(current["link_sha256"]),
+                    "link_status": "unlinked",
+                    "link_revision": next_link_revision,
+                    "anonymous_revision": anonymous_revision + 1,
+                    "known_revision": known_revision + 1,
+                    "transition_type": "unlinked",
+                    "link_event_sha256": event_sha,
+                    "receipt_histories_merged": False,
+                    "retention_until": retained_until,
+                    "updated_at": now,
+                }
+                self._outbox(
+                    conn,
+                    tenant=tenant,
+                    event_type="profile.unlinked",
+                    payload={
+                        "anonymous_profile_id": anonymous,
+                        "known_profile_id": known,
+                        "link_id": current["link_id"],
+                        "link_sha256": current["link_sha256"],
+                        "link_revision": next_link_revision,
+                        "anonymous_revision": anonymous_revision + 1,
+                        "known_revision": known_revision + 1,
+                        "reason_sha256": reason,
+                        "link_event_sha256": event_sha,
+                        "receipt_histories_merged": False,
+                    },
+                    now=now,
+                )
+                self._save_idempotency(
+                    conn,
+                    tenant=tenant,
+                    namespace="profile.unlink",
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                    result=result,
+                    now=now,
+                )
+                conn.execute("COMMIT")
+                return result
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
     def create_profile(
         self,
         tenant_id: str,
@@ -933,7 +1630,7 @@ class ConsentPreferenceStore:
                     conn.execute("ROLLBACK")
                 raise
 
-    def link_profiles(
+    def link_profiles(  # noqa: C901 - one atomic link/relink CAS transition
         self,
         tenant_id: str,
         known_profile_id: str,
@@ -942,8 +1639,19 @@ class ConsentPreferenceStore:
         expected_known_revision: int,
         expected_anonymous_revision: int,
         idempotency_key: str,
+        expected_link_revision: int | None = None,
+        identity_evidence_sha256: str | None = None,
+        audit_evidence_sha256: str | None = None,
+        actor_sha256: str | None = None,
+        retention_until: float | None = None,
     ) -> dict[str, Any]:
-        """Link known and anonymous profiles using only pseudonymous records."""
+        """Link profiles, or relink an explicitly unlinked anonymous profile.
+
+        The first link remains backwards compatible.  Every later link requires
+        an exact current-link revision plus distinct identity and audit evidence.
+        The legacy link row and all lifecycle events remain immutable; only the
+        integrity-bound current authority is advanced under compare-and-swap.
+        """
 
         tenant = self._tenant(tenant_id)
         known = _text(known_profile_id, "known_profile_id")
@@ -953,15 +1661,60 @@ class ConsentPreferenceStore:
         known_revision = _expected_revision(expected_known_revision)
         anonymous_revision = _expected_revision(expected_anonymous_revision)
         _raw_idem, key_sha = self._idem_key(idempotency_key)
+        lifecycle_values = (
+            expected_link_revision,
+            identity_evidence_sha256,
+            audit_evidence_sha256,
+            actor_sha256,
+            retention_until,
+        )
+        lifecycle_supplied = any(value is not None for value in lifecycle_values)
+        if lifecycle_supplied and any(value is None for value in lifecycle_values):
+            raise ConsentValidationError(
+                "relink authority requires revision, identity evidence, audit evidence, "
+                "actor evidence, and retention"
+            )
+        if lifecycle_supplied:
+            link_revision_expected = _expected_revision(expected_link_revision)
+            authority_sha = _digest(
+                identity_evidence_sha256,
+                "identity_evidence_sha256",
+            )
+            audit_sha = _digest(audit_evidence_sha256, "audit_evidence_sha256")
+            actor_sha = _digest(actor_sha256, "actor_sha256")
+            retained_until = _timestamp(retention_until, "retention_until")
+            assert retained_until is not None
+            if hmac.compare_digest(authority_sha, audit_sha):
+                raise ConsentValidationError(
+                    "identity and independent audit evidence must differ"
+                )
+        else:
+            link_revision_expected = None
+            authority_sha = hashlib.sha256(b"consent-link-initial-authority-v1").hexdigest()
+            audit_sha = hashlib.sha256(b"consent-link-initial-audit-v1").hexdigest()
+            actor_sha = hashlib.sha256(b"consent-link-initial-actor-v1").hexdigest()
+            retained_until = None
         request = {
             "known_profile_id": known,
             "anonymous_profile_id": anonymous,
             "expected_known_revision": known_revision,
             "expected_anonymous_revision": anonymous_revision,
         }
+        if lifecycle_supplied:
+            request.update(
+                {
+                    "expected_link_revision": link_revision_expected,
+                    "identity_evidence_sha256": authority_sha,
+                    "audit_evidence_sha256": audit_sha,
+                    "actor_sha256": actor_sha,
+                    "retention_until": retained_until,
+                }
+            )
         request_sha = _sha256(request)
         now = _timestamp(self._clock(), "clock")
         assert now is not None
+        if retained_until is not None and retained_until <= now:
+            raise ConsentValidationError("profile link retention must be in the future")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -985,6 +1738,12 @@ class ConsentPreferenceStore:
                     raise ConsentNotFound("one or both profiles do not exist in this tenant")
                 known_row = indexed[known]
                 anonymous_row = indexed[anonymous]
+                if (
+                    self._profile_lifecycle(conn, tenant, known)["status"] != "active"
+                    or self._profile_lifecycle(conn, tenant, anonymous)["status"]
+                    != "active"
+                ):
+                    raise ConsentConflict("deleted profiles cannot be linked")
                 if known_row["identity_kind"] != "known":
                     raise ConsentValidationError("known_profile_id is not a known profile")
                 if anonymous_row["identity_kind"] != "anonymous":
@@ -1000,6 +1759,32 @@ class ConsentPreferenceStore:
                     raise ConsentConflict("known profile revision changed")
                 if int(anonymous_row["revision"]) != anonymous_revision:
                     raise ConsentConflict("anonymous profile revision changed")
+                current_row = conn.execute(
+                    "SELECT * FROM consent_profile_link_current WHERE tenant = ? "
+                    "AND anonymous_profile_id = ?",
+                    (tenant, anonymous),
+                ).fetchone()
+                current = self._link_current(current_row)
+                if current is not None and current["status"] == "linked":
+                    raise ConsentConflict("anonymous profile is already linked in this tenant")
+                if current is not None:
+                    if not lifecycle_supplied:
+                        raise ConsentConflict(
+                            "relink requires fresh verified identity and audit authority"
+                        )
+                    if current["revision"] != link_revision_expected:
+                        raise ConsentConflict("profile link revision changed")
+                    action = (
+                        "relinked"
+                        if current["known_profile_id"] == known
+                        else "account_transition"
+                    )
+                    next_link_revision = int(current["revision"]) + 1
+                else:
+                    if lifecycle_supplied and link_revision_expected != 0:
+                        raise ConsentConflict("profile link revision changed")
+                    action = "linked"
+                    next_link_revision = 1
                 link_id = self._new_id("CP-LINK")
                 link_body = {
                     "tenant_sha256": hashlib.sha256(tenant.encode("utf-8")).hexdigest(),
@@ -1010,18 +1795,23 @@ class ConsentPreferenceStore:
                     "anonymous_revision": anonymous_revision + 1,
                     "created_at": now,
                 }
+                if current is not None:
+                    link_body.update(
+                        {
+                            "link_revision": next_link_revision,
+                            "transition_type": action,
+                            "identity_evidence_sha256": authority_sha,
+                            "audit_evidence_sha256": audit_sha,
+                        }
+                    )
                 link_sha = _sha256(link_body)
-                try:
+                if current is None:
                     conn.execute(
                         "INSERT INTO consent_profile_links(tenant, link_id, "
                         "known_profile_id, anonymous_profile_id, link_sha256, "
                         "created_at) VALUES (?, ?, ?, ?, ?, ?)",
                         (tenant, link_id, known, anonymous, link_sha, now),
                     )
-                except sqlite3.IntegrityError as exc:
-                    raise ConsentConflict(
-                        "anonymous profile is already linked in this tenant"
-                    ) from exc
                 first = conn.execute(
                     "UPDATE consent_profiles SET revision = revision + 1 "
                     "WHERE tenant = ? AND profile_id = ? AND revision = ?",
@@ -1034,7 +1824,89 @@ class ConsentPreferenceStore:
                 )
                 if first.rowcount != 1 or second.rowcount != 1:
                     raise ConsentConflict("profile link changed concurrently")
-                result = {**link_body, "link_sha256": link_sha}
+                current_body = self._link_current_body(
+                    tenant=tenant,
+                    anonymous_profile_id=anonymous,
+                    known_profile_id=known,
+                    link_id=link_id,
+                    status="linked",
+                    revision=next_link_revision,
+                    link_sha256=link_sha,
+                    authority_sha256=authority_sha,
+                    audit_evidence_sha256=audit_sha,
+                    operation_key_sha256=key_sha,
+                    updated_at=now,
+                    retention_until=retained_until,
+                )
+                current_sha = _sha256(current_body)
+                if current is None:
+                    self._insert_link_current(
+                        conn,
+                        tenant=tenant,
+                        anonymous_profile_id=anonymous,
+                        known_profile_id=known,
+                        link_id=link_id,
+                        status="linked",
+                        revision=next_link_revision,
+                        link_sha256=link_sha,
+                        authority_sha256=authority_sha,
+                        audit_evidence_sha256=audit_sha,
+                        operation_key_sha256=key_sha,
+                        updated_at=now,
+                        retention_until=retained_until,
+                    )
+                else:
+                    changed = conn.execute(
+                        "UPDATE consent_profile_link_current SET known_profile_id = ?, "
+                        "link_id = ?, status = 'linked', revision = ?, link_sha256 = ?, "
+                        "authority_sha256 = ?, audit_evidence_sha256 = ?, "
+                        "operation_key_sha256 = ?, record_sha256 = ?, updated_at = ?, "
+                        "retention_until = ? WHERE tenant = ? AND anonymous_profile_id = ? "
+                        "AND revision = ? AND record_sha256 = ?",
+                        (
+                            known,
+                            link_id,
+                            next_link_revision,
+                            link_sha,
+                            authority_sha,
+                            audit_sha,
+                            key_sha,
+                            current_sha,
+                            now,
+                            retained_until,
+                            tenant,
+                            anonymous,
+                            current["revision"],
+                            current["record_sha256"],
+                        ),
+                    )
+                    if changed.rowcount != 1:
+                        raise ConsentConflict("profile link changed concurrently")
+                event_sha = self._insert_link_event(
+                    conn,
+                    tenant=tenant,
+                    anonymous_profile_id=anonymous,
+                    known_profile_id=known,
+                    link_id=link_id,
+                    action=action,
+                    link_revision=next_link_revision,
+                    link_sha256=link_sha,
+                    authority_sha256=authority_sha,
+                    audit_evidence_sha256=audit_sha,
+                    actor_sha256=actor_sha,
+                    reason_sha256=None,
+                    created_at=now,
+                    retention_until=retained_until,
+                )
+                result = {
+                    **link_body,
+                    "link_sha256": link_sha,
+                    "link_status": "linked",
+                    "link_revision": next_link_revision,
+                    "transition_type": action,
+                    "link_event_sha256": event_sha,
+                    "receipt_histories_merged": False,
+                }
                 self._outbox(
                     conn,
                     tenant=tenant,
@@ -1046,6 +1918,9 @@ class ConsentPreferenceStore:
                         "known_revision": known_revision + 1,
                         "anonymous_revision": anonymous_revision + 1,
                         "link_sha256": link_sha,
+                        "link_revision": next_link_revision,
+                        "transition_type": action,
+                        "receipt_histories_merged": False,
                     },
                     now=now,
                 )
@@ -1078,6 +1953,532 @@ class ConsentPreferenceStore:
         if row is None:
             raise ConsentNotFound("profile does not exist in this tenant")
         return row
+
+    @staticmethod
+    def _profile_lifecycle(
+        conn: sqlite3.Connection,
+        tenant: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        row = conn.execute(
+            "SELECT status, reason_code, actor_sha256, record_sha256, updated_at "
+            "FROM consent_profile_lifecycle WHERE tenant = ? AND profile_id = ?",
+            (tenant, profile_id),
+        ).fetchone()
+        if row is None:
+            return {
+                "status": "active",
+                "reason_code": None,
+                "actor_sha256": None,
+                "record_sha256": None,
+                "updated_at": None,
+            }
+        body = {
+            "profile_id": profile_id,
+            "status": str(row["status"]),
+            "reason_code": row["reason_code"],
+            "actor_sha256": str(row["actor_sha256"]),
+            "updated_at": float(row["updated_at"]),
+        }
+        if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+            raise ConsentPreferencesError("stored profile lifecycle integrity failed")
+        return {**body, "record_sha256": str(row["record_sha256"])}
+
+    def change_identifier_type(  # noqa: PLR0913 - explicit CAS authority
+        self,
+        tenant_id: str,
+        profile_id: str,
+        identity_kind: str,
+        subject_sha256: str,
+        *,
+        expected_revision: int,
+        idempotency_key: str,
+        actor_sha256: str,
+    ) -> dict[str, Any]:
+        """Change a profile's pseudonymous identifier type under CAS.
+
+        Immutable receipts keep the stable ``profile_id``.  Only the current
+        digest and its declared known/anonymous type change.  Supplying a new
+        digest for a deleted profile also restores its active lifecycle; the
+        former digest is never returned or written to an event.
+        """
+
+        tenant = self._tenant(tenant_id)
+        profile = _text(profile_id, "profile_id")
+        if identity_kind not in _IDENTITY_KINDS:
+            raise ConsentValidationError("identity_kind must be known or anonymous")
+        subject = _digest(subject_sha256, "subject_sha256")
+        revision = _expected_revision(expected_revision)
+        actor = _digest(actor_sha256, "actor_sha256")
+        _raw_idem, key_sha = self._idem_key(idempotency_key)
+        request = {
+            "profile_id": profile,
+            "identity_kind": identity_kind,
+            "subject_sha256": subject,
+            "expected_revision": revision,
+            "actor_sha256": actor,
+        }
+        request_sha = _sha256(request)
+        now = _timestamp(self._clock(), "clock")
+        assert now is not None
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._idempotent_result(
+                    conn,
+                    tenant=tenant,
+                    namespace="profile.change_identifier_type",
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                )
+                if replay is not None:
+                    conn.execute("COMMIT")
+                    return replay
+                row = self._profile_row(conn, tenant, profile)
+                if int(row["revision"]) != revision:
+                    raise ConsentConflict("profile revision changed")
+                if str(row["identity_kind"]) != identity_kind:
+                    linked = conn.execute(
+                        "SELECT 1 FROM consent_profile_link_current WHERE tenant = ? "
+                        "AND status = 'linked' AND "
+                        "(known_profile_id = ? OR anonymous_profile_id = ?) LIMIT 1",
+                        (tenant, profile, profile),
+                    ).fetchone()
+                    if linked is not None:
+                        raise ConsentConflict(
+                            "linked profile identity kind cannot be changed"
+                        )
+                try:
+                    updated = conn.execute(
+                        "UPDATE consent_profiles SET identity_kind = ?, "
+                        "subject_sha256 = ?, revision = revision + 1 "
+                        "WHERE tenant = ? AND profile_id = ? AND revision = ?",
+                        (identity_kind, subject, tenant, profile, revision),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise ConsentConflict(
+                        "profile identity already exists in this tenant"
+                    ) from exc
+                if updated.rowcount != 1:
+                    raise ConsentConflict("profile revision changed")
+                lifecycle_body = {
+                    "profile_id": profile,
+                    "status": "active",
+                    "reason_code": None,
+                    "actor_sha256": actor,
+                    "updated_at": now,
+                }
+                lifecycle_sha = _sha256(lifecycle_body)
+                conn.execute(
+                    "INSERT INTO consent_profile_lifecycle(tenant, profile_id, status, "
+                    "reason_code, actor_sha256, record_sha256, updated_at) "
+                    "VALUES (?, ?, 'active', NULL, ?, ?, ?) "
+                    "ON CONFLICT(tenant, profile_id) DO UPDATE SET status = 'active', "
+                    "reason_code = NULL, actor_sha256 = excluded.actor_sha256, "
+                    "record_sha256 = excluded.record_sha256, "
+                    "updated_at = excluded.updated_at",
+                    (tenant, profile, actor, lifecycle_sha, now),
+                )
+                result = {
+                    "profile_id": profile,
+                    "identity_kind": identity_kind,
+                    "subject_sha256": subject,
+                    "revision": revision + 1,
+                    "status": "active",
+                    "updated_at": now,
+                }
+                self._outbox(
+                    conn,
+                    tenant=tenant,
+                    event_type="profile.identifier_changed",
+                    payload={
+                        "profile_id": profile,
+                        "identity_kind": identity_kind,
+                        "revision": revision + 1,
+                        "subject_sha256": subject,
+                    },
+                    now=now,
+                )
+                self._save_idempotency(
+                    conn,
+                    tenant=tenant,
+                    namespace="profile.change_identifier_type",
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                    result=result,
+                    now=now,
+                )
+                conn.execute("COMMIT")
+                return result
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+
+    def delete_subject(  # noqa: PLR0913 - explicit destructive authority
+        self,
+        tenant_id: str,
+        profile_id: str,
+        *,
+        expected_revision: int,
+        reason_code: str,
+        idempotency_key: str,
+        actor_sha256: str,
+    ) -> dict[str, Any]:
+        """Pseudonymize the live identifier and fail enforcement closed.
+
+        Receipt and outbox evidence remain under their declared retention.  The
+        original subject digest is overwritten in the live profile authority,
+        never copied to the lifecycle record or returned to the caller.
+        """
+
+        tenant = self._tenant(tenant_id)
+        profile = _text(profile_id, "profile_id")
+        revision = _expected_revision(expected_revision)
+        reason = _text(reason_code, "reason_code")
+        actor = _digest(actor_sha256, "actor_sha256")
+        _raw_idem, key_sha = self._idem_key(idempotency_key)
+        request = {
+            "profile_id": profile,
+            "expected_revision": revision,
+            "reason_code": reason,
+            "actor_sha256": actor,
+        }
+        request_sha = _sha256(request)
+        tombstone_sha = hashlib.sha256(
+            (
+                "lightwork.consent-subject-tombstone.v1:"
+                f"{tenant}:{profile}:{request_sha}"
+            ).encode()
+        ).hexdigest()
+        now = _timestamp(self._clock(), "clock")
+        assert now is not None
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._idempotent_result(
+                    conn,
+                    tenant=tenant,
+                    namespace="profile.delete_subject",
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                )
+                if replay is not None:
+                    conn.execute("COMMIT")
+                    return replay
+                row = self._profile_row(conn, tenant, profile)
+                if int(row["revision"]) != revision:
+                    raise ConsentConflict("profile revision changed")
+                lifecycle = self._profile_lifecycle(conn, tenant, profile)
+                if lifecycle["status"] == "deleted":
+                    raise ConsentConflict("profile subject is already deleted")
+                try:
+                    updated = conn.execute(
+                        "UPDATE consent_profiles SET subject_sha256 = ?, "
+                        "revision = revision + 1 WHERE tenant = ? AND profile_id = ? "
+                        "AND revision = ?",
+                        (tombstone_sha, tenant, profile, revision),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise ConsentConflict("profile tombstone collision") from exc
+                if updated.rowcount != 1:
+                    raise ConsentConflict("profile revision changed")
+                lifecycle_body = {
+                    "profile_id": profile,
+                    "status": "deleted",
+                    "reason_code": reason,
+                    "actor_sha256": actor,
+                    "updated_at": now,
+                }
+                lifecycle_sha = _sha256(lifecycle_body)
+                conn.execute(
+                    "INSERT INTO consent_profile_lifecycle(tenant, profile_id, status, "
+                    "reason_code, actor_sha256, record_sha256, updated_at) "
+                    "VALUES (?, ?, 'deleted', ?, ?, ?, ?) "
+                    "ON CONFLICT(tenant, profile_id) DO UPDATE SET status = 'deleted', "
+                    "reason_code = excluded.reason_code, actor_sha256 = excluded.actor_sha256, "
+                    "record_sha256 = excluded.record_sha256, "
+                    "updated_at = excluded.updated_at",
+                    (tenant, profile, reason, actor, lifecycle_sha, now),
+                )
+                result = {
+                    "profile_id": profile,
+                    "status": "deleted",
+                    "reason_code": reason,
+                    "revision": revision + 1,
+                    "tombstone_sha256": tombstone_sha,
+                    "updated_at": now,
+                }
+                self._outbox(
+                    conn,
+                    tenant=tenant,
+                    event_type="profile.subject_deleted",
+                    payload={
+                        "profile_id": profile,
+                        "revision": revision + 1,
+                        "reason_code": reason,
+                        "tombstone_sha256": tombstone_sha,
+                    },
+                    now=now,
+                )
+                self._save_idempotency(
+                    conn,
+                    tenant=tenant,
+                    namespace="profile.delete_subject",
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                    result=result,
+                    now=now,
+                )
+                conn.execute("COMMIT")
+                return result
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+
+    def _mutate_receipt_lifecycle(  # noqa: PLR0913 - exact authority pins
+        self,
+        tenant_id: str,
+        profile_id: str,
+        receipt_id: str,
+        *,
+        expected_revision: int,
+        reactivation_at: float | None,
+        clear_expiration: bool | None,
+        idempotency_key: str,
+        actor_sha256: str,
+        namespace: str,
+    ) -> dict[str, Any]:
+        tenant = self._tenant(tenant_id)
+        profile = _text(profile_id, "profile_id")
+        receipt = _text(receipt_id, "receipt_id")
+        revision = _expected_revision(expected_revision)
+        actor = _digest(actor_sha256, "actor_sha256")
+        reactivation = _timestamp(
+            reactivation_at, "reactivation_at", allow_none=True
+        )
+        if clear_expiration is not None and type(clear_expiration) is not bool:
+            raise ConsentValidationError("clear_expiration must be true or false")
+        _raw_idem, key_sha = self._idem_key(idempotency_key)
+        request = {
+            "profile_id": profile,
+            "receipt_id": receipt,
+            "expected_revision": revision,
+            "reactivation_at": reactivation,
+            "clear_expiration": clear_expiration,
+            "actor_sha256": actor,
+        }
+        request_sha = _sha256(request)
+        now = _timestamp(self._clock(), "clock")
+        assert now is not None
+        if reactivation is not None and reactivation <= now:
+            raise ConsentValidationError("reactivation_at must be in the future")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                replay = self._idempotent_result(
+                    conn,
+                    tenant=tenant,
+                    namespace=namespace,
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                )
+                if replay is not None:
+                    conn.execute("COMMIT")
+                    return replay
+                profile_row = self._profile_row(conn, tenant, profile)
+                if int(profile_row["revision"]) != revision:
+                    raise ConsentConflict("profile revision changed")
+                lifecycle = self._profile_lifecycle(conn, tenant, profile)
+                if lifecycle["status"] != "active":
+                    raise ConsentConflict("deleted profile receipt cannot be changed")
+                receipt_row = conn.execute(
+                    "SELECT receipt_id FROM consent_receipts WHERE tenant = ? "
+                    "AND profile_id = ? AND receipt_id = ?",
+                    (tenant, profile, receipt),
+                ).fetchone()
+                if receipt_row is None:
+                    raise ConsentNotFound(
+                        "receipt does not exist for this profile in this tenant"
+                    )
+                prior = conn.execute(
+                    "SELECT reactivation_at, clear_expiration, revision "
+                    "FROM consent_receipt_lifecycle WHERE tenant = ? AND receipt_id = ?",
+                    (tenant, receipt),
+                ).fetchone()
+                next_reactivation = (
+                    reactivation
+                    if reactivation is not None
+                    else (
+                        float(prior["reactivation_at"])
+                        if prior is not None and prior["reactivation_at"] is not None
+                        else None
+                    )
+                )
+                next_clear = (
+                    clear_expiration
+                    if clear_expiration is not None
+                    else bool(prior["clear_expiration"] if prior is not None else False)
+                )
+                lifecycle_revision = (
+                    int(prior["revision"]) + 1 if prior is not None else 1
+                )
+                body = {
+                    "receipt_id": receipt,
+                    "profile_id": profile,
+                    "reactivation_at": next_reactivation,
+                    "clear_expiration": next_clear,
+                    "revision": lifecycle_revision,
+                    "actor_sha256": actor,
+                    "updated_at": now,
+                }
+                record_sha = _sha256(body)
+                conn.execute(
+                    "INSERT INTO consent_receipt_lifecycle(tenant, receipt_id, profile_id, "
+                    "reactivation_at, clear_expiration, revision, actor_sha256, "
+                    "record_sha256, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(tenant, receipt_id) DO UPDATE SET "
+                    "reactivation_at = excluded.reactivation_at, "
+                    "clear_expiration = excluded.clear_expiration, "
+                    "revision = excluded.revision, actor_sha256 = excluded.actor_sha256, "
+                    "record_sha256 = excluded.record_sha256, "
+                    "updated_at = excluded.updated_at",
+                    (
+                        tenant,
+                        receipt,
+                        profile,
+                        next_reactivation,
+                        int(next_clear),
+                        lifecycle_revision,
+                        actor,
+                        record_sha,
+                        now,
+                    ),
+                )
+                updated = conn.execute(
+                    "UPDATE consent_profiles SET revision = revision + 1 "
+                    "WHERE tenant = ? AND profile_id = ? AND revision = ?",
+                    (tenant, profile, revision),
+                )
+                if updated.rowcount != 1:
+                    raise ConsentConflict("profile revision changed")
+                result = {
+                    **body,
+                    "profile_revision": revision + 1,
+                    "record_sha256": record_sha,
+                }
+                self._outbox(
+                    conn,
+                    tenant=tenant,
+                    event_type="receipt.lifecycle_changed",
+                    payload={
+                        "receipt_id": receipt,
+                        "profile_id": profile,
+                        "profile_revision": revision + 1,
+                        "reactivation_at": next_reactivation,
+                        "clear_expiration": next_clear,
+                        "record_sha256": record_sha,
+                    },
+                    now=now,
+                )
+                self._save_idempotency(
+                    conn,
+                    tenant=tenant,
+                    namespace=namespace,
+                    key_sha256=key_sha,
+                    request_sha256=request_sha,
+                    result=result,
+                    now=now,
+                )
+                conn.execute("COMMIT")
+                return result
+            except BaseException:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+
+    def set_receipt_reactivation(  # noqa: PLR0913 - explicit lifecycle contract
+        self,
+        tenant_id: str,
+        profile_id: str,
+        receipt_id: str,
+        reactivation_at: float,
+        *,
+        expected_revision: int,
+        idempotency_key: str,
+        actor_sha256: str,
+    ) -> dict[str, Any]:
+        """Project a future ``reactivationDate`` without rewriting a receipt."""
+
+        return self._mutate_receipt_lifecycle(
+            tenant_id,
+            profile_id,
+            receipt_id,
+            expected_revision=expected_revision,
+            reactivation_at=reactivation_at,
+            clear_expiration=None,
+            idempotency_key=idempotency_key,
+            actor_sha256=actor_sha256,
+            namespace="receipt.set_reactivation",
+        )
+
+    def clear_receipt_expiration(  # noqa: PLR0913 - explicit lifecycle contract
+        self,
+        tenant_id: str,
+        profile_id: str,
+        receipt_id: str,
+        *,
+        expected_revision: int,
+        idempotency_key: str,
+        actor_sha256: str,
+    ) -> dict[str, Any]:
+        """Apply an auditable ``clearExpiration`` overlay to a receipt."""
+
+        return self._mutate_receipt_lifecycle(
+            tenant_id,
+            profile_id,
+            receipt_id,
+            expected_revision=expected_revision,
+            reactivation_at=None,
+            clear_expiration=True,
+            idempotency_key=idempotency_key,
+            actor_sha256=actor_sha256,
+            namespace="receipt.clear_expiration",
+        )
+
+    def get_receipt_lifecycle(
+        self,
+        tenant_id: str,
+        receipt_id: str,
+    ) -> dict[str, Any]:
+        tenant = self._tenant(tenant_id)
+        receipt = _text(receipt_id, "receipt_id")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT profile_id, reactivation_at, clear_expiration, revision, "
+                "actor_sha256, record_sha256, updated_at "
+                "FROM consent_receipt_lifecycle WHERE tenant = ? AND receipt_id = ?",
+                (tenant, receipt),
+            ).fetchone()
+        if row is None:
+            raise ConsentNotFound("receipt lifecycle does not exist in this tenant")
+        body = {
+            "receipt_id": receipt,
+            "profile_id": str(row["profile_id"]),
+            "reactivation_at": (
+                float(row["reactivation_at"])
+                if row["reactivation_at"] is not None
+                else None
+            ),
+            "clear_expiration": bool(row["clear_expiration"]),
+            "revision": int(row["revision"]),
+            "actor_sha256": str(row["actor_sha256"]),
+            "updated_at": float(row["updated_at"]),
+        }
+        if not hmac.compare_digest(_sha256(body), str(row["record_sha256"])):
+            raise ConsentPreferencesError("stored receipt lifecycle integrity failed")
+        return {**body, "record_sha256": str(row["record_sha256"])}
 
     def record_preferences(
         self,
@@ -1145,6 +2546,9 @@ class ConsentPreferenceStore:
                     conn.execute("COMMIT")
                     return replay
                 profile_row = self._profile_row(conn, tenant, profile)
+                lifecycle = self._profile_lifecycle(conn, tenant, profile)
+                if lifecycle["status"] != "active":
+                    raise ConsentConflict("deleted profile cannot record preferences")
                 if int(profile_row["revision"]) != revision:
                     raise ConsentConflict(
                         f"profile revision is {profile_row['revision']}, expected {revision}"
@@ -1595,8 +2999,8 @@ class ConsentPreferenceStore:
     ) -> list[str]:
         self._profile_row(conn, tenant, profile_id)
         rows = conn.execute(
-            "SELECT known_profile_id, anonymous_profile_id "
-            "FROM consent_profile_links WHERE tenant = ? AND "
+            "SELECT * FROM consent_profile_link_current WHERE tenant = ? AND "
+            "status = 'linked' AND "
             "(known_profile_id = ? OR anonymous_profile_id = ?) "
             "ORDER BY known_profile_id, anonymous_profile_id LIMIT ?",
             (tenant, profile_id, profile_id, _MAX_LINKED_PROFILES + 1),
@@ -1606,22 +3010,39 @@ class ConsentPreferenceStore:
         profiles = {profile_id}
         known_profiles: set[str] = set()
         for row in rows:
-            known = str(row["known_profile_id"])
+            current = self._link_current(row)
+            assert current is not None
+            events = self._verified_link_events(
+                conn,
+                tenant,
+                str(current["anonymous_profile_id"]),
+            )
+            self._assert_current_link_history(current, events)
+            known = str(current["known_profile_id"])
             profiles.add(known)
-            profiles.add(str(row["anonymous_profile_id"]))
+            profiles.add(str(current["anonymous_profile_id"]))
             known_profiles.add(known)
         # An anonymous profile first resolves to its known profile, then to the
         # other anonymous profiles already linked to that authority.
         for known in known_profiles:
             siblings = conn.execute(
-                "SELECT anonymous_profile_id FROM consent_profile_links "
-                "WHERE tenant = ? AND known_profile_id = ? "
+                "SELECT * FROM consent_profile_link_current "
+                "WHERE tenant = ? AND known_profile_id = ? AND status = 'linked' "
                 "ORDER BY anonymous_profile_id LIMIT ?",
                 (tenant, known, _MAX_LINKED_PROFILES + 1),
             ).fetchall()
             if len(siblings) > _MAX_LINKED_PROFILES:
                 raise ConsentPreferencesError("linked profile bound exceeded")
-            profiles.update(str(row["anonymous_profile_id"]) for row in siblings)
+            for sibling in siblings:
+                current = self._link_current(sibling)
+                assert current is not None
+                events = self._verified_link_events(
+                    conn,
+                    tenant,
+                    str(current["anonymous_profile_id"]),
+                )
+                self._assert_current_link_history(current, events)
+                profiles.add(str(current["anonymous_profile_id"]))
         if len(profiles) > _MAX_LINKED_PROFILES:
             raise ConsentPreferencesError("linked profile bound exceeded")
         return sorted(profiles)
@@ -1664,6 +3085,14 @@ class ConsentPreferenceStore:
                 profile_row = self._profile_row(conn, tenant, profile)
             except ConsentNotFound:
                 return EnforcementDecision(False, "unknown_profile", evaluated_at=evaluated)
+            lifecycle = self._profile_lifecycle(conn, tenant, profile)
+            if lifecycle["status"] != "active":
+                return EnforcementDecision(
+                    False,
+                    "subject_deleted",
+                    profile_revision=int(profile_row["revision"]),
+                    evaluated_at=evaluated,
+                )
             if policy is None:
                 rows = conn.execute(
                     "SELECT DISTINCT policy_id FROM consent_policies WHERE tenant = ? "
@@ -1759,6 +3188,19 @@ class ConsentPreferenceStore:
                     profile_revision=int(profile_row["revision"]),
                     evaluated_at=evaluated,
                 )
+            if any(
+                self._profile_lifecycle(conn, tenant, linked_profile)["status"]
+                != "active"
+                for linked_profile in group
+            ):
+                return EnforcementDecision(
+                    False,
+                    "linked_subject_deleted",
+                    policy_id=policy,
+                    policy_version=version,
+                    profile_revision=int(profile_row["revision"]),
+                    evaluated_at=evaluated,
+                )
             placeholders = ",".join("?" for _ in group)
             rows = conn.execute(
                 "SELECT receipt_id, receipt_sha256, choices_json FROM consent_receipts "
@@ -1776,6 +3218,38 @@ class ConsentPreferenceStore:
                     profile_revision=int(profile_row["revision"]),
                     evaluated_at=evaluated,
                 )
+            lifecycle_overrides: dict[str, dict[str, Any]] = {}
+            receipt_ids = [str(row["receipt_id"]) for row in rows]
+            if receipt_ids:
+                receipt_placeholders = ",".join("?" for _ in receipt_ids)
+                override_rows = conn.execute(
+                    "SELECT receipt_id, profile_id, reactivation_at, clear_expiration, "
+                    "revision, actor_sha256, record_sha256, updated_at "
+                    "FROM consent_receipt_lifecycle WHERE tenant = ? "
+                    f"AND receipt_id IN ({receipt_placeholders})",
+                    (tenant, *receipt_ids),
+                ).fetchall()
+                for override_row in override_rows:
+                    body = {
+                        "receipt_id": str(override_row["receipt_id"]),
+                        "profile_id": str(override_row["profile_id"]),
+                        "reactivation_at": (
+                            float(override_row["reactivation_at"])
+                            if override_row["reactivation_at"] is not None
+                            else None
+                        ),
+                        "clear_expiration": bool(override_row["clear_expiration"]),
+                        "revision": int(override_row["revision"]),
+                        "actor_sha256": str(override_row["actor_sha256"]),
+                        "updated_at": float(override_row["updated_at"]),
+                    }
+                    if not hmac.compare_digest(
+                        _sha256(body), str(override_row["record_sha256"])
+                    ):
+                        raise ConsentPreferencesError(
+                            "stored receipt lifecycle integrity failed"
+                        )
+                    lifecycle_overrides[body["receipt_id"]] = body
             decision = _decision_from_receipts(
                 rows,
                 purpose=purpose,
@@ -1785,6 +3259,7 @@ class ConsentPreferenceStore:
                 version=version,
                 profile_revision=int(profile_row["revision"]),
                 evaluated=evaluated,
+                lifecycle_overrides=lifecycle_overrides,
             )
             if decision is not None:
                 return decision
@@ -2225,6 +3700,75 @@ class ConsentPreferenceStore:
                     conn.execute("ROLLBACK")
                 raise
 
+    def unified_audit_records(self, tenant_id: str):
+        """Return a digest-only chain over the durable consent outbox.
+
+        Policy publication, scan admission, decisions and retention purges are
+        not all represented in this canonical replay history.  Callers must
+        therefore retain a suite-level ``source_history_incomplete`` limit.
+        """
+
+        from .unified_audit import GENESIS_SHA256, build_source_record
+
+        tenant = self._tenant(tenant_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT sequence,event_id,event_type,payload_json,payload_sha256,"
+                "created_at FROM consent_outbox WHERE tenant=? ORDER BY sequence",
+                (tenant,),
+            ).fetchall()
+        actions = {
+            "profile.created": "record_created",
+            "profile.linked": "relationship_changed",
+            "profile.identifier_changed": "record_updated",
+            "profile.subject_deleted": "record_deleted",
+            "receipt.lifecycle_changed": "status_changed",
+            "preferences.changed": "consent_recorded",
+            "tracker.registry.changed": "policy_changed",
+        }
+        actor_sha256 = hashlib.sha256(
+            b"lightwork.consent-preferences.outbox-authority.v1"
+        ).hexdigest()
+        previous = GENESIS_SHA256
+        records = []
+        for sequence, row in enumerate(rows, start=1):
+            event_type = str(row["event_type"])
+            action = actions.get(event_type)
+            if action is None:
+                raise ConsentPreferencesError(
+                    "stored consent outbox event type is unsupported"
+                )
+            body = _loads(row["payload_json"], "consent outbox payload")
+            if (
+                not isinstance(body, dict)
+                or body.get("schema") != OUTBOX_SCHEMA
+                or body.get("event_id") != row["event_id"]
+                or body.get("event_type") != event_type
+                or body.get("created_at") != row["created_at"]
+                or _canonical(body).decode("ascii") != row["payload_json"]
+            ):
+                raise ConsentPreferencesError(
+                    "stored consent outbox payload is invalid"
+                )
+            payload_sha256 = str(row["payload_sha256"])
+            if not hmac.compare_digest(payload_sha256, _sha256(body)):
+                raise ConsentPreferencesError(
+                    "stored consent outbox payload failed integrity verification"
+                )
+            event_id = str(row["event_id"])
+            record = build_source_record(
+                sequence=sequence,
+                occurred_at=float(row["created_at"]),
+                action=action,
+                actor_sha256=actor_sha256,
+                resource_sha256=hashlib.sha256(event_id.encode("utf-8")).hexdigest(),
+                payload_sha256=payload_sha256,
+                previous_sha256=previous,
+            )
+            records.append(record)
+            previous = record.record_sha256
+        return tuple(records)
+
     def summary(self, tenant_id: str) -> dict[str, Any]:
         """Return privacy-safe tenant counts for an operator overview."""
 
@@ -2240,6 +3784,27 @@ class ConsentPreferenceStore:
                 "profiles": int(
                     conn.execute(
                         "SELECT COUNT(*) FROM consent_profiles WHERE tenant = ?",
+                        (tenant,),
+                    ).fetchone()[0]
+                ),
+                "identity_links_current": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM consent_profile_link_current "
+                        "WHERE tenant = ? AND status = 'linked'",
+                        (tenant,),
+                    ).fetchone()[0]
+                ),
+                "identity_links_unlinked": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM consent_profile_link_current "
+                        "WHERE tenant = ? AND status = 'unlinked'",
+                        (tenant,),
+                    ).fetchone()[0]
+                ),
+                "identity_link_events": int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM consent_profile_link_events "
+                        "WHERE tenant = ?",
                         (tenant,),
                     ).fetchone()[0]
                 ),
@@ -2326,7 +3891,7 @@ class ConsentPreferenceStore:
         tenant_id: str,
         profile_id: str,
     ) -> dict[str, Any]:
-        """Resolve one profile and its immutable link authority exactly.
+        """Resolve one profile and its current, integrity-bound link authority.
 
         This deliberately exposes no lookup by subject digest.  Federation
         callers already hold a tenant-scoped profile capability and need an
@@ -2339,15 +3904,24 @@ class ConsentPreferenceStore:
         profile = _text(profile_id, "profile_id")
         with self._connect() as conn:
             row = self._profile_row(conn, tenant, profile)
+            lifecycle = self._profile_lifecycle(conn, tenant, profile)
             if row["identity_kind"] == "anonymous":
-                link = conn.execute(
-                    "SELECT link_id, known_profile_id, link_sha256, created_at "
-                    "FROM consent_profile_links WHERE tenant = ? "
+                current_row = conn.execute(
+                    "SELECT * FROM consent_profile_link_current WHERE tenant = ? "
                     "AND anonymous_profile_id = ?",
                     (tenant, profile),
                 ).fetchone()
+                current = self._link_current(current_row)
+                if current is not None:
+                    events = self._verified_link_events(conn, tenant, profile)
+                    self._assert_current_link_history(current, events)
+                else:
+                    events = []
             else:
-                link = None
+                current = None
+                events = []
+        linked = current is not None and current["status"] == "linked"
+        linked_at = events[-1]["created_at"] if linked and events else None
         return {
             "profile_id": str(row["profile_id"]),
             "identity_kind": str(row["identity_kind"]),
@@ -2355,11 +3929,120 @@ class ConsentPreferenceStore:
             "revision": int(row["revision"]),
             "created_at": float(row["created_at"]),
             "linked_known_profile_id": (
-                str(link["known_profile_id"]) if link is not None else None
+                str(current["known_profile_id"]) if linked else None
             ),
-            "link_id": str(link["link_id"]) if link is not None else None,
-            "link_sha256": str(link["link_sha256"]) if link is not None else None,
-            "linked_at": float(link["created_at"]) if link is not None else None,
+            "link_id": str(current["link_id"]) if linked else None,
+            "link_sha256": str(current["link_sha256"]) if linked else None,
+            "linked_at": linked_at,
+            "link_status": str(current["status"]) if current is not None else "never_linked",
+            "link_revision": int(current["revision"]) if current is not None else 0,
+            "last_known_profile_id": (
+                str(current["known_profile_id"]) if current is not None else None
+            ),
+            "last_link_id": str(current["link_id"]) if current is not None else None,
+            "last_link_sha256": (
+                str(current["link_sha256"]) if current is not None else None
+            ),
+            "link_authority_sha256": (
+                str(current["authority_sha256"]) if current is not None else None
+            ),
+            "link_audit_evidence_sha256": (
+                str(current["audit_evidence_sha256"])
+                if current is not None
+                else None
+            ),
+            "link_record_sha256": (
+                str(current["record_sha256"]) if current is not None else None
+            ),
+            "link_retention_until": (
+                current["retention_until"] if current is not None else None
+            ),
+            "lifecycle": lifecycle,
+        }
+
+    def get_profile_link_history(
+        self,
+        tenant_id: str,
+        anonymous_profile_id: str,
+        *,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Return bounded immutable lifecycle evidence for one anonymous profile."""
+
+        tenant = self._tenant(tenant_id)
+        anonymous = _text(anonymous_profile_id, "anonymous_profile_id")
+        page_size = _limit(limit)
+        with self._connect() as conn:
+            profile = self._profile_row(conn, tenant, anonymous)
+            if profile["identity_kind"] != "anonymous":
+                raise ConsentValidationError("profile is not anonymous")
+            current_row = conn.execute(
+                "SELECT * FROM consent_profile_link_current WHERE tenant = ? "
+                "AND anonymous_profile_id = ?",
+                (tenant, anonymous),
+            ).fetchone()
+            current = self._link_current(current_row)
+            events = self._verified_link_events(conn, tenant, anonymous)
+            if current is None and events:
+                raise ConsentPreferencesError("profile link authority is missing")
+            if current is not None:
+                self._assert_current_link_history(current, events)
+        selected = list(reversed(events))[:page_size]
+        return {
+            "profile_id": anonymous,
+            "current": (
+                {
+                    "status": current["status"],
+                    "revision": current["revision"],
+                    "known_profile_id": current["known_profile_id"],
+                    "link_id": current["link_id"],
+                    "link_sha256": current["link_sha256"],
+                    "authority_sha256": current["authority_sha256"],
+                    "audit_evidence_sha256": current["audit_evidence_sha256"],
+                    "record_sha256": current["record_sha256"],
+                    "updated_at": current["updated_at"],
+                    "retention_until": current["retention_until"],
+                }
+                if current is not None
+                else {"status": "never_linked", "revision": 0}
+            ),
+            "events": selected,
+            "truncated": len(events) > page_size,
+            "receipt_histories_merged": False,
+        }
+
+    def verify_profile_link_integrity(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """Verify a bounded tenant slice of current authorities and event chains."""
+
+        tenant = self._tenant(tenant_id)
+        page_size = _limit(limit)
+        authorities = events_verified = 0
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM consent_profile_link_current WHERE tenant = ? "
+                "ORDER BY anonymous_profile_id LIMIT ?",
+                (tenant, page_size + 1),
+            ).fetchall()
+            for row in rows[:page_size]:
+                current = self._link_current(row)
+                assert current is not None
+                events = self._verified_link_events(
+                    conn,
+                    tenant,
+                    str(current["anonymous_profile_id"]),
+                )
+                self._assert_current_link_history(current, events)
+                authorities += 1
+                events_verified += len(events)
+        return {
+            "authorities_verified": authorities,
+            "events_verified": events_verified,
+            "truncated": len(rows) > page_size,
         }
 
     def list_trackers(self, tenant_id: str, *, limit: int = 100) -> dict[str, Any]:

@@ -631,6 +631,38 @@ class _RecordStore:
                 out.append(record)
         return sorted(out, key=lambda r: r.get("created_at", 0), reverse=True)
 
+    def count_records(self) -> int:
+        """Count valid record paths without deserializing an unbounded store."""
+
+        from .file_lock import private_path_is_restricted
+
+        directory, _ = _validated_private_directory(self._dir(), must_exist=False)
+        if not directory.exists():
+            return 0
+        count = 0
+        for path in directory.glob("*.json"):
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise PermissionError(
+                    f"privacy record path could not be inspected: {path}"
+                ) from exc
+            record_id = path.stem
+            if (
+                _unsafe_path_alias(path, info)
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or not _RECORD_ID_RE.fullmatch(record_id)
+                or not record_id.startswith(f"{self.prefix}-")
+                or not private_path_is_restricted(path, 0o600)
+                or info.st_size > _MAX_PRIVACY_JSON_BYTES
+            ):
+                raise PermissionError(
+                    "privacy record scan found an invalid record path"
+                )
+            count += 1
+        return count
+
     def iter_record_ids(
         self,
         *,
@@ -2854,6 +2886,49 @@ def list_incidents() -> list[dict]:
     return out
 
 
+def privacy_program_context_heads(
+    *,
+    limit_per_register: int = 100,
+    register_names: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, object]]:
+    """Return bounded current heads for a strictly read-only program projection.
+
+    No audit retry is attempted here: a governance-agent context read must not
+    mutate source records.  Each register includes its exact valid path count,
+    allowing the caller to mark a bounded projection partial when appropriate.
+    """
+
+    if (
+        isinstance(limit_per_register, bool)
+        or not isinstance(limit_per_register, int)
+        or not 1 <= limit_per_register <= 1_000
+    ):
+        raise ValueError("privacy program context limit is outside its bound")
+    stores = {
+        "ai_systems": _AI,
+        "dpa_reviews": _DPA,
+        "dsars": _DSAR,
+        "incidents": _INCIDENT,
+        "ropa": _ROPA,
+    }
+    selected_names = tuple(sorted(stores)) if register_names is None else register_names
+    if (
+        not isinstance(selected_names, tuple)
+        or not selected_names
+        or selected_names != tuple(sorted(set(selected_names)))
+        or any(name not in stores for name in selected_names)
+    ):
+        raise ValueError("privacy program context register selection is invalid")
+    result: dict[str, dict[str, object]] = {}
+    for name in selected_names:
+        store = stores[name]
+        result[name] = {
+            "records": tuple(store.list_bounded(limit=limit_per_register)),
+            "total_records": store.count_records(),
+        }
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # Program report -- the board-pack aggregate over every register
 # --------------------------------------------------------------------------- #
@@ -2962,7 +3037,7 @@ def program_report(assessment_types: set | None = None) -> dict:
 __all__ = [
     "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
     "DSAR_KINDS", "close_incident", "decide_incident_notification",
-    "list_incidents", "open_incident", "program_report",
+    "list_incidents", "open_incident", "privacy_program_context_heads", "program_report",
     "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
     "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",

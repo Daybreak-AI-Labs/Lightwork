@@ -1,0 +1,41 @@
+<button class="mv-copilot__fab" id="mv-copilot-fab" type="button"
+        aria-expanded="false" aria-controls="mv-copilot"
+        aria-label="Open Lightwork Copilot" title="Copilot — need a hand?">
+  <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-chat"></use></svg>
+  <span class="mv-copilot__fab-label">Copilot</span>
+</button>
+<section class="mv-copilot" id="mv-copilot" role="dialog"
+         aria-modal="false" aria-labelledby="mv-copilot-title" hidden>
+  <div class="mv-copilot__head">
+    <div>
+      <span class="mv-copilot__eyebrow">Page-aware guide</span>
+      <strong id="mv-copilot-title">Copilot</strong>
+    </div>
+    <button class="btn btn--ghost btn--icon" id="mv-copilot-close" type="button"
+            aria-label="Close Copilot">✕</button>
+  </div>
+  <p class="mv-copilot__hello" id="mv-copilot-hello">
+    Ask what this page can do, where its authority stops, or what to verify next.
+  </p>
+  <p class="mv-copilot__egress" id="mv-copilot-egress">
+    If a model provider is configured, this question and recent user questions
+    may be sent to that provider. Do not enter artifact contents, secrets, personal
+    data, credentials, or other restricted evidence.
+  </p>
+  <ul class="mv-copilot__tips" id="mv-copilot-tips"></ul>
+  <div class="mv-copilot__prompts" id="mv-copilot-prompts"
+       aria-label="Suggested Copilot questions"></div>
+  <div class="mv-copilot__log" id="mv-copilot-log"
+       aria-live="polite" aria-relevant="additions text"></div>
+  <form id="mv-copilot-form">
+    <label class="sr-only" for="mv-copilot-input">Ask Copilot about this page</label>
+    <div class="mv-copilot__row">
+      <input class="input" id="mv-copilot-input" autocomplete="off"
+             aria-describedby="mv-copilot-egress"
+             maxlength="2000" placeholder="Ask about this page…">
+      <button class="btn btn--primary" id="mv-copilot-send"
+              type="submit">Send</button>
+    </div>
+    <p class="mv-copilot__note" id="mv-copilot-note" role="status"></p>
+  </form>
+</section>

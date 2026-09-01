@@ -165,6 +165,22 @@ def test_saved_summaries_carry_the_risk_pair(tmp_path, monkeypatch):
     assert row["residual_risk"] == "high"
 
 
+def test_saved_heads_are_bounded_read_only_and_disclose_exact_total(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick.assessment import AssessmentSession, list_saved_heads, save_session
+
+    first = AssessmentSession(type="pia", subject="First")
+    second = AssessmentSession(type="pia", subject="Second")
+    save_session(first)
+    save_session(second)
+
+    rows, total = list_saved_heads(limit=1)
+    assert total == 2
+    assert len(rows) == 1
+    assert rows[0]["id"] in {first.id, second.id}
+    assert "_audit_pending" not in rows[0]
+
+
 def test_record_rejects_bad_answer_and_unknown_question():
     from maverick.assessment import AssessmentSession
 

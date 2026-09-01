@@ -360,6 +360,38 @@ def test_governance_operations_inline_javascript_has_valid_syntax(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_assurance_modules_lazy_load_each_read_group_once():
+    response = client.get("/security/assurance")
+
+    assert response.status_code == 200
+    page = response.text
+    assert '"IntersectionObserver" in window' in page
+    assert 'rootMargin: "240px 0px"' in page
+    assert 'id="governance-operations-load-all"' in page
+    assert "const loadedPanels = new Set();" in page
+    assert "loadedPanels.has(item[0])" in page
+    assert 'panel.addEventListener("focusin"' in page
+    assert "panelObserver.unobserve(panel)" in page
+    assert "Promise.all(panelLoaders.map(loadPanel))" in page
+    for panel_id in (
+        "ai-literacy-panel",
+        "article-73-panel",
+        "ai-business-intake-panel",
+        "ai-cost-roi-panel",
+        "ai-policy-management-panel",
+        "ai-explainability-panel",
+        "ai-insurability-panel",
+        "ai-conformity-panel",
+        "ai-regulated-package-workbench",
+        "ai-benchmark-panel",
+        "ai-discovery-sensors-panel",
+        "ai-identity-governance-panel",
+        "ai-media-provenance-panel",
+        "grc-outbound-panel",
+    ):
+        assert f'["{panel_id}",' in page
+
+
 def test_non_admin_page_withholds_admin_governance_mutations(monkeypatch):
     from maverick_dashboard import auth
 

@@ -43,9 +43,16 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     assert response.status_code == 200
     page = response.text
     assert "Privacy Notice Governance" in page
-    assert "No raw notice content, personal data, secret values, network I/O" in page
-    assert "automatic publication, or live acceptance" in page
+    assert "No raw notice content, personal data, secret values, direct external" in page
+    assert "automatically publish" in page
+    assert "exact-tenant Consent Publishing store" in page
+    assert "external delivery" in page
     assert "/api/v1/privacy/notices" in page
+    assert 'data-copilot-page="/privacy/notice-governance"' in page
+    assert "Local publication runtime" in page
+    assert "/publication-runtime/status" in page
+    assert "/publication-runtime/run-once" in page
+    assert "cannot update a website, SDK, tag manager" in page
     for operation in (
         "policy-set",
         "policy-get",

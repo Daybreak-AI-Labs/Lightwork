@@ -2,9 +2,10 @@
 
 Mounting this module only installs lazy factories.  It does not open the
 projection database, create an audit log, inspect suite-private stores, or
-perform network I/O. A deployment may inject source-owned readers and
-independent verifiers through the two explicit app-state factories; omitted
-or unpaired authorities remain explicitly incomplete.
+perform network I/O. At first enabled use, stock source-owned readers and a
+separately instantiated local verifier cover one canonical history in each of
+the fixed six suites. A deployment may replace them through the two explicit
+app-state factories; omitted or unpaired authorities remain incomplete.
 """
 
 from __future__ import annotations
@@ -14,9 +15,11 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from maverick import unified_audit as audit
+from maverick import unified_audit_custody as custody
 from maverick.audit.writer import AuditLog
 from maverick.paths import canonical_tenant_id, data_dir, tenant_scope
 
+from .stock_unified_audit_sources import build_stock_unified_audit_authorities
 from .unified_audit_sources import (
     SOURCE_IDS,
     AuthoritativeAuditHistoryReader,
@@ -89,20 +92,29 @@ class DashboardUnifiedAuditProjector:
         *,
         projector: audit.UnifiedAuditProjector,
         source_composition: UnifiedAuditSourceComposition,
+        source_authority_mode: str = "injected",
+        custody_runtime: custody.UnifiedAuditCustodyRuntime | None = None,
     ) -> None:
         if not isinstance(projector, audit.UnifiedAuditProjector):
             raise audit.UnifiedAuditConfigError("unified-audit projector is unavailable")
         if not isinstance(source_composition, UnifiedAuditSourceComposition):
             raise audit.UnifiedAuditConfigError("unified-audit source composition is unavailable")
+        if source_authority_mode not in {"injected", "stock"}:
+            raise audit.UnifiedAuditConfigError("unified-audit source authority mode is invalid")
         self._projector = projector
         self._source_composition = source_composition
+        self._source_authority_mode = source_authority_mode
+        self._custody_runtime = custody_runtime
 
     @property
     def store(self) -> audit.UnifiedAuditStore:
         return self._projector.store
 
     def run_all(self, *, worker_id: str):
-        return self._projector.run_all(worker_id=worker_id)
+        results = self._projector.run_all(worker_id=worker_id)
+        if self._custody_runtime is not None:
+            self._custody_runtime.run_once()
+        return results
 
     def run_source(self, source_id: str, *, worker_id: str):
         return self._projector.run_source(source_id, worker_id=worker_id)
@@ -117,8 +129,28 @@ class DashboardUnifiedAuditProjector:
             # status is diagnostic and intentionally never promotes itself.
             complete=core_status.get("complete") is True,
             source_adapter_coverage=adapter_status,
+            source_authority_mode=self._source_authority_mode,
+            stock_source_authorities_installed=(
+                self._source_authority_mode == "stock"
+            ),
+            stock_source_scope="canonical_partial",
             live_source_interoperability_verified=False,
             live_customer_acceptance_verified=False,
+            custody=(
+                self._custody_runtime.readiness()
+                if self._custody_runtime is not None
+                else {
+                    "schema": "lightwork.unified-audit-custody-status.v1",
+                    "enabled": False,
+                    "ready": False,
+                    "automatic_sealing_performed": False,
+                    "independent_operation_verified": False,
+                    "off_host_key_custody_verified": False,
+                    "s3_object_lock_acceptance_verified": False,
+                    "siem_acceptance_verified": False,
+                    "live_customer_acceptance_verified": False,
+                }
+            ),
         )
         limits = dict(core_status.get("limits", {}))
         limits.update(
@@ -138,8 +170,9 @@ def build_unified_audit_projector(
     verifiers: Mapping[str, audit.SourceVerifier],
     config: Mapping[str, Any],
     clock: Callable[[], float] = time.time,
+    source_authority_mode: str = "injected",
 ) -> DashboardUnifiedAuditProjector:
-    """Build one tenant runtime from server-injected, source-owned readers."""
+    """Build one tenant runtime from validated source-owned authorities."""
 
     tenant = canonical_tenant_id(tenant_id)
     settings = audit.require_enabled(config)
@@ -180,9 +213,24 @@ def build_unified_audit_projector(
         sink=sink,
         config=settings,
     )
+    custody_runtime = None
+    try:
+        custody_settings = custody.settings_from(config, tenant_id=tenant)
+    except custody.UnifiedAuditCustodyError as exc:
+        raise audit.UnifiedAuditConfigError(
+            "unified-audit custody configuration is unavailable"
+        ) from exc
+    if custody_settings.enable:
+        custody_runtime = custody.UnifiedAuditCustodyRuntime(
+            tenant_id=tenant,
+            config_loader=lambda: _load_tenant_config(tenant),
+            clock=clock,
+        )
     return DashboardUnifiedAuditProjector(
         projector=projector,
         source_composition=source_composition,
+        source_authority_mode=source_authority_mode,
+        custody_runtime=custody_runtime,
     )
 
 
@@ -216,25 +264,40 @@ def attach_unified_audit_composition(app: Any) -> None:
         config = _load_tenant_config(tenant)
         # Admission happens before any call to data_dir or a SQLite constructor.
         audit.require_enabled(config)
-        readers = _injected_mapping(
-            state,
-            attribute="unified_audit_source_readers_factory",
-            tenant_id=tenant,
-            request=request,
-            unavailable_message="unified-audit source readers are unavailable",
+        injected = any(
+            getattr(state, attribute, None) is not None
+            for attribute in (
+                "unified_audit_source_readers_factory",
+                "unified_audit_source_verifiers_factory",
+            )
         )
-        verifiers = _injected_mapping(
-            state,
-            attribute="unified_audit_source_verifiers_factory",
-            tenant_id=tenant,
-            request=request,
-            unavailable_message="unified-audit source verifiers are unavailable",
-        )
+        if injected:
+            readers = _injected_mapping(
+                state,
+                attribute="unified_audit_source_readers_factory",
+                tenant_id=tenant,
+                request=request,
+                unavailable_message="unified-audit source readers are unavailable",
+            )
+            verifiers = _injected_mapping(
+                state,
+                attribute="unified_audit_source_verifiers_factory",
+                tenant_id=tenant,
+                request=request,
+                unavailable_message="unified-audit source verifiers are unavailable",
+            )
+            source_authority_mode = "injected"
+        else:
+            readers, verifiers = build_stock_unified_audit_authorities(
+                tenant_id=tenant,
+            )
+            source_authority_mode = "stock"
         return build_unified_audit_projector(
             tenant_id=tenant,
             readers=readers,
             verifiers=verifiers,
             config=config,
+            source_authority_mode=source_authority_mode,
         )
 
     state.unified_audit_projector_factory = projector_factory

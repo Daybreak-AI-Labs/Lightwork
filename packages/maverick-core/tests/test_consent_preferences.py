@@ -419,6 +419,161 @@ def test_grant_expiry_is_enforced(store: ConsentPreferenceStore, clock: MutableC
     assert decision.reason == "no_current_explicit_grant"
 
 
+def test_receipt_reactivation_date_is_auditable_and_enforced(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _policy(store)
+    _profile(store)
+    receipt = _record(
+        store,
+        expires_at=NOW + 10,
+        retention_until=NOW + 100,
+    )
+    projected = store.set_receipt_reactivation(
+        "tenant-a",
+        "profile-001",
+        receipt["receipt_id"],
+        NOW + 20,
+        expected_revision=1,
+        idempotency_key="receipt-reactivation-001",
+        actor_sha256=DIGEST_D,
+    )
+    assert projected["reactivation_at"] == NOW + 20
+    assert projected["profile_revision"] == 2
+    assert store.get_receipt_lifecycle(
+        "tenant-a", receipt["receipt_id"]
+    ) == {
+        key: value for key, value in projected.items() if key != "profile_revision"
+    }
+
+    clock.value = NOW + 11
+    assert not store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+    clock.value = NOW + 20
+    decision = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is True
+    assert decision.receipt_id == receipt["receipt_id"]
+
+
+def test_clear_expiration_overlay_restores_receipt_without_rewriting_it(
+    store: ConsentPreferenceStore,
+    clock: MutableClock,
+) -> None:
+    _policy(store)
+    _profile(store)
+    receipt = _record(
+        store,
+        expires_at=NOW + 10,
+        retention_until=NOW + 100,
+    )
+    clock.value = NOW + 11
+    assert not store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+    cleared = store.clear_receipt_expiration(
+        "tenant-a",
+        "profile-001",
+        receipt["receipt_id"],
+        expected_revision=1,
+        idempotency_key="clear-expiration-001",
+        actor_sha256=DIGEST_D,
+    )
+    assert cleared["clear_expiration"] is True
+    assert cleared["profile_revision"] == 2
+    assert store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+    assert store.get_receipt("tenant-a", receipt["receipt_id"])["choices"][0][
+        "expires_at"
+    ] == NOW + 10
+
+
+def test_delete_subject_fails_closed_and_identifier_change_can_restore_authority(
+    store: ConsentPreferenceStore,
+) -> None:
+    _policy(store)
+    _profile(store)
+    _record(store)
+    deleted = store.delete_subject(
+        "tenant-a",
+        "profile-001",
+        expected_revision=1,
+        reason_code="verified-erasure",
+        idempotency_key="delete-subject-001",
+        actor_sha256=DIGEST_D,
+    )
+    assert deleted["status"] == "deleted"
+    assert deleted["tombstone_sha256"] != DIGEST_B
+    decision = store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    )
+    assert decision.allowed is False
+    assert decision.reason == "subject_deleted"
+    authority = store.get_profile_authority("tenant-a", "profile-001")
+    assert authority["subject_sha256"] == deleted["tombstone_sha256"]
+    assert authority["lifecycle"]["status"] == "deleted"
+    with pytest.raises(ConsentConflict, match="deleted profile"):
+        _record(store, expected_revision=2, idem="preference-after-delete")
+
+    restored = store.change_identifier_type(
+        "tenant-a",
+        "profile-001",
+        "known",
+        DIGEST_A,
+        expected_revision=2,
+        idempotency_key="change-identifier-001",
+        actor_sha256=DIGEST_D,
+    )
+    assert restored["status"] == "active"
+    assert restored["revision"] == 3
+    assert store.decide(
+        "tenant-a", "profile-001", "analytics", policy_id="privacy-notice"
+    ).allowed
+
+    with sqlite3.connect(store.path) as connection:
+        live_digest = connection.execute(
+            "SELECT subject_sha256 FROM consent_profiles "
+            "WHERE tenant = ? AND profile_id = ?",
+            ("tenant-a", "profile-001"),
+        ).fetchone()[0]
+    assert live_digest == DIGEST_A
+
+
+def test_linked_profile_identity_kind_change_is_rejected(
+    store: ConsentPreferenceStore,
+) -> None:
+    _profile(store, profile_id="known", subject_sha256=DIGEST_A, idem="known-profile")
+    _profile(
+        store,
+        profile_id="anonymous",
+        identity_kind="anonymous",
+        subject_sha256=DIGEST_B,
+        idem="anonymous-profile",
+    )
+    store.link_profiles(
+        "tenant-a",
+        "known",
+        "anonymous",
+        expected_known_revision=0,
+        expected_anonymous_revision=0,
+        idempotency_key="link-profiles-001",
+    )
+    with pytest.raises(ConsentConflict, match="linked profile"):
+        store.change_identifier_type(
+            "tenant-a",
+            "anonymous",
+            "known",
+            DIGEST_C,
+            expected_revision=1,
+            idempotency_key="change-linked-identifier-001",
+            actor_sha256=DIGEST_D,
+        )
+
+
 @pytest.mark.parametrize("signal", ["gpc", "dnt"])
 def test_privacy_signals_are_asserted_context_and_deny(
     store: ConsentPreferenceStore,

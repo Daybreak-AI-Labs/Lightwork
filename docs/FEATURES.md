@@ -2412,20 +2412,41 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   browser-selected identity or keys. The public exact-origin routes and safe SDK
   renderer expose only granted sections and a signed consumer export. A pinned
   localized theme can apply only contrast-checked colors and plain copy across
-  the CMP and Trust Center. Production resolver composition/signing custody,
-  governed logo/media assets and custom domains, DSR intake, native/cross-
-  channel delivery, live identity, accessibility/usability and customer
-  acceptance are not claimed.
+  the CMP and Trust Center. The separately gated
+  `[consent_preferences.trust_center.branding]` authority adds tenant-private,
+  AES-GCM-sealed and immutable-versioned PNG/JPEG logo/icon custody; bounded
+  structural media/dimension/digest validation; independent review,
+  activation, key-reference rotation, revocation and ciphertext retention;
+  exact DNS/TLS challenge, reverify, revoke and recovery contracts through an
+  injected deployment authority; and an exact enrolled-client/property/
+  publication/host/digest-bound public asset route. It accepts no SVG, HTML,
+  CSS, URL, raw storage path, tenant selector or raw key, and Host never selects
+  a tenant. Live DNS/TLS issuance, CDN/custom-domain routing, accessibility,
+  brand/customer acceptance, DSR intake, native/cross-channel delivery and
+  live identity acceptance are not claimed.
 - **Consent change delivery** (`consent_delivery.py`,
   `consent_delivery_bridge.py`, `consent_delivery_runtime.py`,
+  `consent_delivery_destinations.py`,
+  `consent_delivery_destinations_composition.py`,
   `[consent_preferences.delivery] enable = true`) — bridges immutable consent
   receipts into a durable ordered destination outbox with exact destination
   enrollment/revocation, compare-and-swap authority, bounded retry/backoff,
   dead letters/replay, retention, external HMAC signing custody, and a
   DNS-pinned exact-HTTPS dispatcher. The API and `/consent/delivery` workspace
-  expose operations without accepting raw signing keys. This is a provider-
-  neutral delivery contract; named MarTech/AdTech adapters and live recipient
-  interoperability are not claimed.
+  expose operations without accepting raw signing keys. A separately gated
+  named-adapter composition translates only server-authorized envelopes into
+  closed Salesforce external-ID upserts, Marketo custom-object upserts, Adobe
+  Experience Platform streaming records, or parameter-bound Snowflake SQL API
+  merges. Each binding pins the tenant, destination, public provider origin,
+  credential revision and provider schema; credentials remain deployment-held,
+  redirects are refused, DNS is pinned, completed requests are local no-change,
+  and ambiguous outcomes require an independently injected provider-read
+  authority before replay. The liquid-glass operator surface exposes minimized
+  readiness, operation, ambiguity, reconciliation and integrity views without
+  accepting provider URLs, credentials, raw provider bodies or caller-declared
+  reconciliation outcomes. Provider-specific independent readback adapters,
+  live OAuth/tenant interoperability, schema provisioning, permissions,
+  recovery/scale exercises and recipient/customer acceptance are not claimed.
 - **Consent standards boundary** (`consent_standards.py`) — exact GPC and DNT
   parsing/precedence, policy/purpose/vendor/specification digest bindings,
   MSPA US-National-relevant opt-out projection, Google Consent Mode v2
@@ -2537,8 +2558,14 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   double-reads source/report/finding/review pins and supplies leases, retry,
   dead-letter/replay, revocation/cancellation, ambiguity reconciliation,
   retention, audit/integrity and a network-free-by-default injected worker.
-  Live source/target adapters, proprietary/binary document formats, deployed
-  worker composition and production estate acceptance remain separate.
+  The separately opt-in nested `remediation.scheduler` now owns bounded active-
+  tenant cycles, tenant/principal-derived worker identity, exact built-in target
+  reconciliation before retry, durable interrupted-cycle recovery, interval/
+  jitter/backoff, and process plus cross-process exclusion. Its API/UI status is
+  tenant-gated and content-free. The scheduler never executes provider scans or
+  provider writes. Live source acceptance, proprietary/binary document formats,
+  estate completeness, continuously operated deployment, recovery/scale drills
+  and customer acceptance remain separate.
 - **Privacy regulatory intelligence**
   (`privacy_regulatory_intelligence.py`,
   `[privacy_automation.regulatory_intelligence] enable = true`) — an exact-
@@ -2568,6 +2595,29 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   I/O, provider write, actual identity verification or response delivery and
   retains no raw subject. The separate delivery path below does not turn local
   callback intent into live-provider or estate-completeness acceptance.
+- **Stock privacy-rights source runtime**
+  (`privacy_rights_source_worker.py`, `privacy_rights_source_adapters.py`, and
+  `privacy_rights_source_composition.py`; additionally gated by
+  `[privacy_automation.rights_orchestration.source_adapters] enable = true`) —
+  opt-in Microsoft Graph, Google Workspace, Salesforce and ServiceNow source
+  contracts resolve raw subjects and credentials only through deployment-owned
+  request-time authorities. Mutations use a read-only unique-ID preparation,
+  encrypted exact-target custody and a `BEGIN IMMEDIATE` one-time dispatch
+  reservation that becomes reconciliation-only before provider I/O. Source
+  revision/integrity, adapter and credential references, adapter authority,
+  provider contract, operation digest and target binding remain in immutable
+  evidence. Active-record 404 responses do not prove erasure: Graph deleted
+  items and Salesforce `queryAll` distinguish soft deletion from purge, while
+  providers without a hard-purge contract remain retention-unknown. Retrievals
+  enter the encrypted governed-document vault through an operation-idempotent
+  receipt index. Claims are restricted to configured source IDs, empty polls
+  are not persisted, claim history is minimized and retention-bounded, and
+  runtime batch/lease/retry values are capped by server configuration. Status
+  reports configuration preflight separately from credential-checked
+  executable readiness. Local adversarial tests cover duplicate dispatch,
+  process exit, lease overlap, hold/source drift, identifier reuse, soft-delete
+  retention and post-ingest recovery; live provider/customer acceptance and
+  whole-estate completeness remain external.
 - **OTT/CTV consumer-rights bridge** (`privacy_rights_ott_ctv.py`,
   `privacy_rights_ott_ctv_api.py`,
   `[privacy_automation.ott_ctv_rights] enable = true`) — a selector-free
@@ -2599,10 +2649,22 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   object-byte, credential or provider-write route. The public consent API and
   SDK accept reauthentication only in a dedicated header, claim the server
   grant immediately, and return bounded package bytes only after an injected
-  adapter's content hash matches the pinned package digest. Built-in object
-  storage/decryption and source adapters, production identity/redaction,
-  post-claim delivery recovery and live customer/provider acceptance remain
-  separate work.
+  adapter's content hash matches the pinned package digest. The production
+  composition now lazily opens tenant/principal-bound stores, pins digest,
+  export-signing and package-encryption key references, re-resolves the exact
+  orchestration case/package, and adapts the stock encrypted governed-document
+  vault populated by privacy-rights retrieval. Vault document authority,
+  record type, object reference, package digest, revocation state and package
+  metadata are checked before vault grant issue, again before consumption and
+  again before response bytes are returned. Public subject binding comes only
+  from the independently reauthenticated public profile, while a strict
+  deployment-owned identity verifier must attest the reauthentication receipt.
+  Operator mint remains fail-closed until a production IdP-backed
+  operator-to-consumer mapping is injected; the case/package authority is never
+  accepted as identity proof. Live IdP, KMS/HSM, browser/customer, recovery/load
+  and external object-store acceptance remain separate operational evidence;
+  durable replay after a process failure between one-time server-grant claim
+  and HTTP response completion still requires a separately reviewed protocol.
 - **Privacy-notice governance** (`privacy_notice_governance.py`,
   `[privacy_automation] enable = true` plus
   `[privacy_automation.notice_governance] enable = true`) — an exact-tenant,
@@ -2617,8 +2679,15 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   publish/rollback/withdraw intents through constructor-bound tenant and target
   authority, pins release/rule/notice/bundle digests, and drives the local
   `consent_publishing.py` compare-and-swap lifecycle, including fail-closed
-  withdrawal tombstones and exact lost-response recovery. Both stores remain
-  non-atomically committed. The modules accept no raw notice content or
+  withdrawal tombstones and exact lost-response recovery. The opt-in dashboard
+  production composition adds named exact tenant/property/consent-reference/
+  rule-group-version/notice-resource-version bindings, tenant-private store
+  factories, independent authority re-reads, exact-digest rollback resolution,
+  and a bounded app-lifespan scheduler with durable recovery/retry status plus
+  in-process and cross-process cycle exclusion. Authenticated status and
+  run-once routes and the liquid-glass operator card never accept a tenant or
+  target from the request. See `PRIVACY_NOTICE_PUBLICATION_RUNTIME.md`. Both
+  stores remain non-atomically committed. The modules accept no raw notice content or
   signing-key value and perform no network transport, consent-provider write,
   SDK deployment, site/app/native mutation, legal applicability decision, or
   live acceptance.
@@ -2647,28 +2716,32 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
 - **Named third-party provider-feed runtime and scheduler**
   (`third_party_intelligence_providers.py`,
   `third_party_intelligence_runtime.py`, and
+  `third_party_intelligence_provider_composition.py` plus
   `third_party_intelligence_scheduler.py`; additionally gated by
   `[third_party_management.intelligence.providers] enable = true` and
   `[third_party_management.intelligence.providers.scheduler] enable = true`)
-  — closed normalized feed contracts cover the named RiskRecon,
-  SecurityScorecard and HackNotice concepts plus one deployment-approved
-  generic provider. Each adapter fixes the HTTPS host, GET method, path and
-  response schema; binds tenant, provider, source revision/digest, monitoring
-  capability and credential-key ID; bounds pages, cursors, bytes, records and
-  timeouts; and rejects drift, cycles, duplicates and any explicit
-  incompleteness. The durable tenant-local runtime adds deterministic monitor-
-  revision jobs, leases, retry/backoff, dead-letter/replay, revocation,
-  idempotency, minimized receipts, immutable retained history and audit,
-  integrity checks, and acknowledgement-boundary recovery while writing
-  observations only through the existing source-snapshot and monitor/alert/
-  outbox authority. The cross-tenant supervisor rechecks global and per-tenant
-  opt-in before constructing injected stores or provider dependencies. These
-  are reference normalization/runtime contracts, not bundled vendor-native
-  HTTP clients: deployment must inject a trusted GET transport, transient
-  credential resolver, tenant stores and scheduler startup wiring. No raw
-  credential or provider page is persisted, no provider write or automatic
-  vendor/risk conclusion occurs, and no licensed feed, SupplyWisdom contract,
-  live-provider interoperability, notification operation, live recovery or
+  — closed normalized reference-feed contracts cover the RiskRecon,
+  SecurityScorecard, HackNotice, SupplyWisdom and ISS Corporate Solutions
+  concepts plus one deployment-approved generic provider. SupplyWisdom and ISS
+  require exact deployment-enrolled bare hostnames; no package default guesses
+  a customer-specific licensed authority. Each adapter fixes the HTTPS host,
+  GET method, path and response schema; binds tenant, provider, source
+  revision/digest, monitoring capability and credential-key ID; bounds pages,
+  cursors, bytes, records, and elapsed time; and rejects redirects, drift,
+  cycles, duplicates, malformed schemas and any explicit incompleteness. The
+  bundled production composition uses the project DNS-pinned egress policy,
+  deployment-held secret references and current approved source revisions. It
+  is attached to dashboard startup/shutdown, exposes side-effect-free status
+  plus an admin-only source credential check, and drives the default-off cross-
+  tenant scheduler. The durable tenant-local runtime adds deterministic jobs,
+  leases, retry/backoff, dead-letter/replay, no-change handling, revocation,
+  idempotency, minimized receipts, immutable retained history/audit, integrity
+  checks and acknowledgement-boundary recovery while writing observations only
+  through the existing source-snapshot and monitor/alert/outbox authority.
+  These are normalized reference contracts, not accepted vendor-native
+  integrations. No raw credential or provider page is persisted, no provider
+  write or automatic vendor/risk conclusion occurs, and no licensed/live feed,
+  vendor-native interoperability, notification operation, continuous recovery,
   portfolio-scale exercise, or provider/customer acceptance is claimed.
 - **Third-party lifecycle and conditional assessments**
   (`third_party_lifecycle.py`,
@@ -2717,22 +2790,40 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   certification or live acceptance is included or inferred.
 - **Tech Risk & Compliance continuous evidence**
   (`trc_evidence_collectors.py`, `trc_continuous_evidence.py`,
-  `trc_continuous_evidence_scheduler.py`, and the strict operator API;
+  `trc_stock_evidence_collectors.py`,
+  `trc_stock_evidence_composition.py`,
+  `trc_continuous_evidence_scheduler.py`, the strict operator API and the
+  `/compliance/continuous-evidence` liquid-glass workbench;
   `[tech_risk_compliance.continuous_evidence] enable = true`) — independently
   approved collector definitions and exact asset, credential, control and
-  capability pins feed a tenant-local leased job authority. The built-in local
-  SOC 2 observation collector is digest-only; explicit injection seams exist
-  for additional collectors and credential resolution, but a deployment must
-  actually install them. The runtime preserves
+  capability pins feed a tenant-local leased job authority. In addition to the
+  digest-only local SOC 2 observation collector, the config-driven production
+  composition installs normalized read-only collectors for AWS Security Hub,
+  AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command
+  Center, GitHub security streams and Okta posture. Each source manifest pins
+  an independently created enrollment and collector-definition version and
+  integrity digest, enrolled origin/scope, capability revision, collector key,
+  credential reference and control bindings. The shipped HTTP path is DNS-
+  pinned and redirect-free, applies page/time/byte limits, resolves credential
+  values only at execution, and persists normalized digest-only evidence rather
+  than raw provider responses. The runtime preserves
   terminal cursor/completeness state, normalized observation equality,
   incomplete/truncated outcomes, retries, recovery, dead letters/replay,
   cancellation, retention, immutable histories, operations and hash-chained
   audit. A bounded active-tenant scheduler is separately gated, rejects
   overlapping cycles and invalid tenant aliases, isolates job/tenant failures,
-  and is composed into dashboard startup/shutdown. Observations are technical
-  evidence only: the module writes no compliance conclusion, certification or
-  control-implementation state, persists no raw provider payload or credential,
-  and has no broad live-estate/customer acceptance.
+  and is composed into dashboard startup/shutdown with status and an explicit
+  run-once operator action. Config lint, installer selection and Copilot cover
+  the same closed provider set; the installer intentionally does not invent
+  tenant scopes, definition digests, enrollment authority or credential
+  references. Readiness is a configuration/credential-reference preflight: it
+  performs no provider request or credential-value resolution, and each job
+  still rechecks the current approved definition and active exact enrollment.
+  Observations are technical evidence only: the module writes no compliance
+  conclusion, certification or control-implementation state. No live provider
+  tenant was contacted and provider interoperability, estate completeness,
+  continuous operation, outage/recovery, concurrency, scale and customer or
+  auditor acceptance remain unverified.
 - **Tech Risk & Compliance evergreen policy links**
   (`policy_publication_links.py`,
   `[tech_risk_compliance.policy_publication_links] enable = true`) — immutable
@@ -4041,6 +4132,19 @@ tested without spawning py-spy.
   summaries, transparent justification components, criterion assessments,
   gaps/remediation, provenance and human-review state. A distinct authorized
   reviewer releases results; revocation, retention and integrity are explicit.
+  The tenant-configured authority-history budget fails closed while preserving
+  a bounded terminal-revocation reserve. Case quotas count only live,
+  unrevoked artifact authority, so expiry releases capacity without erasing
+  retained history. Maintenance purges retention-due analysis data and then
+  compacts retention-due artifact, criteria and reviewer authority chains into
+  digest-only replay tombstones; after a second retention interval it folds
+  expired tombstones into a constant-size rolling anchor and VACUUMs/truncates
+  the active SQLite registry. Local adapter authority remains on its explicit
+  rotation/revocation path and is never silently bootstrapped by compaction.
+  Status reports only the current tenant's enabled media and configured byte
+  limits. Legacy XLS/OCR availability is true only when that parser is enabled
+  for the tenant and the side-effect-free operational readiness check succeeds;
+  configuration alone is not reported as runtime availability.
   The schema-bound API result covers the public `aiEvidenceAnalysisResult`
   outcome locally without claiming OneTrust wire compatibility, calibrated
   detection quality, preview entitlement or customer acceptance.
@@ -4064,15 +4168,29 @@ tested without spawning py-spy.
   section, question and time. Comments do not mutate the assessment follow-up
   workflow. This is a local contract, not accepted OneTrust API compatibility.
 - **California DROP request/status management**
-  (`privacy_drop_management.py`, `/api/v1/privacy/drop`, opt-in
+  (`privacy_drop_management.py`, `/api/v1/privacy/drop`,
+  `/api/v1/privacy/drop/authority`, opt-in
   `[privacy_automation.drop_management]`) — independently resolves exact
   tenant, registered-broker, subject, request, template and principal authority;
   composes `DataDeletion` or `OptOut` through the existing privacy-rights intake
   callback; and records evidence-bound `PENDING`, `EXEMPTED`, `DELETED`,
   `OPTED_OUT` or `NOT_FOUND` outcomes. Only opaque references and digests are
-  durable. It does not scrape DROP, accept caller-supplied subject identity, or
-  prove live California authority/broker interoperability, subject matching,
-  legal/regulator acceptance or production delivery.
+  durable. The mounted liquid-glass workbench and Copilot context cover broker
+  enrollment/revocation, record import/revocation, outcome proposal/approval,
+  revisions, integrity and principal-binding key rotation/retirement/migration.
+  Every authority mutation uses a durable proposal, server-resolved tenant and
+  actor, independent administrator approval, CAS and idempotency. Versioned
+  secret-provider/KMS key references keep current and previous bindings
+  verifiable; retained dependencies block retirement and unknown, retired or
+  revoked revisions fail closed. An opt-in managed scheduler provides a durable
+  cross-process lease, retry/recovery state, per-tenant failure isolation and
+  lifespan shutdown while preserving the one-shot coordinator. Readiness
+  separately reports `configured_for_attempt`, `locally_operational`, authority
+  counts, scheduler health and `request_executable`; zero active records means
+  no request can execute. It does not scrape DROP, accept raw caller-supplied
+  subject identity or key material, or prove live California authority/broker
+  interoperability, subject matching, legal/regulator acceptance or production
+  delivery.
 
 ## Unified cross-suite audit projection
 
@@ -4084,12 +4202,20 @@ tested without spawning py-spy.
   accepts only closed action and limitation codes rather than raw payloads,
   free-form actions or raw actor/resource identifiers.
 - **Separate source and verification authority**
-  (`unified_audit_sources.py`): a deployment must inject an authoritative,
-  tenant-bound reader and a separate verifier for each source. A source can be
-  complete only when its signed-and-anchored verification names the exact
-  source authority, schema, verifier identity, trust-root revision and source
-  key. A reader without a verifier, a verifier without a reader, an incomplete
-  page or a self-asserted/unkeyed digest remains visibly incomplete.
+  (`suite_audit_capture.py`, `stock_suite_audit_capture.py`,
+  `stock_unified_audit_sources.py` and `unified_audit_sources.py`): the reusable
+  core provider exposes canonical digest-only histories from the AI-governance
+  loop, consent outbox, data-use mutation ledger, signed privacy audit, TRC
+  continuous-evidence audit and third-party lifecycle audit without importing
+  the dashboard or audit sink. Lightwork installs thin lazy page readers plus
+  separately instantiated local re-verifiers over that provider. A deployment
+  can replace the complete pair
+  through the existing app-state factories. Exact source revision, capture
+  digest, head, count, schema, completeness and retention limitations are
+  double-read; drift or tampering fails closed. A source can become complete
+  only when signed-and-anchored verification names the exact source authority,
+  verifier identity, trust-root revision and source key. A self-asserted local
+  re-verification remains visibly incomplete.
 - **Stable, receipt-bound projection:** canonical source records receive stable
   projection identifiers, and every page -- including an empty terminal page
   -- produces a mandatory signed page receipt. The tenant-bound strict sink
@@ -4105,12 +4231,25 @@ tested without spawning py-spy.
   rotation authorization. A bounded lifespan scheduler uses only active tenant
   registry records, a stable tenant-bound worker identity and one six-source
   reconciliation run per enabled tenant per cycle.
-- **Boundary:** Lightwork does not ship authoritative readers for the six domain
-  stores or independently operated signed/anchored verifier deployments. The
-  local SQLite history linkage is not external WORM storage or a cross-day,
-  off-host anchor; signing keys do not have accepted off-host custody here.
-  Live scheduler crash/recovery, concurrency, scale, provider completeness and
-  customer/SIEM operation remain unverified.
+- **Managed custody composition** (`unified_audit_custody.py`): the separately
+  opted-in `[audit.unified.custody]` run uses the existing checkpoint, WORM and
+  SIEM primitives under one strict tenant-local cross-process lock. It verifies
+  signed day chains and cross-day anchors, stages a tenant-exact checkpoint,
+  can push only already anchored and already sealed closed days to a
+  tenant-namespaced local or S3 Object-Lock target, and can forward bounded
+  unified-projection batches to an exact tenant HTTPS path. A durable,
+  integrity-linked cursor provides at-least-once recovery; authority revision
+  rollback, same-revision drift, mid-run config drift and cursor mismatch fail
+  closed. The runtime never seals files automatically.
+- **Boundary:** The six stock readers cover one canonical authority per suite,
+  not every module/history within each suite, and therefore report
+  `source_history_incomplete` and `source_retention_unverified`. Their separate
+  verifier process boundary has not been independently operated or accepted.
+  Tenant-local checkpoint staging is not independently operated assurance, and
+  configured S3/SIEM code is not proof of a live Object-Lock account, off-host
+  key custody, provider acceptance, or customer operation. Live scheduler
+  crash/recovery, concurrency, scale and full provider/source completeness
+  remain unverified.
 
 ## Distribution & install
 

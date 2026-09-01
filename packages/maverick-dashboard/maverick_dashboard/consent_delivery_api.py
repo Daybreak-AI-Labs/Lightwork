@@ -160,6 +160,80 @@ def _authority():
     return ops, tenant, _delivery_store(ops, tenant)
 
 
+def _named_destination_adapters_enabled() -> bool:
+    from maverick import config
+
+    try:
+        if config.config_source_errors():
+            return False
+        consent = config.load_config().get("consent_preferences", {})
+    except Exception:
+        return False
+    delivery = consent.get("delivery") if isinstance(consent, Mapping) else None
+    destinations = (
+        delivery.get("destinations") if isinstance(delivery, Mapping) else None
+    )
+    return isinstance(destinations, Mapping) and destinations.get("enable") is True
+
+
+def _named_destination_transport(
+    request: Request,
+    *,
+    tenant_id: str,
+    delivery_store: Any,
+    destination_ids: list[str],
+):
+    """Resolve one ready runtime without allowing browser-supplied authority."""
+
+    if not _named_destination_adapters_enabled():
+        return None
+    factory = getattr(request.app.state, "consent_destination_runtime_factory", None)
+    if not callable(factory):
+        raise HTTPException(
+            status_code=503,
+            detail="named consent destination runtime is unavailable",
+        )
+    try:
+        runtime = factory(
+            tenant_id=tenant_id,
+            delivery_store=delivery_store,
+        )
+        readiness = runtime.transport.readiness()
+        if not isinstance(readiness, Mapping) or readiness.get("ready") is not True:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "named consent destinations are not ready; verify credential "
+                    "placement and install an independent reconciliation authority"
+                ),
+            )
+        for destination_id in destination_ids:
+            runtime.registry.binding(destination_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        from maverick.consent_delivery_destinations import (
+            ConsentDestinationAdapterError,
+        )
+
+        if isinstance(exc, ConsentDestinationAdapterError):
+            raise HTTPException(
+                status_code=422,
+                detail="one or more destinations have no named provider binding",
+            ) from exc
+        from .consent_delivery_destinations_composition import (
+            ConsentDestinationCompositionError,
+        )
+
+        if isinstance(exc, (ConsentDestinationCompositionError, ValueError)):
+            raise HTTPException(
+                status_code=503,
+                detail="named consent destination composition is invalid",
+            ) from exc
+        raise
+    return runtime.transport
+
+
 @router.post("/destinations/{destination_id}", status_code=201)
 async def enroll_destination(
     request: Request,
@@ -263,11 +337,17 @@ async def dispatch(request: Request, body: DispatchIn) -> dict[str, Any]:
     """Run one explicit bridge/send batch; this may perform external HTTPS I/O."""
 
     require_global_permission(request, "admin")
-    _ops()
-    tenant = _tenant_id()
+    ops, tenant, store = _authority()
     from maverick import consent_delivery_runtime
 
     try:
+        transport = await run_in_threadpool(
+            _named_destination_transport,
+            request,
+            tenant_id=tenant,
+            delivery_store=store,
+            destination_ids=body.destination_ids,
+        )
         return await run_in_threadpool(
             consent_delivery_runtime.run_delivery_once,
             tenant,
@@ -276,12 +356,14 @@ async def dispatch(request: Request, body: DispatchIn) -> dict[str, Any]:
             sync_limit=body.sync_limit,
             delivery_limit=body.delivery_limit,
             lease_seconds=body.lease_seconds,
+            preference_store=_preference_store(tenant),
+            delivery_store=store,
+            transport=transport,
         )
     except Exception as exc:
-        from maverick.consent_delivery import ConsentDeliveryError
         from maverick.consent_delivery_bridge import ConsentDeliveryBridgeError
 
-        if isinstance(exc, (ConsentDeliveryError, ConsentDeliveryBridgeError)):
+        if isinstance(exc, (ops.ConsentDeliveryError, ConsentDeliveryBridgeError)):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         raise
 

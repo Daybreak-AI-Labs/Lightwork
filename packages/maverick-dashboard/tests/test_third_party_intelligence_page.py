@@ -45,7 +45,7 @@ def test_page_exposes_complete_governed_workflows_and_exact_boundaries(
     assert response.status_code == 200
     page = response.text
     assert "Third-party Intelligence" in page
-    assert "No bundled corpus or live feed" in page
+    assert "No bundled corpus" in page
     assert "No provider acceptance" in page
     assert "No silent match dismissal" in page
     assert "Low-risk autoapproval is conditional" in page
@@ -54,6 +54,13 @@ def test_page_exposes_complete_governed_workflows_and_exact_boundaries(
     assert "external-operation acceptance" in page
     assert "different authenticated human" in page
     assert "/api/v1/third-party/intelligence" in page
+    assert "Named provider runtime readiness" in page
+    assert "RiskRecon" in page
+    assert "SupplyWisdom" in page
+    assert "ISS Corporate Solutions" in page
+    assert "/provider-runtime/status" in page
+    assert "/provider-runtime/sources/" in page
+    assert "ready for an attempt" in page
     for heading in (
         "Source approval, revocation, and snapshots",
         "Pseudonymous vendor and relationship graph",
@@ -104,6 +111,9 @@ def test_page_exposes_complete_governed_workflows_and_exact_boundaries(
     for operation in operations:
         assert f'value="{operation}"' in page
     assert "tpi-load-status" in page
+    assert "tpi-load-provider-status" in page
+    assert "tpi-provider-source-readiness" in page
+    assert "tpi-provider-output" in page
     assert "tpi-output" in page
     assert "textContent" in page
     assert "window.confirm" in page
@@ -156,7 +166,14 @@ def test_main_dashboard_mounts_third_party_intelligence_page_api_and_visibility(
     paths = set(app.openapi()["paths"])
     assert "/third-party/intelligence" in paths
     assert "/api/v1/third-party/intelligence/status" in paths
+    assert "/api/v1/third-party/intelligence/provider-runtime/status" in paths
+    assert (
+        "/api/v1/third-party/intelligence/provider-runtime/sources/"
+        "{source_id}/readiness"
+    ) in paths
     assert "/api/v1/third-party/intelligence/outbox/run" in paths
+    assert app.state.third_party_intelligence_provider_runtime is not None
+    assert app.state.third_party_intelligence_feed_scheduler is not None
     page = page_for("/third-party/intelligence")
     assert page is not None
     assert page["floor"] == "operate"

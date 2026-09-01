@@ -11,7 +11,14 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 
-def _write(cfg_dir, monkeypatch, advanced, capabilities=None):
+def _write(
+    cfg_dir,
+    monkeypatch,
+    advanced,
+    capabilities=None,
+    security_suite=None,
+    assessments=None,
+):
     monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", cfg_dir)
     monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", cfg_dir / ".env")
     monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
@@ -23,6 +30,8 @@ def _write(cfg_dir, monkeypatch, advanced, capabilities=None):
         sandbox={"backend": "local", "workdir": "~/ws"},
         keys={"ANTHROPIC_API_KEY": "x"},
         capabilities=capabilities or {}, advanced=advanced,
+        security_suite=security_suite,
+        assessments=assessments,
     )
     return (cfg_dir / "config.toml").read_text()
 
@@ -112,7 +121,104 @@ def test_unified_audit_is_default_off_and_enables_signed_six_suite_projection(
         "max_attempts": 5,
         "retry_backoff_seconds": 30,
         "poll_seconds": 60,
+        "custody": {
+            "enable": True,
+            "authority_revision": 1,
+            "checkpoint_enable": True,
+            "worm_enable": False,
+            "siem_enable": False,
+            "max_siem_events_per_run": 500,
+            "retry_backoff_seconds": 30,
+            "max_retry_backoff_seconds": 3600,
+        },
     }
+
+
+def test_pick_advanced_can_enable_shared_governance_inventory(monkeypatch):
+    from maverick_installer import wizard
+
+    prompts = []
+
+    def confirm(prompt, *, default=False):
+        prompts.append((prompt, default))
+        return "shared governance inventory" in prompt.lower()
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(
+        wizard,
+        "_q_select",
+        lambda *args, default=None, **kwargs: default,
+    )
+    monkeypatch.setattr(
+        wizard,
+        "_q_text",
+        lambda *args, default="", **kwargs: default,
+    )
+
+    advanced = wizard.pick_advanced()
+
+    assert advanced["governance_inventory"] is True
+    assert any(
+        "shared governance inventory" in prompt.lower() and default is False
+        for prompt, default in prompts
+    )
+
+
+def test_governance_inventory_writes_closed_bounds_and_one_entity_graph(
+    tmp_path,
+    monkeypatch,
+):
+    cfg = _write(tmp_path, monkeypatch, {"governance_inventory": True})
+
+    assert cfg.count("[entity_graph]") == 1
+    parsed = tomllib.loads(cfg)
+    assert parsed["entity_graph"] == {"enable": True}
+    assert parsed["governance_inventory"] == {
+        "enable": True,
+        "retention_seconds": 31_536_000,
+        "max_source_records": 10_000,
+        "max_entities": 20_000,
+        "max_relationships": 40_000,
+        "max_export_bytes": 10_485_760,
+        "max_snapshots": 10_000,
+    }
+
+
+def test_governance_inventory_reconciles_entity_graph_decline_once(
+    tmp_path,
+    monkeypatch,
+):
+    assessments = {"entity_graph": False}
+
+    cfg = _write(
+        tmp_path,
+        monkeypatch,
+        {"governance_inventory": True},
+        assessments=assessments,
+    )
+
+    assert cfg.count("[entity_graph]") == 1
+    parsed = tomllib.loads(cfg)
+    assert parsed["entity_graph"] == {"enable": True}
+    assert parsed["governance_inventory"]["enable"] is True
+    assert assessments == {"entity_graph": False}
+
+
+def test_governance_inventory_decline_preserves_entity_graph_opt_out(
+    tmp_path,
+    monkeypatch,
+):
+    parsed = tomllib.loads(
+        _write(
+            tmp_path,
+            monkeypatch,
+            {"governance_inventory": False},
+            assessments={"entity_graph": False},
+        )
+    )
+
+    assert "governance_inventory" not in parsed
+    assert parsed["entity_graph"] == {"enable": False}
 
 
 def test_kernel_modules_read_what_the_wizard_writes(tmp_path, monkeypatch):
@@ -657,6 +763,23 @@ def test_audit_sign_writes_and_is_read(tmp_path, monkeypatch):
     # explicit=None -> falls through to MAVERICK_AUDIT_SIGN env (unset) ->
     # [audit] sign in the config the wizard just wrote.
     assert _resolve_signing(None) is True
+
+
+def test_document_access_derives_signed_audit_dependency(tmp_path, monkeypatch):
+    cfg = _write(
+        tmp_path,
+        monkeypatch,
+        {},
+        security_suite={
+            "administration_document_access": True,
+            "incident_attachment_metadata": True,
+        },
+    )
+    parsed = tomllib.loads(cfg)
+
+    assert parsed["audit"]["sign"] is True
+    assert parsed["administration_document_access"]["enable"] is True
+    assert parsed["incident_attachment_metadata"]["enable"] is True
 
 
 def test_anonymous_logs_writes_and_is_read(tmp_path, monkeypatch):

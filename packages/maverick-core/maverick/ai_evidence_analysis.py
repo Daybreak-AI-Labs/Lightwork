@@ -2706,6 +2706,53 @@ class EvidenceAnalysisStore:
         with self._connect() as connection:
             return self._current(connection, selected)
 
+    def list_analyses(
+        self,
+        tenant_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> tuple[EvidenceAnalysisRecord, ...]:
+        """Return bounded current heads after full stored-record validation."""
+
+        self._check_gate()
+        self._require_tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        clauses = ["tenant_sha256=?"]
+        values: list[object] = [self._tenant_sha256]
+        if status is not None:
+            if status not in _STATUSES:
+                raise EvidenceAnalysisValidationError(
+                    "evidence-analysis status is unsupported"
+                )
+            clauses.append("status=?")
+            values.append(status)
+        values.append(bounded)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM ai_evidence_analyses WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY analysis_id LIMIT ?",
+                tuple(values),
+            ).fetchall()
+        return tuple(self._row_record(row, "evidence analysis") for row in rows)
+
+    def context_record_count(self, tenant_id: str) -> int:
+        """Return the exact tenant current-head count for bounded projections."""
+
+        self._check_gate()
+        self._require_tenant(tenant_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM ai_evidence_analyses WHERE tenant_sha256=?",
+                (self._tenant_sha256,),
+            ).fetchone()
+        if row is None or not isinstance(row[0], int) or row[0] < 0:
+            raise EvidenceAnalysisIntegrityError(
+                "evidence-analysis record count is invalid"
+            )
+        return int(row[0])
+
     def get_released(self, tenant_id: str, analysis_id: str) -> EvidenceAnalysisRecord:
         """Return only current, unexpired evidence released by a human reviewer."""
 

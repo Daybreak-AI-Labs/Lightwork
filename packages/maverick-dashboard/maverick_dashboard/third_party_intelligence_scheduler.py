@@ -181,6 +181,9 @@ class ThirdPartyFeedScheduler:
         self._lock = threading.Lock()
         self._stop: threading.Event | None = None
         self._thread: threading.Thread | None = None
+        self._cycles = 0
+        self._last_dispatch_complete: bool | None = None
+        self._last_error_code: str | None = None
 
     def start(self) -> bool:
         from maverick.config import config_source_errors, load_global_config
@@ -208,13 +211,37 @@ class ThirdPartyFeedScheduler:
     def _loop(self, stop: threading.Event, actor: str, poll_seconds: float) -> None:
         while not stop.is_set():
             try:
-                scheduler_cycle(self._dependencies, actor_ref=actor)
+                complete = scheduler_cycle(self._dependencies, actor_ref=actor)
+                with self._lock:
+                    self._cycles += 1
+                    self._last_dispatch_complete = bool(complete)
+                    self._last_error_code = (
+                        None if complete else "tenant_dispatch_incomplete"
+                    )
             except Exception as exc:  # noqa: BLE001 - visible tenant-isolated degradation
+                with self._lock:
+                    self._cycles += 1
+                    self._last_dispatch_complete = False
+                    self._last_error_code = "scheduler_cycle_failed"
                 log.warning(
                     "third-party feed scheduler failed safely: %s",
                     type(exc).__name__,
                 )
             stop.wait(poll_seconds)
+
+    def status(self) -> Mapping[str, object]:
+        """Return process-local, tenant-free scheduler health only."""
+
+        with self._lock:
+            return {
+                "schema": "lightwork.third-party-feed-scheduler-status.v1",
+                "running": self._thread is not None and self._thread.is_alive(),
+                "cycles": self._cycles,
+                "last_dispatch_complete": self._last_dispatch_complete,
+                "last_error_code": self._last_error_code,
+                "tenant_identifiers_returned": False,
+                "provider_errors_returned": False,
+            }
 
     def stop(self, *, timeout: float = 5.0) -> bool:
         with self._lock:

@@ -1090,6 +1090,19 @@ class TestIncidentRegister:
         listed = {x["id"]: x for x in privacy_ops.list_incidents()}
         assert listed[undecided["id"]]["clock_breached"] is True
         assert listed[decided["id"]]["clock_breached"] is False
+
+    def test_context_heads_are_bounded_read_only_and_count_every_register(self):
+        privacy_ops.open_incident("First")
+        privacy_ops.open_incident("Second")
+        heads = privacy_ops.privacy_program_context_heads(
+            limit_per_register=1,
+            register_names=("incidents",),
+        )
+        assert set(heads) == {"incidents"}
+        assert heads["incidents"]["total_records"] == 2
+        assert len(heads["incidents"]["records"]) == 1
+
+
 class TestPdfExtraction(TestPdfExtraction):  # noqa: F811
     """Extend the concurrent PDF suite without duplicating inherited tests."""
 

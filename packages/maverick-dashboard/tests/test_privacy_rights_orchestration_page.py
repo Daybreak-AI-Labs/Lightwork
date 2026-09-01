@@ -43,9 +43,10 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     assert response.status_code == 200
     page = response.text
     assert "Privacy Rights Orchestration" in page
-    assert "No network calls, provider writes, identity verification" in page
-    assert "Callbacks are worker intent only" in page
-    assert "never persisted or returned" in page
+    assert "Provider execution stays closed" in page
+    assert "Microsoft Graph, Google Workspace, Salesforce, and" in page
+    assert "ambiguity-safe reconciliation" in page
+    assert "never\n  returned" in page
     assert "/api/v1/privacy/rights-orchestration" in page
     for operation in (
         "source-enroll",
@@ -56,9 +57,12 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
         "task-plan",
         "destructive-approve",
         "callback-claim",
+        "callback-list",
         "callback-fail",
         "callback-ack",
         "callback-requeue",
+        "source-runtime-run",
+        "source-runtime-reconcile",
         "source-evidence",
         "manifest-build",
         "package-create",

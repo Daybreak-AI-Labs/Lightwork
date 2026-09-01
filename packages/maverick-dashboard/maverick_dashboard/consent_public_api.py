@@ -2472,6 +2472,12 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
 ) -> APIRouter:
     """Create the isolated public router with injectable trust dependencies."""
 
+    from .consent_global_opt_out_public_adapter import (
+        GlobalOptOutPublicRouteDependencies,
+        attach_consent_global_opt_out_public_routes,
+        global_opt_out_preflight_contracts,
+    )
+
     deps = dependencies or default_public_consent_dependencies()
     router = APIRouter(prefix="/api/v1/public/consent", tags=["public-consent"])
 
@@ -2522,8 +2528,14 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             "rights-deliveries/redeem": {"POST"},
             "privacy-signals": {"POST"},
         }
+        contracts.update(global_opt_out_preflight_contracts())
         if re.fullmatch(
             r"rights-requests/[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}",
+            resource_path,
+        ):
+            contracts[resource_path] = {"GET"}
+        if re.fullmatch(
+            r"trust-center/brand-assets/[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}/[0-9a-f]{64}",
             resource_path,
         ):
             contracts[resource_path] = {"GET"}
@@ -4169,6 +4181,106 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             raise HTTPException(status_code=503, detail="trust center unavailable")
         return dict(result)
 
+    def branding_material(
+        request: Request,
+        authority: _Authority,
+        contract: _Contract,
+    ) -> tuple[Any, Any]:
+        """Resolve branding from credential/publication authority, never Host."""
+
+        from maverick.trust_center_branding import BrandPublicationAuthority
+
+        gate = getattr(request.app.state, "trust_center_branding_gate", None)
+        factory = getattr(request.app.state, "trust_center_branding_store_factory", None)
+        if not callable(gate) or not callable(factory) or gate() is not True:
+            raise HTTPException(status_code=404, detail="not found")
+        binding = authority.binding
+        publication = contract.public_configuration.get("publication")
+        if not isinstance(publication, Mapping) or not isinstance(binding.target_origin, str):
+            raise HTTPException(status_code=409, detail=_CONTRACT_DETAIL)
+        exact = BrandPublicationAuthority(
+            tenant_id=binding.tenant_id,
+            property_id=binding.property_id,
+            property_revision=binding.property_revision,
+            publication_id=str(publication.get("publication_id", "")),
+            publication_revision=int(publication.get("publication_revision", 0)),
+            publication_sha256=binding.publication_sha256,
+            bundle_sha256=binding.bundle_sha256,
+            client_credential_id=binding.credential_id,
+            client_revision=binding.revision,
+            client_record_sha256=binding.record_sha256,
+            public_origin=binding.target_origin,
+        ).normalized()
+        try:
+            store = factory(
+                tenant_id=binding.tenant_id,
+                request=request,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="trust center branding unavailable") from exc
+        return store, exact
+
+    async def brand_projection_response(
+        request: Request,
+        authority: _Authority,
+        contract: _Contract,
+    ) -> dict[str, Any] | None:
+        from maverick import trust_center_branding as brand_ops
+
+        try:
+            store, exact = branding_material(request, authority, contract)
+            projection = await run_in_threadpool(store.resolve_projection, exact)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        except brand_ops.BrandingNotFound:
+            return None
+        except brand_ops.BrandingConflict:
+            return {
+                "schema": "lightwork.public-trust-center-brand.v1",
+                "available": False,
+                "reason": "binding_changed",
+            }
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="trust center branding unavailable",
+            ) from exc
+        asset_url = (
+            "/api/v1/public/consent/trust-center/brand-assets/"
+            f"{projection.projection_id}/{projection.asset_content_sha256}"
+        )
+        return {
+            "schema": "lightwork.public-trust-center-brand.v1",
+            "available": True,
+            "projection_id": projection.projection_id,
+            "projection_revision": projection.projection_revision,
+            "publication_sha256": projection.publication_sha256,
+            "public_origin": projection.public_origin,
+            "public_host": projection.public_host,
+            "asset": {
+                "kind": projection.asset_kind,
+                "media_type": projection.asset_media_type,
+                "width": projection.asset_width,
+                "height": projection.asset_height,
+                "content_sha256": projection.asset_content_sha256,
+                "url": asset_url,
+            },
+            "custom_domain": (
+                {
+                    "claim_id": projection.domain_claim_id,
+                    "claim_version": projection.domain_claim_version,
+                    "authority_sha256": projection.domain_authority_sha256,
+                    "deployment_sha256": projection.domain_deployment_sha256,
+                    "host": projection.public_host,
+                }
+                if projection.domain_claim_id is not None
+                else None
+            ),
+            "host_header_tenant_inference": False,
+        }
+
     async def rights_intake_call(
         store: Any,
         call: Callable[[], Any],
@@ -4224,8 +4336,61 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
     ) -> dict[str, Any]:
         store, _ = await trust_center_store(request, authority)
         result = await trust_center_call(store.snapshot)
+        contract = await active_contract(request, authority)
+        brand = await brand_projection_response(request, authority, contract)
+        if brand is not None:
+            result["brand"] = brand
         _set_private_response_headers(response, request=request, binding=authority.binding)
         return _bounded_response(result)
+
+    @router.get("/trust-center/brand-assets/{projection_id}/{content_sha256}")
+    async def consumer_trust_center_brand_asset(
+        projection_id: Annotated[
+            str,
+            ApiPath(
+                min_length=1,
+                max_length=128,
+                pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+            ),
+        ],
+        content_sha256: Annotated[
+            str,
+            ApiPath(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"),
+        ],
+        request: Request,
+        authority: _Authority = Depends(authenticate),  # noqa: B008
+    ) -> Response:
+        from maverick import trust_center_branding as brand_ops
+
+        contract = await active_contract(request, authority)
+        try:
+            store, exact = branding_material(request, authority, contract)
+            asset = await run_in_threadpool(
+                store.read_public_asset,
+                exact,
+                projection_id,
+                content_sha256,
+            )
+        except (brand_ops.BrandingNotFound, brand_ops.BrandingConflict) as exc:
+            raise HTTPException(status_code=404, detail="not found") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="trust center branding unavailable",
+            ) from exc
+        response = Response(content=asset.content, media_type=asset.projection.asset_media_type)
+        response.headers.update(
+            {
+                "Cache-Control": "private, max-age=0, must-revalidate",
+                "Content-Security-Policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
+                "ETag": f'"sha256-{asset.projection.asset_content_sha256}"',
+                "X-Content-Type-Options": "nosniff",
+                "X-Lightwork-Publication-SHA256": asset.projection.publication_sha256,
+            }
+        )
+        return response
 
     @router.post("/trust-center/exports")
     async def export_consumer_trust_center(
@@ -4614,6 +4779,23 @@ def create_consent_public_router(  # noqa: C901 - closure wires one isolated rou
             }
         )
 
+    attach_consent_global_opt_out_public_routes(
+        router,
+        GlobalOptOutPublicRouteDependencies(
+            authenticate=authenticate,
+            profile_authority=profile_authority,
+            active_contract=active_contract,
+            rights_intake_material=rights_intake_material,
+            public_authority_reauthenticator=public_authority_reauthenticator,
+            set_private_headers=lambda response, request, authority: (
+                _set_private_response_headers(
+                    response,
+                    request=request,
+                    binding=authority.binding,
+                )
+            ),
+        ),
+    )
     return router
 
 

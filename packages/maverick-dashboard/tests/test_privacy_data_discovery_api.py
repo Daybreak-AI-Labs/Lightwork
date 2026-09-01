@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from maverick import privacy_data_discovery as discovery
 from maverick_dashboard import privacy_data_discovery_api
@@ -138,6 +138,22 @@ def _source_payload(*, kind: str = "structured") -> dict[str, object]:
         "evidence_key_env": "PRIVACY_EVIDENCE_HMAC_KEY",
         "expected_revision": 0,
         "idempotency_key": f"enroll-{kind}-v1",
+    }
+
+
+def _stock_readiness(_tenant_id: str) -> dict[str, object]:
+    return {
+        "configured": True,
+        "ready": True,
+        "structured_providers": ["servicenow_cmdb"],
+        "unstructured_providers": ["aws_s3"],
+        "remediation_outbox_enabled": True,
+        "data_map_target_enabled": True,
+        "approved_review_callback_durable_outbox": True,
+        "retry_worker_factory_installed": True,
+        "remediation_scheduler_enabled": True,
+        "status_probe_opened_store": False,
+        "status_probe_invoked_provider": False,
     }
 
 
@@ -382,7 +398,7 @@ def test_fail_dead_letter_replay_and_revoked_source_are_controlled(environment) 
 def test_four_eyes_review_uses_server_evidence_and_approved_only_callback(
     environment,
 ) -> None:
-    client, _database, rows, _documents, callbacks, _clock, _config, _app = environment
+    client, _database, rows, _documents, callbacks, _clock, _config, app = environment
     _enroll(client)
     report = _run_manual(
         client,
@@ -436,6 +452,8 @@ def test_four_eyes_review_uses_server_evidence_and_approved_only_callback(
     )
     assert same_reviewer.status_code == 409
 
+    app.state.privacy_data_discovery_readiness_probe = _stock_readiness
+
     approved = _ok(
         client.post(
             f"{API}/reviews/{proposal['review_id']}/approve",
@@ -451,7 +469,12 @@ def test_four_eyes_review_uses_server_evidence_and_approved_only_callback(
     assert approved["approved_only_callback"] is True
     assert approved["callback_attempted_this_request"] is True
     assert approved["callback_acknowledged"] is True
-    assert approved["callback_durable_outbox"] is False
+    assert approved["callback_durable_outbox"] is True
+    assert approved["callback_enqueued_durably"] is True
+    assert approved["data_map_target_configured"] is True
+    assert approved["bounded_retry_worker_available"] is True
+    assert approved["automatic_retry_available"] is False
+    assert approved["target_applied_synchronously"] is False
     assert len(callbacks) == 1
     assert callbacks[0].finding_id == finding["finding_id"]
     assert not hasattr(callbacks[0], "raw_value")
@@ -554,6 +577,339 @@ def test_posture_audit_chain_and_retention_are_explicit(environment) -> None:
     assert purged["purged_reports"] == 1
     assert purged["raw_data_purged"] is False
     assert purged["digest_only_audit_tombstones_retained"] is True
+
+
+def test_audit_routes_require_tenant_audit_permission(environment, monkeypatch) -> None:
+    client = environment[0]
+    checked: list[str] = []
+
+    def require(_request, permission: str) -> None:
+        checked.append(permission)
+        if permission == "audit":
+            raise HTTPException(status_code=403, detail="audit permission required")
+
+    monkeypatch.setattr(privacy_data_discovery_api, "require_permission", require)
+
+    assert client.get(f"{API}/audit").status_code == 403
+    assert client.get(f"{API}/audit/verify").status_code == 403
+    assert checked == ["audit", "audit"]
+
+
+def test_tenant_readiness_probe_drives_stock_status_without_provider_io(
+    environment,
+) -> None:
+    client, _database, _rows, _documents, _callbacks, _clock, _config, app = (
+        environment
+    )
+    app.state.privacy_data_discovery_readiness_probe = _stock_readiness
+
+    status = _ok(client.get(f"{API}/status"))
+    assert status["runtime_source"] == "tenant_readiness_probe"
+    assert status["structured_provider_adapters"] == ["servicenow_cmdb"]
+    assert status["unstructured_provider_adapters"] == ["aws_s3"]
+    assert status["status_probe_opened_store"] is False
+    assert status["status_probe_invoked_provider"] is False
+    delivery = status["callback_delivery"]
+    assert delivery["durable_outbox"] is True
+    assert delivery["data_map_target"] is True
+    assert delivery["bounded_retry_worker_available"] is True
+    assert delivery["automatic_retry"] is False
+    assert delivery["worker_scheduler_operational"] is False
+    assert delivery["retry_execution_requires_worker_invocation"] is True
+
+    posture = _ok(client.get(f"{API}/posture"))
+    assert posture["callback_outbox_available"] is True
+    assert posture["data_map_target_available"] is True
+    assert posture["bounded_retry_worker_available"] is True
+    assert posture["automatic_retry_available"] is False
+    assert posture["posture_opened_store"] is False
+    assert posture["posture_invoked_provider"] is False
+
+    app.state.privacy_data_discovery_worker_scheduler_operational = True
+    scheduled = _ok(client.get(f"{API}/status"))["callback_delivery"]
+    assert scheduled["automatic_retry"] is True
+    assert scheduled["worker_scheduler_operational"] is True
+    assert scheduled["retry_execution_requires_worker_invocation"] is False
+
+
+def test_scheduler_status_is_closed_tenant_specific_and_recovery_visible(
+    environment,
+) -> None:
+    client, _database, _rows, _documents, _callbacks, _clock, _config, app = (
+        environment
+    )
+    app.state.privacy_data_discovery_readiness_probe = _stock_readiness
+    app.state.privacy_data_discovery_worker_scheduler_status = lambda: {
+        "installed": True,
+        "configured_enabled": True,
+        "running": True,
+        "healthy": False,
+        "consecutive_failures": 1,
+        "interrupted_cycles_recovered": 2,
+        "last_error_code": "tenant_cycle_incomplete",
+        "last_cycle": None,
+        "process_concurrency_excluded": True,
+        "cross_process_concurrency_excluded": True,
+        "status_opened_tenant_store": False,
+        "status_invoked_provider": False,
+        "digest_only_data_map_target": True,
+        "provider_network_io": False,
+        "provider_writes": False,
+        "estate_completeness_claimed": False,
+        "live_provider_acceptance_verified": False,
+    }
+
+    payload = _ok(client.get(f"{API}/status"))
+    delivery = payload["callback_delivery"]
+    scheduler = payload["worker_scheduler"]
+    assert delivery["worker_scheduler_configured_for_tenant"] is True
+    assert delivery["worker_scheduler_operational"] is True
+    assert delivery["automatic_retry"] is True
+    assert scheduler["interrupted_cycles_recovered"] == 2
+    assert scheduler["consecutive_failures"] == 1
+    assert scheduler["status_opened_tenant_store"] is False
+    assert scheduler["status_invoked_provider"] is False
+    assert scheduler["provider_network_io"] is False
+    assert scheduler["provider_writes"] is False
+    assert scheduler["estate_completeness_claimed"] is False
+
+
+def test_admin_remediation_routes_use_tenant_factories_and_closed_bodies(
+    environment,
+) -> None:
+    client, _database, _rows, _documents, _callbacks, _clock, _config, app = (
+        environment
+    )
+    app.state.privacy_data_discovery_readiness_probe = _stock_readiness
+    unavailable = client.post(
+        f"{API}/remediation/worker/run-once",
+        json={"limit": 1, "lease_seconds": 30},
+    )
+    assert unavailable.status_code == 503
+
+    calls: dict[str, list[object]] = {
+        "factory": [],
+        "worker": [],
+        "list": [],
+        "reconcile": [],
+        "maintenance": [],
+    }
+
+    class Worker:
+        def run_once(self, **kwargs):
+            calls["worker"].append(kwargs)
+            return {
+                "claimed": 1,
+                "applied": 1,
+                "no_change": 0,
+                "retried": 0,
+                "ambiguous": 0,
+                "dead_lettered": 0,
+                "cancelled": 0,
+            }
+
+    class Outbox:
+        def list_work(self, **kwargs):
+            calls["list"].append(kwargs)
+            return (
+                {
+                    "work_id": "PDRW-work-1",
+                    "state": "ambiguous",
+                    "revision": 3,
+                    "attempts": 1,
+                    "max_attempts": 3,
+                    "next_attempt_at": NOW,
+                    "ambiguous_at": NOW,
+                    "retained_until": NOW + 3_600,
+                    "created_at": NOW - 60,
+                    "updated_at": NOW,
+                    "authority_sha256": "a" * 64,
+                    "receipt_sha256": None,
+                    "last_error_code": "callback_outcome_unknown",
+                    "raw_value": "must-not-cross-the-api-boundary",
+                    "source_id": "must-not-cross-the-api-boundary",
+                },
+                {
+                    "work_id": "PDRW-work-2",
+                    "state": "ambiguous",
+                    "revision": 1,
+                    "attempts": 1,
+                    "max_attempts": 3,
+                },
+            )
+
+        def reconcile_ambiguous(self, work_id, **kwargs):
+            calls["reconcile"].append((work_id, kwargs))
+            return {"work_id": work_id, "state": "applied", "revision": 4}
+
+    class Runtime:
+        tenant_id = "tenant-a"
+        worker = Worker()
+        outbox = Outbox()
+        reconciler = staticmethod(lambda _probe: None)
+        digest_only_target = True
+        external_side_effect = False
+        provider_network_io = False
+        provider_writes = False
+
+        def maintenance(self, **kwargs):
+            calls["maintenance"].append(kwargs)
+            return {
+                "schema": "lightwork.privacy-discovery-maintenance.v1",
+                "tenant_id": "tenant-a",
+                "outbox_purged": 0,
+                "data_map_purged": 0,
+                "outbox_integrity": {"current_records": 0},
+                "data_map_integrity": {"observations": 0, "tombstones": 0},
+                "raw_data_returned": False,
+                "provider_side_effect": False,
+            }
+
+    runtime = Runtime()
+
+    def runtime_factory(**kwargs):
+        calls["factory"].append(kwargs)
+        return runtime
+
+    app.state.privacy_data_discovery_remediation_runtime_factory = runtime_factory
+
+    forged = client.post(
+        f"{API}/remediation/worker/run-once",
+        json={"limit": 1, "lease_seconds": 30, "tenant_id": "tenant-b"},
+    )
+    assert forged.status_code == 422
+    worker = _ok(
+        client.post(
+            f"{API}/remediation/worker/run-once",
+            json={"limit": 2, "lease_seconds": 30},
+        )
+    )
+    assert worker["claimed"] == 1
+    assert worker["external_side_effect"] is False
+    assert worker["provider_network_io"] is False
+    assert worker["provider_writes"] is False
+    assert calls["worker"][0]["limit"] == 2
+    assert str(calls["worker"][0]["worker_id"]).startswith("pdd-worker-")
+
+    work = _ok(
+        client.get(f"{API}/remediation/work?state=ambiguous&limit=1")
+    )
+    assert work["truncated"] is True
+    assert work["operational_metadata_only"] is True
+    assert work["raw_data_returned"] is False
+    assert work["provider_network_io"] is False
+    assert work["items"][0]["work_id"] == "PDRW-work-1"
+    assert work["items"][0]["state"] == "ambiguous"
+    assert "raw_value" not in work["items"][0]
+    assert "source_id" not in work["items"][0]
+    assert calls["list"] == [{"state": "ambiguous", "limit": 2}]
+
+    reconciled = _ok(
+        client.post(
+            f"{API}/remediation/work/PDRW-work-1/reconcile",
+            json={
+                "expected_revision": 3,
+                "absent_backoff_seconds": 10,
+                "idempotency_key": "reconcile-work-1",
+            },
+        )
+    )
+    assert reconciled["state"] == "applied"
+    assert reconciled["digest_only_reconciliation"] is True
+    assert reconciled["optimistic_replay_performed"] is False
+    work_id, reconcile_kwargs = calls["reconcile"][0]
+    assert work_id == "PDRW-work-1"
+    assert reconcile_kwargs["reconciler"] is runtime.reconciler
+
+    rejected_path = client.post(
+        f"{API}/remediation/maintenance",
+        json={"idempotency_key": "maintenance-1", "path": "C:/forbidden"},
+    )
+    assert rejected_path.status_code == 422
+    maintenance = _ok(
+        client.post(
+            f"{API}/remediation/maintenance",
+            json={"idempotency_key": "maintenance-1", "target_limit": 25},
+        )
+    )
+    assert maintenance["cutoff_server_derived"] is True
+    assert maintenance["integrity_verified"] is True
+    assert maintenance["external_side_effect"] is False
+    assert calls["maintenance"][0]["target_limit"] == 25
+    assert calls["maintenance"][0]["cutoff"] > 0
+
+    runtime.external_side_effect = True
+    unsafe_runtime = client.post(
+        f"{API}/remediation/worker/run-once",
+        json={"limit": 1, "lease_seconds": 30},
+    )
+    assert unsafe_runtime.status_code == 503
+
+    assert len(calls["factory"]) == 5
+    assert all(call["tenant_id"] == "tenant-a" for call in calls["factory"])
+    assert all("path" not in call for call in calls["factory"])
+    assert all("credential" not in repr(call) for call in calls["factory"])
+
+
+def test_admin_worker_and_maintenance_run_with_stock_local_composition(
+    environment,
+) -> None:
+    client, _database, _rows, _documents, _callbacks, _clock, config_path, app = (
+        environment
+    )
+    config_path.write_text(
+        "[privacy_automation]\n"
+        "enable = true\n"
+        "[privacy_automation.data_discovery]\n"
+        "enable = true\n"
+        "[privacy_automation.data_discovery.adapters]\n"
+        "enable = true\n"
+        'enabled_providers = ["aws_s3"]\n'
+        "[privacy_automation.data_discovery.remediation]\n"
+        "enable = true\n"
+        "max_attempts = 3\n"
+        "retention_seconds = 86400\n"
+        "[privacy_automation.data_discovery.remediation.data_map]\n"
+        "enable = true\n"
+        "retention_seconds = 172800\n",
+        encoding="utf-8",
+    )
+    from maverick import config
+    from maverick_dashboard import privacy_data_discovery_adapters_composition
+
+    config.reset_config_cache()
+    privacy_data_discovery_adapters_composition.attach_privacy_data_discovery_adapters(
+        app
+    )
+
+    worker = _ok(
+        client.post(
+            f"{API}/remediation/worker/run-once",
+            json={"limit": 5, "lease_seconds": 30},
+        )
+    )
+    assert worker["claimed"] == 0
+    assert worker["digest_only_data_map_target"] is True
+    assert worker["external_side_effect"] is False
+
+    work = _ok(client.get(f"{API}/remediation/work?state=ambiguous&limit=5"))
+    assert work["items"] == []
+    assert work["truncated"] is False
+    assert work["operational_metadata_only"] is True
+    assert work["raw_data_returned"] is False
+
+    maintenance = _ok(
+        client.post(
+            f"{API}/remediation/maintenance",
+            json={"idempotency_key": "stock-maintenance-1", "target_limit": 10},
+        )
+    )
+    assert maintenance["outbox_purged"] == 0
+    assert maintenance["data_map_purged"] == 0
+    assert maintenance["outbox_integrity"]["current_records"] == 0
+    assert maintenance["data_map_integrity"]["observations"] == 0
+    assert maintenance["integrity_verified"] is True
+    assert maintenance["provider_network_io"] is False
 
 
 def test_unstructured_unsupported_format_is_reported_not_claimed_complete(

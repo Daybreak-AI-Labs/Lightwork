@@ -38,7 +38,16 @@ def test_pick_assessments_can_enable_privacy_data_discovery(monkeypatch):
         "data_discovery": {"enable": True},
         "regulatory_intelligence": {"enable": True},
         "rights_orchestration": {"enable": True},
-        "rights_consumer_delivery": {"enable": True},
+        "rights_consumer_delivery": {
+            "enable": True,
+            "digest_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_DIGEST_KEY",
+            "export_signing_key_ref": (
+                "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_EXPORT_KEY"
+            ),
+            "package_encryption_key_ref": "env:MAVERICK_ENCRYPTION_KEY",
+            "server_grant_ttl_seconds": 30,
+            "max_package_bytes": 16_777_216,
+        },
         "rights_consumer_intake": {
             "enable": False,
             "request_ttl_seconds": 86_400,
@@ -49,7 +58,12 @@ def test_pick_assessments_can_enable_privacy_data_discovery(monkeypatch):
         "ott_ctv_rights": {"enable": False},
         "drop_management": {
             "enable": False,
+            "principal_binding_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY",
             "retention_seconds": 31_536_000,
+            "scheduler_enable": False,
+            "scheduler_interval_seconds": 3_600,
+            "scheduler_jitter_seconds": 60,
+            "scheduler_retry_max_seconds": 900,
         },
         "notice_governance": {"enable": True},
     }
@@ -60,6 +74,14 @@ def test_pick_assessments_can_enable_privacy_data_discovery(monkeypatch):
     assert parsed["privacy_automation"]["regulatory_intelligence"]["enable"] is True
     assert parsed["privacy_automation"]["rights_orchestration"]["enable"] is True
     assert parsed["privacy_automation"]["rights_consumer_delivery"]["enable"] is True
+    assert parsed["privacy_automation"]["rights_consumer_delivery"] == {
+        "enable": True,
+        "digest_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_DIGEST_KEY",
+        "export_signing_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_EXPORT_KEY",
+        "package_encryption_key_ref": "env:MAVERICK_ENCRYPTION_KEY",
+        "server_grant_ttl_seconds": 30,
+        "max_package_bytes": 16_777_216,
+    }
     assert parsed["privacy_automation"]["rights_consumer_intake"] == {
         "enable": False,
         "request_ttl_seconds": 86_400,
@@ -70,7 +92,12 @@ def test_pick_assessments_can_enable_privacy_data_discovery(monkeypatch):
     assert parsed["privacy_automation"]["ott_ctv_rights"]["enable"] is False
     assert parsed["privacy_automation"]["drop_management"] == {
         "enable": False,
+        "principal_binding_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY",
         "retention_seconds": 31_536_000,
+        "scheduler_enable": False,
+        "scheduler_interval_seconds": 3_600,
+        "scheduler_jitter_seconds": 60,
+        "scheduler_retry_max_seconds": 900,
     }
     assert parsed["privacy_automation"]["notice_governance"]["enable"] is True
     assert "privacy_automation" not in parsed.get("assessments", {})
@@ -181,6 +208,8 @@ def test_drop_management_is_explicit_and_requires_rights_orchestration(monkeypat
             return True
         if prompt.startswith("Enable California DROP"):
             return True
+        if prompt.startswith("Enable the managed DROP"):
+            return True
         if prompt.startswith("Enable the Data Use Governance"):
             return False
         return False
@@ -192,7 +221,122 @@ def test_drop_management_is_explicit_and_requires_rights_orchestration(monkeypat
     assert selected["privacy_automation"]["rights_orchestration"]["enable"] is True
     assert selected["privacy_automation"]["drop_management"] == {
         "enable": True,
+        "principal_binding_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY",
         "retention_seconds": 31_536_000,
+        "scheduler_enable": True,
+        "scheduler_interval_seconds": 3_600,
+        "scheduler_jitter_seconds": 60,
+        "scheduler_retry_max_seconds": 900,
     }
     parsed = tomllib.loads("\n".join(wizard._cfg_assessments(selected)))
+    assert lint_config(parsed) == []
+
+
+def test_generated_stock_rights_source_config_is_real_and_lints_clean(monkeypatch):
+    def confirm(prompt, *, default=False, **_kwargs):
+        if prompt.startswith(
+            "Enable provider-neutral Privacy Automation rights-request"
+        ):
+            return True
+        if prompt.startswith(
+            "Enable production stock privacy-rights source adapters"
+        ):
+            return True
+        if prompt.startswith("Enable the Data Use Governance"):
+            return False
+        return False
+
+    def checkbox(prompt, _choices, *, default=None, **_kwargs):
+        if prompt == "Select privacy-rights source providers":
+            return ["Microsoft Graph users"]
+        return list(default or [])
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_checkbox", checkbox)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: "")
+
+    selected = wizard.pick_assessments()
+    source_config = selected["privacy_automation"]["rights_orchestration"][
+        "source_adapters"
+    ]
+    assert source_config["enable"] is True
+    assert source_config["lease_seconds"] == 60
+    assert source_config["claim_history_retention_seconds"] == 86_400
+    assert source_config["target_custody_retention_seconds"] == 2_592_000
+    assert source_config["providers"] == {
+        "microsoft_graph_users": {
+            "enable": True,
+            "source_id": "directory-graph",
+            "origin": "https://graph.microsoft.com",
+            "credential_ref": "env:GRAPH_RIGHTS_TOKEN",
+            "capabilities": [
+                "discover",
+                "retrieve",
+                "delete",
+                "verify_delete",
+            ],
+        }
+    }
+    rendered = wizard._cfg_assessments(selected)
+    parsed = tomllib.loads("\n".join(rendered))
+    assert parsed["privacy_automation"]["rights_orchestration"][
+        "source_adapters"
+    ] == source_config
+    assert lint_config(parsed) == []
+
+
+def test_generated_notice_publication_runtime_config_is_exact_and_lints_clean(
+    monkeypatch,
+):
+    def confirm(prompt, *, default=False, **_kwargs):
+        enabled = (
+            "Enable consumer Consent & Preferences",
+            "Enable versioned property",
+            "Enable governed Privacy Automation notice",
+            "Enable the local privacy-notice publication runtime",
+            "Run the bounded local notice-publication scheduler",
+        )
+        if prompt.startswith(enabled):
+            return True
+        if prompt.startswith("Enable the Data Use Governance"):
+            return False
+        return False
+
+    def text(prompt, *, default="", **_kwargs):
+        values = {
+            "  Exact active tenant ID": "tenant-a",
+            "  Publication binding name": "primary",
+            "  Exact notice release ID": "privacy-main",
+            "  Exact notice release consent-publication": "consent-binding:7",
+            "  Exact Consent Publishing property ID": "property-main",
+            "  Exact consent rule-group ID": "production-rules",
+            "  Exact consent rule-group version": "7",
+            "  Exact consent notice-resource ID": "privacy-notice",
+            "  Exact consent notice-resource version": "4",
+        }
+        return next(
+            (answer for prefix, answer in values.items() if prompt.startswith(prefix)),
+            default,
+        )
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_text", text)
+    selected = wizard.pick_assessments()
+    rendered = wizard._cfg_assessments(selected)
+    parsed = tomllib.loads("\n".join(rendered))
+    runtime = parsed["privacy_automation"]["notice_governance"][
+        "publication_runtime"
+    ]
+    assert runtime["active_tenants"] == ["tenant-a"]
+    assert runtime["scheduler_enable"] is True
+    assert runtime["bindings"]["primary"] == {
+        "tenant_id": "tenant-a",
+        "notice_id": "privacy-main",
+        "consent_publication_ref": "consent-binding:7",
+        "property_id": "property-main",
+        "rule_group_id": "production-rules",
+        "rule_group_version": 7,
+        "notice_resource_id": "privacy-notice",
+        "notice_resource_version": 4,
+    }
     assert lint_config(parsed) == []

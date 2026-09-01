@@ -1064,6 +1064,166 @@ class ThirdPartyIntelligenceStore:
             raise ThirdPartyIntelligenceNotFound(f"{label} not found")
         return self._row(row, label), row["integrity_sha256"]
 
+    def _list_payloads(
+        self,
+        table: str,
+        tenant_id: str,
+        id_column: str,
+        label: str,
+        *,
+        limit: int,
+    ) -> tuple[tuple[dict[str, Any], str], ...]:
+        allowed = {
+            ("sources", "source_id"),
+            ("source_snapshots", "snapshot_id"),
+            ("vendors", "vendor_id"),
+            ("screening_runs", "run_id"),
+            ("risk_decisions", "decision_id"),
+            ("edd_cases", "case_id"),
+            ("monitors", "monitor_id"),
+            ("monitoring_alerts", "alert_id"),
+        }
+        if (table, id_column) not in allowed:
+            raise ThirdPartyIntelligenceIntegrityError(
+                "internal table selection is invalid"
+            )
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM {table} WHERE tenant_id=? "  # noqa: S608
+                f"ORDER BY {id_column} LIMIT ?",  # noqa: S608
+                (tenant_id, bounded),
+            ).fetchall()
+        return tuple(
+            (self._row(row, label), row["integrity_sha256"])
+            for row in rows
+        )
+
+    def list_sources(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[IntelligenceSource, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._source_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "sources", tenant, "source_id", "source", limit=limit
+            )
+        )
+
+    def list_source_snapshots(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[SourceSnapshot, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._snapshot_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "source_snapshots",
+                tenant,
+                "snapshot_id",
+                "source snapshot",
+                limit=limit,
+            )
+        )
+
+    def list_vendors(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[VendorProfile, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._vendor_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "vendors", tenant, "vendor_id", "vendor", limit=limit
+            )
+        )
+
+    def list_screening_runs(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[ScreeningRun, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._run_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "screening_runs", tenant, "run_id", "screening run", limit=limit
+            )
+        )
+
+    def list_risk_decisions(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[RiskDecision, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._decision_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "risk_decisions",
+                tenant,
+                "decision_id",
+                "risk decision",
+                limit=limit,
+            )
+        )
+
+    def list_edd_cases(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[EDDCase, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._edd_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "edd_cases", tenant, "case_id", "EDD case", limit=limit
+            )
+        )
+
+    def list_monitors(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[Monitor, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._monitor_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "monitors", tenant, "monitor_id", "monitor", limit=limit
+            )
+        )
+
+    def list_monitoring_alerts(
+        self, tenant_id: str, *, limit: int = 100
+    ) -> tuple[MonitoringAlert, ...]:
+        tenant = _tenant(tenant_id)
+        return tuple(
+            self._alert_from(payload, digest)
+            for payload, digest in self._list_payloads(
+                "monitoring_alerts",
+                tenant,
+                "alert_id",
+                "monitoring alert",
+                limit=limit,
+            )
+        )
+
+    def context_record_counts(self, tenant_id: str) -> Mapping[str, int]:
+        """Return exact current-head counts for context truncation disclosure."""
+
+        tenant = _tenant(tenant_id)
+        tables = (
+            "sources",
+            "source_snapshots",
+            "vendors",
+            "screening_runs",
+            "risk_decisions",
+            "edd_cases",
+            "monitors",
+            "monitoring_alerts",
+        )
+        with self._connect() as connection:
+            return {
+                table: int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE tenant_id=?",  # noqa: S608
+                        (tenant,),
+                    ).fetchone()[0]
+                )
+                for table in tables
+            }
+
     # -- independently governed sources ---------------------------------
 
     def enroll_source(

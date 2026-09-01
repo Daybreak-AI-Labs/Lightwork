@@ -1014,7 +1014,12 @@ class PrivacyDataDiscoveryRemediationStore:
         report = self._safe_discovery_call("get_report", self._tenant_id, report_id)
         finding = self._safe_discovery_call("get_finding", self._tenant_id, finding_id)
         review = self._safe_discovery_call("get_review", self._tenant_id, review_id)
-        latest = self._safe_discovery_call("list_reviews", self._tenant_id, finding_id, limit=1)
+        latest = self._safe_discovery_call(
+            "list_reviews",
+            self._tenant_id,
+            finding_id=finding_id,
+            limit=1,
+        )
         if (
             type(source) is not EnrolledSource
             or type(report) is not ScanReport

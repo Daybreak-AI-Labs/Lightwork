@@ -47,6 +47,10 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
     assert "cp-analytics-form" in page
     assert "[consent_preferences.analytics] enable = true" in page
     assert "small cohorts are hidden" in page
+    assert "cp-identity-form" in page
+    assert "Link, unlink, relink &amp; account transition evidence" in page
+    assert "/identity-links/integrity?limit=500" in page
+    assert "Operators cannot unlink or relink here" in page
     assert 'value="web_tracker"' in page
     assert "consent_required" not in page
 

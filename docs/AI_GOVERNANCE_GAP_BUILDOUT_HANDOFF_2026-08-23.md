@@ -1,6 +1,6 @@
 # Lightwork AI Governance Gap Buildout: Fable Handoff
 
-Updated: 2026-08-30
+Updated: 2026-09-01
 
 Repository: Daybreak-AI-Labs/Lightwork
 
@@ -10,12 +10,10 @@ Publication target: origin/claude/aigov-gap-buildout
 
 Commit message: wip: AI governance gap buildout (G1-G27) - handoff state
 
-Current state: the earlier handoff snapshot is committed and pushed at
-`ffa309a0990ecd216ee995a24bd53ece6bee16ac`, which is also the current
-`origin/claude/aigov-gap-buildout` tip. The 2026-08-28 operational-acceptance
-additions and the 2026-08-30 OneTrust full-platform increment described below
-are currently **local, uncommitted and unpushed** on
-`claude/aigov-gap-buildout`; main remains untouched.
+Publication state: `9cadfabccb59ed81b9e4e1421c08769d1eb5e1e0` is the last
+previously verified remote snapshot. This document describes the complete
+2026-09-01 handoff candidate on `claude/aigov-gap-buildout`; the final committer
+must record and verify the new branch tip after push. Main remains untouched.
 
 ## Executive result
 
@@ -24,7 +22,26 @@ covering every G1-G27 recommendation that can reasonably be represented as
 repository code. It is a WIP handoff, not a finished product, a OneTrust-parity
 claim, a certification, or proof of operation in a customer environment.
 
-The remaining gaps are now concentrated in external operation and acceptance:
+The remaining gaps include both buildable product breadth and external
+operation or acceptance. Production compositions now exist for packaged
+Governance Agents, AI Evidence Analysis, California DROP and identity
+governance. AI-entity tasks, consent bulk jobs/custom indexes/current publish
+and Global Opt-Out contracts, current assessment projections and first-class
+TPRM Contract/Engagement records are also implemented and mounted. The current
+tree additionally includes tenant-private document custody for administration
+tokens and incident attachments, reviewed evidence-to-assessment proposals,
+role-aware deterministic executive PDF reporting, a mounted six-suite shared
+governance inventory, a native application scanner and device-bound consent
+source/server contracts, and six stock privacy-discovery readers with an
+approved-review digest target. Current material code/deployment gaps instead
+include full canonical-history coverage and independently operated verifiers;
+compiled/deployed native consent host integrations and certified TCF/GPP/
+downstream AdTech interoperability; broad privacy-source, format, database-value
+and RoPA semantic coverage; exact identity-provider transports and live
+provider/customer operation; deployment of the Bubblewrap-contained optional
+OCR and legacy-XLS dependencies; visual-semantic image analysis beyond OCR; and
+the broader product gaps enumerated in the current OneTrust matrix.
+External gaps include:
 
 - deployment of the new sensor agents into a consenting external estate and
   enterprise completeness, privacy and production-scale acceptance;
@@ -43,10 +60,10 @@ The remaining gaps are now concentrated in external operation and acceptance:
 - live Snowflake/Databricks provider-audit interoperability, permission,
   latency, retention, completeness, continuous-operation, recovery and scale
   acceptance for the new native typed transports;
-- authoritative readers for all six domain stores, independently operated
-  signed/anchored unified-audit verifiers, external WORM/cross-day anchors,
-  off-host signing-key custody and live scheduler/recovery/scale/customer/SIEM
-  acceptance;
+- whole-suite history coverage beyond the six canonical stock readers,
+  independently operated signed/anchored unified-audit verifiers, a real S3
+  Object Lock account, accepted off-host signing-key custody and live custody-
+  scheduler/recovery/scale/customer/SIEM acceptance;
 - a maintained external TRC collector catalog and continuously operated broad
   control-evidence estate;
 - licensed privacy-intelligence content, destination enrollment and operated
@@ -68,9 +85,9 @@ used for the final cross-check.
 - Work is confined to claude/aigov-gap-buildout.
 - Main was not checked out, changed, merged or pushed.
 - No pull request was opened.
-- The remote branch tip is the earlier snapshot. The working tree described by
-  this revision is not durable on GitHub until the user authorizes a new commit
-  and push.
+- Verify the final commit SHA and `origin/claude/aigov-gap-buildout` equality
+  after publication; this document deliberately does not predict its own
+  containing commit hash.
 - All service claims below distinguish local/mock validation from live or
   external acceptance.
 - No local test result should be presented as customer, regulator, insurer,
@@ -79,16 +96,23 @@ used for the final cross-check.
 ## Status taxonomy
 
 - **Complete-local**: the bounded repository capability and its expected local
-  path exist and have focused automated coverage. Live acceptance may remain.
+  path exist, are mounted and have a shipped, documented production composition
+  whose readiness can pass without test-only dependency injection. Focused
+  automated coverage exists; live acceptance may remain.
 - **Partial**: useful control-plane or adapter code exists, but a material part
-  of the original product capability is not implemented or not operational by
-  default.
+  of the original product capability, mount, configured readiness, integration,
+  deployment or validation is absent.
 - **External**: the requested outcome requires a third party, commercial
   relationship, certification or market action that repository code cannot
   complete.
-- **Missing**: no coherent implementation exists. No whole G-number is now
-  classified as missing, although several rows contain explicitly missing
-  product components.
+- **Missing**: no coherent implementation exists. No whole G-number and no
+  current OneTrust capability-matrix row is classified Missing in this working
+  tree. Zero Missing does not mean parity; Partial and External rows remain.
+
+Every claim below should preserve five separate evidence stages: **Core**,
+**Mounted**, **Configured / ready**, **Live interoperable**, and **Operated /
+accepted**. A local test double, mock transport or manual `app.state` injection
+does not prove a later stage.
 
 ## Prior focused verification baseline
 
@@ -119,6 +143,34 @@ That prior pass also established:
   cross-checked against the server routes.
 - Git diff --check passed; only expected Windows line-ending notices appeared.
 - Imports were confirmed to resolve from this checkout's maverick package.
+
+## 2026-08-31 continuation verification
+
+The final changed-surface Python command selected 647 tests across Governance
+Agents, AI Evidence Analysis, assessment evidence, document custody, incident
+attachments, executive reports, DROP, Copilot and installer/config paths. Its
+first run produced 645 passes and exposed two stale installer-test expectations
+for the new fail-closed parser fields. Only those two contracts were corrected;
+both then passed in a targeted rerun. Production code did not change after the
+645 passing cases, so all 647 selected cases have current passing evidence
+without repeating the full slice.
+
+The associated browser/client and repository checks were also green:
+
+- 66 focused Node client/JSON-contract tests passed.
+- At that verification checkpoint, the 149-row matrix integrity gate passed at
+  69 Implemented, 73 Partial, zero Missing and seven External / unverifiable;
+  the later cross-suite context and no-code GRC continuation supersedes those
+  counts below.
+- Ruff passed each changed security surface and the matrix verifier.
+- `git diff --check` passed; only expected Windows line-ending notices appeared.
+- Browser smoke checks served the assessment-evidence, document-vault and
+  executive-report pages with their shared liquid-glass shell and Copilot
+  context, without horizontal overflow. Protected data calls failed closed
+  without credentials, as expected.
+
+This is focused local/synthetic verification, not a full repository suite or
+live provider, customer, authority, regulator, recovery or scale acceptance.
 
 ## Current focused verification of the follow-on additions
 
@@ -168,47 +220,163 @@ Not performed in that 2026-08-28 acceptance batch:
 - production-scale, on-call or disaster-recovery exercises;
 - legal, certification, underwriting, regulator or partner review.
 
+## 2026-08-31 adversarial UI, Copilot and wiring audit
+
+The final continuation pass treated each new surface as an untrusted operator
+workflow instead of assuming that a rendered page was operational. It found and
+repaired the following missed implementation defects:
+
+- malformed, empty or non-JSON HTTP `2xx` responses could be presented as
+  successful operations by multiple governance clients; the shared and
+  page-specific clients now reject these responses without reflecting raw
+  provider text;
+- California DROP mutation routes did not consistently require literal verified
+  readiness before resolving authority or opening a store; every operation now
+  fails closed with a sanitized `503` on false, missing, malformed or failing
+  readiness;
+- the Governance Agents status path could imply more operational proof than it
+  performed; it is now store-free and reports callable configuration separately
+  from operation-by-operation verification, with every live-verification field
+  false until independently established;
+- Governance Agents, Evidence Analysis and DROP controls were not uniformly
+  constrained by both caller role and current readiness; server-rendered
+  permissions and client-side bounded status checks now keep unavailable
+  controls disabled;
+- the Copilot did not cover every new canonical route or qualify advice by the
+  caller's authority; it now supplies page-specific context for 30 routes,
+  includes role/readiness boundaries, excludes assistant history from model
+  context and falls back to a deterministic local page guide when the model
+  provider is unavailable;
+- Evidence Analysis was outside the shared application shell, had incomplete
+  CSP/theme integration and could blur the boundary between installed parser
+  packages and the external Tesseract binary; it now uses the shared navigation
+  and Copilot, a per-response nonce, honest dependency/readiness fields and
+  explicit transient/unverified-output labels;
+- the Assurance workspace eagerly requested all module summaries; it now loads
+  summaries near the viewport or on focus and provides an explicit **Load all**
+  action with completion feedback;
+- the collapsed mobile navigation remained discoverable to assistive technology
+  and did not reliably restore focus; it now uses `inert`, synchronized
+  `aria-hidden`/expanded state, Escape-to-close and focus restoration;
+- several legacy/custom surfaces and the Copilot had incomplete liquid-glass,
+  high-contrast or reduced-transparency treatment. The shared glass primitives
+  now cover the application shell and direct fixes cover Finance, Privacy,
+  Start, Partner, Chat Goal, Learning and Run Tree. High-contrast and
+  reduced-transparency modes use opaque, non-blurred surfaces, while destructive
+  controls retain their red danger treatment.
+
+### Live UI evidence
+
+A fresh local Uvicorn estate was exercised through a real browser, then stopped
+and removed. Governance Agents, Evidence Analysis and DROP rendered in the
+shared shell with one current navigation item, no horizontal overflow and the
+Copilot available. At that earlier browser-audit checkpoint their disabled state
+was intentional and accurate because the production compositions had not yet
+been installed. Later 2026-08-31 work added those compositions; this historical
+browser observation must not be read as the current code state. The status
+responses at the checkpoint reported no store opening, network I/O or
+operational verification.
+
+The page-aware Copilot exposed the correct prompts for Governance Agents,
+Evidence Analysis, DROP and Assurance, included the caller's read-only/authority
+boundary and successfully used the deterministic local guide during a provider
+outage. Finance and Privacy resolved their live local data states; representative
+glass cards computed a translucent background with blur/saturation. Assurance
+started with lazy placeholders and completed all summaries only after the
+explicit load-all action. At a 390 x 844 viewport, DROP had no horizontal
+overflow; navigation open, Escape close, inert state and focus return worked;
+the Copilot remained inside the viewport. High-contrast mode was verified live
+as opaque/no-blur with legible borders and preserved danger styling. The
+reduced-transparency branch is covered by CSS/source-contract tests rather than
+live OS emulation in this pass.
+
+### Current-tree verification
+
+- 328 focused Python tests passed across the repaired governance, Copilot,
+  readiness, authorization, UI and accessibility surfaces.
+- All 93 dashboard JavaScript tests passed.
+- Ruff, Vulture, Python compileall, JavaScript syntax checks and
+  `git diff --check` passed; the latter emitted only expected Windows line-ending
+  notices.
+- At that checkpoint, the capability-matrix verifier passed at 149 outcomes:
+  53 Implemented, 86 Partial, 3 Missing and 7 External / unverifiable. The later
+  dated continuation rebaseline supersedes those counts; `parity_claimed`
+  remains false in both snapshots.
+- The complete default-environment repository run reached 23,388 passed,
+  287 skipped and 3 expected xfails. Its sole failure was the explicitly live
+  Anthropic self-learning benchmark: the provider connection failed and the
+  circuit opened, with zero completed provider calls and $0.00 spent. It was not
+  retried because doing so could invoke a paid external provider.
+- A second full run with the Anthropic credential removed was stopped at 54%
+  after the user challenged redundant testing. Its single early marker was not
+  allowed to consume another full run; the mapped AI-governance-loop and
+  identity-connector/control block passed directly (79 tests). This is recorded
+  as a non-reproduced order/state marker, not as a second full-suite pass.
+
+### Completion boundary after this audit
+
+The requested local UI/UX, page wiring, liquid-glass system, authorization and
+readiness behavior, and Copilot extension are implemented and locally
+exercised. This still does **not** mean every OneTrust outcome or production
+acceptance is complete. The production compositions for Governance Agents,
+Evidence Analysis and DROP were added after this browser checkpoint. Remaining
+work includes their source/provider dependencies, installation and attestation
+of the shipped optional OCR and legacy-BIFF8 parser dependencies, live provider/
+customer/vendor/identity and registered-broker estates, and independent
+recovery, scale, accessibility, legal, regulator, certification and operational
+acceptance. The current audit changes remain local and uncommitted/unpushed on
+`claude/aigov-gap-buildout`; `main` was not touched.
+
 ## 2026-08-30 OneTrust full-platform increment
 
 The new
 [OneTrust full-platform public capability matrix](./ONETRUST_FULL_PLATFORM_CAPABILITY_MATRIX_2026-08-30.md)
-maps 138 publicly advertised outcomes across shared platform capabilities, AI
+maps 149 publicly advertised outcomes across shared platform capabilities, AI
 Governance, Consent & Preferences, Data Use Governance, Privacy Automation,
 Tech Risk & Compliance and Third-Party Management.
 
 | Matrix status | Count |
 |---|---:|
-| Implemented | 59 |
-| Partial | 72 |
+| Implemented | 69 |
+| Partial | 73 |
 | Missing | 0 |
 | External / unverifiable | 7 |
-| **Total** | **138** |
+| **Total** | **149** |
 
-Zero rows classified **Missing** does not mean OneTrust parity. A **Partial**
-row may contain substantial local code while still lacking a material part of
-the advertised outcome, live interoperability, content, operations, recovery,
-scale or customer acceptance. The seven **External / unverifiable** rows depend
-on licensed content, third parties, commercial relationships, certifications
-or market evidence that repository code cannot create. These are
-capability-level classifications, not proof that every feature is complete.
+No row remains **Missing** after the 2026-08-31 continuation. AI-entity tasks,
+custom consent data-element indexes/search, first-class TPRM
+Contract/Engagement lifecycle, tenant-private governed document delivery,
+reviewed evidence-assisted assessment proposals and deterministic executive PDF
+reporting are now coherent mounted local products. A
+**Partial** row may still contain substantial code while lacking a material part
+of the advertised outcome, configured authority, live interoperability,
+content, operations, recovery, scale or customer acceptance. The seven
+**External / unverifiable** rows depend on licensed content, third parties,
+commercial relationships, certifications or market evidence that repository
+code cannot create. These are capability-level classifications, not proof that
+every feature is complete.
 
-A same-day official-site refresh added six previously implicit named outcomes:
-packaged shared-platform AI Agents; AWS Bedrock, Azure AI Foundry and Google
-Vertex agent detection; the Databricks AI Security Framework; the Privacy AI
-agent/Copilot/Knowledgebase suite; multimodal AI Evidence Analysis; and the
-early-access Third-Party Risk Agent. The official
+A 2026-08-30 official-site refresh added six previously implicit named
+outcomes: packaged shared-platform AI Agents; AWS Bedrock, Azure AI Foundry and
+Google Vertex agent detection; the Databricks AI Security Framework; the
+Privacy AI agent/Copilot/Knowledgebase suite; multimodal AI Evidence Analysis;
+and the early-access Third-Party Risk Agent. The official
 [2026-07-10 changelog](https://developer.onetrust.com/onetrust/changelog/onetrust-20260710-released)
 adds Assessment Comments APIs, California DROP request/status APIs and the
-`aiEvidenceAnalysisResult` evidence-task result. Seven of these nine named
-outcomes now have coherent local paths classified **Implemented**; the named
-cloud-provider enforcement and Databricks framework outcomes remain
-**Partial**. The sources mix preview, early-access and GA language without a
-feature-level entitlement map, so this handoff does not promote a marketing
-mention to a generally available baseline.
+`aiEvidenceAnalysisResult` evidence-task result. A 2026-08-31 refresh then added
+the official February, March, June and August 2026 changelogs: AI-entity tasks;
+consent bulk export/action jobs and custom indexes; assessment score and AI
+metadata projections; CMP publish controls and Global Opt-Out; administration
+document/event APIs; incident attachments; and TPRM Contracts/Engagements. The
+sources mix public preview, early access, solution-packaging-only,
+migration-gated, GA and unstated maturity, so this handoff preserves the exact
+published qualifier rather than promoting a mention to a generally available
+baseline.
 
 ### Current continuation addendum
 
-The current tree adds the following locally coherent, product-mounted paths:
+The current tree adds the following local cores and mounted surfaces; their
+configured/readiness stage is stated separately:
 
 - `governance_agents.py` and the strict workbench/API package five closed agent
   kinds: breach response, privacy risk assessment, program Copilot,
@@ -216,13 +384,38 @@ The current tree adds the following locally coherent, product-mounted paths:
   default-off; context, adapters, dispatchers and execution credentials are
   server-resolved; findings/actions are closed and bounded; consequential
   execution requires human approval and verified receipts; quotas, replay,
-  recovery, revocation, retention and integrity are explicit.
+  recovery, revocation, retention and integrity are explicit. The shipped app
+  now installs a stock production composition with deterministic offline
+  analysis, internal-intent dispatch and an encrypted rotatable token vault.
+  The stock app also installs authoritative tenant-exact cross-suite context
+  projections over privacy, assessment, governed-document/evidence and third-
+  party histories with revision, digest, completeness and availability pins.
+  The shared packaged-agent row is therefore Implemented locally; Privacy AI
+  and Third-Party Risk Agent rows remain Partial for maintained/licensed content,
+  commercial feeds and live external operation.
 - `ai_evidence_analysis.py` and its workbench/API implement bounded PDF, JPEG,
   Excel and text analysis against immutable criteria with independently
   attested adapters, transient raw content, closed cited facts, deterministic
   summaries, transparent justification components, gaps/remediation,
   provenance, distinct human release and a durable result object corresponding
-  to the newly public `aiEvidenceAnalysisResult` outcome.
+  to the newly public `aiEvidenceAnalysisResult` outcome. The shipped app now
+  installs the enable/store/authority/retention composition. Authority history
+  now has a tenant-configured hard admission budget with a bounded fail-closed
+  revocation reserve; per-case artifact quota counts only current unexpired
+  authority. Composed maintenance purges due analyses, replaces retention-due
+  non-adapter authority chains with minimized digest-only replay tombstones,
+  later folds expired tombstones into a rolling anchor, and compacts the active
+  SQLite file. Status is tenant-media-specific and reports legacy XLS/OCR
+  availability only when enabled configuration and operational readiness both
+  succeed. Local adapter authority is excluded from compaction and remains an
+  explicit rotation/revocation decision. The durable-result
+  row is Implemented locally. The broader format-analysis row is operationally
+  Partial: optional default-off OCR and legacy XLS workers require an exact-
+  pinned POSIX Bubblewrap network namespace, pre-exec containment, bounded
+  readiness probes and attested runtime/data manifests. This Windows host fails
+  closed because Bubblewrap is unavailable, so no live network-denied sandbox
+  execution was demonstrated; quality, privacy, calibration and customer
+  acceptance also remain unverified.
 - `ai_cloud_agent_governance.py` and its workbench/API normalize Bedrock, Azure
   AI Foundry and Vertex agent inventories, ingest closed observability,
   evaluate policy, create exact enforcement intents, verify adapter receipts
@@ -234,11 +427,19 @@ The current tree adds the following locally coherent, product-mounted paths:
 - `privacy_drop_management.py` and its strict API create independently bound
   `DataDeletion`/`OptOut` requests through the existing rights-intake callback
   and record evidence-bound DROP status updates without persisting raw subject
-  data.
+  data. The shipped app now installs its versioned secret-provider-backed
+  principal key authority, durable four-eyes proposal queue, broker/record/outcome
+  registry, store factory, strict authority API, liquid-glass/Copilot workbench,
+  truthful operational probe and opt-in lifespan-managed scheduler. Previous key
+  revisions remain usable for retained outcomes after rotation; dependency-bound
+  retirement and unknown/revoked revisions fail closed. This is a locally
+  operated control plane, while live California authority/registered-broker,
+  legal, regulator and customer acceptance remain external and unverified.
 
-This addendum does **not** claim literal OneTrust parity. Final integrated
-repository verification against this checkout passed **23,145 tests**, with
-**292 skipped**, **3 expected xfails** and **0 failures** in **43m45s**. The run
+This addendum does **not** claim literal OneTrust parity. At the 2026-08-30
+checkpoint, final integrated repository verification against the then-current
+checkout passed **23,145 tests**, with **292 skipped**, **3 expected xfails**
+and **0 failures** in **43m45s**. That checkpoint run
 removed live LLM-provider variables so the credential-gated real-provider
 self-learning benchmark was skipped instead of spending or making external
 inference calls. This is strong local repository evidence, not external
@@ -286,9 +487,9 @@ adversarial, recovery, scale and certification acceptance.
   expiry, revocation, drift, cross-tenant access and exact partial-operation
   recovery are covered by immutable audit/integrity and retention paths. The
   focused changed-surface run passed 67 Python tests and six Node SDK tests;
-  targeted Ruff, compileall and Vulture passed. No live IdP/JWKS fetch, native
-  SDK integration, production key custody, customer synchronization, recovery
-  or scale acceptance is claimed.
+  targeted Ruff, compileall and Vulture passed. No live IdP/JWKS fetch,
+  compiled/deployed native host integration, production key custody, customer
+  synchronization, recovery or scale acceptance is claimed.
 - **Reviewed scan-to-disclosure proposals:** an independently gated exact-
   tenant authority now re-reads an enrolled property's exact immutable scan
   report, discoveries and independently reviewed classifications through a
@@ -309,8 +510,14 @@ adversarial, recovery, scale and certification acceptance.
   It double-reads public source/report/finding/review authority, leases bounded
   work to an injected idempotent callback, and records retry/dead-letter/replay,
   revocation/cancellation, ambiguous-result reconciliation, retention, history,
-  audit and integrity evidence. It is network-free by default and includes no
-  built-in provider/data-map target or live-estate acceptance.
+  audit and integrity evidence. The core remains network-free by default; the
+  current stock provider/data-map composition and its narrower evidence boundary
+  are described below. A new explicit `remediation.scheduler` gate drives only
+  this built-in digest target: bounded active-tenant cycles use internally
+  derived tenant/principal identities, reconcile exact local ambiguous outcomes
+  before retry, retain minimized durable control health, recover interrupted
+  cycles, and exclude overlapping process/cross-process cycles. It does not run
+  discovery adapters or establish provider/completeness evidence.
 - **Reviewed discovery to Data Use Governance:**
   `privacy_discovery_data_use_bridge.py` now re-reads exact discovery and target
   asset/context authority before a revision/digest-pinned, CAS/idempotent
@@ -409,10 +616,13 @@ adversarial, recovery, scale and certification acceptance.
   approvals, enforce legal-hold/retention gates, operate a recoverable callback
   outbox, record provider evidence, create bounded completeness manifests and
   encrypted-object response-package metadata, and provide retention/integrity
-  evidence. In this orchestration module, callbacks remain worker intent only:
-  no source adapter, identity verification, response delivery or estate-
-  completeness claim is implemented. The separate delivery path below does not
-  convert that local intent into provider or customer acceptance.
+  evidence. The final stock source runtime now fulfills those intents through
+  exact Microsoft Graph, Google Workspace, Salesforce and ServiceNow contracts
+  with atomic pre-mutation reservation, ambiguity reconciliation, authority
+  rechecks, encrypted exact-target custody and governed-vault retrieval. The
+  separate rights-delivery composition adds independent identity/reauth seams
+  and one-time response delivery. Neither path converts local source/runtime
+  code into live provider, estate-completeness or customer acceptance.
 - **OTT/CTV consumer-rights bridge:** `privacy_rights_ott_ctv.py` and its
   selector-free public API require a fresh exact redeemed OIDC/device pairing,
   service-client authority, current publication/policy and Trust Center
@@ -481,11 +691,21 @@ adversarial, recovery, scale and certification acceptance.
   recovery, dead-letter/replay, cancellation, retention and full integrity now
   sit behind a strict mounted API. A separately gated active-tenant scheduler
   is composed into dashboard lifespan and isolates invalid tenants and job
-  failures. The built-in collector observes only local SOC 2 technical state;
-  external collector/credential injection seams exist but no external runtime
-  is installed by default, and no compliance
-  conclusion, certification, broad live-estate completeness or customer/
-  auditor acceptance is claimed.
+  failures. Config-driven production composition now installs the local SOC 2
+  observer plus normalized read-only AWS Security Hub, AWS Config, Azure
+  Defender, Azure Policy, Google Cloud Security Command Center, GitHub security
+  stream and Okta posture collectors. Closed source manifests pin exact
+  definition version/integrity, enrollment, origin/scope, capability/key
+  revision, credential reference and control bindings; the bounded DNS-pinned,
+  redirect-free transport resolves credential values only during a job. Config
+  lint, the installer, status/API, the liquid-glass
+  `/compliance/continuous-evidence` operator workbench and Copilot expose the
+  same provider set. Readiness performs no provider I/O or secret-value
+  resolution, and runtime jobs still recheck approved definitions and active
+  enrollments. No compliance conclusion, certification, live-provider
+  interoperability, broad estate completeness, continuous operation,
+  outage/recovery, concurrency, scale or customer/auditor acceptance is
+  claimed.
 - **Privacy-notice governance:** an opt-in exact-tenant authority, strict API
   and operator workbench now provide role/quorum/TTL approval policies,
   independently reviewed digest-bound releases, approval revocation,
@@ -498,13 +718,71 @@ adversarial, recovery, scale and certification acceptance.
   are not atomically committed. This content-free path accepts no raw notice
   content or signing-key value and performs no transport, consent-provider
   write, SDK deployment or site/app/native mutation.
+- **Shared six-suite governance inventory:** `shared_governance_inventory.py`
+  plus its stock composition, strict API and liquid-glass/Copilot workbench now
+  provide one tenant-private normalized read model over fixed AI Governance,
+  Consent & Preferences, Data Use Governance, Privacy Automation, Tech Risk &
+  Compliance and Third-Party Management source contracts. Lazy canonical
+  readers preserve exact source revision/head, completeness, retention and
+  available/partial/unavailable/drifted state. The inventory stores HMAC
+  references and minimized relationship provenance rather than raw source
+  actors, identifiers or names, and covers CAS/idempotent refresh, bounded
+  query/export, integrity, retention and recovery. It is not a second system of
+  record, each stock reader is limited to one canonical history per suite, and
+  live scheduler, whole-suite completeness, recovery/scale and customer
+  operation remain unproven.
+- **Native consent scanner, protocol and operator composition:**
+  `consent_application_scanner.py` inventories enrolled Android/FireOS, iOS/
+  tvOS, Roku, Tizen and webOS application manifests, permissions, detected
+  dependencies/SDKs and Apple privacy manifests through a reviewed lifecycle.
+  `consent_native_sdk.py`, the stock backend/composition and strict public/admin
+  surfaces bind an application to an existing public-consent client, admit an
+  installation Ed25519 key through fresh injected platform attestation, and
+  execute eight closed configuration/profile/preference/signal/link/rights/
+  revoke operations under exact application, device, public-client,
+  publication, policy and profile authority. Monotonic counters, signed
+  receipts, downstream idempotency, durable offline replay/renewal, key
+  rotation/revocation and fresh application-authority refresh are explicit.
+  Swift, Kotlin, JavaScript and BrightScript reference adapters cover iOS/tvOS,
+  Android/Fire TV, Tizen/webOS and Roku source contracts. They were not compiled,
+  packaged, store-reviewed or operated on physical devices; production
+  attestation, protected key/profile/outbox/transport custody, certified TCF/
+  GPP handling, downstream AdTech, accessibility, recovery/scale and customer
+  acceptance remain outstanding. Application registration is create-only;
+  authority changes use a new globally unique application reference, while
+  device refresh requires fresh attestation and exact revision CAS. The stock
+  limiter is process-local and needs fleet-wide upstream enforcement. `CP-16`
+  through `CP-19` therefore remain material-code Partial.
+- **Stock privacy discovery and approved data-map delivery:**
+  `privacy_data_discovery_adapters.py` supplies bounded readers for exact
+  enrolled AWS S3, Azure Blob and Google Cloud Storage text objects, Snowflake
+  column metadata, ServiceNow CMDB and Microsoft Entra assets. The mounted
+  tenant-exact composition pins provider/config authority, connects fresh
+  independently approved findings to the durable remediation outbox and a
+  built-in tenant-private digest-only data-map target, and exposes admin-only
+  work-list, worker, reconcile and maintenance operations with fail-closed
+  side-effect attestations. The optional managed scheduler is now lifespan-owned,
+  config/wizard-reachable, bounded by tenant/worker/reconciliation/lease limits,
+  interval/jitter/retry controlled, and visible in the API, workbench and Copilot
+  through tenant-free recovery/concurrency status. Only enrolled resources and supported text media are
+  covered; permissions and non-transactional pagination limit completeness,
+  Snowflake data values and broad PDF/OCR/archive/proprietary formats are not
+  scanned, no purpose/transfer/subject/recipient/vendor semantics are inferred,
+  the target is not a complete Article 30 RoPA, and no credentials, live estate,
+  continuously running deployment, provider interoperability, recovery/scale or
+  customer acceptance was operated. Local scheduler recovery/concurrency tests
+  do not establish multi-host production acceptance.
 - **Unified cross-suite audit projection:** `unified_audit.py` plus the
   dashboard source adapters, composition, strict API and bounded lifespan
   scheduler now provide a default-off, signed-only projection over the fixed
   AI Governance, Consent & Preferences, Data Use Governance, Privacy
   Automation, Tech Risk & Compliance and Third-Party Management sources.
-  Deployments inject tenant-bound authoritative readers separately from
-  independent verifiers. Closed normalized records use stable projection IDs;
+  A reusable core capture contract and stock dashboard composition now install
+  six lazy tenant-bound readers plus separately instantiated local re-verifiers
+  over the AI-governance loop, consent outbox, data-use mutation ledger, signed
+  privacy audit, TRC continuous-evidence audit and third-party lifecycle audit.
+  Deployments can still replace both maps with independently operated source
+  authorities. Closed normalized records use stable projection IDs;
   every page, including an empty terminal page, requires a signed receipt from
   the canonical tenant-bound strict sink before its cursor advances. Exact
   source-authority, schema, verifier-identity, trust-root and source-key
@@ -512,10 +790,12 @@ adversarial, recovery, scale and certification acceptance.
   replay, revocation, immutable history, local integrity linkage and
   read/admin APIs are covered locally. The scheduler consults only active
   tenant-registry records and makes one fixed-six run per enabled tenant per
-  cycle. No authoritative readers for the six domain stores or independently
-  operated signed/anchored verifier deployment ships here. SQLite linkage is
-  not external WORM or a cross-day/off-host anchor; off-host signing-key
-  custody and live scheduler crash/recovery, concurrency, scale, provider
+  cycle. Stock histories cover one canonical authority per suite rather than
+  every suite module, and explicitly retain `source_history_incomplete` and
+  `source_retention_unverified`; no independently operated signed/anchored
+  verifier deployment ships here. SQLite linkage is not external WORM or an
+  accepted cross-day/off-host anchor; off-host signing-key custody and live
+  scheduler crash/recovery, concurrency, scale, full provider/source
   completeness, customer operation and SIEM acceptance remain unproven.
 - **Configuration and installation:** config lint, migration recognition and
   installer/wizard prompts now cover
@@ -523,18 +803,24 @@ adversarial, recovery, scale and certification acceptance.
   `[consent_preferences.profile_data]`,
   `[consent_preferences.trust_center]`,
   `[consent_preferences.scanner.notice_proposals]`,
-  `[privacy_automation.regulatory_intelligence]` and
+  `[privacy_automation.regulatory_intelligence]`,
+  `[privacy_automation.data_discovery.adapters]`,
+  `[privacy_automation.data_discovery.remediation]`,
+  `[privacy_automation.data_discovery.remediation.data_map]`,
   `[third_party_management.intelligence]`,
-  `[third_party_management.lifecycle]` and
+  `[third_party_management.lifecycle]`,
   `[privacy_automation.rights_orchestration]`,
   `[privacy_automation.rights_consumer_delivery]`,
   `[privacy_automation.notice_governance]`,
   `[tech_risk_compliance.scoping]` and
   `[tech_risk_compliance.scope_actions]`,
-  `[tech_risk_compliance.continuous_evidence]`,
-  `[data_use_governance.provider_audit]` and
-  `[third_party_management.intelligence.providers]`, and
-  `[customer_sandbox_lifecycle]`, and `[audit.unified]`. Enabling a local
+  `[tech_risk_compliance.continuous_evidence]` and its closed
+  `[tech_risk_compliance.continuous_evidence.stock_collectors]` source
+  manifests,
+  `[data_use_governance.provider_audit]`,
+  `[third_party_management.intelligence.providers]`,
+  `[customer_sandbox_lifecycle]`, `[audit.unified]`,
+  `[consent_preferences.native_sdk]` and `[governance_inventory]`. Enabling a local
   control plane does not
   provision content licenses, provider credentials, destinations or live
   operating approval.
@@ -550,12 +836,20 @@ adversarial, recovery, scale and certification acceptance.
 | Third-party alert-delivery worker | 11 passed | Local transport doubles; no destination enrollment or live SMTP operation |
 | Third-party dashboard/API and mount | 13 passed | Strict route/page contracts, explicit delivery-run boundary and main OpenAPI/visibility mount; no commercial feed or live SMTP operation |
 | Config lint, migration and installer/wizard subset | 20 passed | Local configuration generation/recognition only |
-| Named third-party provider contracts, durable feed runtime and scheduler plus existing intelligence/delivery regressions | 64 passed | Closed RiskRecon, SecurityScorecard, HackNotice and approved-generic normalized contracts; tenant/source/monitor/key/revision pins; leases, retry/dead-letter/replay/revocation, concurrency, retention/integrity and lost-acknowledgement recovery were exercised with injected local doubles. No bundled HTTP client or credential, licensed/live feed, SupplyWisdom contract, provider write, automatic risk conclusion, continuously operated deployment, portfolio-scale operation or provider/customer acceptance. |
+| Named consent-delivery destinations, shared dispatch composition, operator API/UI, config/installer and Copilot | 300 selected Python checks demonstrated passing across the focused run and corrected single-test rerun; 2 consent-delivery Node response-contract checks passed | Closed Salesforce, Marketo, Adobe Experience Platform and Snowflake request translations; exact tenant/destination/public-origin/DNS/signing-key/credential-revision/schema authority; deployment-held credential references; no redirects; same-store bridge/dispatch; idempotency/no-change/retry/ambiguity/revocation; minimized receipts; fail-closed readiness; mounted API; liquid-glass UI and Copilot guidance were exercised locally. No credential value or provider session was opened by readiness. No fake reconciliation authority was installed, so production readiness remains false until a deployment supplies an independently operated provider-read authority. No live provider tenant, OAuth scope, schema provisioning, interoperability, outage/recovery, continuous operation, scale or customer acceptance was tested. One separate pre-existing/concurrent `privacy_data_discovery.html` source-level JSON-contract selector remained red because that page moved its client into a static file without updating the template-only test; it is not consent-delivery evidence. |
+| Named third-party provider contracts, production composition, durable feed runtime, scheduler, dashboard readiness, config, installer and Copilot | 38 focused provider/runtime tests plus 255 focused integration checks passed in the current tranche | Closed normalized reference contracts for the RiskRecon, SecurityScorecard, HackNotice, SupplyWisdom, ISS Corporate Solutions and approved-generic concepts; exact enrolled hosts; bundled DNS-pinned redirect-free GET transport; deployment-held credential references; tenant/source/monitor/key/revision pins; schema/byte/page/time/completeness bounds; leases, retry/no-change/ambiguity/dead-letter/replay/revocation; minimized receipts; app lifespan wiring; status/admin credential readiness; liquid-glass UI and closed Copilot guidance were exercised locally. Provider names describe normalized reference-contract shapes only. No licensed sandbox or live feed was contacted; no vendor-native interoperability, commercial corpus, provider write, automatic risk conclusion, continuously operated external deployment, multi-node recovery/scale drill or provider/customer acceptance is claimed. |
 | Native Data Use provider audit plus Snowflake/Databricks adapter regressions | 230 passed in the current broader focused rerun | Exact operation/binding/IR/control/read/key pins, built-in bounded native transports, normalized audit events, pagination/chunk/metadata/watermark checks, explicit reconciliation outcomes, leases/recovery/retry/dead-letter/replay/revocation/retention/integrity and no-raw persistence; no live provider/customer acceptance, production completeness certification or scale proof |
-| OTT/CTV rights bridge plus identity/orchestration/config/app regressions | 182 passed | Fresh redeemed pairing and exact service-client/Trust-Center authority, access/deletion case creation, approval/legal-hold preservation, revocation, recovery, expiry/purge and digest-only status with local fixtures; no native SDK, provider retrieval/deletion, delivered response or live estate/customer acceptance |
+| OTT/CTV rights bridge plus identity/orchestration/config/app regressions | 182 passed | Fresh redeemed pairing and exact service-client/Trust-Center authority, access/deletion case creation, approval/legal-hold preservation, revocation, recovery, expiry/purge and digest-only status with local fixtures; no compiled/deployed native host package, provider retrieval/deletion, delivered response or live estate/customer acceptance |
 | Managed customer sandbox core, API, composition, config and wizard | 137 passed, including 83 core lifecycle tests | Six closed safe projections, immutable snapshot/source authority, four-eyes lifecycle, disabled remediation, exact idempotency/replay, collision and quota enforcement, retention, and injected crash windows across provisioning/resync/expiry/destroy/abandon passed locally. This is not a registered tenant or execution/network sandbox; workspace integrity, keyed audit, hosted/live operation, production recovery/concurrency/scale/usability/SLA and customer acceptance remain unverified. Two Windows link/reparse tests skip when the host cannot create the required link type. |
-| Unified cross-suite audit core, strict sink, adversarial cases, six-source adapters, API, composition, scheduler, config and wizard | 89 passed | Local/injected fixtures cover signed-only default-off configuration, fixed-six completeness, stable record and mandatory page receipts, tenant-bound chain-verified sink receipts, rotation pins, sweep generations, leases/retry/replay/revocation, history/integrity and active-tenant scheduling. No live authoritative domain reader, independent verifier service, external WORM/cross-day anchor, off-host key custody, crash/recovery/concurrency/scale exercise, provider completeness, customer operation or SIEM acceptance was performed. |
+| Unified cross-suite audit core, strict sink, adversarial cases, six-source adapters, API, composition, scheduler, config and wizard | 204 passed in the integrated focused slice; 24 focused reader/capture/composition tests passed after final hardening | Local/synthetic fixtures cover the fixed-six projection core plus shipped lazy tenant-exact canonical readers, a reusable digest-only capture contract, separately instantiated local re-verifiers, signed privacy-chain verification, source drift/tamper refusal and stock/injected composition boundaries. The final tenant-exact custody composition added later orchestrates checkpoint/anchor/WORM/SIEM primitives after projection and through the scheduler. The stock readers still cover only one canonical history per suite. No independently operated verifier service, whole-suite completeness, real Object Lock/SIEM estate, accepted off-host key custody, crash/recovery/concurrency/scale exercise, provider completeness or customer operation was performed. |
+| Shared governance inventory core, stock composition/API and installer/config | 8 focused core/composition/API tests plus 4 installer/config tests passed | Tenant-private fixed-six normalized read model, explicit completeness/availability, minimized HMAC provenance, CAS/idempotency, bounded query/export, retention/recovery and integrity were exercised locally. Do not add these overlapping slices into a repository-wide unique-test total; no live source completeness, scheduler/recovery/scale or customer acceptance was performed. |
+| Native consent protocol/security and reference-adapter contracts | 13 focused Python tests plus 5 Node tests passed | Canonical Ed25519 envelope/receipt handling, exact authority, counters/replay/idempotency, offline renewal, rotation/revocation, fresh-attestation refresh and bounded SDK schema behavior passed locally. The Swift/Kotlin/JavaScript/BrightScript sources were not compiled, packaged or operated on physical devices. |
+| Native consent production composition, admin/operator UI, app/config/Copilot integration | 274 Python tests plus 2 Node admin-client tests passed; targeted Ruff clean | Separate focused slice over composition, admin API/page, app mount, wizard consent config, Copilot context and UI visibility. Local/synthetic only: no external platform verifier, store/device, HSM/KMS, multi-replica rate limit, customer/regulator/conformance or recovery/scale acceptance; missing required callbacks fail readiness. |
+| Stock privacy-discovery adapters, digest-only target, composition and operational API | 31 distinct focused tests passed: 14 adapter, 6 target, 9 composition and 2 API; Ruff clean across 9 touched files | Six exact-source readers, pinned bounded transport, lazy tenant composition, approved-review outbox/target, admin work list, worker/reconcile/maintenance and fail-closed side-effect attestation were exercised with local doubles. The managed scheduler was added and validated in the separate row immediately below. No credentials/live estate, provider writes, broad formats/database values, complete RoPA semantics, live recovery/concurrency/scale or customer acceptance. |
+| Managed privacy-discovery remediation scheduler, lifecycle, API/UI/Copilot and config/installer | The one 306-check focused slice reported 305 passed and one failed assertion; the production parser correctly rejected that invalid parent-gate combination, the assertion was corrected, and its exact selector passed. One subsequently added app-owned start/stop selector also passed, so 307 distinct focused checks were demonstrated individually without rerunning the full slice. Targeted Ruff initially exposed four integration issues; the exact affected files passed after correction, the subsequently changed scheduler test also passed Ruff, final compile checks passed, and targeted diff-check was clean apart from line-ending warnings. | Local doubles exercised explicit global plus tenant opt-in, bounded active-tenant/worker/reconciliation/lease limits, tenant/principal-derived identities, exact built-in digest-target reconciliation before retry, durable interrupted-cycle recovery, interval/jitter/backoff, process and strict cross-process exclusion, app-owned start/stop, tenant-gated automatic-retry truth, operator status and Copilot/config/wizard reachability. No discovery provider, credential value, provider write or raw finding was used. No continuously operated deployment, live provider interoperability, estate completeness, multi-host outage/recovery/scale or customer acceptance is claimed. |
 | TRC continuous-evidence core, API, scheduler and dashboard attachment | 29 passed | Local digest-only collector, exact authority, tenant allowlist enforcement, incomplete/truncated evidence, recovery, retention/integrity, tenant/job failure isolation and bounded lifespan operation; external collector/credential injection seams exist but no external runtime is installed, and no compliance conclusion, broad live estate or customer/auditor acceptance is claimed |
+| Seven stock TRC collectors, production composition, scheduler/app/API, operator UI, config/installer and Copilot | A 312-check focused local slice initially reported 310 passed and 2 failed. One assertion incorrectly depended on provider tuple order; the other exposed an unrelated shared consent-page token typo. Both were corrected, and the exact two failed selectors then passed (2 passed). The entire 312-check slice was intentionally not rerun, so this row does not claim a fresh aggregate green run. | Local doubles and closed manifests exercised AWS Security Hub, AWS Config, Azure Defender, Azure Policy, Google Cloud Security Command Center, GitHub security streams and Okta posture composition, tenant/source/definition/enrollment/key/capability/scope/credential/control pins, bounded transport, lazy registry, scheduler injection, status/run-once API, liquid-glass operator page, Copilot and config/wizard contracts. No credential value or provider session was opened by readiness. No live provider tenant, provider-native interoperability, licensed corpus, estate completeness, continuous operation, outage/recovery, concurrency, scale or customer/auditor acceptance was tested. |
+| AI Evidence Analysis authority lifecycle, tenant media status, API, config and installer | 59 focused tests passed in one run; targeted Ruff passed across the eight touched Python/test files | Local SQLite fixtures exercised live-only artifact case capacity, bounded authority-history admission with terminal revocation reserve, expiry plus full retention before compaction, minimized digest-only replay tombstones, second-interval tombstone folding into a rolling anchor, active-file VACUUM/WAL truncation, composed core/authority maintenance, tenant-enabled media/byte-limit status, readiness-bound legacy XLS availability and closed config/wizard output. This is not external WORM/off-host anchor custody, backup/crash/concurrency/scale acceptance, live parser operation, calibrated extraction/analysis quality, OneTrust wire compatibility or customer/provider acceptance. |
 | Parity-runtime installer and config gates | 22 passed | Explicit default-off provider-audit, continuous-evidence/scheduler and named third-party-provider/scheduler settings; configuration only, with no credential, provider license or live deployment provisioned |
 | Public consent experiment core/runtime | 43 passed | Default tenant-local web runtime and closed DOM contract; no live traffic, accessibility or scale acceptance |
 | Third-party lifecycle core, API and page | 23 passed | Local provider-neutral control plane; callback intent only, no provider writes |
@@ -576,7 +870,7 @@ adversarial, recovery, scale and certification acceptance.
 | Reviewed scan-to-disclosure proposal and inventory adapter | 44 passed | Public inventory APIs and deterministic local fixtures; no legal-copy generation, publication or live-estate completeness claim |
 | Progressive-profile SDK continuation rerun | 2 Node tests passed | Safe closed-control renderer; no live browser/accessibility/customer acceptance |
 | Governed consent-publishing/Trust Center branding core, API and page | 78 passed | Exact theme-version pins, rollback, strict copy/contrast/digest validation and legacy-unbranded compatibility; no live accessibility/customer acceptance |
-| Privacy discovery plus durable remediation outbox | 53 passed | Local digest-only leases/retry/recovery/reconciliation with injected callback; no built-in provider/target or live estate |
+| Privacy discovery plus durable remediation outbox | 53 passed | Earlier local digest-only lease/retry/recovery/reconciliation slice with an injected callback; the later stock provider/target composition is covered separately above, and neither run is live-estate evidence |
 | Privacy discovery-to-Data-Use bridge plus both source authorities | 49 passed | Exact reviewed observed-classification CAS/reconcile/rollback only; no inferred business/regulatory/consent authority or live estate |
 | Current combined focused reconciliation across consent publishing, Trust Center core/authority/public/operator paths, discovery/remediation, Data Use bridge and shared visibility | 248 passed | One 2026-08-30 current-tree invocation; focused local coverage only, not the full repository suite or external acceptance |
 | Trust Center/DSR preparation composition, safe public-profile discovery and third-party collaboration regression | 241 passed plus 12 Node tests | One 2026-08-30 current-tree invocation covering exact credential/profile/revision binding, registry migration and tamper detection, server-derived rights-intake context preparation, production composition seams, distinct approvals and the external collaboration portal. Local/injected fixtures only; no live IdP, browser, vendor, provider, estate, recovery, concurrency, scale or customer acceptance. |
@@ -598,13 +892,19 @@ skips** in one combined run. The continuation rows above were run on
 Use combined focused invocation. Other rows overlap and are evidence sets, not
 a sum or a replacement for the later full-suite result.
 
-For the final current-tree gate, `python -m ruff check .`,
-`python -m vulture`, package `compileall`, JavaScript syntax checking, the
-138-row OneTrust matrix verifier and `git diff --check` all passed. The first
+For the earlier final current-tree gate, `python -m ruff check .`,
+`python -m vulture`, package `compileall`, JavaScript syntax checking, the then
+current 138-row OneTrust matrix verifier and `git diff --check` all passed. The first
 repository-wide attempt exposed dated test evidence, Windows command quoting,
 UTC/local-day bucketing and host-provider isolation defects; those were repaired
 without weakening production freshness, sandbox, tenancy or audit controls.
 The complete clean-provider matrix was then rerun from zero and passed.
+
+For the 2026-08-31 documentation correction, the expanded 149-row verifier
+passed separately, including exact status locks for the corrected and newly
+tracked rows plus the five-stage legend and official-source gates. This
+docs/gate validation did not rerun the 23,145-test repository matrix and must
+not be presented as a new full-suite result.
 
 For the current continuation, Ruff passed across 21 targeted Python files;
 `py_compile` passed eight runtime/integration modules; Vulture at 80% confidence
@@ -674,12 +974,15 @@ so would mix broad unrelated formatting churn with the functional increment.
   normalized snapshots.
 - An opt-in identity-governance scheduler with provider leases, retry/backoff,
   digest-only snapshot history, bounded hash deltas and safe change callbacks.
+  The stock app starts the process-default scheduler without a change callback,
+  so normalized changes do not reach dynamic risk/alerts through that path.
 - A default-off identity-governance control plane for digest-only risk/alert
   callback fanout, pseudonymous agent-principal federation through an
   independently injected enrolled subject-binding resolver, identity-to-
   capability mapping, fresh conditional-access decisions and CAS/idempotent
-  Purview writeback/compensation. These paths are locally tested, not accepted
-  against live identity tenants.
+  Purview writeback/compensation. The stock app does not install the control
+  runtime, so its endpoints fail closed rather than becoming configured/ready.
+  These paths are locally tested, not accepted against live identity tenants.
 - Agent/tool/MCP/data/model topology, reverse blast radius and MCP inventory
   synchronization without projecting secret values.
 
@@ -777,7 +1080,7 @@ so would mix broad unrelated formatting churn with the functional increment.
   tests.
 - Updated feature catalog, the earlier focused comparison in
   [ONETRUST_CAPABILITY_GAP_ANALYSIS_2026-08-28.md](./ONETRUST_CAPABILITY_GAP_ANALYSIS_2026-08-28.md),
-  and the broader 138-outcome
+  and the broader 149-outcome
   [OneTrust full-platform public capability matrix](./ONETRUST_FULL_PLATFORM_CAPABILITY_MATRIX_2026-08-30.md).
 
 ## G1-G27 status matrix
@@ -793,7 +1096,7 @@ so would mix broad unrelated formatting churn with the functional increment.
 | G7 explainability | **Complete-local core** | Closed explanation receipts, exact input/model provenance, review, API/UI | Native provider adapters and adverse-action/legal acceptance |
 | G8 red-team assurance | **Complete-local core/dispatcher** | Schedules, leases, dispatcher, bounded suites, commitments, evidence/promotion gate | Live enrolled-agent end-to-end and comprehensive legal bias audit |
 | G9 agent/MCP topology | **Complete-local core** | Transitive reachability, trust boundaries, reverse blast radius, MCP inventory, API/UI | Live enterprise product adoption and operator usability acceptance |
-| G10 agent identity federation | **Complete-local control paths; live acceptance outstanding** | Read-only Entra/Okta/Purview discovery; leased scheduler; digest-only risk/alert coupling; pseudonymous federation with authoritative enrolled subject resolution; capability mapping; fresh conditional-access decisions; CAS/idempotent Purview writeback/compensation | Real Entra/Okta/Purview test tenants, agent-principal enrollment contracts, policy semantics and customer operating acceptance |
+| G10 agent identity federation | **Partial; production composition exists, provider/consumer last mile absent** | Read-only Entra/Okta/Purview discovery; leased tenant-specific scheduler; mounted lazy per-tenant control runtime; governed federation/capability/Purview authority registry; fresh conditional-access decisions; CAS/idempotent writeback/compensation; durable digest-only dynamic-risk/alert request handoff. | Exact Entra/Okta/Purview transports and trusted enrollment; AI-asset-bound governed downstream risk/alert consumer; real test tenants, provider policy semantics and customer operating acceptance |
 | G11 inline LLM control plane | **Complete-local enforcement and pilot; external acceptance outstanding** | Runtime evaluate/execute plus restart-safe local gateway pilot covering retry, outage ambiguity, no-change, re-evaluation, rollback and compensation | A consenting real external/customer gateway and broad agent/tool/MCP/Copilot acceptance |
 | G12 regulatory tracking | **Complete-local bridge; external feed operations outstanding** | Impact mapping, review, stale-evidence resolution, notices, API/UI/config/tests | Licensed/current sources, counsel validation and delivered-notice operations |
 | G13 Article 73 incidents | **Complete-local workflow** | Serious-incident triage, clocks, routing record, four-eyes approval, export/receipt | Filing transmitter, maintained authority directory, legal calendar and legal determination |
@@ -814,9 +1117,9 @@ so would mix broad unrelated formatting churn with the functional increment.
 
 ## Explicit OneTrust gaps after this build
 
-The 138-outcome matrix has no rows classified Missing, but 72 are Partial and
-seven are External / unverifiable. OneTrust's publicly marketed product still
-has advantages Lightwork has not matched in code-plus-proof:
+The 149-outcome matrix now has 75 rows classified Implemented, 67 Partial, zero
+Missing and seven External / unverifiable. OneTrust's publicly named product
+still has advantages Lightwork has not matched in code-plus-proof:
 
 1. Deployed broad discovery, including shadow and embedded AI collection.
 2. A much larger set of live, maintained enterprise integrations.
@@ -839,6 +1142,29 @@ has advantages Lightwork has not matched in code-plus-proof:
 12. Live California DROP authority/registered-broker interoperability, subject
     matching, deletion/permanent-opt-out semantics and legal/regulator/customer
     acceptance. The local control plane cannot prove any of those outcomes.
+13. Live/migrated customer acceptance for the now-built AI-entity tasks,
+    consent bulk jobs/indexes/publish settings/Global Opt-Out, assessment
+    projections, evidence-assisted assessment proposals, TPRM Contract/
+    Engagement lifecycle and role-aware executive PDF reporting.
+14. External object-store, malware/privacy, backup, off-host key-custody,
+    recovery/scale and relying-workflow acceptance for the now-built encrypted
+    local document vault, administration tokens and incident attachments.
+15. Whole-suite canonical source-history coverage for the shared inventory and
+    unified audit; independently operated verifiers, a real S3 Object Lock
+    account, accepted off-host key custody and live shared-inventory/agent/audit
+    custody/SIEM operation. The current stock readers cover one bounded history
+    per suite, while the local checkpoint/anchor/WORM/SIEM composition is built.
+16. Compiled, packaged and operated native consent host integrations with
+    accepted platform attestation/key/outbox/transport custody, a certified
+    TCF/GPP CMP, downstream AdTech and full device/household/rights delivery.
+17. Privacy discovery beyond the six current readers: broad formats/database
+    values, complete purpose/transfer/subject/recipient/vendor semantics, a
+    complete RoPA target and live scheduler/estate completeness operation.
+18. Exact identity-provider transports and live operation of the AI-asset-bound
+    governed downstream risk/alert consumer.
+19. Installed/attested OCR and legacy-XLS deployment dependencies, general
+    visual-semantic image analysis beyond OCR, and representative extraction
+    quality/calibration/privacy/customer acceptance.
 
 Lightwork's strongest differentiation is the governed execution substrate:
 runtime action-path enforcement, signed delegation, capability attenuation,
@@ -865,9 +1191,11 @@ infrastructure:
    placeholder test-tenant identifiers, and run without `--readiness-only` only
    after the exact consent and ServiceNow mutation acknowledgements are true and
    the exact ServiceNow write origin is independently reviewed in the allowlist.
-4. Operate the identity scheduler/control plane against approved Entra or Okta
-   and Purview tenants. Review provider-specific agent-principal, conditional-
-   access and writeback semantics before enabling any mutation.
+4. Install exact Entra/Okta/Purview transports and trusted enrollment into the
+   now-mounted identity scheduler/control composition. Bind its durable
+   dynamic-risk/alert request to an exact AI asset and separately governed
+   downstream consumer, then operate federation, conditional access and
+   writeback in approved tenants before enabling provider mutation.
 5. Provision production C2PA HSM/KMS custody, certificate chain, timestamping,
    rotation/revocation and on-call recovery following
    `docs/security/c2pa-signing-custody.md`; obtain relying-party acceptance.
@@ -878,25 +1206,30 @@ infrastructure:
    human review, and record vendor/customer ecosystem acceptance.
 8. Repeat the five-suite platform runner in deployment-like infrastructure and
    add moderated human usability acceptance before readiness claims.
-9. Operate the new registry-backed Trust Center/DSR composition with a
+9. Operate the registry-backed Trust Center/DSR composition with a
    production IdP, separately approved identity-assurance resolver, protected
    signing-key custody and at least three distinct operator identities for the
    proposer/two-approver ceremony. Exercise stale revision, key rotation,
    revocation, outage/recovery, per-subject and tenant quotas, concurrency and
-   scale. Extend the reviewed color/plain-copy theme contract to governed
-   logo/media assets and custom domains; run accessibility acceptance across
-   representative web/native channels. Build native mobile/TV SDKs and operate
+   scale. Operate the shipped governed logo/media authority and custom-domain
+   DNS/TLS lifecycle, then run accessibility and brand acceptance across
+   representative web/native channels. Compile, package and deploy the existing
+   native reference adapters, add any remaining host integrations, and operate
    the OTT/CTV rights bridge through real device identity, provider retrieval/
    deletion, response delivery, household/device transitions and customer
    acceptance.
-10. Supply governed object-store/decryption and source-system adapters for
-    rights packages, define recovery for failures after one-time server-grant
-    claim, and operate end-to-end identity, redaction, delivery, revocation and
-    customer acceptance exercises.
-11. Compose the discovery remediation outbox and discovery-to-Data-Use bridge
-    into deployed workers, supply approved source and data-map/RoPA target
-    adapters, and exercise revocation, outage, ambiguity, recovery, concurrency,
-    scale and continuous-completeness limits in a consenting enterprise estate.
+10. Supply a production IdP/reauthentication mapping and accepted KMS/HSM or
+    external object-store custody to the shipped rights-delivery composition.
+    Separately review a safe protocol for failures after one-time server-grant
+    claim, then operate end-to-end identity, redaction, delivery, revocation,
+    recovery and customer acceptance exercises.
+11. Operate the shipped discovery scheduler, worker/reconcile/maintenance
+    paths, six stock source readers and digest-only target in a consenting
+    estate, then add broad
+    formats/database values, the missing RoPA semantics and any required source/
+    destination adapters. Exercise revocation, outage, ambiguity, manual
+    redelivery, recovery, concurrency, scale and continuous-completeness limits
+    in a consenting enterprise estate.
 12. Operate the built-in Snowflake and Databricks audit readers against
     consenting test tenants and independently accept query-tag availability,
     permissions, source latency/retention, result pagination/chunks, delivery-
@@ -909,20 +1242,22 @@ infrastructure:
     usability, audit export and SLA behavior. A true product-tenant copy needs
     separately designed identity, secret, data, provider and rollback authority;
     do not infer it from the local 137-test result.
-14. Implement authoritative, lawful-cursor readers for the AI Governance,
-    Consent & Preferences, Data Use Governance, Privacy Automation, Tech Risk &
-    Compliance and Third-Party Management stores. Deploy separately controlled
-    signed/anchored verifiers with accepted trust-root and off-host key custody;
-    operate the scheduler through kill, restart, outage, recovery, concurrency
-    and production scale; add external WORM/cross-day anchors and whole-database
-    rollback protections; then obtain customer and SIEM completeness/operations
-    acceptance. Do not infer any of those results from the local 89-test run.
-15. Deploy the closed packaged-agent contracts with independently operated
-    analysis/dispatch adapters and a durable encrypted one-time execution-token
-    vault. Complete HSM/KMS custody, rotation/revocation, ambiguous-outcome
-    recovery, adversarial evaluation, licensed knowledge content and customer
-    usability/operations acceptance. Do not infer those results from local
-    policy, receipt and recovery tests.
+14. Extend the shipped tenant-exact stock readers from one canonical authority
+    per suite to lawful-cursor coverage of every material suite history. Deploy
+    separately controlled signed/anchored verifiers with accepted trust-root
+    and off-host key custody; operate the scheduler through kill, restart,
+    outage, recovery, concurrency and production scale; configure and accept the
+    shipped cross-day anchor, real S3 Object Lock WORM and exact-tenant SIEM
+    paths plus whole-database rollback protections; then obtain customer and
+    SIEM completeness/operations acceptance. Do not infer any of those results
+    from the local focused runs.
+15. Extend the shipped shared-inventory and packaged-agent context readers from
+    one canonical history per suite to all material suite authorities, then
+    deploy the agent contracts with independently operated adapters/dispatchers.
+    Move the encrypted one-time token vault to accepted HSM/KMS custody and
+    complete rotation/revocation, ambiguous-outcome recovery, adversarial
+    evaluation, licensed knowledge content and customer usability/operations
+    acceptance.
 16. Replace the cloud-agent control plane's process-local canonical authority
     with durable tenant storage, install credentialed transports, broaden only
     independently verified safe provider writes, and run Bedrock/Azure/Vertex
@@ -934,6 +1269,27 @@ infrastructure:
     all status transitions, and complete retry, revocation, privacy, legal,
     regulator and customer acceptance. Separately contract-test assessment
     comments and the evidence-result object in their real relying workflows.
+18. Operate the now-mounted Governance Agents, AI Evidence Analysis, DROP and
+    identity compositions with production authority. Preserve fail-closed
+    revoked/drifted behavior and record startup, recovery, concurrency, scale
+    and customer/provider acceptance without converting local readiness into a
+    live claim.
+19. Migrate and usability-test the now-built AI-entity tasks; exercise the
+    consent bulk export/action/index/settings/Global Opt-Out products at
+    representative volume and through native device channels.
+20. Contract-test the new assessment score/record/AI-metadata projections,
+    reviewed evidence-to-assessment proposals and first-class Contract/
+    Engagement lifecycle in real relying workflows, including mapping/model
+    calibration, migration, privacy review and customer/vendor acceptance.
+21. Operate the encrypted local document vault, administration tokens,
+    incident attachments and deterministic executive PDF reports with
+    representative records and relying workflows. Independently accept
+    external object-store/malware/backup/key custody, source completeness,
+    brand governance, recovery, concurrency, scale and customer usability.
+22. Deploy and attest exact Bubblewrap, Tesseract/language-data and legacy-XLS
+    parser dependencies on a supported POSIX host; execute the OS-network-
+    denied sandbox/readiness path and independently evaluate adversarial
+    extraction quality, privacy boundaries and score calibration.
 
 Parallel non-code work:
 
@@ -956,3 +1312,235 @@ Parallel non-code work:
   attribution, fabricated provider acceptance or automatic legal conclusions.
 - Treat unsupported integrations as fail-closed.
 - Keep main untouched unless the user separately authorizes a merge or PR.
+
+## 2026-08-31 production-composition and parity rebaseline continuation
+
+This section is the authoritative continuation for current capability counts
+and supersedes earlier same-day statements that Governance Agents, AI Evidence
+Analysis, DROP or identity production compositions were absent. Those earlier
+statements accurately described the browser-audit checkpoint before the later
+build, but they are not the current working-tree state.
+
+Current composition outcome:
+
+- **Governance Agents:** the app installs the stock production composition,
+  including deterministic offline analysis, internal-intent dispatch, an
+  encrypted rotatable one-time token vault, receipt verification and recovery/
+  readiness controls. It now also installs authoritative tenant-exact
+  cross-suite context projections with revision, digest, completeness and
+  source-availability pins, bounded projections and double-read drift
+  rejection. The packaged common-context row is Implemented locally; the
+  Privacy AI and Third-Party Risk Agent rows remain Partial for equivalent
+  maintained/licensed content, commercial feeds and live external operation.
+- **AI Evidence Analysis:** the app installs its tenant store, authority,
+  adapter, readiness and retention composition. Its authority registry now has
+  closed capacity, live-only artifact quotas, retention-delayed digest
+  tombstones, a rolling compaction anchor and composed core/authority
+  maintenance; tenant status no longer advertises disabled media or hardcodes
+  legacy XLS unavailable. Adapter compaction cannot silently recreate revoked
+  or expired local authority. The durable-result row is
+  Implemented locally. The broader format-analysis row remains operationally
+  Partial: optional OCR and legacy-BIFF8 workers require exact-pinned POSIX
+  Bubblewrap network isolation plus attested Tesseract/language data/runtime
+  libraries/Pillow/`xlrd`/`olefile`. Unsupported Windows fails closed, and this
+  host could not execute the required sandbox. OCR is not general visual-
+  semantic understanding, and no extraction-quality, calibration, privacy or
+  customer acceptance is claimed.
+- **California DROP:** the app installs the authority registry, store factory,
+  scheduler and production composition. The locally owned DROP row is
+  Implemented; registered-broker, legal, regulator and customer acceptance are
+  explicitly not claimed.
+- **Identity governance:** the app installs a lazy exact-tenant control runtime,
+  tenant scheduler composition, exact tenant/provider/revision/digest AI-asset
+  authority and leased, retryable, idempotent dynamic-risk and alert outcomes,
+  with closed config/wizard controls and a fixed-authority deployment transport
+  boundary. The row remains Partial because real Entra/Okta/Purview credentials,
+  trusted enrollment, provider-side conditional-access enforcement, writeback
+  interoperability and operated customer acceptance are absent.
+- **Shared governance inventory and unified audit:** the app installs a tenant-
+  private fixed-six shared inventory with canonical readers, explicit source
+  completeness/availability, minimized HMAC provenance, strict API and liquid-
+  glass/Copilot workbench. This closes local `PX-01`. Unified audit now also
+  installs an exact-tenant custody runtime invoked by projection runs and the
+  scheduler for signed chain/anchor verification, checkpoint publish/verify,
+  optional sealed-day S3 Object Lock export and durable at-least-once exact-
+  tenant SIEM delivery with replay/backoff. `PX-10` remains Partial because the
+  stock surface covers only one narrow history per suite and has no independently
+  operated verifier, whole-suite audit completeness, real Object Lock account,
+  accepted off-host key custody or live scheduler/SIEM operation.
+- **Native consent:** the application scanner, device-bound Ed25519 core,
+  backend, public/admin/operator composition and Swift/Kotlin/JavaScript/
+  BrightScript reference adapters now exist. A 13-Python/5-Node protocol slice
+  and separate 274-Python/2-Node composition/UI slice passed locally, with
+  targeted Ruff clean. `CP-16` through `CP-19` remain Partial: the adapters were
+  not compiled, packaged or run on devices, and accepted attestation/key/outbox/
+  transport custody, certified TCF/GPP, AdTech/rights delivery and live device/
+  recovery/scale/customer operation are absent.
+- **Privacy discovery:** six exact-source S3/Azure Blob/GCS/Snowflake metadata/
+  ServiceNow CMDB/Entra readers, a tenant-pinned composition, approved-review
+  outbox, digest-only data-map target, admin worker/reconcile/maintenance
+  surfaces and a bounded active-tenant scheduler now ship. `PA-04` remains
+  operational-proof Partial because no live continuously operated estate was
+  available. `PA-05` and `PA-06` remain material-code Partial because coverage
+  is enrolled-resource and supported-text/metadata only and the target is not a
+  complete RoPA.
+- **No-code GRC Studio:** the app installs a guided liquid-glass/Copilot visual
+  builder for closed objects, fields, forms, rules, collector bindings and
+  report views. Three-principal approval, CAS publish/rollback, authenticated
+  portability, integrity, retention/recovery and server-authorized runtime
+  projections close the local UI-driven configuration row. Broad named-
+  connector coverage and fresh-tenant live usability remain separate outcomes.
+- **Governed document custody:** the app installs an encrypted tenant-private
+  vault and wires its exact document resolver and opaque one-time delivery-grant
+  authority into administration tokens and incident attachments. The two local
+  rows are Implemented; external object-store, malware/privacy, backup, off-host
+  key custody, relying-workflow, recovery and scale acceptance are not claimed.
+- **Evidence-assisted assessments:** the app installs the general
+  evidence-analysis-to-questionnaire proposal composition, API and workbench.
+  Exact evidence/template/criteria/mapping pins, citations, independent review
+  and CAS application to still-empty answers close the two local rows; vendor
+  attestation, source completeness, model/parser calibration and customer
+  acceptance are not claimed.
+- **Third-party executive reports:** the app installs role-aware deterministic
+  PDF reporting over exact selected lifecycle, intelligence, Contract/
+  Engagement and collaboration source manifests. Rendered branding is limited
+  to closed plain-text/color tokens; optional brand-asset reference/digest
+  fields are non-rendered provenance metadata, and no asset/logo bytes are
+  resolved, fetched or embedded. Truthful unavailable states, immutable report
+  content, revocation/retention, one-time principal-bound downloads, audit and
+  integrity close the local row; live portfolio completeness, migrated data,
+  external custody and executive/customer recovery/scale acceptance are not
+  claimed.
+
+The rebaselined 149-row matrix is **75 Implemented, 67 Partial, 0 Missing and
+7 External / unverifiable**. The 67 Partial rows split into **52 with material
+code/product breadth remaining** and **15 whose primary residual is live or
+operational proof**. The twenty-two promotions from the earlier
+53/86/3/7 checkpoint are `PX-16`, `AG-27`, `CP-21` through `CP-25`, `PA-08`,
+`PA-21` through `PA-24`, `TRC-25`, `TPM-06`, `TPM-18`, `TPM-22`, `PX-15` and
+`TRC-16`, `PX-01`, `CP-03`, `PA-11` and `PA-14`. No row was
+promoted merely from a file or class name, and no live/provider/customer/legal
+evidence was inferred from local tests. The optional parser paths remain
+default-off until their exact deployment dependencies are installed and
+attested. `TRC-24` remains operational-proof Partial because this Windows host
+cannot execute its required OS-enforced, network-denied parser sandbox.
+
+The detailed status definitions, all 149 IDs split into implemented,
+code/product-Partial, live/operational-Partial, Missing and External groups, and
+focused deep dives are in
+[`ONETRUST_PARITY_BREAKDOWN_2026-08-31.md`](./ONETRUST_PARITY_BREAKDOWN_2026-08-31.md).
+This continuation is documentation of the local working tree; it is not proof
+that the changes are committed, pushed, merged or deployed.
+
+## 2026-09-01 final local closure
+
+This section supersedes any earlier statement in this handoff that the privacy-
+notice publisher lacked a stock callback/composition, privacy discovery lacked
+a scheduler, privacy-rights fulfillment lacked source adapters, rights package
+delivery lacked production wiring, Trust Center branding/custom domains were
+only a theme placeholder, or unified-audit checkpoint/WORM/SIEM primitives were
+not orchestrated. Those were accurate intermediate checkpoints, not the final
+working-tree state.
+
+Final classification changes and boundaries:
+
+| Row | Final local result | What remains |
+|---|---|---|
+| `CP-03` | **Implemented.** Reviewed encrypted/versioned PNG/JPEG custody, independent activation/revocation, exact custom-domain challenge plus DNS/TLS verification, Host-independent projection and digest-bound public asset delivery now ship. | Live DNS/TLS/CDN issuance, production key/IdP custody, accessibility/brand/customer and external-fulfillment acceptance. |
+| `CP-13` | **Operational-proof Partial.** Exact-CAS unlink, fresh-evidence relink/account transition, immutable history, pairing-proof revocation, legacy backfill and interrupted-operation recovery close the material local identity-lifecycle gap. | Production IdP/JWKS custody, continuous multi-device transport and live recovery/scale/customer operation. |
+| `PA-04` | **Operational-proof Partial.** The six stock readers and digest target now run through a bounded active-tenant scheduler with durable leases, cross-process exclusion, recovery and backoff. | Credentialed continuous-estate operation, completeness, outage/recovery/concurrency/scale and customer acceptance. |
+| `PA-11` | **Implemented.** Exact notice/property/rule/resource bindings, double-preview resolution, release/target re-read, CAS publication, verified rollback, retry/recovery and a bounded active-tenant scheduler now form the stock notice-publication runtime. | The runtime intentionally does not mutate a provider, website, tag manager or SDK deployment; live rollout and legal/privacy/accessibility/customer acceptance remain external. |
+| `PA-14` | **Implemented.** Exact Microsoft Graph, Google Workspace, Salesforce and ServiceNow retrieval/deletion/verification contracts, atomic pre-mutation reservation, ambiguity reconciliation, authority rechecks, encrypted exact-target custody and governed-vault retrieval now ship. | Live providers/credentials, estate completeness, accepted KMS custody and provider/legal/customer operation. |
+| `PA-15` | **Operational-proof Partial.** The stock rights-delivery composition binds exact case/package authority, independent public subject identity, deployment-owned reauthentication proof, digest/key pins and governed-vault authority checks before grant, consume and byte return. | Production IdP/reauth mapping, accepted KMS/HSM or object-store custody, live browser/customer/load evidence, and a separately reviewed post-claim/pre-response crash protocol; current behavior deliberately fails closed. |
+| `PX-10` | **Material-code Partial.** The tenant-exact custody runtime now runs with projection/scheduling and performs signed chain/anchor verification, checkpoint publish/verify, optional sealed-day S3 Object Lock export, durable at-least-once exact-tenant SIEM delivery, replay/backoff, authority drift rejection and cross-process exclusion. | Every material suite history, independently attested completeness, separately operated verification, a real Object Lock/SIEM estate, accepted off-host keys and live recovery/scale/customer operation. |
+
+`CP-01`, `CP-04` and `CP-06` remain material-code Partial even though their
+evidence descriptions are stronger: the complete UCPM outcome still needs
+operated communications/native channels; Adobe Experience Platform still needs
+a deployment-specific asynchronous query/readback authority; and native CMP
+hosts remain uncompiled/unoperated with no live geolocation/accessibility
+acceptance.
+
+The three production compositions named in the user review are code-complete at
+the local product-composition layer:
+
+- **Governance Agents** installs tenant/principal/RBAC authority, five packaged
+  kinds, exact shared context, deterministic local analysis, internal-intent
+  dispatch, encrypted one-time token custody, receipts, approval, recovery,
+  readiness, API, liquid-glass UI and Copilot.
+- **AI Evidence Analysis** installs private tenant stores, parser/adapter
+  authority, revocation/rotation, bounded parsing and analysis, durable review/
+  release results, retention, API, liquid-glass UI and Copilot. Optional OCR/
+  BIFF8 execution still requires an attested supported POSIX sandbox.
+- **California DROP** installs broker/principal/key/request authority, the
+  privacy-rights bridge, four-eyes changes, exact status transitions, scheduler,
+  retry/reconciliation/revocation/recovery, API, liquid-glass UI and Copilot.
+
+Here, **production composition** means deployable, configuration-backed,
+fail-closed application wiring that does not rely on test-only injection. It
+does not mean a California authority, cloud provider, licensed content owner,
+customer, auditor or regulator supplied credentials or accepted an operation.
+The final current matrix is therefore **75 Implemented, 67 Partial, 0 Missing
+and 7 External / unverifiable**, not literal OneTrust parity. The historical
+**53/86/3/7** checkpoint remains only as provenance for the 22 local promotions.
+
+## 2026-09-01 integrated UI and validation closure
+
+The dashboard was started twice on loopback from the repository `.venv` with an
+isolated `MAVERICK_HOME`: first with every new capability gate off, then with a
+closed local acceptance configuration enabling Governance Agents, AI Evidence
+Analysis, DROP, consent identity, notice governance/publication, Trust Center
+branding/custom-domain authority and privacy-rights consumer delivery. No live
+provider credential, customer data or external mutation was used.
+
+Browser acceptance covered `/governance-agents`, `/ai-evidence-analysis`,
+`/privacy/drop`, `/privacy/notice-governance`,
+`/consent/trust-center-authority`, `/consent`,
+`/privacy/rights-consumer-delivery`, `/privacy` and `/audit`:
+
+- all pages returned HTTP 200, rendered their closed operator controls, exposed
+  the current navigation path and showed no browser console warning/error;
+- the off-state disabled controls and explained the exact configuration gates;
+- the enabled-state removed those disabled banners and exposed the bounded
+  operations without introducing browser-selected tenant, credential, adapter
+  or identity authority;
+- Governance Agents status returned its five packaged kinds and callable stock
+  seams, while candidly reporting the missing authenticated principal and live
+  provider/content proof;
+- AI Evidence status enabled PDF/XLSX/text operation attempts and truthfully
+  reported image OCR unavailable on this host;
+- DROP reached local `Ready` through its real stock composition, but continued
+  to disclaim California/regulator/legal/customer interoperability;
+- notice publication exposed its local runtime/status/run-once controls and
+  corrected stale page text: the scheduler can publish to Lightwork's exact-
+  tenant Consent Publishing store, not a website, SDK, tag manager or provider;
+- Trust Center exposed the complete asset review/activate/revoke/custody and
+  custom-domain challenge/DNS/TLS/activate/reverify/revoke operation inventory;
+- consent showed current identity links, governed unlinks and immutable
+  link/unlink/relink/account-transition evidence; rights delivery showed its
+  exact case/package/vault gates and operator-to-consumer identity fail-closed
+  seam;
+- Audit now has a read-only liquid-glass Unified Audit Custody panel backed by
+  `/api/v1/audit/unified/status`, with checkpoint/WORM/SIEM readiness and an
+  explicit separate-production-proof indicator; and
+- page-aware Copilot was opened on Governance Agents and rights delivery. Its
+  module-specific suggestions loaded successfully and remained guidance-only.
+
+The standard dark theme's panel material was verified in the browser as a
+translucent gradient with `blur(20px) saturate(1.6)`, layered borders and
+shadows. High-contrast mode deliberately replaces transparency/blur with an
+opaque surface and stronger border; that accessibility exception is not a
+liquid-glass regression.
+
+Validation was intentionally not repeated wholesale. One consolidated changed-
+test Python run completed with three integration failures: a mis-nested AI-
+evidence config-lint block and an outdated explicit public-route allowlist.
+Those defects were corrected; the exact failures plus adjacent notice/audit UI
+checks passed `8/8`. The JavaScript sweep passed `137/139`, exposing an outdated
+test harness that still assumed privacy discovery was inline after the client
+moved to a bounded external script; the exact corrected contract file then
+passed `52/52`. Native consent contracts passed `5/5`. Ruff passed all 321
+changed Python files, Vulture returned clean, the matrix verifier returned
+`verified_structure_only` with `parity_claimed=false`, and the browser checks
+above completed with no console errors. These are local/synthetic validation
+results, not live provider, customer, regulator or certification acceptance.

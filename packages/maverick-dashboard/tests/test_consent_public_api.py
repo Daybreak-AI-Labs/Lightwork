@@ -7,6 +7,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import maverick_dashboard.consent_public_api as consent_public_api
@@ -1896,6 +1897,85 @@ def test_public_trust_center_reauthenticates_and_exports_without_selectors(
     )
 
 
+def test_public_trust_center_brand_projection_and_asset_are_exactly_bound(
+    environment: _Environment,
+) -> None:
+    from maverick.trust_center_branding import BrandingNotFound
+
+    _bootstrap(environment)
+    environment.app.state.consumer_trust_center_gate = lambda: True
+    environment.app.state.consumer_trust_center_store_factory = (
+        lambda **_kwargs: _FakeTrustCenterStore()
+    )
+    content = b"bounded-raster-fixture"
+    content_sha = hashlib.sha256(content).hexdigest()
+    projection = SimpleNamespace(
+        projection_id="brand-projection-public",
+        projection_revision=2,
+        publication_sha256=environment.binding.publication_sha256,
+        public_origin=_ORIGIN,
+        public_host="www.example.com",
+        asset_kind="logo",
+        asset_media_type="image/png",
+        asset_width=320,
+        asset_height=80,
+        asset_content_sha256=content_sha,
+        domain_claim_id="brand-domain",
+        domain_claim_version=1,
+        domain_authority_sha256="d" * 64,
+        domain_deployment_sha256="e" * 64,
+    )
+
+    class BrandStore:
+        def resolve_projection(self, exact):
+            assert exact.tenant_id == "tenant-a"
+            assert exact.client_credential_id == environment.binding.credential_id
+            assert exact.client_record_sha256 == environment.binding.record_sha256
+            assert exact.public_origin == _ORIGIN
+            return projection
+
+        def read_public_asset(self, exact, projection_id, requested_sha):
+            self.resolve_projection(exact)
+            if projection_id != projection.projection_id or requested_sha != content_sha:
+                raise BrandingNotFound("branding_asset_unavailable")
+            return SimpleNamespace(projection=projection, content=content)
+
+    environment.app.state.trust_center_branding_gate = lambda: True
+    environment.app.state.trust_center_branding_store_factory = (
+        lambda **_kwargs: BrandStore()
+    )
+    headers = _browser_headers(profile=True)
+    snapshot = environment.client.get(
+        "/api/v1/public/consent/trust-center",
+        headers=headers,
+    )
+    assert snapshot.status_code == 200
+    brand = snapshot.json()["brand"]
+    assert brand["available"] is True
+    assert brand["public_host"] == "www.example.com"
+    assert brand["host_header_tenant_inference"] is False
+    assert brand["asset"]["url"].endswith(
+        f"/{projection.projection_id}/{content_sha}"
+    )
+
+    asset = environment.client.get(brand["asset"]["url"], headers=headers)
+    assert asset.status_code == 200
+    assert asset.content == content
+    assert asset.headers["content-type"] == "image/png"
+    assert asset.headers["x-content-type-options"] == "nosniff"
+    assert asset.headers["cache-control"] == "private, max-age=0, must-revalidate"
+    assert asset.headers["x-lightwork-publication-sha256"] == (
+        environment.binding.publication_sha256
+    )
+
+    wrong = environment.client.get(
+        f"/api/v1/public/consent/trust-center/brand-assets/"
+        f"{projection.projection_id}/{'f' * 64}",
+        headers=headers,
+    )
+    assert wrong.status_code == 404
+
+
 def test_public_rights_delivery_claims_server_grant_and_returns_only_bound_bytes(
     environment: _Environment,
 ) -> None:
@@ -1998,6 +2078,8 @@ def test_only_narrow_public_routes_are_exposed(environment: _Environment) -> Non
         "/api/v1/public/consent/experiments/assignment",
         "/api/v1/public/consent/experiments/exposure",
         "/api/v1/public/consent/experiments/outcome",
+        "/api/v1/public/consent/global-opt-out/configuration",
+        "/api/v1/public/consent/global-opt-out/requests",
         "/api/v1/public/consent/preferences",
         "/api/v1/public/consent/profile-data",
         "/api/v1/public/consent/profile-data/export",
@@ -2014,6 +2096,7 @@ def test_only_narrow_public_routes_are_exposed(environment: _Environment) -> Non
         "/api/v1/public/consent/profiles/bootstrap",
         "/api/v1/public/consent/sdk.js",
         "/api/v1/public/consent/trust-center",
+        "/api/v1/public/consent/trust-center/brand-assets/{projection_id}/{content_sha256}",
         "/api/v1/public/consent/trust-center/exports",
         "/api/v1/public/consent/{resource_path}",
     }

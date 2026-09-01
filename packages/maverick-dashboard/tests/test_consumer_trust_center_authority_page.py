@@ -145,7 +145,9 @@ def test_dashboard_mounts_page_api_visibility_help_and_consent_link(
         / "consent_preferences.html"
     ).read_text(encoding="utf-8")
     assert 'href="/consent/trust-center-authority"' in consent
-    base = (
-        Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "base.html"
-    ).read_text(encoding="utf-8")
-    assert '"/consent/trust-center-authority"' in base
+    from maverick_dashboard.copilot_context import context_for_page
+
+    assert (
+        context_for_page("/consent/trust-center-authority").path
+        == "/consent/trust-center-authority"
+    )

@@ -19,11 +19,15 @@
 <p>Exact-tenant control plane for rights requests, evidence, source work,
   completeness-explicit manifests, response-package metadata, and closure.</p>
 <div class="pro-warning">
-  <strong>No network calls, provider writes, identity verification, response
-    delivery, live acceptance, or estate-completeness claim.</strong>
-  Callbacks are worker intent only. Raw subject and external-request references
-  are accepted only while opening a case, replaced with tenant-keyed HMACs, and
-  never persisted or returned.
+  <strong>Provider execution stays closed until the tenant source manifest,
+    deployment subject authority, credential references, and encrypted retrieval
+    custody are ready.</strong>
+  The stock worker supports Microsoft Graph, Google Workspace, Salesforce, and
+  ServiceNow discovery, retrieval, deletion, verification, retry, dead letter,
+  and ambiguity-safe reconciliation. Raw subject and external-request references
+  are replaced with tenant-keyed HMACs in orchestration state and are never
+  returned. This does not perform identity verification or response delivery,
+  prove estate completeness, or claim live provider/customer acceptance.
 </div>
 
 {% if not privacy_rights_orchestration_enabled %}
@@ -53,9 +57,12 @@
         <option value="task-plan" data-method="POST" data-path="/cases/{case_id}/sources/{source_id}/plan">Source work: plan tasks</option>
         <option value="destructive-approve" data-method="POST" data-path="/tasks/{task_id}/approve-destructive">Deletion: independent approval</option>
         <option value="callback-claim" data-method="POST" data-path="/callbacks/claim">Callback: claim worker lease</option>
+        <option value="callback-list" data-method="GET" data-path="/callbacks">Callback: list governed queue</option>
         <option value="callback-fail" data-method="POST" data-path="/callbacks/{callback_id}/fail">Callback: record failure</option>
         <option value="callback-ack" data-method="POST" data-path="/callbacks/{callback_id}/acknowledge">Callback: acknowledge worker evidence</option>
         <option value="callback-requeue" data-method="POST" data-path="/callbacks/{callback_id}/requeue">Callback: requeue dead letter</option>
+        <option value="source-runtime-run" data-method="POST" data-path="/source-runtime/run">Provider runtime: execute bounded batch</option>
+        <option value="source-runtime-reconcile" data-method="POST" data-path="/source-runtime/reconcile">Provider runtime: reconcile ambiguous deletes</option>
         <option value="source-evidence" data-method="PUT" data-path="/cases/{case_id}/sources/{source_id}/phases/{phase}/evidence/{evidence_id}">Source work: record evidence</option>
         <option value="manifest-build" data-method="PUT" data-path="/cases/{case_id}/manifests/{manifest_id}">Case: build completeness manifest</option>
         <option value="package-create" data-method="PUT" data-path="/cases/{case_id}/packages/{package_id}">Response package: record metadata</option>
@@ -100,7 +107,8 @@
   var highImpact = new Set([
     "identity-evidence", "legal-hold", "retention-gate",
     "destructive-approve", "callback-claim", "callback-fail", "callback-ack",
-    "callback-requeue", "closure-approve", "case-close", "retention-purge"
+    "callback-requeue", "source-runtime-run", "source-runtime-reconcile",
+    "closure-approve", "case-close", "retention-purge"
   ]);
 
   function show(value) {
@@ -130,8 +138,15 @@
     var response = await fetch(API + path, options);
     var responseText = await response.text();
     var result;
-    try { result = responseText ? JSON.parse(responseText) : {}; }
-    catch (_error) { result = {detail: responseText}; }
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
     show({status: response.status, ok: response.ok, result: result});
   }
 

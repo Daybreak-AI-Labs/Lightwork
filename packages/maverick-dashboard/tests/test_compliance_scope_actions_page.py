@@ -153,8 +153,10 @@ def test_main_dashboard_mounts_scope_actions_page_api_and_visibility(
     assert page["floor"] == "operate"
     assert page["in_nav"] is False
 
+    from maverick_dashboard.copilot_context import context_for_page
+
+    assert context_for_page("/compliance/scope-actions").path == "/compliance/scope-actions"
     templates = Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
-    assert '"/compliance/scope-actions"' in (templates / "base.html").read_text(encoding="utf-8")
     assert 'href="/compliance/scope-actions"' in (templates / "compliance.html").read_text(
         encoding="utf-8"
     )

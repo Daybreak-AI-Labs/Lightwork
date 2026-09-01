@@ -30,8 +30,13 @@ from .third_party_intelligence_providers import (
     CredentialBinding,
     ProviderFeedResult,
     ProviderRequest,
+    ThirdPartyProviderConfigError,
+    ThirdPartyProviderCredentialError,
     ThirdPartyProviderError,
     ThirdPartyProviderFactory,
+    ThirdPartyProviderIncompleteError,
+    ThirdPartyProviderProtocolError,
+    ThirdPartyProviderTransportError,
 )
 
 SCHEMA_VERSION = 1
@@ -966,6 +971,29 @@ class ThirdPartyFeedRuntimeStore:
             backoff_seconds=backoff_seconds,
             actor_ref=actor_ref,
             revoke=False,
+            force_dead_letter=False,
+        )
+
+    def dead_letter_job(
+        self,
+        tenant_id: str,
+        job_id: str,
+        *,
+        lease_token: str,
+        error_code: str,
+        actor_ref: str,
+    ) -> FeedJob:
+        """Finish one leased job immediately after a definitive failure."""
+
+        return self._finish_failed(
+            tenant_id,
+            job_id,
+            lease_token=lease_token,
+            error_code=error_code,
+            backoff_seconds=0.0,
+            actor_ref=actor_ref,
+            revoke=False,
+            force_dead_letter=True,
         )
 
     def revoke_job(
@@ -985,6 +1013,7 @@ class ThirdPartyFeedRuntimeStore:
             backoff_seconds=0.0,
             actor_ref=actor_ref,
             revoke=True,
+            force_dead_letter=False,
         )
 
     def _finish_failed(
@@ -997,6 +1026,7 @@ class ThirdPartyFeedRuntimeStore:
         backoff_seconds: float,
         actor_ref: str,
         revoke: bool,
+        force_dead_letter: bool,
     ) -> FeedJob:
         tenant = _tenant(tenant_id)
         job = _identifier(job_id, "job_id")
@@ -1006,7 +1036,7 @@ class ThirdPartyFeedRuntimeStore:
         backoff = _number(
             backoff_seconds,
             "backoff_seconds",
-            0.0 if revoke else 1.0,
+            0.0 if revoke or force_dead_letter else 1.0,
             _MAX_BACKOFF_SECONDS,
         )
         now = self._now()
@@ -1028,6 +1058,9 @@ class ThirdPartyFeedRuntimeStore:
                 raise ThirdPartyFeedRuntimeConflict("feed job lease was lost")
             if revoke:
                 state = "revoked"
+                next_attempt = now
+            elif force_dead_letter:
+                state = "dead_letter"
                 next_attempt = now
             elif int(payload["attempt"]) >= int(payload["maximum_attempts"]):
                 state = "dead_letter"
@@ -1603,12 +1636,19 @@ def _authority(
 def _safe_error_code(error: Exception) -> str:
     if isinstance(error, ThirdPartyFeedAuthorityDrift):
         return "authority_drift"
+    if isinstance(error, ThirdPartyProviderCredentialError):
+        return "credential_revoked" if error.revoked else "credential_unavailable"
+    if isinstance(error, ThirdPartyProviderTransportError):
+        if error.ambiguous:
+            return "provider_ambiguous"
+        return "provider_unavailable" if error.retryable else "provider_definitive"
+    if isinstance(error, ThirdPartyProviderIncompleteError):
+        return "provider_incomplete"
+    if isinstance(error, ThirdPartyProviderProtocolError):
+        return "provider_protocol"
+    if isinstance(error, ThirdPartyProviderConfigError):
+        return "provider_config"
     if isinstance(error, ThirdPartyProviderError):
-        name = type(error).__name__.lower()
-        if "incomplete" in name:
-            return "provider_incomplete"
-        if "protocol" in name:
-            return "provider_protocol"
         return "provider_unavailable"
     name = type(error).__name__.lower()
     if "credential" in name or "secret" in name or "key" in name:
@@ -1616,6 +1656,27 @@ def _safe_error_code(error: Exception) -> str:
     if "conflict" in name or "permission" in name or "notfound" in name:
         return "authority_drift"
     return "feed_runtime_error"
+
+
+def _retryable_failure(error: Exception) -> bool:
+    if isinstance(error, ThirdPartyProviderTransportError):
+        return error.retryable
+    if isinstance(error, ThirdPartyProviderCredentialError):
+        return error.retryable
+    if isinstance(error, ThirdPartyProviderIncompleteError):
+        return True
+    if isinstance(
+        error,
+        (
+            ThirdPartyProviderProtocolError,
+            ThirdPartyProviderConfigError,
+        ),
+    ):
+        return False
+    # Generic provider failures and cross-store acknowledgement failures retain
+    # the bounded retry/dead-letter recovery behavior that predates the bundled
+    # transport.  Only errors carrying a definitive classification bypass it.
+    return True
 
 
 def _provider_citations(result: ProviderFeedResult) -> list[dict[str, str]]:
@@ -1647,6 +1708,8 @@ def _execute_job(
                 pin.source_id,
             )
         except (KeyboardInterrupt, SystemExit):
+            raise
+        except ThirdPartyProviderError:
             raise
         except Exception:
             raise ThirdPartyFeedRuntimeConfigError("feed credential resolver failed") from None
@@ -1871,7 +1934,7 @@ def run_feed_batch(
             if job.lease_token is None:  # pragma: no cover - claim invariant
                 raise ThirdPartyFeedRuntimeIntegrityError("claimed feed job lacks a lease") from exc
             code = _safe_error_code(exc)
-            if code == "authority_drift":
+            if code in {"authority_drift", "credential_revoked"}:
                 failed = runtime_store.revoke_job(
                     tenant,
                     job.job_id,
@@ -1880,6 +1943,15 @@ def run_feed_batch(
                     actor_ref=worker,
                 )
                 revoked += 1
+            elif not _retryable_failure(exc):
+                failed = runtime_store.dead_letter_job(
+                    tenant,
+                    job.job_id,
+                    lease_token=job.lease_token,
+                    error_code=code,
+                    actor_ref=worker,
+                )
+                dead_lettered += 1
             else:
                 backoff = min(maximum, base * (2 ** max(0, job.attempt - 1)))
                 failed = runtime_store.fail_job(

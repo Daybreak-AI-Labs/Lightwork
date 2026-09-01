@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from typing import Annotated, Any, Literal
@@ -69,6 +70,15 @@ ObjectPath = Annotated[
 SourceKind = Literal["structured", "unstructured"]
 SourceState = Literal["active", "suspended", "revoked"]
 JobState = Literal["queued", "leased", "complete", "dead_letter"]
+RemediationState = Literal[
+    "queued",
+    "leased",
+    "applied",
+    "no_change",
+    "ambiguous",
+    "dead_letter",
+    "cancelled",
+]
 ReviewDecision = Literal["confirmed", "reclassified", "false_positive"]
 Category = Literal[
     "authentication_secret",
@@ -200,6 +210,22 @@ class ReviewApprovalIn(_StrictModel):
 
 class RetentionIn(_StrictModel):
     idempotency_key: IdempotencyKey
+
+
+class RemediationWorkerIn(_StrictModel):
+    limit: int = Field(default=10, ge=1, le=100)
+    lease_seconds: int = Field(default=60, ge=1, le=3_600)
+
+
+class RemediationReconcileIn(_StrictModel):
+    expected_revision: int = Field(ge=1, le=2**31 - 1)
+    absent_backoff_seconds: int = Field(default=0, ge=0, le=86_400)
+    idempotency_key: IdempotencyKey
+
+
+class RemediationMaintenanceIn(_StrictModel):
+    idempotency_key: IdempotencyKey
+    target_limit: int = Field(default=500, ge=1, le=1_000)
 
 
 def _ops():
@@ -378,6 +404,645 @@ def _provider_names(value: object) -> tuple[list[str], bool]:
     return names[:100], len(names) > 100
 
 
+def _provider_list(value: object) -> tuple[list[str], bool]:
+    if not isinstance(value, (list, tuple)):
+        return [], False
+    names = sorted(
+        {
+            item
+            for item in value
+            if isinstance(item, str) and re.fullmatch(_PROVIDER, item) is not None
+        }
+    )
+    return names[:100], len(names) > 100
+
+
+def _remediation_worker_payload(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation worker returned an invalid result",
+        )
+    keys = (
+        "claimed",
+        "applied",
+        "no_change",
+        "retried",
+        "ambiguous",
+        "dead_lettered",
+        "cancelled",
+    )
+    if any(
+        type(value.get(key)) is not int or not 0 <= value[key] <= 100
+        for key in keys
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation worker returned an invalid result",
+        )
+    result = {key: int(value[key]) for key in keys}
+    if sum(result[key] for key in keys[1:]) > result["claimed"]:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation worker returned an invalid result",
+        )
+    return result
+
+
+def _remediation_reconciliation_payload(
+    value: object,
+    work_id: str,
+) -> dict[str, object]:
+    if (
+        not isinstance(value, Mapping)
+        or value.get("work_id") != work_id
+        or value.get("state")
+        not in {
+            "queued",
+            "applied",
+            "no_change",
+            "ambiguous",
+            "dead_letter",
+            "cancelled",
+        }
+        or type(value.get("revision")) is not int
+        or not 1 <= value["revision"] <= 2**31 - 1
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation reconciliation returned an invalid result",
+        )
+    result: dict[str, object] = {
+        "work_id": work_id,
+        "state": value["state"],
+        "revision": value["revision"],
+    }
+    for key in ("attempts", "max_attempts"):
+        item = value.get(key)
+        if item is not None:
+            if type(item) is not int or not 0 <= item <= 20:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "privacy discovery remediation reconciliation returned "
+                        "an invalid result"
+                    ),
+                )
+            result[key] = item
+    for key in ("authority_sha256", "receipt_sha256"):
+        item = value.get(key)
+        if item is not None:
+            if not isinstance(item, str) or re.fullmatch(_DIGEST, item) is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "privacy discovery remediation reconciliation returned "
+                        "an invalid result"
+                    ),
+                )
+            result[key] = item
+    error = value.get("last_error_code")
+    if error is not None:
+        if not isinstance(error, str) or re.fullmatch(r"^[a-z][a-z0-9_]{0,63}$", error) is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "privacy discovery remediation reconciliation returned an invalid result"
+                ),
+            )
+        result["last_error_code"] = error
+    return result
+
+
+def _remediation_work_payload(value: object) -> dict[str, object]:
+    if (
+        not isinstance(value, Mapping)
+        or not isinstance(value.get("work_id"), str)
+        or re.fullmatch(_ID, value["work_id"]) is None
+        or value.get("state")
+        not in {
+            "queued",
+            "leased",
+            "applied",
+            "no_change",
+            "ambiguous",
+            "dead_letter",
+            "cancelled",
+        }
+        or type(value.get("revision")) is not int
+        or not 1 <= value["revision"] <= 2**31 - 1
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation work listing returned an invalid result",
+        )
+    result: dict[str, object] = {
+        "work_id": value["work_id"],
+        "state": value["state"],
+        "revision": value["revision"],
+    }
+    for key in ("attempts", "max_attempts"):
+        item = value.get(key)
+        if type(item) is not int or not 0 <= item <= 20:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "privacy discovery remediation work listing returned an invalid result"
+                ),
+            )
+        result[key] = item
+    for key in (
+        "next_attempt_at",
+        "lease_until",
+        "ambiguous_at",
+        "retained_until",
+        "created_at",
+        "updated_at",
+    ):
+        item = value.get(key)
+        if item is not None:
+            if type(item) not in (int, float) or not 0 <= item <= 100_000_000_000.0:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "privacy discovery remediation work listing returned "
+                        "an invalid result"
+                    ),
+                )
+            result[key] = float(item)
+    for key in ("authority_sha256", "receipt_sha256"):
+        item = value.get(key)
+        if item is not None:
+            if not isinstance(item, str) or re.fullmatch(_DIGEST, item) is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "privacy discovery remediation work listing returned "
+                        "an invalid result"
+                    ),
+                )
+            result[key] = item
+    error = value.get("last_error_code")
+    if error is not None:
+        if not isinstance(error, str) or re.fullmatch(r"^[a-z][a-z0-9_]{0,63}$", error) is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "privacy discovery remediation work listing returned an invalid result"
+                ),
+            )
+        result["last_error_code"] = error
+    return result
+
+
+def _remediation_maintenance_payload(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation maintenance returned an invalid result",
+        )
+    outbox = value.get("outbox_integrity")
+    data_map = value.get("data_map_integrity")
+    if not isinstance(outbox, Mapping) or not isinstance(data_map, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation maintenance returned an invalid result",
+        )
+
+    def counts(source: Mapping[str, object], keys: tuple[str, ...]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key in keys:
+            if key not in source:
+                continue
+            item = source[key]
+            if type(item) is not int or not 0 <= item <= 2**31 - 1:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "privacy discovery remediation maintenance returned "
+                        "an invalid result"
+                    ),
+                )
+            result[key] = item
+        return result
+
+    purged: dict[str, int] = {}
+    for key in ("outbox_purged", "data_map_purged"):
+        item = value.get(key)
+        if type(item) is not int or not 0 <= item <= 1_000:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "privacy discovery remediation maintenance returned an invalid result"
+                ),
+            )
+        purged[key] = item
+    outbox_result = counts(
+        outbox,
+        (
+            "current_records",
+            "history_records",
+            "operation_records",
+            "audit_events",
+        ),
+    )
+    terminal = outbox.get("terminal_audit_sha256")
+    if terminal is not None:
+        if not isinstance(terminal, str) or re.fullmatch(_DIGEST, terminal) is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "privacy discovery remediation maintenance returned an invalid result"
+                ),
+            )
+        outbox_result["terminal_audit_sha256"] = terminal
+    return {
+        "schema": "lightwork.privacy-discovery-maintenance.v1",
+        **purged,
+        "outbox_integrity": outbox_result,
+        "data_map_integrity": counts(
+            data_map,
+            ("observations", "tombstones"),
+        ),
+        "raw_data_returned": False,
+        "provider_side_effect": False,
+    }
+
+
+async def _scheduler_runtime_status(request: Request) -> dict[str, object]:
+    """Resolve only the scheduler's closed, tenant-free health projection."""
+
+    marker = (
+        getattr(
+            request.app.state,
+            "privacy_data_discovery_worker_scheduler_operational",
+            False,
+        )
+        is True
+    )
+    resolver = getattr(
+        request.app.state,
+        "privacy_data_discovery_worker_scheduler_status",
+        None,
+    )
+    if resolver is None:
+        return {
+            "installed": False,
+            "configured_enabled": marker,
+            "running": marker,
+            "healthy": marker,
+            "consecutive_failures": 0,
+            "interrupted_cycles_recovered": 0,
+            "last_error_code": None,
+            "last_cycle": None,
+            "process_concurrency_excluded": False,
+            "cross_process_concurrency_excluded": False,
+            "status_opened_tenant_store": False,
+            "status_invoked_provider": False,
+            "digest_only_data_map_target": False,
+            "provider_network_io": False,
+            "provider_writes": False,
+            "estate_completeness_claimed": False,
+            "live_provider_acceptance_verified": False,
+        }
+    if not callable(resolver):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery scheduler status authority is invalid",
+        )
+    try:
+        raw = await run_in_threadpool(resolver)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery scheduler status is unavailable",
+        ) from exc
+    if not isinstance(raw, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery scheduler status is invalid",
+        )
+    booleans = (
+        "installed",
+        "configured_enabled",
+        "running",
+        "healthy",
+        "process_concurrency_excluded",
+        "cross_process_concurrency_excluded",
+        "status_opened_tenant_store",
+        "status_invoked_provider",
+        "digest_only_data_map_target",
+        "provider_network_io",
+        "provider_writes",
+        "estate_completeness_claimed",
+        "live_provider_acceptance_verified",
+    )
+    result: dict[str, object] = {}
+    for key in booleans:
+        value = raw.get(key)
+        if type(value) is not bool:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy discovery scheduler status is invalid",
+            )
+        result[key] = value
+    for key in ("consecutive_failures", "interrupted_cycles_recovered"):
+        value = raw.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**31 - 1:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy discovery scheduler status is invalid",
+            )
+        result[key] = value
+    error_code = raw.get("last_error_code")
+    if error_code not in {
+        None,
+        "scheduler_cycle_failed",
+        "tenant_cycle_incomplete",
+    }:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery scheduler status is invalid",
+        )
+    result["last_error_code"] = error_code
+    cycle = raw.get("last_cycle")
+    if cycle is not None:
+        cycle_keys = {
+            "schema",
+            "started_at",
+            "completed_at",
+            "tenants_considered",
+            "tenants_enabled",
+            "tenants_failed",
+            "tenant_limit_reached",
+            "ambiguous_considered",
+            "ambiguous_applied",
+            "ambiguous_no_change",
+            "ambiguous_requeued",
+            "ambiguous_unresolved",
+            "claimed",
+            "applied",
+            "no_change",
+            "retried",
+            "ambiguous",
+            "dead_lettered",
+            "cancelled",
+            "recovery_checked_tenants",
+            "next_interval_seconds",
+            "cycle_sha256",
+        }
+        if not isinstance(cycle, Mapping) or set(cycle) != cycle_keys:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy discovery scheduler status is invalid",
+            )
+        cycle = {key: cycle[key] for key in cycle_keys}
+    result["last_cycle"] = cycle
+    return result
+
+
+async def _runtime_capabilities(request: Request, tenant_id: str) -> dict[str, Any]:
+    """Resolve content-free runtime capabilities without opening a provider/store."""
+
+    callback_configured = _callback_authority(request, tenant_id) is not None
+    scheduler_status = await _scheduler_runtime_status(request)
+    scheduler_running = scheduler_status["running"] is True
+    probe = getattr(
+        request.app.state,
+        "privacy_data_discovery_readiness_probe",
+        None,
+    )
+    if probe is None:
+        structured, structured_truncated = _provider_names(
+            getattr(
+                request.app.state,
+                "privacy_data_discovery_structured_sources",
+                {},
+            )
+        )
+        unstructured, unstructured_truncated = _provider_names(
+            getattr(
+                request.app.state,
+                "privacy_data_discovery_unstructured_sources",
+                {},
+            )
+        )
+        durable = (
+            callback_configured
+            and getattr(
+                request.app.state,
+                "privacy_data_discovery_review_callback_durable_outbox",
+                False,
+            )
+            is True
+        )
+        worker_available = callable(
+            getattr(
+                request.app.state,
+                "privacy_data_discovery_worker_factory",
+                None,
+            )
+        )
+        return {
+            "source": "legacy_global_maps",
+            "configured": bool(structured or unstructured),
+            "ready": bool(structured or unstructured),
+            "structured": structured,
+            "unstructured": unstructured,
+            "truncated": structured_truncated or unstructured_truncated,
+            "callback_configured": callback_configured,
+            "durable_outbox": durable,
+            "data_map_target": False,
+            "retry_worker_available": worker_available,
+            "scheduler_configured_for_tenant": False,
+            "scheduler_operational": scheduler_running,
+            "scheduler_status": scheduler_status,
+            "automatic_retry": (
+                durable and worker_available and scheduler_running
+            ),
+            "status_probe_opened_store": False,
+            "status_probe_invoked_provider": False,
+        }
+    if not callable(probe):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery readiness authority is misconfigured",
+        )
+    try:
+        raw = await run_in_threadpool(probe, tenant_id)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery readiness authority is unavailable",
+        ) from exc
+    if not isinstance(raw, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery readiness authority is invalid",
+        )
+    structured, structured_truncated = _provider_list(
+        raw.get("structured_providers")
+    )
+    unstructured, unstructured_truncated = _provider_list(
+        raw.get("unstructured_providers")
+    )
+    outbox_enabled = raw.get("remediation_outbox_enabled") is True
+    durable = (
+        callback_configured
+        and outbox_enabled
+        and raw.get("approved_review_callback_durable_outbox") is True
+    )
+    data_map_target = (
+        outbox_enabled and raw.get("data_map_target_enabled") is True
+    )
+    worker_available = raw.get("retry_worker_factory_installed") is True
+    scheduler_configured = raw.get("remediation_scheduler_enabled") is True
+    scheduler_operational = scheduler_running and scheduler_configured
+    return {
+        "source": "tenant_readiness_probe",
+        "configured": raw.get("configured") is True,
+        "ready": raw.get("ready") is True,
+        "structured": structured,
+        "unstructured": unstructured,
+        "truncated": structured_truncated or unstructured_truncated,
+        "callback_configured": callback_configured,
+        "durable_outbox": durable,
+        "data_map_target": data_map_target,
+        "retry_worker_available": worker_available,
+        "scheduler_configured_for_tenant": scheduler_configured,
+        "scheduler_operational": scheduler_operational,
+        "scheduler_status": scheduler_status,
+        "automatic_retry": durable and worker_available and scheduler_operational,
+        "status_probe_opened_store": raw.get("status_probe_opened_store") is True,
+        "status_probe_invoked_provider": (
+            raw.get("status_probe_invoked_provider") is True
+        ),
+    }
+
+
+async def _remediation_runtime(
+    request: Request,
+    ops: Any,
+    tenant_id: str,
+    discovery_store: Any,
+    *,
+    principal_ref: str,
+) -> Any:
+    capabilities = await _runtime_capabilities(request, tenant_id)
+    if (
+        capabilities["source"] != "tenant_readiness_probe"
+        or not capabilities["configured"]
+        or not capabilities["ready"]
+        or not capabilities["data_map_target"]
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="privacy discovery remediation data-map runtime is not ready",
+        )
+    factory = getattr(
+        request.app.state,
+        "privacy_data_discovery_remediation_runtime_factory",
+        None,
+    )
+    if not callable(factory):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation runtime authority is unavailable",
+        )
+    try:
+        runtime = await run_in_threadpool(
+            factory,
+            tenant_id=tenant_id,
+            discovery_store=discovery_store,
+            principal_ref=principal_ref,
+        )
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except ops.PrivacyDataDiscoveryConfigError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="privacy discovery remediation data-map runtime is disabled",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation runtime authority is unavailable",
+        ) from exc
+    worker = getattr(runtime, "worker", None)
+    outbox = getattr(runtime, "outbox", None)
+    if (
+        getattr(runtime, "tenant_id", None) != tenant_id
+        or not callable(getattr(worker, "run_once", None))
+        or not callable(getattr(outbox, "list_work", None))
+        or not callable(getattr(outbox, "reconcile_ambiguous", None))
+        or not callable(getattr(runtime, "reconciler", None))
+        or not callable(getattr(runtime, "maintenance", None))
+        or getattr(runtime, "digest_only_target", None) is not True
+        or getattr(runtime, "external_side_effect", None) is not False
+        or getattr(runtime, "provider_network_io", None) is not False
+        or getattr(runtime, "provider_writes", None) is not False
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation runtime authority is invalid",
+        )
+    return runtime
+
+
+async def _remediation_call(function: Callable[..., Any], *args, **kwargs) -> Any:
+    from maverick import privacy_data_discovery_remediation as remediation_ops
+
+    try:
+        return await run_in_threadpool(function, *args, **kwargs)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except remediation_ops.PrivacyDiscoveryRemediationConfigError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="privacy discovery remediation is disabled or unavailable",
+        ) from exc
+    except remediation_ops.PrivacyDiscoveryRemediationValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="privacy discovery remediation request is invalid",
+        ) from exc
+    except remediation_ops.PrivacyDiscoveryRemediationNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="privacy discovery remediation work was not found",
+        ) from exc
+    except (
+        remediation_ops.PrivacyDiscoveryRemediationConflict,
+        remediation_ops.PrivacyDiscoveryRemediationLeaseLost,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="privacy discovery remediation state changed",
+        ) from exc
+    except (
+        remediation_ops.PrivacyDiscoveryRemediationIntegrityError,
+        remediation_ops.PrivacyDiscoveryRemediationAuthorityError,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation authority validation failed",
+        ) from exc
+    except remediation_ops.PrivacyDiscoveryRemediationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation operation failed",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation operation failed",
+        ) from exc
+
+
 async def _call(ops, function, *args, **kwargs) -> Any:
     try:
         return await run_in_threadpool(function, *args, **kwargs)
@@ -414,54 +1079,87 @@ def _limits(ops, body: ScanLimitsIn):
 async def status(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     _ops()
-    structured = getattr(
-        request.app.state,
-        "privacy_data_discovery_structured_sources",
-        {},
-    )
-    unstructured = getattr(
-        request.app.state,
-        "privacy_data_discovery_unstructured_sources",
-        {},
-    )
-    callback = getattr(
-        request.app.state,
-        "privacy_data_discovery_review_callback",
-        None,
-    )
-    structured_names, structured_truncated = _provider_names(structured)
-    unstructured_names, unstructured_truncated = _provider_names(unstructured)
+    tenant = _tenant_id()
+    capabilities = await _runtime_capabilities(request, tenant)
+    durable = capabilities["durable_outbox"]
     return {
         "schema": "lightwork.privacy-data-discovery-runtime-status.v1",
         "enabled": True,
-        "structured_provider_adapters": structured_names,
-        "unstructured_provider_adapters": unstructured_names,
-        "provider_adapter_list_truncated": (
-            structured_truncated or unstructured_truncated
-        ),
+        "tenant_bound": True,
+        "runtime_source": capabilities["source"],
+        "configured": capabilities["configured"],
+        "ready": capabilities["ready"],
+        "structured_provider_adapters": capabilities["structured"],
+        "unstructured_provider_adapters": capabilities["unstructured"],
+        "provider_adapter_list_truncated": capabilities["truncated"],
         "external_scan_execution": "explicit_execute_endpoint_only",
         "raw_data_returned": False,
         "live_provider_acceptance_verified": False,
         "completeness_claim": False,
+        "status_probe_opened_store": capabilities["status_probe_opened_store"],
+        "status_probe_invoked_provider": capabilities[
+            "status_probe_invoked_provider"
+        ],
         "callback_delivery": {
-            "configured": callback is not None,
+            "configured": capabilities["callback_configured"],
             "approved_reviews_only": True,
-            "durable_outbox": False,
-            "automatic_retry": False,
-            "failure_contract": "approval_remains_durable_and_manual_redelivery_is_required",
+            "durable_outbox": durable,
+            "data_map_target": capabilities["data_map_target"],
+            "bounded_retry_worker_available": capabilities[
+                "retry_worker_available"
+            ],
+            "automatic_retry": capabilities["automatic_retry"],
+            "worker_scheduler_operational": capabilities[
+                "scheduler_operational"
+            ],
+            "worker_scheduler_configured_for_tenant": capabilities[
+                "scheduler_configured_for_tenant"
+            ],
+            "retry_execution_requires_worker_invocation": (
+                capabilities["retry_worker_available"]
+                and not capabilities["scheduler_operational"]
+            ),
+            "enqueue_failure_recovery": (
+                "manual_approved_review_redelivery_required"
+            ),
+            "delivery_failure_recovery": (
+                "automatic_bounded_retry_and_ambiguous_reconciliation"
+                if capabilities["automatic_retry"]
+                else (
+                    "bounded_retry_on_worker_invocation_and_ambiguous_reconciliation"
+                    if durable and capabilities["retry_worker_available"]
+                    else "manual_redelivery_required"
+                )
+            ),
         },
+        "worker_scheduler": capabilities["scheduler_status"],
     }
 
 
 @router.get("/posture")
 async def posture(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
-    ops, tenant, store = _authority(request)
-    result = await _call(ops, store.privacy_posture)
+    ops = _ops()
+    tenant = _tenant_id()
+    capabilities = await _runtime_capabilities(request, tenant)
+    result = await _call(ops, ops.PrivacyDataDiscoveryStore.privacy_posture)
     return {
         **_jsonable(result),
         "tenant_bound": bool(tenant),
-        "callback_outbox_available": False,
+        "callback_outbox_available": capabilities["durable_outbox"],
+        "data_map_target_available": capabilities["data_map_target"],
+        "bounded_retry_worker_available": capabilities[
+            "retry_worker_available"
+        ],
+        "automatic_retry_available": capabilities["automatic_retry"],
+        "worker_scheduler_operational": capabilities["scheduler_operational"],
+        "worker_scheduler_configured_for_tenant": capabilities[
+            "scheduler_configured_for_tenant"
+        ],
+        "worker_scheduler": capabilities["scheduler_status"],
+        "posture_opened_store": False,
+        "posture_invoked_provider": False,
+        "live_provider_acceptance_verified": False,
     }
 
 
@@ -866,6 +1564,7 @@ async def approve_review(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     ops, tenant, store = _authority(request)
+    capabilities = await _runtime_capabilities(request, tenant)
     callback_configured = _callback_authority(request, tenant) is not None
     before = await _call(ops, store.get_review, tenant, review_id)
     callback_attempted = callback_configured and before.status == "pending"
@@ -884,7 +1583,165 @@ async def approve_review(
         "callback_configured": callback_configured,
         "callback_attempted_this_request": callback_attempted,
         "callback_acknowledged": True if callback_attempted else None,
-        "callback_durable_outbox": False,
+        "callback_durable_outbox": capabilities["durable_outbox"],
+        "callback_enqueued_durably": (
+            True
+            if callback_attempted and capabilities["durable_outbox"]
+            else None
+        ),
+        "data_map_target_configured": capabilities["data_map_target"],
+        "bounded_retry_worker_available": capabilities[
+            "retry_worker_available"
+        ],
+        "automatic_retry_available": capabilities["automatic_retry"],
+        "target_applied_synchronously": False,
+    }
+
+
+@router.post("/remediation/worker/run-once")
+async def run_remediation_worker(
+    request: Request,
+    body: RemediationWorkerIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    ops, tenant, store = _authority(request)
+    runtime = await _remediation_runtime(
+        request,
+        ops,
+        tenant,
+        store,
+        principal_ref=_worker_ref(request, tenant),
+    )
+    result = await _remediation_call(
+        runtime.worker.run_once,
+        worker_id=_worker_ref(request, tenant),
+        **body.model_dump(),
+    )
+    payload = _remediation_worker_payload(_jsonable(result))
+    return {
+        **payload,
+        "tenant_bound": True,
+        "bounded_batch": True,
+        "approved_reviews_only": True,
+        "digest_only_data_map_target": True,
+        "external_side_effect": False,
+        "local_state_write_possible": True,
+        "provider_network_io": False,
+        "provider_writes": False,
+        "ambiguous_outcomes_retried_optimistically": False,
+        "live_provider_acceptance_verified": False,
+    }
+
+
+@router.get("/remediation/work")
+async def list_remediation_work(
+    request: Request,
+    state: RemediationState | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=100),
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    ops, tenant, store = _authority(request)
+    runtime = await _remediation_runtime(
+        request,
+        ops,
+        tenant,
+        store,
+        principal_ref=_actor_ref(request, tenant),
+    )
+    values = await _remediation_call(
+        runtime.outbox.list_work,
+        state=state,
+        limit=limit + 1,
+    )
+    if not isinstance(values, (list, tuple)):
+        raise HTTPException(
+            status_code=503,
+            detail="privacy discovery remediation work listing returned an invalid result",
+        )
+    items = [
+        _remediation_work_payload(_jsonable(value))
+        for value in values[:limit]
+    ]
+    return {
+        "items": items,
+        "truncated": len(values) > limit,
+        "tenant_bound": True,
+        "operational_metadata_only": True,
+        "raw_data_returned": False,
+        "external_side_effect": False,
+        "local_state_write": False,
+        "provider_network_io": False,
+        "provider_writes": False,
+        "live_provider_acceptance_verified": False,
+    }
+
+
+@router.post("/remediation/work/{work_id}/reconcile")
+async def reconcile_remediation_work(
+    request: Request,
+    work_id: ObjectPath,
+    body: RemediationReconcileIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    ops, tenant, store = _authority(request)
+    runtime = await _remediation_runtime(
+        request,
+        ops,
+        tenant,
+        store,
+        principal_ref=_actor_ref(request, tenant),
+    )
+    result = await _remediation_call(
+        runtime.outbox.reconcile_ambiguous,
+        work_id,
+        reconciler=runtime.reconciler,
+        **body.model_dump(),
+    )
+    payload = _remediation_reconciliation_payload(_jsonable(result), work_id)
+    return {
+        **payload,
+        "tenant_bound": True,
+        "digest_only_reconciliation": True,
+        "external_side_effect": False,
+        "local_state_write_possible": True,
+        "provider_network_io": False,
+        "provider_writes": False,
+        "optimistic_replay_performed": False,
+        "live_provider_acceptance_verified": False,
+    }
+
+
+@router.post("/remediation/maintenance")
+async def maintain_remediation_runtime(
+    request: Request,
+    body: RemediationMaintenanceIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    ops, tenant, store = _authority(request)
+    runtime = await _remediation_runtime(
+        request,
+        ops,
+        tenant,
+        store,
+        principal_ref=_actor_ref(request, tenant),
+    )
+    result = await _remediation_call(
+        runtime.maintenance,
+        cutoff=time.time(),
+        **body.model_dump(),
+    )
+    payload = _remediation_maintenance_payload(_jsonable(result))
+    return {
+        **payload,
+        "tenant_bound": True,
+        "cutoff_server_derived": True,
+        "retention_bounded": True,
+        "integrity_verified": True,
+        "external_side_effect": False,
+        "local_state_write_possible": True,
+        "provider_network_io": False,
+        "provider_writes": False,
+        "live_provider_acceptance_verified": False,
     }
 
 
@@ -893,7 +1750,7 @@ async def audit_events(
     request: Request,
     limit: int = Query(default=500, ge=1, le=999),
 ) -> dict[str, Any]:
-    require_permission(request, "view")
+    require_permission(request, "audit")
     ops, tenant, store = _authority(request)
     rows = await _call(ops, store.audit_events, tenant, limit=limit + 1)
     return _items(rows, limit)
@@ -901,7 +1758,7 @@ async def audit_events(
 
 @router.get("/audit/verify")
 async def verify_audit(request: Request) -> dict[str, Any]:
-    require_permission(request, "view")
+    require_permission(request, "audit")
     ops, tenant, store = _authority(request)
     verified = await _call(ops, store.verify_audit_chain, tenant)
     return {"verified": bool(verified), "tenant_bound": True}

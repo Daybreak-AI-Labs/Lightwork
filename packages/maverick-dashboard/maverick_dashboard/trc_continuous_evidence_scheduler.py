@@ -576,7 +576,17 @@ def attach_trc_continuous_evidence_scheduler(
 ) -> TrcContinuousEvidenceScheduler:
     """Compose bounded scheduler startup/shutdown with an ASGI lifespan."""
 
-    selected = runtime if runtime is not None else default_scheduler()
+    factory = getattr(
+        getattr(app, "state", None),
+        "trc_stock_evidence_scheduler_factory",
+        None,
+    )
+    if runtime is not None:
+        selected = runtime
+    elif callable(factory):
+        selected = factory()
+    else:
+        selected = default_scheduler()
     router = getattr(app, "router", None)
     previous = getattr(router, "lifespan_context", None)
     if router is None or not callable(previous):

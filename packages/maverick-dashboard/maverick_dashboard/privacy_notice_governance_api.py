@@ -213,6 +213,10 @@ class PurgeIn(_StrictModel):
     idempotency_key: IdempotencyKey
 
 
+class PublicationRuntimeRunOnceIn(_StrictModel):
+    """Intentionally empty: tenant and target selection are never request input."""
+
+
 def _enabled() -> bool:
     from maverick import privacy_notice_governance as notice
 
@@ -404,16 +408,135 @@ def create_privacy_notice_governance_router(  # noqa: C901, PLR0915
             PrivacyNoticeGovernanceStore,
         )
 
+        readiness_probe = getattr(
+            request.app.state,
+            "privacy_notice_publication_readiness_probe",
+            None,
+        )
+        runtime_readiness = (
+            readiness_probe(tenant) if callable(readiness_probe) else None
+        )
         return {
             "schema": "lightwork.privacy-notice-governance-status.v1",
             "enabled": _enabled(),
             "principal_ref": principal,
             **PrivacyNoticeGovernanceStore.product_boundaries(),
             "publication_intents_are_worker_intent_only": True,
-            "publication_transport_worker_implemented": False,
+            "publication_transport_worker_implemented": True,
+            "publication_runtime_configured": bool(
+                isinstance(runtime_readiness, Mapping)
+                and runtime_readiness.get("configured") is True
+            ),
             "regulatory_reference_resolver_required": True,
             "claim_is_only_live_lease_token_response": True,
             "status_request_external_network_io": False,
+        }
+
+    @router.get("/publication-runtime/status")
+    async def publication_runtime_status(request: Request) -> dict[str, Any]:
+        """Return tenant-derived configuration and content-free scheduler health."""
+
+        require_permission(request, "view")
+        _notice()
+        tenant = _tenant_id()
+        _principal(request, tenant)
+        readiness_probe = getattr(
+            request.app.state,
+            "privacy_notice_publication_readiness_probe",
+            None,
+        )
+        scheduler_probe = getattr(
+            request.app.state,
+            "privacy_notice_publication_scheduler_status",
+            None,
+        )
+        if not callable(readiness_probe) or not callable(scheduler_probe):
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-notice publication runtime is unavailable",
+            )
+        try:
+            readiness_value = await run_in_threadpool(readiness_probe, tenant)
+            scheduler_value = await run_in_threadpool(scheduler_probe)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-notice publication runtime status is unavailable",
+            ) from exc
+        return {
+            "schema": "lightwork.privacy-notice-publication-operator-status.v1",
+            "readiness": _without_lease(readiness_value),
+            "scheduler": _without_lease(scheduler_value),
+            "tenant_derived_from_authenticated_context": True,
+            "request_selected_target": False,
+            "local_consent_publication_only": True,
+            "provider_network_io": False,
+            "provider_writes": False,
+            "site_mutation": False,
+            "sdk_deployment": False,
+            "live_acceptance_verified": False,
+        }
+
+    @router.post("/publication-runtime/run-once")
+    async def publication_runtime_run_once(
+        request: Request,
+        _body: PublicationRuntimeRunOnceIn,
+    ) -> dict[str, Any]:
+        """Run one bounded cycle for the authenticated active tenant only."""
+
+        require_global_permission(request, "admin")
+        _notice()
+        tenant = _tenant_id()
+        _principal(request, tenant)
+        readiness_probe = getattr(
+            request.app.state,
+            "privacy_notice_publication_readiness_probe",
+            None,
+        )
+        if not callable(readiness_probe):
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-notice publication runtime is unavailable",
+            )
+        readiness_value = await run_in_threadpool(readiness_probe, tenant)
+        if not isinstance(readiness_value, Mapping) or (
+            readiness_value.get("configuration_preflight_ready") is not True
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="privacy-notice publication runtime requires exact tenant bindings",
+            )
+        from .privacy_notice_publication_scheduler import (
+            PrivacyNoticePublicationSchedulerBusy,
+            PrivacyNoticePublicationSchedulerError,
+            run_once_for_tenant,
+        )
+
+        try:
+            cycle = await run_in_threadpool(run_once_for_tenant, request.app, tenant)
+        except PrivacyNoticePublicationSchedulerBusy as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="a privacy-notice publication cycle is already running",
+            ) from exc
+        except PrivacyNoticePublicationSchedulerError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="privacy-notice publication execution is unavailable",
+            ) from exc
+        return {
+            "schema": "lightwork.privacy-notice-publication-run-once.v1",
+            "cycle": _without_lease(cycle),
+            "tenant_derived_from_authenticated_context": True,
+            "request_selected_target": False,
+            "local_consent_publication_only": True,
+            "provider_network_io": False,
+            "provider_writes": False,
+            "site_mutation": False,
+            "sdk_deployment": False,
+            "live_acceptance_verified": False,
         }
 
     @router.put("/approval-policies/{policy_id}")

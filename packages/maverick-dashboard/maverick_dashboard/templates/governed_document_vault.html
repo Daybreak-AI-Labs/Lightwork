@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Governed Document Vault - Lightwork{% endblock %}
+{% block head_extra %}
+<style nonce="{{ csp_style_nonce }}">
+  .document-vault-shell {
+    --vault-glass: color-mix(in srgb, var(--panel, #111827) 72%, transparent);
+    --vault-line: color-mix(in srgb, var(--text, #f8fafc) 17%, transparent);
+    --vault-glow: color-mix(in srgb, var(--accent, #67e8f9) 24%, transparent);
+    display: grid; gap: 1.15rem;
+  }
+  .document-vault-hero, .document-vault-panel, .document-vault-boundary {
+    background: linear-gradient(145deg, var(--vault-glow), transparent 38%), var(--vault-glass);
+    border: 1px solid var(--vault-line); border-radius: 1.45rem;
+    box-shadow: 0 1.25rem 3.7rem color-mix(in srgb, #020617 34%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(155%);
+    backdrop-filter: blur(24px) saturate(155%);
+  }
+  .document-vault-hero { display: grid; gap: .7rem; padding: clamp(1.35rem, 3vw, 2.45rem); }
+  .document-vault-hero h1, .document-vault-hero p { margin: 0; }
+  .document-vault-hero p { max-width: 76ch; }
+  .document-vault-panel, .document-vault-boundary { padding: 1.15rem; }
+  .document-vault-boundary { border-inline-start: .34rem solid var(--accent, #67e8f9); }
+  .document-vault-grid { border: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); margin: 0; min-inline-size: 0; padding: 0; }
+  .document-vault-form, .document-vault-form fieldset { display: grid; gap: .75rem; }
+  .document-vault-form fieldset { border: 0; margin: 0; min-inline-size: 0; padding: 0; }
+  .document-vault-row { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+  .document-vault-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
+  .document-vault-output { background: color-mix(in srgb, #020617 50%, transparent); border: 1px solid var(--vault-line); border-radius: 1rem; max-block-size: 32rem; min-block-size: 8rem; overflow: auto; padding: 1rem; white-space: pre-wrap; }
+  .document-vault-status[data-state="failed"] { color: var(--danger, #fb7185); }
+  .document-vault-status[data-state="ready"] { color: var(--success, #4ade80); }
+  .document-vault-shell :focus-visible { outline: .2rem solid var(--accent, #67e8f9); outline-offset: .18rem; }
+  @media (prefers-reduced-motion: reduce) { .document-vault-shell *, .document-vault-shell *::before, .document-vault-shell *::after { transition-duration: .001ms !important; } }
+  @media (forced-colors: active) { .document-vault-hero, .document-vault-panel, .document-vault-boundary, .document-vault-output { border: 1px solid CanvasText; box-shadow: none; } }
+</style>
+{% endblock %}
+{% block content %}
+<main class="document-vault-shell" id="document-vault-shell"
+      data-vault-api-base="{{ vault_api_base }}" data-access-api-base="{{ access_api_base }}"
+      data-copilot-page="/administration/document-vault">
+  <header class="document-vault-hero">
+    <p class="eyebrow">Administration · governed custody</p>
+    <h1>Governed document vault</h1>
+    <p>Ingest approved document bytes into tenant-private encrypted custody, bind exact immutable authority, and deliver only through short-lived one-time grants.</p>
+  </header>
+
+  <aside class="document-vault-boundary" aria-labelledby="document-vault-boundary-title">
+    <p class="eyebrow">Trust boundary</p>
+    <h2 id="document-vault-boundary-title">No paths, locators, or plaintext keys</h2>
+    <ul>
+      <li>The browser sends bounded bytes, an approved media type, and a safe display name. Filesystem paths, URLs, bucket keys, and object locators are not API inputs.</li>
+      <li>Content is SHA-256 bound to immutable revisions and encrypted through Lightwork's at-rest key authority before persistence.</li>
+      <li>Download tokens and delivery grants are principal-bound, short-lived, CAS protected, and one time. Raw grants and principals are not persisted.</li>
+      <li>Local custody readiness does not prove external object-store custody, backup restoration, malware scanning, or live customer-workflow acceptance.</li>
+    </ul>
+  </aside>
+
+  <section class="document-vault-panel" aria-labelledby="document-vault-status-title">
+    <p class="eyebrow">Readiness</p>
+    <h2 id="document-vault-status-title">Tenant vault authority</h2>
+    <p id="document-vault-runtime-status" class="document-vault-status" role="status" aria-live="polite">Checking encrypted custody…</p>
+    <div class="document-vault-actions">
+      <button class="btn" id="document-vault-refresh-status" type="button">Refresh readiness</button>
+      <button class="btn" id="document-vault-refresh-documents" type="button">Refresh documents</button>
+    </div>
+    <pre class="document-vault-output" id="document-vault-status-output" tabindex="0"></pre>
+  </section>
+
+  <fieldset class="document-vault-grid" id="document-vault-operations" disabled>
+    <legend class="sr-only">Governed document-vault operations</legend>
+
+    <section class="document-vault-panel" aria-labelledby="document-vault-ingest-title">
+      <p class="eyebrow">Encrypted ingestion</p>
+      <h2 id="document-vault-ingest-title">Add approved evidence</h2>
+      <form class="document-vault-form" id="document-vault-ingest-form" autocomplete="off" novalidate>
+        <fieldset id="document-vault-ingest-controls"{% if not document_vault_can_admin %} disabled aria-disabled="true"{% endif %}>
+          <label for="document-vault-file">Document</label>
+          <input class="input" id="document-vault-file" name="document" type="file" required>
+          <div class="document-vault-row">
+            <div><label for="document-vault-product-area">Product area</label>
+              <select class="select" id="document-vault-product-area" name="product_area">
+                <option value="administration">Administration</option><option value="ai_governance">AI governance</option>
+                <option value="consent_preferences">Consent and preferences</option><option value="data_use_governance">Data use governance</option>
+                <option value="privacy_automation" selected>Privacy automation</option><option value="tech_risk_compliance">Technology risk and compliance</option>
+                <option value="third_party_management">Third-party management</option>
+              </select></div>
+            <div><label for="document-vault-record-type">Record type</label>
+              <input class="input" id="document-vault-record-type" name="record_type" maxlength="96" value="incident_attachment" required></div>
+          </div>
+          <button class="btn btn--primary" type="submit">Encrypt and ingest</button>
+        </fieldset>
+      </form>
+      {% if not document_vault_can_admin %}<p class="help">Administrator permission is required to ingest documents.</p>{% endif %}
+    </section>
+
+    <section class="document-vault-panel" aria-labelledby="document-vault-lifecycle-title">
+      <p class="eyebrow">Authority lifecycle</p>
+      <h2 id="document-vault-lifecycle-title">Select and revoke</h2>
+      <form class="document-vault-form" id="document-vault-lifecycle-form" autocomplete="off" novalidate>
+        <fieldset id="document-vault-lifecycle-controls"{% if not document_vault_can_admin %} disabled aria-disabled="true"{% endif %}>
+          <label for="document-vault-document-ref">Opaque document reference</label>
+          <input class="input" id="document-vault-document-ref" name="document_ref" maxlength="128" required>
+          <label for="document-vault-authority-revision">Expected authority revision</label>
+          <input class="input" id="document-vault-authority-revision" name="expected_revision" type="number" min="1" max="2147483647" step="1" required>
+          <button class="btn btn--danger" id="document-vault-revoke" type="button">Revoke document authority</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="document-vault-panel" aria-labelledby="document-vault-token-title">
+      <p class="eyebrow">One-time delivery</p>
+      <h2 id="document-vault-token-title">Mint, redeem, download</h2>
+      <form class="document-vault-form" id="document-vault-token-form" autocomplete="off" novalidate>
+        <fieldset id="document-vault-token-controls"{% if not document_vault_can_admin %} disabled aria-disabled="true"{% endif %}>
+          <div class="document-vault-row">
+            <div><label for="document-vault-token-ttl">Token TTL seconds</label><input class="input" id="document-vault-token-ttl" type="number" min="30" max="3600" step="1" value="300"></div>
+            <div><label for="document-vault-mint-idempotency">Mint idempotency key</label><input class="input" id="document-vault-mint-idempotency" maxlength="192" required></div>
+          </div>
+          <button class="btn btn--primary" type="submit">Mint download token</button>
+        </fieldset>
+      </form>
+      <form class="document-vault-form" id="document-vault-delivery-form" autocomplete="off" novalidate>
+        <fieldset id="document-vault-delivery-controls"{% if not document_vault_can_operate %} disabled aria-disabled="true"{% endif %}>
+          <label for="document-vault-download-token">Download token</label>
+          <input class="input" id="document-vault-download-token" autocomplete="off" maxlength="52" required>
+          <label for="document-vault-claim-idempotency">Claim idempotency key</label>
+          <input class="input" id="document-vault-claim-idempotency" maxlength="192" required>
+          <button class="btn btn--primary" type="submit">Redeem and download once</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="document-vault-panel" aria-labelledby="document-vault-evidence-title">
+      <p class="eyebrow">Evidence</p>
+      <h2 id="document-vault-evidence-title">Documents, audit, integrity</h2>
+      <fieldset id="document-vault-audit-controls"{% if not document_vault_can_audit %} disabled aria-disabled="true"{% endif %}>
+        <legend class="sr-only">Vault audit operations</legend>
+        <div class="document-vault-actions">
+          <button class="btn" id="document-vault-audit" type="button">Audit history</button>
+          <button class="btn" id="document-vault-integrity" type="button">Verify content integrity</button>
+          <button class="btn" id="document-vault-reconcile" type="button">Run grant recovery</button>
+        </div>
+      </fieldset>
+      <p id="document-vault-operation-status" class="document-vault-status" role="status" aria-live="polite">No operation has run.</p>
+      <pre class="document-vault-output" id="document-vault-operation-output" tabindex="0"></pre>
+    </section>
+  </fieldset>
+  <noscript><p class="document-vault-boundary">JavaScript is required for this bounded administrative workbench.</p></noscript>
+</main>
+{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-governed-document-vault.js" defer></script>{% endblock %}

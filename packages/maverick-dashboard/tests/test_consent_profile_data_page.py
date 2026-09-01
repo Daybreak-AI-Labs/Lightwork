@@ -157,10 +157,9 @@ def test_main_dashboard_mounts_profile_page_and_visibility(
     assert page["floor"] == "operate"
     assert page["in_nav"] is False
 
-    base = (
-        Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "base.html"
-    ).read_text(encoding="utf-8")
-    assert '"/consent/profile-data"' in base
+    from maverick_dashboard.copilot_context import context_for_page
+
+    assert context_for_page("/consent/profile-data").path == "/consent/profile-data"
 
     consent_home = (
         Path(__file__).resolve().parents[1]

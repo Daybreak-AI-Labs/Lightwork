@@ -300,6 +300,41 @@ def test_unicode_tenant_isolation_strict_ids_and_private_sqlite(
         assert connection.execute("PRAGMA synchronous").fetchone()[0] == 2
 
 
+def test_context_heads_are_bounded_tenant_exact_and_count_current_records(
+    authority: tuple[ThirdPartyLifecycleStore, Clock, Principal],
+) -> None:
+    store, _, principal = authority
+    principal.value = "owner"
+    first = store.create_lifecycle(
+        "tenant-a",
+        "lifecycle-a",
+        vendor_ref="vendor-a",
+        owner_ref="owner",
+        dependencies=dependencies(),
+        retention_seconds=DAY,
+        idempotency_key="context-lifecycle-a",
+    )
+    store.create_lifecycle(
+        "tenant-a",
+        "lifecycle-b",
+        vendor_ref="vendor-b",
+        owner_ref="owner",
+        dependencies=[],
+        retention_seconds=DAY,
+        idempotency_key="context-lifecycle-b",
+    )
+
+    assert store.list_lifecycles("tenant-a", limit=1) == (first,)
+    assert store.list_lifecycles("tenant-b", limit=1) == ()
+    assert store.list_assessments("tenant-a", limit=1) == ()
+    assert store.list_offboarding_plans("tenant-a", limit=1) == ()
+    assert store.context_record_counts("tenant-a") == {
+        "assessments": 0,
+        "lifecycles": 2,
+        "offboarding_plans": 0,
+    }
+
+
 def test_template_four_eyes_versioning_and_closed_conditions(
     authority: tuple[ThirdPartyLifecycleStore, Clock, Principal],
 ) -> None:

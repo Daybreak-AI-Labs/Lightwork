@@ -12,17 +12,26 @@
   .png-warning { border:2px solid var(--danger); padding:var(--space-3);
                  border-radius:8px; background:var(--surface-2); }
   .png-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  .png-runtime { margin:var(--space-4) 0; display:grid; gap:var(--space-3); }
+  .png-runtime__actions { display:flex; flex-wrap:wrap; gap:var(--space-2); }
+  .png-runtime__output { max-height:24rem; overflow:auto; white-space:pre-wrap;
+                         word-break:break-word; }
   @media (max-width:900px) { .png-grid { grid-template-columns:1fr; } }
 </style>
 
+<div class="png-shell" data-copilot-page="/privacy/notice-governance">
 <h1>Privacy Notice Governance</h1>
 <p>Exact-tenant control plane for content-free notice versions, independent
   approvals, scheduled publication intents, rollback, withdrawal, governed
   update proposals, effective-release resolution, and signed local exports.</p>
 <div class="png-warning">
-  <strong>No raw notice content, personal data, secret values, network I/O,
-    provider writes, automatic legal-applicability decisions, SDK deployment,
-    site mutation, automatic publication, or live acceptance.</strong>
+  <strong>No raw notice content, personal data, secret values, direct external
+    network I/O, unconfigured provider writes, automatic legal-applicability
+    decisions, SDK deployment, external site or tag-manager mutation, or live
+    acceptance.</strong>
+  The production composition and bounded scheduler can automatically publish
+  only into Lightwork's exact-tenant Consent Publishing store; external delivery
+  remains adapter-owned and fails closed when that authority is unavailable.
   Policy, content, and configuration are represented only by SHA-256 digests.
   Consent publications, citations, acknowledgements, and signing keys are
   bounded opaque references, never their underlying values.
@@ -37,6 +46,24 @@
 </section>
 {% else %}
 <p><button class="btn" id="png-load-status" type="button">Load honest status</button></p>
+<section class="panel png-runtime" aria-labelledby="png-runtime-title">
+  <div>
+    <h2 id="png-runtime-title">Local publication runtime</h2>
+    <p>Inspect the exact tenant binding and bounded scheduler health, or run one
+      tenant-derived cycle. A run can update only Lightwork's tenant-private
+      Consent Publishing store. It cannot update a website, SDK, tag manager,
+      consent provider, or any other external system.</p>
+  </div>
+  <div class="png-runtime__actions">
+    <button class="btn" id="png-runtime-status" type="button">Refresh runtime status</button>
+    <label class="png-confirm">
+      <input id="png-runtime-confirm" type="checkbox">
+      <span>I reviewed the exact configured binding and authorize one bounded local cycle.</span>
+    </label>
+    <button class="btn btn--primary" id="png-runtime-run" type="button">Run one local cycle</button>
+  </div>
+  <pre class="png-runtime__output" id="png-runtime-output" aria-live="polite">Runtime status not loaded.</pre>
+</section>
 <div class="png-grid">
   <section class="panel png-stack">
     <h2>Strict JSON operator workbench</h2>
@@ -98,6 +125,8 @@
   var confirmation = document.getElementById("png-confirm");
   var confirmationPanel = document.getElementById("png-confirm-panel");
   var output = document.getElementById("png-output");
+  var runtimeOutput = document.getElementById("png-runtime-output");
+  var runtimeConfirmation = document.getElementById("png-runtime-confirm");
   var highImpact = new Set([
     "policy-set", "release-approve", "approval-revoke", "release-schedule",
     "intent-claim", "intent-fail", "intent-requeue", "intent-acknowledge",
@@ -144,13 +173,50 @@
     var response = await fetch(API + path, options);
     var responseText = await response.text();
     var result;
-    try { result = responseText ? JSON.parse(responseText) : {}; }
-    catch (_error) { result = {detail: responseText}; }
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
     show({status: response.status, ok: response.ok, result: result});
   }
 
   document.getElementById("png-load-status").addEventListener("click", function () {
     run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  async function runRuntime(method, path) {
+    var response = await fetch(API + path, {
+      method: method,
+      headers: {"Accept": "application/json", "Content-Type": "application/json"},
+      body: method === "POST" ? "{}" : undefined
+    });
+    var responseText = await response.text();
+    var result;
+    try { result = JSON.parse(responseText); }
+    catch (_error) { throw new Error("The runtime returned an invalid JSON response."); }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
+    runtimeOutput.textContent = JSON.stringify(result, null, 2);
+  }
+  document.getElementById("png-runtime-status").addEventListener("click", function () {
+    runRuntime("GET", "/publication-runtime/status").catch(function (error) {
+      runtimeOutput.textContent = String(error);
+    });
+  });
+  document.getElementById("png-runtime-run").addEventListener("click", function () {
+    if (!runtimeConfirmation.checked) {
+      runtimeOutput.textContent = "Confirm the exact local publication cycle before continuing.";
+      return;
+    }
+    runtimeConfirmation.checked = false;
+    runRuntime("POST", "/publication-runtime/run-once").catch(function (error) {
+      runtimeOutput.textContent = String(error);
+    });
   });
   operation.addEventListener("change", updateConfirmation);
   document.getElementById("png-submit").addEventListener("click", async function () {
@@ -172,4 +238,5 @@
 }());
 </script>
 {% endif %}
+</div>
 {% endblock %}

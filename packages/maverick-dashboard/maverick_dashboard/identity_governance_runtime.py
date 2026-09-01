@@ -27,6 +27,9 @@ from maverick.ai_identity_governance_connectors import (
 )
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+# Legacy compatibility for deployments that have not enabled the shipped
+# production composition.  Production requests resolve a fresh tenant-bound
+# runtime through ``identity_governance_control_runtime_factory``.
 CONTROL_RUNTIME_APP_STATE = "identity_governance_control_runtime"
 
 
@@ -34,13 +37,11 @@ CONTROL_RUNTIME_APP_STATE = "identity_governance_control_runtime"
 class IdentityGovernanceControlRuntime:
     """Explicit startup composition for live identity-control dependencies.
 
-    The assurance API looks only at
-    ``request.app.state.identity_governance_control_runtime``.  It never builds
-    this object from browser input or connector credentials.  Deployment code
-    must inject exact tenant-bound authority resolution, an independently
-    enrolled principal-to-provider-subject binding resolver, credential-owning
-    observation transports, capability rules, and (for Purview) the separately
-    governed write transport and asset resolver.
+    The shipped composition creates this object lazily for the active request
+    tenant.  It never builds the authority from browser input or connector
+    credentials.  Exact authorities and mappings come from the tenant's
+    governed registry; credential-owning provider transports remain closed,
+    independently configured deployment seams.
     """
 
     tenant_sha256: str
@@ -53,6 +54,7 @@ class IdentityGovernanceControlRuntime:
         default_factory=lambda: MappingProxyType({})
     )
     conditional_access_decision_engine: object | None = None
+    conditional_access_decision_ledger: object | None = None
     purview_writeback: object | None = None
 
     def __post_init__(self) -> None:
@@ -110,6 +112,14 @@ class IdentityGovernanceControlRuntime:
             for method in ("prepare", "get_intent", "execute", "compensate"):
                 if not callable(getattr(self.purview_writeback, method, None)):
                     raise TypeError("identity control Purview writeback service is invalid")
+        if self.conditional_access_decision_ledger is not None:
+            for method in ("record", "get", "list", "revoke", "status"):
+                if not callable(
+                    getattr(self.conditional_access_decision_ledger, method, None)
+                ):
+                    raise TypeError(
+                        "identity control conditional-access decision ledger is invalid"
+                    )
 
     @staticmethod
     def _closed_provider_map(
@@ -329,6 +339,17 @@ class IdentityGovernanceControlRuntime:
             )
         return self.conditional_access_decision_engine
 
+    def require_conditional_access_decision_ledger(self):
+        from maverick.ai_identity_governance_controls import (
+            IdentityGovernanceControlConfigError,
+        )
+
+        if self.conditional_access_decision_ledger is None:
+            raise IdentityGovernanceControlConfigError(
+                "conditional_access_decision_ledger_unavailable"
+            )
+        return self.conditional_access_decision_ledger
+
     def require_purview_writeback(self):
         from maverick.ai_identity_governance_controls import (
             IdentityGovernanceControlConfigError,
@@ -355,7 +376,7 @@ class IdentityGovernanceControlRuntime:
             "schema": "lightwork.identity_governance.attached-control-runtime-status.v1",
             "tenant_sha256": self.tenant_sha256,
             "runtime_attached": True,
-            "attachment": "FastAPI app.state.identity_governance_control_runtime",
+            "attachment": "lazy_per_request_tenant_runtime_factory",
             "authority_resolver_attached": True,
             "federation_binding_resolver_attached": (
                 self.federation_binding_resolver is not None
@@ -370,6 +391,11 @@ class IdentityGovernanceControlRuntime:
             ),
             "conditional_access_decision_available": (
                 self.conditional_access_decision_engine is not None
+            ),
+            "conditional_access_decision_ledger": (
+                self.conditional_access_decision_ledger.status()
+                if self.conditional_access_decision_ledger is not None
+                else None
             ),
             "purview_writeback": purview_status,
             "provider_writes_possible": bool(
@@ -388,8 +414,61 @@ class IdentityGovernanceControlRuntime:
         }
 
 
+@dataclass(frozen=True)
+class IdentityGovernanceOutcomeRuntime:
+    """Tenant-exact authority and durable consumers used by the scheduler/API."""
+
+    tenant_sha256: str
+    asset_registry: object
+    consumers: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tenant_sha256, str) or not _SHA256_RE.fullmatch(
+            self.tenant_sha256
+        ):
+            raise ValueError("identity outcome runtime tenant binding is invalid")
+        for method in ("resolve_change", "status", "list_bindings", "enroll", "revoke"):
+            if not callable(getattr(self.asset_registry, method, None)):
+                raise TypeError("identity outcome asset registry is invalid")
+        if not isinstance(self.consumers, Mapping) or set(self.consumers) - {
+            "dynamic_risk",
+            "alert",
+        }:
+            raise TypeError("identity outcome consumer table is invalid")
+        selected = dict(self.consumers)
+        for consumer in selected.values():
+            for method in ("status", "get", "list", "run_due", "replay", "revoke"):
+                if not callable(getattr(consumer, method, None)):
+                    raise TypeError("identity outcome consumer is invalid")
+        object.__setattr__(self, "consumers", MappingProxyType(selected))
+
+    def consumer(self, sink: str):
+        selected = self.consumers.get(sink)
+        if selected is None:
+            raise IdentityGovernanceConfigError(
+                "identity outcome consumer is unavailable"
+            )
+        return selected
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "schema": "lightwork.identity_governance.outcome-runtime-status.v1",
+            "tenant_sha256": self.tenant_sha256,
+            "asset_registry": self.asset_registry.status(),
+            "consumers": {
+                name: consumer.status()
+                for name, consumer in sorted(self.consumers.items())
+            },
+            "provider_writes": False,
+            "live_acceptance_verified": False,
+        }
+
+
 class PinnedIdentityGovernanceHTTPTransport:
     """DNS-pinned, redirect-disabled transport for the closed provider adapters."""
+
+    dns_pinned = True
+    redirects_followed = False
 
     def request(
         self,
@@ -404,7 +483,7 @@ class PinnedIdentityGovernanceHTTPTransport:
         from maverick.enterprise import enterprise_egress_denial
         from maverick.tools._ssrf import BlockedHost, safe_client
 
-        if method not in {"GET", "POST"}:
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
             raise IdentityGovernanceProtocolError("connector_method_rejected")
         denial = enterprise_egress_denial(
             url,
@@ -498,6 +577,7 @@ def _control_table(section: object) -> Mapping[str, Any] | None:
         "federation",
         "conditional_access",
         "purview_writeback",
+        "production",
     }
     if set(raw) - allowed:
         raise IdentityGovernanceConfigError("identity_control_key_unsupported")
@@ -510,6 +590,21 @@ def _control_table(section: object) -> Mapping[str, Any] | None:
         "federation": {"enable"},
         "conditional_access": {"enable"},
         "purview_writeback": {"enable"},
+        "production": {
+            "enable",
+            "mapping_revision",
+            "mapping_retention_seconds",
+            "max_authority_records",
+            "max_observation_age_seconds",
+            "max_future_skew_seconds",
+            "purview_max_attempts",
+            "purview_operation_lease_seconds",
+            "outcome_max_attempts",
+            "outcome_retry_base_seconds",
+            "outcome_retry_max_seconds",
+            "outcome_lease_seconds",
+            "outcome_signal_validity_seconds",
+        },
     }
     any_nested_enabled = False
     for name, keys in shapes.items():
@@ -519,9 +614,38 @@ def _control_table(section: object) -> Mapping[str, Any] | None:
         if not isinstance(value, Mapping) or set(value) - keys:
             raise IdentityGovernanceConfigError("identity_control_shape_invalid")
         for key in keys:
-            if key in value and not isinstance(value[key], bool):
+            if key in value and key == "enable" and not isinstance(value[key], bool):
                 raise IdentityGovernanceConfigError("identity_control_flag_invalid")
         any_nested_enabled = any_nested_enabled or value.get("enable") is True
+    production = raw.get("production")
+    if isinstance(production, Mapping):
+        integer_bounds = {
+            "mapping_revision": (1, 1_000_000),
+            "mapping_retention_seconds": (300, 31_622_400),
+            "max_authority_records": (1, 10_000),
+            "max_observation_age_seconds": (1, 3_600),
+            "max_future_skew_seconds": (0, 300),
+            "purview_max_attempts": (1, 10),
+            "purview_operation_lease_seconds": (5, 300),
+            "outcome_max_attempts": (1, 20),
+            "outcome_retry_base_seconds": (1, 86_400),
+            "outcome_retry_max_seconds": (1, 604_800),
+            "outcome_lease_seconds": (1, 3_600),
+            "outcome_signal_validity_seconds": (60, 31_622_400),
+        }
+        for key, (lower, upper) in integer_bounds.items():
+            value = production.get(key)
+            if (
+                value is not None
+                and (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or not lower <= value <= upper
+                )
+            ):
+                raise IdentityGovernanceConfigError(
+                    "identity_control_production_bound_invalid"
+                )
     if any_nested_enabled and raw.get("enable") is not True:
         raise IdentityGovernanceConfigError("identity_controls_parent_disabled")
     change = raw.get("change_coupling")
@@ -566,6 +690,8 @@ def build_change_coupler(
     *,
     risk_sink: Callable[[Mapping[str, Any]], object] | None = None,
     alert_sink: Callable[[Mapping[str, Any]], object] | None = None,
+    asset_binding_resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]]
+    | None = None,
     store: object | None = None,
     clock: Callable[[], float] | None = None,
 ) -> object | None:
@@ -592,6 +718,7 @@ def build_change_coupler(
         "tenant_sha256": scheduler.tenant_binding_sha256(require_explicit=True),
         "risk_sink": selected_risk,
         "alert_sink": selected_alert,
+        "asset_binding_resolver": asset_binding_resolver,
     }
     if store is not None:
         kwargs["store"] = store
@@ -656,6 +783,8 @@ def build_purview_writeback(
     transport: object | None = None,
     store: object | None = None,
     clock: Callable[[], float] | None = None,
+    max_attempts: int = 3,
+    operation_lease_seconds: float = 60.0,
 ) -> object | None:
     """Build the opt-in governed writeback service without resolving secrets."""
 
@@ -674,6 +803,8 @@ def build_purview_writeback(
         "principal_resolver": principal_resolver,
         "asset_binding_resolver": asset_binding_resolver,
         "transport": transport,
+        "max_attempts": max_attempts,
+        "operation_lease_seconds": operation_lease_seconds,
     }
     if store is not None:
         kwargs["store"] = store
@@ -696,6 +827,7 @@ def control_plane_status(section: object) -> dict[str, Any]:
             "purview_writeback",
         )
     }
+    production_enabled = _control_enabled(section, "production")
     return {
         "schema": "lightwork.identity_governance.control-plane-status.v1",
         "enabled": enabled,
@@ -711,8 +843,17 @@ def control_plane_status(section: object) -> dict[str, Any]:
             "purview_compensation": True,
         },
         "runtime_attached": False,
-        "runtime_attachment": "FastAPI app.state.identity_governance_control_runtime",
-        "activation": "explicit_startup_injection_required",
+        "runtime_attachment": (
+            "FastAPI app.state.identity_governance_control_runtime_factory"
+            if production_enabled
+            else "FastAPI app.state.identity_governance_control_runtime"
+        ),
+        "production_composition_enabled": production_enabled,
+        "activation": (
+            "lazy_per_tenant_production_factory"
+            if production_enabled
+            else "explicit_startup_injection_required"
+        ),
         "authoritative_subject_enrollment_required": True,
         "federation_providers": ["entra", "okta"],
         "default_mode": "read_only_off",
@@ -742,6 +883,8 @@ def build_scheduler(
     change_callback: Callable[[Mapping[str, Any]], None] | None = None,
     risk_sink: Callable[[Mapping[str, Any]], object] | None = None,
     alert_sink: Callable[[Mapping[str, Any]], object] | None = None,
+    asset_binding_resolver: Callable[[Mapping[str, Any]], Mapping[str, Any]]
+    | None = None,
     change_store: object | None = None,
     attach_control_callback: bool = True,
 ) -> object | None:
@@ -771,6 +914,7 @@ def build_scheduler(
             selected,
             risk_sink=risk_sink,
             alert_sink=alert_sink,
+            asset_binding_resolver=asset_binding_resolver,
             store=change_store,
             clock=clock,
         )
@@ -889,6 +1033,7 @@ def collect_connector(section: object, provider: str) -> dict[str, Any]:
 __all__ = [
     "CONTROL_RUNTIME_APP_STATE",
     "IdentityGovernanceControlRuntime",
+    "IdentityGovernanceOutcomeRuntime",
     "PinnedIdentityGovernanceHTTPTransport",
     "build_change_coupler",
     "build_conditional_access_observer",

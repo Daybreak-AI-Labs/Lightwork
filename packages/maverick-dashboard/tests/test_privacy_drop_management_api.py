@@ -128,6 +128,9 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         subject="user:drop-operator",
         enabled=True,
         enabled_calls=[],
+        readiness=True,
+        readiness_calls=[],
+        readiness_failure=None,
         factory_calls=[],
         resolver_calls=[],
         permissions=[],
@@ -163,6 +166,12 @@ def environment(monkeypatch: pytest.MonkeyPatch):
             raise state.factory_failure
         return state.store
 
+    def readiness_probe(tenant_id: str) -> bool:
+        state.readiness_calls.append(tenant_id)
+        if state.readiness_failure is not None:
+            raise state.readiness_failure
+        return state.readiness
+
     def resolver(**kwargs: object):
         state.resolver_calls.append(kwargs)
         if state.resolver_failure is not None:
@@ -183,6 +192,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         store_factory=factory,
         authority_resolver=resolver,
         enabled_probe=enabled_probe,
+        readiness_probe=readiness_probe,
     )
     app = FastAPI()
 
@@ -206,14 +216,28 @@ def test_status_is_tenant_aware_store_free_and_omits_principal(environment) -> N
     assert response.json() == {
         "schema": "lightwork.privacy-drop-management-status.v1",
         "enabled": True,
-        "ready": True,
+        "configured": True,
+        "configured_for_attempt": True,
+        "locally_operational": True,
+            "request_executable": False,
+            "request_execution_blocker": "readiness_unverified",
+            "ready": True,
         "configuration": {
             "custom_enabled_probe_configured": True,
             "store_factory_configured": True,
             "authority_resolver_configured": True,
+            "operational_readiness_probe_configured": True,
+            "operational_readiness_checked": True,
+            "operational_readiness_verified": True,
             "store_opened_for_status": False,
             "record_authority_resolved_for_status": False,
         },
+        "authority_counts": {
+            "active_brokers": 0,
+            "active_records": 0,
+            "approved_outcomes": 0,
+        },
+        "scheduler": {"installed": False, "running": False, "healthy": False},
         "request_types": ["DataDeletion", "OptOut"],
         "terminal_statuses": ["DELETED", "EXEMPTED", "NOT_FOUND", "OPTED_OUT"],
         "raw_identity_fields_accepted": False,
@@ -227,10 +251,86 @@ def test_status_is_tenant_aware_store_free_and_omits_principal(environment) -> N
         "legal_acceptance_verified": False,
     }
     assert state.enabled_calls == [TENANT]
+    assert state.readiness_calls == [TENANT]
     assert state.factory_calls == []
     assert state.resolver_calls == []
     assert state.subject not in response.text
     assert "principal" not in response.text
+
+
+def test_status_does_not_infer_readiness_from_callable_dependencies(environment) -> None:
+    client, state, app = environment
+    app.state.privacy_drop_management_readiness_probe = None
+
+    response = client.get(f"{BASE}/status")
+
+    assert response.status_code == 200
+    assert response.json()["configured"] is True
+    assert response.json()["ready"] is False
+    assert response.json()["configuration"]["operational_readiness_checked"] is False
+    assert state.readiness_calls == []
+    assert state.factory_calls == []
+    assert state.resolver_calls == []
+
+
+def test_status_requires_a_boolean_readiness_result_and_sanitizes_failures(
+    environment,
+) -> None:
+    client, state, app = environment
+    state.readiness = False
+
+    not_ready = client.get(f"{BASE}/status")
+
+    assert not_ready.status_code == 200
+    assert not_ready.json()["ready"] is False
+    assert not_ready.json()["configuration"]["operational_readiness_checked"] is True
+    assert not_ready.json()["configuration"]["operational_readiness_verified"] is False
+
+    app.state.privacy_drop_management_readiness_probe = lambda _tenant: 1
+    malformed = client.get(f"{BASE}/status")
+    assert malformed.status_code == 503
+    assert malformed.json()["detail"] == "DROP management readiness is unavailable"
+
+    def fail_readiness(_tenant: str) -> bool:
+        raise RuntimeError("private readiness detail")
+
+    app.state.privacy_drop_management_readiness_probe = fail_readiness
+    failed = client.get(f"{BASE}/status")
+    assert failed.status_code == 503
+    assert failed.json()["detail"] == "DROP management readiness is unavailable"
+    assert "private readiness detail" not in failed.text
+
+
+@pytest.mark.parametrize("probe_mode", ["false", "missing", "malformed", "failure"])
+def test_operations_require_verified_readiness_before_opening_composition(
+    environment,
+    probe_mode: str,
+) -> None:
+    client, state, app = environment
+    if probe_mode == "false":
+        state.readiness = False
+    elif probe_mode == "missing":
+        app.state.privacy_drop_management_readiness_probe = None
+    elif probe_mode == "malformed":
+        app.state.privacy_drop_management_readiness_probe = lambda _tenant: 1
+    else:
+        def fail_readiness(_tenant: str) -> bool:
+            raise RuntimeError("private readiness operation detail")
+
+        app.state.privacy_drop_management_readiness_probe = fail_readiness
+
+    response = client.post(f"{BASE}/{DROP_ID}/request", json=_create_body())
+
+    assert response.status_code == 503
+    expected = (
+        "DROP management operational readiness is not verified"
+        if probe_mode in {"false", "missing"}
+        else "DROP management readiness is unavailable"
+    )
+    assert response.json()["detail"] == expected
+    assert "private readiness operation detail" not in response.text
+    assert state.factory_calls == []
+    assert state.resolver_calls == []
 
 
 def test_disabled_or_non_boolean_capability_fails_closed_without_store(environment) -> None:

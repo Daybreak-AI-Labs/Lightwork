@@ -3548,6 +3548,41 @@ def test_identity_control_http_composes_exact_runtime_and_separate_purview_actio
         clock=lambda: 1_000.0,
     )
     purview = PurviewService()
+
+    class DecisionLedger:
+        def __init__(self):
+            self.records = []
+
+        def record(self, decision, observation, mapping, *, actor):
+            assert actor == "user:identity-control-admin"
+            result = {
+                "decision_record_id": "IGCD-" + sha(decision.decision_sha256)[:32],
+                "revision": 1,
+                "status": "active",
+                "decision_sha256": decision.decision_sha256,
+                "mapping_sha256": mapping.mapping_sha256,
+                "policy_sha256": observation.policy_sha256,
+                "live_acceptance_verified": False,
+            }
+            self.records.append(result)
+            return result
+
+        def get(self, _record_id):
+            return None
+
+        def list(self, *, limit=100):
+            return self.records[:limit]
+
+        def revoke(self, *_args, **_kwargs):
+            return {"status": "revoked"}
+
+        def status(self):
+            return {
+                "active_decisions": len(self.records),
+                "live_acceptance_verified": False,
+            }
+
+    decision_ledger = DecisionLedger()
     runtime = identity_governance_runtime.IdentityGovernanceControlRuntime(
         tenant_sha256=tenant_sha256,
         authority_resolver=lambda tenant, principal: (
@@ -3575,6 +3610,7 @@ def test_identity_control_http_composes_exact_runtime_and_separate_purview_actio
         conditional_access_decision_engine=ConditionalAccessDecisionEngine(
             clock=lambda: 1_000.0
         ),
+        conditional_access_decision_ledger=decision_ledger,
         purview_writeback=purview,
     )
     section = {
@@ -3644,6 +3680,8 @@ def test_identity_control_http_composes_exact_runtime_and_separate_purview_actio
     )
     assert conditional["decision"]["action"] == "permit"
     assert conditional["decision"]["provider_policy_mutated"] is False
+    assert conditional["decision_receipt"]["status"] == "active"
+    assert len(decision_ledger.records) == 1
 
     prepare_body = {
         **binding_body,

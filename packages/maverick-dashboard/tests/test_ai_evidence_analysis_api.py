@@ -249,6 +249,18 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         permissions=[],
         subject="user:submitter",
         stores=[],
+        media_settings={
+            "schema": "lightwork.ai-evidence.tenant-status-settings.v1",
+            "supported_media": {evidence.MEDIA_TEXT: 4_096},
+            "enabled_media_names": ["text"],
+            "parser_sandbox_configured": False,
+            "ocr_configured": False,
+            "legacy_xls_configured": False,
+            "authority_history_capacity": 100_000,
+            "authority_retention_seconds": 31_536_000,
+            "store_opened": False,
+            "runtime_parser_probe_performed": False,
+        },
     )
     monkeypatch.setattr(api, "_tenant_id", lambda: TENANT)
     monkeypatch.setattr(
@@ -272,6 +284,7 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         store_for=factory,
         enabled_probe=lambda _tenant: state.enabled,
         lifetime_for=lifetime,
+        status_settings_for=lambda _tenant: dict(state.media_settings),
     )
     app = FastAPI()
     app.include_router(api.create_ai_evidence_analysis_router(deps), prefix="/api/v1")
@@ -288,19 +301,26 @@ def test_status_is_honest_and_never_opens_a_store(environment) -> None:
     body = response.json()
     assert body["schema"] == "lightwork.ai-evidence.api-status.v1"
     assert body["enabled"] is True
-    assert body["ready"] is True
+    assert body["ready"] is False
+    assert body["configured_for_operation_attempt"] is True
+    assert body["operational_composition_verified"] is False
     assert body["configuration"] == {
         "enabled_probe_configured": True,
         "store_factory_configured": True,
         "lifetime_policy_configured": True,
         "store_opened_for_status": False,
         "selected_adapter_authorities_resolved_for_status": False,
+        "tenant_media_policy_probe_configured": True,
+        "tenant_media_policy_resolved_for_status": True,
     }
-    assert body["supported_media"][evidence.MEDIA_TEXT] == 2 * 1024 * 1024
+    assert body["supported_media"] == {evidence.MEDIA_TEXT: 4_096}
+    assert body["tenant_media_policy"]["enabled_media_names"] == ["text"]
     assert body["boundaries"]["multipart_temp_spooling_used"] is False
     assert body["boundaries"]["raw_artifact_content_persisted"] is False
     assert body["boundaries"]["human_review_required"] is True
     assert body["boundaries"]["legal_or_compliance_conclusion"] is False
+    assert body["boundaries"]["supported_media_scope"] == "tenant_enabled_only"
+    assert body["boundaries"]["legacy_xls_local_parser_available"] is False
     assert state.factory_calls == []
     assert response.headers["cache-control"] == "no-store, private, max-age=0"
 
@@ -310,6 +330,91 @@ def test_status_is_honest_and_never_opens_a_store(environment) -> None:
     assert disabled.json()["enabled"] is False
     assert disabled.json()["ready"] is False
     assert state.factory_calls == []
+
+
+def test_status_consumes_side_effect_free_readiness_probe(environment) -> None:
+    client, state, app = environment
+    calls: list[str] = []
+    app.state.ai_evidence_analysis_readiness_probe = lambda tenant: (
+        calls.append(tenant) or True
+    )
+
+    response = client.get(f"{BASE}/status")
+
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert response.json()["operational_composition_verified"] is True
+    assert calls == [TENANT]
+    assert state.factory_calls == []
+
+
+def test_status_reports_only_tenant_enabled_media_and_readiness_bound_legacy_xls(
+    environment,
+) -> None:
+    client, state, app = environment
+    state.media_settings = {
+        **state.media_settings,
+        "supported_media": {
+            evidence.MEDIA_TEXT: 4_096,
+            evidence.MEDIA_XLS: 8_192,
+        },
+        "enabled_media_names": ["text", "xls"],
+        "parser_sandbox_configured": True,
+        "legacy_xls_configured": True,
+    }
+    app.state.ai_evidence_analysis_readiness_probe = lambda _tenant: True
+
+    body = client.get(f"{BASE}/status").json()
+
+    assert body["ready"] is True
+    assert body["supported_media"] == {
+        evidence.MEDIA_TEXT: 4_096,
+        evidence.MEDIA_XLS: 8_192,
+    }
+    assert evidence.MEDIA_PDF not in body["supported_media"]
+    assert body["boundaries"]["legacy_xls_local_parser_configured"] is True
+    assert body["boundaries"]["legacy_xls_local_parser_available"] is True
+    assert body["boundaries"]["local_parser_customer_acceptance_verified"] is False
+    assert state.factory_calls == []
+
+
+def test_upload_enforces_tenant_transport_limit_before_analysis(environment) -> None:
+    client, state, app = environment
+    app.state.ai_evidence_analysis_artifact_limit_resolver = (
+        lambda tenant, media_type: 8
+        if tenant == TENANT and media_type == evidence.MEDIA_TEXT
+        else 1
+    )
+
+    response = client.post(
+        f"{BASE}/analyses",
+        headers=_upload_headers(),
+        content=b"nine-byte",
+    )
+
+    assert response.status_code == 413
+    assert state.stores[0].calls == []
+
+
+def test_status_distinguishes_python_ocr_wrapper_from_external_binary(
+    environment,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _state, _app = environment
+    original_find_spec = api.importlib.util.find_spec
+
+    monkeypatch.setattr(
+        api.importlib.util,
+        "find_spec",
+        lambda name: original_find_spec(name),
+    )
+    monkeypatch.setattr(api.shutil, "which", lambda _name: None)
+
+    body = client.get(f"{BASE}/status").json()
+
+    assert "pytesseract" not in body["local_parser_packages_detected"]
+    assert body["external_parser_binaries_detected"]["tesseract"] is False
+    assert body["ready"] is False
 
 
 def test_raw_upload_uses_server_tenant_actor_lifetime_and_safe_projection(environment) -> None:
@@ -522,6 +627,49 @@ def test_review_revoke_reads_integrity_and_retention_use_closed_server_authority
     assert extra.status_code == 422
 
 
+def test_retention_purge_uses_composed_authority_maintenance_when_installed(
+    environment,
+) -> None:
+    client, state, app = environment
+    calls: list[tuple[str, int]] = []
+
+    def maintenance(tenant_id: str, *, limit: int):
+        calls.append((tenant_id, limit))
+        return _ns(
+            schema="lightwork.ai-evidence.maintenance-result.v2",
+            tenant_id=tenant_id,
+            registry_records=7,
+            registry_records_before=10,
+            live_authorities=5,
+            retained_expired_authorities=2,
+            authority_tombstones=3,
+            compacted_authorities=2,
+            compacted_authority_records=3,
+            purged_authority_tombstones=1,
+            authority_compaction_anchor_sha256="c" * 64,
+            analyses_before=2,
+            purged_analysis_ids=("EVA-purged-one",),
+            purged_analyses=1,
+            purged_history_records=2,
+            purged_operations=3,
+            analyses_after=1,
+            integrity_verified=True,
+        )
+
+    app.state.ai_evidence_analysis_maintenance_runner = maintenance
+
+    response = client.post(f"{BASE}/retention/purge", json={"limit": 12})
+
+    assert response.status_code == 200
+    assert calls == [(TENANT, 12)]
+    assert response.json()["analysis_ids"] == ["EVA-purged-one"]
+    assert response.json()["authority_registry_records_before"] == 10
+    assert response.json()["authority_registry_records_after"] == 7
+    assert response.json()["compacted_authorities"] == 2
+    assert response.json()["authority_compaction_anchor_sha256"] == "c" * 64
+    assert state.stores[-1].calls == []
+
+
 def test_dependency_errors_are_sanitized_and_principal_binding_changes(environment) -> None:
     client, state, app = environment
     first = client.get(f"{BASE}/analyses/EVA-0123456789abcdef")
@@ -554,13 +702,18 @@ def test_status_without_composition_reports_not_ready_without_constructing_anyth
     assert response.status_code == 200
     assert response.json()["enabled"] is False
     assert response.json()["ready"] is False
+    assert response.json()["configured_for_operation_attempt"] is False
+    assert response.json()["operational_composition_verified"] is False
     assert response.json()["configuration"] == {
         "enabled_probe_configured": False,
         "store_factory_configured": False,
         "lifetime_policy_configured": False,
         "store_opened_for_status": False,
         "selected_adapter_authorities_resolved_for_status": False,
+        "tenant_media_policy_probe_configured": False,
+        "tenant_media_policy_resolved_for_status": False,
     }
+    assert response.json()["supported_media"] == {}
 
 
 def test_api_round_trip_with_real_core_store_and_distinct_human_reviewer(

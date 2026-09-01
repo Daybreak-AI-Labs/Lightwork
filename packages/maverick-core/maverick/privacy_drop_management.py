@@ -62,6 +62,10 @@ _PAYLOAD_FIELDS = frozenset(
         "outcome_evidence_sha256",
         "status_actor_binding_sha256",
         "status_reviewer_binding_sha256",
+        "status_actor_ref",
+        "principal_key_revision",
+        "status_actor_key_revision",
+        "status_reviewer_key_revision",
         "created_at",
         "updated_at",
         "retained_until",
@@ -203,6 +207,20 @@ def _uuid(value: object, label: str) -> str:
         return str(uuid.UUID(str(value)))
     except (AttributeError, TypeError, ValueError) as exc:
         raise DROPManagementValidationError(f"{label} is not a UUID") from exc
+
+
+@dataclass(frozen=True)
+class DROPPrincipalBinding:
+    """One principal digest pinned to a versioned server-owned key revision."""
+
+    binding_sha256: str
+    key_revision: int
+
+    def normalized(self) -> DROPPrincipalBinding:
+        return DROPPrincipalBinding(
+            binding_sha256=_digest(self.binding_sha256, "principal_binding_sha256"),
+            key_revision=_integer(self.key_revision, "principal_key_revision", 1, 2**31 - 1),
+        )
 
 
 @dataclass(frozen=True)
@@ -363,6 +381,9 @@ class DROPRequestRecord:
     updated_at: float
     retained_until: float
     integrity_sha256: str
+    principal_key_revision: int = 1
+    status_actor_key_revision: int = 0
+    status_reviewer_key_revision: int = 0
 
 
 class DROPManagementStore:
@@ -378,7 +399,9 @@ class DROPManagementStore:
         status_evidence_resolver: Callable[
             [DROPRecordAuthority, DROPDSARReceipt, str], DROPStatusEvidence
         ],
-        principal_binding_resolver: Callable[[str, str], str],
+        principal_binding_resolver: Callable[[str, str], str | DROPPrincipalBinding],
+        principal_binding_verifier: Callable[[str, str, int, str], bool] | None = None,
+        principal_key_revision_checker: Callable[[int], bool] | None = None,
         retention_seconds: int = 365 * 24 * 3_600,
         maintenance_authorizer: Callable[[], bool] = lambda: False,
         config_gate: Callable[[], None] = require_enabled,
@@ -409,6 +432,11 @@ class DROPManagementStore:
         self._dsar_submitter = dsar_submitter
         self._status_evidence_resolver = status_evidence_resolver
         self._principal_binding_resolver = principal_binding_resolver
+        for dependency in (principal_binding_verifier, principal_key_revision_checker):
+            if dependency is not None and not callable(dependency):
+                raise DROPManagementConfigError("DROP principal key authority is unavailable")
+        self._principal_binding_verifier = principal_binding_verifier
+        self._principal_key_revision_checker = principal_key_revision_checker
         self._retention_seconds = _integer(
             retention_seconds, "retention_seconds", 3_600, _MAX_RETENTION_SECONDS
         )
@@ -539,7 +567,19 @@ class DROPManagementStore:
             raise DROPManagementConflict("DROP record authority changed")
         return second
 
-    def _principal_binding(self, tenant_id: str, principal_ref: str) -> str:
+    @staticmethod
+    def _binding(value: object) -> DROPPrincipalBinding:
+        if isinstance(value, str):
+            return DROPPrincipalBinding(value, 1).normalized()
+        if type(value) is DROPPrincipalBinding:
+            return value.normalized()
+        raise DROPManagementValidationError("principal binding authority is invalid")
+
+    def _principal_binding(
+        self,
+        tenant_id: str,
+        principal_ref: str,
+    ) -> DROPPrincipalBinding:
         if not hmac.compare_digest(_tenant(tenant_id), self.tenant_id):
             raise DROPManagementNotFound("DROP request was not found")
         principal = _ref(principal_ref, "principal_ref")
@@ -551,13 +591,48 @@ class DROPManagementStore:
         except Exception as exc:
             raise DROPManagementConflict("principal binding is unavailable") from exc
         try:
-            first_digest = _digest(first, "principal_binding_sha256")
-            second_digest = _digest(second, "principal_binding_sha256")
+            first_binding = self._binding(first)
+            second_binding = self._binding(second)
         except DROPManagementValidationError as exc:
             raise DROPManagementConflict("principal binding is unavailable") from exc
-        if not _same(first_digest, second_digest):
+        if (
+            first_binding.key_revision != second_binding.key_revision
+            or not _same(first_binding.binding_sha256, second_binding.binding_sha256)
+        ):
             raise DROPManagementConflict("principal binding changed")
-        return second_digest
+        return second_binding
+
+    def _verify_principal_binding(
+        self,
+        principal_ref: str,
+        key_revision: object,
+        binding_sha256: object,
+    ) -> bool:
+        try:
+            revision = _integer(key_revision, "principal_key_revision", 1, 2**31 - 1)
+            digest = _digest(binding_sha256, "principal_binding_sha256")
+            if callable(self._principal_binding_verifier):
+                return self._principal_binding_verifier(
+                    self.tenant_id,
+                    _ref(principal_ref, "principal_ref"),
+                    revision,
+                    digest,
+                ) is True
+            current = self._principal_binding(self.tenant_id, principal_ref)
+            return current.key_revision == revision and _same(current.binding_sha256, digest)
+        except DROPManagementError:
+            return False
+
+    def _require_key_revision(self, value: object) -> int:
+        revision = _integer(value, "principal_key_revision", 1, 2**31 - 1)
+        if callable(self._principal_key_revision_checker):
+            try:
+                active = self._principal_key_revision_checker(revision)
+            except Exception as exc:
+                raise DROPManagementConflict("principal key revision is unavailable") from exc
+            if active is not True:
+                raise DROPManagementConflict("principal key revision is unavailable")
+        return revision
 
     @staticmethod
     def _payload(row: sqlite3.Row) -> dict[str, Any]:
@@ -633,6 +708,9 @@ class DROPManagementStore:
             internal_case_id=receipt.internal_case_id,
             authority_sha256=str(payload["authority_sha256"]),
             outcome_evidence_sha256=str(payload.get("outcome_evidence_sha256") or ""),
+            principal_key_revision=int(payload["principal_key_revision"]),
+            status_actor_key_revision=int(payload["status_actor_key_revision"]),
+            status_reviewer_key_revision=int(payload["status_reviewer_key_revision"]),
             created_at=float(payload["created_at"]),
             updated_at=float(payload["updated_at"]),
             retained_until=float(payload["retained_until"]),
@@ -750,6 +828,10 @@ class DROPManagementStore:
         key_sha = _text_sha256(_ref(idempotency_key, "idempotency_key"))
         now = self._now()
         authority = self._resolve(authority, now)
+        record_key_revision = self._principal_binding(
+            authority.tenant_id,
+            f"drop-management-record:{authority.drop_id}",
+        ).key_revision
         request_sha = _sha256(
             {
                 "action": "create_drop_request",
@@ -777,6 +859,10 @@ class DROPManagementStore:
                 "outcome_evidence_sha256": "",
                 "status_actor_binding_sha256": "",
                 "status_reviewer_binding_sha256": "",
+                "status_actor_ref": "",
+                "principal_key_revision": record_key_revision,
+                "status_actor_key_revision": 0,
+                "status_reviewer_key_revision": 0,
                 "created_at": now,
                 "updated_at": now,
                 "retained_until": retained_until,
@@ -891,13 +977,13 @@ class DROPManagementStore:
         authority: DROPRecordAuthority,
         receipt: DROPDSARReceipt,
         status: str,
-        actor_binding_sha256: str,
+        actor_binding: DROPPrincipalBinding,
         now: float,
-    ) -> tuple[DROPStatusEvidence, str]:
+    ) -> tuple[DROPStatusEvidence, DROPPrincipalBinding]:
         if type(evidence) is not DROPStatusEvidence:
             raise DROPManagementConflict("DROP status evidence is unavailable")
         evidence = evidence.normalized()
-        reviewer_binding_sha256 = self._principal_binding(
+        reviewer_binding = self._principal_binding(
             authority.tenant_id,
             evidence.reviewer_ref,
         )
@@ -909,7 +995,7 @@ class DROPManagementStore:
             or evidence.internal_case_id != receipt.internal_case_id
             or not _same(evidence.authority_sha256, authority.authority_sha256)
             or not receipt.created_at <= evidence.observed_at <= now < evidence.valid_until
-            or _same(reviewer_binding_sha256, actor_binding_sha256)
+            or _same(reviewer_binding.binding_sha256, actor_binding.binding_sha256)
         ):
             raise DROPManagementConflict("DROP status evidence binding changed")
         if status == "DELETED" and not (
@@ -929,7 +1015,7 @@ class DROPManagementStore:
             raise DROPManagementConflict("not-found outcome requires a complete search")
         if status == "EXEMPTED" and not evidence.exemption_approved:
             raise DROPManagementConflict("exemption outcome is not independently approved")
-        return evidence, reviewer_binding_sha256
+        return evidence, reviewer_binding
 
     def update_status(
         self,
@@ -950,14 +1036,15 @@ class DROPManagementStore:
         key_sha = _text_sha256(_ref(idempotency_key, "idempotency_key"))
         now = self._now()
         authority = self._resolve(authority, now)
-        actor_binding_sha256 = self._principal_binding(authority.tenant_id, actor)
+        actor_binding = self._principal_binding(authority.tenant_id, actor)
         request_sha = _sha256(
             {
                 "action": "update_drop_status",
                 "authority_sha256": authority.authority_sha256,
                 "status": status,
                 "expected_revision": expected,
-                "actor_binding_sha256": actor_binding_sha256,
+                "actor_binding_sha256": actor_binding.binding_sha256,
+                "actor_key_revision": actor_binding.key_revision,
             }
         )
         replay = self._operation(authority.tenant_id, "update_status", key_sha, request_sha)
@@ -987,12 +1074,12 @@ class DROPManagementStore:
             raise
         except Exception as exc:
             raise DROPManagementConflict("DROP status evidence is unavailable") from exc
-        evidence, reviewer_binding_sha256 = self._validate_outcome(
+        evidence, reviewer_binding = self._validate_outcome(
             evidence,
             authority,
             receipt,
             status,
-            actor_binding_sha256,
+            actor_binding,
             self._now(),
         )
         self._resolve(authority, self._now())
@@ -1010,8 +1097,11 @@ class DROPManagementStore:
                 "revision": expected + 1,
                 "outcome_evidence": asdict(evidence),
                 "outcome_evidence_sha256": evidence.evidence_binding_sha256,
-                "status_actor_binding_sha256": actor_binding_sha256,
-                "status_reviewer_binding_sha256": reviewer_binding_sha256,
+                "status_actor_binding_sha256": actor_binding.binding_sha256,
+                "status_reviewer_binding_sha256": reviewer_binding.binding_sha256,
+                "status_actor_ref": actor,
+                "status_actor_key_revision": actor_binding.key_revision,
+                "status_reviewer_key_revision": reviewer_binding.key_revision,
                 "updated_at": updated_at,
             }
         )
@@ -1096,6 +1186,9 @@ class DROPManagementStore:
         try:
             _digest(payload.get("operation_key_sha256"), "operation_key_sha256")
             _digest(payload.get("request_sha256"), "request_sha256")
+            principal_key_revision = self._require_key_revision(
+                payload.get("principal_key_revision")
+            )
             created_at = _timestamp(payload.get("created_at"), "created_at")
             updated_at = _timestamp(payload.get("updated_at"), "updated_at")
             retained_until = _timestamp(payload.get("retained_until"), "retained_until")
@@ -1114,6 +1207,11 @@ class DROPManagementStore:
         outcome_sha = payload.get("outcome_evidence_sha256")
         actor_binding = payload.get("status_actor_binding_sha256")
         reviewer_binding = payload.get("status_reviewer_binding_sha256")
+        actor_ref = payload.get("status_actor_ref")
+        actor_key_revision = payload.get("status_actor_key_revision")
+        reviewer_key_revision = payload.get("status_reviewer_key_revision")
+        if principal_key_revision < 1:
+            raise DROPManagementIntegrityError("stored DROP principal key is invalid")
         if state == "creating":
             if (
                 status is not None
@@ -1123,6 +1221,9 @@ class DROPManagementStore:
                 or outcome_sha != ""
                 or actor_binding != ""
                 or reviewer_binding != ""
+                or actor_ref != ""
+                or actor_key_revision != 0
+                or reviewer_key_revision != 0
             ):
                 raise DROPManagementIntegrityError("stored DROP creating state is invalid")
             return authority, None, None
@@ -1141,6 +1242,9 @@ class DROPManagementStore:
                 or outcome_sha != ""
                 or actor_binding != ""
                 or reviewer_binding != ""
+                or actor_ref != ""
+                or actor_key_revision != 0
+                or reviewer_key_revision != 0
             ):
                 raise DROPManagementIntegrityError("stored pending DROP state is invalid")
             return authority, receipt, None
@@ -1150,10 +1254,9 @@ class DROPManagementStore:
         try:
             actor_sha256 = _digest(actor_binding, "status_actor_binding_sha256")
             reviewer_sha256 = _digest(reviewer_binding, "status_reviewer_binding_sha256")
-            current_reviewer_sha256 = self._principal_binding(
-                authority.tenant_id,
-                evidence.reviewer_ref,
-            )
+            stored_actor_ref = _ref(actor_ref, "status_actor_ref")
+            actor_revision = self._require_key_revision(actor_key_revision)
+            reviewer_revision = self._require_key_revision(reviewer_key_revision)
         except DROPManagementError as exc:
             raise DROPManagementIntegrityError("stored DROP principal binding is invalid") from exc
         if (
@@ -1165,7 +1268,17 @@ class DROPManagementStore:
             or evidence.internal_case_id != receipt.internal_case_id
             or not _same(evidence.authority_sha256, authority.authority_sha256)
             or not receipt.created_at <= evidence.observed_at <= updated_at < evidence.valid_until
-            or not _same(current_reviewer_sha256, reviewer_sha256)
+            or actor_revision < 1
+            or not self._verify_principal_binding(
+                stored_actor_ref,
+                actor_revision,
+                actor_sha256,
+            )
+            or not self._verify_principal_binding(
+                evidence.reviewer_ref,
+                reviewer_revision,
+                reviewer_sha256,
+            )
         ):
             raise DROPManagementIntegrityError("stored DROP outcome binding is invalid")
         if status == "DELETED" and not (
@@ -1333,6 +1446,7 @@ class DROPManagementStore:
                         "status": payload["status"],
                         "expected_revision": int(payload["revision"]) - 1,
                         "actor_binding_sha256": payload["status_actor_binding_sha256"],
+                        "actor_key_revision": payload["status_actor_key_revision"],
                     }
                 )
                 if (
@@ -1393,6 +1507,33 @@ class DROPManagementStore:
                 self._maintenance.authorized = False
         return len(rows)
 
+    def retained_key_revision_counts(self) -> Mapping[int, int]:
+        """Count retained management records by principal-key revision."""
+
+        self._gate()
+        now = self._now()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM drop_requests WHERE tenant_id=? AND retained_until>? "
+                "ORDER BY drop_id",
+                (self.tenant_id, now),
+            ).fetchall()
+        counts: dict[int, int] = {}
+        for row in rows:
+            payload = self._payload(row)
+            self._validate_persisted_state(payload)
+            revisions = [int(payload["principal_key_revision"])]
+            if int(payload["status_actor_key_revision"]):
+                revisions.extend(
+                    (
+                        int(payload["status_actor_key_revision"]),
+                        int(payload["status_reviewer_key_revision"]),
+                    )
+                )
+            for revision in revisions:
+                counts[revision] = counts.get(revision, 0) + 1
+        return counts
+
     @staticmethod
     def product_boundaries() -> Mapping[str, object]:
         return {
@@ -1425,6 +1566,7 @@ __all__ = [
     "DROPManagementNotFound",
     "DROPManagementStore",
     "DROPManagementValidationError",
+    "DROPPrincipalBinding",
     "DROPRecordAuthority",
     "DROPRequestRecord",
     "DROPStatusEvidence",

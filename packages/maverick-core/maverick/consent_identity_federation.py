@@ -78,6 +78,7 @@ class ConsentIdentitySettings:
     audience: str
     jwks_origin: str
     token_ttl_seconds: int
+    link_lifecycle_retention_seconds: int = DEFAULT_RETENTION_SECONDS
 
     def normalized(self) -> ConsentIdentitySettings:
         if self.enabled is not True:
@@ -100,6 +101,15 @@ class ConsentIdentitySettings:
             or not 60 <= self.token_ttl_seconds <= 86_400
         ):
             raise ConsentIdentityFederationConfigError("OIDC token TTL is invalid")
+        if (
+            not isinstance(self.link_lifecycle_retention_seconds, int)
+            or isinstance(self.link_lifecycle_retention_seconds, bool)
+            or not 3_600 <= self.link_lifecycle_retention_seconds <= 315_360_000
+            or self.link_lifecycle_retention_seconds < self.token_ttl_seconds
+        ):
+            raise ConsentIdentityFederationConfigError(
+                "consent identity link lifecycle retention is invalid"
+            )
         return replace(self, jwks_origin=_origin(self.jwks_origin))
 
 
@@ -343,12 +353,26 @@ def load_consent_identity_settings(
     ttl = identity.get("token_ttl_seconds", 600)
     if not isinstance(ttl, int) or isinstance(ttl, bool) or not 60 <= ttl <= 86_400:
         raise ConsentIdentityFederationConfigError("OIDC token TTL is invalid")
+    lifecycle_retention = identity.get(
+        "link_lifecycle_retention_seconds",
+        DEFAULT_RETENTION_SECONDS,
+    )
+    if (
+        not isinstance(lifecycle_retention, int)
+        or isinstance(lifecycle_retention, bool)
+        or not 3_600 <= lifecycle_retention <= 315_360_000
+        or lifecycle_retention < ttl
+    ):
+        raise ConsentIdentityFederationConfigError(
+            "consent identity link lifecycle retention is invalid"
+        )
     return ConsentIdentitySettings(
         enabled=True,
         issuer=issuer,
         audience=audience,
         jwks_origin=_origin(identity.get("jwks_origin")),
         token_ttl_seconds=ttl,
+        link_lifecycle_retention_seconds=lifecycle_retention,
     ).normalized()
 
 
@@ -544,6 +568,22 @@ class ConsentIdentityFederationStore:
                     binding_sha256 TEXT NOT NULL,
                     PRIMARY KEY(tenant_id,target_fingerprint)
                 );
+                CREATE TABLE IF NOT EXISTS consent_identity_unlink_operations(
+                    tenant_id TEXT NOT NULL,
+                    operation_key_sha256 TEXT NOT NULL,
+                    target_fingerprint TEXT NOT NULL,
+                    pairing_id TEXT NOT NULL,
+                    request_sha256 TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('prepared','completed')),
+                    record_json TEXT NOT NULL,
+                    record_sha256 TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    updated_at REAL NOT NULL,
+                    retention_until REAL NOT NULL,
+                    PRIMARY KEY(tenant_id,operation_key_sha256)
+                );
+                CREATE INDEX IF NOT EXISTS consent_identity_unlink_retention
+                    ON consent_identity_unlink_operations(status,retention_until);
                 CREATE TABLE IF NOT EXISTS consent_identity_pairing_events(
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     pairing_id TEXT NOT NULL,
@@ -594,6 +634,36 @@ class ConsentIdentityFederationStore:
             or record.get("revision") != row["revision"]
         ):
             raise ConsentIdentityFederationIntegrityError("stored pairing material changed")
+        return record
+
+    @staticmethod
+    def _unlink_operation(row: sqlite3.Row) -> dict[str, Any]:
+        try:
+            record = json.loads(str(row["record_json"]))
+        except (TypeError, ValueError) as exc:
+            raise ConsentIdentityFederationIntegrityError(
+                "stored identity unlink operation is invalid"
+            ) from exc
+        if not isinstance(record, dict):
+            raise ConsentIdentityFederationIntegrityError(
+                "stored identity unlink operation is invalid"
+            )
+        if (
+            record.get("schema") != "lightwork.consent.identity-unlink-operation.v1"
+            or record.get("tenant_id") != row["tenant_id"]
+            or record.get("operation_key_sha256") != row["operation_key_sha256"]
+            or record.get("target_fingerprint") != row["target_fingerprint"]
+            or record.get("pairing_id") != row["pairing_id"]
+            or record.get("request_sha256") != row["request_sha256"]
+            or record.get("status") != row["status"]
+            or record.get("revision") != row["revision"]
+            or record.get("updated_at") != row["updated_at"]
+            or record.get("retention_until") != row["retention_until"]
+            or not hmac.compare_digest(_sha256(record), str(row["record_sha256"]))
+        ):
+            raise ConsentIdentityFederationIntegrityError(
+                "stored identity unlink operation changed"
+            )
         return record
 
     @staticmethod
@@ -1135,6 +1205,15 @@ class ConsentIdentityFederationStore:
         )
         linked_known = current_source.get("linked_known_profile_id")
         if linked_known is None:
+            source_audit_sha = _sha256(
+                {
+                    "schema": "lightwork.consent.identity-link-audit.v1",
+                    "pairing_id": record["pairing_id"],
+                    "code_sha256": record["code_sha256"],
+                    "role": "source",
+                    "context_fingerprint": source.fingerprint,
+                }
+            )
             try:
                 link = preference_store.link_profiles(
                     source.tenant_id,
@@ -1143,6 +1222,11 @@ class ConsentIdentityFederationStore:
                     expected_known_revision=int(known["revision"]),
                     expected_anonymous_revision=source.profile_revision,
                     idempotency_key=f"identity-source-{record['pairing_id']}",
+                    expected_link_revision=int(current_source.get("link_revision", 0)),
+                    identity_evidence_sha256=verification_sha,
+                    audit_evidence_sha256=source_audit_sha,
+                    actor_sha256=source.fingerprint,
+                    retention_until=float(record["retention_until"]),
                 )
             except (ConsentConflict, ConsentNotFound) as exc:
                 raise ConsentIdentityFederationConflict(
@@ -1280,6 +1364,15 @@ class ConsentIdentityFederationStore:
 
         if target_link_not_started:
             assert known is not None
+            target_audit_sha = _sha256(
+                {
+                    "schema": "lightwork.consent.identity-link-audit.v1",
+                    "pairing_id": record["pairing_id"],
+                    "code_sha256": record["code_sha256"],
+                    "role": "target",
+                    "context_fingerprint": target.fingerprint,
+                }
+            )
             try:
                 link = preference_store.link_profiles(
                     target.tenant_id,
@@ -1288,6 +1381,14 @@ class ConsentIdentityFederationStore:
                     expected_known_revision=int(known["revision"]),
                     expected_anonymous_revision=int(target_profile["revision"]),
                     idempotency_key=f"identity-target-{record['pairing_id']}",
+                    expected_link_revision=int(target_profile.get("link_revision", 0)),
+                    identity_evidence_sha256=_digest(
+                        record.get("oidc_verification_sha256"),
+                        "oidc_verification_sha256",
+                    ),
+                    audit_evidence_sha256=target_audit_sha,
+                    actor_sha256=target.fingerprint,
+                    retention_until=float(record["retention_until"]),
                 )
             except (ConsentConflict, ConsentNotFound) as exc:
                 raise ConsentIdentityFederationConflict(
@@ -1368,10 +1469,10 @@ class ConsentIdentityFederationStore:
 
         target = self._resolve_context(target)
         preference_store, target_profile = self._profile(target, identity_kind="anonymous")
-        target_link = _digest(target_profile.get("link_sha256"), "link_sha256")
         known_profile_id = target_profile.get("linked_known_profile_id")
         if not isinstance(known_profile_id, str):
             raise ConsentIdentityFederationDenied("fresh identity evidence is unavailable")
+        target_link = _digest(target_profile.get("link_sha256"), "link_sha256")
         with self._connect() as connection:
             pointer_row = connection.execute(
                 "SELECT * FROM consent_identity_evidence_current "
@@ -1467,6 +1568,356 @@ class ConsentIdentityFederationStore:
         }
         return ConsentIdentityEvidence(**body | {"evidence_sha256": _sha256(body)})
 
+    def unlink_current_identity(  # noqa: C901, PLR0912, PLR0913
+        self,
+        target: ConsentPairingContext,
+        *,
+        expected_profile_revision: int,
+        expected_link_revision: int,
+        idempotency_key: str,
+        reason_sha256: str,
+        settings: ConsentIdentitySettings,
+    ) -> dict[str, Any]:
+        """Unlink the current device profile using fresh redeemed identity proof.
+
+        A digest-only preparation record bridges the pairing and preference
+        stores.  If the process stops after the core CAS but before pairing
+        revocation, the same exact operation resumes; rebinding the key fails.
+        """
+
+        settings = settings.normalized()
+        target = self._resolve_context(target)
+        if (
+            not isinstance(expected_profile_revision, int)
+            or isinstance(expected_profile_revision, bool)
+            or expected_profile_revision < 0
+            or not isinstance(expected_link_revision, int)
+            or isinstance(expected_link_revision, bool)
+            or expected_link_revision < 1
+        ):
+            raise ConsentIdentityFederationDenied("identity unlink revision is invalid")
+        operation_key = _ref(idempotency_key, "idempotency_key")
+        operation_sha = hashlib.sha256(operation_key.encode("utf-8")).hexdigest()
+        reason = _digest(reason_sha256, "reason_sha256")
+        expected_target = replace(
+            target,
+            profile_revision=expected_profile_revision,
+        ).normalized()
+        request = {
+            "schema": "lightwork.consent.identity-unlink-request.v1",
+            "tenant_id": target.tenant_id,
+            "target_fingerprint": expected_target.fingerprint,
+            "expected_profile_revision": expected_profile_revision,
+            "expected_link_revision": expected_link_revision,
+            "operation_key_sha256": operation_sha,
+            "reason_sha256": reason,
+        }
+        request_sha = _sha256(request)
+        now = _timestamp(self._clock(), "clock")
+        prepared: dict[str, Any] | None = None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM consent_identity_unlink_operations WHERE tenant_id=? "
+                "AND operation_key_sha256=?",
+                (target.tenant_id, operation_sha),
+            ).fetchone()
+            if row is not None:
+                prepared = self._unlink_operation(row)
+                if not hmac.compare_digest(
+                    str(prepared.get("request_sha256", "")),
+                    request_sha,
+                ):
+                    raise ConsentIdentityFederationConflict(
+                        "identity unlink idempotency key was rebound"
+                    )
+                if prepared["status"] == "completed":
+                    result = prepared.get("core_result")
+                    if not isinstance(result, dict) or not hmac.compare_digest(
+                        _sha256(result),
+                        str(prepared.get("core_result_sha256", "")),
+                    ):
+                        raise ConsentIdentityFederationIntegrityError(
+                            "stored identity unlink result changed"
+                        )
+                    return result
+        if target.profile_revision not in {
+            expected_profile_revision,
+            expected_profile_revision + 1,
+        }:
+            raise ConsentIdentityFederationConflict("identity unlink recovery authority changed")
+
+        preference_store = self._preference_store_for(target.tenant_id)
+        if prepared is None:
+            if target.profile_revision != expected_profile_revision:
+                raise ConsentIdentityFederationConflict(
+                    "identity unlink preparation is missing"
+                )
+            _store, profile = self._profile(target, identity_kind="anonymous")
+            if (
+                profile.get("link_status") != "linked"
+                or profile.get("link_revision") != expected_link_revision
+                or not isinstance(profile.get("linked_known_profile_id"), str)
+            ):
+                raise ConsentIdentityFederationConflict("identity link authority changed")
+            evidence = self.resolve_redeemed_identity_evidence(target)
+            known_profile_id = str(profile["linked_known_profile_id"])
+            known = preference_store.get_profile_authority(
+                target.tenant_id,
+                known_profile_id,
+            )
+            if known.get("identity_kind") != "known":
+                raise ConsentIdentityFederationConflict("known identity authority changed")
+            with self._connect() as connection:
+                pointer_row = connection.execute(
+                    "SELECT * FROM consent_identity_evidence_current WHERE tenant_id=? "
+                    "AND target_fingerprint=?",
+                    (target.tenant_id, target.fingerprint),
+                ).fetchone()
+                if pointer_row is None:
+                    raise ConsentIdentityFederationDenied(
+                        "fresh identity evidence is unavailable"
+                    )
+                pointer = self._current_evidence_pointer(pointer_row)
+                pairing_row = connection.execute(
+                    "SELECT * FROM consent_identity_pairings WHERE pairing_id=?",
+                    (pointer["pairing_id"],),
+                ).fetchone()
+                if pairing_row is None:
+                    raise ConsentIdentityFederationIntegrityError(
+                        "current identity evidence record is missing"
+                    )
+                pairing = self._record(pairing_row)
+            audit_evidence = _sha256(
+                {
+                    "schema": "lightwork.consent.identity-unlink-audit.v1",
+                    "pairing_id": pairing["pairing_id"],
+                    "pairing_revision": pairing["revision"],
+                    "target_fingerprint": target.fingerprint,
+                    "identity_evidence_sha256": evidence.evidence_sha256,
+                    "operation_key_sha256": operation_sha,
+                    "reason_sha256": reason,
+                }
+            )
+            retention_until = now + settings.link_lifecycle_retention_seconds
+            prepared = {
+                "schema": "lightwork.consent.identity-unlink-operation.v1",
+                "tenant_id": target.tenant_id,
+                "operation_key_sha256": operation_sha,
+                "target_fingerprint": target.fingerprint,
+                "pairing_id": pairing["pairing_id"],
+                "request_sha256": request_sha,
+                "status": "prepared",
+                "expected_profile_revision": expected_profile_revision,
+                "expected_link_revision": expected_link_revision,
+                "known_profile_id": known_profile_id,
+                "known_profile_revision": int(known["revision"]),
+                "identity_evidence_sha256": evidence.evidence_sha256,
+                "audit_evidence_sha256": audit_evidence,
+                "actor_sha256": target.fingerprint,
+                "reason_sha256": reason,
+                "core_result": None,
+                "core_result_sha256": None,
+                "revision": 0,
+                "created_at": now,
+                "updated_at": now,
+                "retention_until": retention_until,
+            }
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    pairing_row = connection.execute(
+                        "SELECT * FROM consent_identity_pairings WHERE pairing_id=?",
+                        (prepared["pairing_id"],),
+                    ).fetchone()
+                    if pairing_row is None or self._record(pairing_row)["status"] != "redeemed":
+                        raise ConsentIdentityFederationConflict(
+                            "fresh identity evidence changed"
+                        )
+                    connection.execute(
+                        "INSERT INTO consent_identity_unlink_operations(tenant_id,"
+                        "operation_key_sha256,target_fingerprint,pairing_id,request_sha256,"
+                        "status,record_json,record_sha256,revision,updated_at,"
+                        "retention_until) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            prepared["tenant_id"],
+                            prepared["operation_key_sha256"],
+                            prepared["target_fingerprint"],
+                            prepared["pairing_id"],
+                            prepared["request_sha256"],
+                            prepared["status"],
+                            _canonical(prepared).decode("ascii"),
+                            _sha256(prepared),
+                            prepared["revision"],
+                            prepared["updated_at"],
+                            prepared["retention_until"],
+                        ),
+                    )
+                    self._write_event(
+                        connection,
+                        pairing_id=str(prepared["pairing_id"]),
+                        event_type="identity.unlink_prepared",
+                        payload={
+                            "operation_key_sha256": operation_sha,
+                            "target_fingerprint": target.fingerprint,
+                            "identity_evidence_sha256": evidence.evidence_sha256,
+                            "audit_evidence_sha256": audit_evidence,
+                            "reason_sha256": reason,
+                        },
+                        now=now,
+                    )
+                    connection.execute("COMMIT")
+                except sqlite3.IntegrityError as exc:
+                    if connection.in_transaction:
+                        connection.execute("ROLLBACK")
+                    raise ConsentIdentityFederationConflict(
+                        "identity unlink operation changed concurrently"
+                    ) from exc
+                except BaseException:
+                    if connection.in_transaction:
+                        connection.execute("ROLLBACK")
+                    raise
+
+        assert prepared is not None
+        try:
+            result = preference_store.unlink_profile(
+                target.tenant_id,
+                target.profile_id,
+                expected_anonymous_revision=int(prepared["expected_profile_revision"]),
+                expected_known_revision=int(prepared["known_profile_revision"]),
+                expected_link_revision=int(prepared["expected_link_revision"]),
+                idempotency_key=f"identity-unlink-{operation_sha}",
+                identity_evidence_sha256=_digest(
+                    prepared.get("identity_evidence_sha256"),
+                    "identity_evidence_sha256",
+                ),
+                audit_evidence_sha256=_digest(
+                    prepared.get("audit_evidence_sha256"),
+                    "audit_evidence_sha256",
+                ),
+                actor_sha256=_digest(
+                    prepared.get("actor_sha256"),
+                    "actor_sha256",
+                ),
+                reason_sha256=reason,
+                retention_until=float(prepared["retention_until"]),
+            )
+        except (ConsentConflict, ConsentNotFound) as exc:
+            raise ConsentIdentityFederationConflict(
+                "identity unlink authority changed concurrently"
+            ) from exc
+        result_sha = _sha256(result)
+        finished_at = _timestamp(self._clock(), "clock")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                operation_row = connection.execute(
+                    "SELECT * FROM consent_identity_unlink_operations WHERE tenant_id=? "
+                    "AND operation_key_sha256=?",
+                    (target.tenant_id, operation_sha),
+                ).fetchone()
+                if operation_row is None:
+                    raise ConsentIdentityFederationIntegrityError(
+                        "identity unlink recovery record is missing"
+                    )
+                current_operation = self._unlink_operation(operation_row)
+                if current_operation["status"] == "completed":
+                    stored = current_operation.get("core_result")
+                    if not isinstance(stored, dict) or not hmac.compare_digest(
+                        _sha256(stored),
+                        str(current_operation.get("core_result_sha256", "")),
+                    ):
+                        raise ConsentIdentityFederationIntegrityError(
+                            "stored identity unlink result changed"
+                        )
+                    connection.execute("COMMIT")
+                    return stored
+                pairing_row = connection.execute(
+                    "SELECT * FROM consent_identity_pairings WHERE pairing_id=?",
+                    (prepared["pairing_id"],),
+                ).fetchone()
+                if pairing_row is None:
+                    raise ConsentIdentityFederationIntegrityError(
+                        "identity unlink pairing is missing"
+                    )
+                pairing = self._record(pairing_row)
+                if pairing["status"] == "redeemed":
+                    revoked = {
+                        **pairing,
+                        "status": "revoked",
+                        "unlink_operation_key_sha256": operation_sha,
+                        "unlink_result_sha256": result_sha,
+                    }
+                    self._save_record(
+                        connection,
+                        revoked,
+                        expected_revision=int(pairing["revision"]),
+                        now=finished_at,
+                    )
+                    self._delete_current_evidence(
+                        connection,
+                        tenant_id=target.tenant_id,
+                        target_fingerprint=str(prepared["target_fingerprint"]),
+                        pairing_id=str(prepared["pairing_id"]),
+                    )
+                    self._write_event(
+                        connection,
+                        pairing_id=str(prepared["pairing_id"]),
+                        event_type="identity.unlinked",
+                        payload={
+                            "operation_key_sha256": operation_sha,
+                            "target_fingerprint": prepared["target_fingerprint"],
+                            "link_event_sha256": result["link_event_sha256"],
+                            "link_revision": result["link_revision"],
+                            "reason_sha256": reason,
+                        },
+                        now=finished_at,
+                    )
+                elif (
+                    pairing["status"] != "revoked"
+                    or pairing.get("unlink_operation_key_sha256") != operation_sha
+                    or not hmac.compare_digest(
+                        str(pairing.get("unlink_result_sha256", "")),
+                        result_sha,
+                    )
+                ):
+                    raise ConsentIdentityFederationConflict(
+                        "identity unlink pairing changed concurrently"
+                    )
+                completed = {
+                    **current_operation,
+                    "status": "completed",
+                    "core_result": result,
+                    "core_result_sha256": result_sha,
+                    "revision": int(current_operation["revision"]) + 1,
+                    "updated_at": finished_at,
+                }
+                updated = connection.execute(
+                    "UPDATE consent_identity_unlink_operations SET status='completed',"
+                    "record_json=?,record_sha256=?,revision=?,updated_at=? WHERE "
+                    "tenant_id=? AND operation_key_sha256=? AND status='prepared' "
+                    "AND revision=? AND record_sha256=?",
+                    (
+                        _canonical(completed).decode("ascii"),
+                        _sha256(completed),
+                        completed["revision"],
+                        completed["updated_at"],
+                        target.tenant_id,
+                        operation_sha,
+                        current_operation["revision"],
+                        str(operation_row["record_sha256"]),
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise ConsentIdentityFederationConflict(
+                        "identity unlink operation changed concurrently"
+                    )
+                connection.execute("COMMIT")
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        return result
+
     def revoke_pairing(
         self,
         raw_code: str,
@@ -1535,6 +1986,39 @@ class ConsentIdentityFederationStore:
         pairings = events = 0
         previous_by_pairing: dict[str, str | None] = {}
         with self._connect() as connection:
+            for row in connection.execute(
+                "SELECT * FROM consent_identity_unlink_operations "
+                "ORDER BY tenant_id,operation_key_sha256"
+            ):
+                operation = self._unlink_operation(row)
+                pairing_row = connection.execute(
+                    "SELECT * FROM consent_identity_pairings WHERE pairing_id=?",
+                    (operation["pairing_id"],),
+                ).fetchone()
+                if pairing_row is None:
+                    raise ConsentIdentityFederationIntegrityError(
+                        "identity unlink pairing is missing"
+                    )
+                pairing = self._record(pairing_row)
+                if operation["status"] == "completed":
+                    result = operation.get("core_result")
+                    if (
+                        pairing.get("status") != "revoked"
+                        or pairing.get("unlink_operation_key_sha256")
+                        != operation["operation_key_sha256"]
+                        or not isinstance(result, dict)
+                        or not hmac.compare_digest(
+                            _sha256(result),
+                            str(operation.get("core_result_sha256", "")),
+                        )
+                    ):
+                        raise ConsentIdentityFederationIntegrityError(
+                            "completed identity unlink operation is invalid"
+                        )
+                elif pairing.get("status") != "redeemed":
+                    raise ConsentIdentityFederationIntegrityError(
+                        "prepared identity unlink operation is invalid"
+                    )
             for row in connection.execute(
                 "SELECT * FROM consent_identity_evidence_current "
                 "ORDER BY tenant_id,target_fingerprint"
@@ -1623,6 +2107,11 @@ class ConsentIdentityFederationStore:
                 connection.executemany(
                     "DELETE FROM consent_identity_pairings WHERE pairing_id=?",
                     [(str(row["pairing_id"]),) for row in rows],
+                )
+                connection.execute(
+                    "DELETE FROM consent_identity_unlink_operations "
+                    "WHERE status='completed' AND retention_until<=?",
+                    (cutoff,),
                 )
                 connection.execute("COMMIT")
             except BaseException:

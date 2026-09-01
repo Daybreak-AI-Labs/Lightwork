@@ -17,12 +17,16 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
     assert wizard.pick_security_suite() == {
         "customer_sandbox_lifecycle": False,
         "security_ops": True,
+        "administration_document_access": False,
+        "governed_document_vault": False,
+        "incident_attachment_metadata": False,
         "evidence_graph": False,
         "model_risk_assurance": False,
         "evidence_gateway": False,
         "model_improvement": False,
         "allow_hosted_training": False,
         "ai_inventory": False,
+        "ai_entity_tasks": False,
         "inventory_connectors": [],
         "ai_vendor_risk": False,
         "ai_vendor_risk_portal": False,
@@ -30,14 +34,40 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "policy_packs": False,
         "governance_agents": False,
         "ai_evidence_analysis": False,
+        "ai_evidence_ocr": False,
+        "ai_evidence_ocr_executable": "",
+        "ai_evidence_ocr_sha256": "",
+        "ai_evidence_ocr_tesseract_version": "",
+        "ai_evidence_ocr_traineddata_path": "",
+        "ai_evidence_ocr_traineddata_sha256": "",
+        "ai_evidence_ocr_runtime_library_paths": [],
+        "ai_evidence_ocr_runtime_libraries_sha256": "",
+        "ai_evidence_ocr_pillow_version": "",
+        "ai_evidence_ocr_pillow_manifest_sha256": "",
+        "ai_evidence_legacy_xls": False,
+        "ai_evidence_xlrd_manifest_sha256": "",
+        "ai_evidence_olefile_manifest_sha256": "",
+        "ai_evidence_parser_sandbox": False,
+        "ai_evidence_parser_sandbox_launcher": "",
+        "ai_evidence_parser_sandbox_sha256": "",
+        "ai_evidence_parser_sandbox_version": "",
+        "assessment_evidence_autopopulation": False,
+        "assessment_evidence_apply": False,
         "tech_risk_compliance": {
             "enable": False,
+            "grc_studio": {
+                "enable": False,
+                "max_studios": 10_000,
+                "retention_seconds": 31_536_000,
+                "max_import_bytes": 2_097_152,
+            },
             "policy_publication_links": {"enable": False},
             "scoping": {"enable": False},
             "scope_actions": {"enable": False},
             "continuous_evidence": {
                 "enable": False,
                 "enabled_collectors": [],
+                "stock_collectors": {"enable": False, "sources": []},
                 "scheduler": {
                     "enable": False,
                     "poll_seconds": 60,
@@ -51,6 +81,20 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         },
         "third_party_management": {
             "enable": False,
+            "contracts": {
+                "enable": False,
+                "max_records": 100_000,
+                "retention_seconds": 31_536_000,
+                "authority_max_age_seconds": 604_800,
+            },
+            "executive_reports": {
+                "enable": False,
+                "max_reports": 10_000,
+                "max_sources": 100,
+                "max_pdf_bytes": 524_288,
+                "retention_seconds": 31_536_000,
+                "download_token_seconds": 300,
+            },
             "intelligence": {
                 "enable": False,
                 "providers": {
@@ -102,6 +146,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_identity_federation": False,
         "ai_identity_conditional_access": False,
         "ai_identity_purview_writeback": False,
+        "ai_identity_production_composition": False,
         "threat_hunt": False,
         "env_hunt": False,
         "response_execution": False,
@@ -116,34 +161,78 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     checkbox_answers = iter(
         [
             ["AWS Bedrock", "Google Vertex AI"],
+            [
+                "AWS Security Hub",
+                "AWS Config posture",
+                "Azure Defender",
+                "Azure Policy posture",
+                "Google Cloud Security Command Center",
+                "GitHub security streams",
+                "Okta policy posture",
+            ],
             ["AWS CloudTrail", "Microsoft Entra ID"],
             ["AWS CloudTrail"],
             ["Microsoft Entra ID"],
         ]
     )
     monkeypatch.setattr(wizard, "_q_checkbox", lambda *args, **kwargs: next(checkbox_answers))
-    text_answers = iter(["a" * 64, "virustotal, abuseipdb", "120"])
+    # Confirming a governed parser is not sufficient: absent exact runtime
+    # attestations it truthfully remains disabled.  Eleven blank answers cover
+    # the OCR/XLS manifest prompts before the unrelated existing text answers.
+    text_answers = iter(
+        [""] * 11
+        + [
+            "tenant.supplywisdom.example",
+            "tenant.iss-corporate-solutions.example",
+            "a" * 64,
+            "virustotal, abuseipdb",
+            "120",
+        ]
+    )
     monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: next(text_answers))
 
     picked = wizard.pick_security_suite()
     assert picked["evidence_gateway"] is True
+    assert picked["administration_document_access"] is True
+    assert picked["governed_document_vault"] is True
+    assert picked["incident_attachment_metadata"] is True
     assert picked["model_improvement"] is True
     assert picked["allow_hosted_training"] is True
     assert picked["inventory_connectors"] == ["bedrock", "vertex_ai"]
+    assert picked["ai_entity_tasks"] is True
     assert picked["ai_vendor_risk"] is True
     assert picked["ai_vendor_risk_portal"] is True
     assert picked["portfolio_risk"] is True
     assert picked["policy_packs"] is True
     assert picked["governance_agents"] is True
     assert picked["ai_evidence_analysis"] is True
+    assert picked["ai_evidence_ocr"] is False
+    assert picked["ai_evidence_legacy_xls"] is False
+    assert picked["ai_evidence_parser_sandbox"] is False
     assert picked["tech_risk_compliance"] == {
         "enable": True,
+        "grc_studio": {
+            "enable": True,
+            "max_studios": 10_000,
+            "retention_seconds": 31_536_000,
+            "max_import_bytes": 2_097_152,
+        },
         "policy_publication_links": {"enable": True},
         "scoping": {"enable": True},
         "scope_actions": {"enable": True},
         "continuous_evidence": {
             "enable": True,
-            "enabled_collectors": ["local_soc2_v1"],
+            "enabled_collectors": [
+                "local_soc2_v1",
+                "aws_security_hub_v1",
+                "aws_config_posture_v1",
+                "azure_defender_v1",
+                "azure_policy_posture_v1",
+                "gcp_security_command_center_v1",
+                "github_security_v1",
+                "okta_posture_v1",
+            ],
+            "stock_collectors": {"enable": True, "sources": []},
             "scheduler": {
                 "enable": True,
                 "poll_seconds": 60,
@@ -157,11 +246,35 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     }
     assert picked["third_party_management"] == {
         "enable": True,
+        "contracts": {
+            "enable": True,
+            "max_records": 100_000,
+            "retention_seconds": 31_536_000,
+            "authority_max_age_seconds": 604_800,
+        },
+        "executive_reports": {
+            "enable": True,
+            "max_reports": 10_000,
+            "max_sources": 100,
+            "max_pdf_bytes": 524_288,
+            "retention_seconds": 31_536_000,
+            "download_token_seconds": 300,
+        },
         "intelligence": {
             "enable": True,
             "providers": {
                 "enable": True,
-                "enabled_providers": ["riskrecon", "securityscorecard", "hacknotice"],
+                "enabled_providers": [
+                    "riskrecon",
+                    "securityscorecard",
+                    "hacknotice",
+                    "supplywisdom",
+                    "iss_corporate_solutions",
+                ],
+                "supplywisdom_host": "tenant.supplywisdom.example",
+                "iss_corporate_solutions_host": (
+                    "tenant.iss-corporate-solutions.example"
+                ),
                 "timeout_seconds": 20,
                 "scheduler": {"enable": True, "poll_seconds": 900},
             },
@@ -208,6 +321,7 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_identity_federation"] is True
     assert picked["ai_identity_conditional_access"] is True
     assert picked["ai_identity_purview_writeback"] is True
+    assert picked["ai_identity_production_composition"] is True
     assert picked["env_hunt"] is True
     assert picked["response_execution"] is True
     assert picked["connectors"]["cloudtrail"] == {
@@ -229,6 +343,34 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["poll_seconds"] == 120
 
 
+def test_document_access_prompt_derives_attachment_dependency(monkeypatch):
+    from maverick_installer import wizard
+
+    def answer(prompt, *args, **kwargs):
+        del args, kwargs
+        return prompt.startswith(
+            (
+                "Enable governed short-lived document",
+                "Enable the stock tenant-private encrypted document vault",
+                "Enable governed metadata-only attachments",
+            )
+        )
+
+    monkeypatch.setattr(wizard, "_q_confirm", answer)
+    picked = wizard.pick_security_suite()
+
+    assert picked["administration_document_access"] is True
+    assert picked["governed_document_vault"] is True
+    assert picked["incident_attachment_metadata"] is True
+    rendered = tomllib.loads("\n".join(wizard._cfg_security_suite(picked)))
+    assert rendered["administration_document_access"]["enable"] is True
+    assert rendered["governed_document_vault"]["enable"] is True
+    assert rendered["incident_attachment_metadata"]["enable"] is True
+    assert set(rendered["incident_attachment_metadata"]["allowed_media_types"]).issubset(
+        rendered["governed_document_vault"]["allowed_media_types"]
+    )
+
+
 def test_pick_security_suite_scoping_independently_enables_trc_root(monkeypatch):
     from maverick_installer import wizard
 
@@ -240,12 +382,19 @@ def test_pick_security_suite_scoping_independently_enables_trc_root(monkeypatch)
     picked = wizard.pick_security_suite()
     assert picked["tech_risk_compliance"] == {
         "enable": True,
+        "grc_studio": {
+            "enable": False,
+            "max_studios": 10_000,
+            "retention_seconds": 31_536_000,
+            "max_import_bytes": 2_097_152,
+        },
         "policy_publication_links": {"enable": False},
         "scoping": {"enable": True},
         "scope_actions": {"enable": False},
         "continuous_evidence": {
             "enable": False,
             "enabled_collectors": [],
+            "stock_collectors": {"enable": False, "sources": []},
             "scheduler": {
                 "enable": False,
                 "poll_seconds": 60,
@@ -268,6 +417,12 @@ def test_security_suite_writer_emits_separate_trc_capability_gates():
             "security_ops": False,
             "tech_risk_compliance": {
                 "enable": True,
+                "grc_studio": {
+                    "enable": True,
+                    "max_studios": 10_000,
+                    "retention_seconds": 31_536_000,
+                    "max_import_bytes": 2_097_152,
+                },
                 "policy_publication_links": {"enable": True},
                 "scoping": {"enable": True},
                 "scope_actions": {"enable": True},
@@ -287,6 +442,12 @@ def test_security_suite_writer_emits_separate_trc_capability_gates():
             },
             "third_party_management": {
                 "enable": True,
+                "contracts": {
+                    "enable": True,
+                    "max_records": 100_000,
+                    "retention_seconds": 31_536_000,
+                    "authority_max_age_seconds": 604_800,
+                },
                 "intelligence": {
                     "enable": True,
                     "providers": {
@@ -317,6 +478,12 @@ def test_security_suite_writer_emits_separate_trc_capability_gates():
     parsed = tomllib.loads("\n".join(rendered))
     assert parsed["tech_risk_compliance"] == {
         "enable": True,
+        "grc_studio": {
+            "enable": True,
+            "max_studios": 10_000,
+            "retention_seconds": 31_536_000,
+            "max_import_bytes": 2_097_152,
+        },
         "policy_publication_links": {"enable": True},
         "scoping": {"enable": True},
         "scope_actions": {"enable": True},
@@ -336,6 +503,12 @@ def test_security_suite_writer_emits_separate_trc_capability_gates():
     }
     assert parsed["third_party_management"] == {
         "enable": True,
+        "contracts": {
+            "enable": True,
+            "max_records": 100_000,
+            "retention_seconds": 31_536_000,
+            "authority_max_age_seconds": 604_800,
+        },
         "intelligence": {
             "enable": True,
             "providers": {
@@ -601,6 +774,21 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "federation": {"enable": False},
             "conditional_access": {"enable": False},
             "purview_writeback": {"enable": False},
+            "production": {
+                "enable": False,
+                "mapping_revision": 1,
+                "mapping_retention_seconds": 86_400,
+                "max_authority_records": 10_000,
+                "max_observation_age_seconds": 300,
+                "max_future_skew_seconds": 30,
+                "outcome_max_attempts": 5,
+                "outcome_retry_base_seconds": 30,
+                "outcome_retry_max_seconds": 3_600,
+                "outcome_lease_seconds": 60,
+                "outcome_signal_validity_seconds": 86_400,
+                "purview_max_attempts": 3,
+                "purview_operation_lease_seconds": 60,
+            },
         },
     }
     environment = (tmp_path / ".env").read_text(encoding="utf-8")
@@ -667,6 +855,21 @@ def test_security_suite_high_trust_adapters_require_separate_opt_ins():
         "federation": {"enable": False},
         "conditional_access": {"enable": False},
         "purview_writeback": {"enable": False},
+        "production": {
+            "enable": False,
+            "mapping_revision": 1,
+            "mapping_retention_seconds": 86_400,
+            "max_authority_records": 10_000,
+            "max_observation_age_seconds": 300,
+            "max_future_skew_seconds": 30,
+            "outcome_max_attempts": 5,
+            "outcome_retry_base_seconds": 30,
+            "outcome_retry_max_seconds": 3_600,
+            "outcome_lease_seconds": 60,
+            "outcome_signal_validity_seconds": 86_400,
+            "purview_max_attempts": 3,
+            "purview_operation_lease_seconds": 60,
+        },
     }
     assert all(
         provider["enable"] is False
@@ -692,6 +895,7 @@ def test_security_suite_high_trust_adapters_require_separate_opt_ins():
                     "ai_identity_federation": True,
                     "ai_identity_conditional_access": True,
                     "ai_identity_purview_writeback": True,
+                    "ai_identity_production_composition": True,
                 }
             )
         )
@@ -717,6 +921,21 @@ def test_security_suite_high_trust_adapters_require_separate_opt_ins():
         "federation": {"enable": True},
         "conditional_access": {"enable": True},
         "purview_writeback": {"enable": True},
+        "production": {
+            "enable": True,
+            "mapping_revision": 1,
+            "mapping_retention_seconds": 86_400,
+            "max_authority_records": 10_000,
+            "max_observation_age_seconds": 300,
+            "max_future_skew_seconds": 30,
+            "outcome_max_attempts": 5,
+            "outcome_retry_base_seconds": 30,
+            "outcome_retry_max_seconds": 3_600,
+            "outcome_lease_seconds": 60,
+            "outcome_signal_validity_seconds": 86_400,
+            "purview_max_attempts": 3,
+            "purview_operation_lease_seconds": 60,
+        },
     }
 
 

@@ -276,6 +276,31 @@ def test_unicode_tenant_isolation_strict_ids_and_secret_safe_profile(store) -> N
     assert vendor.entity_identity_sha256 in payload
 
 
+def test_context_heads_are_bounded_tenant_exact_and_count_current_records(store) -> None:
+    first = create_vendor(store, vendor_id="vendor-1")
+    create_vendor(store, vendor_id="vendor-2")
+
+    assert store.list_vendors("tenant-a", limit=1) == (first,)
+    assert store.list_vendors("tenant-b", limit=1) == ()
+    assert store.list_sources("tenant-a", limit=1) == ()
+    assert store.list_source_snapshots("tenant-a", limit=1) == ()
+    assert store.list_screening_runs("tenant-a", limit=1) == ()
+    assert store.list_risk_decisions("tenant-a", limit=1) == ()
+    assert store.list_edd_cases("tenant-a", limit=1) == ()
+    assert store.list_monitors("tenant-a", limit=1) == ()
+    assert store.list_monitoring_alerts("tenant-a", limit=1) == ()
+    assert store.context_record_counts("tenant-a") == {
+        "sources": 0,
+        "source_snapshots": 0,
+        "vendors": 2,
+        "screening_runs": 0,
+        "risk_decisions": 0,
+        "edd_cases": 0,
+        "monitors": 0,
+        "monitoring_alerts": 0,
+    }
+
+
 def test_source_requires_independent_approval_and_rotation_invalidates_snapshot(store) -> None:
     source = store.enroll_source(
         "tenant-a",

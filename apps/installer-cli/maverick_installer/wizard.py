@@ -19,6 +19,7 @@ v0.1.1 additions (council UX feedback):
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -1453,7 +1454,7 @@ def pick_durable() -> dict[str, Any]:
     return {"enabled": True, "keep_last": 5}
 
 
-def pick_assessments() -> dict[str, Any]:
+def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product prompts
     """Assessment-flow assists (doc discovery + learning), both default ON.
 
     Doc discovery searches connected sources (Microsoft Graph / Slack /
@@ -1486,10 +1487,18 @@ def pick_assessments() -> dict[str, Any]:
     consent_public_api = False
     consent_identity = False
     consent_trust_center = False
+    consent_trust_center_branding = False
+    consent_native_sdk: dict[str, Any] | None = None
     if consent_preferences:
         consent_publishing = _q_confirm(
             "Enable versioned property, policy, notice, translation, and publication governance?",
             default=True,
+        )
+        consent_web_publish_settings = consent_publishing and _q_confirm(
+            "Enable governed website publish settings for SDK version, "
+            "geolocation reconsent, analytics, cookie scope, SPA reload, CSP "
+            "nonce requirements, and automatic refresh?",
+            default=False,
         )
         consent_public_api = consent_publishing and _q_confirm(
             "Enable the external consumer consent API? Property/origin "
@@ -1519,6 +1528,7 @@ def pick_assessments() -> dict[str, Any]:
                     default="",
                 ).strip(),
                 "token_ttl_seconds": 600,
+                "link_lifecycle_retention_seconds": 31_536_000,
             }
         consent_scanner = _q_confirm(
             "Enable scheduled website tracker scanning? Only properties "
@@ -1536,6 +1546,12 @@ def pick_assessments() -> dict[str, Any]:
             "it does not generate legal copy or publish a notice or site change.",
             default=False,
         )
+        consent_application_scanner = _q_confirm(
+            "Enable bounded mobile and OTT/CTV application manifest analysis? "
+            "Operators must supply already-extracted manifests; this does not "
+            "execute APKs/IPAs, inspect devices, or classify trackers or law.",
+            default=False,
+        )
         consent_signals = _q_confirm(
             "Enable GPC and DNT signal interpretation?",
             default=True,
@@ -1545,11 +1561,209 @@ def pick_assessments() -> dict[str, Any]:
             "Consent Mode) after its conformance vectors are installed?",
             default=False,
         )
+        consent_native_enabled = (
+            consent_publishing
+            and consent_public_api
+            and _q_confirm(
+                "Enable the native mobile and OTT/CTV consent SDK runtime? "
+                "Production readiness requires an injected platform attestation "
+                "verifier; GPP/TCF also requires an injected standards-wire verifier.",
+                default=False,
+            )
+        )
+        if consent_native_enabled:
+            receipt_key_id = (
+                _q_text(
+                    "  Native receipt signing key id",
+                    default="native-consent-receipt",
+                ).strip()
+                or "native-consent-receipt"
+            )
+            receipt_key_secret_ref = (
+                _q_text(
+                    "  Environment variable holding the native receipt root secret",
+                    default="MAVERICK_NATIVE_CONSENT_RECEIPT_KEY",
+                ).strip()
+                or "MAVERICK_NATIVE_CONSENT_RECEIPT_KEY"
+            )
+            require_profile_linking = consent_identity and _q_confirm(
+                "Require each native consent request to link to a verified consumer profile? "
+                "The deployment must inject the profile-linking callback.",
+                default=False,
+            )
+            consent_native_sdk = {
+                "enable": True,
+                "receipt_key_id": receipt_key_id,
+                "receipt_key_revision": 1,
+                "receipt_key_secret_ref": receipt_key_secret_ref,
+                "max_applications": 1_000,
+                "max_devices": 100_000,
+                "max_requests": 1_000_000,
+                "requests_per_minute": 120,
+                "require_profile_linking": require_profile_linking,
+                "require_rights_requests": False,
+            }
         consent_delivery = _q_confirm(
             "Enable downstream preference delivery? Destinations remain "
             "disabled until separately enrolled.",
             default=False,
         )
+        consent_destination_config: dict[str, Any] | None = None
+        if consent_delivery and _q_confirm(
+            "Configure named Salesforce, Marketo, Adobe Experience Platform, "
+            "or Snowflake consent destinations? Exact destination enrollment, "
+            "signing keys, deployment-held credentials, and an independent "
+            "reconciliation authority are still required.",
+            default=False,
+        ):
+            destination_providers = _q_checkbox(
+                "Select named consent delivery destinations",
+                [
+                    "salesforce",
+                    "marketo",
+                    "adobe_experience_platform",
+                    "snowflake",
+                ],
+                default=[],
+            )
+            destination_tables: dict[str, dict[str, Any]] = {}
+
+            def destination_text(label: str, default: str) -> str:
+                return _q_text(f"  {label}", default=default).strip() or default
+
+            def credential_reference(label: str, default: str) -> str:
+                name = destination_text(label, default)
+                if name.startswith("$"):
+                    return name
+                return "${" + name + "}"
+
+            if "salesforce" in destination_providers:
+                destination_tables["salesforce"] = {
+                    "destination_id": destination_text(
+                        "Salesforce destination id", "salesforce"
+                    ),
+                    "origin": destination_text(
+                        "Salesforce exact HTTPS origin",
+                        "https://tenant.my.salesforce.com",
+                    ),
+                    "credential_secret_ref": credential_reference(
+                        "Environment variable holding the Salesforce OAuth token",
+                        "MAVERICK_SALESFORCE_CONSENT_TOKEN",
+                    ),
+                    "credential_revision": 1,
+                    "api_version": destination_text(
+                        "Salesforce REST API version", "v65.0"
+                    ),
+                    "object_api_name": destination_text(
+                        "Salesforce consent-event object API name",
+                        "Lightwork_Consent_Event__c",
+                    ),
+                    "external_id_field": destination_text(
+                        "Salesforce external-id field",
+                        "Lightwork_Message_Id__c",
+                    ),
+                    "payload_digest_field": destination_text(
+                        "Salesforce payload-digest field",
+                        "Lightwork_Payload_SHA256__c",
+                    ),
+                }
+            if "marketo" in destination_providers:
+                destination_tables["marketo"] = {
+                    "destination_id": destination_text(
+                        "Marketo destination id", "marketo"
+                    ),
+                    "origin": destination_text(
+                        "Marketo exact HTTPS origin",
+                        "https://123-ABC-456.mktorest.com",
+                    ),
+                    "credential_secret_ref": credential_reference(
+                        "Environment variable holding the Marketo OAuth token",
+                        "MAVERICK_MARKETO_CONSENT_TOKEN",
+                    ),
+                    "credential_revision": 1,
+                    "custom_object_name": destination_text(
+                        "Marketo consent custom-object API name",
+                        "lightworkConsentEvent",
+                    ),
+                    "dedupe_field": destination_text(
+                        "Marketo dedupe field", "lightworkMessageId"
+                    ),
+                    "message_id_field": destination_text(
+                        "Marketo standalone searchable message-id field",
+                        "lightworkMessageId",
+                    ),
+                    "payload_digest_field": destination_text(
+                        "Marketo payload-digest field", "payloadSha256"
+                    ),
+                }
+            if "adobe_experience_platform" in destination_providers:
+                destination_tables["adobe_experience_platform"] = {
+                    "destination_id": destination_text(
+                        "Adobe Experience Platform destination id", "aep"
+                    ),
+                    "origin": destination_text(
+                        "Adobe Experience Platform exact streaming origin",
+                        "https://dcs.adobedc.net",
+                    ),
+                    "credential_secret_ref": credential_reference(
+                        "Environment variable holding the AEP credential JSON bundle",
+                        "MAVERICK_AEP_CONSENT_CREDENTIAL",
+                    ),
+                    "credential_revision": 1,
+                    "connection_id": destination_text(
+                        "AEP streaming connection id", "replace_connection_id"
+                    ),
+                    "flow_id": destination_text(
+                        "AEP dataflow id", "replace_flow_id"
+                    ),
+                    "dataset_id": destination_text(
+                        "AEP dataset id", "replace_dataset_id"
+                    ),
+                    "schema_id": destination_text(
+                        "AEP XDM schema id", "replace_schema_id"
+                    ),
+                    "ims_org_id": destination_text(
+                        "AEP IMS organization id", "replace@AdobeOrg"
+                    ),
+                }
+            if "snowflake" in destination_providers:
+                destination_tables["snowflake"] = {
+                    "destination_id": destination_text(
+                        "Snowflake destination id", "snowflake"
+                    ),
+                    "origin": destination_text(
+                        "Snowflake exact SQL API origin",
+                        "https://account.region.snowflakecomputing.com",
+                    ),
+                    "credential_secret_ref": credential_reference(
+                        "Environment variable holding the Snowflake OAuth token",
+                        "MAVERICK_SNOWFLAKE_CONSENT_TOKEN",
+                    ),
+                    "credential_revision": 1,
+                    "database": destination_text(
+                        "Snowflake database", "LIGHTWORK"
+                    ),
+                    "schema": destination_text(
+                        "Snowflake schema", "CONSENT"
+                    ),
+                    "table": destination_text(
+                        "Snowflake consent-event table", "PREFERENCE_EVENTS"
+                    ),
+                    "warehouse": destination_text(
+                        "Snowflake warehouse", "LIGHTWORK_WH"
+                    ),
+                    "role": destination_text(
+                        "Snowflake least-privilege role", "LIGHTWORK_CONSENT_WRITER"
+                    ),
+                }
+            if destination_tables:
+                consent_destination_config = {
+                    "enable": True,
+                    "enabled_providers": list(destination_tables),
+                    "timeout_seconds": 10.0,
+                    "max_response_bytes": 65_536,
+                    **destination_tables,
+                }
         consent_analytics = _q_confirm(
             "Enable privacy-safe aggregate consent analytics?",
             default=False,
@@ -1566,9 +1780,27 @@ def pick_assessments() -> dict[str, Any]:
             "text and protected-trait inference are not supported.",
             default=False,
         )
+        consent_custom_index = consent_profile_data and _q_confirm(
+            "Enable governed custom data-element indexes and exact profile search? "
+            "Search values are HMAC-tokenized under a deployment-custody key; "
+            "indexes fail closed when their source changes.",
+            default=False,
+        )
+        consent_bulk_jobs = _q_confirm(
+            "Enable governed bulk consent exports and lifecycle jobs? Jobs are "
+            "tenant-scoped, credit-limited, cancellable, and retain bounded "
+            "artifacts; operators must still hold the matching consent authority.",
+            default=False,
+        )
         consent_trust_center = consent_public_api and _q_confirm(
             "Enable the unified consumer Trust Center? It requires separately "
             "approved capability grants before consumer data is shown.",
+            default=False,
+        )
+        consent_trust_center_branding = consent_trust_center and _q_confirm(
+            "Enable governed Trust Center logos and exact custom-domain claims? "
+            "PNG/JPEG assets require independent review; DNS/TLS/CDN deployment "
+            "authority and the encryption key must still be injected.",
             default=False,
         )
         consent_product = {
@@ -1576,12 +1808,21 @@ def pick_assessments() -> dict[str, Any]:
             "publishing": {
                 "enable": consent_publishing,
                 "require_signed_publications": True,
+                **(
+                    {
+                        "web_settings": {
+                            "enable": True,
+                            "retention_seconds": 31_536_000,
+                            "max_history": 250,
+                        }
+                    }
+                    if consent_web_publish_settings
+                    else {}
+                ),
             },
             "public_api": {"enable": consent_public_api},
             **(
-                {"identity": consent_identity_config}
-                if consent_identity_config is not None
-                else {}
+                {"identity": consent_identity_config} if consent_identity_config is not None else {}
             ),
             "scanner": {
                 "enable": consent_scanner,
@@ -1594,6 +1835,17 @@ def pick_assessments() -> dict[str, Any]:
                     "tenant_limit": 1_000,
                 },
             },
+            **(
+                {
+                    "application_scanner": {
+                        "enable": True,
+                        "max_records": 25_000,
+                        "retention_seconds": 31_536_000,
+                    }
+                }
+                if consent_application_scanner
+                else {}
+            ),
             "standards": {
                 "gpc": consent_signals,
                 "dnt": consent_signals,
@@ -1601,11 +1853,67 @@ def pick_assessments() -> dict[str, Any]:
                 "tcf": consent_adtech_standards,
                 "google_consent_mode": consent_adtech_standards,
             },
-            "delivery": {"enable": consent_delivery},
+            **({"native_sdk": consent_native_sdk} if consent_native_sdk is not None else {}),
+            "delivery": {
+                "enable": consent_delivery,
+                **(
+                    {"destinations": consent_destination_config}
+                    if consent_destination_config is not None
+                    else {}
+                ),
+            },
             "analytics": {"enable": consent_analytics},
             "experiments": {"enable": consent_experiments},
-            "profile_data": {"enable": consent_profile_data},
-            "trust_center": {"enable": consent_trust_center},
+            "profile_data": {
+                "enable": consent_profile_data,
+                "custom_index": {
+                    "enable": consent_custom_index,
+                    "key_secret_ref": "MAVERICK_CONSENT_CUSTOM_INDEX_KEY",
+                    "key_version": 1,
+                    "max_indexes": 256,
+                    "max_page_size": 100,
+                    "retention_seconds": 31_536_000,
+                },
+            },
+            **(
+                {
+                    "bulk_jobs": {
+                        "enable": True,
+                        "initial_credits": 10_000,
+                        "max_jobs": 10_000,
+                        "max_items_per_job": 10_000,
+                        "max_artifact_bytes": 16_777_216,
+                        "lease_seconds": 60,
+                        "retention_seconds": 31_536_000,
+                        "worker_batch_size": 100,
+                    }
+                }
+                if consent_bulk_jobs
+                else {}
+            ),
+            "trust_center": {
+                "enable": consent_trust_center,
+                **(
+                    {
+                        "branding": {
+                            "enable": True,
+                            "max_asset_bytes": 2_097_152,
+                            "max_assets": 1_000,
+                            "max_width": 4_096,
+                            "max_height": 4_096,
+                            "max_pixels": 8_388_608,
+                            "max_domains": 100,
+                            "challenge_ttl_seconds": 3_600,
+                            "verification_ttl_seconds": 604_800,
+                            "retention_seconds": 7_776_000,
+                            "key_ref": "env:MAVERICK_TRUST_CENTER_BRAND_ASSET_KEY",
+                            "key_revision": 1,
+                        }
+                    }
+                    if consent_trust_center_branding
+                    else {}
+                ),
+            },
         }
     privacy_data_discovery = _q_confirm(
         "Enable Privacy Automation structured and unstructured personal-data "
@@ -1613,6 +1921,44 @@ def pick_assessments() -> dict[str, Any]:
         "adapters are attached.",
         default=False,
     )
+    privacy_discovery_adapter_providers: list[str] = []
+    privacy_discovery_remediation = False
+    privacy_discovery_data_map = False
+    privacy_discovery_scheduler = False
+    if privacy_data_discovery and _q_confirm(
+        "Enable the bounded built-in privacy discovery source adapters? "
+        "Each source still requires an exact tenant enrollment and deployment-held credential.",
+        default=False,
+    ):
+        privacy_discovery_adapter_providers = _q_checkbox(
+            "Select built-in privacy discovery adapters",
+            [
+                "aws_s3",
+                "azure_blob",
+                "google_cloud_storage",
+                "snowflake_metadata",
+                "servicenow_cmdb",
+                "entra_assets",
+            ],
+            default=[],
+        )
+        if privacy_discovery_adapter_providers:
+            privacy_discovery_remediation = _q_confirm(
+                "Enable independently approved discovery-remediation outbox jobs and "
+                "the digest-only governed data-map target? Provider writes remain "
+                "disabled until a separate tenant authority is enrolled.",
+                default=False,
+            )
+            privacy_discovery_data_map = privacy_discovery_remediation
+            privacy_discovery_scheduler = (
+                privacy_discovery_remediation
+                and _q_confirm(
+                    "Enable the managed privacy discovery remediation scheduler? "
+                    "It runs bounded tenant-local digest-only retry and ambiguity "
+                    "reconciliation; it never runs provider discovery or proves completeness.",
+                    default=False,
+                )
+            )
     privacy_regulatory_intelligence = _q_confirm(
         "Enable Privacy Automation regulatory research, collections, alerts, "
         "comparisons, and cited reports? No proprietary corpus is bundled; "
@@ -1625,9 +1971,82 @@ def pick_assessments() -> dict[str, Any]:
         "no provider transport or response delivery.",
         default=False,
     )
+    privacy_rights_source_adapters: dict[str, Any] | None = None
+    if privacy_rights_orchestration and _q_confirm(
+        "Enable production stock privacy-rights source adapters with encrypted "
+        "immutable-target custody and reconciliation-only deletes? Provider "
+        "credentials and raw subjects remain server-owned.",
+        default=False,
+    ):
+        source_choices = _q_checkbox(
+            "Select privacy-rights source providers",
+            [
+                "Microsoft Graph users",
+                "Google Workspace users",
+                "Salesforce contacts",
+                "ServiceNow users",
+            ],
+            default=[],
+        )
+        provider_specs = {
+            "Microsoft Graph users": (
+                "microsoft_graph_users",
+                "directory-graph",
+                "https://graph.microsoft.com",
+                "env:GRAPH_RIGHTS_TOKEN",
+            ),
+            "Google Workspace users": (
+                "google_workspace_users",
+                "directory-google",
+                "https://admin.googleapis.com",
+                "env:GOOGLE_WORKSPACE_RIGHTS_TOKEN",
+            ),
+            "Salesforce contacts": (
+                "salesforce_contacts",
+                "crm-salesforce",
+                "https://tenant.salesforce.com",
+                "env:SALESFORCE_RIGHTS_TOKEN",
+            ),
+            "ServiceNow users": (
+                "servicenow_users",
+                "itsm-servicenow",
+                "https://tenant.service-now.com",
+                "env:SERVICENOW_RIGHTS_TOKEN",
+            ),
+        }
+        selected_providers: dict[str, Any] = {}
+        for choice in source_choices:
+            provider, source_id, origin, credential_ref = provider_specs[choice]
+            selected_providers[provider] = {
+                "enable": True,
+                "source_id": source_id,
+                "origin": origin,
+                "credential_ref": credential_ref,
+                "capabilities": [
+                    "discover",
+                    "retrieve",
+                    "delete",
+                    "verify_delete",
+                ],
+            }
+        privacy_rights_source_adapters = {
+            "enable": bool(selected_providers),
+            "timeout_seconds": 15,
+            "max_response_bytes": 1_048_576,
+            "max_retrieval_bytes": 8_388_608,
+            "max_records": 200,
+            "batch_size": 10,
+            "lease_seconds": 60,
+            "retry_delay_seconds": 30,
+            "claim_history_retention_seconds": 86_400,
+            "target_custody_retention_seconds": 2_592_000,
+            "providers": selected_providers,
+        }
     privacy_rights_consumer_delivery = privacy_rights_orchestration and _q_confirm(
         "Enable one-time consumer delivery for closed, redacted rights-response "
-        "packages? Delivery still requires an enrolled server authority.",
+        "packages? Production use still requires the governed document vault, "
+        "pinned key references, independent public reauthentication, and an "
+        "IdP-backed operator-to-consumer mapping for operator minting.",
         default=False,
     )
     privacy_rights_consumer_intake = (
@@ -1643,6 +2062,25 @@ def pick_assessments() -> dict[str, Any]:
             default=False,
         )
     )
+    if consent_native_sdk is not None and privacy_rights_consumer_intake:
+        consent_native_sdk["require_rights_requests"] = _q_confirm(
+            "Require native SDK privacy-rights requests? The deployment must inject "
+            "the tenant-bound rights-request callback.",
+            default=False,
+        )
+    consent_global_opt_out = privacy_rights_consumer_intake and _q_confirm(
+        "Enable the governed Global Opt-Out mobile and email experience? "
+        "Public submissions create a real profile-bound opt-out rights request; "
+        "live device, service, customer-estate, and legal acceptance remain separate.",
+        default=False,
+    )
+    if consent_global_opt_out and consent_product is not None:
+        consent_product["global_opt_out"] = {
+            "enable": True,
+            "retention_seconds": 31_536_000,
+            "submission_ttl_seconds": 900,
+            "max_records": 10_000,
+        }
     privacy_ott_ctv_rights = (
         privacy_rights_orchestration
         and consent_identity
@@ -1661,12 +2099,96 @@ def pick_assessments() -> dict[str, Any]:
         "California provider connection or make a legal-compliance claim.",
         default=False,
     )
+    privacy_drop_key_ref = "env:MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY"
+    privacy_drop_scheduler = False
+    if privacy_drop_management:
+        privacy_drop_key_ref = (
+            _q_text(
+                "DROP principal-binding secret-provider reference (never key material)",
+                default=privacy_drop_key_ref,
+            ).strip()
+            or privacy_drop_key_ref
+        )
+        privacy_drop_scheduler = _q_confirm(
+            "Enable the managed DROP reconciliation and retention scheduler? "
+            "This runs bounded tenant-local maintenance; California delivery and "
+            "registered-broker interoperability remain separately operated.",
+            default=False,
+        )
     privacy_notice_governance = _q_confirm(
         "Enable governed Privacy Automation notice approvals and publication "
         "intents? Notice content stays external and publication remains local "
         "worker intent with no site, app, or consent-provider write.",
         default=False,
     )
+    privacy_notice_publication_runtime = False
+    privacy_notice_publication_scheduler = False
+    privacy_notice_publication_binding: dict[str, Any] | None = None
+    if privacy_notice_governance and consent_publishing:
+        privacy_notice_publication_runtime = _q_confirm(
+            "Enable the local privacy-notice publication runtime? This consumes "
+            "approved intents into the tenant-private Consent Publishing store "
+            "only; it does not update a website, SDK, tag manager, or provider.",
+            default=False,
+        )
+    if privacy_notice_publication_runtime:
+        binding_tenant = (
+            _q_text(
+                "  Exact active tenant ID for the first publication binding",
+                default=os.environ.get("MAVERICK_TENANT", "default"),
+            ).strip()
+            or "default"
+        )
+        binding_id = (
+            _q_text("  Publication binding name", default="primary").strip()
+            or "primary"
+        )
+        privacy_notice_publication_binding = {
+            "binding_id": binding_id,
+            "tenant_id": binding_tenant,
+            "notice_id": (
+                _q_text("  Exact notice release ID", default="privacy-main").strip()
+                or "privacy-main"
+            ),
+            "consent_publication_ref": (
+                _q_text(
+                    "  Exact notice release consent-publication reference",
+                    default="consent-binding:1",
+                ).strip()
+                or "consent-binding:1"
+            ),
+            "property_id": (
+                _q_text("  Exact Consent Publishing property ID", default="property-main").strip()
+                or "property-main"
+            ),
+            "rule_group_id": (
+                _q_text("  Exact consent rule-group ID", default="production-rules").strip()
+                or "production-rules"
+            ),
+            "rule_group_version": max(
+                1,
+                _safe_int(
+                    _q_text("  Exact consent rule-group version", default="1"),
+                    default=1,
+                ),
+            ),
+            "notice_resource_id": (
+                _q_text("  Exact consent notice-resource ID", default="privacy-notice").strip()
+                or "privacy-notice"
+            ),
+            "notice_resource_version": max(
+                1,
+                _safe_int(
+                    _q_text("  Exact consent notice-resource version", default="1"),
+                    default=1,
+                ),
+            ),
+        }
+        privacy_notice_publication_scheduler = _q_confirm(
+            "Run the bounded local notice-publication scheduler with the dashboard? "
+            "Only the exact active tenant and target binding above are eligible.",
+            default=False,
+        )
     data_use_governance = _q_confirm(
         "Enable the Data Use Governance authority and policy compiler? "
         "Provider writes remain disabled until a native provider is enrolled.",
@@ -1785,17 +2307,60 @@ def pick_assessments() -> dict[str, Any]:
         or privacy_drop_management
         or privacy_notice_governance
     ):
+        data_discovery_config: dict[str, Any] = {"enable": privacy_data_discovery}
+        if privacy_discovery_adapter_providers:
+            data_discovery_config["adapters"] = {
+                "enable": True,
+                "enabled_providers": privacy_discovery_adapter_providers,
+                "timeout_seconds": 15.0,
+                "max_response_bytes": 8_388_608,
+                "page_size": 250,
+                "max_pages": 500,
+                "max_attempts": 3,
+                "max_polls": 8,
+            }
+            data_discovery_config["remediation"] = {
+                "enable": privacy_discovery_remediation,
+                "max_attempts": 5,
+                "retention_seconds": 2_592_000,
+                "data_map": {
+                    "enable": privacy_discovery_data_map,
+                    "retention_seconds": 31_536_000,
+                },
+                "scheduler": {
+                    "enable": privacy_discovery_scheduler,
+                    "interval_seconds": 60,
+                    "jitter_seconds": 10,
+                    "retry_max_seconds": 300,
+                    "tenant_limit": 1_000,
+                    "worker_limit": 10,
+                    "reconcile_limit": 10,
+                    "lease_seconds": 60,
+                },
+            }
         out["privacy_automation"] = {
             "enable": True,
-            "data_discovery": {"enable": privacy_data_discovery},
+            "data_discovery": data_discovery_config,
             "regulatory_intelligence": {
                 "enable": privacy_regulatory_intelligence,
             },
             "rights_orchestration": {
                 "enable": privacy_rights_orchestration,
+                **(
+                    {"source_adapters": privacy_rights_source_adapters}
+                    if privacy_rights_source_adapters is not None
+                    else {}
+                ),
             },
             "rights_consumer_delivery": {
                 "enable": privacy_rights_consumer_delivery,
+                "digest_key_ref": "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_DIGEST_KEY",
+                "export_signing_key_ref": (
+                    "env:MAVERICK_PRIVACY_RIGHTS_DELIVERY_EXPORT_KEY"
+                ),
+                "package_encryption_key_ref": "env:MAVERICK_ENCRYPTION_KEY",
+                "server_grant_ttl_seconds": 30,
+                "max_package_bytes": 16_777_216,
             },
             "rights_consumer_intake": {
                 "enable": privacy_rights_consumer_intake,
@@ -1809,10 +2374,40 @@ def pick_assessments() -> dict[str, Any]:
             },
             "drop_management": {
                 "enable": privacy_drop_management,
+                "principal_binding_key_ref": privacy_drop_key_ref,
                 "retention_seconds": 31_536_000,
+                "scheduler_enable": privacy_drop_scheduler,
+                "scheduler_interval_seconds": 3_600,
+                "scheduler_jitter_seconds": 60,
+                "scheduler_retry_max_seconds": 900,
             },
             "notice_governance": {
                 "enable": privacy_notice_governance,
+                **(
+                    {
+                        "publication_runtime": {
+                            "enable": True,
+                            "scheduler_enable": privacy_notice_publication_scheduler,
+                            "active_tenants": [
+                                str(privacy_notice_publication_binding["tenant_id"])
+                            ],
+                            "poll_seconds": 30,
+                            "retry_max_seconds": 300,
+                            "tenant_limit": 100,
+                            "lease_seconds": 60,
+                            "retry_delay_seconds": 60,
+                            "bindings": {
+                                str(privacy_notice_publication_binding["binding_id"]): {
+                                    key: value
+                                    for key, value in privacy_notice_publication_binding.items()
+                                    if key != "binding_id"
+                                }
+                            },
+                        }
+                    }
+                    if privacy_notice_publication_binding is not None
+                    else {}
+                ),
             },
         }
     if data_use_governance:
@@ -1862,6 +2457,161 @@ def pick_assessments() -> dict[str, Any]:
     if not graph:
         out["entity_graph"] = False
     return out
+
+
+def _pick_evidence_local_parsers(enabled: bool) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ai_evidence_ocr": False,
+        "ai_evidence_ocr_executable": "",
+        "ai_evidence_ocr_sha256": "",
+        "ai_evidence_ocr_tesseract_version": "",
+        "ai_evidence_ocr_traineddata_path": "",
+        "ai_evidence_ocr_traineddata_sha256": "",
+        "ai_evidence_ocr_runtime_library_paths": [],
+        "ai_evidence_ocr_runtime_libraries_sha256": "",
+        "ai_evidence_ocr_pillow_version": "",
+        "ai_evidence_ocr_pillow_manifest_sha256": "",
+        "ai_evidence_legacy_xls": False,
+        "ai_evidence_xlrd_manifest_sha256": "",
+        "ai_evidence_olefile_manifest_sha256": "",
+        "ai_evidence_parser_sandbox": False,
+        "ai_evidence_parser_sandbox_launcher": "",
+        "ai_evidence_parser_sandbox_sha256": "",
+        "ai_evidence_parser_sandbox_version": "",
+    }
+    if not enabled:
+        return result
+    ocr_enabled = _q_confirm(
+        "Configure the governed offline JPEG/PNG OCR runtime now? It remains "
+        "disabled unless an absolute Tesseract path, exact reviewed binary "
+        "SHA-256, exact Tesseract version, and exact Pillow version are supplied.",
+        default=False,
+    )
+    if ocr_enabled:
+        result["ai_evidence_ocr_executable"] = _q_text(
+            "  Absolute Tesseract executable path", default=""
+        ).strip()
+        result["ai_evidence_ocr_sha256"] = _q_text(
+            "  Reviewed Tesseract executable SHA-256 (64 lowercase hex)",
+            default="",
+        ).strip().lower()
+        result["ai_evidence_ocr_tesseract_version"] = _q_text(
+            "  Exact `tesseract --version` version token", default=""
+        ).strip()
+        result["ai_evidence_ocr_traineddata_path"] = _q_text(
+            "  Absolute eng.traineddata path", default=""
+        ).strip()
+        result["ai_evidence_ocr_traineddata_sha256"] = _q_text(
+            "  Reviewed eng.traineddata SHA-256 (64 lowercase hex)", default=""
+        ).strip().lower()
+        raw_runtime_paths = _q_text(
+            "  Absolute Tesseract runtime library paths (comma-separated)", default=""
+        )
+        result["ai_evidence_ocr_runtime_library_paths"] = [
+            value.strip() for value in raw_runtime_paths.split(",") if value.strip()
+        ]
+        result["ai_evidence_ocr_runtime_libraries_sha256"] = _q_text(
+            "  Reviewed runtime-library manifest SHA-256", default=""
+        ).strip().lower()
+        result["ai_evidence_ocr_pillow_version"] = _q_text(
+            "  Exact installed Pillow distribution version", default="12.3.0"
+        ).strip()
+        result["ai_evidence_ocr_pillow_manifest_sha256"] = _q_text(
+            "  Reviewed Pillow package-file manifest SHA-256", default=""
+        ).strip().lower()
+        digests = (
+            result["ai_evidence_ocr_sha256"],
+            result["ai_evidence_ocr_traineddata_sha256"],
+            result["ai_evidence_ocr_runtime_libraries_sha256"],
+            result["ai_evidence_ocr_pillow_manifest_sha256"],
+        )
+        digests_valid = all(
+            len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+            for digest in digests
+        )
+        versions_valid = all(
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}", value)
+            for value in (
+                result["ai_evidence_ocr_tesseract_version"],
+                result["ai_evidence_ocr_pillow_version"],
+            )
+        )
+        absolute_paths = [
+            result["ai_evidence_ocr_executable"],
+            result["ai_evidence_ocr_traineddata_path"],
+            *result["ai_evidence_ocr_runtime_library_paths"],
+        ]
+        ocr_enabled = bool(
+            absolute_paths
+            and all(Path(path).is_absolute() for path in absolute_paths)
+            and digests_valid
+            and versions_valid
+        )
+        if not ocr_enabled:
+            console.print(
+                "[yellow]Governed OCR remains disabled until every exact "
+                "runtime attestation is supplied.[/yellow]"
+            )
+    result["ai_evidence_ocr"] = ocr_enabled
+    xls_enabled = _q_confirm(
+        "Enable the isolated, offline legacy BIFF8 XLS subset parser? It requires "
+        "the evidence-analysis extra with exact xlrd 2.0.2 and olefile 0.47, and "
+        "rejects formulas, macros, external references, and unknown records.",
+        default=False,
+    )
+    if xls_enabled:
+        result["ai_evidence_xlrd_manifest_sha256"] = _q_text(
+            "  Reviewed xlrd package-file manifest SHA-256", default=""
+        ).strip().lower()
+        result["ai_evidence_olefile_manifest_sha256"] = _q_text(
+            "  Reviewed olefile package-file manifest SHA-256", default=""
+        ).strip().lower()
+        xls_enabled = all(
+            len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+            for digest in (
+                result["ai_evidence_xlrd_manifest_sha256"],
+                result["ai_evidence_olefile_manifest_sha256"],
+            )
+        )
+    result["ai_evidence_legacy_xls"] = xls_enabled
+    if ocr_enabled or xls_enabled:
+        if os.name != "posix":
+            console.print(
+                "[yellow]Governed OCR/XLS remains disabled on this platform: "
+                "the stock runtime requires a POSIX Bubblewrap network namespace.[/yellow]"
+            )
+            result["ai_evidence_ocr"] = False
+            result["ai_evidence_legacy_xls"] = False
+            return result
+        result["ai_evidence_parser_sandbox_launcher"] = _q_text(
+            "  Absolute Bubblewrap launcher path", default="/usr/bin/bwrap"
+        ).strip()
+        result["ai_evidence_parser_sandbox_sha256"] = _q_text(
+            "  Reviewed Bubblewrap launcher SHA-256", default=""
+        ).strip().lower()
+        result["ai_evidence_parser_sandbox_version"] = _q_text(
+            "  Exact `bwrap --version` version token", default=""
+        ).strip()
+        sandbox_digest = result["ai_evidence_parser_sandbox_sha256"]
+        result["ai_evidence_parser_sandbox"] = bool(
+            Path(result["ai_evidence_parser_sandbox_launcher"]).is_absolute()
+            and len(sandbox_digest) == 64
+            and all(character in "0123456789abcdef" for character in sandbox_digest)
+            and re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}",
+                result["ai_evidence_parser_sandbox_version"],
+            )
+        )
+        if not result["ai_evidence_parser_sandbox"]:
+            result["ai_evidence_ocr"] = False
+            result["ai_evidence_legacy_xls"] = False
+            console.print(
+                "[yellow]Governed OCR/XLS remains disabled until the exact "
+                "Bubblewrap sandbox attestation is supplied.[/yellow]"
+            )
+    return result
 
 
 def pick_security_suite() -> dict[str, Any]:
@@ -1932,6 +2682,13 @@ def pick_security_suite() -> dict[str, Any]:
         "inventory ledger.",
         default=False,
     )
+    ai_entity_tasks = _q_confirm(
+        "Enable governed task management for AI inventory entities? Tasks are "
+        "tenant-bound, revision-pinned, approval-audited, and require the AI "
+        "inventory authority.",
+        default=False,
+    )
+    ai_inventory = ai_inventory or ai_entity_tasks
     inventory_connectors: list[str] = []
     if ai_inventory:
         evidence_graph = True
@@ -1981,6 +2738,13 @@ def pick_security_suite() -> dict[str, Any]:
         "evidence-staleness tracking? Packs do not certify compliance.",
         default=False,
     )
+    grc_studio = _q_confirm(
+        "Enable the tenant-private no-code GRC configuration studio for closed "
+        "objects, fields, forms, rules, collector bindings and reports? "
+        "Publishing requires independent review and approval; runtime writes "
+        "remain deployment-owned.",
+        default=False,
+    )
     policy_publication_links = _q_confirm(
         "Enable Tech Risk & Compliance evergreen public/private policy links? "
         "Publication remains review-gated; private capabilities, expiry, "
@@ -2002,10 +2766,35 @@ def pick_security_suite() -> dict[str, Any]:
     )
     continuous_evidence = _q_confirm(
         "Enable Tech Risk & Compliance continuous evidence collection? The "
-        "built-in collector is local and digest-only; external estates require "
-        "separately approved collectors, credentials, and acceptance.",
+        "built-in local collector and seven read-only stock provider adapters are "
+        "digest-only; external estates still require exact approved definitions, "
+        "enrollments, credentials, and acceptance.",
         default=False,
     )
+    stock_collector_labels = {
+        "AWS Security Hub": "aws_security_hub_v1",
+        "AWS Config posture": "aws_config_posture_v1",
+        "Azure Defender": "azure_defender_v1",
+        "Azure Policy posture": "azure_policy_posture_v1",
+        "Google Cloud Security Command Center": "gcp_security_command_center_v1",
+        "GitHub security streams": "github_security_v1",
+        "Okta policy posture": "okta_posture_v1",
+    }
+    selected_stock_collector_labels = (
+        _q_checkbox(
+            "Prepare which read-only Tech Risk stock evidence adapters? Exact "
+            "tenant source manifests are added separately after independent approval.",
+            list(stock_collector_labels),
+            default=[],
+        )
+        if continuous_evidence
+        else []
+    )
+    stock_collector_ids = [
+        stock_collector_labels[label]
+        for label in selected_stock_collector_labels
+        if label in stock_collector_labels
+    ]
     continuous_evidence_scheduler = continuous_evidence and _q_confirm(
         "Enable the continuous-evidence scheduler with leased retries, recovery, "
         "and bounded tenant processing?",
@@ -2020,6 +2809,19 @@ def pick_security_suite() -> dict[str, Any]:
     )
     if ai_evidence_analysis:
         evidence_gateway = True
+    evidence_local_parsers = _pick_evidence_local_parsers(ai_evidence_analysis)
+    assessment_evidence_autopopulation = ai_evidence_analysis and _q_confirm(
+        "Enable evidence-assisted assessment answer proposals from released AI "
+        "Evidence Analysis results? Proposals remain cited drafts and require a "
+        "different human reviewer.",
+        default=False,
+    )
+    assessment_evidence_apply = assessment_evidence_autopopulation and _q_confirm(
+        "Allow a separately approved proposal to fill only unanswered assessment "
+        "questions under revision-CAS? Existing answers are never overwritten and "
+        "final assessment review remains required.",
+        default=False,
+    )
     third_party_intelligence = _q_confirm(
         "Enable the provider-neutral Third-Party Management intelligence, "
         "screening, continuous-monitoring, EDD, exchange, and bounded "
@@ -2029,9 +2831,44 @@ def pick_security_suite() -> dict[str, Any]:
     )
     third_party_intelligence_providers = third_party_intelligence and _q_confirm(
         "Enable the bounded third-party intelligence provider runtime for "
-        "RiskRecon, SecurityScorecard, and HackNotice? Licensed credentials and "
-        "live provider acceptance remain separate deployment requirements.",
+        "RiskRecon, SecurityScorecard, HackNotice, SupplyWisdom, and ISS Corporate "
+        "Solutions? Licensed credentials and live provider acceptance remain "
+        "separate deployment requirements.",
         default=False,
+    )
+    third_party_supplywisdom = third_party_intelligence_providers and _q_confirm(
+        "Enable the SupplyWisdom normalized reference contract? This requires the "
+        "exact licensed HTTPS gateway hostname for this deployment.",
+        default=False,
+    )
+    third_party_supplywisdom_host = (
+        _q_text(
+            "  Exact SupplyWisdom gateway hostname (no scheme, port, path, or query)",
+            default="",
+        )
+        .strip()
+        .lower()
+        if third_party_supplywisdom
+        else ""
+    )
+    third_party_iss_corporate_solutions = (
+        third_party_intelligence_providers
+        and _q_confirm(
+            "Enable the ISS Corporate Solutions normalized reference contract? This "
+            "requires the exact licensed HTTPS gateway hostname for this deployment.",
+            default=False,
+        )
+    )
+    third_party_iss_corporate_solutions_host = (
+        _q_text(
+            "  Exact ISS Corporate Solutions gateway hostname "
+            "(no scheme, port, path, or query)",
+            default="",
+        )
+        .strip()
+        .lower()
+        if third_party_iss_corporate_solutions
+        else ""
     )
     third_party_intelligence_scheduler = third_party_intelligence_providers and _q_confirm(
         "Enable scheduled third-party provider collection with retries, "
@@ -2044,6 +2881,21 @@ def pick_security_suite() -> dict[str, Any]:
         "no transport worker or provider write is included.",
         default=False,
     )
+    third_party_contracts = _q_confirm(
+        "Enable first-class third-party Contract and Engagement records with "
+        "revisioned schema metadata, redaction state, and governed tombstones? "
+        "External contract systems and legal acceptance remain separate.",
+        default=False,
+    )
+    third_party_executive_reports = _q_confirm(
+        "Enable role-aware, brandable third-party executive PDF reports from "
+        "exact revision-pinned local records? PDFs use closed branding and "
+        "one-time downloads; live portfolio completeness remains separate.",
+        default=False,
+    )
+    # The stock composition resolves exact vendor authority through the local
+    # intelligence registry; commercial provider transports stay independent.
+    third_party_intelligence = third_party_intelligence or third_party_contracts
     third_party_collaboration_portal = third_party_lifecycle and _q_confirm(
         "Enable the external third-party collaboration portal for invitation-"
         "bound assessments, attestations, evidence manifests, and follow-up? "
@@ -2240,6 +3092,7 @@ def pick_security_suite() -> dict[str, Any]:
     ai_identity_federation = False
     ai_identity_conditional_access = False
     ai_identity_purview_writeback = False
+    ai_identity_production_composition = False
     if ai_identity_governance_connectors:
         ai_identity_governance_scheduler = _q_confirm(
             "Enable the bounded identity-governance scheduler supervisor? "
@@ -2276,6 +3129,13 @@ def pick_security_suite() -> dict[str, Any]:
                     "requires separate test-tenant consent.",
                     default=False,
                 )
+            ai_identity_production_composition = _q_confirm(
+                "Enable the lazy per-tenant identity-governance production "
+                "composition? Provider transports and enrolled pseudonymous "
+                "authorities remain separately required; local readiness does "
+                "not claim live provider acceptance.",
+                default=False,
+            )
     if (
         portfolio_risk
         or policy_packs
@@ -2383,15 +3243,38 @@ def pick_security_suite() -> dict[str, Any]:
                 ),
             ),
         )
+    # Keep these additive administration prompts at the end of the established
+    # security-suite questionnaire so scripted/resumed answers for existing
+    # controls retain their historical ordering.
+    administration_document_access = _q_confirm(
+        "Enable governed short-lived document and attachment access tokens? "
+        "Document authority, object storage, and delivery grants remain deployment-owned.",
+        default=False,
+    )
+    governed_document_vault = administration_document_access and _q_confirm(
+        "Enable the stock tenant-private encrypted document vault as the local "
+        "document authority and one-time delivery backend? External object-store, "
+        "backup, HSM/KMS, and live workflow acceptance remain separate.",
+        default=False,
+    )
+    incident_attachment_metadata = administration_document_access and _q_confirm(
+        "Enable governed metadata-only attachments on privacy and security incidents? "
+        "No document bytes, filenames, paths, or object-store credentials are stored.",
+        default=False,
+    )
     result = {
         "customer_sandbox_lifecycle": customer_sandbox_lifecycle,
         "security_ops": security_ops,
+        "administration_document_access": administration_document_access,
+        "governed_document_vault": governed_document_vault,
+        "incident_attachment_metadata": incident_attachment_metadata,
         "evidence_graph": evidence_graph,
         "model_risk_assurance": model_risk_assurance,
         "evidence_gateway": evidence_gateway,
         "model_improvement": model_improvement,
         "allow_hosted_training": allow_hosted_training,
         "ai_inventory": ai_inventory,
+        "ai_entity_tasks": ai_entity_tasks,
         "inventory_connectors": inventory_connectors,
         "ai_vendor_risk": ai_vendor_risk,
         "ai_vendor_risk_portal": ai_vendor_risk_portal,
@@ -2399,19 +3282,37 @@ def pick_security_suite() -> dict[str, Any]:
         "policy_packs": policy_packs,
         "governance_agents": governance_agents,
         "ai_evidence_analysis": ai_evidence_analysis,
+        **evidence_local_parsers,
+        "assessment_evidence_autopopulation": assessment_evidence_autopopulation,
+        "assessment_evidence_apply": assessment_evidence_apply,
         "tech_risk_compliance": {
             "enable": (
                 policy_publication_links
                 or compliance_scoping
                 or compliance_scope_actions
                 or continuous_evidence
+                or grc_studio
             ),
+            "grc_studio": {
+                "enable": grc_studio,
+                "max_studios": 10_000,
+                "retention_seconds": 31_536_000,
+                "max_import_bytes": 2_097_152,
+            },
             "policy_publication_links": {"enable": policy_publication_links},
             "scoping": {"enable": compliance_scoping},
             "scope_actions": {"enable": compliance_scope_actions},
             "continuous_evidence": {
                 "enable": continuous_evidence,
-                "enabled_collectors": ["local_soc2_v1"] if continuous_evidence else [],
+                "enabled_collectors": (
+                    ["local_soc2_v1", *stock_collector_ids]
+                    if continuous_evidence
+                    else []
+                ),
+                "stock_collectors": {
+                    "enable": bool(stock_collector_ids),
+                    "sources": [],
+                },
                 "scheduler": {
                     "enable": continuous_evidence_scheduler,
                     "poll_seconds": 60,
@@ -2424,15 +3325,62 @@ def pick_security_suite() -> dict[str, Any]:
             },
         },
         "third_party_management": {
-            "enable": third_party_intelligence or third_party_lifecycle,
+            "enable": (
+                third_party_intelligence
+                or third_party_lifecycle
+                or third_party_contracts
+                or third_party_executive_reports
+            ),
+            "contracts": {
+                "enable": third_party_contracts,
+                "max_records": 100_000,
+                "retention_seconds": 31_536_000,
+                "authority_max_age_seconds": 604_800,
+            },
+            "executive_reports": {
+                "enable": third_party_executive_reports,
+                "max_reports": 10_000,
+                "max_sources": 100,
+                "max_pdf_bytes": 524_288,
+                "retention_seconds": 31_536_000,
+                "download_token_seconds": 300,
+            },
             "intelligence": {
                 "enable": third_party_intelligence,
                 "providers": {
                     "enable": third_party_intelligence_providers,
                     "enabled_providers": (
-                        ["riskrecon", "securityscorecard", "hacknotice"]
+                        [
+                            "riskrecon",
+                            "securityscorecard",
+                            "hacknotice",
+                            *(
+                                ["supplywisdom"]
+                                if third_party_supplywisdom
+                                else []
+                            ),
+                            *(
+                                ["iss_corporate_solutions"]
+                                if third_party_iss_corporate_solutions
+                                else []
+                            ),
+                        ]
                         if third_party_intelligence_providers
                         else []
+                    ),
+                    **(
+                        {"supplywisdom_host": third_party_supplywisdom_host}
+                        if third_party_supplywisdom
+                        else {}
+                    ),
+                    **(
+                        {
+                            "iss_corporate_solutions_host": (
+                                third_party_iss_corporate_solutions_host
+                            )
+                        }
+                        if third_party_iss_corporate_solutions
+                        else {}
                     ),
                     "timeout_seconds": 20,
                     "scheduler": {
@@ -2483,6 +3431,7 @@ def pick_security_suite() -> dict[str, Any]:
         "ai_identity_federation": ai_identity_federation,
         "ai_identity_conditional_access": ai_identity_conditional_access,
         "ai_identity_purview_writeback": ai_identity_purview_writeback,
+        "ai_identity_production_composition": ai_identity_production_composition,
         "threat_hunt": threat_hunt,
         "env_hunt": env_hunt,
         "response_execution": response_execution,
@@ -2951,6 +3900,13 @@ def pick_advanced() -> dict[str, Any]:
             "OFF by default.",
             default=False,
         ),
+        "governance_inventory": _q_confirm(
+            "Enable the shared governance inventory? Build a tenant-scoped, "
+            "revisioned projection across the stock governance suites and entity "
+            "graph with closed retention, record, relationship, export, and "
+            "snapshot bounds. OFF by default.",
+            default=False,
+        ),
         "specialist_discipline": _q_confirm(
             "Specialist operating discipline? Append each business suite's "
             "professional guardrails (finance maker-checker, legal privilege, "
@@ -3332,7 +4288,9 @@ def pick_advanced() -> dict[str, Any]:
             "Project all six governance suites into one tenant-bound signed audit "
             "view? Each source stays authoritative while a bounded, digest-only "
             "projection exposes explicit coverage, lag, retry, revocation and "
-            "integrity status. This also enables audit signing. OFF by default.",
+            "integrity status. The managed runtime also stages independently "
+            "verifiable checkpoints; WORM remains separately opt-in. This enables "
+            "audit signing. OFF by default.",
             default=False,
         ),
         "saml": _q_confirm(
@@ -4721,20 +5679,40 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
             if str(value).strip().lower() in allowed_inventory_connectors
         )
     )
+    ai_entity_tasks_enabled = bool(security_suite.get("ai_entity_tasks", False))
     governance_agents_enabled = bool(security_suite.get("governance_agents", False))
     evidence_analysis_enabled = bool(security_suite.get("ai_evidence_analysis", False))
-    cloud_agent_governance_enabled = bool(
-        security_suite.get("ai_cloud_agent_governance", False)
+    evidence_ocr_enabled = bool(
+        evidence_analysis_enabled and security_suite.get("ai_evidence_ocr", False)
     )
+    evidence_legacy_xls_enabled = bool(
+        evidence_analysis_enabled and security_suite.get("ai_evidence_legacy_xls", False)
+    )
+    evidence_parser_sandbox_enabled = bool(
+        (evidence_ocr_enabled or evidence_legacy_xls_enabled)
+        and security_suite.get("ai_evidence_parser_sandbox", False)
+    )
+    evidence_media_types = ["pdf", "jpeg", "png", "xlsx", "text"]
+    if evidence_legacy_xls_enabled:
+        evidence_media_types.insert(3, "xls")
+    rendered_evidence_media_types = ", ".join(
+        _toml_str(value) for value in evidence_media_types
+    )
+    assessment_evidence_enabled = bool(
+        security_suite.get("assessment_evidence_autopopulation", False)
+        and evidence_analysis_enabled
+    )
+    assessment_evidence_apply_enabled = bool(
+        assessment_evidence_enabled and security_suite.get("assessment_evidence_apply", False)
+    )
+    cloud_agent_governance_enabled = bool(security_suite.get("ai_cloud_agent_governance", False))
     databricks_framework_enabled = bool(
         cloud_agent_governance_enabled
         and security_suite.get("databricks_ai_security_framework", False)
     )
     if cloud_agent_governance_enabled:
         inventory_connectors = list(
-            dict.fromkeys(
-                [*inventory_connectors, "bedrock", "azure_ai_foundry", "vertex_ai"]
-            )
+            dict.fromkeys([*inventory_connectors, "bedrock", "azure_ai_foundry", "vertex_ai"])
         )
     rendered_inventory_connectors = ", ".join(_toml_str(value) for value in inventory_connectors)
     vendor_portal_enabled = bool(
@@ -4763,6 +5741,10 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
     identity_federation_enabled = bool(
         identity_controls_enabled and security_suite.get("ai_identity_federation", False)
     )
+    identity_production_enabled = bool(
+        identity_controls_enabled
+        and security_suite.get("ai_identity_production_composition", False)
+    )
     lines = [
         "",
         "[customer_sandbox_lifecycle]",
@@ -4772,6 +5754,33 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "",
         "[security_ops]",
         f"enable = {'true' if security_suite.get('security_ops', True) else 'false'}",
+        "",
+        "[administration_document_access]",
+        "enable = "
+        f"{'true' if security_suite.get('administration_document_access', False) else 'false'}",
+        "default_ttl_seconds = 300",
+        "max_ttl_seconds = 900",
+        "max_uses = 1",
+        "delivery_grant_ttl_seconds = 60",
+        "retention_seconds = 31536000",
+        "",
+        "[governed_document_vault]",
+        f"enable = {'true' if security_suite.get('governed_document_vault', False) else 'false'}",
+        "max_document_bytes = 26214400",
+        "max_documents = 100000",
+        "retention_seconds = 31536000",
+        "grant_ttl_seconds = 60",
+        "claim_lease_seconds = 30",
+        "stream_chunk_bytes = 65536",
+        'allowed_media_types = ["application/json", "application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png", "image/webp", "text/csv", "text/plain"]',
+        "",
+        "[incident_attachment_metadata]",
+        "enable = "
+        f"{'true' if security_suite.get('incident_attachment_metadata', False) else 'false'}",
+        "retention_seconds = 31536000",
+        "attachment_ttl_seconds = 604800",
+        "max_attachments = 100000",
+        'allowed_media_types = ["application/json", "application/pdf", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png", "image/webp", "text/csv", "text/plain"]',
         "",
         "[governed_records]",
         'backend = "auto"',
@@ -4790,7 +5799,7 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "",
         "[ai_inventory]",
         "enable = "
-        f"{'true' if security_suite.get('ai_inventory', False) or cloud_agent_governance_enabled else 'false'}",
+        f"{'true' if security_suite.get('ai_inventory', False) or ai_entity_tasks_enabled or cloud_agent_governance_enabled else 'false'}",
         f"connectors = [{rendered_inventory_connectors}]",
         "page_cap = 100",
         "record_cap = 5000",
@@ -4798,6 +5807,12 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "timeout_seconds = 30",
         "missing_grace_runs = 2",
         "poll_seconds = 900",
+        "",
+        "[ai_entity_tasks]",
+        f"enable = {'true' if ai_entity_tasks_enabled else 'false'}",
+        "max_tasks = 100000",
+        "retention_seconds = 31536000",
+        "authority_max_age_seconds = 604800",
         "",
         "[ai_vendor_risk]",
         f"enable = {'true' if security_suite.get('ai_vendor_risk', False) else 'false'}",
@@ -4813,6 +5828,11 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "[governance_agents]",
         f"enable = {'true' if governance_agents_enabled else 'false'}",
         'enabled_agents = ["breach_response", "privacy_risk_assessment", "program_copilot", "knowledgebase_governance", "third_party_risk"]',
+        f"context_projection_enable = {'true' if governance_agents_enabled else 'false'}",
+        "context_projection_max_records_per_source = 100",
+        "context_projection_max_context_items = 32",
+        "context_projection_max_total_bytes = 2097152",
+        "context_projection_max_record_bytes = 16384",
         "max_context_items = 100",
         "max_context_bytes = 1048576",
         "max_output_bytes = 262144",
@@ -4820,11 +5840,79 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "",
         "[ai_evidence_analysis]",
         f"enable = {'true' if evidence_analysis_enabled else 'false'}",
-        'enabled_media_types = ["pdf", "jpeg", "png", "xlsx", "text"]',
+        f"enabled_media_types = [{rendered_evidence_media_types}]",
         "max_artifact_bytes = 52428800",
         "max_artifacts_per_case = 20",
+        "max_authority_records = 100000",
         "max_extracted_text_bytes = 1048576",
         "retention_seconds = 31536000",
+        "",
+        "[ai_evidence_analysis.parser_sandbox]",
+        f"enable = {'true' if evidence_parser_sandbox_enabled else 'false'}",
+        'mode = "bubblewrap"',
+        "launcher = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_parser_sandbox_launcher', '')))}",
+        "launcher_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_parser_sandbox_sha256', '')).lower())}",
+        "launcher_version = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_parser_sandbox_version', '')))}",
+        "",
+        "[ai_evidence_analysis.ocr]",
+        f"enable = {'true' if evidence_ocr_enabled else 'false'}",
+        "executable = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_executable', '')))}",
+        "executable_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_sha256', '')).lower())}",
+        "tesseract_version = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_tesseract_version', '')))}",
+        "traineddata_path = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_traineddata_path', '')))}",
+        "traineddata_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_traineddata_sha256', '')).lower())}",
+        "runtime_library_paths = ["
+        + ", ".join(
+            _toml_str(str(value))
+            for value in security_suite.get("ai_evidence_ocr_runtime_library_paths", [])
+        )
+        + "]",
+        "runtime_libraries_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_runtime_libraries_sha256', '')).lower())}",
+        "pillow_version = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_pillow_version', '')))}",
+        "pillow_manifest_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_ocr_pillow_manifest_sha256', '')).lower())}",
+        "timeout_seconds = 30",
+        "max_pixels = 40000000",
+        "max_output_bytes = 1048576",
+        "max_memory_bytes = 536870912",
+        "",
+        "[ai_evidence_analysis.legacy_xls]",
+        f"enable = {'true' if evidence_legacy_xls_enabled else 'false'}",
+        'xlrd_version = "2.0.2"',
+        "xlrd_manifest_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_xlrd_manifest_sha256', '')).lower())}",
+        'olefile_version = "0.47"',
+        "olefile_manifest_sha256 = "
+        f"{_toml_str(str(security_suite.get('ai_evidence_olefile_manifest_sha256', '')).lower())}",
+        "timeout_seconds = 15",
+        "max_workbook_stream_bytes = 33554432",
+        "max_record_bytes = 8388608",
+        "max_records = 500000",
+        "max_sheets = 200",
+        "max_rows_per_sheet = 200000",
+        "max_columns_per_sheet = 256",
+        "max_cells = 200000",
+        "max_output_bytes = 1048576",
+        "max_memory_bytes = 536870912",
+        "",
+        "[assessment_evidence_autopopulation]",
+        f"enable = {'true' if assessment_evidence_enabled else 'false'}",
+        f"apply_enabled = {'true' if assessment_evidence_apply_enabled else 'false'}",
+        "retention_seconds = 31536000",
+        "max_records = 10000",
+        "max_evidence_records_per_proposal = 32",
+        "max_citations_per_answer = 32",
+        "min_confidence_bps = 7000",
         "",
         "[ai_regulatory_feed]",
         f"enable = {'true' if security_suite.get('ai_regulatory_feed', False) else 'false'}",
@@ -5028,6 +6116,21 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "[ai_identity_governance_connectors.controls.purview_writeback]",
         "enable = "
         f"{'true' if identity_federation_enabled and security_suite.get('ai_identity_purview_writeback', False) else 'false'}",
+        "",
+        "[ai_identity_governance_connectors.controls.production]",
+        f"enable = {'true' if identity_production_enabled else 'false'}",
+        "mapping_revision = 1",
+        "mapping_retention_seconds = 86400",
+        "max_authority_records = 10000",
+        "max_observation_age_seconds = 300",
+        "max_future_skew_seconds = 30",
+        "outcome_max_attempts = 5",
+        "outcome_retry_base_seconds = 30",
+        "outcome_retry_max_seconds = 3600",
+        "outcome_lease_seconds = 60",
+        "outcome_signal_validity_seconds = 86400",
+        "purview_max_attempts = 3",
+        "purview_operation_lease_seconds = 60",
         "",
         "[model_improvement]",
         f"enable = {'true' if security_suite.get('model_improvement', False) else 'false'}",
@@ -5596,6 +6699,21 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("max_attempts = 5")
         lines.append("retry_backoff_seconds = 30")
         lines.append("poll_seconds = 60")
+        lines.append("")
+        lines.append("[audit.unified.custody]")
+        lines.append("# Managed tenant-exact checkpoint/custody run after each projection sweep.")
+        lines.append("# It never seals files automatically; run `maverick audit seal` explicitly.")
+        lines.append("enable = true")
+        lines.append("authority_revision = 1")
+        lines.append("checkpoint_enable = true")
+        lines.append(
+            f"worm_enable = {'true' if advanced.get('audit_worm') else 'false'}"
+        )
+        lines.append("siem_enable = false")
+        lines.append('# siem_destination_template = "https://siem.example/tenants/{tenant_sha256}/raw"')
+        lines.append("max_siem_events_per_run = 500")
+        lines.append("retry_backoff_seconds = 30")
+        lines.append("max_retry_backoff_seconds = 3600")
     if advanced.get("audit_worm"):
         lines.append("")
         # WORM export of closed audit day-files. Defaults to a local read-only
@@ -5768,6 +6886,16 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[agent_topology]")
         lines.append("enable = true")
+    if advanced.get("governance_inventory"):
+        lines.append("")
+        lines.append("[governance_inventory]")
+        lines.append("enable = true")
+        lines.append("retention_seconds = 31536000")
+        lines.append("max_source_records = 10000")
+        lines.append("max_entities = 20000")
+        lines.append("max_relationships = 40000")
+        lines.append("max_export_bytes = 10485760")
+        lines.append("max_snapshots = 10000")
     # Discipline defaults ON; only an explicit decline is written.
     if advanced.get("specialist_discipline") is False:
         lines.append("")
@@ -6189,11 +7317,24 @@ def write_config(
         if _flows_url:
             flows.setdefault("public_url", _flows_url)
 
+    # The assessment questionnaire owns the single [entity_graph] table. The
+    # shared governance inventory requires that projection, so reconcile a
+    # prior assessment-time decline here instead of emitting a second table
+    # from _cfg_advanced (duplicate TOML tables invalidate the whole config).
+    assessments = dict(assessments or {})
+    if advanced.get("governance_inventory"):
+        assessments["entity_graph"] = True
+
     # Push-based red-team campaigns are delivered only through the enrolled,
     # self-authenticating external-agent boundary. Enabling the campaign plane
     # therefore prepares that dependency once in the advanced config block.
     if security_suite and security_suite.get("red_team_assurance"):
         advanced["external_agents"] = True
+    if security_suite and security_suite.get("administration_document_access"):
+        # The document token ledger is externally consequential and refuses to
+        # run without the signed audit chain.  Preserve the user's other
+        # advanced choices while deriving this mandatory dependency.
+        advanced["audit_sign"] = True
 
     lines = [
         "# Lightwork config. Regenerate with:  maverick init",

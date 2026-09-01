@@ -125,7 +125,7 @@ def test_dashboard_mounts_page_api_visibility_and_security_link() -> None:
     selected = page_for("/assurance/cloud-agents")
     assert selected is not None
     assert selected["floor"] == "operate"
-    assert selected["in_nav"] is False
+    assert selected["in_nav"] is True
     security = (
         Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "security.html"
     ).read_text(encoding="utf-8")

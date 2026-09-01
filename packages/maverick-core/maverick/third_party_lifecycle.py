@@ -1292,6 +1292,31 @@ class ThirdPartyLifecycleStore:
             )
             return self._assessment_from(payload, digest)
 
+    def list_assessments(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[Assessment, ...]:
+        """Return one bounded, integrity-verified tenant snapshot."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM assessments WHERE tenant_id=? "
+                "ORDER BY assessment_id LIMIT ?",
+                (tenant, bounded),
+            ).fetchall()
+        values = tuple(
+            self._assessment_from(
+                self._payload(row, "assessment"),
+                row["integrity_sha256"],
+            )
+            for row in rows
+        )
+        return tuple(sorted(values, key=lambda item: (-item.updated_at, item.assessment_id)))
+
     @staticmethod
     def _question_state(
         template: AssessmentTemplate,
@@ -2121,6 +2146,31 @@ class ThirdPartyLifecycleStore:
                 "lifecycle",
             )
             return self._lifecycle_from(payload, digest)
+
+    def list_lifecycles(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[LifecycleRecord, ...]:
+        """Return current lifecycle heads without creating another authority."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM lifecycles WHERE tenant_id=? "
+                "ORDER BY lifecycle_id LIMIT ?",
+                (tenant, bounded),
+            ).fetchall()
+        values = tuple(
+            self._lifecycle_from(
+                self._payload(row, "lifecycle"),
+                row["integrity_sha256"],
+            )
+            for row in rows
+        )
+        return tuple(sorted(values, key=lambda item: (-item.updated_at, item.lifecycle_id)))
 
     def transition_lifecycle(
         self,
@@ -3458,6 +3508,68 @@ class ThirdPartyLifecycleStore:
             )
             return result
 
+    def unified_audit_records(self, tenant_id: str):
+        """Return the lifecycle audit chain without raw vendor/detail values."""
+
+        from .unified_audit import GENESIS_SHA256, build_source_record
+
+        tenant = _tenant(tenant_id)
+        self.verify_integrity(tenant)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM audit_events WHERE tenant_id=? ORDER BY sequence",
+                (tenant,),
+            ).fetchall()
+        previous_integrity = GENESIS_SHA256
+        previous_record = GENESIS_SHA256
+        records = []
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload = self._payload(row, "audit event")
+            action_name = str(payload.get("action") or "")
+            if (
+                payload.get("schema") != AUDIT_SCHEMA
+                or payload.get("tenant_id") != tenant
+                or payload.get("sequence") != expected_sequence
+                or int(row["sequence"]) != expected_sequence
+                or payload.get("previous_sha256") != previous_integrity
+            ):
+                raise ThirdPartyLifecycleIntegrityError(
+                    "tenant audit hash chain is inconsistent"
+                )
+            integrity = str(row["integrity_sha256"])
+            subject_sha256 = _digest(
+                payload.get("subject_sha256"),
+                "audit subject digest",
+            )
+            actor_ref = _id(
+                payload.get("actor_ref"),
+                "authenticated principal",
+            )
+            source_action = (
+                "approval_granted"
+                if "approved" in action_name
+                else "approval_denied"
+                if "revoked" in action_name
+                else "evidence_recorded"
+                if "export" in action_name
+                else "risk_changed"
+                if any(token in action_name for token in ("risk", "assessment"))
+                else "status_changed"
+            )
+            record = build_source_record(
+                sequence=expected_sequence,
+                occurred_at=float(payload["occurred_at"]),
+                action=source_action,
+                actor_sha256=hashlib.sha256(actor_ref.encode("utf-8")).hexdigest(),
+                resource_sha256=subject_sha256,
+                payload_sha256=integrity,
+                previous_sha256=previous_record,
+            )
+            records.append(record)
+            previous_integrity = integrity
+            previous_record = record.record_sha256
+        return tuple(records)
+
     def verify_integrity(self, tenant_id: str) -> IntegrityVerification:
         """Verify every tenant row, index projection, operation, and audit link."""
 
@@ -3562,6 +3674,47 @@ class ThirdPartyLifecycleStore:
                 "offboarding plan",
             )
             return self._plan_from(payload, digest)
+
+    def list_offboarding_plans(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[OffboardingPlan, ...]:
+        """Return current, integrity-verified offboarding plan heads."""
+
+        tenant = _tenant(tenant_id)
+        bounded = _integer(limit, "limit", 1, 1_000)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM offboarding_plans WHERE tenant_id=? "
+                "ORDER BY plan_id LIMIT ?",
+                (tenant, bounded),
+            ).fetchall()
+        values = tuple(
+            self._plan_from(
+                self._payload(row, "offboarding plan"),
+                row["integrity_sha256"],
+            )
+            for row in rows
+        )
+        return tuple(sorted(values, key=lambda item: (-item.updated_at, item.plan_id)))
+
+    def context_record_counts(self, tenant_id: str) -> Mapping[str, int]:
+        """Return exact current-head counts for bounded context disclosure."""
+
+        tenant = _tenant(tenant_id)
+        tables = ("assessments", "lifecycles", "offboarding_plans")
+        with self._connect() as connection:
+            return {
+                table: int(
+                    connection.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE tenant_id=?",  # noqa: S608
+                        (tenant,),
+                    ).fetchone()[0]
+                )
+                for table in tables
+            }
 
     def set_legal_hold(
         self,

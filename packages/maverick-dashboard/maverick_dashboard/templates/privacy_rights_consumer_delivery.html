@@ -26,6 +26,18 @@
   server-grant claim, object-byte, network, provider-write, or list operation.
 </div>
 
+<section class="panel" aria-labelledby="prcd-production-heading">
+  <h2 id="prcd-production-heading">Production composition gates</h2>
+  <p>The stock runtime re-resolves the exact closed case and package, requires
+    a separately authenticated public profile plus independent reauthentication,
+    and reads only the pinned active package from the encrypted governed-document
+    vault. It checks the package digest and vault authority before grant issue,
+    before byte consumption, and again before returning the response.</p>
+  <p><strong>Fail-closed seam:</strong> operator minting remains unavailable until
+    the deployment supplies an independent operator-to-consumer identity mapping.
+    The case/package authority is never used as consumer identity proof.</p>
+</section>
+
 {% if not privacy_rights_consumer_delivery_enabled %}
 <section class="panel">
   <h2>Consumer delivery disabled</h2>
@@ -68,7 +80,7 @@
     <button class="btn btn--primary" id="prcd-submit" type="button">Run selected operation</button>
   </section>
   <section class="panel">
-    <h2>Result</h2>
+    <h2>Result and composition readiness</h2>
     <pre class="prcd-output" id="prcd-output" aria-live="polite">No request made.</pre>
   </section>
 </div>
@@ -132,8 +144,15 @@
     var response = await fetch(API + path, options);
     var responseText = await response.text();
     var result;
-    try { result = responseText ? JSON.parse(responseText) : {}; }
-    catch (_error) { result = {detail: responseText}; }
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
     show({status: response.status, ok: response.ok, result: result});
   }
 

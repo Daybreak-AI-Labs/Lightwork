@@ -1,257 +1,212 @@
-:root {
-  color-scheme: light dark;
-  --surface: #ffffff;
-  --surface-muted: #f4f7f8;
-  --text: #182129;
-  --muted: #56636d;
-  --line: #cbd5dc;
-  --accent: #126b61;
-  --accent-strong: #0b4f48;
-  --danger: #a33030;
-  --focus: #ef9f21;
+/* AI Evidence Analysis additions. Core palette, glass material, typography,
+   navigation, and Copilot come from lightwork.css. Everything here is scoped. */
+.evidence-workbench {
+  --evidence-focus: var(--ring);
+  display: grid;
+  gap: var(--space-4);
 }
 
-* {
-  box-sizing: border-box;
+.evidence-workbench .evidence-hero {
+  margin-bottom: 0;
 }
 
-body {
-  margin: 0;
-  background: var(--surface-muted);
+.evidence-workbench .boundary,
+.evidence-workbench .status-card,
+.evidence-workbench .panel {
+  padding: clamp(1rem, 2.4vw, 1.5rem);
+}
+
+.evidence-workbench .boundary {
+  border: 1px solid var(--glass-border, var(--border));
+  border-inline-start: 4px solid var(--warn);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.evidence-workbench .boundary h2,
+.evidence-workbench .panel h2,
+.evidence-workbench .status-card h2 {
+  margin: .15rem 0 .65rem;
   color: var(--text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.5;
+  font-size: var(--text-lg);
+  text-transform: none;
+  letter-spacing: -.01em;
 }
 
-.evidence-shell {
-  width: min(1180px, calc(100% - 2rem));
-  margin: 0 auto;
-  padding: 2.5rem 0 4rem;
-}
-
-.hero,
-.boundary,
-.panel,
-.status-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 0.8rem;
-  box-shadow: 0 0.2rem 1rem rgb(24 33 41 / 7%);
-}
-
-.hero,
-.boundary,
-.status-card,
-.panel {
-  padding: clamp(1.1rem, 3vw, 2rem);
-}
-
-.hero {
-  border-top: 0.35rem solid var(--accent);
-}
-
-.hero h1,
-.panel h2,
-.status-card h2,
-.boundary h2 {
-  margin: 0.15rem 0 0.65rem;
-  line-height: 1.15;
-}
-
-.lede,
-.help,
-.status {
+.evidence-workbench .boundary ul {
+  margin: 0;
+  padding-inline-start: 1.2rem;
   color: var(--muted);
 }
 
-.eyebrow {
+.evidence-workbench .boundary li + li {
+  margin-top: .35rem;
+}
+
+.evidence-workbench .eyebrow {
   margin: 0;
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 750;
-  letter-spacing: 0.09em;
+  color: var(--brand-hi);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: .1em;
   text-transform: uppercase;
 }
 
-.boundary,
-.status-card {
-  margin-top: 1rem;
+.evidence-workbench .help,
+.evidence-workbench .status {
+  color: var(--muted);
 }
 
-.boundary {
-  border-left: 0.35rem solid var(--focus);
-}
-
-.boundary li + li {
-  margin-top: 0.35rem;
-}
-
-.status-card {
+.evidence-workbench .status-card {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.75rem 1rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: .75rem 1rem;
   align-items: start;
+  margin-bottom: 0;
 }
 
-.status-card .status,
-.status-card .output {
+.evidence-workbench .status-card > .status,
+.evidence-workbench .status-card > .governance-details {
   grid-column: 1 / -1;
 }
 
-.grid {
+.evidence-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
+  gap: var(--space-4);
 }
 
-form + form {
-  border-top: 1px solid var(--line);
+.evidence-grid > .panel {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.evidence-workbench form + form {
+  border-top: 1px solid var(--hairline);
   margin-top: 1.4rem;
   padding-top: 1.4rem;
 }
 
-label {
+.evidence-workbench .permission-fieldset {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
+.evidence-workbench .permission-fieldset[disabled] {
+  opacity: .62;
+}
+
+.evidence-workbench label {
   display: block;
-  margin-top: 0.9rem;
-  font-weight: 680;
-}
-
-input,
-select,
-button {
-  border: 1px solid var(--line);
-  border-radius: 0.45rem;
-  font: inherit;
-}
-
-input,
-select {
-  width: 100%;
-  margin-top: 0.3rem;
-  padding: 0.65rem 0.7rem;
-  background: var(--surface);
+  margin-top: .9rem;
   color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 650;
 }
 
-.confirmation {
+.evidence-workbench .input,
+.evidence-workbench .select {
+  margin-top: .3rem;
+}
+
+.evidence-workbench input[type="file"] {
+  padding: .45rem;
+}
+
+.evidence-workbench .confirmation {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.65rem;
+  gap: .65rem;
   align-items: start;
-  font-weight: 560;
+  font-weight: 550;
 }
 
-.confirmation input {
+.evidence-workbench .confirmation input {
   width: auto;
-  margin-top: 0.25rem;
+  margin-top: .25rem;
 }
 
-.digest,
-.output {
+.evidence-workbench .digest,
+.evidence-workbench .output {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
-button {
+.evidence-workbench .btn {
   margin-top: 1rem;
-  padding: 0.65rem 0.85rem;
-  background: var(--accent);
-  color: #ffffff;
-  cursor: pointer;
-  font-weight: 720;
 }
 
-button:hover {
-  background: var(--accent-strong);
-}
-
-button.danger {
-  background: var(--danger);
-}
-
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-.output:focus-visible {
-  outline: 0.2rem solid var(--focus);
-  outline-offset: 0.15rem;
-}
-
-.two-column,
-.actions {
+.evidence-workbench .two-column,
+.evidence-workbench .actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: .75rem;
 }
 
-.actions button {
+.evidence-workbench .actions {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.evidence-workbench .actions .btn {
   width: 100%;
 }
 
-.status[data-state="failed"] {
+.evidence-workbench .status[data-state="failed"] {
   color: var(--danger);
-  font-weight: 680;
+  font-weight: 650;
 }
 
-.output {
+.evidence-workbench .output {
   min-height: 5rem;
   max-height: 32rem;
   overflow: auto;
   margin: 0;
-  padding: 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 0.45rem;
-  background: #101820;
-  color: #eaf2f4;
-  font-size: 0.82rem;
+  padding: .9rem;
+  border: 1px solid var(--glass-border, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  color: var(--text);
+  font-size: var(--text-sm);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  box-shadow: inset 0 1px 0 var(--hairline);
+}
+
+.evidence-workbench :focus-visible {
+  outline-color: var(--evidence-focus);
 }
 
 @media (max-width: 760px) {
-  .grid,
-  .two-column,
-  .actions,
-  .status-card {
+  .evidence-grid,
+  .evidence-workbench .two-column,
+  .evidence-workbench .actions,
+  .evidence-workbench .status-card {
     grid-template-columns: 1fr;
   }
 
-  .status-card .status,
-  .status-card .output {
+  .evidence-workbench .status-card > .status,
+  .evidence-workbench .status-card > .governance-details {
     grid-column: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  .evidence-workbench *,
+  .evidence-workbench *::before,
+  .evidence-workbench *::after {
     scroll-behavior: auto !important;
     transition: none !important;
   }
 }
 
 @media (forced-colors: active) {
-  button,
-  input,
-  select,
-  .panel,
-  .boundary,
-  .hero,
-  .status-card {
+  .evidence-workbench .btn,
+  .evidence-workbench .input,
+  .evidence-workbench .select,
+  .evidence-workbench .panel,
+  .evidence-workbench .boundary,
+  .evidence-workbench .status-card {
     border: 1px solid CanvasText;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #151c21;
-    --surface-muted: #0f1418;
-    --text: #edf3f5;
-    --muted: #b7c3ca;
-    --line: #3d4a52;
-    --accent: #5bc2b5;
-    --accent-strong: #287e73;
-    --danger: #bd5959;
   }
 }

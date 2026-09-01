@@ -340,9 +340,9 @@ def enabled() -> bool:
     try:
         from .config import config_source_errors, load_config
 
+        config = load_config()
         if config_source_errors():
             return False
-        config = load_config()
     except Exception:
         return False
     table = config.get("governance_agents") if isinstance(config, Mapping) else None
@@ -500,6 +500,113 @@ class GovernanceAgentLimits:
             "analysis_lease_seconds",
             _MAX_ANALYSIS_LEASE_SECONDS,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class GovernanceAgentTenantSnapshot:
+    """One exact tenant configuration admitted for a governed operation."""
+
+    tenant_id: str
+    enabled_agents: tuple[str, ...]
+    limits: GovernanceAgentLimits
+
+    def __post_init__(self) -> None:
+        tenant = _tenant(self.tenant_id)
+        if isinstance(self.enabled_agents, (str, bytes)) or not isinstance(
+            self.enabled_agents, Sequence
+        ):
+            raise GovernanceAgentConfigError(
+                "governance-agent enabled_agents authority is invalid"
+            )
+        raw_agents = tuple(self.enabled_agents)
+        if (
+            not raw_agents
+            or len(raw_agents) != len(set(raw_agents))
+            or any(agent not in AGENT_KINDS for agent in raw_agents)
+        ):
+            raise GovernanceAgentConfigError(
+                "governance-agent enabled_agents authority is invalid"
+            )
+        if not isinstance(self.limits, GovernanceAgentLimits):
+            raise GovernanceAgentConfigError(
+                "governance-agent tenant limits authority is invalid"
+            )
+        object.__setattr__(self, "tenant_id", tenant)
+        object.__setattr__(self, "enabled_agents", tuple(sorted(raw_agents)))
+
+
+def load_governance_agent_tenant_snapshot(
+    tenant_id: str,
+    config: Mapping[str, Any] | None = None,
+) -> GovernanceAgentTenantSnapshot:
+    """Load one tenant-bound, fail-closed governance-agent config snapshot.
+
+    Configured limits are restrictive ceilings over the long-standing secure
+    defaults.  Omitting a limit therefore preserves the existing behavior,
+    while a larger configured value cannot silently expand an admitted request.
+    """
+
+    tenant = _tenant(tenant_id)
+    if config is None:
+        try:
+            from .config import config_source_errors, load_config
+            from .paths import tenant_scope
+
+            with tenant_scope(tenant=tenant):
+                config = load_config()
+                if config_source_errors():
+                    raise GovernanceAgentConfigError(
+                        "governance-agent tenant configuration is unreadable"
+                    )
+        except GovernanceAgentError:
+            raise
+        except Exception as exc:
+            raise GovernanceAgentConfigError(
+                "governance-agent tenant configuration is unavailable"
+            ) from exc
+    if not isinstance(config, Mapping):
+        raise GovernanceAgentConfigError(
+            "governance-agent tenant configuration must be an object"
+        )
+    table = config.get("governance_agents")
+    if not isinstance(table, Mapping) or table.get("enable") is not True:
+        raise GovernanceAgentConfigError("packaged governance agents are disabled")
+
+    raw_agents = table.get("enabled_agents")
+    if raw_agents is None:
+        selected_agents = tuple(sorted(AGENT_KINDS))
+    else:
+        if isinstance(raw_agents, (str, bytes)) or not isinstance(raw_agents, Sequence):
+            raise GovernanceAgentConfigError(
+                "governance-agent enabled_agents authority is invalid"
+            )
+        selected_agents = tuple(raw_agents)
+    defaults = GovernanceAgentLimits()
+    configured_limits: dict[str, int] = {}
+    for name in (
+        "max_context_items",
+        "max_context_bytes",
+        "max_output_bytes",
+        "retention_seconds",
+    ):
+        default = getattr(defaults, name)
+        value = table.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise GovernanceAgentConfigError(
+                f"governance-agent {name} authority is invalid"
+            )
+        configured_limits[name] = min(default, value)
+    try:
+        limits = GovernanceAgentLimits(**configured_limits)
+    except GovernanceAgentValidationError as exc:
+        raise GovernanceAgentConfigError(
+            "governance-agent tenant limits authority is invalid"
+        ) from exc
+    return GovernanceAgentTenantSnapshot(
+        tenant_id=tenant,
+        enabled_agents=selected_agents,
+        limits=limits,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -875,6 +982,10 @@ class GovernanceAgentStore:
         execution_binding_resolver: ExecutionBindingResolver | None = None,
         execution_token_escrow: ExecutionTokenEscrow | None = None,
         execution_token_resolver: ExecutionTokenResolver | None = None,
+        tenant_snapshot_resolver: Callable[
+            [str], GovernanceAgentTenantSnapshot
+        ]
+        | None = None,
         tenant_limits_resolver: Callable[[str], GovernanceAgentLimits] | None = None,
         clock: Callable[[], float] = time.time,
         limits: GovernanceAgentLimits | None = None,
@@ -883,6 +994,14 @@ class GovernanceAgentStore:
         config_gate()
         if not callable(principal_resolver) or not callable(clock):
             raise GovernanceAgentConfigError("principal_resolver and clock must be callable")
+        if tenant_snapshot_resolver is not None and not callable(tenant_snapshot_resolver):
+            raise GovernanceAgentConfigError("tenant_snapshot_resolver must be callable")
+        if tenant_limits_resolver is not None and not callable(tenant_limits_resolver):
+            raise GovernanceAgentConfigError("tenant_limits_resolver must be callable")
+        if tenant_snapshot_resolver is not None and tenant_limits_resolver is not None:
+            raise GovernanceAgentConfigError(
+                "tenant snapshot and legacy limits resolvers are mutually exclusive"
+            )
         self.path = Path(path)
         self._principal_resolver = principal_resolver
         self._policy_approver_resolver = policy_approver_resolver
@@ -890,6 +1009,7 @@ class GovernanceAgentStore:
         self._execution_binding_resolver = execution_binding_resolver
         self._execution_token_escrow = execution_token_escrow
         self._execution_token_resolver = execution_token_resolver
+        self._tenant_snapshot_resolver = tenant_snapshot_resolver
         self._tenant_limits_resolver = tenant_limits_resolver
         self._clock = clock
         self.limits = limits or GovernanceAgentLimits()
@@ -906,19 +1026,61 @@ class GovernanceAgentStore:
     def _now(self) -> float:
         return _timestamp(self._clock(), "clock")
 
-    def _limits_for(self, tenant_id: str) -> GovernanceAgentLimits:
-        resolver = self._tenant_limits_resolver
+    def _tenant_snapshot_for(self, tenant_id: str) -> GovernanceAgentTenantSnapshot:
+        tenant = _tenant(tenant_id)
+        resolver = self._tenant_snapshot_resolver
         if resolver is None:
-            return self.limits
+            limits_resolver = self._tenant_limits_resolver
+            if limits_resolver is None:
+                limits = self.limits
+            else:
+                try:
+                    limits = limits_resolver(tenant)
+                except GovernanceAgentError:
+                    raise
+                except Exception as exc:
+                    raise GovernanceAgentConfigError(
+                        "tenant quota authority is unavailable"
+                    ) from exc
+                if not isinstance(limits, GovernanceAgentLimits):
+                    raise GovernanceAgentConfigError(
+                        "tenant quota authority returned invalid limits"
+                    )
+            return GovernanceAgentTenantSnapshot(
+                tenant_id=tenant,
+                enabled_agents=tuple(sorted(AGENT_KINDS)),
+                limits=limits,
+            )
         try:
-            limits = resolver(tenant_id)
+            snapshot = resolver(tenant)
         except GovernanceAgentError:
             raise
         except Exception as exc:
-            raise GovernanceAgentConfigError("tenant quota authority is unavailable") from exc
-        if not isinstance(limits, GovernanceAgentLimits):
-            raise GovernanceAgentConfigError("tenant quota authority returned invalid limits")
-        return limits
+            raise GovernanceAgentConfigError(
+                "governance-agent tenant snapshot authority is unavailable"
+            ) from exc
+        if not isinstance(snapshot, GovernanceAgentTenantSnapshot):
+            raise GovernanceAgentConfigError(
+                "governance-agent tenant snapshot authority is invalid"
+            )
+        if not secrets.compare_digest(snapshot.tenant_id, tenant):
+            raise GovernanceAgentConfigError(
+                "governance-agent tenant snapshot authority is misbound"
+            )
+        return snapshot
+
+    def _limits_for(self, tenant_id: str) -> GovernanceAgentLimits:
+        return self._tenant_snapshot_for(tenant_id).limits
+
+    @staticmethod
+    def _require_agent_enabled(
+        snapshot: GovernanceAgentTenantSnapshot,
+        agent_kind: str,
+    ) -> None:
+        if agent_kind not in snapshot.enabled_agents:
+            raise GovernanceAgentConfigError(
+                "governance-agent kind is disabled by tenant configuration"
+            )
 
     @staticmethod
     def _validate_adapter_authority(
@@ -1793,6 +1955,8 @@ class GovernanceAgentStore:
         tenant = _tenant(tenant_id)
         actor = self._actor()
         kind = _closed(agent_kind, "agent_kind", AGENT_KINDS)
+        tenant_snapshot = self._tenant_snapshot_for(tenant)
+        self._require_agent_enabled(tenant_snapshot, kind)
         capabilities = _unique_closed(
             list(allowed_capabilities),
             "allowed_capabilities",
@@ -1823,9 +1987,16 @@ class GovernanceAgentStore:
             raise
         except Exception as exc:
             raise GovernanceAgentConfigError("policy approval authority is unavailable") from exc
-        if resolved_approvals != approvals:
+        if (
+            len(resolved_approvals) < 2
+            or len(set(resolved_approvals)) != len(resolved_approvals)
+        ):
+            raise GovernanceAgentConfigError(
+                "policy approval authority returned an invalid eligible roster"
+            )
+        if not set(approvals).issubset(resolved_approvals):
             raise GovernanceAgentPermissionDenied(
-                "caller-proposed policy approvers do not match independent authority"
+                "caller-proposed policy approvers are not a subset of the independent authority"
             )
         approval_count = _positive_int(required_approvals, "required_approvals", _MAX_APPROVALS)
         if execution_enabled is not False and execution_enabled is not True:
@@ -1851,7 +2022,7 @@ class GovernanceAgentStore:
         }
         with self._connect() as connection:
             self._begin(connection)
-            tenant_limits = self._limits_for(tenant)
+            tenant_limits = tenant_snapshot.limits
             request_sha256, previous = self._operation(connection, tenant, idempotency_key, request)
             if previous is not None:
                 if (
@@ -1988,7 +2159,8 @@ class GovernanceAgentStore:
         tenant = _tenant(tenant_id)
         requester = self._actor()
         run_ref = _id(run_id, "run_id")
-        tenant_limits = self._limits_for(tenant)
+        tenant_snapshot = self._tenant_snapshot_for(tenant)
+        tenant_limits = tenant_snapshot.limits
         if not callable(adapter):
             raise GovernanceAgentConfigError("analysis adapter must be callable")
         now = self._now()
@@ -2042,11 +2214,13 @@ class GovernanceAgentStore:
                 if previous["result_kind"] != "run" or previous["result_id"] != run_ref:
                     raise GovernanceAgentIntegrityError("run idempotency result binding is invalid")
                 run = self._get_run(connection, tenant, previous["result_id"])
+                self._require_agent_enabled(tenant_snapshot, run.agent_kind)
                 connection.commit()
                 return run
             policy = self._get_policy(
                 connection, tenant, request["policy_id"], request["policy_revision"]
             )
+            self._require_agent_enabled(tenant_snapshot, policy.agent_kind)
             if policy.revoked or policy.valid_until <= now:
                 raise GovernanceAgentConfigError("governance-agent policy is unavailable")
             if capability not in policy.allowed_capabilities:
@@ -2191,7 +2365,6 @@ class GovernanceAgentStore:
             raise GovernanceAgentConflict("adapter authority changed during analysis")
         with self._connect() as connection:
             self._begin(connection)
-            final_limits = self._limits_for(tenant)
             # Revalidate exact authorities after untrusted adapter computation.
             current = self._get_policy(connection, tenant, policy.policy_id, policy.revision)
             if (
@@ -2235,7 +2408,7 @@ class GovernanceAgentStore:
                 request_sha256,
                 "run",
                 run.run_id,
-                final_limits,
+                tenant_limits,
             )
             self._audit(
                 connection,
@@ -2251,7 +2424,7 @@ class GovernanceAgentStore:
                     "request_sha256": run.request_sha256,
                     "analysis_complete": run.analysis_complete,
                 },
-                final_limits,
+                tenant_limits,
             )
             connection.commit()
             return run
@@ -2269,11 +2442,13 @@ class GovernanceAgentStore:
 
         tenant = _tenant(tenant_id)
         actor = self._actor()
+        tenant_snapshot = self._tenant_snapshot_for(tenant)
         decision_value = _closed(decision, "decision", REVIEW_DECISIONS)
         rationale = _closed(rationale_code, "rationale_code", RATIONALE_CODES)
         with self._connect() as connection:
             self._begin(connection)
             run = self._get_run(connection, tenant, _id(run_id, "run_id"))
+            self._require_agent_enabled(tenant_snapshot, run.agent_kind)
             if run.revision != expected_revision:
                 raise GovernanceAgentConflict("governance-agent run revision changed")
             if run.state not in {"pending_review", "approved"}:
@@ -2358,9 +2533,11 @@ class GovernanceAgentStore:
             raise GovernanceAgentConfigError("action dispatcher must be callable")
         tenant = _tenant(tenant_id)
         actor = self._actor()
+        tenant_snapshot = self._tenant_snapshot_for(tenant)
         with self._connect() as connection:
             self._begin(connection)
             run = self._get_run(connection, tenant, _id(run_id, "run_id"))
+            self._require_agent_enabled(tenant_snapshot, run.agent_kind)
             if run.revision != expected_revision:
                 raise GovernanceAgentConflict("governance-agent run revision changed")
             if run.state not in {"approved", "execution_failed", "executing"}:
@@ -2471,8 +2648,10 @@ class GovernanceAgentStore:
             raise GovernanceAgentConfigError("execution recovery requires a dispatcher")
         tenant = _tenant(tenant_id)
         actor = self._actor()
+        tenant_snapshot = self._tenant_snapshot_for(tenant)
         with self._connect() as connection:
             run = self._get_run(connection, tenant, _id(run_id, "run_id"))
+        self._require_agent_enabled(tenant_snapshot, run.agent_kind)
         if run.revision != expected_revision:
             raise GovernanceAgentConflict("governance-agent run revision changed")
         if run.state not in {"executing", "execution_failed"}:
@@ -2807,6 +2986,26 @@ class GovernanceAgentStore:
         with self._connect() as connection:
             return self._get_run(connection, tenant, _id(run_id, "run_id"))
 
+    def has_run_tombstone(self, tenant_id: str, run_id: str) -> bool:
+        """Return whether retention left an integrity-checked replay tombstone."""
+
+        tenant = _tenant(tenant_id)
+        run_ref = _id(run_id, "run_id")
+        self._actor()
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM operations WHERE tenant_id=? "
+                "AND result_kind='run_tombstone' AND result_id=?",
+                (tenant, run_ref),
+            ).fetchall()
+        for row in rows:
+            self._verify_operation_row(row, tenant)
+        if len(rows) > 1:
+            raise GovernanceAgentIntegrityError(
+                "run retention tombstone identity is ambiguous"
+            )
+        return len(rows) == 1
+
     def get_policy(
         self,
         tenant_id: str,
@@ -3138,6 +3337,7 @@ __all__ = [
     "GovernanceAgentQuotaExceeded",
     "GovernanceAgentRun",
     "GovernanceAgentStore",
+    "GovernanceAgentTenantSnapshot",
     "GovernanceAgentValidationError",
     "GovernanceAnalysisAdapter",
     "GovernanceExecutionReceiptVerifier",
@@ -3149,5 +3349,6 @@ __all__ = [
     "build_finding",
     "enabled",
     "execution_receipt_signing_payload",
+    "load_governance_agent_tenant_snapshot",
     "require_enabled",
 ]

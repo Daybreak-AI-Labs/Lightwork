@@ -499,11 +499,132 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
                 detail="third-party intelligence operation failed",
             ) from exc
 
+    def provider_runtime(request: Request):
+        runtime = getattr(
+            request.app.state,
+            "third_party_intelligence_provider_runtime",
+            None,
+        )
+        if (
+            runtime is None
+            or not callable(getattr(runtime, "readiness", None))
+            or not callable(getattr(runtime, "source_readiness", None))
+            or not callable(getattr(runtime, "status", None))
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="third-party provider runtime is unavailable",
+            )
+        return runtime
+
+    async def provider_readiness(
+        request: Request,
+        *,
+        source_id: str | None = None,
+        verify_secret: bool = False,
+    ) -> dict[str, Any]:
+        runtime = provider_runtime(request)
+        tenant = _tenant_id()
+        try:
+            if source_id is None:
+                result = await run_in_threadpool(
+                    runtime.readiness,
+                    tenant,
+                    request=request,
+                )
+            else:
+                result = await run_in_threadpool(
+                    runtime.source_readiness,
+                    tenant,
+                    source_id,
+                    request=request,
+                    verify_secret=verify_secret,
+                )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            candidate = str(exc)
+            safe_codes = {
+                "provider_allowlist_invalid",
+                "provider_composition_invalid",
+                "provider_configuration_invalid",
+                "provider_configuration_unavailable",
+                "provider_host_invalid",
+                "provider_runtime_disabled",
+                "provider_source_authority_invalid",
+                "provider_source_authority_unavailable",
+                "provider_source_not_approved_for_monitoring",
+                "provider_source_not_found",
+                "provider_tenant_scope_mismatch",
+                "provider_tenant_scope_missing",
+                "provider_timeout_invalid",
+            }
+            code = (
+                candidate
+                if candidate in safe_codes
+                else "provider_runtime_unavailable"
+            )
+            if code == "provider_source_not_found":
+                status_code = 404
+            elif code in {
+                "provider_runtime_disabled",
+                "provider_source_not_approved_for_monitoring",
+            }:
+                status_code = 403
+            else:
+                status_code = 503
+            raise HTTPException(
+                status_code=status_code,
+                detail=code,
+            ) from exc
+        if not isinstance(result, Mapping):
+            raise HTTPException(
+                status_code=503,
+                detail="third-party provider readiness is unavailable",
+            )
+        return _jsonable(result)
+
     @router.get("/status")
     async def status(request: Request) -> dict[str, Any]:
         require_permission(request, "view")
         tenant = _tenant_id()
         from maverick import mailer
+
+        runtime_readiness: dict[str, Any]
+        runtime_status: dict[str, Any]
+        try:
+            runtime = provider_runtime(request)
+            runtime_readiness = await provider_readiness(request)
+            raw_status = await run_in_threadpool(runtime.status)
+            runtime_status = (
+                _jsonable(raw_status)
+                if isinstance(raw_status, Mapping)
+                else {
+                    "schema": "lightwork.third-party-feed-scheduler-status.v1",
+                    "running": False,
+                    "error_code": "scheduler_status_unavailable",
+                }
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            runtime_readiness = {
+                "schema": "lightwork.third-party-provider-runtime-readiness.v1",
+                "enabled": False,
+                "configured": False,
+                "configuration_ready": False,
+                "ready": False,
+                "error_code": "provider_runtime_unavailable",
+                "status_secret_resolution": False,
+                "status_provider_network_io": False,
+                "licensed_provider_credential_verified": False,
+                "live_provider_acceptance_verified": False,
+            }
+            runtime_status = {
+                "schema": "lightwork.third-party-feed-scheduler-status.v1",
+                "running": False,
+                "error_code": "scheduler_status_unavailable",
+            }
 
         return {
             "schema": "lightwork.third-party-intelligence-status.v1",
@@ -514,6 +635,15 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
             "provider_acceptance_verified": False,
             "external_operations_accepted": False,
             "status_request_external_network_io": False,
+            "provider_runtime": runtime_readiness,
+            "provider_scheduler": runtime_status,
+            "provider_composition_configured": (
+                runtime_readiness.get("configured") is True
+            ),
+            "provider_configuration_ready": (
+                runtime_readiness.get("configuration_ready") is True
+            ),
+            "provider_source_credential_checked": False,
             "outbound_delivery_runs_only_on_explicit_post": True,
             "delivery_destination_resolver_configured": callable(
                 getattr(
@@ -540,6 +670,40 @@ def create_third_party_intelligence_router(  # noqa: C901, PLR0915
                 "exchange_query_limit": 500,
             },
         }
+
+    @router.get("/provider-runtime/status")
+    async def provider_runtime_status(request: Request) -> dict[str, Any]:
+        require_permission(request, "view")
+        readiness = await provider_readiness(request)
+        runtime = provider_runtime(request)
+        try:
+            raw_scheduler = await run_in_threadpool(runtime.status)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raw_scheduler = None
+        readiness["scheduler"] = (
+            _jsonable(raw_scheduler)
+            if isinstance(raw_scheduler, Mapping)
+            else {
+                "schema": "lightwork.third-party-feed-scheduler-status.v1",
+                "running": False,
+                "error_code": "scheduler_status_unavailable",
+            }
+        )
+        return readiness
+
+    @router.post("/provider-runtime/sources/{source_id}/readiness")
+    async def provider_source_readiness(
+        request: Request,
+        source_id: ObjectPath,
+    ) -> dict[str, Any]:
+        require_global_permission(request, "admin")
+        return await provider_readiness(
+            request,
+            source_id=source_id,
+            verify_secret=True,
+        )
 
     @router.put("/sources/{source_id}")
     async def enroll_source(

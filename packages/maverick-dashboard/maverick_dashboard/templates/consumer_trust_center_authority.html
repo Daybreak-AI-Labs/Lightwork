@@ -152,8 +152,15 @@
     var response = await fetch(API + path, options);
     var responseText = await response.text();
     var result;
-    try { result = responseText ? JSON.parse(responseText) : {}; }
-    catch (_error) { result = {detail: responseText}; }
+    try {
+      if (!responseText) { throw new Error("empty response"); }
+      result = JSON.parse(responseText);
+    } catch (_error) {
+      throw new Error("Request failed: the server returned an invalid JSON response.");
+    }
+    if (!response.ok) {
+      throw new Error(result && typeof result.detail === "string" ? result.detail : ("HTTP " + response.status));
+    }
     show({status: response.status, ok: response.ok, result: result});
   }
 
@@ -179,6 +186,108 @@
     }
   });
   updateConfirmation();
+}());
+</script>
+
+<section class="panel tcb-glass" aria-labelledby="tcb-heading">
+  <style>
+    .tcb-glass { margin-top:var(--space-5); border:1px solid color-mix(in srgb, var(--text) 16%, transparent);
+      background:linear-gradient(135deg, color-mix(in srgb, var(--surface-2) 82%, transparent),
+      color-mix(in srgb, var(--surface-1) 66%, transparent)); backdrop-filter:blur(22px) saturate(145%);
+      box-shadow:0 22px 65px color-mix(in srgb, #000 25%, transparent); }
+    .tcb-preview { min-height:12rem; display:grid; place-items:center; border-radius:1.25rem;
+      border:1px solid color-mix(in srgb, var(--text) 12%, transparent);
+      background:radial-gradient(circle at 15% 15%, rgba(255,255,255,.18), transparent 45%),
+      color-mix(in srgb, var(--surface-2) 72%, transparent); overflow:hidden; }
+    .tcb-preview img { max-width:min(80%,28rem); max-height:10rem; object-fit:contain; }
+  </style>
+  <h2 id="tcb-heading">Governed brand assets &amp; exact domains</h2>
+  <p>PNG/JPEG only. Assets remain encrypted and tenant-private until a different
+    principal reviews and activates the exact version. Custom domains require
+    injected DNS/TLS deployment evidence; a request host never selects a tenant.</p>
+  <div class="tca-grid">
+    <div class="tca-stack">
+      <label>Operation
+        <select id="tcb-operation">
+          <option data-method="GET" data-path="/status">Status</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions" data-file="true">Asset: propose version</option>
+          <option data-method="GET" data-path="/assets/{asset_id}/versions/{asset_version}">Asset: inspect</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/review">Asset: independent review</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/activate">Asset: activate</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/revoke">Asset: revoke</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/rotate-custody">Asset: rotate custody</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/challenges">Domain: challenge/recover</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/verify">Domain: verify DNS/TLS</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/activate">Domain: activate deployment</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/reverify">Domain: reverify</option>
+          <option data-method="POST" data-path="/domains/{claim_id}/versions/{claim_version}/revoke">Domain: revoke</option>
+          <option data-method="PUT" data-path="/projections/{property_id}">Publication: bind brand projection</option>
+          <option data-method="POST" data-path="/projections/{property_id}/revoke">Publication: revoke projection</option>
+          <option data-method="POST" data-path="/retention/purge">Retention: purge ciphertext</option>
+        </select>
+      </label>
+      <label>Closed path values JSON <input class="input" id="tcb-path" value="{}"></label>
+      <label>Strict request JSON <textarea class="input" id="tcb-body">{}</textarea></label>
+      <label>PNG/JPEG file (proposal only) <input id="tcb-file" type="file" accept="image/png,image/jpeg"></label>
+      <label class="tca-confirm"><input id="tcb-confirm" type="checkbox">
+        <span>I reviewed the exact version, publication digest, retention, domain,
+          and independent-approval consequences.</span></label>
+      <button class="btn btn--primary" id="tcb-submit" type="button">Run governed operation</button>
+    </div>
+    <div class="tca-stack">
+      <div class="tcb-preview"><img id="tcb-preview-image" alt="Local brand preview" hidden></div>
+      <pre class="tca-output" id="tcb-output" aria-live="polite">No branding request made.</pre>
+    </div>
+  </div>
+</section>
+<script>
+(function () {
+  "use strict";
+  var base = "/api/v1/consent/trust-center-branding";
+  var operation = document.getElementById("tcb-operation");
+  var file = document.getElementById("tcb-file");
+  var output = document.getElementById("tcb-output");
+  var preview = document.getElementById("tcb-preview-image");
+  function show(value) { output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); }
+  function pathFor(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_all, key) {
+      if (!(key in values)) { throw new Error("Missing path value: " + key); }
+      return encodeURIComponent(String(values[key]));
+    });
+  }
+  function asBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = function () { reject(new Error("Unable to read selected file.")); };
+      reader.onload = function () { resolve(String(reader.result).split(",", 2)[1] || ""); };
+      reader.readAsDataURL(blob);
+    });
+  }
+  file.addEventListener("change", function () {
+    if (!file.files.length) { preview.hidden = true; return; }
+    preview.src = URL.createObjectURL(file.files[0]); preview.hidden = false;
+  });
+  document.getElementById("tcb-submit").addEventListener("click", async function () {
+    try {
+      if (!document.getElementById("tcb-confirm").checked) { throw new Error("Confirm the governed operation."); }
+      var route = operation.options[operation.selectedIndex];
+      var values = JSON.parse(document.getElementById("tcb-path").value || "{}");
+      var payload = JSON.parse(document.getElementById("tcb-body").value || "{}");
+      if (route.dataset.file === "true") {
+        if (!file.files.length) { throw new Error("Select one PNG or JPEG."); }
+        if (!["image/png", "image/jpeg"].includes(file.files[0].type)) { throw new Error("Only PNG/JPEG is accepted."); }
+        payload.content_base64 = await asBase64(file.files[0]); payload.media_type = file.files[0].type;
+      }
+      var options = {method:route.dataset.method, credentials:"same-origin", cache:"no-store",
+        headers:{"Accept":"application/json", "Cache-Control":"no-store"}};
+      if (options.method !== "GET") { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(payload); }
+      var response = await fetch(base + pathFor(route.dataset.path, values), options);
+      var result = await response.json();
+      if (!response.ok) { throw new Error(result.detail || ("HTTP " + response.status)); }
+      show(result);
+    } catch (error) { show(String(error)); }
+    finally { document.getElementById("tcb-confirm").checked = false; }
+  });
 }());
 </script>
 {% endif %}

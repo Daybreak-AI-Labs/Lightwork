@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 from collections import deque
@@ -383,6 +384,50 @@ async def _stop_automation_scheduler() -> None:
         pass
 
 
+async def _start_privacy_discovery_remediation_scheduler() -> None:
+    try:
+        from maverick_dashboard.privacy_data_discovery_scheduler import (
+            start_privacy_data_discovery_scheduler,
+        )
+
+        await run_in_threadpool(start_privacy_data_discovery_scheduler, app)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("privacy-discovery remediation scheduler not started")
+
+
+async def _stop_privacy_discovery_remediation_scheduler() -> None:
+    try:
+        from maverick_dashboard.privacy_data_discovery_scheduler import (
+            stop_privacy_data_discovery_scheduler,
+        )
+
+        await run_in_threadpool(stop_privacy_data_discovery_scheduler, app)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+
+
+async def _start_privacy_notice_publication_scheduler() -> None:
+    try:
+        from maverick_dashboard.privacy_notice_publication_scheduler import (
+            start_privacy_notice_publication_scheduler,
+        )
+
+        await run_in_threadpool(start_privacy_notice_publication_scheduler, app)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("privacy-notice publication scheduler not started")
+
+
+async def _stop_privacy_notice_publication_scheduler() -> None:
+    try:
+        from maverick_dashboard.privacy_notice_publication_scheduler import (
+            stop_privacy_notice_publication_scheduler,
+        )
+
+        await run_in_threadpool(stop_privacy_notice_publication_scheduler, app)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
@@ -471,6 +516,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_identity_governance_scheduler)
     except Exception:  # pragma: no cover - never block startup
         log.exception("identity-governance scheduler not started")
+    await _start_privacy_discovery_remediation_scheduler()
+    await _start_privacy_notice_publication_scheduler()
     # Connected-entitlement auto-refresh: a deployment with [license] api_url
     # configured polls the vendor console so an upgrade/downgrade issued there
     # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
@@ -546,6 +593,8 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(stop_identity_governance_scheduler)
     except Exception:  # pragma: no cover - shutdown must never raise
         pass
+    await _stop_privacy_discovery_remediation_scheduler()
+    await _stop_privacy_notice_publication_scheduler()
     await _stop_automation_scheduler()
     # Graceful drain: give running goals a bounded window to finish. Bounded by
     # MAVERICK_DRAIN_TIMEOUT (default 25s, under the typical 30s
@@ -606,13 +655,43 @@ app = FastAPI(
     ],
     lifespan=_lifespan,
 )
+from .administration_document_access_composition import (  # noqa: E402
+    attach_administration_document_access_composition,
+)
+from .ai_entity_tasks_composition import (  # noqa: E402
+    install_ai_entity_tasks_composition,
+)
+from .ai_evidence_analysis_composition import (  # noqa: E402
+    install_ai_evidence_analysis_composition,
+)
 from .ai_governance_loop_composition import (  # noqa: E402
     install_ai_governance_loop_composition,
 )
 from .ai_governance_loop_scheduler import (  # noqa: E402
     attach_ai_governance_loop_scheduler,
 )
+from .assessment_evidence_autopopulation_composition import (  # noqa: E402
+    install_assessment_evidence_autopopulation_composition,
+)
+from .consent_application_scanner_composition import (  # noqa: E402
+    attach_consent_application_scanner_composition,
+)
+from .consent_bulk_jobs_composition import (  # noqa: E402
+    install_consent_bulk_jobs_composition,
+)
+from .consent_custom_index_composition import (  # noqa: E402
+    install_consent_custom_index_composition,
+)
+from .consent_delivery_destinations_composition import (  # noqa: E402
+    attach_consent_delivery_destinations,
+)
+from .consent_global_opt_out_composition import (  # noqa: E402
+    attach_consent_global_opt_out_composition,
+)
 from .consent_scan_scheduler import attach_consent_scan_scheduler  # noqa: E402
+from .consent_web_publish_settings_composition import (  # noqa: E402
+    attach_consent_web_publish_settings_composition,
+)
 from .consumer_trust_center_authority_composition import (  # noqa: E402
     attach_consumer_trust_center_authority_composition,
 )
@@ -622,14 +701,71 @@ from .customer_sandbox_composition import (  # noqa: E402
 from .data_use_provider_audit_composition import (  # noqa: E402
     attach_data_use_provider_audit_composition,
 )
+from .governance_agent_cross_suite_context import (  # noqa: E402
+    install_governance_agent_cross_suite_context,
+)
+from .governance_agents_composition import (  # noqa: E402
+    install_governance_agents_composition,
+)
+from .governed_document_vault_composition import (  # noqa: E402
+    attach_governed_document_vault_composition,
+)
+from .identity_governance_composition import (  # noqa: E402
+    attach_identity_governance_composition,
+)
+from .incident_attachment_metadata_composition import (  # noqa: E402
+    attach_incident_attachment_metadata_composition,
+)
+from .no_code_grc_studio_composition import (  # noqa: E402
+    install_no_code_grc_studio_composition,
+)
+from .privacy_data_discovery_adapters_composition import (  # noqa: E402
+    attach_privacy_data_discovery_adapters,
+)
+from .privacy_data_discovery_scheduler import (  # noqa: E402
+    install_privacy_data_discovery_scheduler,
+)
+from .privacy_drop_management_composition import (  # noqa: E402
+    attach_privacy_drop_management_composition,
+)
+from .privacy_notice_publication_composition import (  # noqa: E402
+    attach_privacy_notice_publication_composition,
+)
+from .privacy_notice_publication_scheduler import (  # noqa: E402
+    install_privacy_notice_publication_scheduler,
+)
+from .privacy_rights_consumer_delivery_composition import (  # noqa: E402
+    attach_privacy_rights_consumer_delivery_composition,
+)
 from .privacy_rights_intake_composition import (  # noqa: E402
     attach_privacy_rights_intake_composition,
+)
+from .privacy_rights_source_composition import (  # noqa: E402
+    attach_privacy_rights_source_composition,
+)
+from .shared_governance_inventory_composition import (  # noqa: E402
+    install_shared_governance_inventory_composition,
 )
 from .third_party_collaboration_composition import (  # noqa: E402
     attach_third_party_collaboration_composition,
 )
+from .third_party_contracts_composition import (  # noqa: E402
+    install_third_party_contracts_composition,
+)
+from .third_party_executive_reports_composition import (  # noqa: E402
+    install_third_party_executive_reports_composition,
+)
+from .third_party_intelligence_provider_composition import (  # noqa: E402
+    attach_third_party_intelligence_provider_composition,
+)
 from .trc_continuous_evidence_scheduler import (  # noqa: E402
     attach_trc_continuous_evidence_scheduler,
+)
+from .trc_stock_evidence_composition import (  # noqa: E402
+    install_trc_stock_evidence_composition,
+)
+from .trust_center_branding_composition import (  # noqa: E402
+    attach_trust_center_branding_composition,
 )
 from .unified_audit_composition import (  # noqa: E402
     attach_unified_audit_composition,
@@ -640,30 +776,113 @@ from .unified_audit_scheduler import (  # noqa: E402
 
 install_ai_governance_loop_composition(app)
 attach_ai_governance_loop_scheduler(app)
+install_ai_entity_tasks_composition(app)
+install_ai_evidence_analysis_composition(app)
+install_assessment_evidence_autopopulation_composition(app)
+install_governance_agents_composition(app)
+attach_administration_document_access_composition(app)
+attach_governed_document_vault_composition(app)
+attach_identity_governance_composition(app)
+attach_incident_attachment_metadata_composition(app)
+install_no_code_grc_studio_composition(app)
+install_consent_custom_index_composition(app)
+install_consent_bulk_jobs_composition(app)
+attach_consent_delivery_destinations(app)
+attach_consent_application_scanner_composition(app)
 attach_consent_scan_scheduler(app)
+attach_consent_web_publish_settings_composition(app)
+install_trc_stock_evidence_composition(app)
 attach_trc_continuous_evidence_scheduler(app)
 attach_data_use_provider_audit_composition(app)
 attach_customer_sandbox_composition(app)
 attach_consumer_trust_center_authority_composition(app)
+attach_trust_center_branding_composition(app)
 attach_privacy_rights_intake_composition(app)
+attach_privacy_rights_source_composition(app)
+attach_privacy_rights_consumer_delivery_composition(app)
+attach_consent_global_opt_out_composition(app)
+attach_privacy_drop_management_composition(app)
+attach_privacy_notice_publication_composition(app)
+install_privacy_notice_publication_scheduler(app)
+attach_privacy_data_discovery_adapters(app)
+install_privacy_data_discovery_scheduler(app)
 attach_third_party_collaboration_composition(app)
+attach_third_party_intelligence_provider_composition(app)
+install_third_party_contracts_composition(app)
+install_third_party_executive_reports_composition(app)
+install_governance_agent_cross_suite_context(app)
 attach_unified_audit_composition(app)
+install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
 from .ai_cloud_agent_governance_workbench import (  # noqa: E402
     create_ai_cloud_agent_governance_workbench_router,
 )
+from .ai_entity_tasks_page import create_ai_entity_tasks_page_router  # noqa: E402
 from .ai_evidence_analysis_page import (  # noqa: E402
     create_ai_evidence_analysis_page_router,
 )
+from .assessment_evidence_autopopulation_page import (  # noqa: E402
+    create_assessment_evidence_autopopulation_page_router,
+)
+from .consent_application_scanner_page import (  # noqa: E402
+    create_consent_application_scanner_page_router,
+)
+from .consent_bulk_jobs_page import (  # noqa: E402
+    create_consent_bulk_jobs_page_router,
+)
+from .consent_custom_index_page import (  # noqa: E402
+    create_consent_custom_index_page_router,
+)
+from .consent_global_opt_out_page import (  # noqa: E402
+    create_consent_global_opt_out_page_router,
+)
+from .consent_native_page import create_consent_native_page_router  # noqa: E402
+from .consent_web_publish_settings_page import (  # noqa: E402
+    create_consent_web_publish_settings_page_router,
+)
+from .governed_document_vault_page import (  # noqa: E402
+    create_governed_document_vault_page_router,
+)
+from .no_code_grc_studio_page import create_no_code_grc_studio_page_router  # noqa: E402
+from .privacy_drop_management_page import (  # noqa: E402
+    create_privacy_drop_management_page_router,
+)
+from .shared_governance_inventory_page import (  # noqa: E402
+    create_shared_governance_inventory_page_router,
+)
+from .third_party_contracts_page import (  # noqa: E402
+    create_third_party_contracts_page_router,
+)
+from .third_party_executive_reports_page import (  # noqa: E402
+    create_third_party_executive_reports_page_router,
+)
 
 app.include_router(create_ai_cloud_agent_governance_workbench_router(templates))
-app.include_router(create_ai_evidence_analysis_page_router())
+app.include_router(create_ai_evidence_analysis_page_router(templates))
+app.include_router(create_assessment_evidence_autopopulation_page_router(templates))
+app.include_router(create_ai_entity_tasks_page_router(templates))
+app.include_router(create_consent_custom_index_page_router(templates))
+app.include_router(create_consent_application_scanner_page_router(templates))
+app.include_router(create_consent_global_opt_out_page_router(templates))
+app.include_router(create_consent_native_page_router(templates))
+app.include_router(create_consent_web_publish_settings_page_router(templates))
+app.include_router(create_consent_bulk_jobs_page_router(templates))
+app.include_router(create_governed_document_vault_page_router(templates))
+app.include_router(create_no_code_grc_studio_page_router(templates))
+app.include_router(create_privacy_drop_management_page_router(templates))
+app.include_router(create_shared_governance_inventory_page_router(templates))
+app.include_router(create_third_party_contracts_page_router(templates))
+app.include_router(create_third_party_executive_reports_page_router(templates))
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
+from .shared_governance_inventory_api import (  # noqa: E402
+    router as shared_governance_inventory_router,
+)
 from .unified_audit_api import router as unified_audit_router  # noqa: E402
 
 app.include_router(customer_sandbox_router, prefix="/api/v1")
 app.include_router(unified_audit_router, prefix="/api/v1")
+app.include_router(shared_governance_inventory_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
@@ -683,6 +902,28 @@ app.state.public_consent_error_origin_resolver = lambda request: public_consent_
     request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
+from .consent_native_admin_api import (  # noqa: E402
+    create_consent_native_public_metadata_router,
+)
+from .consent_native_admin_api import router as consent_native_admin_router  # noqa: E402
+from .consent_native_composition import attach_consent_native_composition  # noqa: E402
+from .consent_native_sdk_api import create_consent_native_sdk_router  # noqa: E402
+
+_native_consent_dependencies = attach_consent_native_composition(
+    app,
+    public_dependencies=_public_consent_dependencies,
+)
+app.include_router(create_consent_native_sdk_router(_native_consent_dependencies))
+app.include_router(create_consent_native_public_metadata_router())
+app.include_router(consent_native_admin_router, prefix="/api/v1")
+from .consent_web_publish_settings_api import (  # noqa: E402
+    create_consent_web_publish_settings_public_router,
+)
+
+app.include_router(
+    create_consent_web_publish_settings_public_router(),
+    prefix="/api/v1/public",
+)
 from .consent_identity_federation_api import (  # noqa: E402
     create_consent_identity_federation_router,
 )
@@ -928,6 +1169,7 @@ _MAX_FINANCE_ANOMALY_BODY_BYTES = 32 * 1024 * 1024
 _MAX_EVIDENCE_GATEWAY_BODY_BYTES = 3 * 1024 * 1024
 _MAX_EVIDENCE_GATEWAY_DELIVERY_BODY_BYTES = 34 * 1024 * 1024
 _MAX_PUBLIC_CONSENT_BODY_BYTES = 64 * 1024
+_MAX_NATIVE_CONSENT_BODY_BYTES = 256 * 1024
 _MAX_THIRD_PARTY_COLLABORATION_BODY_BYTES = 2 * 1024 * 1024
 _EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
 _SECURITY_HUNTER_BODY_PATHS = {
@@ -978,7 +1220,10 @@ async def bound_public_governance_body(request: Request, call_next):
     if request.method not in {"POST", "PUT", "PATCH"}:
         return await call_next(request)
     path = request.url.path
-    if path.startswith("/api/v1/public/consent/"):
+    if path.startswith("/api/v1/public/consent/native/"):
+        maximum = _MAX_NATIVE_CONSENT_BODY_BYTES
+        detail = "native consent request body too large"
+    elif path.startswith("/api/v1/public/consent/"):
         maximum = _MAX_PUBLIC_CONSENT_BODY_BYTES
         detail = "public consent request body too large"
     elif path.startswith("/api/v1/external/third-party-collaboration/"):
@@ -2784,14 +3029,46 @@ async def data_use_providers_page(request: Request) -> HTMLResponse:
 async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
     """Bounded personal-data discovery, review, and RoPA delivery workspace."""
 
-    require_permission(request, "operate")
+    require_permission(request, "view")
     from maverick import privacy_data_discovery
+    from maverick.paths import current_tenant_id_strict
 
-    return templates.TemplateResponse(
+    from .auth import has_global_permission
+
+    if current_tenant_id_strict() is None:
+        raise HTTPException(
+            status_code=409,
+            detail="select an active tenant before using privacy data discovery",
+        )
+    if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
+        raise HTTPException(
+            status_code=404,
+            detail="privacy data discovery workbench unavailable",
+        )
+    nonce = secrets.token_urlsafe(18)
+    response = templates.TemplateResponse(
         request,
         "privacy_data_discovery.html",
-        {"privacy_data_discovery_enabled": privacy_data_discovery.enabled()},
+        {
+            "privacy_data_discovery_enabled": privacy_data_discovery.enabled(),
+            "privacy_data_discovery_api_base": "/api/v1/privacy/data-discovery",
+            "privacy_data_discovery_page_path": "/privacy/data-discovery",
+            "privacy_data_discovery_can_operate": has_permission(request, "operate"),
+            "privacy_data_discovery_can_audit": has_permission(request, "audit"),
+            "privacy_data_discovery_can_admin": has_global_permission(request, "admin"),
+            "csp_style_nonce": nonce,
+        },
     )
+    response.headers["Cache-Control"] = "no-store, private, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; base-uri 'none'; connect-src 'self'; "
+        "font-src 'none'; form-action 'self'; frame-ancestors 'none'; "
+        "img-src 'self'; object-src 'none'; script-src 'self'; "
+        f"style-src 'self' 'nonce-{nonce}'; worker-src 'none'"
+    )
+    return response
 
 
 @app.get("/privacy/regulatory-intelligence", response_class=HTMLResponse)
@@ -2907,14 +3184,24 @@ async def third_party_intelligence_page(request: Request) -> HTMLResponse:
 async def governance_agents_page(request: Request) -> HTMLResponse:
     """Closed packaged agents over server-resolved governance evidence."""
 
-    require_permission(request, "operate")
+    require_permission(request, "view")
+    from .auth import has_global_permission
     from .governance_agents_api import governance_agents_enabled_for_page
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "governance_agents.html",
-        {"governance_agents_enabled": governance_agents_enabled_for_page()},
+        {
+            "governance_agents_enabled": governance_agents_enabled_for_page(),
+            "governance_can_operate": has_permission(request, "operate"),
+            "governance_can_admin": has_global_permission(request, "admin"),
+            "governance_can_audit": has_global_permission(request, "audit"),
+        },
     )
+    response.headers["Cache-Control"] = "no-store, private, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 
 @app.get("/third-party/lifecycle", response_class=HTMLResponse)
@@ -4522,6 +4809,26 @@ async def compliance_scope_actions_page(request: Request) -> HTMLResponse:
         request,
         "compliance_scope_actions.html",
         {"compliance_scope_actions_enabled": (compliance_scope_actions_enabled_for_page())},
+    )
+
+
+@app.get("/compliance/continuous-evidence", response_class=HTMLResponse)
+async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
+    """Continuous technical-evidence collector operations workbench."""
+
+    require_permission(request, "operate")
+    from .trc_continuous_evidence_api import (
+        trc_continuous_evidence_enabled_for_page,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "trc_continuous_evidence.html",
+        {
+            "trc_continuous_evidence_enabled": (
+                trc_continuous_evidence_enabled_for_page()
+            )
+        },
     )
 
 
@@ -7432,6 +7739,263 @@ async def shell_behaviors_js() -> FileResponse:
     <body> on every page."""
     return FileResponse(
         _STATIC_DIR / "lightwork-ui.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-copilot.js")
+async def shell_copilot_js() -> FileResponse:
+    """The shared page-aware Copilot client used by every dashboard module."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-copilot.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-ai-evidence-analysis.css")
+async def ai_evidence_analysis_stylesheet() -> FileResponse:
+    """Scoped layout additions for the shared-shell evidence workbench."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-ai-evidence-analysis.css",
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-ai-evidence-analysis.js")
+async def ai_evidence_analysis_client() -> FileResponse:
+    """Bounded raw-body upload and review client for evidence analysis."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-ai-evidence-analysis.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-assessment-evidence-autopopulation.css")
+async def assessment_evidence_autopopulation_stylesheet() -> FileResponse:
+    """Liquid-glass styles for evidence-assisted assessment proposals."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-assessment-evidence-autopopulation.css",
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-assessment-evidence-autopopulation.js")
+async def assessment_evidence_autopopulation_client() -> FileResponse:
+    """Bounded proposal, review, and separate-apply workbench client."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-assessment-evidence-autopopulation.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-ai-entity-tasks.js")
+async def ai_entity_tasks_client() -> FileResponse:
+    """Closed-input client for revision-pinned AI entity tasks."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-ai-entity-tasks.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-custom-index.js")
+async def consent_custom_index_client() -> FileResponse:
+    """Closed-input client for governed exact consent-profile indexes."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-custom-index.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-bulk-jobs.js")
+async def consent_bulk_jobs_client() -> FileResponse:
+    """Bounded operator client for governed consent export and action jobs."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-bulk-jobs.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-publish-settings.js")
+async def consent_publish_settings_client() -> FileResponse:
+    """Bounded operator client for versioned website publish settings."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-publish-settings.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-global-opt-out.css")
+async def consent_global_opt_out_styles() -> FileResponse:
+    """Liquid-glass styles for the governed Global Opt-Out workbench."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-global-opt-out.css",
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-global-opt-out.js")
+async def consent_global_opt_out_client() -> FileResponse:
+    """Bounded operator client for governed Global Opt-Out configuration."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-global-opt-out.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-application-scanner.css")
+async def consent_application_scanner_styles() -> FileResponse:
+    """Liquid-glass styles for the governed application-scanner workbench."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-application-scanner.css",
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-application-scanner.js")
+async def consent_application_scanner_client() -> FileResponse:
+    """Bounded client for governed mobile and connected-app manifest analysis."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-application-scanner.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-consent-native-admin.js")
+async def consent_native_admin_client() -> FileResponse:
+    """Bounded same-origin client for native-consent administration."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-consent-native-admin.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-third-party-contracts.js")
+async def third_party_contracts_client() -> FileResponse:
+    """Closed-input client for Contract and Engagement lifecycle operations."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-third-party-contracts.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-third-party-executive-reports.js")
+async def third_party_executive_reports_client() -> FileResponse:
+    """Bounded client for governed role-aware executive PDF reports."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-third-party-executive-reports.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-governed-document-vault.js")
+async def governed_document_vault_client() -> FileResponse:
+    """Bounded client for encrypted document custody and one-time delivery."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-governed-document-vault.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-no-code-grc-studio.js")
+async def no_code_grc_studio_client() -> FileResponse:
+    """Closed-input client for the tenant-private no-code GRC studio."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-no-code-grc-studio.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-shared-governance-inventory.js")
+async def shared_governance_inventory_client() -> FileResponse:
+    """Bounded client for the tenant-private six-suite inventory."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-shared-governance-inventory.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-privacy-data-discovery.css")
+async def privacy_data_discovery_styles() -> FileResponse:
+    """Liquid-glass styling for the privacy discovery workbench."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-privacy-data-discovery.css",
+        media_type="text/css; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-privacy-data-discovery.js")
+async def privacy_data_discovery_client() -> FileResponse:
+    """Bounded same-origin client for privacy discovery and remediation."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-privacy-data-discovery.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-privacy-drop-management.js")
+async def privacy_drop_management_client() -> FileResponse:
+    """Closed-input client for the authenticated DROP operator workbench."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-privacy-drop-management.js",
         media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )

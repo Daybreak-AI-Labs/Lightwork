@@ -87,6 +87,17 @@ class PairingRevokeIn(_StrictModel):
     reason_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class IdentityUnlinkIn(_StrictModel):
+    expected_profile_revision: int = Field(ge=1, le=2**31 - 1)
+    expected_link_revision: int = Field(ge=1, le=2**31 - 1)
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+    )
+    reason_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 @dataclass(frozen=True)
 class _PublicAuthority:
     client: PublicClientBinding
@@ -461,6 +472,7 @@ def create_consent_identity_federation_router(  # noqa: C901 - isolated route fa
                 context,
                 code_challenge=body.code_challenge,
                 ttl_seconds=min(settings.token_ttl_seconds, MAX_PAIRING_TTL_SECONDS),
+                retention_seconds=settings.link_lifecycle_retention_seconds,
             )
         except ConsentIdentityFederationConflict as exc:
             raise HTTPException(status_code=409, detail=_PAIRING_DETAIL) from exc
@@ -544,6 +556,61 @@ def create_consent_identity_federation_router(  # noqa: C901 - isolated route fa
             raise HTTPException(status_code=403, detail=_PAIRING_DETAIL) from exc
         _private_headers(response, request, admitted.client)
         return {"status": revoked["status"]}
+
+    @router.get("/link")
+    async def current_link(
+        request: Request,
+        response: Response,
+        admitted: _PublicAuthority = Depends(authority),
+    ) -> dict[str, Any]:
+        context = await current_context(admitted)
+        try:
+            profile = await run_in_threadpool(
+                deps.public.preference_store_for(context.tenant_id).get_profile_authority,
+                context.tenant_id,
+                context.profile_id,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=_PAIRING_DETAIL) from exc
+        _private_headers(response, request, admitted.client)
+        return {
+            "status": profile.get("link_status", "never_linked"),
+            "profile_revision": profile["revision"],
+            "link_revision": profile.get("link_revision", 0),
+            "linked": profile.get("link_status") == "linked",
+            "receipt_histories_merged": False,
+        }
+
+    @router.post("/link/unlink")
+    async def unlink_current_identity(
+        body: IdentityUnlinkIn,
+        request: Request,
+        response: Response,
+        admitted: _PublicAuthority = Depends(authority),
+    ) -> dict[str, Any]:
+        context = await current_context(admitted)
+        try:
+            unlinked = await run_in_threadpool(
+                deps.pairing_store.unlink_current_identity,
+                context,
+                expected_profile_revision=body.expected_profile_revision,
+                expected_link_revision=body.expected_link_revision,
+                idempotency_key=body.idempotency_key,
+                reason_sha256=body.reason_sha256,
+                settings=deps.settings_for(),
+            )
+        except ConsentIdentityFederationConflict as exc:
+            raise HTTPException(status_code=409, detail=_PAIRING_DETAIL) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=403, detail=_PAIRING_DETAIL) from exc
+        _private_headers(response, request, admitted.client)
+        return {
+            "status": unlinked["link_status"],
+            "profile_revision": unlinked["anonymous_revision"],
+            "link_revision": unlinked["link_revision"],
+            "pairing_revoked": True,
+            "receipt_histories_merged": False,
+        }
 
     return router
 

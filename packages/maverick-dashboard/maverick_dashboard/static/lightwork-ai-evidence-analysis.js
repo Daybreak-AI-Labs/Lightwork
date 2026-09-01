@@ -1,9 +1,10 @@
 "use strict";
 
 const shell = document.getElementById("evidence-shell");
-const apiBase = document.body.dataset.apiBase;
+const apiBase = shell ? shell.dataset.apiBase : "";
 const runtimeStatus = document.getElementById("runtime-status");
 const statusOutput = document.getElementById("status-output");
+const operations = document.getElementById("evidence-operations");
 const operationStatus = document.getElementById("operation-status");
 const operationOutput = document.getElementById("operation-output");
 
@@ -32,11 +33,14 @@ async function apiRequest(path, options = {}) {
   try {
     payload = await response.json();
   } catch (_error) {
-    payload = { detail: "The server returned a non-JSON response." };
+    const error = new Error("The server returned an invalid JSON response.");
+    error.status = response.status;
+    throw error;
   }
   if (!response.ok) {
     const error = new Error(
-      typeof payload.detail === "string" ? payload.detail : "The operation failed."
+      payload && typeof payload.detail === "string" ?
+        payload.detail : "The operation failed."
     );
     error.status = response.status;
     throw error;
@@ -82,11 +86,25 @@ function analysisId() {
 async function refreshStatus() {
   setStatus(runtimeStatus, "Checking the tenant-scoped server composition…");
   statusOutput.textContent = "";
+  operations.disabled = true;
   try {
     const payload = await apiRequest("/status");
     render(statusOutput, payload);
-    if (payload.ready === true) {
-      setStatus(runtimeStatus, "Evidence analysis is enabled and composed for operations.");
+    const tesseractDetected = payload.external_parser_binaries_detected &&
+      payload.external_parser_binaries_detected.tesseract === true;
+    const ocrNotice = tesseractDetected ? "" :
+      " External Tesseract OCR was not detected, so image OCR is unavailable.";
+    if (payload.ready === true && payload.operational_composition_verified === true) {
+      setStatus(runtimeStatus, `Evidence analysis operational composition was verified.${ocrNotice}`);
+      operations.disabled = false;
+    } else if (payload.configured_for_operation_attempt === true) {
+      setStatus(
+        runtimeStatus,
+        "Evidence analysis is enabled and configured for an operation attempt. " +
+          "Status does not open the store or resolve artifact-specific authorities; " +
+          `each operation validates them before work begins.${ocrNotice}`
+      );
+      operations.disabled = false;
     } else if (payload.enabled === true) {
       setStatus(runtimeStatus, "Evidence analysis is enabled but server composition is incomplete.", true);
     } else {

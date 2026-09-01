@@ -294,6 +294,21 @@ def test_identity_control_tables_are_closed_default_off_and_dependency_checked()
                 "federation": {"enable": True},
                 "conditional_access": {"enable": True},
                 "purview_writeback": {"enable": False},
+                "production": {
+                    "enable": True,
+                    "mapping_revision": 1,
+                    "mapping_retention_seconds": 86_400,
+                    "max_authority_records": 10_000,
+                    "max_observation_age_seconds": 300,
+                    "max_future_skew_seconds": 30,
+                    "outcome_max_attempts": 5,
+                    "outcome_retry_base_seconds": 30,
+                    "outcome_retry_max_seconds": 3_600,
+                    "outcome_lease_seconds": 60,
+                    "outcome_signal_validity_seconds": 86_400,
+                    "purview_max_attempts": 3,
+                    "purview_operation_lease_seconds": 60,
+                },
             },
         }
     }
@@ -309,6 +324,70 @@ def test_identity_control_tables_are_closed_default_off_and_dependency_checked()
         and finding.key == "enabled"
         and "unknown" in finding.message.lower()
         for finding in findings
+    )
+
+    invalid_production = {
+        "ai_identity_governance_connectors": {
+            "enable": True,
+            "controls": {
+                "enable": True,
+                "production": {
+                    "enable": True,
+                    "mapping_revision": 0,
+                    "mapping_retention_seconds": 299,
+                    "max_authority_records": 10_001,
+                    "max_observation_age_seconds": 3_601,
+                    "max_future_skew_seconds": 301,
+                    "outcome_max_attempts": 21,
+                    "outcome_retry_base_seconds": 86_401,
+                    "outcome_retry_max_seconds": 604_801,
+                    "outcome_lease_seconds": 3_601,
+                    "outcome_signal_validity_seconds": 59,
+                    "purview_max_attempts": 11,
+                    "purview_operation_lease_seconds": 4,
+                    "credential": "forbidden",
+                },
+            },
+        }
+    }
+    production_findings = lint_config(invalid_production)
+    for key in (
+        "mapping_revision",
+        "mapping_retention_seconds",
+        "max_authority_records",
+        "max_observation_age_seconds",
+        "max_future_skew_seconds",
+        "outcome_max_attempts",
+        "outcome_retry_base_seconds",
+        "outcome_retry_max_seconds",
+        "outcome_lease_seconds",
+        "outcome_signal_validity_seconds",
+        "purview_max_attempts",
+        "purview_operation_lease_seconds",
+    ):
+        assert any(
+            finding.section
+            == "ai_identity_governance_connectors.controls.production"
+            and finding.key == key
+            and finding.severity == "error"
+            for finding in production_findings
+        )
+    assert any(
+        finding.section == "ai_identity_governance_connectors.controls.production"
+        and finding.key == "credential"
+        and "unknown" in finding.message.lower()
+        for finding in production_findings
+    )
+
+    retry_order = config["ai_identity_governance_connectors"]["controls"]["production"]
+    retry_order["outcome_retry_base_seconds"] = 120
+    retry_order["outcome_retry_max_seconds"] = 60
+    retry_findings = lint_config(config)
+    assert any(
+        finding.section == "ai_identity_governance_connectors.controls.production"
+        and finding.key == "outcome_retry_max_seconds"
+        and "greater than or equal" in finding.message
+        for finding in retry_findings
     )
 
     dependencies = lint_config(
@@ -348,6 +427,87 @@ def test_identity_control_tables_are_closed_default_off_and_dependency_checked()
             and "federation.enable = true" in finding.message
             for finding in missing_federation
         )
+
+
+def test_no_code_grc_studio_is_parent_gated_closed_and_bounded() -> None:
+    valid = {
+        "tech_risk_compliance": {
+            "enable": True,
+            "grc_studio": {
+                "enable": True,
+                "max_studios": 10_000,
+                "retention_seconds": 31_536_000,
+                "max_import_bytes": 2_097_152,
+            },
+        }
+    }
+    assert lint_config(valid) == []
+
+    invalid = {
+        "tech_risk_compliance": {
+            "enable": False,
+            "grc_studio": {
+                "enable": True,
+                "max_studios": 0,
+                "retention_seconds": 86_399,
+                "max_import_bytes": 2_097_153,
+                "raw_target_credentials": True,
+            },
+        }
+    }
+    findings = lint_config(invalid)
+    assert any("requires [tech_risk_compliance] enable = true" in item.message for item in findings)
+    for key in ("max_studios", "retention_seconds", "max_import_bytes"):
+        assert any(item.key == key and item.severity == "error" for item in findings)
+    assert any(
+        item.key == "raw_target_credentials" and "unknown" in item.message.lower()
+        for item in findings
+    )
+
+
+def test_shared_governance_inventory_is_closed_bounded_and_graph_gated() -> None:
+    valid = {
+        "entity_graph": {"enable": True},
+        "governance_inventory": {
+            "enable": True,
+            "retention_seconds": 31_536_000,
+            "max_source_records": 10_000,
+            "max_entities": 20_000,
+            "max_relationships": 40_000,
+            "max_export_bytes": 10_485_760,
+            "max_snapshots": 10_000,
+        },
+    }
+    assert lint_config(valid) == []
+
+    invalid = {
+        "entity_graph": {"enable": False},
+        "governance_inventory": {
+            "enable": True,
+            "retention_seconds": 86_399,
+            "max_source_records": 0,
+            "max_entities": 100_001,
+            "max_relationships": 200_001,
+            "max_export_bytes": 1_023,
+            "max_snapshots": 1,
+            "raw_source_ingest": True,
+        },
+    }
+    findings = lint_config(invalid)
+    assert any("requires [entity_graph] enable = true" in item.message for item in findings)
+    for key in (
+        "retention_seconds",
+        "max_source_records",
+        "max_entities",
+        "max_relationships",
+        "max_export_bytes",
+        "max_snapshots",
+    ):
+        assert any(item.key == key and item.severity == "error" for item in findings)
+    assert any(
+        item.key == "raw_source_ingest" and "unknown" in item.message.lower()
+        for item in findings
+    )
 
 
 def test_benchmark_trust_and_coordinator_tables_are_known_but_closed():

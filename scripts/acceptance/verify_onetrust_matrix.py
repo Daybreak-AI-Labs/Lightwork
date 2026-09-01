@@ -2,8 +2,9 @@
 
 This is a coverage/integrity gate, not evidence of product parity.  It verifies
 that the dated public-source snapshot has one unambiguous row for every tracked
-identifier, coherent status totals, explicit residual language, and the
-official source families used by the comparison.  Runtime/provider/customer
+identifier, coherent status totals, locked statuses for material current
+outcomes, explicit residual language, the five-stage evidence legend, and the
+official source families used by the comparison. Runtime/provider/customer
 acceptance remains separate evidence.
 """
 
@@ -17,39 +18,92 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXPECTED_FAMILIES = {
-    "PX": 15,
-    "AG": 26,
-    "CP": 20,
+    "PX": 16,
+    "AG": 27,
+    "CP": 25,
     "DUG": 10,
-    "PA": 21,
+    "PA": 24,
     "TRC": 25,
-    "TPM": 21,
+    "TPM": 22,
 }
 EXPECTED_STATUSES = {
-    "Implemented": 59,
-    "Partial": 72,
+    "Implemented": 75,
+    "Partial": 67,
     "Missing": 0,
     "External / unverifiable": 7,
 }
 EXPECTED_FAMILY_STATUSES = {
-    "PX": {"Implemented": 5, "Partial": 9, "Missing": 0, "External / unverifiable": 1},
-    "AG": {"Implemented": 11, "Partial": 14, "Missing": 0, "External / unverifiable": 1},
-    "CP": {"Implemented": 4, "Partial": 14, "Missing": 0, "External / unverifiable": 2},
+    "PX": {"Implemented": 7, "Partial": 8, "Missing": 0, "External / unverifiable": 1},
+    "AG": {"Implemented": 12, "Partial": 14, "Missing": 0, "External / unverifiable": 1},
+    "CP": {"Implemented": 10, "Partial": 13, "Missing": 0, "External / unverifiable": 2},
     "DUG": {"Implemented": 8, "Partial": 2, "Missing": 0, "External / unverifiable": 0},
-    "PA": {"Implemented": 7, "Partial": 13, "Missing": 0, "External / unverifiable": 1},
+    "PA": {"Implemented": 12, "Partial": 11, "Missing": 0, "External / unverifiable": 1},
     "TRC": {"Implemented": 16, "Partial": 8, "Missing": 0, "External / unverifiable": 1},
-    "TPM": {"Implemented": 8, "Partial": 12, "Missing": 0, "External / unverifiable": 1},
+    "TPM": {"Implemented": 10, "Partial": 11, "Missing": 0, "External / unverifiable": 1},
 }
 REQUIRED_NAMED_DELTAS = {
     "PX-15",
+    "PX-16",
     "AG-25",
     "AG-26",
+    "AG-27",
+    "CP-21",
+    "CP-22",
+    "CP-23",
+    "CP-24",
+    "CP-25",
     "PA-19",
     "PA-20",
     "PA-21",
+    "PA-22",
+    "PA-23",
+    "PA-24",
     "TRC-24",
     "TRC-25",
     "TPM-21",
+    "TPM-22",
+}
+REQUIRED_ROW_STATUSES = {
+    "PX-01": "Implemented",
+    "PX-02": "Partial",
+    "PX-10": "Partial",
+    "PX-15": "Implemented",
+    "PX-16": "Implemented",
+    "AG-20": "Partial",
+    "AG-27": "Implemented",
+    "CP-01": "Partial",
+    "CP-03": "Implemented",
+    "CP-04": "Partial",
+    "CP-06": "Partial",
+    "CP-13": "Partial",
+    "CP-21": "Implemented",
+    "CP-22": "Implemented",
+    "CP-23": "Implemented",
+    "CP-24": "Implemented",
+    "CP-25": "Implemented",
+    "CP-16": "Partial",
+    "CP-17": "Partial",
+    "CP-18": "Partial",
+    "CP-19": "Partial",
+    "PA-19": "Partial",
+    "PA-08": "Implemented",
+    "PA-21": "Implemented",
+    "PA-22": "Implemented",
+    "PA-23": "Implemented",
+    "PA-24": "Implemented",
+    "PA-04": "Partial",
+    "PA-05": "Partial",
+    "PA-06": "Partial",
+    "PA-11": "Implemented",
+    "PA-14": "Implemented",
+    "PA-15": "Partial",
+    "TRC-24": "Partial",
+    "TRC-25": "Implemented",
+    "TRC-16": "Implemented",
+    "TPM-21": "Partial",
+    "TPM-06": "Implemented",
+    "TPM-18": "Implemented",
+    "TPM-22": "Implemented",
 }
 REQUIRED_OFFICIAL_SOURCES = {
     "https://www.onetrust.com/products/",
@@ -60,11 +114,22 @@ REQUIRED_OFFICIAL_SOURCES = {
     "https://www.onetrust.com/solutions/privacy-automation/",
     "https://www.onetrust.com/solutions/tech-risk-and-compliance/",
     "https://www.onetrust.com/solutions/third-party-management/",
+    "https://developer.onetrust.com/onetrust/changelog/onetrust-20260210-released",
+    "https://developer.onetrust.com/onetrust/changelog/onetrust-20260310-released",
+    "https://developer.onetrust.com/onetrust/changelog/onetrust-20260610-released",
     "https://developer.onetrust.com/onetrust/changelog/onetrust-20260710-released",
+    "https://developer.onetrust.com/onetrust/changelog/onetrust-20260810-released",
     "https://developer.onetrust.com/onetrust/reference/createcommentusingpost.md",
     "https://developer.onetrust.com/onetrust/reference/getcommentsforassessmentusingget.md",
     "https://developer.onetrust.com/onetrust/reference/createdroprequestusingpost.md",
     "https://developer.onetrust.com/onetrust/reference/updatedropusingput.md",
+}
+REQUIRED_EVIDENCE_STAGES = {
+    "**Core**",
+    "**Mounted**",
+    "**Configured / ready**",
+    "**Live interoperable**",
+    "**Operated / accepted**",
 }
 
 _ROW_RE = re.compile(r"^\| (?P<identifier>(?:PX|AG|CP|DUG|PA|TRC|TPM)-\d{2}) \|")
@@ -152,6 +217,15 @@ def verify_matrix(path: Path) -> dict[str, object]:
     if missing_named_deltas:
         raise ValueError(f"named 2026 deltas disappeared: {missing_named_deltas}")
 
+    row_statuses = {row.identifier: row.status for row in rows}
+    required_status_drift = {
+        identifier: {"expected": expected, "actual": row_statuses.get(identifier)}
+        for identifier, expected in REQUIRED_ROW_STATUSES.items()
+        if row_statuses.get(identifier) != expected
+    }
+    if required_status_drift:
+        raise ValueError(f"required row status drift: {required_status_drift}")
+
     status_counts = Counter(row.status for row in rows)
     if dict(status_counts) != {key: value for key, value in EXPECTED_STATUSES.items() if value}:
         raise ValueError(
@@ -174,6 +248,12 @@ def verify_matrix(path: Path) -> dict[str, object]:
     if missing_sources:
         raise ValueError(f"official source set drift: missing={missing_sources}")
 
+    missing_evidence_stages = sorted(
+        stage for stage in REQUIRED_EVIDENCE_STAGES if stage not in text
+    )
+    if missing_evidence_stages:
+        raise ValueError(f"evidence-stage legend drift: missing={missing_evidence_stages}")
+
     return {
         "schema": "lightwork.onetrust-public-matrix-verification.v1",
         "matrix": str(path),
@@ -182,7 +262,9 @@ def verify_matrix(path: Path) -> dict[str, object]:
         "family_statuses": family_statuses,
         "statuses": EXPECTED_STATUSES,
         "named_delta_ids": sorted(REQUIRED_NAMED_DELTAS),
+        "required_row_statuses": REQUIRED_ROW_STATUSES,
         "official_sources": len(REQUIRED_OFFICIAL_SOURCES),
+        "evidence_stages": sorted(REQUIRED_EVIDENCE_STAGES),
         "result": "verified_structure_only",
         "parity_claimed": False,
     }

@@ -177,9 +177,12 @@
 
   async function request(path, options) {
     var response = await fetch(path, options || {});
-    var data = {};
-    try { data = await response.json(); } catch (e) {}
-    if (!response.ok) throw new Error(data.detail || ('Request failed (' + response.status + ')'));
+    var data;
+    try { data = await response.json(); }
+    catch (e) { throw new Error('Request failed: the server returned an invalid JSON response.'); }
+    if (!response.ok) {
+      throw new Error(data && typeof data.detail === 'string' ? data.detail : ('Request failed (' + response.status + ')'));
+    }
     return data;
   }
 

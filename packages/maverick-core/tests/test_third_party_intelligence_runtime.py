@@ -441,6 +441,84 @@ def test_retry_dead_letter_and_operator_replay(harness: Harness) -> None:
     assert harness.run().completed == 1
 
 
+def test_ambiguous_get_retries_but_definitive_protocol_failure_dead_letters(
+    harness: Harness,
+) -> None:
+    first_job = harness.enqueue(maximum_attempts=3)
+    harness.transport.error = providers.ThirdPartyProviderTransportError(
+        "provider_transport_ambiguous",
+        retryable=True,
+        ambiguous=True,
+    )
+    first = harness.run()
+    assert first.retry_pending == 1
+    assert first.outcomes[0].error_code == "provider_ambiguous"
+    assert harness.runtime.get_job(TENANT, first_job.job_id).state == "retry"
+
+    harness.clock.advance(1)
+    harness.transport.error = providers.ThirdPartyProviderProtocolError(
+        "provider response contract drifted"
+    )
+    second = harness.run()
+    assert second.dead_lettered == 1
+    assert second.outcomes[0].error_code == "provider_protocol"
+    assert harness.runtime.get_job(TENANT, first_job.job_id).state == "dead_letter"
+
+
+def test_revoked_deployment_credential_is_terminal_without_provider_io(
+    harness: Harness,
+) -> None:
+    job = harness.enqueue(maximum_attempts=5)
+
+    def revoked(*_args):
+        raise providers.ThirdPartyProviderCredentialError(
+            "credential_revoked",
+            revoked=True,
+        )
+
+    result = runtime.run_feed_batch(
+        harness.runtime,
+        harness.intelligence,
+        harness.factory,
+        revoked,
+        tenant_id=TENANT,
+        worker_id="feed-worker-1",
+        base_backoff_seconds=1,
+        maximum_backoff_seconds=1,
+    )
+    assert result.revoked == 1
+    assert result.outcomes[0].error_code == "credential_revoked"
+    assert harness.runtime.get_job(TENANT, job.job_id).state == "revoked"
+    assert harness.transport.calls == []
+
+
+def test_transient_deployment_secret_outage_retries_without_provider_io(
+    harness: Harness,
+) -> None:
+    job = harness.enqueue(maximum_attempts=3)
+
+    def unavailable(*_args):
+        raise providers.ThirdPartyProviderCredentialError(
+            "credential_resolution_failed",
+            retryable=True,
+        )
+
+    result = runtime.run_feed_batch(
+        harness.runtime,
+        harness.intelligence,
+        harness.factory,
+        unavailable,
+        tenant_id=TENANT,
+        worker_id="feed-worker-1",
+        base_backoff_seconds=1,
+        maximum_backoff_seconds=1,
+    )
+    assert result.retry_pending == 1
+    assert result.outcomes[0].error_code == "credential_unavailable"
+    assert harness.runtime.get_job(TENANT, job.job_id).state == "retry"
+    assert harness.transport.calls == []
+
+
 def test_leases_exclude_other_workers_and_expired_lease_recovers(harness: Harness) -> None:
     harness.enqueue()
     first = harness.runtime.claim_jobs(

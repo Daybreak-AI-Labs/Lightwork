@@ -3053,7 +3053,7 @@ def _identity_control_runtime(
     section: Mapping[str, Any],
     *required_controls: str,
 ):
-    """Resolve only an exact startup-injected, current-tenant control runtime."""
+    """Resolve an exact, current-tenant runtime through the production factory."""
 
     from . import identity_governance_runtime, identity_governance_scheduler
 
@@ -3073,11 +3073,37 @@ def _identity_control_runtime(
             status_code=403,
             detail="the requested identity-governance control is disabled",
         )
-    candidate = getattr(
-        request.app.state,
-        identity_governance_runtime.CONTROL_RUNTIME_APP_STATE,
-        None,
-    )
+    production_enabled = posture.get("production_composition_enabled") is True
+    candidate = None
+    if production_enabled:
+        factory = getattr(
+            request.app.state,
+            "identity_governance_control_runtime_factory",
+            None,
+        )
+        if not callable(factory):
+            raise HTTPException(
+                status_code=503,
+                detail="identity-governance production runtime factory is not attached",
+            )
+        try:
+            candidate = factory(_require_active_tenant(), request)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="identity-governance production runtime is unavailable",
+            ) from exc
+    else:
+        # Compatibility only for deployments that have not enabled the shipped
+        # production composition.  The production path never reuses one
+        # process-global, tenant-bound runtime.
+        candidate = getattr(
+            request.app.state,
+            identity_governance_runtime.CONTROL_RUNTIME_APP_STATE,
+            None,
+        )
     if not isinstance(
         candidate,
         identity_governance_runtime.IdentityGovernanceControlRuntime,
@@ -3180,6 +3206,40 @@ async def get_identity_governance_control_status(
     section = _identity_governance_control_status_section()
     posture = await _call(identity_governance_runtime.control_plane_status, section)
     posture["runtime_attachment_state"] = "unavailable"
+    if posture.get("production_composition_enabled") is True:
+        readiness_probe = getattr(
+            request.app.state,
+            "identity_governance_control_readiness_probe",
+            None,
+        )
+        if not callable(readiness_probe):
+            posture["runtime_attachment_state"] = "factory_unavailable"
+            return posture
+        try:
+            readiness = await _call(readiness_probe, _require_active_tenant())
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="identity-governance production readiness is unavailable",
+            ) from exc
+        if not isinstance(readiness, Mapping):
+            raise HTTPException(
+                status_code=503,
+                detail="identity-governance production readiness is invalid",
+            )
+        posture["runtime_attached"] = bool(
+            readiness.get("runtime_factory_installed") is True
+        )
+        posture["runtime_attachment_state"] = (
+            "factory_configured"
+            if readiness.get("configured") is True
+            else "factory_unready"
+        )
+        posture["production_readiness"] = dict(readiness)
+        posture["provider_writes"] = False
+        return posture
     candidate = getattr(
         request.app.state,
         identity_governance_runtime.CONTROL_RUNTIME_APP_STATE,
@@ -3319,11 +3379,19 @@ async def decide_identity_governance_conditional_access(
         expected_revision=body.expected_revision,
         idempotency_key=body.idempotency_key,
     )
+    decision_receipt = await _call(
+        runtime.require_conditional_access_decision_ledger().record,
+        decision,
+        observation,
+        mapping,
+        actor=_human_principal(request),
+    )
     return {
         "federation_observation": asdict(federation),
         "capability_mapping": asdict(mapping),
         "conditional_access_observation": asdict(observation),
         "decision": asdict(decision),
+        "decision_receipt": decision_receipt,
     }
 
 

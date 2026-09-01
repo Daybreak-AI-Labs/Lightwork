@@ -24,7 +24,6 @@ import hashlib
 import hmac
 import json
 import math
-import os
 import re
 import secrets
 import sqlite3
@@ -61,6 +60,7 @@ _MAX_BACKOFF_SECONDS = 7 * 24 * 3_600
 _MIN_RETENTION_SECONDS = 60
 _MAX_RETENTION_SECONDS = 10 * 365 * 24 * 3_600
 _MAX_PACKAGE_SECONDS = 90 * 24 * 3_600
+_DEFAULT_CLAIM_HISTORY_RETENTION_SECONDS = 24 * 3_600
 
 RIGHTS = frozenset(
     {
@@ -87,11 +87,14 @@ TASK_PHASES = frozenset(
 )
 CALLBACK_PHASES = frozenset(TASK_PHASES - {"redact"})
 DESTRUCTIVE_PHASES = frozenset({"delete"})
+MUTATING_PHASES = frozenset({"delete", "rectify", "restrict", "opt_out"})
 IDENTITY_STATUSES = frozenset(
     {"unverified", "pending", "verified", "rejected", "expired"}
 )
 EVIDENCE_STATUSES = frozenset({"complete", "not_found", "partial", "failed"})
-CALLBACK_STATES = frozenset({"pending", "leased", "acked", "dead_letter"})
+CALLBACK_STATES = frozenset(
+    {"pending", "leased", "acked", "ambiguous", "dead_letter"}
+)
 
 _RIGHT_PHASES = {
     "access": ("discover", "retrieve", "redact"),
@@ -180,7 +183,9 @@ def _runtime_principal() -> str | None:
 
 def _default_digest_key_resolver(tenant_id: str) -> bytes:
     del tenant_id
-    value = os.environ.get("MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY")
+    from .secret_provider import get_secret
+
+    value = get_secret("MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY")
     if value is None or len(value.encode("utf-8")) < 32:
         raise PrivacyRightsConfigError(
             "MAVERICK_PRIVACY_RIGHTS_DIGEST_KEY is absent or shorter than 32 bytes"
@@ -300,6 +305,10 @@ def _callback_id(task_id: str) -> str:
     return f"callback:{hashlib.sha256(task_id.encode()).hexdigest()[:40]}"
 
 
+def _callback_evidence_id(callback_id: str) -> str:
+    return f"evidence:{hashlib.sha256(callback_id.encode()).hexdigest()[:40]}"
+
+
 def _choice_sequence(
     value: object,
     label: str,
@@ -389,6 +398,10 @@ class SourceTask:
     created_at: float
     updated_at: float
     integrity_sha256: str
+    source_revision: int = 0
+    source_integrity_sha256: str | None = None
+    adapter_ref: str | None = None
+    credential_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -414,6 +427,21 @@ class CallbackItem:
     created_at: float
     updated_at: float
     integrity_sha256: str
+    ambiguous_operation_sha256: str | None = None
+    ambiguous_operation_ref: str | None = None
+    ambiguous_at: float | None = None
+    provider_operation_id: str | None = None
+    provider_operation_sha256: str | None = None
+    provider_operation_performed: bool = False
+    adapter_authority_sha256: str | None = None
+    source_revision: int | None = None
+    source_integrity_sha256: str | None = None
+    adapter_ref: str | None = None
+    credential_ref: str | None = None
+    provider_contract: str | None = None
+    target_ref: str | None = None
+    target_binding_sha256: str | None = None
+    dispatch_authorized_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -430,6 +458,17 @@ class SourceEvidenceReceipt:
     recorded_by: str
     created_at: float
     integrity_sha256: str
+    provider_operation_id: str | None = None
+    provider_operation_sha256: str | None = None
+    provider_operation_performed: bool = False
+    adapter_authority_sha256: str | None = None
+    source_revision: int | None = None
+    source_integrity_sha256: str | None = None
+    adapter_ref: str | None = None
+    credential_ref: str | None = None
+    provider_contract: str | None = None
+    target_binding_sha256: str | None = None
+    provider_retention_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -498,6 +537,9 @@ class PrivacyRightsOrchestrationStore:
         digest_key_resolver: Callable[[str], bytes] = _default_digest_key_resolver,
         clock: Callable[[], float] = time.time,
         token_factory: Callable[[], str] = lambda: f"lease:{secrets.token_urlsafe(32)}",
+        claim_history_retention_seconds: int = (
+            _DEFAULT_CLAIM_HISTORY_RETENTION_SECONDS
+        ),
     ) -> None:
         config_gate()
         self.path = Path(path)
@@ -505,6 +547,12 @@ class PrivacyRightsOrchestrationStore:
         self._digest_key_resolver = digest_key_resolver
         self._clock = clock
         self._token_factory = token_factory
+        self._claim_history_retention_seconds = _integer(
+            claim_history_retention_seconds,
+            "claim_history_retention_seconds",
+            60,
+            30 * 24 * 3_600,
+        )
         ensure_private_directory(self.path.parent)
         self._initialize()
 
@@ -841,17 +889,110 @@ class PrivacyRightsOrchestrationStore:
 
     @staticmethod
     def _task(payload: Mapping[str, Any], digest: str) -> SourceTask:
-        return SourceTask(**dict(payload), integrity_sha256=digest)
+        values = dict(payload)
+        values.setdefault("source_revision", 0)
+        values.setdefault("source_integrity_sha256", None)
+        values.setdefault("adapter_ref", None)
+        values.setdefault("credential_ref", None)
+        return SourceTask(**values, integrity_sha256=digest)
 
     @staticmethod
     def _callback(payload: Mapping[str, Any], digest: str) -> CallbackItem:
-        return CallbackItem(**dict(payload), integrity_sha256=digest)
+        values = dict(payload)
+        values.setdefault("ambiguous_operation_sha256", None)
+        values.setdefault("ambiguous_operation_ref", None)
+        values.setdefault("ambiguous_at", None)
+        values.setdefault("provider_operation_id", None)
+        values.setdefault("provider_operation_sha256", None)
+        values.setdefault("provider_operation_performed", False)
+        values.setdefault("adapter_authority_sha256", None)
+        values.setdefault("source_revision", None)
+        values.setdefault("source_integrity_sha256", None)
+        values.setdefault("adapter_ref", None)
+        values.setdefault("credential_ref", None)
+        values.setdefault("provider_contract", None)
+        values.setdefault("target_ref", None)
+        values.setdefault("target_binding_sha256", None)
+        values.setdefault("dispatch_authorized_at", None)
+        state = values.get("state")
+        if state not in CALLBACK_STATES:
+            raise PrivacyRightsIntegrityError("persisted callback state is invalid")
+        lease_values = (
+            values.get("lease_owner"),
+            values.get("lease_token"),
+            values.get("lease_until"),
+        )
+        acknowledgement_values = (
+            values.get("acknowledgement_sha256"),
+            values.get("acknowledgement_ref"),
+        )
+        ambiguous_values = (
+            values.get("ambiguous_operation_sha256"),
+            values.get("ambiguous_operation_ref"),
+            values.get("ambiguous_at"),
+        )
+        if state == "leased":
+            if any(item is None for item in lease_values):
+                raise PrivacyRightsIntegrityError("persisted callback lease is invalid")
+        elif any(item is not None for item in lease_values):
+            raise PrivacyRightsIntegrityError("persisted callback lease is invalid")
+        if state == "acked":
+            if any(item is None for item in acknowledgement_values):
+                raise PrivacyRightsIntegrityError(
+                    "persisted callback acknowledgement is invalid"
+                )
+        elif any(item is not None for item in acknowledgement_values):
+            raise PrivacyRightsIntegrityError(
+                "persisted callback acknowledgement is invalid"
+            )
+        if state == "ambiguous":
+            if any(item is None for item in ambiguous_values):
+                raise PrivacyRightsIntegrityError(
+                    "persisted callback ambiguity evidence is invalid"
+                )
+        elif any(item is not None for item in ambiguous_values):
+            raise PrivacyRightsIntegrityError(
+                "persisted callback ambiguity evidence is invalid"
+            )
+        return CallbackItem(**values, integrity_sha256=digest)
 
     @staticmethod
     def _evidence(
         payload: Mapping[str, Any], digest: str
     ) -> SourceEvidenceReceipt:
-        return SourceEvidenceReceipt(**dict(payload), integrity_sha256=digest)
+        values = dict(payload)
+        values.setdefault("provider_operation_id", None)
+        values.setdefault("provider_operation_sha256", None)
+        values.setdefault("provider_operation_performed", False)
+        values.setdefault("adapter_authority_sha256", None)
+        values.setdefault("source_revision", None)
+        values.setdefault("source_integrity_sha256", None)
+        values.setdefault("adapter_ref", None)
+        values.setdefault("credential_ref", None)
+        values.setdefault("provider_contract", None)
+        values.setdefault("target_binding_sha256", None)
+        values.setdefault("provider_retention_state", None)
+        return SourceEvidenceReceipt(**values, integrity_sha256=digest)
+
+    @staticmethod
+    def _execution_provenance(
+        callback: CallbackItem,
+        *,
+        provider_retention_state: str | None = None,
+    ) -> dict[str, object]:
+        return {
+            "provider_operation_id": callback.provider_operation_id,
+            "provider_operation_sha256": callback.provider_operation_sha256,
+            "provider_operation_performed": callback.provider_operation_performed,
+            "adapter_authority_sha256": callback.adapter_authority_sha256,
+            "source_revision": callback.source_revision,
+            "source_integrity_sha256": callback.source_integrity_sha256,
+            "adapter_ref": callback.adapter_ref,
+            "credential_ref": callback.credential_ref,
+            "provider_contract": callback.provider_contract,
+            "target_binding_sha256": callback.target_binding_sha256,
+            "provider_retention_state": provider_retention_state,
+        }
 
     @staticmethod
     def _manifest(
@@ -1147,6 +1288,74 @@ class PrivacyRightsOrchestrationStore:
         with self._connect() as connection:
             payload, digest_value = self._get_case_row(connection, tenant, case)
             return self._case(payload, digest_value)
+
+    def get_task(self, tenant_id: str, task_id: str) -> SourceTask:
+        """Return one tenant-bound source task for worker authority revalidation."""
+
+        tenant = _tenant(tenant_id)
+        task = _id(task_id, "task_id")
+        self._actor()
+        with self._connect() as connection:
+            payload, digest_value = self._get(
+                connection,
+                "rights_tasks",
+                tenant,
+                "task_id",
+                task,
+                "source task",
+            )
+            return self._task(payload, digest_value)
+
+    def get_callback(self, tenant_id: str, callback_id: str) -> CallbackItem:
+        """Return one tenant-bound callback without exposing another tenant."""
+
+        tenant = _tenant(tenant_id)
+        callback = _id(callback_id, "callback_id")
+        self._actor()
+        with self._connect() as connection:
+            payload, digest_value = self._get(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback,
+                "callback",
+            )
+            return self._callback(payload, digest_value)
+
+    def list_callbacks(
+        self,
+        tenant_id: str,
+        *,
+        state: str | None = None,
+        limit: int = 100,
+    ) -> tuple[CallbackItem, ...]:
+        """List a bounded tenant callback work queue for operator reconciliation."""
+
+        tenant = _tenant(tenant_id)
+        if state is not None and state not in CALLBACK_STATES:
+            raise PrivacyRightsValidationError("callback state is unsupported")
+        bounded_limit = _integer(limit, "limit", 1, 1_000)
+        self._actor()
+        with self._connect() as connection:
+            if state is None:
+                rows = connection.execute(
+                    "SELECT * FROM rights_callbacks WHERE tenant_id=? "
+                    "ORDER BY next_attempt_at ASC, callback_id ASC LIMIT ?",
+                    (tenant, bounded_limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM rights_callbacks WHERE tenant_id=? AND state=? "
+                    "ORDER BY next_attempt_at ASC, callback_id ASC LIMIT ?",
+                    (tenant, state, bounded_limit),
+                ).fetchall()
+            return tuple(
+                self._callback(
+                    self._payload(row, "callback"), row["integrity_sha256"]
+                )
+                for row in rows
+            )
 
     def _update_case_gate(
         self,
@@ -1456,6 +1665,10 @@ class PrivacyRightsOrchestrationStore:
                     "evidence_id": None,
                     "approved_by": None,
                     "planned_by": actor,
+                    "source_revision": current_source.revision,
+                    "source_integrity_sha256": current_source.integrity_sha256,
+                    "adapter_ref": current_source.adapter_ref,
+                    "credential_ref": current_source.credential_ref,
                     "revision": 1,
                     "created_at": now,
                     "updated_at": now,
@@ -1488,6 +1701,9 @@ class PrivacyRightsOrchestrationStore:
                         "last_error_code": None,
                         "acknowledgement_sha256": None,
                         "acknowledgement_ref": None,
+                        "ambiguous_operation_sha256": None,
+                        "ambiguous_operation_ref": None,
+                        "ambiguous_at": None,
                         "revision": 1,
                         "created_at": now,
                         "updated_at": now,
@@ -1665,6 +1881,24 @@ class PrivacyRightsOrchestrationStore:
         task = self._task(task_raw, task_digest)
         if task.state != "planned":
             return False
+        source_raw, source_digest = self._get(
+            connection,
+            "rights_sources",
+            tenant_id,
+            "source_id",
+            callback.source_id,
+            "source",
+        )
+        source = self._source(source_raw, source_digest)
+        if (
+            source.state != "active"
+            or task.source_revision != source.revision
+            or task.source_integrity_sha256 != source.integrity_sha256
+            or task.adapter_ref != source.adapter_ref
+            or task.credential_ref != source.credential_ref
+            or callback.phase not in source.capabilities
+        ):
+            return False
         if task.destructive:
             if (
                 task.approved_by is None
@@ -1694,6 +1928,7 @@ class PrivacyRightsOrchestrationStore:
         *,
         limit: int,
         lease_seconds: int,
+        source_ids: Sequence[str] | None = None,
         idempotency_key: str,
     ) -> tuple[CallbackItem, ...]:
         """Lease ready callbacks, including recovery of expired leases."""
@@ -1701,16 +1936,57 @@ class PrivacyRightsOrchestrationStore:
         tenant = _tenant(tenant_id)
         bounded_limit = _integer(limit, "limit", 1, 100)
         lease = _integer(lease_seconds, "lease_seconds", 1, _MAX_LEASE_SECONDS)
+        if isinstance(source_ids, (str, bytes)):
+            raise PrivacyRightsValidationError(
+                "source_ids must be an explicit sequence of source IDs"
+            )
+        owned_sources = (
+            None
+            if source_ids is None
+            else tuple(
+                sorted({_id(value, "source_id") for value in source_ids})
+            )
+        )
+        if owned_sources is not None and not owned_sources:
+            return ()
+        if owned_sources is not None and len(owned_sources) > _MAX_SOURCES:
+            raise PrivacyRightsValidationError("source_ids exceeds its bound")
         actor = self._actor()
         now = _timestamp(self._clock(), "current time")
         request = {
             "action": "claim_callbacks",
             "limit": bounded_limit,
             "lease_seconds": lease,
+            "source_ids": list(owned_sources) if owned_sources is not None else None,
             "actor_ref": actor,
         }
         with self._connect() as connection:
             self._begin(connection)
+            expired_batches: list[str] = []
+            for batch_row in connection.execute(
+                "SELECT * FROM rights_claim_batches WHERE tenant_id=?",
+                (tenant,),
+            ).fetchall():
+                batch = self._payload(batch_row, "claim batch")
+                created_at = batch.get("created_at")
+                if (
+                    isinstance(created_at, (int, float))
+                    and not isinstance(created_at, bool)
+                    and math.isfinite(float(created_at))
+                    and float(created_at)
+                    <= now - self._claim_history_retention_seconds
+                ):
+                    expired_batches.append(batch_row["batch_id"])
+            for batch_id in expired_batches:
+                connection.execute(
+                    "DELETE FROM rights_operations WHERE tenant_id=? "
+                    "AND result_kind='claim_batch' AND result_id=?",
+                    (tenant, batch_id),
+                )
+                connection.execute(
+                    "DELETE FROM rights_claim_batches WHERE tenant_id=? AND batch_id=?",
+                    (tenant, batch_id),
+                )
             request_sha, operation = self._operation(
                 connection, tenant, idempotency_key, request
             )
@@ -1727,17 +2003,65 @@ class PrivacyRightsOrchestrationStore:
                     operation["result_id"],
                     "claim batch",
                 )
-                return tuple(
-                    self._callback(dict(item["payload"]), item["integrity_sha256"])
-                    for item in batch_raw["callbacks"]
-                )
-            rows = connection.execute(
+                replayed: list[CallbackItem] = []
+                for item in batch_raw["callbacks"]:
+                    if not isinstance(item, Mapping):
+                        raise PrivacyRightsIntegrityError(
+                            "claim batch callback binding is invalid"
+                        )
+                    # Backward-compatible verification for pre-minimization rows.
+                    if "payload" in item:
+                        snapshot = self._callback(
+                            dict(item["payload"]), item["integrity_sha256"]
+                        )
+                        callback_id = snapshot.callback_id
+                        revision = snapshot.revision
+                        token_sha256 = (
+                            hashlib.sha256((snapshot.lease_token or "").encode()).hexdigest()
+                        )
+                    else:
+                        callback_id = _id(item.get("callback_id"), "callback_id")
+                        revision = _integer(
+                            item.get("revision"), "callback revision", 1, 1_000_000
+                        )
+                        token_sha256 = _digest(
+                            item.get("lease_token_sha256"), "lease_token_sha256"
+                        )
+                    current_raw, current_digest = self._get(
+                        connection,
+                        "rights_callbacks",
+                        tenant,
+                        "callback_id",
+                        callback_id,
+                        "callback",
+                    )
+                    current = self._callback(current_raw, current_digest)
+                    if (
+                        current.state == "leased"
+                        and current.revision == revision
+                        and current.lease_owner == actor
+                        and current.lease_token is not None
+                        and current.lease_until is not None
+                        and current.lease_until > now
+                        and hmac.compare_digest(
+                            hashlib.sha256(current.lease_token.encode()).hexdigest(),
+                            token_sha256,
+                        )
+                    ):
+                        replayed.append(current)
+                return tuple(replayed)
+            sql = (
                 "SELECT * FROM rights_callbacks WHERE tenant_id=? AND "
                 "((state='pending' AND next_attempt_at<=?) OR "
                 "(state='leased' AND lease_until<=?)) "
-                "ORDER BY next_attempt_at,callback_id LIMIT ?",
-                (tenant, now, now, min(1_000, bounded_limit * 10)),
-            ).fetchall()
+            )
+            parameters: list[object] = [tenant, now, now]
+            if owned_sources is not None:
+                sql += "AND source_id IN (" + ",".join("?" for _ in owned_sources) + ") "
+                parameters.extend(owned_sources)
+            sql += "ORDER BY next_attempt_at,callback_id LIMIT ?"
+            parameters.append(min(1_000, bounded_limit * 10))
+            rows = connection.execute(sql, tuple(parameters)).fetchall()
             claimed: list[CallbackItem] = []
             snapshots: list[dict[str, object]] = []
             for row in rows:
@@ -1777,7 +2101,11 @@ class PrivacyRightsOrchestrationStore:
                 callback = self._callback(payload, digest_value)
                 claimed.append(callback)
                 snapshots.append(
-                    {"payload": payload, "integrity_sha256": digest_value}
+                    {
+                        "callback_id": callback.callback_id,
+                        "revision": callback.revision,
+                        "lease_token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+                    }
                 )
                 self._audit(
                     connection,
@@ -1788,6 +2116,10 @@ class PrivacyRightsOrchestrationStore:
                     {"recovered": recovered, "lease_until": now + lease},
                     now,
                 )
+            if not claimed:
+                # An empty poll has no side effect and must not grow durable
+                # claim/operation history forever under unique scheduler run IDs.
+                return ()
             batch_id = _id(
                 "batch:" + hashlib.sha256(idempotency_key.encode()).hexdigest()[:32],
                 "batch_id",
@@ -1914,6 +2246,92 @@ class PrivacyRightsOrchestrationStore:
             )
             return self._callback(payload, digest_value)
 
+    def dead_letter_callback(
+        self,
+        tenant_id: str,
+        callback_id: str,
+        *,
+        lease_token: str,
+        error_code: str,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> CallbackItem:
+        """Permanently park a leased callback after a definitive provider refusal."""
+
+        tenant = _tenant(tenant_id)
+        callback_key = _id(callback_id, "callback_id")
+        token = _id(lease_token, "lease_token", _OP_RE)
+        if not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code):
+            raise PrivacyRightsValidationError("error_code is unsupported")
+        expected = _integer(expected_revision, "expected_revision", 1, 1_000_000)
+        actor = self._actor()
+        now = _timestamp(self._clock(), "current time")
+        request = {
+            "action": "dead_letter_callback",
+            "callback_id": callback_key,
+            "lease_token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+            "error_code": error_code,
+            "expected_revision": expected,
+            "actor_ref": actor,
+        }
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(
+                connection, tenant, idempotency_key, request
+            )
+            raw, stored_digest = self._get(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                "callback",
+            )
+            if operation is not None:
+                return self._callback(raw, stored_digest)
+            current = self._callback(raw, stored_digest)
+            self._assert_lease(current, actor, token, expected, now)
+            payload = dict(raw)
+            payload.update(
+                {
+                    "state": "dead_letter",
+                    "attempts": current.attempts + 1,
+                    "lease_owner": None,
+                    "lease_token": None,
+                    "lease_until": None,
+                    "last_error_code": error_code,
+                    "revision": current.revision + 1,
+                    "updated_at": now,
+                }
+            )
+            digest_value = self._write(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                payload,
+                index_updates={"state": "dead_letter", "lease_until": None},
+            )
+            self._record_operation(
+                connection,
+                tenant,
+                idempotency_key,
+                request_sha,
+                "callback",
+                callback_key,
+            )
+            self._audit(
+                connection,
+                tenant,
+                "callback_dead_lettered",
+                callback_key,
+                actor,
+                {"attempts": current.attempts + 1, "error_code": error_code},
+                now,
+            )
+            return self._callback(payload, digest_value)
+
     @staticmethod
     def _assert_lease(
         callback: CallbackItem,
@@ -1935,6 +2353,220 @@ class PrivacyRightsOrchestrationStore:
             or callback.lease_until <= now
         ):
             raise PrivacyRightsConflict("callback lease is absent, expired, or not owned")
+
+    def authorize_callback_dispatch(
+        self,
+        tenant_id: str,
+        callback_id: str,
+        *,
+        lease_token: str,
+        operation_id: str,
+        operation_sha256: str,
+        adapter_authority_sha256: str,
+        source_revision: int,
+        source_integrity_sha256: str,
+        adapter_ref: str,
+        credential_ref: str,
+        provider_contract: str,
+        provider_write: bool,
+        target_ref: str | None,
+        target_binding_sha256: str | None,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> CallbackItem:
+        """Atomically authorize provider I/O and reserve mutations once.
+
+        A provider mutation is moved out of the lease-recoverable state before
+        network I/O.  From that point it is reconciliation-only, including
+        after process death, lease expiry, or a caller retry with the same run
+        identifier.
+        """
+
+        tenant = _tenant(tenant_id)
+        callback_key = _id(callback_id, "callback_id")
+        token = _id(lease_token, "lease_token", _OP_RE)
+        provider_operation = _id(operation_id, "operation_id", _OP_RE)
+        operation_digest = _digest(operation_sha256, "operation_sha256")
+        adapter_authority = _digest(
+            adapter_authority_sha256, "adapter_authority_sha256"
+        )
+        expected_source_revision = _integer(
+            source_revision, "source_revision", 1, 1_000_000
+        )
+        expected_source_digest = _digest(
+            source_integrity_sha256, "source_integrity_sha256"
+        )
+        expected_adapter = _id(adapter_ref, "adapter_ref")
+        expected_credential = _credential_ref(credential_ref)
+        contract = _id(provider_contract, "provider_contract")
+        if type(provider_write) is not bool:
+            raise PrivacyRightsValidationError("provider_write must be boolean")
+        if (target_ref is None) != (target_binding_sha256 is None):
+            raise PrivacyRightsValidationError(
+                "target custody reference and binding must be supplied together"
+            )
+        selected_target_ref = (
+            None if target_ref is None else _id(target_ref, "target_ref", _OP_RE)
+        )
+        selected_target_digest = (
+            None
+            if target_binding_sha256 is None
+            else _digest(target_binding_sha256, "target_binding_sha256")
+        )
+        expected = _integer(expected_revision, "expected_revision", 1, 1_000_000)
+        actor = self._actor()
+        now = _timestamp(self._clock(), "current time")
+        request = {
+            "action": "authorize_callback_dispatch",
+            "callback_id": callback_key,
+            "lease_token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+            "operation_id": provider_operation,
+            "operation_sha256": operation_digest,
+            "adapter_authority_sha256": adapter_authority,
+            "source_revision": expected_source_revision,
+            "source_integrity_sha256": expected_source_digest,
+            "adapter_ref": expected_adapter,
+            "credential_ref": expected_credential,
+            "provider_contract": contract,
+            "provider_write": provider_write,
+            "target_ref": selected_target_ref,
+            "target_binding_sha256": selected_target_digest,
+            "expected_revision": expected,
+            "actor_ref": actor,
+        }
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(
+                connection, tenant, idempotency_key, request
+            )
+            callback_raw, callback_digest = self._get(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                "callback",
+            )
+            if operation is not None:
+                if provider_write:
+                    raise PrivacyRightsConflict(
+                        "provider mutation dispatch was already reserved"
+                    )
+                return self._callback(callback_raw, callback_digest)
+            current = self._callback(callback_raw, callback_digest)
+            self._assert_lease(current, actor, token, expected, now)
+            if not self._callback_ready(connection, tenant, current):
+                raise PrivacyRightsConflict(
+                    "callback authority changed and requires replanning or reapproval"
+                )
+            task_raw, task_digest = self._get(
+                connection,
+                "rights_tasks",
+                tenant,
+                "task_id",
+                current.task_id,
+                "source task",
+            )
+            task = self._task(task_raw, task_digest)
+            source_raw, source_digest = self._get(
+                connection,
+                "rights_sources",
+                tenant,
+                "source_id",
+                current.source_id,
+                "source",
+            )
+            source = self._source(source_raw, source_digest)
+            if (
+                source.revision != expected_source_revision
+                or source.integrity_sha256 != expected_source_digest
+                or source.adapter_ref != expected_adapter
+                or source.credential_ref != expected_credential
+                or task.source_revision != source.revision
+                or task.source_integrity_sha256 != source.integrity_sha256
+                or task.adapter_ref != source.adapter_ref
+                or task.credential_ref != source.credential_ref
+            ):
+                raise PrivacyRightsConflict(
+                    "source authority changed and requires replanning or reapproval"
+                )
+            if provider_write:
+                if current.phase not in MUTATING_PHASES:
+                    raise PrivacyRightsConflict(
+                        "provider write is not allowed for this callback phase"
+                    )
+                if selected_target_ref is None or selected_target_digest is None:
+                    raise PrivacyRightsConflict(
+                        "provider mutation requires immutable target custody"
+                    )
+            payload = dict(callback_raw)
+            payload.update(
+                {
+                    "provider_operation_id": provider_operation,
+                    "provider_operation_sha256": operation_digest,
+                    "provider_operation_performed": provider_write,
+                    "adapter_authority_sha256": adapter_authority,
+                    "source_revision": source.revision,
+                    "source_integrity_sha256": source.integrity_sha256,
+                    "adapter_ref": source.adapter_ref,
+                    "credential_ref": source.credential_ref,
+                    "provider_contract": contract,
+                    "target_ref": selected_target_ref,
+                    "target_binding_sha256": selected_target_digest,
+                    "dispatch_authorized_at": now,
+                    "revision": current.revision + 1,
+                    "updated_at": now,
+                }
+            )
+            index_updates: dict[str, object] = {}
+            if provider_write:
+                payload.update(
+                    {
+                        "state": "ambiguous",
+                        "lease_owner": None,
+                        "lease_token": None,
+                        "lease_until": None,
+                        "last_error_code": "provider_dispatch_reserved",
+                        "ambiguous_operation_sha256": operation_digest,
+                        "ambiguous_operation_ref": provider_operation,
+                        "ambiguous_at": now,
+                    }
+                )
+                index_updates.update({"state": "ambiguous", "lease_until": None})
+            digest_value = self._write(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                payload,
+                index_updates=index_updates,
+            )
+            self._record_operation(
+                connection,
+                tenant,
+                idempotency_key,
+                request_sha,
+                "callback_dispatch",
+                callback_key,
+            )
+            self._audit(
+                connection,
+                tenant,
+                "callback_dispatch_reserved" if provider_write else "callback_dispatch_authorized",
+                callback_key,
+                actor,
+                {
+                    "operation_sha256": operation_digest,
+                    "adapter_authority_sha256": adapter_authority,
+                    "source_revision": source.revision,
+                    "provider_contract": contract,
+                    "provider_write": provider_write,
+                    "target_binding_sha256": selected_target_digest,
+                },
+                now,
+            )
+            return self._callback(payload, digest_value)
 
     def ack_callback(
         self,
@@ -1992,6 +2624,9 @@ class PrivacyRightsOrchestrationStore:
                     "lease_until": None,
                     "acknowledgement_sha256": receipt,
                     "acknowledgement_ref": reference,
+                    "ambiguous_operation_sha256": None,
+                    "ambiguous_operation_ref": None,
+                    "ambiguous_at": None,
                     "revision": current.revision + 1,
                     "updated_at": now,
                 }
@@ -2020,6 +2655,583 @@ class PrivacyRightsOrchestrationStore:
                 callback_key,
                 actor,
                 {"acknowledgement_sha256": receipt},
+                now,
+            )
+            return self._callback(payload, digest_value)
+
+    def complete_callback(
+        self,
+        tenant_id: str,
+        callback_id: str,
+        *,
+        lease_token: str,
+        acknowledgement_sha256: str,
+        acknowledgement_ref: str,
+        evidence_status: str,
+        provider_evidence_sha256: str,
+        record_count: int,
+        opaque_ref: str,
+        provider_retention_state: str | None = None,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> tuple[CallbackItem, SourceEvidenceReceipt]:
+        """Atomically acknowledge provider work and complete its source task."""
+
+        tenant = _tenant(tenant_id)
+        callback_key = _id(callback_id, "callback_id")
+        token = _id(lease_token, "lease_token", _OP_RE)
+        acknowledgement_digest = _digest(
+            acknowledgement_sha256, "acknowledgement_sha256"
+        )
+        acknowledgement_reference = _id(
+            acknowledgement_ref, "acknowledgement_ref"
+        )
+        if evidence_status not in {"complete", "not_found"}:
+            raise PrivacyRightsValidationError(
+                "completed provider evidence must be complete or not_found"
+            )
+        evidence_digest = _digest(
+            provider_evidence_sha256, "provider_evidence_sha256"
+        )
+        count = _integer(record_count, "record_count", 0, 1_000_000_000)
+        reference = _id(opaque_ref, "opaque_ref")
+        if provider_retention_state not in {
+            None,
+            "active",
+            "already_absent",
+            "unknown",
+        }:
+            raise PrivacyRightsValidationError(
+                "provider retention state is unsupported"
+            )
+        expected = _integer(expected_revision, "expected_revision", 1, 1_000_000)
+        actor = self._actor()
+        now = _timestamp(self._clock(), "current time")
+        evidence_id = _callback_evidence_id(callback_key)
+        request = {
+            "action": "complete_callback",
+            "callback_id": callback_key,
+            "lease_token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+            "acknowledgement_sha256": acknowledgement_digest,
+            "acknowledgement_ref": acknowledgement_reference,
+            "evidence_status": evidence_status,
+            "provider_evidence_sha256": evidence_digest,
+            "record_count": count,
+            "opaque_ref": reference,
+            "provider_retention_state": provider_retention_state,
+            "expected_revision": expected,
+            "actor_ref": actor,
+        }
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(
+                connection, tenant, idempotency_key, request
+            )
+            callback_raw, callback_digest = self._get(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                "callback",
+            )
+            if operation is not None:
+                evidence_raw, stored_evidence_digest = self._get(
+                    connection,
+                    "rights_evidence",
+                    tenant,
+                    "evidence_id",
+                    evidence_id,
+                    "source evidence",
+                )
+                return (
+                    self._callback(callback_raw, callback_digest),
+                    self._evidence(evidence_raw, stored_evidence_digest),
+                )
+            current = self._callback(callback_raw, callback_digest)
+            self._assert_lease(current, actor, token, expected, now)
+            task_raw, task_digest = self._get(
+                connection,
+                "rights_tasks",
+                tenant,
+                "task_id",
+                current.task_id,
+                "source task",
+            )
+            task = self._task(task_raw, task_digest)
+            if task.state != "planned" or task.evidence_id is not None:
+                raise PrivacyRightsConflict("source task is not awaiting provider evidence")
+            callback_payload = dict(callback_raw)
+            callback_payload.update(
+                {
+                    "state": "acked",
+                    "lease_owner": None,
+                    "lease_token": None,
+                    "lease_until": None,
+                    "last_error_code": None,
+                    "acknowledgement_sha256": acknowledgement_digest,
+                    "acknowledgement_ref": acknowledgement_reference,
+                    "ambiguous_operation_sha256": None,
+                    "ambiguous_operation_ref": None,
+                    "ambiguous_at": None,
+                    "revision": current.revision + 1,
+                    "updated_at": now,
+                }
+            )
+            updated_callback_digest = self._write(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                callback_payload,
+                index_updates={"state": "acked", "lease_until": None},
+            )
+            evidence_payload = {
+                "tenant_id": tenant,
+                "evidence_id": evidence_id,
+                "case_id": current.case_id,
+                "source_id": current.source_id,
+                "phase": current.phase,
+                "status": evidence_status,
+                "provider_evidence_sha256": evidence_digest,
+                "record_count": count,
+                "opaque_ref": reference,
+                "recorded_by": actor,
+                "created_at": now,
+                **self._execution_provenance(
+                    current,
+                    provider_retention_state=provider_retention_state,
+                ),
+            }
+            stored_evidence_digest = self._insert(
+                connection,
+                "rights_evidence",
+                ("tenant_id", "evidence_id", "case_id", "source_id", "phase"),
+                (
+                    tenant,
+                    evidence_id,
+                    current.case_id,
+                    current.source_id,
+                    current.phase,
+                ),
+                evidence_payload,
+            )
+            task_payload = dict(task_raw)
+            task_payload.update(
+                {
+                    "evidence_id": evidence_id,
+                    "state": "complete",
+                    "revision": task.revision + 1,
+                    "updated_at": now,
+                }
+            )
+            self._write(
+                connection,
+                "rights_tasks",
+                tenant,
+                "task_id",
+                task.task_id,
+                task_payload,
+                index_updates={"state": "complete"},
+            )
+            self._record_operation(
+                connection,
+                tenant,
+                idempotency_key,
+                request_sha,
+                "callback_completion",
+                callback_key,
+            )
+            self._audit(
+                connection,
+                tenant,
+                "callback_completed_with_evidence",
+                callback_key,
+                actor,
+                {
+                    "case_id": current.case_id,
+                    "source_id": current.source_id,
+                    "phase": current.phase,
+                    "status": evidence_status,
+                    "record_count": count,
+                },
+                now,
+            )
+            return (
+                self._callback(callback_payload, updated_callback_digest),
+                self._evidence(evidence_payload, stored_evidence_digest),
+            )
+
+    def mark_callback_ambiguous(
+        self,
+        tenant_id: str,
+        callback_id: str,
+        *,
+        lease_token: str,
+        operation_sha256: str,
+        operation_ref: str,
+        error_code: str,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> CallbackItem:
+        """Park an uncertain provider mutation until an exact reconciliation probe.
+
+        Ambiguous callbacks are excluded from lease recovery so a timeout cannot
+        silently repeat a destructive provider operation.
+        """
+
+        tenant = _tenant(tenant_id)
+        callback_key = _id(callback_id, "callback_id")
+        token = _id(lease_token, "lease_token", _OP_RE)
+        operation_digest = _digest(operation_sha256, "operation_sha256")
+        reference = _id(operation_ref, "operation_ref")
+        if not isinstance(error_code, str) or not _ERROR_RE.fullmatch(error_code):
+            raise PrivacyRightsValidationError("error_code is unsupported")
+        expected = _integer(expected_revision, "expected_revision", 1, 1_000_000)
+        actor = self._actor()
+        now = _timestamp(self._clock(), "current time")
+        request = {
+            "action": "mark_callback_ambiguous",
+            "callback_id": callback_key,
+            "lease_token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+            "operation_sha256": operation_digest,
+            "operation_ref": reference,
+            "error_code": error_code,
+            "expected_revision": expected,
+            "actor_ref": actor,
+        }
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(
+                connection, tenant, idempotency_key, request
+            )
+            raw, stored_digest = self._get(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                "callback",
+            )
+            if operation is not None:
+                return self._callback(raw, stored_digest)
+            current = self._callback(raw, stored_digest)
+            self._assert_lease(current, actor, token, expected, now)
+            payload = dict(raw)
+            payload.update(
+                {
+                    "state": "ambiguous",
+                    "lease_owner": None,
+                    "lease_token": None,
+                    "lease_until": None,
+                    "last_error_code": error_code,
+                    "ambiguous_operation_sha256": operation_digest,
+                    "ambiguous_operation_ref": reference,
+                    "ambiguous_at": now,
+                    "revision": current.revision + 1,
+                    "updated_at": now,
+                }
+            )
+            digest_value = self._write(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                payload,
+                index_updates={"state": "ambiguous", "lease_until": None},
+            )
+            self._record_operation(
+                connection,
+                tenant,
+                idempotency_key,
+                request_sha,
+                "callback",
+                callback_key,
+            )
+            self._audit(
+                connection,
+                tenant,
+                "callback_outcome_ambiguous",
+                callback_key,
+                actor,
+                {
+                    "operation_sha256": operation_digest,
+                    "error_code": error_code,
+                },
+                now,
+            )
+            return self._callback(payload, digest_value)
+
+    def reconcile_ambiguous_callback(
+        self,
+        tenant_id: str,
+        callback_id: str,
+        *,
+        disposition: str,
+        provider_evidence_sha256: str,
+        provider_evidence_ref: str,
+        evidence_status: str = "complete",
+        record_count: int = 0,
+        opaque_ref: str | None = None,
+        provider_retention_state: str = "unknown",
+        retry_delay_seconds: int,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> CallbackItem:
+        """Resolve an ambiguous callback without optimistic mutation replay."""
+
+        tenant = _tenant(tenant_id)
+        callback_key = _id(callback_id, "callback_id")
+        if disposition not in {"applied", "no_change", "absent", "unknown"}:
+            raise PrivacyRightsValidationError("reconciliation disposition is unsupported")
+        if provider_retention_state not in {
+            "active",
+            "soft_deleted",
+            "purged",
+            "hard_deleted",
+            "already_absent",
+            "retention_unknown",
+            "unknown",
+        }:
+            raise PrivacyRightsValidationError(
+                "provider retention state is unsupported"
+            )
+        evidence_digest = _digest(
+            provider_evidence_sha256, "provider_evidence_sha256"
+        )
+        evidence_ref = _id(provider_evidence_ref, "provider_evidence_ref")
+        if evidence_status not in {"complete", "not_found"}:
+            raise PrivacyRightsValidationError(
+                "reconciled provider evidence must be complete or not_found"
+            )
+        count = _integer(record_count, "record_count", 0, 1_000_000_000)
+        reference = _id(
+            opaque_ref if opaque_ref is not None else evidence_ref,
+            "opaque_ref",
+        )
+        delay = _integer(
+            retry_delay_seconds,
+            "retry_delay_seconds",
+            0,
+            _MAX_BACKOFF_SECONDS,
+        )
+        expected = _integer(expected_revision, "expected_revision", 1, 1_000_000)
+        actor = self._actor()
+        now = _timestamp(self._clock(), "current time")
+        request = {
+            "action": "reconcile_ambiguous_callback",
+            "callback_id": callback_key,
+            "disposition": disposition,
+            "provider_evidence_sha256": evidence_digest,
+            "provider_evidence_ref": evidence_ref,
+            "evidence_status": evidence_status,
+            "record_count": count,
+            "opaque_ref": reference,
+            "provider_retention_state": provider_retention_state,
+            "retry_delay_seconds": delay,
+            "expected_revision": expected,
+            "actor_ref": actor,
+        }
+        with self._connect() as connection:
+            self._begin(connection)
+            request_sha, operation = self._operation(
+                connection, tenant, idempotency_key, request
+            )
+            raw, stored_digest = self._get(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                "callback",
+            )
+            if operation is not None:
+                return self._callback(raw, stored_digest)
+            current = self._callback(raw, stored_digest)
+            if current.revision != expected:
+                raise PrivacyRightsConflict(
+                    f"callback revision CAS failed: expected {expected}, "
+                    f"found {current.revision}"
+                )
+            if current.state != "ambiguous":
+                raise PrivacyRightsConflict("only ambiguous callbacks can be reconciled")
+            if (
+                current.phase == "delete"
+                and disposition == "applied"
+                and provider_retention_state not in {"purged", "hard_deleted"}
+            ):
+                raise PrivacyRightsConflict(
+                    "active-record absence is not provider erasure proof"
+                )
+            task_raw: dict[str, object] | None = None
+            task: SourceTask | None = None
+            evidence_id: str | None = None
+            if disposition in {"applied", "no_change"}:
+                task_raw, task_digest = self._get(
+                    connection,
+                    "rights_tasks",
+                    tenant,
+                    "task_id",
+                    current.task_id,
+                    "source task",
+                )
+                task = self._task(task_raw, task_digest)
+                if task.state != "planned" or task.evidence_id is not None:
+                    raise PrivacyRightsConflict(
+                        "source task is not awaiting reconciled provider evidence"
+                    )
+                evidence_id = _callback_evidence_id(callback_key)
+            payload = dict(raw)
+            if disposition in {"applied", "no_change"}:
+                state = "acked"
+                payload.update(
+                    {
+                        "acknowledgement_sha256": evidence_digest,
+                        "acknowledgement_ref": evidence_ref,
+                        "next_attempt_at": now,
+                        "last_error_code": None,
+                    }
+                )
+            elif disposition == "absent":
+                state = (
+                    "ambiguous"
+                    if current.phase in MUTATING_PHASES
+                    else "pending"
+                )
+                payload.update(
+                    {
+                        "acknowledgement_sha256": None,
+                        "acknowledgement_ref": None,
+                        "next_attempt_at": now + delay,
+                        "last_error_code": "provider_target_still_active",
+                    }
+                )
+            else:
+                state = "ambiguous"
+                payload.update(
+                    {
+                        "next_attempt_at": now + delay,
+                        "last_error_code": (
+                            "provider_soft_delete_retained"
+                            if provider_retention_state == "soft_deleted"
+                            else "ambiguous_outcome"
+                        ),
+                    }
+                )
+                if current.phase not in MUTATING_PHASES:
+                    payload.update(
+                        {
+                            "ambiguous_operation_sha256": evidence_digest,
+                            "ambiguous_operation_ref": evidence_ref,
+                        }
+                    )
+            if state != "ambiguous":
+                payload.update(
+                    {
+                        "ambiguous_operation_sha256": None,
+                        "ambiguous_operation_ref": None,
+                        "ambiguous_at": None,
+                    }
+                )
+            payload.update(
+                {
+                    "state": state,
+                    "revision": current.revision + 1,
+                    "updated_at": now,
+                }
+            )
+            digest_value = self._write(
+                connection,
+                "rights_callbacks",
+                tenant,
+                "callback_id",
+                callback_key,
+                payload,
+                index_updates={
+                    "state": state,
+                    "next_attempt_at": payload["next_attempt_at"],
+                    "lease_until": None,
+                },
+            )
+            if disposition in {"applied", "no_change"}:
+                assert task_raw is not None
+                assert task is not None
+                assert evidence_id is not None
+                evidence_payload = {
+                    "tenant_id": tenant,
+                    "evidence_id": evidence_id,
+                    "case_id": current.case_id,
+                    "source_id": current.source_id,
+                    "phase": current.phase,
+                    "status": evidence_status,
+                    "provider_evidence_sha256": evidence_digest,
+                    "record_count": count,
+                    "opaque_ref": reference,
+                    "recorded_by": actor,
+                    "created_at": now,
+                    **self._execution_provenance(
+                        current,
+                        provider_retention_state=provider_retention_state,
+                    ),
+                }
+                self._insert(
+                    connection,
+                    "rights_evidence",
+                    ("tenant_id", "evidence_id", "case_id", "source_id", "phase"),
+                    (
+                        tenant,
+                        evidence_id,
+                        current.case_id,
+                        current.source_id,
+                        current.phase,
+                    ),
+                    evidence_payload,
+                )
+                task_payload = dict(task_raw)
+                task_payload.update(
+                    {
+                        "evidence_id": evidence_id,
+                        "state": "complete",
+                        "revision": task.revision + 1,
+                        "updated_at": now,
+                    }
+                )
+                self._write(
+                    connection,
+                    "rights_tasks",
+                    tenant,
+                    "task_id",
+                    task.task_id,
+                    task_payload,
+                    index_updates={"state": "complete"},
+                )
+            self._record_operation(
+                connection,
+                tenant,
+                idempotency_key,
+                request_sha,
+                "callback",
+                callback_key,
+            )
+            self._audit(
+                connection,
+                tenant,
+                "callback_ambiguity_reconciled",
+                callback_key,
+                actor,
+                {
+                    "disposition": disposition,
+                    "state": state,
+                    "evidence_id": evidence_id,
+                    "evidence_status": (
+                        evidence_status
+                        if disposition in {"applied", "no_change"}
+                        else None
+                    ),
+                    "provider_retention_state": provider_retention_state,
+                },
                 now,
             )
             return self._callback(payload, digest_value)
@@ -2832,15 +4044,19 @@ class PrivacyRightsOrchestrationStore:
                 "ORDER BY evidence_id",
                 (tenant, case),
             ).fetchall()
+            evidence_payloads = [
+                self._payload(row, "source evidence") for row in evidence_rows
+            ]
             body = {
                 "case": dict(case_raw),
                 "sources": [self._payload(row, "source") for row in source_rows],
                 "tasks": [self._payload(row, "source task") for row in task_rows],
-                "evidence": [
-                    self._payload(row, "source evidence") for row in evidence_rows
-                ],
+                "evidence": evidence_payloads,
                 "limitations": {
-                    "provider_operations_performed": False,
+                    "provider_operations_performed": any(
+                        item.get("provider_operation_performed") is True
+                        for item in evidence_payloads
+                    ),
                     "response_delivery_performed": False,
                     "estate_completeness_claimed": False,
                     "live_provider_acceptance_verified": False,

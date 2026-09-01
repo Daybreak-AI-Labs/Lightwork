@@ -47,6 +47,9 @@ def test_page_exposes_honest_one_time_operator_workbench(page_client) -> None:
     assert "stores only its digest and cannot replay it" in page
     assert "never accepts a tenant, actor, consumer subject" in page
     assert "no consumer redeem" in page
+    assert "Production composition gates" in page
+    assert "independent operator-to-consumer identity mapping" in page
+    assert "never used as consumer identity proof" in page
     assert "/api/v1/privacy/rights-consumer-delivery" in page
     for operation in (
         "delivery-mint",
@@ -124,7 +127,9 @@ def test_dashboard_mounts_page_api_visibility_and_privacy_link(
         Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "privacy.html"
     ).read_text(encoding="utf-8")
     assert 'href="/privacy/rights-consumer-delivery"' in privacy
-    base = (
-        Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates" / "base.html"
-    ).read_text(encoding="utf-8")
-    assert '"/privacy/rights-consumer-delivery"' in base
+    from maverick_dashboard.copilot_context import context_for_page
+
+    assert (
+        context_for_page("/privacy/rights-consumer-delivery").path
+        == "/privacy/rights-consumer-delivery"
+    )

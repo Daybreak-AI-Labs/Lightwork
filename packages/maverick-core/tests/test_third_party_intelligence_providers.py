@@ -94,8 +94,10 @@ def test_named_provider_factory_is_closed_fixed_host_get_only() -> None:
     assert providers.available_provider_concepts() == (
         "generic_approved",
         "hacknotice",
+        "iss_corporate_solutions",
         "riskrecon",
         "securityscorecard",
+        "supplywisdom",
     )
     transport = Transport()
     adapter = factory(transport).create(
@@ -207,6 +209,18 @@ def test_factory_rejects_disabled_unknown_or_provenance_host_drift() -> None:
             "lightwork.hacknotice-observation-page.v1",
         ),
         (
+            "supplywisdom",
+            "licensed-supplywisdom.customer.example",
+            "/v1/third-party-observations",
+            "lightwork.supplywisdom-observation-page.v1",
+        ),
+        (
+            "iss_corporate_solutions",
+            "licensed-iss.customer.example",
+            "/v1/third-party-observations",
+            "lightwork.iss-corporate-solutions-observation-page.v1",
+        ),
+        (
             "generic_approved",
             "intelligence.customer.example",
             "/v1/third-party-observations",
@@ -230,6 +244,11 @@ def test_every_provider_concept_has_a_fixed_get_contract(
         transport=transport,
         enabled_providers=[provider],
         generic_approved_host=(host if provider == "generic_approved" else None),
+        named_provider_hosts=(
+            {provider: host}
+            if provider in {"supplywisdom", "iss_corporate_solutions"}
+            else None
+        ),
     )
     adapter = provider_factory.create(provider, f"https://{host}/licensed-feed")
     result = adapter.collect(
@@ -239,6 +258,35 @@ def test_every_provider_concept_has_a_fixed_get_contract(
     assert result.provider == provider
     assert transport.calls[0]["host"] == host
     assert transport.calls[0]["path"] == path
+
+
+def test_named_vendor_gateway_authorities_require_exact_explicit_enrollment() -> None:
+    transport = Transport()
+    with pytest.raises(providers.ThirdPartyProviderConfigError, match="enrolled host"):
+        providers.ThirdPartyProviderFactory(
+            transport=transport,
+            enabled_providers=["supplywisdom"],
+        )
+    with pytest.raises(providers.ThirdPartyProviderConfigError, match="disabled"):
+        providers.ThirdPartyProviderFactory(
+            transport=transport,
+            enabled_providers=["riskrecon"],
+            named_provider_hosts={
+                "supplywisdom": "licensed-supplywisdom.customer.example"
+            },
+        )
+    factory_with_host = providers.ThirdPartyProviderFactory(
+        transport=transport,
+        enabled_providers=["supplywisdom"],
+        named_provider_hosts={
+            "supplywisdom": "licensed-supplywisdom.customer.example"
+        },
+    )
+    with pytest.raises(providers.ThirdPartyProviderConfigError, match="authority"):
+        factory_with_host.create(
+            "supplywisdom",
+            "https://licensed-supplywisdom.customer.example:8443/feed",
+        )
 
 
 def test_bounded_pagination_is_complete_and_deterministic() -> None:
