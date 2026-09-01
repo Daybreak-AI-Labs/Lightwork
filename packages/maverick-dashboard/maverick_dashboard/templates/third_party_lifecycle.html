@@ -24,13 +24,12 @@
   and requeue change local state; they do not contact a vendor or provider.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not third_party_lifecycle_enabled %}
-<section class="panel">
-  <h2>Third-party lifecycle disabled</h2>
-  <p>This surface fails closed until both
-    <code>[third_party_management] enable = true</code> and
-    <code>[third_party_management.lifecycle] enable = true</code> are explicit.</p>
-</section>
+{{ module_gate('third_party_management.lifecycle', 'Third-party lifecycle',
+               detail='Versioned conditional assessments, lifecycle decisions,
+                       and governed offboarding stay off until your vendor-risk
+                       owner approves this control plane.') }}
 {% else %}
 <p><button class="btn" id="tpl-load-status" type="button">Load honest status</button></p>
 <div class="tpl-grid">

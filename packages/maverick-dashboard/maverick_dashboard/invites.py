@@ -153,7 +153,7 @@ def _decode_json(raw: str) -> object:
 
 
 def _validate_record(invite_id: str, rec: object) -> dict:
-    from .rbac import ROLES
+    from .rbac import is_known_role
 
     if not invite_id or invite_id != invite_id.strip() or len(invite_id) > 128:
         raise InviteStoreError("invite store corrupt: invalid invite id")
@@ -170,7 +170,7 @@ def _validate_record(invite_id: str, rec: object) -> dict:
         or "@" not in email
     ):
         raise InviteStoreError(f"invite store corrupt: invalid email for {invite_id!r}")
-    if role not in ROLES:
+    if not is_known_role(role):
         raise InviteStoreError(f"invite store corrupt: invalid role for {invite_id!r}")
     if (
         not isinstance(token_hash, str)
@@ -227,7 +227,7 @@ def create_invite(email: str, role: str, *, created_by: str,
     email = (email or "").strip().lower()
     if not email or "@" not in email or any(c.isspace() for c in email):
         raise ValueError("a valid email address is required")
-    if role not in rbac.ROLES:
+    if not rbac.is_known_role(role):
         raise ValueError("unknown role")
     try:
         ttl = float(ttl_hours)

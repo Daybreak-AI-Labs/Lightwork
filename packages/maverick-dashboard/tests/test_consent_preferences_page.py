@@ -37,15 +37,19 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
     assert response.status_code == 200
     page = response.text
     assert "Consent &amp; Preferences" in page
-    assert "Module disabled." in page
-    assert "[consent_preferences] enable = true" in page
+    # Default-off is explicit, and the gate is switchable IN-APP: the shared
+    # module-gate banner with a Turn on control, no config keys in the UI.
+    assert 'data-module-gate="consent_preferences"' in page
+    assert "Consent preferences is turned off." in page
+    assert "[consent_preferences] enable = true" not in page
     assert "Consumer privacy control plane" in page
     assert "cp-policy-form" in page
     assert "cp-preference-form" in page
     assert "cp-decision-form" in page
     assert "cp-tracker-form" in page
     assert "cp-analytics-form" in page
-    assert "[consent_preferences.analytics] enable = true" in page
+    assert 'data-module-gate="consent_preferences.analytics"' in page
+    assert "[consent_preferences.analytics] enable = true" not in page
     assert "small cohorts are hidden" in page
     assert "cp-identity-form" in page
     assert "Link, unlink, relink &amp; account transition evidence" in page

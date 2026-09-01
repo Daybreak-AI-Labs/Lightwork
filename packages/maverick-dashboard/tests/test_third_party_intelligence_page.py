@@ -128,8 +128,8 @@ def test_page_is_fail_closed_and_uses_no_unsafe_dom_or_secret_inputs(
         params={"enabled": False},
     )
     assert response.status_code == 200
-    assert "Third-party intelligence disabled" in response.text
-    assert "third_party_management.intelligence" in response.text
+    assert 'data-module-gate="third_party_management.intelligence"' in response.text
+    assert "[third_party_management.intelligence] enable = true" not in response.text
     assert "fails closed" in response.text
 
     template = (

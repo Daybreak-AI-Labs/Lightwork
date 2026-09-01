@@ -41,13 +41,12 @@
     questionnaire, critical-event and remediation review.</p></section>
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not governance_agents_enabled %}
-<section class="panel">
-  <h2>Governance agents disabled</h2>
-  <p>This surface fails closed until
-    <code>[governance_agents] enable = true</code> is explicit and the server
-    composes independent policy, evidence, adapter and dispatch authorities.</p>
-</section>
+{{ module_gate('governance_agents', 'Governance agents',
+               detail='This surface stays fail-closed until it is on and the
+                       server composes independent policy, evidence, adapter,
+                       and dispatch authorities.') }}
 {% else %}
 <p><button class="btn" id="ga-load-status" type="button">Load composition status</button></p>
 <p id="ga-readiness-note" role="status">Operation controls stay disabled until

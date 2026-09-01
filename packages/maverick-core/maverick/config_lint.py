@@ -94,6 +94,11 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "ssh_args",
         "host_key_checking",
     },
+    # Per-tool rate limits (safety/rate_limiter.py): keys are tool names
+    # ("web_search", "mcp_*", ...), values "N/window" specs -- user-chosen
+    # names, so any key is allowed. The wizard writes this section by default;
+    # without it here every wizard-written config warned "unknown section".
+    "rate_limits": None,
     "features": {"skills", "world_model", "streaming"},
     "capabilities": {
         "computer_use",
@@ -108,6 +113,10 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "enforce",
         "per_call_tokens",
         "deferred_tools",
+        # The wizard's robotics opt-in; read back by agent.py (enable_ros) and
+        # config.py. Missing here, every wizard-written config that answered
+        # the ROS question warned "unknown key" on its own output.
+        "ros",
     },
     # Tamper-evident audit log. The runtime reads [audit] sign (audit/writer.py)
     # and migrate.py already lists it; config-lint flagged the whole section as
@@ -125,7 +134,13 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_snapshots",
     },
     "durable": {"enabled", "keep_last"},
-    "persona": {"name", "style", "addendum"},
+    # user_name: the operator's name the wizard collects for greetings and
+    # writes under [persona] -- lint must never warn on the wizard's own output.
+    "persona": {"name", "style", "addendum", "user_name"},
+    # Polled event triggers ("when X appears, run this workflow"), the wizard's
+    # opt-in read back by automation_events.py. Absent here, a wizard-written
+    # config warned "unknown section" on a section the product itself wrote.
+    "event_triggers": {"enable"},
     # The dashboard reads more than the auth token: theme/density/allow_extension
     # (app.py) and a [dashboard.themes] subtable (themes.py). Listing only
     # "token" made config-lint warn "unknown key" on documented operator
@@ -148,6 +163,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "default_suites",
         "group_roles",
         "group_suites",
+        "active_tenant",
     },
     "analytics": {"mcp_client_language"},
     # Work discovery is a high-trust client-controlled sensor.  Keep this
@@ -596,6 +612,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "enforce",
         "per_call_tokens",
         "deferred_tools",
+        "ros",
     },
     "audit": {"sign"},
     "sandbox": {

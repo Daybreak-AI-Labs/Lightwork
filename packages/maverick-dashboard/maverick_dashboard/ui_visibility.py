@@ -332,7 +332,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy",
         "label": "Privacy",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -340,7 +340,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy/data-discovery",
         "label": "Privacy Data Discovery",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "eye",
         "floor": "view",
         "default": "view",
@@ -349,7 +349,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy/regulatory-intelligence",
         "label": "Privacy Regulatory Intelligence",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "facts",
         "floor": "operate",
         "default": "operate",
@@ -358,7 +358,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy/rights-orchestration",
         "label": "Privacy Rights Orchestration",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -367,7 +367,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy/rights-consumer-delivery",
         "label": "Privacy Rights Consumer Delivery",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "key",
         "floor": "operate",
         "default": "operate",
@@ -376,7 +376,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy/notice-governance",
         "label": "Privacy Notice Governance",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "check",
         "floor": "operate",
         "default": "operate",
@@ -388,7 +388,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent",
         "label": "Consent & Preferences",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "check",
         "floor": "operate",
         "default": "operate",
@@ -396,7 +396,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/publishing",
         "label": "Consent Publishing",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "check",
         "floor": "operate",
         "default": "operate",
@@ -405,7 +405,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/experiments",
         "label": "Consent Experiments",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "bench",
         "floor": "operate",
         "default": "operate",
@@ -414,7 +414,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/delivery",
         "label": "Consent Delivery",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "check",
         "floor": "operate",
         "default": "operate",
@@ -423,7 +423,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/public-clients",
         "label": "Public Consent Clients",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "key",
         "floor": "operate",
         "default": "operate",
@@ -432,7 +432,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/native",
         "label": "Native Consent SDK",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "key",
         "floor": "view",
         "default": "audit",
@@ -441,7 +441,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/profile-data",
         "label": "Consent Profile Data",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "check",
         "floor": "operate",
         "default": "operate",
@@ -450,7 +450,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/custom-indexes",
         "label": "Custom Consent Indexes",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "search",
         "floor": "view",
         "default": "view",
@@ -459,7 +459,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/bulk-jobs",
         "label": "Consent Bulk Jobs",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "clock",
         "floor": "view",
         "default": "audit",
@@ -468,7 +468,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/publish-settings",
         "label": "Consent Publish Settings",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "settings",
         "floor": "view",
         "default": "audit",
@@ -477,7 +477,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/global-opt-out",
         "label": "Global Opt-Out",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "check",
         "floor": "view",
         "default": "audit",
@@ -486,7 +486,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/application-scans",
         "label": "Application Consent Scans",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "search",
         "floor": "view",
         "default": "audit",
@@ -495,7 +495,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/scan-inventory",
         "label": "Consent Scan Inventory",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "eye",
         "floor": "operate",
         "default": "operate",
@@ -504,7 +504,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/scan-notice-proposals",
         "label": "Scan Disclosure Proposals",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "check",
         "floor": "operate",
         "default": "operate",
@@ -513,7 +513,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/consent/trust-center-authority",
         "label": "Trust Center Authority",
-        "group": "Govern",
+        "group": "Consent",
         "icon": "key",
         "floor": "operate",
         "default": "operate",
@@ -522,7 +522,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/data-use",
         "label": "Data Use Governance",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -530,7 +530,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/data-use/providers",
         "label": "Native Data Controls",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -539,7 +539,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/governance-agents",
         "label": "Governance Agents",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "agents",
         "floor": "view",
         "default": "view",
@@ -548,7 +548,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/governance/inventory",
         "label": "Governance Inventory",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "overview",
         "floor": "view",
         "default": "view",
@@ -557,7 +557,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/ai-evidence-analysis",
         "label": "AI Evidence Analysis",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "check",
         "floor": "view",
         "default": "view",
@@ -566,7 +566,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/assess/evidence-autopopulation",
         "label": "Assessment Evidence",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "check",
         "floor": "view",
         "default": "view",
@@ -575,7 +575,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/ai-entity-tasks",
         "label": "AI Entity Tasks",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "check",
         "floor": "view",
         "default": "view",
@@ -584,7 +584,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/assurance/cloud-agents",
         "label": "Cloud Agent Governance",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -593,7 +593,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/privacy/drop",
         "label": "DROP Requests",
-        "group": "Govern",
+        "group": "Privacy",
         "icon": "shield",
         "floor": "view",
         "default": "view",
@@ -613,7 +613,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/third-party/contracts",
         "label": "Contracts & Engagements",
-        "group": "Govern",
+        "group": "Third parties",
         "icon": "shield",
         "floor": "view",
         "default": "view",
@@ -622,7 +622,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/third-party/executive-reports",
         "label": "Executive Vendor Reports",
-        "group": "Govern",
+        "group": "Third parties",
         "icon": "shield",
         "floor": "view",
         "default": "view",
@@ -631,7 +631,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/third-party/intelligence",
         "label": "Third-Party Intelligence",
-        "group": "Govern",
+        "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -640,7 +640,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/third-party/lifecycle",
         "label": "Third-Party Lifecycle",
-        "group": "Govern",
+        "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -649,7 +649,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/third-party/collaboration",
         "label": "Third-Party Collaboration",
-        "group": "Govern",
+        "group": "Third parties",
         "icon": "shield",
         "floor": "operate",
         "default": "operate",
@@ -701,7 +701,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/partner",
         "label": "Partner fleet",
-        "group": "Govern",
+        "group": "Third parties",
         "icon": "graph",
         "floor": "operate",
         "default": "operate",
@@ -845,7 +845,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/external-agents",
         "label": "External Agents",
-        "group": "Govern",
+        "group": "AI oversight",
         "icon": "agents",
         "floor": "view",
         "default": "view",
@@ -963,6 +963,20 @@ PAGES: tuple[dict, ...] = (
         "floor": "admin",
         "default": "admin",
     },
+    # The workspace picker: which tenant this dashboard works in. Reached from
+    # the tenant-gate page (any tenant-scoped workbench opened unbound renders
+    # it) and from the Tenants console, so it stays out of the sidebar. Floor
+    # is "view" -- every signed-in user may see the current binding; changing
+    # it is admin-gated at the API.
+    {
+        "path": "/workspace/tenant",
+        "label": "Workspace tenant",
+        "group": "Admin",
+        "icon": "tenants",
+        "floor": "view",
+        "default": "view",
+        "in_nav": False,
+    },
     {
         "path": "/cache",
         "label": "Cache",
@@ -1067,7 +1081,7 @@ def overrides() -> dict[str, dict[str, bool]]:
     for path, cells in data.items():
         if path not in _PAGES_BY_PATH or not isinstance(cells, dict):
             continue
-        clean = {role: v for role, v in cells.items() if role in rbac.ROLES and isinstance(v, bool)}
+        clean = {role: v for role, v in cells.items() if rbac.is_known_role(role) and isinstance(v, bool)}
         if clean:
             out[path] = clean
     return out
@@ -1124,7 +1138,7 @@ def set_visibility(path: str, role: str, visible: bool) -> None:
     page = _PAGES_BY_PATH.get(path)
     if page is None:
         raise ValueError("unknown page")
-    if role not in rbac.ROLES:
+    if not rbac.is_known_role(role):
         raise ValueError("unknown role")
     if (path, role) in LOCKED:
         raise ValueError("this page is always available to admins")
@@ -1153,7 +1167,7 @@ def apply_selection(checked: set[str]) -> None:
     """
     data: dict[str, dict[str, bool]] = {}
     for page in PAGES:
-        for role in rbac.ROLES:
+        for role in rbac.known_roles():
             if (page["path"], role) in LOCKED or not eligible(page, role):
                 continue
             visible = f"{role}:{page['path']}" in checked
@@ -1211,15 +1225,17 @@ def nav_groups(role: str | None) -> list[dict]:
 def matrix() -> list[dict]:
     """The Settings-page editing matrix, grouped like the nav.
 
-    Each page row carries one cell per role (``rbac.ROLES`` order):
+    Each page row carries one cell per role (``rbac.known_roles()`` order:
+    builtins most-privileged first, then custom roles by name):
     ``eligible`` (permissions reach the floor), ``visible`` (resolved), and
     ``locked`` (lockout-guarded admin cell).
     """
     ov = overrides()
+    roles = rbac.known_roles()
     groups: list[dict] = []
     for page in PAGES:
         cells = []
-        for role in rbac.ROLES:
+        for role in roles:
             locked = (page["path"], role) in LOCKED
             el = eligible(page, role)
             cell = ov.get(page["path"], {}).get(role)

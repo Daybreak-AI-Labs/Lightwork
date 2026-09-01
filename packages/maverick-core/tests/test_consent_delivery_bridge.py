@@ -147,6 +147,12 @@ def test_bridge_fails_closed_on_outbox_receipt_mismatch_without_ack(tmp_path) ->
         ).fetchone()
         payload = row[1].replace('"profile_revision":1', '"profile_revision":2')
         digest = hashlib.sha256(payload.encode("ascii")).hexdigest()
+        # The outbox now carries DB-level immutability triggers, so a plain
+        # UPDATE can no longer stand in for corruption. Drop the trigger for
+        # the tamper -- exactly what out-of-band corruption or an attacker
+        # with raw file access can do, and precisely why the BRIDGE must
+        # verify receipts itself instead of trusting the store's triggers.
+        connection.execute("DROP TRIGGER consent_outbox_no_update")
         connection.execute(
             "UPDATE consent_outbox SET payload_json=?,payload_sha256=? WHERE sequence=?",
             (payload, digest, row[0]),

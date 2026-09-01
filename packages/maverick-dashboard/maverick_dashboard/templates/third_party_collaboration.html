@@ -25,14 +25,13 @@
   scans, or independently verify respondent attestations on this surface.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not third_party_collaboration_enabled %}
-<section class="panel">
-  <h2>Collaboration portal disabled</h2>
-  <p>Enable the third-party parent, lifecycle, and
-    <code>[third_party_management.lifecycle.portal]</code> gates explicitly.
-    The external portal also requires a deployment-owned public-reference
-    resolver and rate limiter.</p>
-</section>
+{{ module_gate('third_party_management.lifecycle.portal', 'Third-party collaboration portal',
+               detail='Vendor invitations, drafts, and submissions stay off
+                       until this is on. The external portal also requires a
+                       deployment-owned public-reference resolver and rate
+                       limiter.') }}
 {% else %}
 <p><button class="btn" id="tpc-load-status" type="button">Load status</button>
   <button class="btn" id="tpc-list" type="button">List invitations</button></p>

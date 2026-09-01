@@ -77,8 +77,9 @@ def test_page_fails_closed_and_template_uses_safe_dom(page_client) -> None:
         params={"enabled": False},
     )
     assert disabled.status_code == 200
-    assert "Compliance scope actions disabled" in disabled.text
-    assert "tech_risk_compliance.scope_actions" in disabled.text
+    assert 'data-module-gate="tech_risk_compliance.scope_actions"' in disabled.text
+    assert "[tech_risk_compliance] enable = true" not in disabled.text
+    assert "[tech_risk_compliance.scope_actions] enable = true" not in disabled.text
 
     template = (
         Path(__file__).resolve().parents[1]

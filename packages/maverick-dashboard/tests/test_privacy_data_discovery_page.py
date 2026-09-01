@@ -101,9 +101,9 @@ def test_page_renders_fail_closed_gate_guidance(page_client: TestClient) -> None
         params={"enabled": False},
     )
     assert response.status_code == 200
-    assert "Privacy data discovery disabled" in response.text
-    assert "privacy_automation.data_discovery.enable" in response.text
-    assert "fails closed" in response.text
+    assert 'data-module-gate="privacy_automation.data_discovery"' in response.text
+    assert "Privacy data discovery is turned off." in response.text
+    assert "privacy_automation.data_discovery.enable" not in response.text
 
 
 def test_main_dashboard_mounts_privacy_discovery_api_page_and_visibility() -> None:

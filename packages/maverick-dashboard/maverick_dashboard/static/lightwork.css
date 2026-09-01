@@ -1175,3 +1175,25 @@ body.theme-hicontrast :where(
 .viz-stop-danger { stop-color: var(--danger); }
 .viz-stop-idle   { stop-color: var(--muted); }
 .viz-stop-info   { stop-color: var(--info); }
+
+/* Module-gate banner (_module_gate.html): a disabled governance module's
+   in-app Turn on control. One shared style so every workbench's gate reads
+   identically; the error line is deliberately prominent (a quiet failure
+   reads as "the button did nothing"). */
+.mg-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong, var(--border));
+  border-left: 3px solid var(--warn, var(--border-strong));
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+.mg-banner .mg-copy { color: var(--muted); flex: 1 1 24rem; min-width: 16rem; }
+.mg-banner .mg-err:not(:empty) {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-weight: var(--font-medium);
+}

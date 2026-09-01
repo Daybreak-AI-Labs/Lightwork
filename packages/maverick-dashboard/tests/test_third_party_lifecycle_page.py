@@ -71,8 +71,9 @@ def test_page_is_complete_honest_and_confirmation_gated(page_client) -> None:
 def test_page_fails_closed_and_static_dom_is_safe(page_client) -> None:
     disabled = page_client.get("/third-party/lifecycle", params={"enabled": False})
     assert disabled.status_code == 200
-    assert "Third-party lifecycle disabled" in disabled.text
-    assert "third_party_management.lifecycle" in disabled.text
+    assert 'data-module-gate="third_party_management.lifecycle"' in disabled.text
+    assert "[third_party_management] enable = true" not in disabled.text
+    assert "[third_party_management.lifecycle] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"

@@ -73,8 +73,9 @@ def test_page_fails_closed_and_template_uses_safe_dom(page_client) -> None:
         params={"enabled": False},
     )
     assert disabled.status_code == 200
-    assert "Scan disclosure proposals disabled" in disabled.text
-    assert "consent_preferences.scanner.notice_proposals" in disabled.text
+    assert 'data-module-gate="consent_preferences.scanner.notice_proposals"' in disabled.text
+    assert "Scan notice proposals is turned off." in disabled.text
+    assert "[consent_preferences.scanner.notice_proposals]" not in disabled.text
 
     template = (
         Path(__file__).resolve().parents[1]
@@ -184,4 +185,4 @@ def test_main_dashboard_mounts_page_api_visibility_tips_and_parent_links(
     response = client.get("/consent/scan-notice-proposals")
     assert response.status_code == 200, response.text
     assert "Scan Disclosure Proposals" in response.text
-    assert "Scan disclosure proposals disabled" in response.text
+    assert 'data-module-gate="consent_preferences.scanner.notice_proposals"' in response.text

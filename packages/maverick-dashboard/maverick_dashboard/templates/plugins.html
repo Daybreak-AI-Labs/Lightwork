@@ -117,9 +117,59 @@
     {% else %}
       <p class="muted" style="margin-bottom: 0;">
         Plugins add new tools, channels, skills and personas. No plugin
-        packages are approved for in-app installation yet — your administrator
-        manages the approved list and the install switch for this platform.
+        packages are approved for in-app installation yet
+        {%- if plugins_can_admin %} — approve some below to offer them as
+        one-click installs.
+        {%- else %} — your administrator manages the approved list and the
+        install switch, right on this page.
+        {%- endif %}
       </p>
     {% endif %}
   </div>
+
+  {% if plugins_can_admin %}
+  <h2 style="margin-top: 2rem;">Administration</h2>
+  <div class="panel">
+    <h3 style="margin-top: 0;">Approved packages</h3>
+    <p class="muted">
+      The one-click installer offers exactly these packages — never free-text
+      input. Approve only packages you have vetted; saving replaces the whole
+      list, and an empty list turns in-app installation into a dead end again.
+    </p>
+    <form method="post" action="/plugins/approvals">
+      <label class="muted" for="plg-approvals" style="display:block; margin-bottom: var(--space-1);">
+        Package names, one per line (letters, digits, dots, dashes — no
+        versions or URLs):
+      </label>
+      <textarea id="plg-approvals" name="names" rows="4" class="input"
+                style="width: 100%; max-width: 32rem; font-family: ui-monospace, monospace;"
+                spellcheck="false">{{ installable | join('\n') }}</textarea>
+      <div style="margin-top: var(--space-2);">
+        <button type="submit" class="btn btn--primary">Save approved list</button>
+      </div>
+    </form>
+
+    <h3 style="margin-top: var(--space-5);">Install switch</h3>
+    {% if install_env_forced_off %}
+    <p class="muted" style="margin-bottom: 0;">
+      In-app installation is <strong>pinned off by this server's environment</strong>
+      (<code>MAVERICK_ALLOW_PLUGIN_INSTALL</code>) and cannot be enabled from
+      here — remove that override to manage it in-app.
+    </p>
+    {% else %}
+    <p class="muted">
+      {% if install_enabled %}In-app installation is <strong>on</strong>: the
+      approved packages above show an Install button for administrators.
+      {% else %}In-app installation is <strong>off</strong>: approved packages
+      are listed but cannot be installed until you turn this on.{% endif %}
+    </p>
+    <form method="post" action="/plugins/install-switch" style="display:inline;">
+      <input type="hidden" name="enabled" value="{{ 'off' if install_enabled else 'on' }}" />
+      <button type="submit" class="btn {{ 'btn--ghost' if install_enabled else 'btn--primary' }}">
+        {{ 'Turn in-app installation off' if install_enabled else 'Turn in-app installation on' }}
+      </button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
 {% endblock %}

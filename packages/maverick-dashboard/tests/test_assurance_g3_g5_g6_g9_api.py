@@ -190,6 +190,7 @@ def test_tenant_scoped_routes_refuse_without_an_active_tenant():
 
 def test_ai_vendor_lifecycle_over_http_is_safe_and_reviewable(monkeypatch):
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    _reset_config_with("\n[ai_vendor_risk]\nenable = true\n")
     base = "/api/v1/security/assurance/ai-vendor"
 
     created = _ok(client.post(

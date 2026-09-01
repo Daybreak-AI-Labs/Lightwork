@@ -81,6 +81,11 @@ def _mock_sandbox_probe(command, **_kwargs):
 
 
 def test_legacy_xls_is_default_off_and_dependency_versions_are_exact() -> None:
+    # A fresh container may lack the legacy-XLS toolchain; the adapter
+    # correctly reports the dependency unavailable there, which is a
+    # different (also-covered) failure mode than this test pins.
+    pytest.importorskip("xlrd")
+    pytest.importorskip("olefile")
     adapter = local.GovernedLocalExtractionAdapter(maximum_bytes=4_096)
     with pytest.raises(local.LocalParserAttestationError, match="disabled"):
         adapter._legacy_xls_text(_xls(_SIMPLE_XLS))  # noqa: SLF001
@@ -147,6 +152,9 @@ def test_biff8_scanner_rejects_unknown_active_and_oversized_records() -> None:
 def test_ocr_attests_exact_runtime_uses_transient_input_and_returns_bounded_text(
     tmp_path: Path,
 ) -> None:
+    # Pillow ships in the reviewed CI environment (requirements/ci.txt);
+    # a container without it must skip, not fail (test_oidc precedent).
+    pytest.importorskip("PIL")
     executable = tmp_path / "tesseract.exe"
     executable.write_bytes(b"reviewed-local-tesseract")
     traineddata = tmp_path / "eng.traineddata"
@@ -213,6 +221,9 @@ def test_ocr_attests_exact_runtime_uses_transient_input_and_returns_bounded_text
 
 
 def test_ocr_digest_version_and_output_bounds_fail_closed(tmp_path: Path) -> None:
+    # Pillow ships in the reviewed CI environment (requirements/ci.txt);
+    # a container without it must skip, not fail (test_oidc precedent).
+    pytest.importorskip("PIL")
     executable = tmp_path / "tesseract.exe"
     executable.write_bytes(b"reviewed-local-tesseract")
     traineddata = tmp_path / "eng.traineddata"
@@ -281,6 +292,11 @@ def test_bounded_process_enforces_output_limit() -> None:
 def test_enabled_worker_fails_closed_without_enforceable_platform(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A fresh container may lack the legacy-XLS toolchain; the adapter
+    # correctly reports the dependency unavailable there, which is a
+    # different (also-covered) failure mode than this test pins.
+    pytest.importorskip("xlrd")
+    pytest.importorskip("olefile")
     monkeypatch.setattr(local, "_network_sandbox_supported", lambda: False)
     with pytest.raises(local.LocalParserAttestationError, match="unsupported on this platform"):
         local.GovernedLocalExtractionAdapter(
@@ -302,6 +318,9 @@ def test_authority_identity_binds_inherited_base_parser() -> None:
 
 
 def test_real_isolated_image_validator_is_exact_and_bounded() -> None:
+    # Pillow ships in the reviewed CI environment (requirements/ci.txt);
+    # a container without it must skip, not fail (test_oidc precedent).
+    pytest.importorskip("PIL")
     result = local._bounded_process(  # noqa: SLF001
         (
             sys.executable,

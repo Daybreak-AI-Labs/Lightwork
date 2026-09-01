@@ -67,9 +67,9 @@ def test_page_renders_fail_closed_gate_guidance(page_client: TestClient) -> None
         params={"enabled": False},
     )
     assert response.status_code == 200
-    assert "Regulatory intelligence disabled" in response.text
-    assert "privacy_automation.regulatory_intelligence.enable" in response.text
-    assert "fails closed" in response.text
+    assert 'data-module-gate="privacy_automation.regulatory_intelligence"' in response.text
+    assert "Privacy regulatory intelligence is turned off." in response.text
+    assert "privacy_automation.regulatory_intelligence.enable" not in response.text
 
 
 def test_main_dashboard_mounts_privacy_intelligence_page_api_and_visibility(

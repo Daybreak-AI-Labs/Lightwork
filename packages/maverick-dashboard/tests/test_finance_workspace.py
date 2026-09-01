@@ -49,7 +49,8 @@ def test_page_renders_finance_worklist_and_catalog():
     # No privacy-records UI on the finance chassis.
     assert "Privacy records" not in html and "open DSARs" not in html
     assert "Deterministic finance operations" in html
-    assert "Finance operations are disabled" in html
+    assert 'data-module-gate="finance_operations"' in html
+    assert "[finance_operations] enable = true" not in html
 
 
 def test_department_isolation():
