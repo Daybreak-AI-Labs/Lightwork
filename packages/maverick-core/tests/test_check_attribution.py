@@ -178,8 +178,14 @@ def test_the_ruleset_requires_every_blocking_check_and_the_queue():
     assert "pull_request" in rules and "non_fast_forward" in rules and "deletion" in rules
     contexts = {c["context"] for c in rules["required_status_checks"]["parameters"]
                 ["required_status_checks"]}
-    for check in ("lint", "test (3.10)", "test (3.11)", "test (3.12)", "posture",
-                  "harness-overhead", "governance-frontier-offline", "lint-pr-title",
-                  "no-ai-attribution"):
+    for check in ("lint", "harness-overhead", "governance-frontier-offline",
+                  "lint-pr-title", "no-ai-attribution"):
         assert check in contexts, check
+    # One required context per (interpreter, slice) and per posture slice; the
+    # slice count is the COUNT in ci.yml's --shard.
+    for version in ("3.10", "3.11", "3.12"):
+        for shard in (1, 2, 3):
+            assert f"test ({version}, {shard})" in contexts
+    for shard in (1, 2, 3):
+        assert f"posture ({shard})" in contexts
     assert ruleset["bypass_actors"] == []

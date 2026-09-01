@@ -111,9 +111,10 @@ Follow these steps in order. Paths cited are the actual controls in this repo.
       removals/renumbers fail), `python -m maverick.a11y_audit --ci`,
       `python -m maverick.schema_migrations --ci`.
     - `audit` — dependency/security audit + SBOM.
-    - `test` — the **test matrix on Python 3.10, 3.11, 3.12** (pytest-xdist,
-      one worker per core); `posture` — the same suite under the production
-      security posture.
+    - `test` — the **test matrix on Python 3.10, 3.11, 3.12**, three
+      file-level slices per interpreter (pytest-xdist, one worker per core);
+      `posture` — the same suite under the production security posture, in
+      the same three slices.
     - `harness-overhead`, `governance-frontier-offline` — the tracked benchmark
       manifests verify against the current sources.
     - `redteam`, `eval-smoke`, `release-cohort`, `postgres`, `docker`, the three

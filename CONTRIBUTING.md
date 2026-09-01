@@ -76,12 +76,18 @@ or non-technical users can't reach it.
 - Every package has a `tests/` directory with `test_*.py` files.
 - Use the `FakeLLM` fixture in `packages/maverick-core/tests/conftest.py`
   for any test that touches the agent loop -- never burn API credits in CI.
-- Tests run in CI on Python 3.10/3.11/3.12 under pytest-xdist, one worker
-  per core with tests grouped by file (`-n auto --dist loadfile`). Run the
-  same locally -- `python -m pytest -q -n auto --dist loadfile` -- and the
-  full suite takes minutes instead of the half hour it takes serially.
-  Tests must therefore be file-independent: no fixed TCP ports, no shared
-  paths outside `tmp_path`, nothing that assumes another file ran first.
+- Tests run in CI on Python 3.10/3.11/3.12 as three disjoint file-level
+  slices per interpreter (`--shard N/3`, defined in the root `conftest.py`),
+  each under pytest-xdist with one worker per core and tests grouped by file
+  (`-n auto --dist loadfile`). Run the whole suite the same way locally --
+  `python -m pytest -q -n auto --dist loadfile` -- and it takes minutes
+  instead of the half hour it takes serially. Tests must therefore be
+  file-independent: no fixed TCP ports, no shared paths outside `tmp_path`,
+  nothing that assumes another file ran first or after. xdist orders files
+  by size, not alphabetically, so "it only leaks into files that run later"
+  is not a defence; the root conftest fails any test that leaves a
+  `maverick.*` package attribute bound to a re-imported module copy, the
+  leak that took nine unrelated tests down the first time.
 
 ## Continuous integration (read before merging)
 
@@ -117,8 +123,8 @@ pins that):
 | `lint`                             | `ruff check .`, vulture, the tomllib/shell=True greps, detect-secrets, and every `python -m maverick.<gate> --ci` contract gate |
 | `lint-pr-title`                    | Conventional-Commit PR title (see below)                              |
 | `no-ai-attribution`                | `scripts/check_attribution.py` over the PR's commits + title/body, the merge-queue commit, and pushes to `main`: no AI co-author trailers, generator footers or assistant session links (CLAUDE.md) |
-| `test (3.10/.11/.12)`              | the full `pytest` suite on each interpreter                           |
-| `posture`                          | the full suite again under the production security posture           |
+| `test (3.10/.11/.12, 1/2/3)`       | the full `pytest` suite on each interpreter, three file-level slices each |
+| `posture (1/2/3)`                  | the full suite again under the production security posture, three slices |
 | `harness-overhead`, `governance-frontier-offline` | the tracked benchmark manifests verify against the current sources (regenerate them when a control-tree source changes) |
 | `audit`                            | OSV/pip-audit/bandit/SBOM across every dependency surface             |
 | `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | packaging cohort, shield red-team corpus, eval harness, Postgres backend, deploy image |

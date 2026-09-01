@@ -26,7 +26,9 @@ from __future__ import annotations
 import atexit
 import os
 import shutil
+import sys
 import tempfile
+import types
 
 import pytest
 
@@ -49,6 +51,43 @@ os.environ.setdefault("MAVERICK_SECURE_DEFAULT", "0")
 os.environ.setdefault("MAVERICK_VOICE_AUTO_FETCH", "0")
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--shard", default=None, metavar="INDEX/COUNT",
+        help="run only the test files in slice INDEX (1-based) of COUNT: files "
+             "are dealt round-robin in collection order, so the slices are "
+             "deterministic, disjoint and together cover the whole suite. CI "
+             "runs three slices per interpreter on two-core runners.",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Keep one file-level slice of the collection when ``--shard`` is given.
+
+    File-level (not test-level) so module-scoped fixtures, module-level
+    TestClients and ``--dist loadfile`` keep their meaning inside a slice; the
+    same dealing happens in every xdist worker, so a slice is consistent
+    across workers and across interpreters.
+    """
+    spec = config.getoption("--shard")
+    if not spec:
+        return
+    try:
+        index, count = (int(part) for part in spec.split("/", 1))
+    except ValueError as exc:
+        raise pytest.UsageError(f"--shard expects INDEX/COUNT, got {spec!r}") from exc
+    if count < 1 or not 1 <= index <= count:
+        raise pytest.UsageError(f"--shard {spec}: INDEX must be within 1..COUNT")
+    slot: dict[str, int] = {}
+    for item in items:
+        slot.setdefault(str(item.path), len(slot))
+    keep = [item for item in items if slot[str(item.path)] % count == index - 1]
+    drop = [item for item in items if slot[str(item.path)] % count != index - 1]
+    items[:] = keep
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
     """Give every package a fresh dynamic home, including on Windows.
@@ -62,6 +101,82 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    # Import-time path constants do not follow the per-test home. Re-point
+    # the one the suite writes through from several packages: the runtime
+    # overrides file carries the admin model allow-list and per-role model
+    # overrides, so a test that set an allow-list without patching
+    # OVERRIDES_PATH wrote the shared session home, and any later test on the
+    # same worker resolving a model was silently capped to it (seen as the
+    # cost-routing test returning the older Opus under xdist, #2410).
+    try:
+        from maverick import runtime_overrides as _runtime_overrides
+    except Exception:  # pragma: no cover -- core not installed in this env
+        pass
+    else:
+        monkeypatch.setattr(
+            _runtime_overrides, "OVERRIDES_PATH",
+            tmp_path / ".maverick" / "runtime-overrides.toml", raising=False,
+        )
+
+
+@pytest.fixture(autouse=True)
+def _restore_environ():
+    """Put ``os.environ`` back the way the test found it.
+
+    ``monkeypatch`` restores what a test set through it, but not what the code
+    under test sets: the config loader mirrors a wizard-written ``.env`` into
+    the environment with ``setdefault`` (``ANTHROPIC_API_KEY``), the
+    ``LIGHTWORK_*`` alias layer mirrors into ``MAVERICK_*``, the moat preflight
+    sets ``MAVERICK_SUPPRESS_SANDBOX_WARNING``. Each of those stayed set for
+    every later test in the worker, and pytest-xdist's size-first file order
+    made "later" mean any file at all (#2410). Restoring the snapshot keeps
+    each test's environment its own without making every test pre-record the
+    keys its code under test might mirror.
+    """
+    snapshot = dict(os.environ)
+    yield
+    for key in set(os.environ) - set(snapshot):
+        del os.environ[key]
+    for key, value in snapshot.items():
+        if os.environ.get(key) != value:
+            os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def _fail_the_test_that_forks_a_module():
+    """Fail the test that leaves a package attribute pointing at a module copy.
+
+    A test that pops ``maverick.plugins`` from ``sys.modules``, triggers a
+    re-import, then puts the ORIGINAL entry back leaves two live copies of the
+    module: ``sys.modules`` holds the original, the ``maverick`` package
+    attribute holds the copy. From then on every string-form monkeypatch in
+    the process (``monkeypatch.setattr("maverick.plugins.x", ...)`` resolves
+    through the attribute) patches the copy while call-time imports in the
+    code under test get the original -- a leak that only shows once files
+    run in a different order, i.e. under pytest-xdist, and then in whichever
+    unrelated file happens to follow (nine victims across four files in
+    #2410). Checking after every test names the culprit instead.
+    """
+    yield
+    forked = []
+    for name, module in list(sys.modules.items()):
+        if module is None or "." not in name or not name.startswith("maverick"):
+            continue
+        parent_name, _, child = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if parent is None:
+            continue
+        bound = getattr(parent, child, None)
+        if isinstance(bound, types.ModuleType) and bound is not module:
+            forked.append(name)
+    if forked:
+        pytest.fail(
+            "this test left a package attribute bound to a different module object "
+            f"than sys.modules holds for: {sorted(forked)}. Do not pop maverick "
+            "modules and re-import them; block the import with "
+            "monkeypatch.setitem(sys.modules, name, None) or patch the attribute.",
+            pytrace=False,
+        )
 
 
 @pytest.fixture(autouse=True)

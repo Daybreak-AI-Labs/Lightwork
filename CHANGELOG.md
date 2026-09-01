@@ -148,9 +148,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **CI runs the suite in parallel and `main` is protected** — the test matrix
-  and the posture job run under pytest-xdist (one worker per core, tests
-  grouped by file), bringing a full run from ~27 minutes serial to ~7 on a
-  four-core runner; the repo-wide contract gates memoise their source scan;
+  and the posture job run as three disjoint file-level slices per interpreter,
+  each under pytest-xdist (one worker per core, tests grouped by file), taking
+  a leg from ~27 minutes serial to single digits on GitHub's two-core runners;
+  the root conftest fails any test that leaves a `maverick.*` module forked
+  between the package attribute and `sys.modules` (the order-dependent leak
+  parallel runs exposed); the repo-wide contract gates memoise their source
+  scan;
   `main` is governed by the importable ruleset in
   `.github/rulesets/protect-main.json` (pull requests only, squash only,
   linear history, every blocking check required, merge queue) with every
