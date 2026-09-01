@@ -234,8 +234,8 @@ jobs:
         shell: bash
         run: |
           python -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           # NOT editable (-e): PyInstaller can't collect editable installs,
           # which is why the binary crashed with "No module named 'maverick'".
           # A regular install puts the packages in site-packages where the
@@ -249,11 +249,11 @@ jobs:
           # requirements/ci.txt so rebuilding a tag cannot silently consume a
           # new packager or hook set.
           python -m pip install --constraint requirements/ci.txt \
-            'pyinstaller==6.21.0'
+            'pyinstaller==6.22.2'
           python -m pip check
           python scripts/verify_constraint_closure.py
           python -c "from maverick.providers import verify_release_runtime; verify_release_runtime()"
-          python -c "from importlib.metadata import version; assert version('pywhispercpp') == '1.5.0'; print('pywhispercpp:', version('pywhispercpp'))"
+          python -c "from importlib.metadata import version; assert version('pywhispercpp') == '1.5.1'; print('pywhispercpp:', version('pywhispercpp'))"
       - name: Diagnostic - verify sqlite3 is importable at build time
         shell: bash
         run: |
@@ -361,14 +361,14 @@ jobs:
         run: |
           set -euo pipefail
           python -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
-            'packaging==26.2' 'cyclonedx-bom==7.3.1'
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.48.0' \
+            'packaging==26.3' 'cyclonedx-bom==7.3.1'
           python -I scripts/verify_constraint_closure.py
           SBOM_ENV="$RUNNER_TEMP/lightwork-release-sbom"
           python -m venv "$SBOM_ENV"
           "$SBOM_ENV/bin/python" -I -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
-            'packaging==26.2'
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.48.0' \
+            'packaging==26.3'
           python scripts/install_release_cohort.py \
             --source-root . \
             --target-python "$SBOM_ENV/bin/python" \
