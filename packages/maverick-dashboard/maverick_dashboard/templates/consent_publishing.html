@@ -10,10 +10,11 @@
   .cpp-result{white-space:pre-wrap;word-break:break-word;max-height:28rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.7rem;font-size:.78rem}.cpp-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}
   @media(max-width:900px){.cpp-layout,.cpp-form{grid-template-columns:1fr}.cpp-form .wide,.cpp-actions{grid-column:auto}}
 </style>
+{% from "_module_gate.html" import module_gate %}
+{% if not consent_publishing_enabled %}<div class="cpp-shell">{{ module_gate('consent_preferences.publishing', 'Consent publishing', detail='Publishes versioned consent experiences to your public web and mobile properties -- have your privacy owner approve it first.') }}</div>{% endif %}
 <fieldset class="cpp-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if consent_publishing_enabled else 'false' }}"{% if not consent_publishing_enabled %} disabled aria-disabled="true"{% endif %}>
   <legend class="sr-only">Consent publishing workbench</legend>
   <header class="cpp-hero"><div><div class="cpp-kicker">Immutable public experience control</div><h1>Consent Publishing</h1><p class="muted">Enroll exact web or mobile properties, version structured content, preview pinned bundles, publish with compare-and-swap, roll back as a new auditable publication, or withdraw the active head into an immutable tombstone.</p></div><a class="btn" href="/consent">Back to Consent</a></header>
-  {% if not consent_publishing_enabled %}<div class="cpp-banner" role="status"><strong>Publishing disabled.</strong> Enable <code>[consent_preferences.publishing] enable = true</code> after privacy-owner approval.</div>{% endif %}
   <div id="cpp-status" class="muted" role="status" aria-live="polite"></div>
   <div class="cpp-layout">
     <div>

@@ -69,8 +69,8 @@ def test_operator_page_explains_disabled_gate(page_client: TestClient) -> None:
         params={"enabled": False},
     )
     assert response.status_code == 200
-    assert "Policy links disabled" in response.text
-    assert "tech_risk_compliance.policy_publication_links" in response.text
+    assert 'data-module-gate="tech_risk_compliance.policy_publication_links"' in response.text
+    assert "[tech_risk_compliance.policy_publication_links] enable = true" not in response.text
     assert "live customer" in response.text
 
 

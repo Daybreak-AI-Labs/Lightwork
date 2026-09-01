@@ -78,8 +78,9 @@ def test_page_fails_closed_and_uses_safe_dom_only(page_client):
         params={"enabled": False},
     )
     assert response.status_code == 200
-    assert "Continuous evidence is disabled" in response.text
-    assert "stock_collectors.sources" in response.text
+    assert 'data-module-gate="tech_risk_compliance.continuous_evidence"' in response.text
+    assert "stock_collectors.sources" not in response.text
+    assert "[tech_risk_compliance.continuous_evidence] enable = true" not in response.text
 
     template = (
         Path(__file__).resolve().parents[1]

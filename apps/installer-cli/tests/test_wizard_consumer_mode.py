@@ -294,3 +294,32 @@ def test_run_aborts_with_guidance_when_not_a_tty(monkeypatch):
     out = wizard.console.file.getvalue()
     assert "interactive terminal" in out
     assert "--fast" in out
+
+
+def _lint_written_config(tmp_path: Path) -> list:
+    from maverick.config import _read_toml_raw
+    from maverick.config_lint import lint_config
+
+    return lint_config(_read_toml_raw(tmp_path / ".maverick" / "config.toml") or {})
+
+
+def test_consumer_wizard_output_lints_clean(monkeypatch, tmp_path: Path):
+    """The wizard must never write a config its own linter warns about.
+
+    Field finding: a wizard-written config warned "unknown section
+    [event_triggers]" and "unknown key" on capabilities.ros and
+    persona.user_name -- the product flagging its own output, which reads as
+    breakage to the user.
+    """
+    wizard = _stub_wizard_io(monkeypatch, tmp_path)
+    assert wizard.run_consumer() == 0
+    findings = _lint_written_config(tmp_path)
+    assert findings == [], [f.message for f in findings]
+
+
+def test_express_wizard_output_lints_clean(monkeypatch, tmp_path: Path):
+    """Same invariant for express mode (see the consumer variant above)."""
+    wizard = _stub_wizard_io(monkeypatch, tmp_path)
+    assert wizard.run_express() == 0
+    findings = _lint_written_config(tmp_path)
+    assert findings == [], [f.message for f in findings]

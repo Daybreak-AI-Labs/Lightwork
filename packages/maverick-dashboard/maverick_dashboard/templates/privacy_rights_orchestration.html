@@ -30,13 +30,13 @@
   prove estate completeness, or claim live provider/customer acceptance.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not privacy_rights_orchestration_enabled %}
-<section class="panel">
-  <h2>Privacy-rights orchestration disabled</h2>
-  <p>This surface fails closed until both
-    <code>[privacy_automation] enable = true</code> and
-    <code>[privacy_automation.rights_orchestration] enable = true</code> are explicit.</p>
-</section>
+{{ module_gate('privacy_automation.rights_orchestration', 'Privacy-rights orchestration',
+               detail='Rights-request casework, source runtimes, evidence
+                       manifests, and response packages all stay safely off
+                       until it is on -- have your privacy owner review the
+                       workflow first.') }}
 {% else %}
 <p><button class="btn" id="pro-load-status" type="button">Load honest status</button></p>
 <div class="pro-grid">

@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from maverick.suite_grants import known_suites, register_grant_resolver
 
-from .rbac import ROLES  # ordered most-privileged first; group mapping honors it
+from .rbac import is_known_role, most_privileged
 
 
 class GroupAccessPolicyError(RuntimeError):
@@ -111,7 +111,7 @@ def _ci_mapping(key: str) -> dict:
                 f"dashboard.{key} has duplicate case-insensitive group names"
             )
         if key == "group_roles":
-            if not isinstance(raw_value, str) or raw_value.strip().lower() not in ROLES:
+            if not isinstance(raw_value, str) or not is_known_role(raw_value.strip().lower()):
                 raise GroupAccessPolicyError(
                     f"dashboard.{key} has an invalid role for {raw_name!r}"
                 )
@@ -228,10 +228,9 @@ def role_for_principal(principal: str) -> str | None:
         names = group_names_for_principal(principal)
         mapped = {mapping[n.casefold()]
                   for n in names if n.casefold() in mapping}
-        for role in ROLES:  # ROLES is ordered most-privileged first
-            if role in mapped:
-                return role
-        return None
+        # Ranked by granted permission atoms -- the generalization of "ROLES
+        # is ordered most-privileged first" that also covers custom roles.
+        return most_privileged(mapped)
     except Exception:
         # auth.global_role_for_principal deliberately swallows resolver errors
         # and falls through to the deployment default (historically operator).

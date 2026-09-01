@@ -16,10 +16,12 @@
     <a class="btn" href="/privacy">Back to Privacy</a>
   </header>
 
+  {% from "_module_gate.html" import module_gate %}
   {% if not privacy_regulatory_intelligence_enabled %}
-  <div class="pri-banner" role="status">
-    <strong>Regulatory intelligence disabled.</strong> Enable both <code>privacy_automation.enable</code> and <code>privacy_automation.regulatory_intelligence.enable</code>. The authority fails closed while either gate is off.
-  </div>
+  {{ module_gate('privacy_automation.regulatory_intelligence', 'Privacy regulatory intelligence',
+                 detail='Licensed-source regulatory research stays safely off
+                         until it is on -- review your licensed sources and
+                         research scope with your privacy owner first.') }}
   {% endif %}
 
   <div class="pri-banner pri-boundary">

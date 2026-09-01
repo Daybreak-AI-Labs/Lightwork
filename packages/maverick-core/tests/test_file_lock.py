@@ -893,3 +893,54 @@ def test_lock_registry_does_not_accumulate(tmp_path):
         with cross_process_lock(tmp_path / f"f{i}.state"):
             assert _LOCAL_PATH_LOCKS          # live while held
     assert not _LOCAL_PATH_LOCKS              # empty once released
+
+
+def test_empty_lock_sidecar_self_heals(tmp_path, monkeypatch):
+    """An orphaned EMPTY sidecar (the creator died -- or AV/backup tooling
+    recreated the file empty -- before the lock byte was published) used to
+    wedge the lock FOREVER: every later opener took the existing-file path,
+    waited out the initialization timeout, and raised "lock file was never
+    initialized"; no process could ever become the O_EXCL creator again.
+    Observed in the field on a dashboard-config.toml.lock the user had to
+    delete by hand. A timed-out waiter now adopts the orphan instead."""
+    import maverick.file_lock as file_lock
+
+    lock_path = tmp_path / "state.json.lock"
+    lock_path.write_bytes(b"")
+    fd = os.open(str(lock_path), os.O_RDWR)
+    try:
+        with monkeypatch.context() as mp:
+            mp.setattr(file_lock, "_WINDOWS_LOCK_INITIALIZATION_SECONDS", 0.05)
+            mp.setattr(file_lock.os, "name", "nt")
+            file_lock._wait_for_windows_lock_initialization(lock_path, fd)
+            # Adoption published the byte; a second waiter sees an
+            # initialized lock immediately (no timeout, no error).
+            file_lock._wait_for_windows_lock_initialization(lock_path, fd)
+    finally:
+        os.close(fd)
+    assert lock_path.read_bytes() == b"\0"
+
+
+def test_orphan_adoption_failure_keeps_the_classic_error(tmp_path, monkeypatch):
+    """When the adoption write fails (e.g. a live creator already holds the
+    mandatory byte-range lock), the waiter reports the classic timeout error
+    with the underlying cause chained -- never a silent success."""
+    import maverick.file_lock as file_lock
+
+    lock_path = tmp_path / "state.json.lock"
+    lock_path.write_bytes(b"")
+    fd = os.open(str(lock_path), os.O_RDWR)
+    try:
+        with monkeypatch.context() as mp:
+            mp.setattr(file_lock, "_WINDOWS_LOCK_INITIALIZATION_SECONDS", 0.05)
+            mp.setattr(file_lock.os, "name", "nt")
+
+            def denied(_fd, _data):
+                raise PermissionError("byte-range lock held")
+
+            mp.setattr(file_lock.os, "write", denied)
+            with pytest.raises(PermissionError, match="never initialized"):
+                file_lock._wait_for_windows_lock_initialization(lock_path, fd)
+    finally:
+        os.close(fd)
+    assert lock_path.read_bytes() == b""

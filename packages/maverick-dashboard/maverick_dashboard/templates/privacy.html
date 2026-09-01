@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Privacy · Lightwork{% endblock %}
 {% block content %}
+{% from "_module_gate.html" import module_gate %}
 <style>
   /* Record-type tabs (DPA / AI registry / RoPA / DSAR). */
   .pw-tab[hidden] { display: none; }
@@ -805,9 +806,10 @@
       </div>
       {% endif %}
       {% else %}
-      <p class="muted">The vendor register is off. Enable it with
-        <code>[vendor_management] enable = true</code> or re-run the installer
-        wizard.</p>
+      {{ module_gate('vendor_management', 'Vendor management',
+                     detail='The vendor register tracks your processors, DPAs,
+                             contracts, and renewal dates in one place -- decide
+                             who owns vendor records before turning it on.') }}
       {% endif %}
     </div>
 
@@ -929,9 +931,11 @@
         <div id="pe-scan-result"></div>
       </div>
       {% else %}
-      <p class="muted">The consent registry is off. Enable it with
-        <code>[consent_registry] enable = true</code> plus a
-        <code>subject_salt</code>, or re-run the installer wizard.</p>
+      {{ module_gate('consent_registry', 'Consent registry',
+                     detail='Durable per-subject consent receipts stored as
+                             salted digests; it also needs a subject salt --
+                             set that on the Settings page or in your
+                             deployment config before recording events.') }}
       {% endif %}
     </div>
 
@@ -997,9 +1001,11 @@
         above to get started.</p>
       {% endif %}
       {% else %}
-      <p class="muted">The data map is off. Enable it with
-        <code>[data_map] enable = true</code> or re-run the installer
-        wizard.</p>
+      {{ module_gate('data_map', 'Data map',
+                     detail='Maps where personal data actually lives from
+                             schema imports and SharePoint censuses -- triage
+                             for a human mapping exercise, never a content
+                             scan.') }}
       {% endif %}
     </div>
   </div>

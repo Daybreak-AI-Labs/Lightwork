@@ -1,0 +1,29 @@
+{#
+  Shared module-gate banner: shown when a governance module's fail-closed
+  [section] enable gate is off. Renders a plain-language explanation and a
+  Turn on button wired (via the delegated .mg-on handler in lightwork-ui.js)
+  to POST /api/v1/features/modules -- the module comes on in-app, no config
+  file, no restart. The button renders for everyone; a non-admin's click
+  gets a loud "ask your administrator" in the aria-live error line (same
+  pattern as the learning-page switches). Config keys stay OUT of the UI.
+
+  Usage:
+    {% from "_module_gate.html" import module_gate %}
+    {{ module_gate('consent_preferences.publishing', 'Consent publishing',
+                   detail='Publish approved consent notices to your sites.') }}
+
+  `section` must be a key of the API's module-switch registry
+  (api._MODULE_SWITCHES); `detail` is optional extra copy about what turning
+  the module on unlocks or what to review first.
+#}
+{% macro module_gate(section, label, detail='') %}
+<div class="mg-banner" role="status" data-module-gate="{{ section }}">
+  <strong>{{ label }} is turned off.</strong>
+  <span class="mg-copy">{{ detail or 'Everything on this page unlocks once it is on.' }}
+    Turning it on applies immediately and can be turned back off here any time.</span>
+  <span class="mg-actions">
+    <button type="button" class="btn btn--primary mg-on">Turn on {{ label|lower }}</button>
+  </span>
+  <span class="mg-err" role="alert" aria-live="assertive"></span>
+</div>
+{% endmacro %}

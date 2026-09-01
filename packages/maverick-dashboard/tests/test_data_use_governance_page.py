@@ -36,8 +36,8 @@ def test_default_off_page_exposes_authority_workflows_and_limits() -> None:
     assert response.status_code == 200
     page = response.text
     assert "Data Use Governance" in page
-    assert "Module disabled." in page
-    assert "[data_use_governance] enable = true" in page
+    assert 'data-module-gate="data_use_governance"' in page
+    assert "[data_use_governance] enable = true" not in page
     for form in ("dug-catalog", "dug-context", "dug-policy", "dug-request", "dug-records"):
         assert form in page
     assert "All four roots must be fresh and independently sourced." in page
@@ -55,8 +55,9 @@ def test_enabled_authority_still_labels_disabled_compiler(isolated_page) -> None
     )
     config.reset_config_cache()
     page = client.get("/data-use").text
-    assert "Module disabled." not in page
-    assert "Compiler disabled." in page
+    assert 'data-module-gate="data_use_governance"' not in page
+    assert 'data-module-gate="data_use_governance.compiler"' in page
+    assert "[data_use_governance.compiler] enable = true" not in page
 
     isolated_page.write_text(
         "[data_use_governance]\nenable = true\n"
@@ -64,4 +65,7 @@ def test_enabled_authority_still_labels_disabled_compiler(isolated_page) -> None
         encoding="utf-8",
     )
     config.reset_config_cache()
-    assert "Compiler disabled." not in client.get("/data-use").text
+    assert (
+        'data-module-gate="data_use_governance.compiler"'
+        not in client.get("/data-use").text
+    )

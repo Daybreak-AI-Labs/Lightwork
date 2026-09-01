@@ -147,8 +147,12 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     v = hrefs("viewer")
     assert {"/goals", "/overview", "/spend", "/safety", "/learning"} <= v
     assert v.isdisjoint({"/chat", "/ekko", "/automations", "/settings", "/users", "/mcp", "/audit"})
+    # The governance surfaces are split into focused sections (the flat
+    # 30-link Govern block read as unorganized); the role still sees no
+    # Extend/Admin group.
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
-        "Operate", "Observe", "Govern"}
+        "Operate", "Observe", "Govern", "Privacy", "Consent",
+        "AI oversight", "Third parties"}
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
     # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")

@@ -152,12 +152,12 @@
   {% include "_workspace_worklist.html" %}
 
   <div class="section-head"><h2>Deterministic finance operations</h2></div>
+  {% from "_module_gate.html" import module_gate %}
   {% if not operations.enabled %}
-  <section class="panel">
-    <h3 style="margin-top:0;">Finance operations are disabled</h3>
-    <p>Enable <code>[finance_operations] enable = true</code> or rerun
-      <code>maverick init</code>. The assessment worklist above remains available.</p>
-  </section>
+  {{ module_gate('finance_operations', 'Finance operations',
+                 detail='Regulatory monitoring, anomaly queues, and control
+                         testing stay off; the assessment worklist above
+                         remains available either way.') }}
   {% else %}
     {% if operations.degraded %}
     <section class="panel" role="status">

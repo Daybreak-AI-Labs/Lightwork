@@ -344,6 +344,20 @@ def preflight() -> bool:
 # ---------- validators ----------
 
 
+def _sdk_import_skip_message(name: str, exc: ImportError) -> str:
+    """Say WHY validation is skipped. A corrupt install raises ImportError
+    exactly like an absent package; reporting "not installed" while pip lists
+    the package sent a user the wrong fix (field finding: the cure was
+    --force-reinstall). Only a ModuleNotFoundError for the package itself is
+    "not installed"."""
+    if isinstance(exc, ModuleNotFoundError) and exc.name == name:
+        return f"{name} SDK not installed -- skipping validation"
+    return (
+        f"{name} SDK failed to import ({exc}) -- skipping validation; "
+        f"try: pip install --force-reinstall {name}"
+    )
+
+
 def _validate_anthropic_key(key: str) -> tuple[bool, str]:
     """Ping Anthropic with the key. Returns (ok, message).
 
@@ -355,8 +369,8 @@ def _validate_anthropic_key(key: str) -> tuple[bool, str]:
         return False, "empty key"
     try:
         import anthropic
-    except ImportError:
-        return True, "anthropic SDK not installed -- skipping validation"
+    except ImportError as e:
+        return True, _sdk_import_skip_message("anthropic", e)
     try:
         client = anthropic.Anthropic(api_key=key, timeout=5.0)
         # Minimal call -- list available models is enough to verify auth.
@@ -375,8 +389,8 @@ def _validate_openai_key(key: str) -> tuple[bool, str]:
     # sk-, sk-proj-, sk-svcacct-. Just ping the API and let it tell us.
     try:
         from openai import AuthenticationError, OpenAI
-    except ImportError:
-        return True, "openai SDK not installed -- skipping validation"
+    except ImportError as e:
+        return True, _sdk_import_skip_message("openai", e)
     try:
         client = OpenAI(api_key=key, timeout=5.0)
         list(client.models.list().data[:1])
@@ -393,8 +407,8 @@ def _validate_openai_compat_key(key: str, base_url: str, label: str) -> tuple[bo
         return False, "empty key"
     try:
         from openai import AuthenticationError, OpenAI
-    except ImportError:
-        return True, "openai SDK not installed -- skipping validation"
+    except ImportError as e:
+        return True, _sdk_import_skip_message("openai", e)
     try:
         client = OpenAI(api_key=key, base_url=base_url, timeout=5.0)
         list(client.models.list().data[:1])

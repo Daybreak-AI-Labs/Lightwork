@@ -416,3 +416,38 @@
         }
       });
     })();
+
+    // Module-gate banners (_module_gate.html): one delegated handler turns a
+    // disabled governance module on in-app via /api/v1/features/modules.
+    // Failures are LOUD -- the exact server reason lands in the banner's
+    // role="alert" line (a quiet failure here reads as "I clicked Turn on
+    // and nothing happened", a real field complaint).
+    (function () {
+      document.addEventListener('click', function (ev) {
+        var btn = ev.target.closest && ev.target.closest('.mg-on');
+        if (!btn) return;
+        var gate = btn.closest('[data-module-gate]');
+        if (!gate) return;
+        var err = gate.querySelector('.mg-err');
+        var section = gate.getAttribute('data-module-gate');
+        btn.disabled = true;
+        if (err) err.textContent = '';
+        fetch('/api/v1/features/modules', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ section: section, enabled: true }),
+        }).then(function (r) {
+          if (r.status === 403) {
+            throw new Error('Only an administrator can turn this on — ask yours.');
+          }
+          if (!r.ok) {
+            return r.json().catch(function () { return {}; }).then(function (b) {
+              throw new Error(b.detail || ('Could not turn this on (' + r.status + ').'));
+            });
+          }
+          location.reload();   // re-render with the module live
+        }).catch(function (e) {
+          if (err) err.textContent = (e && e.message) || 'Could not reach the server.';
+          btn.disabled = false;
+        });
+      });
+    })();
