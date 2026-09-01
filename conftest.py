@@ -195,6 +195,35 @@ def _reset_governed_process_authority_pin():
 
 
 @pytest.fixture(autouse=True)
+def _reset_provider_health():
+    """Start every test with an empty provider-health ledger.
+
+    ``provider_health.get()`` is a process-wide singleton the cost router
+    consults on every pick: a provider/model with a high recent error rate is
+    excluded from routing. A test that records failures against a real model
+    and does not reset leaves that exclusion in place for every later test in
+    the worker -- seen as the cost-routing test resolving the orchestrator to
+    the previous Opus generation once xdist's file order put such a test
+    ahead of it (#2410).
+    """
+    def _reset() -> None:
+        try:
+            from maverick import provider_health
+        except ImportError:
+            return
+        try:
+            provider_health.get().reset()
+        except Exception:  # pragma: no cover -- isolation never blocks a test
+            pass
+
+    _reset()
+    try:
+        yield
+    finally:
+        _reset()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_default_audit_writers():
     """Do not let a cached deployment-global writer cross test data roots.
 

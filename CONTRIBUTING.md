@@ -87,7 +87,11 @@ or non-technical users can't reach it.
   by size, not alphabetically, so "it only leaks into files that run later"
   is not a defence; the root conftest fails any test that leaves a
   `maverick.*` package attribute bound to a re-imported module copy, the
-  leak that took nine unrelated tests down the first time.
+  leak that took nine unrelated tests down the first time. A test whose
+  *own* concurrency contends on SQLite (the queue soak, the discovery
+  estate runner) carries `@pytest.mark.heavy_concurrency`; CI runs those in
+  a short serial phase after each slice's parallel pass so they never share
+  a two-core box with a second xdist worker.
 
 ## Continuous integration (read before merging)
 
