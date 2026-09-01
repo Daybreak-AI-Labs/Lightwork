@@ -334,6 +334,38 @@ def _dump_value(lines: list[str], val: dict) -> None:
         lines.append("")
 
 
+def _dump_selector_sections(lines: list[str], data: dict) -> None:
+    """Emit the single-key selector tables the dashboard owns: [dashboard]
+    active_tenant (set_active_tenant) and [sandbox] backend
+    (set_sandbox_backend). _dump is an allowlist serializer, so a key missing
+    here would be silently dropped by the next save."""
+    dash = data.get("dashboard") or {}
+    if dash.get("active_tenant"):
+        lines.append("[dashboard]")
+        lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
+        lines.append("")
+    sandbox = data.get("sandbox") or {}
+    if sandbox.get("backend"):
+        lines.append("[sandbox]")
+        lines.append(f"backend = {_toml_str(sandbox['backend'])}")
+        lines.append("")
+
+
+def _dump_plugins(lines: list[str], plugins: dict) -> None:
+    """Emit [plugins] -- the dashboard-install allowlist + opt-in switch
+    (set_installable_plugins / set_plugin_install_allowed)."""
+    if not plugins:
+        return
+    lines.append("[plugins]")
+    if "allow_install" in plugins:
+        lines.append(
+            f"allow_install = {'true' if plugins['allow_install'] else 'false'}"
+        )
+    if plugins.get("installable"):
+        lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
+    lines.append("")
+
+
 def _dump(data: dict) -> str:
     lines = [
         "# Dashboard-managed settings overlay (provider keys + capability/feature",
@@ -343,16 +375,24 @@ def _dump(data: dict) -> str:
     ]
     # "flows" carries the autonomous self-improvement knobs (auto_evolve/auto_apply,
     # both booleans) -- persisted here so set_flow_autonomy survives a restart.
-    for section in ("capabilities", "features", "flows", "self_modify", "ekko",
+    # _MODULE_TOP_SECTIONS: the governance-module tables set_module_enables
+    # writes (nested subsection dicts serialize as inline tables, which
+    # deep-merge identically to [a.b] headers). dict.fromkeys dedupes: a
+    # section emitted twice is a duplicate TOML table, which invalidates the
+    # WHOLE overlay file.
+    for section in dict.fromkeys((
+                    "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control",
-                    *_LEARNING_SECTIONS):
+                    *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS)):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
             for k in sorted(tbl):
                 lines.append(f"{k} = {_toml_value(tbl[k])}")
             lines.append("")
+    _dump_selector_sections(lines, data)
+    _dump_plugins(lines, data.get("plugins") or {})
     _dump_value(lines, data.get("value") or {})
     # [model_cost_tiers] -- manager-set cost bands per model. Keys are model
     # ids that can contain '/' or '.', so they are always quoted.
@@ -474,6 +514,189 @@ def set_section_enable(section: str, enabled: bool) -> None:
     with _locked():
         data = _load_overlay_for_update()
         data.setdefault(section, {})["enable"] = bool(enabled)
+        _write(data)
+
+
+# Governance-module enable flags an admin may switch from inside the app --
+# each entry is a dotted path whose final table carries the ``enable``
+# boolean the module's fail-closed gate reads (e.g.
+# "consent_preferences.publishing" -> [consent_preferences.publishing]
+# enable). The single authority the /features/switches API trusts for
+# module switching; anything not listed stays config-file-only.
+MODULE_ENABLE_PATHS: frozenset[str] = frozenset({
+    "consent_preferences",
+    "consent_preferences.analytics",
+    "consent_preferences.delivery",
+    "consent_preferences.experiments",
+    "consent_preferences.profile_data",
+    "consent_preferences.public_api",
+    "consent_preferences.publishing",
+    "consent_preferences.scanner",
+    "consent_preferences.scanner.notice_proposals",
+    "consent_preferences.trust_center",
+    "consent_registry",
+    "data_map",
+    "data_use_governance",
+    "data_use_governance.compiler",
+    "data_use_governance.databricks",
+    "data_use_governance.enforcement",
+    "data_use_governance.snowflake",
+    "dsar_fulfillment",
+    "finance_operations",
+    "governance_agents",
+    "privacy_automation",
+    "privacy_automation.data_discovery",
+    "privacy_automation.notice_governance",
+    "privacy_automation.regulatory_intelligence",
+    "privacy_automation.rights_consumer_delivery",
+    "privacy_automation.rights_orchestration",
+    "tech_risk_compliance",
+    "tech_risk_compliance.continuous_evidence",
+    "tech_risk_compliance.policy_publication_links",
+    "tech_risk_compliance.scope_actions",
+    "tech_risk_compliance.scoping",
+    "third_party_management",
+    "third_party_management.intelligence",
+    "third_party_management.lifecycle",
+    "third_party_management.lifecycle.portal",
+    "vendor_management",
+})
+
+# Top-level tables the module paths live under; _dump is an allowlist, so a
+# section missing here would be silently dropped on the next save.
+_MODULE_TOP_SECTIONS: tuple[str, ...] = tuple(sorted(
+    {path.split(".", 1)[0] for path in MODULE_ENABLE_PATHS}
+))
+
+
+def set_module_enables(paths, enabled: bool) -> None:
+    """Overlay ``enable`` for one or more governance-module dotted paths.
+
+    All writes land in ONE locked read-modify-write, so "turn on this module
+    and the parents its gate requires" is atomic -- a crash can't leave a
+    child enabled under a disabled parent that the one click promised to
+    open. Every path must be allowlisted in :data:`MODULE_ENABLE_PATHS`.
+    """
+    wanted = [str(p or "").strip() for p in paths]
+    if not wanted:
+        raise ValueError("no module sections given")
+    for path in wanted:
+        if path not in MODULE_ENABLE_PATHS:
+            raise ValueError(f"unknown module section {path!r}")
+    with _locked():
+        data = _load_overlay_for_update()
+        for path in wanted:
+            node = data
+            for part in path.split("."):
+                child = node.get(part)
+                if not isinstance(child, dict):
+                    child = {}
+                    node[part] = child
+                node = child
+            node["enable"] = bool(enabled)
+        _write(data)
+
+
+SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
+
+
+def set_sandbox_backend(backend: str) -> None:
+    """Overlay the sandbox backend ([sandbox] backend).
+
+    Only the backend selector is dashboard-writable; the rest of [sandbox]
+    (image, limits, network) stays config-file policy. The caller (the
+    sandbox API) is responsible for probing daemon reachability first so a
+    switch never silently strands every goal on an unreachable runtime.
+    """
+    cleaned = str(backend or "").strip().lower()
+    if cleaned not in SANDBOX_BACKENDS:
+        raise ValueError(f"unknown sandbox backend {cleaned!r}")
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault("sandbox", {})["backend"] = cleaned
+        _write(data)
+
+
+def set_installable_plugins(names) -> None:
+    """Replace the dashboard-install plugin allowlist ([plugins] installable).
+
+    Every entry must be a plain distribution name (maverick.plugins._SAFE_PKG:
+    no URLs, version specifiers, or shell metacharacters) -- the same check
+    install_plugin() re-applies at install time, enforced here too so a bad
+    name is rejected at approval, not discovered at install.
+    """
+    from maverick.plugins import _SAFE_PKG
+
+    cleaned: list[str] = []
+    for raw in names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        if not _SAFE_PKG.match(name):
+            raise ValueError(f"unsafe package name: {name!r}")
+        if name not in cleaned:
+            cleaned.append(name)
+    with _locked():
+        data = _load_overlay_for_update()
+        if cleaned:
+            data.setdefault("plugins", {})["installable"] = cleaned
+        else:
+            (data.get("plugins") or {}).pop("installable", None)
+            if not data.get("plugins"):
+                data.pop("plugins", None)
+        _write(data)
+
+
+def set_plugin_install_allowed(enabled: bool) -> None:
+    """Overlay the in-app plugin-install opt-in ([plugins] allow_install).
+
+    The MAVERICK_ALLOW_PLUGIN_INSTALL env var still outranks it in BOTH
+    directions (an explicit falsy value force-disables installs on a hardened
+    deployment); this knob is the everyone-else path that needs no shell.
+    """
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault("plugins", {})["allow_install"] = bool(enabled)
+        _write(data)
+
+
+def active_tenant() -> str | None:
+    """The dashboard-selected active tenant id, or ``None`` when unset.
+
+    Read through the merged config (the overlay deep-merges over config.toml),
+    so an operator can also pin ``[dashboard] active_tenant`` in config.toml
+    and the UI selection overrides it the same way every other setting does.
+    """
+    loaded = config.load_config() or {}
+    value = (loaded.get("dashboard") or {}).get("active_tenant")
+    cleaned = str(value or "").strip()
+    return cleaned or None
+
+
+def set_active_tenant(tenant_id: str | None) -> None:
+    """Persist (or clear) the dashboard's active tenant selection.
+
+    The id must name an existing, active tenant in the registry -- selecting a
+    tenant that does not exist would silently scope every workbench to an
+    empty data root, which reads as data loss.
+    """
+    cleaned = str(tenant_id or "").strip()
+    if cleaned:
+        from maverick.tenant.registry import get_tenant
+
+        record = get_tenant(cleaned)
+        if record is None:
+            raise ValueError(f"unknown tenant {cleaned!r}")
+        if not record.active:
+            raise ValueError(f"tenant {cleaned!r} is suspended")
+    with _locked():
+        data = _load_overlay_for_update()
+        if cleaned:
+            data.setdefault("dashboard", {})["active_tenant"] = cleaned
+        else:
+            (data.get("dashboard") or {}).pop("active_tenant", None)
+            if not data.get("dashboard"):
+                data.pop("dashboard", None)
         _write(data)
 
 

@@ -4,13 +4,20 @@
 <style>
   .ppl-shell{max-width:1500px;margin:0 auto;padding:1.25rem}.ppl-hero{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;margin-bottom:1rem}.ppl-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}.ppl-hero h1{margin:.1rem 0}.ppl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.ppl-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:1rem}.ppl-card h2{font-size:1rem;margin:.1rem 0 .75rem}.ppl-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.ppl-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}.ppl-wide,.ppl-actions{grid-column:1/-1}.ppl-actions{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}.ppl-output{white-space:pre-wrap;word-break:break-word;max-height:36rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.78rem}.ppl-warning{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}.ppl-limit{border-left:3px solid var(--accent);padding-left:.75rem;margin:.45rem 0}.ppl-secret{font-family:monospace}@media(max-width:980px){.ppl-grid,.ppl-form{grid-template-columns:1fr}.ppl-wide,.ppl-actions{grid-column:auto}}
 </style>
+{% from "_module_gate.html" import module_gate %}
+{% if not policy_publication_links_enabled %}
+{{ module_gate('tech_risk_compliance.policy_publication_links', 'Policy publication links',
+               detail='Immutable policy versions, independent approval, and
+                       fail-closed publication schedules -- review storage,
+                       access, recovery, and retention ownership before turning
+                       it on.') }}
+{% endif %}
 <fieldset class="ppl-shell feature-gated-workbench" data-feature-enabled="{{ 'true' if policy_publication_links_enabled else 'false' }}"{% if not policy_publication_links_enabled %} disabled aria-disabled="true"{% endif %}>
   <legend class="sr-only">Policy publication links workbench</legend>
   <header class="ppl-hero">
     <div><div class="ppl-kicker">Tech Risk &amp; Compliance</div><h1>Policy Publication Links</h1><p class="muted">Create immutable policy versions, enforce independent approval, move an exact stable-link pointer with CAS, and operate fail-closed publication schedules.</p></div>
     <a class="btn" href="/compliance">Back to Compliance</a>
   </header>
-  {% if not policy_publication_links_enabled %}<div class="ppl-warning" role="status"><strong>Policy links disabled.</strong> Enable both <code>[tech_risk_compliance] enable = true</code> and <code>[tech_risk_compliance.policy_publication_links] enable = true</code> after storage, access, recovery, and retention review.</div>{% endif %}
   <div class="ppl-warning"><strong>Authority boundary:</strong> public retrieval is an inbound Lightwork request and performs no outbound network call. Creating, approving, publishing, scheduling, and retaining records change local state. Raw private capabilities and scheduler lease tokens are returned once and are never persisted by this console.</div>
   <section class="ppl-card" aria-labelledby="ppl-limits-heading">
     <h2 id="ppl-limits-heading">Acceptance and storage limits</h2>

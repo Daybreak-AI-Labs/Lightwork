@@ -120,4 +120,5 @@ def test_dsar_detail_404_and_disabled_fulfillment_note(tmp_path):
     config.reset_config_cache()
     page = client.get(f"/privacy/dsar/{request['id']}")
     assert page.status_code == 200
-    assert "not enabled" in page.text
+    assert 'data-module-gate="dsar_fulfillment"' in page.text
+    assert "[dsar_fulfillment]" not in page.text

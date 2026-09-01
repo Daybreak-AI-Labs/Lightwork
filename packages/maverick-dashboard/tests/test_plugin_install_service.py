@@ -48,3 +48,85 @@ def test_page_shows_install_section_when_allowlisted(tmp_path, monkeypatch):
     t = client.get("/plugins").text
     assert "acme-maverick-tools" in t
     assert "Install a plugin" in t
+
+
+def _isolate_config(tmp_path, monkeypatch):
+    from maverick import config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("MAVERICK_ALLOW_PLUGIN_INSTALL", raising=False)
+    config.reset_config_cache()
+    return config
+
+
+def test_install_opt_in_via_config_switch(tmp_path, monkeypatch):
+    """[plugins] allow_install is the in-app path to the install opt-in --
+    no env var, no shell."""
+    _isolate_config(tmp_path, monkeypatch)
+    called = []
+    monkeypatch.setattr("maverick.plugins.install_plugin",
+                        lambda n: called.append(n) or {})
+    r = client.post("/plugins/install-switch", data={"enabled": "on"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    r = client.post("/plugins/install", data={"name": "approved-pkg"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    assert called == ["approved-pkg"]
+
+
+def test_env_falsy_force_disables_despite_config(tmp_path, monkeypatch):
+    """A hardened deployment pins installs off: an explicit falsy env value
+    outranks the in-app switch in the OFF direction."""
+    _isolate_config(tmp_path, monkeypatch)
+    from maverick_dashboard import settings_store
+
+    settings_store.set_plugin_install_allowed(True)
+    monkeypatch.setenv("MAVERICK_ALLOW_PLUGIN_INSTALL", "0")
+    called = []
+    monkeypatch.setattr("maverick.plugins.install_plugin", lambda n: called.append(n))
+    r = client.post("/plugins/install", data={"name": "approved-pkg"},
+                    follow_redirects=False)
+    assert r.status_code == 403
+    assert called == []
+    # And the page tells the admin the environment pinned it off.
+    t = client.get("/plugins").text
+    assert "pinned off by this server" in t
+
+
+def test_approvals_endpoint_writes_the_allowlist(tmp_path, monkeypatch):
+    """Admins manage the pre-approved package list on the page itself --
+    the old dead end ('no packages approved yet' with no way forward)."""
+    _isolate_config(tmp_path, monkeypatch)
+    r = client.post(
+        "/plugins/approvals",
+        data={"names": "acme-maverick-tools\n globex-channel , acme-maverick-tools"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    from maverick.plugins import installable_plugins
+
+    assert installable_plugins() == ["acme-maverick-tools", "globex-channel"]
+    # An unsafe name is rejected at approval time, not discovered at install.
+    r = client.post("/plugins/approvals", data={"names": "evil pkg==1.0"},
+                    follow_redirects=False)
+    assert r.status_code == 400
+    assert installable_plugins() == ["acme-maverick-tools", "globex-channel"]
+    # Clearing fails closed.
+    r = client.post("/plugins/approvals", data={"names": ""}, follow_redirects=False)
+    assert r.status_code == 303
+    assert installable_plugins() == []
+
+
+def test_approvals_and_switch_require_admin(tmp_path, monkeypatch):
+    _isolate_config(tmp_path, monkeypatch)
+    import maverick_dashboard.auth as auth
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:viewer")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "viewer")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "viewer")
+    assert client.post("/plugins/approvals", data={"names": "x"},
+                       follow_redirects=False).status_code == 403
+    assert client.post("/plugins/install-switch", data={"enabled": "on"},
+                       follow_redirects=False).status_code == 403

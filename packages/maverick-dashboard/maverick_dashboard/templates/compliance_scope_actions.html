@@ -29,13 +29,13 @@
   selected or supplied by this page.
 </div>
 
+{% from "_module_gate.html" import module_gate %}
 {% if not compliance_scope_actions_enabled %}
-<section class="panel">
-  <h2>Compliance scope actions disabled</h2>
-  <p>This surface fails closed until both
-    <code>[tech_risk_compliance] enable = true</code> and
-    <code>[tech_risk_compliance.scope_actions] enable = true</code> are explicit.</p>
-</section>
+{{ module_gate('tech_risk_compliance.scope_actions', 'Compliance scope actions',
+               detail='Turns a finalized compliance scope into reason-coded
+                       control and evidence-task intents through an approved
+                       mapping catalog -- have your compliance owner review the
+                       catalog governance first.') }}
 {% else %}
 <p><button class="btn" id="csa-load-status" type="button">Load honest status</button></p>
 <div class="csa-grid">

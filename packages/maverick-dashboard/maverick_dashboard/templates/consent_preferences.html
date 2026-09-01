@@ -24,8 +24,12 @@
       <p class="muted">Version-bound receipts, preference profiles, tracker governance, privacy signals, enforcement, and replayable downstream synchronization.</p></div>
     <div class="cp-actions"><a class="btn" href="/consent/publishing">Experience publishing</a><a class="btn" href="/consent/experiments">Experiments</a><a class="btn" href="/consent/public-clients">Public SDK clients</a><a class="btn" href="/consent/profile-data">Profile data</a><a class="btn" href="/consent/trust-center-authority">Trust Center authority</a><a class="btn" href="/consent/delivery">Signed delivery</a><a class="btn" href="/consent/scan-inventory">Scan inventory</a><a class="btn" href="/consent/scan-notice-proposals">Disclosure proposals</a><button class="btn" id="cp-refresh" type="button">Refresh</button></div>
   </header>
+  {% from "_module_gate.html" import module_gate %}
   {% if not consent_preferences_enabled %}
-  <div class="cp-banner" role="status"><strong>Module disabled.</strong> Enable <code>[consent_preferences] enable = true</code> after the privacy owner approves this data plane.</div>
+  {{ module_gate('consent_preferences', 'Consent preferences',
+                 detail='Receipts, preference profiles, tracker governance, and
+                         downstream sync all run through this data plane -- have
+                         your privacy owner approve it first.') }}
   {% endif %}
   <div id="cp-status" class="muted" role="status" aria-live="polite"></div>
   <section class="cp-grid" aria-label="Consent program summary">
@@ -119,7 +123,10 @@
 
       <section class="cp-card"><h2>Privacy-bounded consent analytics</h2>
         {% if not consent_analytics_enabled %}
-        <p class="muted">Analytics is independently disabled. Enable <code>[consent_preferences.analytics] enable = true</code> after cohort-threshold review.</p>
+        {{ module_gate('consent_preferences.analytics', 'Consent analytics',
+                       detail='Independently switched: privacy-bounded aggregates
+                               over consent receipts. Review your cohort
+                               thresholds before turning it on.') }}
         {% endif %}
         <form class="cp-form" id="cp-analytics-form">
           <label>Start timestamp<input class="input" name="start_at" type="number" step="any" required></label>

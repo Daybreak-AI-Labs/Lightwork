@@ -73,8 +73,10 @@ from .auth import (
     can_access_goal_principal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_global_permission,
     has_permission,
     non_static_auth_configured,
+    require_global_permission,
     require_permission,
     require_principal_in_request_context,
     require_suite,
@@ -851,6 +853,7 @@ from .privacy_drop_management_page import (  # noqa: E402
 from .shared_governance_inventory_page import (  # noqa: E402
     create_shared_governance_inventory_page_router,
 )
+from .tenant_select_page import create_tenant_select_page_router  # noqa: E402
 from .third_party_contracts_page import (  # noqa: E402
     create_third_party_contracts_page_router,
 )
@@ -859,6 +862,7 @@ from .third_party_executive_reports_page import (  # noqa: E402
 )
 
 app.include_router(create_ai_cloud_agent_governance_workbench_router(templates))
+app.include_router(create_tenant_select_page_router(templates))
 app.include_router(create_ai_evidence_analysis_page_router(templates))
 app.include_router(create_assessment_evidence_autopopulation_page_router(templates))
 app.include_router(create_ai_entity_tasks_page_router(templates))
@@ -1810,6 +1814,17 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             {"path": request.url.path},
             status_code=404,
         )
+    if (
+        exc.status_code == 409
+        and _wants_html(request)
+        and str(exc.detail or "").startswith("select an active tenant")
+    ):
+        # Every tenant-scoped workbench raises this same gate. A browser user
+        # gets the picker, not a JSON dead end that sends them to a config
+        # file; API callers keep the machine-readable 409 below.
+        from .tenant_select_page import tenant_select_response
+
+        return tenant_select_response(request, templates, detail=str(exc.detail))
     return JSONResponse(
         {"detail": exc.detail},
         status_code=exc.status_code,
@@ -1966,6 +1981,47 @@ async def security_headers(request: Request, call_next):
         csp = _DEFAULT_CSP
     response.headers.setdefault("Content-Security-Policy", csp)
     return response
+
+
+@app.middleware("http")
+async def bind_active_tenant(request: Request, call_next):
+    """Scope each request to the dashboard's selected active tenant.
+
+    The tenant-scoped workbenches (consent, privacy discovery, third-party,
+    ...) refuse to run unbound. Before this middleware the only ways to bind
+    were the MAVERICK_TENANT env var or an enterprise client binding -- a
+    config-file/environment step, which the dashboard promises not to need.
+    The Settings-persisted selection fills the same slot, and only that slot:
+    an explicit env/context binding still wins, and a selection that names a
+    tenant since suspended or deleted is ignored rather than trusted, so the
+    registry stays the authority on who may do work.
+    """
+    from maverick.paths import current_tenant_id, reset_tenant, set_tenant
+
+    def _stored_selection() -> str | None:
+        # current_tenant_id covers all three existing bindings -- request
+        # context, MAVERICK_TENANT, and the enterprise client binding (the
+        # tenant FLOOR for one-client deployments) -- and each outranks the
+        # dashboard selection, which must never widen an existing scope.
+        if current_tenant_id() is not None:
+            return None
+        from maverick_dashboard import settings_store
+
+        selected = settings_store.active_tenant()
+        if not selected:
+            return None
+        from maverick.tenant.registry import is_active
+
+        return selected if is_active(selected) else None
+
+    selected = await run_in_threadpool(_stored_selection)
+    if not selected:
+        return await call_next(request)
+    token = set_tenant(selected)
+    try:
+        return await call_next(request)
+    finally:
+        reset_tenant(token)
 
 
 # ----- browser-extension CORS gate (extensions/browser) -----
@@ -5367,11 +5423,6 @@ async def plugins_page(request: Request) -> HTMLResponse:
         installable = installable_plugins()
     except Exception:  # pragma: no cover -- never break the page
         installable = []
-    install_enabled = os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
     return templates.TemplateResponse(
         request,
         "plugins.html",
@@ -5380,9 +5431,42 @@ async def plugins_page(request: Request) -> HTMLResponse:
             "allowlist_active": allow is not None,
             "error": None,
             "installable": installable,
-            "install_enabled": install_enabled,
+            "install_enabled": _plugin_install_enabled(),
+            "install_env_forced_off": _plugin_install_env_state() is False,
+            "plugins_can_admin": has_global_permission(request, "admin"),
         },
     )
+
+
+def _plugin_install_env_state() -> bool | None:
+    """The MAVERICK_ALLOW_PLUGIN_INSTALL env override: True/False when the
+    operator set it explicitly, None when unset (config decides)."""
+    env = os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    if env in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _plugin_install_enabled() -> bool:
+    """Whether the dashboard may run plugin installs.
+
+    Historically env-only (MAVERICK_ALLOW_PLUGIN_INSTALL) -- a shell step the
+    dashboard promises not to need. Now `[plugins] allow_install` (settings
+    overlay or config.toml) is the in-app path, and the env var keeps final
+    say in BOTH directions: an explicit falsy value force-disables installs
+    on a hardened deployment no matter what the overlay says.
+    """
+    env = _plugin_install_env_state()
+    if env is not None:
+        return env
+    try:
+        from maverick.config import load_config
+
+        return bool(((load_config() or {}).get("plugins") or {}).get("allow_install", False))
+    except Exception:  # pragma: no cover -- uncertainty cannot enable installs
+        return False
 
 
 @app.post("/plugins/toggle")
@@ -5418,17 +5502,19 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
     installable``, then redirect back so its slots show up to enable.
 
     Sensitive (runs ``pip install``), so it's quad-gated: same-origin, an
-    explicit ``MAVERICK_ALLOW_PLUGIN_INSTALL`` opt-in, the admin role, and the
-    install allowlist (``install_plugin`` rejects anything not on it). Only the
+    explicit install opt-in (the [plugins] allow_install switch on the
+    Plugins page, or MAVERICK_ALLOW_PLUGIN_INSTALL -- whose falsy value
+    force-disables regardless of config), the admin role, and the install
+    allowlist (``install_plugin`` rejects anything not on it). Only the
     allowlisted package names are ever accepted -- never free-text input."""
     _require_same_origin(request)
-    if os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() not in {"1", "true", "yes"}:
+    if not _plugin_install_enabled():
         raise HTTPException(
             status_code=403,
             detail=(
                 "Installing plugins from the dashboard is disabled on this "
-                "server — an administrator can opt in (set "
-                "MAVERICK_ALLOW_PLUGIN_INSTALL=1)."
+                "server — an administrator can opt in from the Plugins page "
+                "(or with MAVERICK_ALLOW_PLUGIN_INSTALL=1)."
             ),
         )
     require_permission(request, "admin")
@@ -5438,6 +5524,50 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
         install_plugin(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/plugins", status_code=303)
+
+
+@app.post("/plugins/approvals")
+async def plugins_approvals(request: Request, names: str = Form("")) -> RedirectResponse:
+    """Replace the pre-approved install allowlist from the Plugins page.
+
+    The allowlist decides WHAT the one-click installer may ever pull, so it is
+    admin + same-origin gated and every name must be a plain distribution name
+    (the store re-applies install_plugin's _SAFE_PKG check at write time).
+    ``names`` is a whitespace/comma/newline-separated list; an empty submission
+    clears the allowlist (fail closed)."""
+    _require_same_origin(request)
+    require_global_permission(request, "admin")
+    from maverick_dashboard import settings_store
+
+    parsed = [p for chunk in names.replace(",", "\n").splitlines() for p in chunk.split()]
+    try:
+        await run_in_threadpool(settings_store.set_installable_plugins, parsed)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
+    return RedirectResponse("/plugins", status_code=303)
+
+
+@app.post("/plugins/install-switch")
+async def plugins_install_switch(
+    request: Request, enabled: str = Form(...)
+) -> RedirectResponse:
+    """Flip the in-app plugin-install opt-in ([plugins] allow_install) from
+    the Plugins page. Admin + same-origin; an explicit falsy
+    MAVERICK_ALLOW_PLUGIN_INSTALL still force-disables installs regardless."""
+    _require_same_origin(request)
+    require_global_permission(request, "admin")
+    if enabled not in {"on", "off"}:
+        raise HTTPException(status_code=400, detail="enabled must be 'on' or 'off'")
+    from maverick_dashboard import settings_store
+
+    await run_in_threadpool(settings_store.set_plugin_install_allowed, enabled == "on")
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
     return RedirectResponse("/plugins", status_code=303)
 
 

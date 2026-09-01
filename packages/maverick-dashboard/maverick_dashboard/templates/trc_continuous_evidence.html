@@ -71,11 +71,13 @@
     </aside>
   </section>
 
+  {% from "_module_gate.html" import module_gate %}
   {% if not trc_continuous_evidence_enabled %}
-  <section class="trc-panel trc-glass">
-    <h2>Continuous evidence is disabled</h2>
-    <p>Enable <code>[tech_risk_compliance]</code> and <code>[tech_risk_compliance.continuous_evidence]</code>. Stock feeds also require an exact tenant <code>stock_collectors.sources</code> manifest, an approved definition, an active enrollment, and deployment-held credential custody.</p>
-  </section>
+  {{ module_gate('tech_risk_compliance.continuous_evidence', 'Continuous evidence',
+                 detail='Read-only, digest-only provider evidence feeds. Stock
+                         feeds still collect nothing until a tenant source
+                         manifest, an approved definition, an active enrollment,
+                         and deployment-held credential custody are in place.') }}
   {% else %}
   <section class="trc-status-grid" aria-label="Continuous evidence status">
     <article class="trc-stat trc-glass"><span class="trc-stat__label">Composition</span><span class="trc-stat__value" id="trc-composition">unknown</span><span class="trc-stat__detail" id="trc-composition-detail">Refresh to inspect configured sources.</span></article>

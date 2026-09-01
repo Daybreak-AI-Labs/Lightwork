@@ -78,8 +78,9 @@ def test_page_fails_closed_and_template_uses_safe_ephemeral_dom(page_client) -> 
         params={"enabled": False},
     )
     assert disabled.status_code == 200
-    assert "Trust Center authority disabled" in disabled.text
-    assert "consent_preferences.trust_center" in disabled.text
+    assert 'data-module-gate="consent_preferences.trust_center"' in disabled.text
+    assert "Consumer Trust Center is turned off." in disabled.text
+    assert "[consent_preferences.trust_center] enable = true" not in disabled.text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"

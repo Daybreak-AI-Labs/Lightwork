@@ -22,10 +22,13 @@
     <a class="btn" href="/">Back to Overview</a>
   </header>
 
+  {% from "_module_gate.html" import module_gate %}
   {% if not privacy_data_discovery_enabled %}
-  <div class="pdd-banner" role="status">
-    <strong>Privacy data discovery disabled.</strong> Enable both <code>privacy_automation.enable</code> and <code>privacy_automation.data_discovery.enable</code>. Provider work fails closed while either gate is off.
-  </div>
+  {{ module_gate('privacy_automation.data_discovery', 'Privacy data discovery',
+                 detail='Bounded provider scans, digest-only findings, and
+                         four-eyes remediation delivery all stay safely off
+                         until it is on -- review your scan scope and enrolled
+                         sources with your privacy owner first.') }}
   {% endif %}
 
   <div class="pdd-banner">

@@ -84,8 +84,9 @@ def test_page_is_safe_and_explicit_when_independent_gate_is_off(
 ) -> None:
     response = page_client.get("/consent/experiments", params={"enabled": False})
     assert response.status_code == 200
-    assert "Consent experiments disabled" in response.text
-    assert "consent_preferences.experiments" in response.text
+    assert 'data-module-gate="consent_preferences.experiments"' in response.text
+    assert "Consent experiments is turned off." in response.text
+    assert "[consent_preferences.experiments] enable = true" not in response.text
     assert "production-scale acceptance" in response.text
 
     template = (

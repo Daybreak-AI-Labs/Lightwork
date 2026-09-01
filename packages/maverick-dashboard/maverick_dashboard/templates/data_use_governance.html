@@ -10,8 +10,20 @@
 </style>
 <div class="dug-shell">
   <header class="dug-hero"><div><div class="dug-kicker">Context-aware policy authority</div><h1>Data Use Governance</h1><p class="muted">Catalog bindings, independently sourced decision context, reviewed labels, machine-readable policy, expiring exceptions, authorization, and provider-neutral control IR.</p></div><div class="dug-actions"><a class="btn" href="/data-use/providers">Native data controls</a><button class="btn" id="dug-refresh" type="button">Refresh</button></div></header>
-  {% if not data_use_enabled %}<div class="dug-banner" role="status"><strong>Module disabled.</strong> Enable <code>[data_use_governance] enable = true</code> after the data owner approves the authority plane.</div>{% endif %}
-  {% if data_use_enabled and not data_use_compiler_enabled %}<div class="dug-banner" role="status"><strong>Compiler disabled.</strong> Authorization records work, but compilation requires <code>[data_use_governance.compiler] enable = true</code>.</div>{% endif %}
+  {% from "_module_gate.html" import module_gate %}
+  {% if not data_use_enabled %}
+  {{ module_gate('data_use_governance', 'Data-use governance',
+                 detail='Catalog bindings, decision context, reviewed labels,
+                         and authorization records all run through this
+                         authority plane -- have your data owner approve it
+                         first.') }}
+  {% endif %}
+  {% if data_use_enabled and not data_use_compiler_enabled %}
+  {{ module_gate('data_use_governance.compiler', 'Data-use policy compiler',
+                 detail='Independently switched: authorization records keep
+                         working, but compiling machine-readable policy into
+                         provider-neutral control IR needs the compiler on.') }}
+  {% endif %}
   <div id="dug-status-message" class="muted" role="status" aria-live="polite"></div>
   <section class="dug-grid" aria-label="Data use posture"><div class="dug-stat"><strong id="dug-policy-default">—</strong><span>Policy default</span></div><div class="dug-stat"><strong id="dug-context-count">—</strong><span>Required context roots</span></div><div class="dug-stat"><strong id="dug-provider-writes">—</strong><span>Native provider writes</span></div><div class="dug-stat"><strong id="dug-live-acceptance">—</strong><span>Live provider acceptance</span></div></section>
   <div class="dug-layout">

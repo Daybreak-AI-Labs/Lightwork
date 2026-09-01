@@ -109,6 +109,27 @@ def _check_config_lint(cfg: dict) -> None:
              fix="run `maverick config-lint` for the full report" if i == 0 else "")
 
 
+def _sdk_import_failure(
+    name: str, exc: ImportError, install_fix: str
+) -> tuple[str, str]:
+    """Message + fix for a provider SDK whose import raised.
+
+    A missing package and a CORRUPT install both land here as ImportError,
+    but the fixes differ -- and "SDK not installed" while pip lists the
+    package sent a user chasing the wrong problem (field finding: a broken
+    anthropic install needed --force-reinstall, not install). Only a
+    ModuleNotFoundError for the package itself means "not installed";
+    anything else (a broken submodule, a missing compiled dep) reports the
+    real error.
+    """
+    if isinstance(exc, ModuleNotFoundError) and exc.name == name:
+        return "SDK not installed", install_fix
+    return (
+        f"SDK is installed but failed to import: {exc}",
+        f"pip install --force-reinstall {name}",
+    )
+
+
 def _check_anthropic() -> None:
     key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not key:
@@ -136,9 +157,9 @@ def _check_anthropic() -> None:
         return
     try:
         import anthropic
-    except ImportError:
-        _row(YELLOW, "anthropic", "SDK not installed",
-             fix="pip install anthropic")
+    except ImportError as e:
+        msg, fix = _sdk_import_failure("anthropic", e, "pip install anthropic")
+        _row(YELLOW, "anthropic", msg, fix=fix)
         return
     try:
         client = anthropic.Anthropic(api_key=key)
@@ -166,14 +187,14 @@ def _check_openai() -> None:
         return
     try:
         from openai import AuthenticationError, OpenAI
-    except ImportError:
-        _row(
-            YELLOW,
+    except ImportError as e:
+        msg, fix = _sdk_import_failure(
             "openai",
-            "SDK not installed",
-            fix=("install the OpenAI extra from the same reviewed Lightwork "
-                 "checkout; public-index lookup is disabled"),
+            e,
+            "install the OpenAI extra from the same reviewed Lightwork "
+            "checkout; public-index lookup is disabled",
         )
+        _row(YELLOW, "openai", msg, fix=fix)
         return
     try:
         client = OpenAI(api_key=key)

@@ -60,4 +60,6 @@ def test_delivery_page_reports_disabled_gate(
     config.reset_config_cache()
     response = client.get("/consent/delivery")
     assert response.status_code == 200
-    assert "Delivery disabled" in response.text
+    assert 'data-module-gate="consent_preferences.delivery"' in response.text
+    assert "Consent delivery is turned off." in response.text
+    assert "[consent_preferences.delivery] enable = true" not in response.text
