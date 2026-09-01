@@ -73,8 +73,10 @@ from .auth import (
     can_access_goal_principal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_global_permission,
     has_permission,
     non_static_auth_configured,
+    require_global_permission,
     require_permission,
     require_principal_in_request_context,
     require_suite,
@@ -5421,11 +5423,6 @@ async def plugins_page(request: Request) -> HTMLResponse:
         installable = installable_plugins()
     except Exception:  # pragma: no cover -- never break the page
         installable = []
-    install_enabled = os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
     return templates.TemplateResponse(
         request,
         "plugins.html",
@@ -5434,9 +5431,42 @@ async def plugins_page(request: Request) -> HTMLResponse:
             "allowlist_active": allow is not None,
             "error": None,
             "installable": installable,
-            "install_enabled": install_enabled,
+            "install_enabled": _plugin_install_enabled(),
+            "install_env_forced_off": _plugin_install_env_state() is False,
+            "plugins_can_admin": has_global_permission(request, "admin"),
         },
     )
+
+
+def _plugin_install_env_state() -> bool | None:
+    """The MAVERICK_ALLOW_PLUGIN_INSTALL env override: True/False when the
+    operator set it explicitly, None when unset (config decides)."""
+    env = os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    if env in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _plugin_install_enabled() -> bool:
+    """Whether the dashboard may run plugin installs.
+
+    Historically env-only (MAVERICK_ALLOW_PLUGIN_INSTALL) -- a shell step the
+    dashboard promises not to need. Now `[plugins] allow_install` (settings
+    overlay or config.toml) is the in-app path, and the env var keeps final
+    say in BOTH directions: an explicit falsy value force-disables installs
+    on a hardened deployment no matter what the overlay says.
+    """
+    env = _plugin_install_env_state()
+    if env is not None:
+        return env
+    try:
+        from maverick.config import load_config
+
+        return bool(((load_config() or {}).get("plugins") or {}).get("allow_install", False))
+    except Exception:  # pragma: no cover -- uncertainty cannot enable installs
+        return False
 
 
 @app.post("/plugins/toggle")
@@ -5472,17 +5502,19 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
     installable``, then redirect back so its slots show up to enable.
 
     Sensitive (runs ``pip install``), so it's quad-gated: same-origin, an
-    explicit ``MAVERICK_ALLOW_PLUGIN_INSTALL`` opt-in, the admin role, and the
-    install allowlist (``install_plugin`` rejects anything not on it). Only the
+    explicit install opt-in (the [plugins] allow_install switch on the
+    Plugins page, or MAVERICK_ALLOW_PLUGIN_INSTALL -- whose falsy value
+    force-disables regardless of config), the admin role, and the install
+    allowlist (``install_plugin`` rejects anything not on it). Only the
     allowlisted package names are ever accepted -- never free-text input."""
     _require_same_origin(request)
-    if os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() not in {"1", "true", "yes"}:
+    if not _plugin_install_enabled():
         raise HTTPException(
             status_code=403,
             detail=(
                 "Installing plugins from the dashboard is disabled on this "
-                "server — an administrator can opt in (set "
-                "MAVERICK_ALLOW_PLUGIN_INSTALL=1)."
+                "server — an administrator can opt in from the Plugins page "
+                "(or with MAVERICK_ALLOW_PLUGIN_INSTALL=1)."
             ),
         )
     require_permission(request, "admin")
@@ -5492,6 +5524,50 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
         install_plugin(name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse("/plugins", status_code=303)
+
+
+@app.post("/plugins/approvals")
+async def plugins_approvals(request: Request, names: str = Form("")) -> RedirectResponse:
+    """Replace the pre-approved install allowlist from the Plugins page.
+
+    The allowlist decides WHAT the one-click installer may ever pull, so it is
+    admin + same-origin gated and every name must be a plain distribution name
+    (the store re-applies install_plugin's _SAFE_PKG check at write time).
+    ``names`` is a whitespace/comma/newline-separated list; an empty submission
+    clears the allowlist (fail closed)."""
+    _require_same_origin(request)
+    require_global_permission(request, "admin")
+    from maverick_dashboard import settings_store
+
+    parsed = [p for chunk in names.replace(",", "\n").splitlines() for p in chunk.split()]
+    try:
+        await run_in_threadpool(settings_store.set_installable_plugins, parsed)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
+    return RedirectResponse("/plugins", status_code=303)
+
+
+@app.post("/plugins/install-switch")
+async def plugins_install_switch(
+    request: Request, enabled: str = Form(...)
+) -> RedirectResponse:
+    """Flip the in-app plugin-install opt-in ([plugins] allow_install) from
+    the Plugins page. Admin + same-origin; an explicit falsy
+    MAVERICK_ALLOW_PLUGIN_INSTALL still force-disables installs regardless."""
+    _require_same_origin(request)
+    require_global_permission(request, "admin")
+    if enabled not in {"on", "off"}:
+        raise HTTPException(status_code=400, detail="enabled must be 'on' or 'off'")
+    from maverick_dashboard import settings_store
+
+    await run_in_threadpool(settings_store.set_plugin_install_allowed, enabled == "on")
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
     return RedirectResponse("/plugins", status_code=303)
 
 

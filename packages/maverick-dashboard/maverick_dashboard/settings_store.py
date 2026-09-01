@@ -368,6 +368,18 @@ def _dump(data: dict) -> str:
         lines.append("[dashboard]")
         lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
         lines.append("")
+    # [plugins] -- the dashboard-install allowlist + opt-in switch
+    # (set_installable_plugins / set_plugin_install_allowed).
+    plugins = data.get("plugins") or {}
+    if plugins:
+        lines.append("[plugins]")
+        if "allow_install" in plugins:
+            lines.append(
+                f"allow_install = {'true' if plugins['allow_install'] else 'false'}"
+            )
+        if plugins.get("installable"):
+            lines.append(f"installable = {_toml_value(list(plugins['installable']))}")
+        lines.append("")
     _dump_value(lines, data.get("value") or {})
     # [model_cost_tiers] -- manager-set cost bands per model. Keys are model
     # ids that can contain '/' or '.', so they are always quoted.
@@ -569,6 +581,49 @@ def set_module_enables(paths, enabled: bool) -> None:
                     node[part] = child
                 node = child
             node["enable"] = bool(enabled)
+        _write(data)
+
+
+def set_installable_plugins(names) -> None:
+    """Replace the dashboard-install plugin allowlist ([plugins] installable).
+
+    Every entry must be a plain distribution name (maverick.plugins._SAFE_PKG:
+    no URLs, version specifiers, or shell metacharacters) -- the same check
+    install_plugin() re-applies at install time, enforced here too so a bad
+    name is rejected at approval, not discovered at install.
+    """
+    from maverick.plugins import _SAFE_PKG
+
+    cleaned: list[str] = []
+    for raw in names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        if not _SAFE_PKG.match(name):
+            raise ValueError(f"unsafe package name: {name!r}")
+        if name not in cleaned:
+            cleaned.append(name)
+    with _locked():
+        data = _load_overlay_for_update()
+        if cleaned:
+            data.setdefault("plugins", {})["installable"] = cleaned
+        else:
+            (data.get("plugins") or {}).pop("installable", None)
+            if not data.get("plugins"):
+                data.pop("plugins", None)
+        _write(data)
+
+
+def set_plugin_install_allowed(enabled: bool) -> None:
+    """Overlay the in-app plugin-install opt-in ([plugins] allow_install).
+
+    The MAVERICK_ALLOW_PLUGIN_INSTALL env var still outranks it in BOTH
+    directions (an explicit falsy value force-disables installs on a hardened
+    deployment); this knob is the everyone-else path that needs no shell.
+    """
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault("plugins", {})["allow_install"] = bool(enabled)
         _write(data)
 
 
