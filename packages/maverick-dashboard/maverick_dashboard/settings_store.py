@@ -368,6 +368,14 @@ def _dump(data: dict) -> str:
         lines.append("[dashboard]")
         lines.append(f"active_tenant = {_toml_str(dash['active_tenant'])}")
         lines.append("")
+    # [sandbox] backend -- the dashboard-selected execution backend
+    # (set_sandbox_backend). Only the selector; other sandbox keys are
+    # config-file policy and never written here.
+    sandbox = data.get("sandbox") or {}
+    if sandbox.get("backend"):
+        lines.append("[sandbox]")
+        lines.append(f"backend = {_toml_str(sandbox['backend'])}")
+        lines.append("")
     # [plugins] -- the dashboard-install allowlist + opt-in switch
     # (set_installable_plugins / set_plugin_install_allowed).
     plugins = data.get("plugins") or {}
@@ -581,6 +589,26 @@ def set_module_enables(paths, enabled: bool) -> None:
                     node[part] = child
                 node = child
             node["enable"] = bool(enabled)
+        _write(data)
+
+
+SANDBOX_BACKENDS: tuple[str, ...] = ("local", "docker", "podman")
+
+
+def set_sandbox_backend(backend: str) -> None:
+    """Overlay the sandbox backend ([sandbox] backend).
+
+    Only the backend selector is dashboard-writable; the rest of [sandbox]
+    (image, limits, network) stays config-file policy. The caller (the
+    sandbox API) is responsible for probing daemon reachability first so a
+    switch never silently strands every goal on an unreachable runtime.
+    """
+    cleaned = str(backend or "").strip().lower()
+    if cleaned not in SANDBOX_BACKENDS:
+        raise ValueError(f"unknown sandbox backend {cleaned!r}")
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault("sandbox", {})["backend"] = cleaned
         _write(data)
 
 

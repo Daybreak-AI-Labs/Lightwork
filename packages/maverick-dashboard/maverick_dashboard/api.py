@@ -138,6 +138,7 @@ from .api_schemas import (
     RoleOverrideIn,
     RopaIn,
     ScheduleIn,
+    SandboxBackendIn,
     ScheduleOut,
     SchemaImportIn,
     SharePointSyncIn,
@@ -9589,6 +9590,114 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
         "section": body.section,
         "enabled": _module_switch_enabled(loaded, body.section),
     }
+
+
+def _probe_container_daemon(binary: str) -> dict:
+    """``{"available": bool, "detail": str}`` for a container runtime.
+
+    argv-only subprocess (never a shell); bounded so a hung daemon can't hang
+    the status endpoint.
+    """
+    import shutil
+    import subprocess
+
+    path = shutil.which(binary)
+    if not path:
+        return {
+            "available": False,
+            "detail": f"{binary} is not installed (not found on PATH)",
+        }
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+            [path, "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True,
+            text=True,
+            timeout=6,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "detail": f"{binary} did not answer within 6s -- daemon starting or hung?",
+        }
+    except OSError as exc:
+        return {"available": False, "detail": f"could not run {binary}: {exc}"}
+    if proc.returncode != 0:
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = lines[-1].strip() if lines else f"{binary} info failed"
+        return {"available": False, "detail": detail[:300]}
+    version = (proc.stdout or "").strip()
+    detail = "daemon reachable" + (f" (server {version})" if version else "")
+    return {"available": True, "detail": detail}
+
+
+@router.get("/sandbox/status")
+async def sandbox_status(request: Request) -> dict:
+    """The execution sandbox: the selected backend and, live, whether each
+    container runtime's daemon is actually reachable right now."""
+    require_permission(request, "view")
+    from maverick import config as _cfg
+
+    def _read() -> dict:
+        loaded = _cfg.load_config() or {}
+        backend = str((loaded.get("sandbox") or {}).get("backend") or "local").strip().lower()
+        return {
+            "backend": backend,
+            "backends": {
+                "local": {
+                    "available": True,
+                    "detail": (
+                        "always available -- runs model-driven shell on this "
+                        "host with no isolation"
+                    ),
+                },
+                "docker": _probe_container_daemon("docker"),
+                "podman": _probe_container_daemon("podman"),
+            },
+        }
+
+    return await run_in_threadpool(_read)
+
+
+@router.post("/sandbox/backend")
+async def set_sandbox_backend(request: Request, body: SandboxBackendIn) -> dict:
+    """Switch the sandbox backend from the dashboard -- no config file, no
+    restart. A container backend must have a REACHABLE daemon before the
+    switch lands (a selected-but-dead runtime would strand every later goal
+    with an opaque failure); switching to "local" requires an explicit risk
+    acknowledgement since it runs shell on the host un-isolated."""
+    require_global_permission(request, "admin")
+    backend = body.backend
+    if backend == "local" and not body.acknowledge_local_risk:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "switching to the local backend runs the agent's shell on "
+                "this host with no isolation; pass acknowledge_local_risk "
+                "to confirm"
+            ),
+        )
+    if backend != "local":
+        probe = await run_in_threadpool(_probe_container_daemon, backend)
+        if not probe["available"]:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{backend} is not ready: {probe['detail']}. Start the "
+                    f"{backend} daemon (e.g. open Docker Desktop, or "
+                    f"`systemctl start {backend}`) and try again."
+                ),
+            )
+    from maverick_dashboard import settings_store
+
+    try:
+        await run_in_threadpool(settings_store.set_sandbox_backend, backend)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick import config as _cfg
+
+    _cfg.reset_config_cache()
+    return {"backend": backend}
 
 
 @router.get("/copilot/context")
