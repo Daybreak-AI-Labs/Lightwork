@@ -111,15 +111,28 @@ Follow these steps in order. Paths cited are the actual controls in this repo.
       removals/renumbers fail), `python -m maverick.a11y_audit --ci`,
       `python -m maverick.schema_migrations --ci`.
     - `audit` — dependency/security audit + SBOM.
-    - `test` — the **test matrix on Python 3.10, 3.11, 3.12**.
-    - `redteam`, `eval-smoke`, `postgres`, `docker` — as configured.
+    - `test` — the **test matrix on Python 3.10, 3.11, 3.12** (pytest-xdist,
+      one worker per core); `posture` — the same suite under the production
+      security posture.
+    - `harness-overhead`, `governance-frontier-offline` — the tracked benchmark
+      manifests verify against the current sources.
+    - `redteam`, `eval-smoke`, `release-cohort`, `postgres`, `docker`, the three
+      `Windows process containment` legs — as configured.
   - **`.github/workflows/conventional-commits.yml`**, job `lint-pr-title` — PR
     title check.
+  - **`.github/workflows/commit-hygiene.yml`**, job `no-ai-attribution` — no AI
+    co-author trailers, generator footers or assistant session links in the
+    commit messages or PR text (checked again on the merge-queue commit).
   - [ ] If any gate is red, fix forward on the branch. Do not merge a red PR and
-        do not bypass a gate.
-- [ ] **7. Squash and merge to `main`.** Use squash merge to keep `main` history
-      linear and one commit per change. The squashed commit message keeps the
-      Conventional Commits subject.
+        do not bypass a gate. The gates above are **required status checks** in
+        the `main` ruleset (`.github/rulesets/protect-main.json`); GitHub
+        refuses the merge until each has passed on the queue's merge of the
+        branch onto the current `main`.
+- [ ] **7. Merge to `main` through the merge queue.** "Merge when ready" adds
+      the PR to the queue; the ruleset allows **squash only**, keeps history
+      linear (one commit per change) and refuses direct pushes, force-pushes
+      and branch deletion, with no bypass actors. The squashed commit message
+      keeps the Conventional Commits subject.
 - [ ] **8. Confirm the merge commit is signed** (see §8) and the PR is linked to
       any tracking issue.
 

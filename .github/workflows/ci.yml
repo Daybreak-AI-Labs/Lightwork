@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue builds a temporary branch per entry and gates the merge on
+  # this workflow's required checks. Without this trigger nothing reports on
+  # that branch and every entry times out (.github/rulesets/protect-main.json).
+  merge_group:
 
 # Resolve the test environment from one reviewed set. Consumer package
 # manifests keep compatible ranges; CI must not silently change behavior when
@@ -530,11 +534,14 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    # The complete deterministic suite is intentionally broad and currently
-    # takes about 46 minutes on a Windows validation host before dependency
-    # installation.  Keep enough job headroom that a healthy Linux matrix run
-    # cannot be killed by runner variance or setup time.
-    timeout-minutes: 60
+    # The complete deterministic suite is intentionally broad: ~24,700 tests,
+    # about 27 minutes serial on this runner class. It runs under pytest-xdist
+    # across the runner's cores (one worker per core, tests grouped by file so
+    # module-scoped fixtures and module-level TestClients stay per-worker),
+    # which brings a healthy run to roughly a third of that. The ceiling below
+    # is headroom for runner variance and setup, not the expected duration:
+    # a run that needs it is hung, and pytest-timeout/GNU timeout say where.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -567,7 +574,7 @@ jobs:
             -e ./packages/maverick-mcp \
             -e ./packages/maverick-knowledge \
             -e ./apps/installer-cli \
-            pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
+            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]'
           python -m pip check
           python scripts/verify_constraint_closure.py
       - name: Show installed packages
@@ -582,8 +589,8 @@ jobs:
           # ceiling. pytest-timeout catches a stuck test; GNU timeout also
           # bounds interpreter shutdown/non-daemon-thread leaks after the last
           # test and SIGABRT gives faulthandler a chance to print stacks.
-          timeout --verbose --signal=ABRT --kill-after=30s 35m \
-            python -m pytest -q --tb=short --durations=50 \
+          timeout --verbose --signal=ABRT --kill-after=30s 25m \
+            python -m pytest -q -n auto --dist loadfile --tb=short --durations=50 \
               --timeout=180 --timeout-method=signal \
               --junitxml="test-results-${{ matrix.python-version }}.xml" \
             2>&1 | tee "pytest-${{ matrix.python-version }}.log"
@@ -637,7 +644,9 @@ jobs:
     # committed to the baseline in the open. requirements/ci.txt keeps the
     # measurement reproducible instead of absorbing dependency drift.
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    # Same suite as the test matrix, same pytest-xdist parallelism; see the
+    # test job for why the ceiling is headroom rather than expected duration.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -660,7 +669,7 @@ jobs:
             -e ./packages/maverick-mcp \
             -e ./packages/maverick-knowledge \
             -e ./apps/installer-cli \
-            pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
+            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]'
           python -m pip check
           python scripts/verify_constraint_closure.py
       - name: Test and gate the production security posture
@@ -683,8 +692,8 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          timeout --verbose --signal=ABRT --kill-after=30s 40m \
-            python -m pytest -q -p no:randomly \
+          timeout --verbose --signal=ABRT --kill-after=30s 25m \
+            python -m pytest -q -p no:randomly -n auto --dist loadfile \
               --tb=no --timeout=180 --timeout-method=signal \
             2>&1 | tee posture-report.txt
           pytest_status=${PIPESTATUS[0]}

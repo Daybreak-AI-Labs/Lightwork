@@ -35,6 +35,8 @@ import ast
 import sys
 from pathlib import Path
 
+from .source_fingerprint import ScanMemo
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SEARCH_ROOTS = ("packages", "apps")
@@ -158,10 +160,25 @@ def _libraries_used(tree: ast.AST) -> set[str]:
     return used
 
 
+_MEMO: ScanMemo[dict[str, set[str]]] = ScanMemo()
+
+
 def scan(roots: tuple[str, ...] | None = None) -> dict[str, set[str]]:
-    """Map production module -> outbound HTTP libraries it calls directly."""
+    """Map production module -> outbound HTTP libraries it calls directly.
+
+    Memoised on the tree's content (see ``source_fingerprint``): the tests
+    call this four times per process and the tree does not change between.
+    """
+    chosen = tuple(roots or SEARCH_ROOTS)
+    return _MEMO.get(
+        REPO_ROOT, chosen, lambda: _scan_uncached(chosen),
+        lambda census: {module: set(libs) for module, libs in census.items()},
+    )
+
+
+def _scan_uncached(roots: tuple[str, ...]) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
-    for root in (roots or SEARCH_ROOTS):
+    for root in roots:
         base = REPO_ROOT / root
         if not base.is_dir():
             continue
