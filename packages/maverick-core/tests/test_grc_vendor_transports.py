@@ -540,10 +540,15 @@ def test_invalid_or_missing_credentials_never_reach_http() -> None:
         ),
         (gvt.VendorHTTPResponse(200, {}, b"x" * 4_097), "vendor_response_too_large"),
         (gvt.VendorHTTPResponse(200, {}, b"not-json"), "vendor_response_not_json"),
+        # Pathological nesting is rejected AT PARSE (json.loads raises
+        # RecursionError, mapped to not_json) -- a 1,100-deep array never
+        # reaches the object check, so it cannot earn the not_object category.
         (
             gvt.VendorHTTPResponse(200, {}, b"[" * 1_100 + b"0" + b"]" * 1_100),
-            "vendor_response_not_object",
+            "vendor_response_not_json",
         ),
+        # Valid JSON that parses but is not an object gets the precise category.
+        (gvt.VendorHTTPResponse(200, {}, b"[1, 2, 3]"), "vendor_response_not_object"),
     ],
 )
 def test_response_size_and_json_are_bounded(

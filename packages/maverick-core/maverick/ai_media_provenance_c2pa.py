@@ -895,12 +895,18 @@ class _C2PAToolRuntime:
 
     @property
     def adapter_version(self) -> str:
-        try:
-            return self._tool()[1]
-        except (KeyboardInterrupt, SystemExit):
-            raise
-        except Exception:
-            return "unavailable"
+        """The ADMITTED tool version, from cache only -- never a probe.
+
+        This property is touched by ``isinstance`` against the
+        runtime-checkable adapter protocols (``hasattr`` evaluates
+        properties), so probing here would make a mere type check spawn the
+        c2patool subprocess. Every caller that needs the live version goes
+        through ``is_available()``/``_tool()`` first, which primes the cache;
+        an un-admitted tool reports the same "unavailable" as before.
+        """
+        if self._tool_cache is not None:
+            return self._tool_cache[1]
+        return "unavailable"
 
     def _tool(self) -> tuple[str, str]:
         if self._tool_cache is not None:
