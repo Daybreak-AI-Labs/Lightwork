@@ -4420,6 +4420,16 @@ def pick_advanced() -> dict[str, Any]:
             "enterprise mode; recommended at the company boundary.",
             default=False,
         ),
+        "control_plane": _q_confirm(
+            "Turn on the Agent Control Plane? One console (dashboard page + "
+            "`maverick control-plane`) over every agent this deployment runs or "
+            "admits: suspend / resume / contain / attenuate a principal, or halt "
+            "the fleet, with each verb landing in the enforcement the runtime "
+            "already consults and recorded on the signed audit chain. Reads work "
+            "regardless; this arms the verbs. Recommended wherever more than one "
+            "person operates agents.",
+            default=False,
+        ),
         "anonymous_logs": _q_confirm(
             "Anonymous mode? Scrub user-identifying content (goal text, user/channel "
             "ids, home paths, emails/phones) from logs and audit events — hashes or "
@@ -6889,6 +6899,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             'max_wall_seconds = 600, data_scopes = ["support"] },'
         )
         lines.append("# ]")
+    if advanced.get("control_plane"):
+        lines.append("")
+        lines.append("# Agent Control Plane (maverick.agent_control_plane): arms the")
+        lines.append("# suspend/resume/contain/release/attenuate/halt verbs on the console")
+        lines.append("# and `maverick control-plane`; roster/status/ledger reads work anyway.")
+        lines.append("[control_plane]")
+        lines.append("enable = true")
     if advanced.get("anonymous_logs"):
         lines.append("")
         lines.append("[privacy]")

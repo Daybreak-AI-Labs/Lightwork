@@ -171,6 +171,13 @@ class EventKind:
     # payload: peer:str, direction:str (inbound|outbound), rule:str, reason:str,
     # correlation_id:str ("" when none).
     AGENT_TRUST_DENIED = "agent_trust_denied"
+    # Agent Control Plane: an operator verb (suspend / resume / contain /
+    # release / attenuate / halt / clear-halt) applied to a governed principal
+    # from the console or `maverick control-plane`. payload: verb:str,
+    # principal:str ("*" for a fleet verb), actor:str, ok:bool (what was
+    # CONFIRMED to land, not what was asked), detail:str; attenuate adds
+    # ceiling:dict (the narrowed deny_tools / max_risk / caps).
+    CONTROL_PLANE_ACTION = "control_plane_action"
     # Bring-your-own-agent gateway: enrollment lifecycle and the governed
     # traffic of agents that run on OTHER platforms (Agentforce, Bedrock, ...).
     # ENROLLED payload: external_agent, platform, department, enrolled_by.

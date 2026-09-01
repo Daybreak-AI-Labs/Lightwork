@@ -43,7 +43,7 @@ KNOWN_SECTIONS = frozenset({
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",
     "capabilities", "catalogs", "channels", "client", "coding", "compaction",
     "compliance", "computer_use", "connections", "consent_preferences",
-    "consequence", "containment",
+    "consequence", "containment", "control_plane",
     "context", "credit", "customer_sandbox_lifecycle", "data_engine", "data_use_governance",
     "dashboard", "director", "durable", "ebpf_monitor", "effort", "egress", "ekko",
     "emergent_codec", "emergent_protocol",

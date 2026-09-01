@@ -1594,6 +1594,28 @@ here.
   `issuer.key_custody` so a co-located key is reported as integrity rather than
   tamper-evidence. Point-in-time by design: a later lawful erasure re-signs the
   day, and the verifier says so.
+- **Agent Control Plane — one console over every agent the runtime enforces**
+  (`agent_control_plane.py`, dashboard `/agent-control-plane`,
+  `maverick control-plane status|list|ledger|suspend|resume|contain|release|
+  attenuate|halt|clear-halt`, opt-in `[control_plane] enable` /
+  `MAVERICK_CONTROL_PLANE=1`) — the roster of every principal the deployment
+  governs (native runs by the `user:<id>` capability principal their goals run
+  under; external agents as `agent:<id>` from the trust registry) and one set
+  of operator verbs whose effects are the stores the runtime already consults
+  on its next tool call: **suspend/resume** land in the capability revocation
+  registry (a native subtree's next tool call is denied; an external agent's
+  trust entry is flipped to revoked as well so every surface refuses it),
+  **contain/release** drive the security plane's containment and the
+  bring-your-own-agent gateway's, **attenuate** narrows an external agent's
+  deny-tools / risk / budget / wall ceiling in the trust registry and refuses
+  any change that would widen it, and **halt/clear-halt** arm and disarm the
+  fleet killswitch every kernel checks at its tool boundary. No new
+  enforcement is added; each verb reports what it *confirmed* landed (a
+  revocation that did not persist is a failure, not a success with a
+  footnote), and each is one signed `control_plane_action` audit row carrying
+  the verb, the principal, the actor and the outcome. Reads (roster, status,
+  the principal's forensic ledger off the signed chain) work on every
+  deployment; the verbs refuse while the plane is off.
 - **Memory Guard — governed reads/writes (OWASP ASI06)** (`memory_guard.py`,
   opt-in `[memory_guard] enable` / `MAVERICK_MEMORY_GUARD`) — the screen
   between an agent and its memory store. Every fact write is stamped with

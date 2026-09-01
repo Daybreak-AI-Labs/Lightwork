@@ -815,6 +815,9 @@ attach_unified_audit_composition(app)
 install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
+from .agent_control_plane_page import (  # noqa: E402
+    create_agent_control_plane_page_router,
+)
 from .ai_cloud_agent_governance_workbench import (  # noqa: E402
     create_ai_cloud_agent_governance_workbench_router,
 )
@@ -872,8 +875,10 @@ app.include_router(create_governed_document_vault_page_router(templates))
 app.include_router(create_no_code_grc_studio_page_router(templates))
 app.include_router(create_privacy_drop_management_page_router(templates))
 app.include_router(create_shared_governance_inventory_page_router(templates))
+app.include_router(create_agent_control_plane_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
+from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
 from .shared_governance_inventory_api import (  # noqa: E402
     router as shared_governance_inventory_router,
@@ -883,6 +888,7 @@ from .unified_audit_api import router as unified_audit_router  # noqa: E402
 app.include_router(customer_sandbox_router, prefix="/api/v1")
 app.include_router(unified_audit_router, prefix="/api/v1")
 app.include_router(shared_governance_inventory_router, prefix="/api/v1")
+app.include_router(agent_control_plane_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
@@ -8535,6 +8541,20 @@ async def shared_governance_inventory_client() -> FileResponse:
 
     return FileResponse(
         _STATIC_DIR / "lightwork-shared-governance-inventory.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-agent-control-plane.js")
+async def agent_control_plane_client() -> FileResponse:
+    """Client for the Agent Control Plane console (roster + verbs)."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-agent-control-plane.js",
         media_type="application/javascript; charset=utf-8",
         headers={
             "Cache-Control": "no-store, private, max-age=0",
