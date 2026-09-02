@@ -36,7 +36,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   function's department, reusing the `/approvals` queue. The Shoring P&L is the
   existing Savings report. The book is a small governed JSON store (not a
   world-model migration); SLA/status computation is read-only. On by default
-  (`[shoring] enable`, `MAVERICK_SHORING`).
+  (`[shoring] enable`, `MAVERICK_SHORING`), offered as an installer step beside
+  Cortex and included in the express presets.
 - **AI Evidence-Ready Gateway and operator cockpit** — governed evidence intake,
   review queues, readiness/health visibility, and first-run guidance now share
   one operator-facing workflow with durable audit checkpoints.
