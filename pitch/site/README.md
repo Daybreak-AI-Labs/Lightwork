@@ -33,7 +33,7 @@ described, not linked).
 | `cortex.html` | Cortex — the company brain: what it holds, who writes to it, how it's kept |
 | `second-shift.html` | Second Shift — turnkey departments of specialist agents |
 | `fleet-governance.html` | Fleet Governance & Memory — govern and learn from agents you didn't build |
-| `autonomous-compliance.html` | Autonomous Compliance — the agentic replacement for OneTrust-class platforms: six suites, how it's built, the 149-row capability map, how a migration runs |
+| `autonomous-compliance.html` | Autonomous Compliance — the compliance platform that does the work: six suites, how it's built, what's shipped vs. preview, how a migration runs |
 | `autonomous-shoring.html` | Autonomous Shoring & BPO — moving a whole function to a governed agentic workforce |
 | `daybreak-forge.html` | Daybreak Forge — bespoke departments from the agent factory |
 | `security.html` | Security & deployment — control→mechanism table, deployment models, audit/evidence, compliance status |
@@ -84,5 +84,7 @@ delivery — get a free one at web3forms.com (sends to chris@daybreakailabs.com)
 ## Finish before launch
 - Set the Web3Forms access key (above) so demo requests reach the inbox directly.
 - Confirm the SOC 2 wording on `security.html` matches reality before publishing.
-- The Autonomous Compliance capability numbers (149 rows; 75 / 67 / 0 / 7) come from
-  `docs/ONETRUST_PARITY_BREAKDOWN_2026-08-31.md`; refresh them when that review is re-run.
+- Legal rule for the compliance offering: the site never names another vendor, never
+  claims a row-by-row or line-by-line comparison, and never cites capability counts
+  from the internal competitive review; status is described only for our own product
+  (shipped / preview / external).
