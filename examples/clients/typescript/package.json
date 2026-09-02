@@ -15,7 +15,8 @@
   "overrides": {
     "@hono/node-server": "2.0.12",
     "body-parser": "2.3.0",
-    "fast-uri": "3.1.6"
+    "fast-uri": "3.1.6",
+    "qs": "6.16.0"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

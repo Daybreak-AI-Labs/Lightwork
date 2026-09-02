@@ -151,7 +151,9 @@ def anthropic_counter(model: str) -> Counter:
     use ``tiktoken_counter`` for a free offline proxy."""
     from anthropic import Anthropic
 
-    client = Anthropic()
+    # Metering is intentionally one request per count operation. The caller
+    # can rerun a measurement; an SDK retry would create unrecorded API work.
+    client = Anthropic(max_retries=0)
 
     def _count(text: str) -> int:
         resp = client.messages.count_tokens(

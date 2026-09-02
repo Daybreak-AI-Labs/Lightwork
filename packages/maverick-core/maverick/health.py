@@ -162,7 +162,8 @@ def _check_anthropic() -> None:
         _row(YELLOW, "anthropic", msg, fix=fix)
         return
     try:
-        client = anthropic.Anthropic(api_key=key)
+        # A health probe is a one-shot observation of current reachability.
+        client = anthropic.Anthropic(api_key=key, max_retries=0)
         list(client.models.list(limit=1))
         _row(GREEN, "anthropic", "key validated")
     except anthropic.AuthenticationError:
@@ -197,7 +198,8 @@ def _check_openai() -> None:
         _row(YELLOW, "openai", msg, fix=fix)
         return
     try:
-        client = OpenAI(api_key=key)
+        # A health probe is a one-shot observation of current reachability.
+        client = OpenAI(api_key=key, max_retries=0)
         list(client.models.list().data[:1])
         _row(GREEN, "openai", "key validated")
     except AuthenticationError:

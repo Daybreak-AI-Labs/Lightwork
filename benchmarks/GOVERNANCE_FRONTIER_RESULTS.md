@@ -10,8 +10,8 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-09-02T16:52:56.588201+00:00`
-- Git commit: `3f771417e82e112c3e8af738aa62724467d43afa`
+- Started: `2026-09-02T19:07:57.121717+00:00`
+- Git commit: `a15db2871f8250371a6bcfaa872fcbceed255e04`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
@@ -22,9 +22,9 @@
 - Input digest: `a3a7b2730d9130204222196cab16de9d91391247d749e739cfb82a1a5b4d9595`
 - Manifest signature: `ed25519` (self-signed run integrity)
 - Public evidence: [signed measured manifest](./results/governance-frontier-v1/measured-manifest.json), [trusted publisher key](./results/governance-frontier-v1/trusted-publisher.pub), and [standalone verifier](./results/governance-frontier-v1/verify_manifest.py)
-- Signed manifest file SHA-256 (UTF-8/LF): `51e80b40239dbf0e31ae7f2d67ced6d03e94c733d67ecc4d3cbb337c1e27e341`
-- Trusted-key file SHA-256 (UTF-8/LF): `e62ec6fd4312caaec9fc5226f59be46fd7a7cda97515e207883ba99088544cc6`
-- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `4ecc23afab5ad7128f62fdc038472163e635c28faf6cd32eed5a499bd3a5fc9d`
+- Signed manifest file SHA-256 (UTF-8/LF): `448aea214f55e7fca5eac0be7d254f606b8408f88656411ea3e931b9709304fa`
+- Trusted-key file SHA-256 (UTF-8/LF): `43360c5a9ff843af866c0daf0cf9c7880fc4c326e1154d129590b158eed78597`
+- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `fd7c46b1b28049c3d7236353e898f902d519560cbe3cc2a78aa2be760bc448e8`
 - Publication verification requires the separately downloaded trusted key; the manifest-embedded key is not trusted by itself
 
 ## Scorecard
@@ -67,10 +67,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 509.800 µs | 70204.800 µs |
-| Disabled baseline call | 120 | 25.150 µs | 440.300 µs |
-| Paired governance overhead | 120 | 330.500 µs | 70200.300 µs |
-| Harness signed decision append | 120 | 10415.150 µs | 16340.100 µs |
+| Governed control call | 120 | 348.600 µs | 52485.100 µs |
+| Disabled baseline call | 120 | 16.950 µs | 254.700 µs |
+| Paired governance overhead | 120 | 220.850 µs | 52482.700 µs |
+| Harness signed decision append | 120 | 6998.250 µs | 8929.700 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -79,7 +79,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `8b9f4baa12ac71ac74bdc4a6ec51097c9a6640f16c7ddaa41c339e36cc68c924`
+- Audit-chain SHA-256: `70ec197b345bfeb6d1323b7e2458825cc92cdc67ad41abbc95b2f7f0738dcb2c`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.

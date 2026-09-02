@@ -48,6 +48,21 @@ def _fail(msg: str) -> None:
     print(f"{_RED}FAIL{_RESET}  {msg}")
 
 
+def _arm_validation_egress() -> bool:
+    """Arm Lightwork's egress boundary before importing the provider SDK."""
+    try:
+        from maverick.egress_guard import install
+
+        active = install()
+    except Exception as exc:
+        _fail(f"Cannot arm Lightwork egress guard ({type(exc).__name__}); API ping refused")
+        return False
+    if not active:
+        _fail("Cannot arm Lightwork egress guard; API ping refused")
+        return False
+    return True
+
+
 def check_api_key() -> bool:
     """ANTHROPIC_API_KEY set + actually pings successfully."""
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -60,13 +75,17 @@ def check_api_key() -> bool:
         return False
     if not key.startswith(("sk-ant-", "sk-")):
         _warn(f"ANTHROPIC_API_KEY does not start with `sk-ant-` (length={len(key)})")
+    if not _arm_validation_egress():
+        return False
     try:
         import anthropic
     except ImportError:
         _fail("anthropic package not installed. Run: pip install anthropic")
         return False
     try:
-        client = anthropic.Anthropic(api_key=key)
+        # Preflight reports current reachability. Each named model gets one
+        # attempt; the explicit NotFound fallback below is a separate probe.
+        client = anthropic.Anthropic(api_key=key, max_retries=0)
         # Cheapest possible call: 1-token completion on Haiku.
         resp = client.messages.create(
             model="claude-haiku-4-5",

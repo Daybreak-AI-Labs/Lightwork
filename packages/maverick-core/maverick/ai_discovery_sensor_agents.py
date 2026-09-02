@@ -27,10 +27,13 @@ import re
 import sqlite3
 import stat
 import sys
+import threading
 import time
 import urllib.parse
 import uuid
+import weakref
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Protocol
@@ -48,6 +51,21 @@ from .ai_discovery_sensor_clients import (
     safe_request_digest,
 )
 from .file_lock import ensure_private_directory, ensure_private_file
+
+_SPOOL_LOCKS_GUARD = threading.Lock()
+_SPOOL_LOCKS: weakref.WeakValueDictionary[str, Any] = weakref.WeakValueDictionary()
+
+
+def _shared_spool_lock(path: Path) -> Any:
+    """Return one process lock for every handle to the same spool path."""
+
+    key = os.path.normcase(str(path.resolve(strict=False)))
+    with _SPOOL_LOCKS_GUARD:
+        lock = _SPOOL_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _SPOOL_LOCKS[key] = lock
+        return lock
 
 AGENT_CONFIG_SCHEMA = "lightwork.ai-discovery-agent.v1"
 _SOURCE_KINDS = frozenset(
@@ -485,30 +503,70 @@ class DiscoverySensorSpool:
     """Private SQLite spool with expiring leases and digest idempotency."""
 
     def __init__(self, path: str | Path, *, max_pending: int = 100_000) -> None:
-        self.path = Path(path).expanduser()
+        # Bind a relative configuration path to the startup directory once.
+        # Re-resolving it implicitly on every SQLite open after ``chdir`` can
+        # select a different database while still holding the original path's
+        # process lock.
+        expanded = Path(path).expanduser()
+        # Make the configured location independent of later ``chdir`` calls,
+        # but preserve every on-disk path component for the private-directory
+        # checks below. ``Path.resolve`` would erase a symlink/junction parent
+        # before ``ensure_private_directory`` could reject that alias.
+        self.path = Path(os.path.abspath(os.fspath(expanded)))
         self.max_pending = _positive_int(max_pending, "max_pending", 1_000_000)
+        self._lock = _shared_spool_lock(self.path)
         ensure_private_directory(self.path.parent)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
-            str(self.path), timeout=15.0, isolation_level=None, check_same_thread=False
+            str(self.path), timeout=30.0, isolation_level=None, check_same_thread=False
         )
         connection.row_factory = sqlite3.Row
         try:
-            connection.execute("PRAGMA journal_mode=DELETE")
+            # Arm the busy handler before any connection-local pragma. Journal
+            # mode is a database-wide setting and must not be rewritten by
+            # every hot-path connection: concurrent workers used to race that
+            # pragma and then starve at BEGIN IMMEDIATE.
+            connection.execute("PRAGMA busy_timeout=30000")
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("PRAGMA foreign_keys=ON")
-            connection.execute("PRAGMA busy_timeout=15000")
         except BaseException:
             connection.close()
             raise
         return connection
 
+    @contextmanager
+    def _serialized_connection(self):
+        """Serialize same-process handles while SQLite coordinates processes."""
+
+        with self._lock:
+            connection = None
+            try:
+                connection = self._connect()
+                yield connection
+            except SensorAgentStateError:
+                raise
+            except sqlite3.Error as exc:
+                # SQLite's busy handler is the bounded inter-process wait. If
+                # another process outlives it, preserve the spool API contract
+                # so the CLI reports an operational failure without leaking a
+                # raw driver traceback.
+                raise SensorAgentStateError(
+                    "normalized event spool operation failed"
+                ) from exc
+            finally:
+                if connection is not None:
+                    connection.close()
+
     def _initialize(self) -> None:
         try:
-            connection = self._connect()
-            try:
+            with self._serialized_connection() as connection:
+                # DELETE is intentional for the privacy-minimized spool: unlike
+                # WAL, acknowledged payload pages are not retained in a sidecar.
+                # Set it once during serialized initialization, never on each
+                # concurrent enqueue/lease/ack connection.
+                connection.execute("PRAGMA journal_mode=DELETE")
                 connection.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS pending_events (
@@ -530,8 +588,6 @@ class DiscoverySensorSpool:
                     ON pending_events(state, next_attempt_at, lease_until, created_at);
                     """
                 )
-            finally:
-                connection.close()
             ensure_private_file(self.path, 0o600)
         except (OSError, PermissionError, sqlite3.Error) as exc:
             raise SensorAgentStateError("normalized event spool is unavailable") from exc
@@ -542,40 +598,40 @@ class DiscoverySensorSpool:
         if not _DIGEST_RE.fullmatch(event_digest):
             raise SensorAgentStateError("event_sha256 is invalid")
         moment = time.time() if now is None else float(now)
-        connection = self._connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            if connection.execute(
-                "SELECT 1 FROM completed_events WHERE event_sha256 = ?", (event_digest,)
-            ).fetchone():
+        with self._serialized_connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                if connection.execute(
+                    "SELECT 1 FROM completed_events WHERE event_sha256 = ?", (event_digest,)
+                ).fetchone():
+                    connection.execute("COMMIT")
+                    return False
+                existing = connection.execute(
+                    "SELECT payload_json FROM pending_events WHERE event_sha256 = ?",
+                    (event_digest,),
+                ).fetchone()
+                if existing is not None:
+                    if existing["payload_json"] != payload:
+                        raise SensorAgentStateError(
+                            "event digest conflicts with queued payload"
+                        )
+                    connection.execute("COMMIT")
+                    return False
+                count = connection.execute("SELECT COUNT(*) FROM pending_events").fetchone()[0]
+                if count >= self.max_pending:
+                    raise SensorAgentStateError("normalized event spool is full")
+                connection.execute(
+                    """INSERT INTO pending_events(
+                           event_sha256,payload_json,state,attempts,next_attempt_at,created_at
+                       ) VALUES(?,?,'queued',0,0,?)""",
+                    (event_digest, payload, moment),
+                )
                 connection.execute("COMMIT")
-                return False
-            existing = connection.execute(
-                "SELECT payload_json FROM pending_events WHERE event_sha256 = ?",
-                (event_digest,),
-            ).fetchone()
-            if existing is not None:
-                if existing["payload_json"] != payload:
-                    raise SensorAgentStateError("event digest conflicts with queued payload")
-                connection.execute("COMMIT")
-                return False
-            count = connection.execute("SELECT COUNT(*) FROM pending_events").fetchone()[0]
-            if count >= self.max_pending:
-                raise SensorAgentStateError("normalized event spool is full")
-            connection.execute(
-                """INSERT INTO pending_events(
-                       event_sha256,payload_json,state,attempts,next_attempt_at,created_at
-                   ) VALUES(?,?,'queued',0,0,?)""",
-                (event_digest, payload, moment),
-            )
-            connection.execute("COMMIT")
-            return True
-        except BaseException:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
-        finally:
-            connection.close()
+                return True
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
 
     def lease(
         self,
@@ -589,36 +645,44 @@ class DiscoverySensorSpool:
         batch = _positive_int(limit, "lease limit", 500)
         lease_for = _positive_float(lease_seconds, "lease_seconds", 900.0)
         moment = time.time() if now is None else float(now)
-        connection = self._connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            rows = connection.execute(
-                """SELECT event_sha256,payload_json,attempts
-                   FROM pending_events
-                   WHERE (state = 'queued' AND next_attempt_at <= ?)
-                      OR (state = 'leased' AND lease_until <= ?)
-                   ORDER BY created_at,event_sha256 LIMIT ?""",
-                (moment, moment, batch),
-            ).fetchall()
-            digests = [row["event_sha256"] for row in rows]
-            for digest in digests:
-                connection.execute(
-                    """UPDATE pending_events
-                       SET state='leased',lease_owner=?,lease_until=?
-                       WHERE event_sha256=?""",
-                    (worker, moment + lease_for, digest),
-                )
-            connection.execute("COMMIT")
-            return tuple(
-                _LeasedEvent(_decode_event(row["payload_json"]), int(row["attempts"]))
-                for row in rows
-            )
-        except BaseException:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
-        finally:
-            connection.close()
+        with self._serialized_connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                rows = connection.execute(
+                    """SELECT event_sha256,payload_json,attempts
+                       FROM pending_events
+                       WHERE (state = 'queued' AND next_attempt_at <= ?)
+                          OR (state = 'leased' AND lease_until <= ?)
+                       ORDER BY created_at,event_sha256 LIMIT ?""",
+                    (moment, moment, batch),
+                ).fetchall()
+                # Validate every selected payload before publishing leases. A
+                # corrupt row must roll back the whole selection, not become a
+                # durable poison lease that blocks healthy rows until expiry.
+                decoded: list[tuple[str, _LeasedEvent]] = []
+                for row in rows:
+                    digest = str(row["event_sha256"])
+                    event = _decode_event(row["payload_json"])
+                    if digest != event.event_sha256:
+                        raise SensorAgentStateError(
+                            "normalized event spool is corrupt: payload digest mismatch"
+                        )
+                    decoded.append((digest, _LeasedEvent(event, int(row["attempts"]))))
+                digests = [digest for digest, _item in decoded]
+                leased_events = tuple(item for _digest, item in decoded)
+                for digest in digests:
+                    connection.execute(
+                        """UPDATE pending_events
+                           SET state='leased',lease_owner=?,lease_until=?
+                           WHERE event_sha256=?""",
+                        (worker, moment + lease_for, digest),
+                    )
+                connection.execute("COMMIT")
+                return leased_events
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
 
     def acknowledge(self, event_sha256: str, worker_id: str, *, now: float | None = None) -> None:
         self._finish_lease(event_sha256, worker_id, outcome="complete", now=now)
@@ -672,74 +736,71 @@ class DiscoverySensorSpool:
         digest = str(event_sha256).lower()
         worker = _token(worker_id, "worker_id")
         moment = time.time() if now is None else float(now)
-        connection = self._connect()
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT state,lease_owner FROM pending_events WHERE event_sha256=?",
-                (digest,),
-            ).fetchone()
-            if row is None or row["state"] != "leased" or row["lease_owner"] != worker:
-                raise SensorAgentStateError("event lease is no longer owned by this worker")
-            if outcome == "complete":
-                connection.execute(
-                    "INSERT OR REPLACE INTO completed_events(event_sha256,completed_at) VALUES(?,?)",
-                    (digest, moment),
-                )
-                connection.execute(
-                    "DELETE FROM pending_events WHERE event_sha256=?", (digest,)
-                )
-                overflow = connection.execute(
-                    "SELECT COUNT(*) FROM completed_events"
-                ).fetchone()[0] - _MAX_COMPLETED_DIGESTS
-                if overflow > 0:
-                    connection.execute(
-                        """DELETE FROM completed_events WHERE event_sha256 IN (
-                               SELECT event_sha256 FROM completed_events
-                               ORDER BY completed_at,event_sha256 LIMIT ?
-                           )""",
-                        (overflow,),
+        with self._serialized_connection() as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT state,lease_owner FROM pending_events WHERE event_sha256=?",
+                    (digest,),
+                ).fetchone()
+                if row is None or row["state"] != "leased" or row["lease_owner"] != worker:
+                    raise SensorAgentStateError(
+                        "event lease is no longer owned by this worker"
                     )
-            elif outcome == "retry":
-                if retry_at is None or not math.isfinite(float(retry_at)):
-                    raise SensorAgentStateError("retry time is invalid")
-                connection.execute(
-                    """UPDATE pending_events SET state='queued',attempts=attempts+1,
-                       next_attempt_at=?,lease_owner=NULL,lease_until=NULL,last_status=?
-                       WHERE event_sha256=?""",
-                    (float(retry_at), status_code, digest),
-                )
-            elif outcome == "auth_blocked":
-                connection.execute(
-                    """UPDATE pending_events SET state='auth_blocked',attempts=attempts+1,
-                       lease_owner=NULL,lease_until=NULL,last_status=?
-                       WHERE event_sha256=?""",
-                    (status_code, digest),
-                )
-            else:  # pragma: no cover - private contract
-                raise AssertionError("unsupported lease outcome")
-            connection.execute("COMMIT")
-        except BaseException:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
-            raise
-        finally:
-            connection.close()
+                if outcome == "complete":
+                    connection.execute(
+                        "INSERT OR REPLACE INTO completed_events(event_sha256,completed_at) "
+                        "VALUES(?,?)",
+                        (digest, moment),
+                    )
+                    connection.execute(
+                        "DELETE FROM pending_events WHERE event_sha256=?", (digest,)
+                    )
+                    overflow = connection.execute(
+                        "SELECT COUNT(*) FROM completed_events"
+                    ).fetchone()[0] - _MAX_COMPLETED_DIGESTS
+                    if overflow > 0:
+                        connection.execute(
+                            """DELETE FROM completed_events WHERE event_sha256 IN (
+                                   SELECT event_sha256 FROM completed_events
+                                   ORDER BY completed_at,event_sha256 LIMIT ?
+                               )""",
+                            (overflow,),
+                        )
+                elif outcome == "retry":
+                    if retry_at is None or not math.isfinite(float(retry_at)):
+                        raise SensorAgentStateError("retry time is invalid")
+                    connection.execute(
+                        """UPDATE pending_events SET state='queued',attempts=attempts+1,
+                           next_attempt_at=?,lease_owner=NULL,lease_until=NULL,last_status=?
+                           WHERE event_sha256=?""",
+                        (float(retry_at), status_code, digest),
+                    )
+                elif outcome == "auth_blocked":
+                    connection.execute(
+                        """UPDATE pending_events SET state='auth_blocked',attempts=attempts+1,
+                           lease_owner=NULL,lease_until=NULL,last_status=?
+                           WHERE event_sha256=?""",
+                        (status_code, digest),
+                    )
+                else:  # pragma: no cover - private contract
+                    raise AssertionError("unsupported lease outcome")
+                connection.execute("COMMIT")
+            except BaseException:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
 
     def unblock_auth(self) -> int:
-        connection = self._connect()
-        try:
+        with self._serialized_connection() as connection:
             cursor = connection.execute(
                 """UPDATE pending_events SET state='queued',next_attempt_at=0,
                    lease_owner=NULL,lease_until=NULL WHERE state='auth_blocked'"""
             )
             return int(cursor.rowcount)
-        finally:
-            connection.close()
 
     def counts(self) -> dict[str, int]:
-        connection = self._connect()
-        try:
+        with self._serialized_connection() as connection:
             rows = connection.execute(
                 "SELECT state,COUNT(*) AS count FROM pending_events GROUP BY state"
             ).fetchall()
@@ -750,17 +811,12 @@ class DiscoverySensorSpool:
                 connection.execute("SELECT COUNT(*) FROM completed_events").fetchone()[0]
             )
             return counts
-        finally:
-            connection.close()
 
     def privacy_posture(self) -> dict[str, Any]:
         """Inspect every retained payload and report, never return, its values."""
 
-        connection = self._connect()
-        try:
+        with self._serialized_connection() as connection:
             rows = connection.execute("SELECT payload_json FROM pending_events").fetchall()
-        finally:
-            connection.close()
         retained_fields: set[str] = set()
         for row in rows:
             try:

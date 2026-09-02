@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "anthropic>=0.40.0",
+    "anthropic>=0.40.0,<2",
     "click>=8.3.3",
     "httpx>=0.27",
     # idna is pulled transitively (httpx/anthropic); floor it past PYSEC-2026-215
@@ -44,17 +44,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai     = ["openai>=1.30"]
-release-runtime = ["openai>=1.30"]
-azure      = ["openai>=1.30", "azure-identity>=1.25.3,<2"]
-openrouter = ["openai>=1.30"]
-ollama     = ["openai>=1.30"]
-moonshot   = ["openai>=1.30"]
-deepseek   = ["openai>=1.30"]
-xai        = ["openai>=1.30"]
-gemini     = ["openai>=1.30"]
-tgi        = ["openai>=1.30"]
-vllm       = ["openai>=1.30"]
+openai     = ["openai>=1.30,<4"]
+release-runtime = ["openai>=1.30,<4"]
+azure      = ["openai>=1.30,<4", "azure-identity>=1.25.3,<2"]
+openrouter = ["openai>=1.30,<4"]
+ollama     = ["openai>=1.30,<4"]
+moonshot   = ["openai>=1.30,<4"]
+deepseek   = ["openai>=1.30,<4"]
+xai        = ["openai>=1.30,<4"]
+gemini     = ["openai>=1.30,<4"]
+tgi        = ["openai>=1.30,<4"]
+vllm       = ["openai>=1.30,<4"]
 chroma     = ["chromadb>=0.4"]
 qdrant     = ["qdrant-client>=1.6", "fastembed>=0.3"]
 weaviate   = ["weaviate-client>=4.5"]
@@ -158,7 +158,7 @@ dev        = [
     "twilio>=9.0",
 ]
 all        = [
-    "openai>=1.30",
+    "openai>=1.30,<4",
     "fastembed>=0.3",
     "maverick-shield>=0.1.7",
     "maverick-installer>=0.1.7",

@@ -490,7 +490,15 @@ def contain(
         result.failed.append("no containment action requested")
         return result
 
+    registry_r = None
+    expected_revocations: list[str] = []
+    dependents_applied = False
+
     def _apply_dependents() -> None:
+        nonlocal dependents_applied
+        if dependents_applied:
+            return
+        dependents_applied = True
         if seal:
             if registry is None:
                 # Not a failure of containment, but not containment either. Said
@@ -512,12 +520,38 @@ def contain(
                         "process; the durable revocation remains the enforcement floor")
                 except Exception as e:
                     result.failed.append(f"seal failed: {e}")
-        if not result.failed and durable_apply is not None:
+        # Each restrictive arm is independent. A failed live seal must not
+        # prevent trust-registry or external-gateway containment from being
+        # attempted; accumulate every failure and leave all successful arms in
+        # their restrictive state.
+        if durable_apply is not None:
             try:
                 if durable_apply() is False:
                     result.failed.append("dependent containment did not take effect")
             except Exception as e:
                 result.failed.append(f"dependent containment failed: {e}")
+        if registry_r is not None:
+            # ``RevocationRegistry`` invokes this callback while its
+            # per-principal containment authority and writer lock are still
+            # held. Confirm the durable mutation here, where a legitimate
+            # concurrent release cannot linearize between publication and the
+            # observation. The former post-return check raced with exactly
+            # such a release and falsely reported a successful containment as
+            # failed after it had already been cleanly released.
+            try:
+                revoked_snapshot = registry_r.revoked()
+            except Exception as e:
+                result.failed.append(f"revocation confirmation failed: {e}")
+                return
+            missed = [
+                principal
+                for principal in expected_revocations
+                if principal not in revoked_snapshot
+            ]
+            if missed:
+                result.failed.append(
+                    f"revocation did not take effect for {', '.join(missed)}"
+                )
 
     # Publish the durable generation before touching dependent run-scoped
     # state, then apply every dependent projection before releasing the same
@@ -525,8 +559,10 @@ def contain(
     # between publication and the live/trust/gateway containment writes.
     if revoke:
         try:
-            from .revocation import shared
+            from .revocation import _bfs, shared
+
             registry_r = shared()
+            expected_revocations = _bfs(subject, edges) if edges else [subject]
             if edges:
                 order = registry_r.revoke_subtree(
                     subject, edges, reason=reason, now=now, protected=True,
@@ -539,14 +575,13 @@ def contain(
                     durable_apply=_apply_dependents,
                 )
                 result.revoked = [subject]
-            # Confirm rather than assume: a write that silently did not land
-            # would otherwise be reported as containment.
-            missed = [p for p in result.revoked if not registry_r.is_revoked(p)]
-            if missed:
-                result.failed.append(
-                    f"revocation did not take effect for {', '.join(missed)}")
         except Exception as e:
             result.failed.append(f"revoke failed: {e}")
+            # Revocation persistence is one restrictive authority, not a
+            # prerequisite for the others. If it failed before invoking its
+            # under-lock callback, still attempt the live seal and external
+            # containment rather than abandoning every available control.
+            _apply_dependents()
     else:
         _apply_dependents()
 

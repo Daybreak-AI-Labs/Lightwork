@@ -54,6 +54,28 @@ def test_llm_retry_policy_rejects_control_exceptions():
     assert pf.should_retry_llm_error(PreflightFailed("tiny", 10, 8, 2)) is False
 
 
+def test_failover_does_not_amplify_sdk_wrapped_egress_block():
+    from maverick.enterprise import EgressBlocked
+
+    fallback_calls = []
+
+    def blocked():
+        try:
+            raise EgressBlocked("openai")
+        except EgressBlocked as exc:
+            raise ConnectionError("provider connection failed") from exc
+
+    with pytest.raises(ConnectionError, match="provider connection failed"):
+        pf.failover(
+            [
+                ("primary", blocked),
+                ("fallback", lambda: fallback_calls.append("dispatched")),
+            ],
+            should_retry=pf.should_retry_llm_error,
+        )
+    assert fallback_calls == []
+
+
 def test_afailover_returns_first_success():
     async def boom():
         raise RuntimeError("down")

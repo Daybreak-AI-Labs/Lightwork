@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 from packaging.requirements import Requirement
+from packaging.version import Version
 
 try:
     import tomllib
@@ -493,7 +494,9 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
     assert core_extras["knowledge"] == [
         f"maverick-knowledge>={release_version}"
     ]
-    assert core_extras["release-runtime"] == ["openai>=1.30"]
+    release_runtime = [Requirement(value) for value in core_extras["release-runtime"]]
+    assert len(release_runtime) == 1
+    assert _normalise_project_name(release_runtime[0].name) == "openai"
     assert core_extras["postgres"] == ["psycopg[binary,pool]>=3.1"]
     assert "tzdata>=2026.3" in core["dependencies"]
 
@@ -524,9 +527,55 @@ def test_ci_constraints_cover_every_release_base_dependency():
         if name not in constraints
     }
     assert not missing, f"unconstrained release base dependencies: {missing}"
+    incompatible = {
+        name: requirements
+        for name, requirements in external_requirements.items()
+        if any(
+            Version(constraints[name])
+            not in Requirement(requirement.split(": ", 1)[1]).specifier
+            for requirement in requirements
+        )
+    }
+    assert not incompatible, f"CI pins outside release manifest ranges: {incompatible}"
     assert constraints["pywhispercpp"] == "1.5.1"
-    assert constraints["openai"] == "2.46.0"
     assert constraints["tqdm"] == "4.70.0"
+
+    core = tomllib.loads(
+        (
+            REPO_ROOT / "packages" / "maverick-core" / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+    )["project"]
+    provider_requirements = [
+        Requirement(requirement)
+        for requirement in core["dependencies"]
+        if _requirement_project_name(requirement) == "anthropic"
+    ]
+    provider_requirements.extend(
+        Requirement(requirement)
+        for requirements in core["optional-dependencies"].values()
+        for requirement in requirements
+        if _requirement_project_name(requirement) == "openai"
+    )
+    supported_major_ceilings = {"anthropic": Version("2"), "openai": Version("4")}
+    seen_providers: set[str] = set()
+    for requirement in provider_requirements:
+        name = _normalise_project_name(requirement.name)
+        seen_providers.add(name)
+        assert Version(constraints[name]) in requirement.specifier
+        ceiling = supported_major_ceilings[name]
+        assert any(
+            (
+                specifier.operator == "<"
+                and Version(specifier.version) <= ceiling
+            )
+            or (
+                specifier.operator == "<="
+                and Version(specifier.version) < ceiling
+            )
+            for specifier in requirement.specifier
+        ), f"{requirement} has no supported-major upper bound below {ceiling}"
+    assert seen_providers == set(supported_major_ceilings)
+    assert {"httpx2", "httpcore2", "truststore"} <= constraints.keys()
 
     dashboard = tomllib.loads(
         (
