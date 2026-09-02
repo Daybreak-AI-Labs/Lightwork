@@ -13,6 +13,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "maverick_dashboard"
 TEMPLATES = PACKAGE / "templates"
 SHARED_ASSETS = {
     "/static/daybreak-logo.jpg",
+    "/static/daybreak-mark.png",
     "/static/lightwork-copilot.js",
     "/static/lightwork-ui.js",
     "/static/lightwork-voice.js",
@@ -148,6 +149,8 @@ def test_exposed_governance_pages_use_shared_shell_and_mounted_assets(
             assert content_type == "application/javascript", asset
         elif asset.endswith((".jpg", ".jpeg")):
             assert content_type == "image/jpeg", asset
+        elif asset.endswith(".png"):
+            assert content_type == "image/png", asset
         else:  # pragma: no cover - update this contract when adding an asset kind
             pytest.fail(f"unasserted static asset type: {asset}")
 
