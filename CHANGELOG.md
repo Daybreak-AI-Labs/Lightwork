@@ -24,6 +24,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--domain`, `TEXT` or `--file PATH`). Default-on under `[cortex] enable`
   (`MAVERICK_CORTEX` overrides), offered as an advanced installer step beside
   fleet memory and included in the express and governance-profile presets.
+- **Autonomous Shoring engagement tooling** (`maverick.shoring`, dashboard
+  `/shoring` + `/api/v1/shoring`) — the surface for moving a whole business
+  function onto the governed workforce: a tenant-scoped **Book of Work**
+  (functions mapped to operating departments, each with a scope, an owner,
+  named service-level targets, and a lifecycle in
+  {scoping, demonstrating, running, proving}); an **SLA view** measuring
+  target-vs-actual (throughput/day, exception rate %) from real completed work
+  in the Operating Record, with a met/at-risk/breached indicator per SLA; and
+  an **exception desk** — the pending human sign-offs filtered to each
+  function's department, reusing the `/approvals` queue. The Shoring P&L is the
+  existing Savings report. The book is a small governed JSON store (not a
+  world-model migration); SLA/status computation is read-only. On by default
+  (`[shoring] enable`, `MAVERICK_SHORING`), offered as an installer step beside
+  Cortex and included in the express presets.
 - **AI Evidence-Ready Gateway and operator cockpit** — governed evidence intake,
   review queues, readiness/health visibility, and first-run guidance now share
   one operator-facing workflow with durable audit checkpoints.

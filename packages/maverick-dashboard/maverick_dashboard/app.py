@@ -945,6 +945,7 @@ from .regulatory_obligations_page import (  # noqa: E402
 from .shared_governance_inventory_page import (  # noqa: E402
     create_shared_governance_inventory_page_router,
 )
+from .shoring_page import create_shoring_page_router  # noqa: E402
 from .tenant_select_page import create_tenant_select_page_router  # noqa: E402
 from .third_party_contracts_page import (  # noqa: E402
     create_third_party_contracts_page_router,
@@ -976,6 +977,7 @@ app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
 app.include_router(create_cortex_page_router(templates))
 app.include_router(create_autonomous_compliance_page_router(templates))
+app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
@@ -987,6 +989,7 @@ from .regulatory_obligations_api import router as regulatory_obligations_router 
 from .shared_governance_inventory_api import (  # noqa: E402
     router as shared_governance_inventory_router,
 )
+from .shoring_api import router as shoring_router  # noqa: E402
 from .trust_receipts_api import router as trust_receipts_router  # noqa: E402
 from .unified_audit_api import router as unified_audit_router  # noqa: E402
 
@@ -997,6 +1000,7 @@ app.include_router(agent_control_plane_router, prefix="/api/v1")
 app.include_router(regulatory_obligations_router, prefix="/api/v1")
 app.include_router(trust_receipts_router, prefix="/api/v1")
 app.include_router(cortex_router, prefix="/api/v1")
+app.include_router(shoring_router, prefix="/api/v1")
 app.include_router(evolution_ledger_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns

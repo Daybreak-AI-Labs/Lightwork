@@ -713,6 +713,26 @@ def test_write_config_omits_cortex_when_unanswered(tmp_path: Path, monkeypatch):
     assert "cortex" not in parsed
 
 
+def test_write_config_emits_shoring_when_enabled(tmp_path: Path, monkeypatch):
+    # Autonomous Shoring has a kernel knob ([shoring] enable) and a dashboard
+    # surface; the wizard step beside Cortex is what makes it reachable from
+    # the installer. Accepting it writes the section the kernel reads.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"shoring": True})
+    assert parsed["shoring"]["enable"] is True
+
+
+def test_write_config_persists_shoring_opt_out(tmp_path: Path, monkeypatch):
+    # Default-on in the kernel, so a deliberate "no" must be written rather
+    # than omitted (omitting would silently mean on).
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"shoring": False})
+    assert parsed["shoring"]["enable"] is False
+
+
+def test_write_config_omits_shoring_when_unanswered(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"cortex": True})
+    assert "shoring" not in parsed
+
+
 def test_write_config_emits_routing_energy_aware(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(
         tmp_path, monkeypatch, advanced={"energy_aware": True},
@@ -1020,6 +1040,7 @@ def test_pick_advanced_defaults_governed_learning_on_but_dgm_off(monkeypatch):
         "operations_scientist",
         "consequence",
         "cortex",
+        "shoring",
     }
     assert all(advanced[key] is True for key in governed_learning)
     assert advanced["structured_verifier_off"] is False

@@ -472,6 +472,10 @@ enable = true              # one governed recall/deposit surface over knowledge
                            #   source's own toggle still applies. Operator
                            #   commands: `maverick cortex status|recall|deposit`.
                            #   Env: MAVERICK_CORTEX.
+[shoring]                  # Autonomous Shoring engagement tooling (dashboard
+                           #   /shoring: book of work, measured SLAs, exception
+                           #   desk). ON by default — a kill switch, not a gate.
+enable = true              # set false to hide the surface. Env: MAVERICK_SHORING.
 
 [suites]                   # disable whole suites (all on by default)
 # healthcare = false

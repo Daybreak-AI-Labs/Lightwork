@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Autonomous Shoring · Lightwork{% endblock %}
+{% block content %}
+<style>
+  /* Autonomous Shoring — scoped. Derived from the shared design tokens. */
+  .sh-pos { color: var(--success); }
+  .sh-neg { color: var(--danger); }
+  .sh-fn { margin-bottom: var(--space-4); }
+  .sh-fn h3 { margin: 0 0 var(--space-1); font-size: var(--text-md); }
+  .sh-fn .sh-meta { color: var(--muted); font-size: var(--text-xs); margin: 0 0 var(--space-3); }
+  .sh-slas { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+  .sh-slas li { font-size: var(--text-xs); }
+  .sh-slas .sh-actual { color: var(--muted); margin-left: 4px; }
+  .sh-exc { margin-top: var(--space-3); }
+  .sh-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-3); align-items: end; }
+  .sh-form .field { display: flex; flex-direction: column; gap: 4px; }
+  .sh-form label { font-size: var(--text-xs); color: var(--muted); }
+  .sh-form input, .sh-form select { padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-sunken); color: var(--text); }
+  .sh-sla-row { display: grid; grid-template-columns: 1.2fr 1.4fr 0.8fr; gap: var(--space-2); margin-bottom: var(--space-2); }
+  .sh-note { font-size: var(--text-xs); color: var(--muted); }
+  .sh-remove { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; padding: 0.25rem 0.6rem; font-size: var(--text-xs); }
+  .sh-remove:hover { border-color: var(--danger); color: var(--danger); }
+</style>
+
+{% set saved = report.saved %}
+{% set sla_cls = {'met': 'ok', 'at_risk': 'warn', 'breached': 'breach', 'no_data': 'idle'} %}
+{% set sla_word = {'met': 'met', 'at_risk': 'at risk', 'breached': 'breached', 'no_data': 'no data'} %}
+{% set lc_cls = {'scoping': 'idle', 'demonstrating': 'info', 'running': 'ok', 'proving': 'info'} %}
+
+{% from "_hero.html" import hero, state %}
+{% call hero('Move a function', 'Autonomous Shoring',
+             subtitle='A function, run by the workforce',
+             lede='Move a whole business function onto a governed agentic
+                   workforce: a book of work, a demonstration-driven
+                   transition, enforceable service levels measured from real
+                   completed work, and an exception desk — with the
+                   <a href="/savings">Shoring P&amp;L</a> underneath.') %}
+  {{ state('Shoring P&L',
+           '$' ~ '{:,.2f}'.format(saved) ~ ' saved',
+           badge='net positive' if saved >= 0 else 'net negative',
+           badge_class='ok' if saved >= 0 else 'warn',
+           copy='Money saved vs the human baseline, counted from completed work
+                 over the last ' ~ report.window_days ~ ' days — never a
+                 projection.') }}
+{% endcall %}
+
+<div class="section-head"><h2>Shoring P&amp;L</h2></div>
+<div class="grid" aria-label="Shoring profit and loss summary">
+  <div class="stat">
+    <div class="num {{ 'sh-pos' if saved >= 0 else 'sh-neg' }}">${{ '{:,.2f}'.format(saved) }}</div>
+    <div class="label">Saved (last {{ report.window_days }}d)</div>
+  </div>
+  <div class="stat">
+    <div class="num">${{ '{:,.2f}'.format(report.human_cost) }}</div>
+    <div class="label">Human baseline cost</div>
+  </div>
+  <div class="stat">
+    <div class="num">${{ '{:,.2f}'.format(report.agent_cost) }}</div>
+    <div class="label">Agent spend</div>
+  </div>
+  <div class="stat">
+    <div class="num">{{ report.deliverables }}</div>
+    <div class="label">Delivered{% if report.roi_multiple %} · {{ report.roi_multiple }}x ROI{% endif %}</div>
+  </div>
+</div>
+
+<div class="section-head"><h2>Book of work</h2></div>
+<div class="panel">
+  {% if functions %}
+    {% for f in functions %}
+    <div class="sh-fn" data-fn="{{ f.key }}">
+      <h3>
+        {{ f.name }}
+        <span class="badge {{ lc_cls.get(f.lifecycle, 'idle') }}">{{ f.lifecycle }}</span>
+        <span class="badge {{ sla_cls.get(f.overall, 'idle') }}">SLA {{ sla_word.get(f.overall, f.overall) }}</span>
+      </h3>
+      <p class="sh-meta">
+        Department <code>{{ f.department or '—' }}</code>
+        · owner {{ f.owner or '—' }}
+        · {{ f.delivered }} delivered / {{ f.blocked }} blocked
+        · {{ f.exception_count }} awaiting sign-off
+        {% if f.scope %}<br>{{ f.scope }}{% endif %}
+      </p>
+      {% if f.slas %}
+      <ul class="sh-slas">
+        {% for s in f.slas %}
+        <li>
+          <span class="badge {{ sla_cls.get(s.status, 'idle') }}">{{ s.name }}: {{ sla_word.get(s.status, s.status) }}</span>
+          <span class="sh-actual">target {{ s.target }}{{ s.unit }}{% if s.actual is not none %} · actual {{ s.actual }}{{ s.unit }}{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="sh-note">No SLA targets set for this function yet.</p>
+      {% endif %}
+      {% if can_manage %}
+      <div class="sh-exc">
+        <button type="button" class="sh-remove" data-remove="{{ f.key }}">Remove from book</button>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">No functions in the book of work yet. Add the first function below to scope a shoring engagement.</p>
+  {% endif %}
+</div>
+
+{% if can_manage %}
+<div class="section-head"><h2>Add a function</h2></div>
+<div class="panel">
+  <form id="sh-form">
+    <div class="sh-form">
+      <div class="field">
+        <label for="sh-key">Key (slug, stable id)</label>
+        <input id="sh-key" name="key" type="text" required
+               pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64"
+               placeholder="accounts_payable">
+      </div>
+      <div class="field">
+        <label for="sh-name">Function name</label>
+        <input id="sh-name" name="name" type="text" required maxlength="400"
+               placeholder="Accounts Payable">
+      </div>
+      <div class="field">
+        <label for="sh-department">Department (operating tag)</label>
+        <input id="sh-department" name="department" type="text" maxlength="400"
+               placeholder="finance_ap">
+      </div>
+      <div class="field">
+        <label for="sh-owner">Owner</label>
+        <input id="sh-owner" name="owner" type="text" maxlength="400"
+               placeholder="controller">
+      </div>
+      <div class="field">
+        <label for="sh-status">Lifecycle status</label>
+        <select id="sh-status" name="status">
+          {% for st in lifecycle %}
+          <option value="{{ st }}">{{ st }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sh-scope">Scope</label>
+        <input id="sh-scope" name="scope" type="text" maxlength="400"
+               placeholder="Invoice intake through payment">
+      </div>
+    </div>
+
+    <p class="sh-note" style="margin-top: var(--space-3)">Target service levels (optional — up to three):</p>
+    {% for i in range(3) %}
+    <div class="sh-sla-row">
+      <div class="field">
+        <label for="sh-sla-name-{{ i }}">SLA {{ i + 1 }} name</label>
+        <input id="sh-sla-name-{{ i }}" class="sh-sla-name" type="text" maxlength="64"
+               placeholder="Throughput">
+      </div>
+      <div class="field">
+        <label for="sh-sla-metric-{{ i }}">SLA {{ i + 1 }} metric</label>
+        <select id="sh-sla-metric-{{ i }}" class="sh-sla-metric">
+          {% for m in metrics %}
+          <option value="{{ m.key }}">{{ m.key }} ({{ m.unit }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sh-sla-target-{{ i }}">SLA {{ i + 1 }} target</label>
+        <input id="sh-sla-target-{{ i }}" class="sh-sla-target" type="number"
+               min="0" step="0.1" placeholder="5">
+      </div>
+    </div>
+    {% endfor %}
+
+    <button type="submit" class="btn btn--primary">Save function</button>
+    <p class="sh-note" id="sh-status-msg" role="status" aria-live="polite"></p>
+  </form>
+</div>
+{% endif %}
+
+<div class="section-head"><h2>Exception desk</h2></div>
+<div class="panel">
+  <p class="sh-note" style="margin-top: 0">
+    The human sign-offs awaiting a decision for each shored function's department —
+    the same queue behind <a href="{{ approvals_path }}">Approvals</a>, seen through
+    the shoring lens. Act on an item in Approvals.
+  </p>
+  {% set ns = namespace(any=false) %}
+  {% for f in functions %}
+    {% if f.exceptions %}
+      {% set ns.any = true %}
+      <div class="sh-exc" data-desk="{{ f.key }}">
+        <h3>{{ f.name }} <span class="badge blocked">{{ f.exception_count }} awaiting sign-off</span></h3>
+        <table>
+          <thead><tr>
+            <th scope="col">action</th><th scope="col">risk</th>
+            <th scope="col">scope</th><th scope="col">exception SLA</th>
+          </tr></thead>
+          <tbody>
+          {% for e in f.exceptions %}
+            <tr>
+              <td><code>{{ e.action }}</code></td>
+              <td><span class="badge {{ 'breach' if e.risk in ('high', 'critical') else 'pending' }}">{{ e.risk }}</span></td>
+              <td>{{ e.scope or '—' }}</td>
+              <td>
+                {% set exc_sla = (f.slas | selectattr('metric', 'equalto', 'max_exception_rate_pct') | list) %}
+                {% if exc_sla %}<span class="badge {{ sla_cls.get(exc_sla[0].status, 'idle') }}">{{ exc_sla[0].name }}: {{ sla_word.get(exc_sla[0].status, exc_sla[0].status) }}</span>{% else %}<span class="muted">no exception SLA</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endfor %}
+  {% if not ns.any %}
+    <p class="muted">No exceptions awaiting sign-off for any shored function.</p>
+  {% endif %}
+</div>
+
+{% if can_manage %}
+<script>
+(function () {
+  'use strict';
+  var form = document.getElementById('sh-form');
+  var msg = document.getElementById('sh-status-msg');
+  var api = {{ api_base | tojson }};
+
+  function collectSlas() {
+    var out = [];
+    document.querySelectorAll('.sh-sla-row').forEach(function (row) {
+      var name = (row.querySelector('.sh-sla-name').value || '').trim();
+      var metric = row.querySelector('.sh-sla-metric').value;
+      var target = row.querySelector('.sh-sla-target').value;
+      if (!name || target === '') return;
+      var num = parseFloat(target);
+      if (isNaN(num)) return;
+      out.push({ name: name, metric: metric, target: num });
+    });
+    return out;
+  }
+
+  if (form) {
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var body = {
+        key: form.key.value.trim(),
+        name: form.name.value.trim(),
+        department: form.department.value.trim(),
+        scope: form.scope.value.trim(),
+        status: form.status.value,
+        owner: form.owner.value.trim(),
+        slas: collectSlas()
+      };
+      msg.textContent = 'Saving…';
+      fetch(api + '/function', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || r.status); });
+        msg.textContent = 'Saved — reloading…';
+        window.location.reload();
+      }).catch(function (err) {
+        msg.textContent = 'Could not save: ' + err.message;
+      });
+    });
+  }
+
+  document.querySelectorAll('[data-remove]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-remove');
+      if (!window.confirm('Remove "' + key + '" from the book of work?')) return;
+      fetch(api + '/function/' + encodeURIComponent(key), { method: 'DELETE' })
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (e) { throw new Error(e.detail || r.status); });
+          window.location.reload();
+        }).catch(function (err) { window.alert('Could not remove: ' + err.message); });
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
