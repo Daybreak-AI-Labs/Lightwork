@@ -16,7 +16,7 @@
                  detail='Catalog bindings, decision context, reviewed labels,
                          and authorization records all run through this
                          authority plane -- have your data owner approve it
-                         first.') }}
+                         first.', status=acm_module_status) }}
   {% endif %}
   {% if data_use_enabled and not data_use_compiler_enabled %}
   {{ module_gate('data_use_governance.compiler', 'Data-use policy compiler',
