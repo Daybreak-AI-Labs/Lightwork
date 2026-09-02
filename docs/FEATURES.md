@@ -407,7 +407,7 @@ here.
   maker-checker + SoD, legal privilege, HR PII-minimization, IT/GRC
   chain-of-custody, ops safety interlocks, engineering tests-first, GTM
   no-overpromising, strategy source-grounding). One implementation point
-  upgrades all 2,020 built-in packs AND operator/intake-generated packs;
+  upgrades all 2,031 built-in packs AND operator/intake-generated packs;
   prompts only — hard limits stay with capabilities/governance.
 - **Hard refusals** (`domain_refusals.py`, always on — a prohibited use is not
   an operator preference) — every pack's prompt carries a non-negotiable
@@ -420,7 +420,7 @@ here.
   Packs add their own via a `refuse = [...]` field; the rails (capability /
   governance / Shield) still enforce independently — this makes the agent
   refuse *before* a rail is tested.
-- **Pack consumption surface** — every one of the 2,020 packs now declares an
+- **Pack consumption surface** — every one of the 2,031 packs now declares an
   `[output]` contract (deliverable shape, consumers, cadence, sign-off gate) and
   an editable `[[workflow]]` playbook (the ordered procedure, each step naming
   only the pack's own tools and ending in the human gate). Rendered into the
@@ -441,7 +441,7 @@ here.
   = ALL tools, missing/unknown `max_risk`, invalid `effort` tier), warnings
   for quality gaps (thin persona, allow∩deny overlap, no knowledge sources, a
   read-only pack not explicitly denying the `shell`/`write_file` floor, an
-  `output.gate` lighter than the playbook's final sign-off). All 2,020 built-in
+  `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
 - **Governance-posture audit** — `maverick domains-audit [--json <path>
@@ -458,7 +458,7 @@ here.
   `/billing` view shows a tenant's accrued charges, period-over-period trend,
   and an itemized CSV invoice.
 - **Per-pack behavioral evals** — `maverick domains-eval [--check]`
-- **Roster-wide governance invariant suite** (verified across ALL 2,020 packs,
+- **Roster-wide governance invariant suite** (verified across ALL 2,031 packs,
   fault-injected with a non-vacuous control) — six invariants proven non-vacuously
   (each carries a fault-injection control that fails when the guarantee is
   removed): (1) **tool-reachability** — no drafting/non-builder agent can reach
@@ -482,7 +482,7 @@ here.
   runner; `--check` lints the suite against the roster (key-free CI gate) while
   `run_eval(cases, runner)` scores live when a provider key is present.
 - **Specialist routing** (`domain_router.py`, wired into `list_specialists
-  query=<task>`) — a pre-filter that ranks the whole 2,020-pack roster for a
+  query=<task>`) — a pre-filter that ranks the whole 2,031-pack roster for a
   task so the orchestrator picks from a shortlist, not a haystack: lexical
   TF-IDF blended with sentence-transformer cosine when `fastembed` is installed
   (paraphrase-aware), graceful lexical-only fallback otherwise. A 25-case
@@ -1492,7 +1492,7 @@ here.
   (country employment law, GDPR/CCPA/PIPL/EU-AI-Act regimes, indirect-tax
   regimes). Quality gate: `maverick domains-lint [--ci]` — every pack has
   a bounded persona, least-privilege allow list, explicit deny list, and
-  risk ceiling; 0 errors, 0 warnings across all 2,020.
+  risk ceiling; 0 errors, 0 warnings across all 2,031.
 - **Tax preparation pipeline** (`tax_prep.py`, `maverick tax prepare
   <docs-dir>`; the 19-pack `tax_` suite) — a CPA firm's docs-to-draft
   workflow: uploaded client documents are classified and extracted
