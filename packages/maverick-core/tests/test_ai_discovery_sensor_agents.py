@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -630,6 +632,157 @@ def test_binding_conflict_is_retained_for_operator_reapproval(tmp_path: Path) ->
     assert report.blocked_events == 1
     assert agent.spool.unblock_auth() == 1
     assert agent.spool.counts()["queued"] == 1
+
+
+def test_spool_handles_for_one_path_serialize_connection_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two in-process handles must not race database-wide SQLite pragmas."""
+
+    path = tmp_path / "shared-spool.sqlite"
+    spools = [DiscoverySensorSpool(path), DiscoverySensorSpool(path)]
+    real_connect = DiscoverySensorSpool._connect
+    state_lock = threading.Lock()
+    both_inside = threading.Event()
+    active = 0
+    maximum_active = 0
+
+    def observed_connect(spool: DiscoverySensorSpool):
+        nonlocal active, maximum_active
+        with state_lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+            if active == 2:
+                both_inside.set()
+        try:
+            # If setup is not serialized, both callers reach this wait and make
+            # the race deterministic. With the shared lock, each caller simply
+            # times out before the next handle enters.
+            both_inside.wait(timeout=0.1)
+            return real_connect(spool)
+        finally:
+            with state_lock:
+                active -= 1
+
+    monkeypatch.setattr(DiscoverySensorSpool, "_connect", observed_connect)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda spool: spool.counts(), spools))
+
+    assert maximum_active == 1
+    assert all(result["pending"] == 0 for result in results)
+
+
+def test_relative_spool_path_is_bound_before_working_directory_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    startup = tmp_path / "startup"
+    later = tmp_path / "later"
+    startup.mkdir()
+    later.mkdir()
+    monkeypatch.chdir(startup)
+    spool = DiscoverySensorSpool("spool.sqlite")
+
+    monkeypatch.chdir(later)
+
+    assert spool.counts()["pending"] == 0
+    assert spool.path == (startup / "spool.sqlite").resolve()
+    assert not (later / "spool.sqlite").exists()
+
+
+def test_spool_parent_alias_is_not_resolved_before_private_path_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alias = tmp_path / "configured-alias"
+    configured = alias / "spool.sqlite"
+    inspected: list[Path] = []
+
+    def refuse_alias(path: str | Path) -> Path:
+        inspected.append(Path(path))
+        raise PermissionError("private directory path is an alias")
+
+    monkeypatch.setattr(sensor_agents, "ensure_private_directory", refuse_alias)
+
+    with pytest.raises(PermissionError, match="alias"):
+        DiscoverySensorSpool(configured)
+
+    assert inspected == [Path(os.path.abspath(configured.parent))]
+
+
+def test_corrupt_selected_payload_does_not_publish_a_poison_lease(tmp_path: Path) -> None:
+    spool = DiscoverySensorSpool(tmp_path / "spool.sqlite")
+    digest = "f" * 64
+    with spool._serialized_connection() as connection:
+        connection.execute(
+            """INSERT INTO pending_events(
+                   event_sha256,payload_json,state,attempts,next_attempt_at,created_at
+               ) VALUES(?,?,'queued',0,0,?)""",
+            (digest, "not-json", _NOW),
+        )
+
+    with pytest.raises(SensorAgentStateError, match="corrupt"):
+        spool.lease("worker", limit=1, lease_seconds=60, now=_NOW + 1)
+
+    with spool._serialized_connection() as connection:
+        row = connection.execute(
+            """SELECT state,lease_owner,lease_until
+               FROM pending_events WHERE event_sha256=?""",
+            (digest,),
+        ).fetchone()
+    assert row is not None
+    assert tuple(row) == ("queued", None, None)
+
+
+def test_payload_digest_mismatch_does_not_publish_a_poison_lease(tmp_path: Path) -> None:
+    spool = DiscoverySensorSpool(tmp_path / "spool.sqlite")
+    event = NormalizedSensorEvent(
+        "e" * 64,
+        _NOW,
+        "openai",
+        "openai_api",
+        "openai",
+        "network_egress",
+        "hosted_api",
+        "test",
+    )
+    with spool._serialized_connection() as connection:
+        connection.execute(
+            """INSERT INTO pending_events(
+                   event_sha256,payload_json,state,attempts,next_attempt_at,created_at
+               ) VALUES(?,?,'queued',0,0,?)""",
+            ("f" * 64, sensor_agents._canonical_event(event), _NOW),
+        )
+
+    with pytest.raises(SensorAgentStateError, match="digest mismatch"):
+        spool.lease("worker", limit=1, lease_seconds=60, now=_NOW + 1)
+
+    with spool._serialized_connection() as connection:
+        row = connection.execute(
+            """SELECT state,lease_owner,lease_until
+               FROM pending_events WHERE event_sha256=?""",
+            ("f" * 64,),
+        ).fetchone()
+    assert row is not None
+    assert tuple(row) == ("queued", None, None)
+
+
+def test_cross_connection_contention_is_normalized_as_spool_state_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A competing SQLite writer must not leak a raw driver traceback."""
+
+    spool = DiscoverySensorSpool(tmp_path / "spool.sqlite")
+    contender = sqlite3.connect(str(spool.path), timeout=0.025, isolation_level=None)
+    contender.row_factory = sqlite3.Row
+    contender.execute("PRAGMA busy_timeout=25")
+    blocker = sqlite3.connect(str(spool.path), isolation_level=None)
+    blocker.execute("BEGIN EXCLUSIVE")
+    monkeypatch.setattr(spool, "_connect", lambda: contender)
+    try:
+        with pytest.raises(SensorAgentStateError, match="spool operation failed"):
+            spool.counts()
+    finally:
+        blocker.execute("ROLLBACK")
+        blocker.close()
 
 
 def test_bounded_scale_and_concurrent_workers_deliver_each_digest_once(tmp_path: Path) -> None:

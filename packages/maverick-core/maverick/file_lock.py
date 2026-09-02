@@ -85,6 +85,23 @@ def _canonical_lock_path(path: Path) -> str:
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
 
+def _windows_extended_path(path: str | Path) -> str:
+    r"""Return an absolute Win32 path that is not subject to ``MAX_PATH``.
+
+    The ``\\?\`` namespace requires an absolute, normalized path and uses a
+    distinct spelling for UNC shares.  Normalize before adding the prefix
+    because Win32 deliberately stops resolving ``.``/``..`` and converting
+    separators once an extended-length path reaches the API.
+    """
+    raw = os.fspath(path)
+    if raw.startswith(("\\\\?\\", "\\\\.\\")):
+        return raw
+    absolute = os.path.normpath(os.path.abspath(raw))
+    if absolute.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + absolute[2:]
+    return "\\\\?\\" + absolute
+
+
 _REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 
@@ -312,7 +329,11 @@ def _windows_set_private_dacl(path: Path) -> None:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
         security_information = 0x00000004 | 0x80000000
-        if not set_security(str(path), security_information, descriptor):
+        if not set_security(
+            _windows_extended_path(path),
+            security_information,
+            descriptor,
+        ):
             raise ctypes.WinError(ctypes.get_last_error())
     finally:
         kernel32.LocalFree(descriptor)
@@ -383,7 +404,7 @@ def _windows_secure_mkstemp(
         for _ in range(100):
             candidate = directory / f"{prefix}{secrets.token_hex(16)}{suffix}"
             handle = create_file(
-                str(candidate),
+                _windows_extended_path(candidate),
                 0xC0010000,  # GENERIC_READ | GENERIC_WRITE | DELETE
                 0,  # no sharing while the private payload is being written
                 ctypes.byref(attributes),
@@ -399,11 +420,14 @@ def _windows_secure_mkstemp(
                 except BaseException:
                     kernel32.CloseHandle(handle)
                     try:
-                        candidate.unlink()
+                        os.unlink(_windows_extended_path(candidate))
                     except OSError:
                         pass
                     raise
-                return fd, str(candidate)
+                # Downstream chmod, ACL verification, and failure cleanup also
+                # need the namespace form when the random temp name crosses
+                # MAX_PATH, even if the caller's destination itself does not.
+                return fd, _windows_extended_path(candidate)
             error = ctypes.get_last_error()
             if error not in {80, 183}:  # ERROR_FILE_EXISTS / ALREADY_EXISTS
                 raise ctypes.WinError(error)
@@ -486,7 +510,7 @@ def _windows_private_sddl(path: Path) -> tuple[str, str]:
     owner = ctypes.c_void_p()
     descriptor = ctypes.c_void_p()
     result = get_info(
-        str(path),
+        _windows_extended_path(path),
         1,  # SE_FILE_OBJECT
         0x00000001 | 0x00000004,  # OWNER + DACL
         ctypes.byref(owner),
@@ -706,7 +730,7 @@ def _windows_open_security_handle(path: Path) -> tuple[int, int]:
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel32.CloseHandle.restype = wintypes.BOOL
     handle = create_file(
-        str(path),
+        _windows_extended_path(path),
         0x00020000 | 0x00000080,  # READ_CONTROL | FILE_READ_ATTRIBUTES
         0x00000001 | 0x00000002 | 0x00000004,  # SHARE R/W/DELETE
         None,
@@ -1051,8 +1075,8 @@ def _replace_with_retry(source: str | Path, target: str | Path) -> None:
     move_file.restype = wintypes.BOOL
     while True:
         if move_file(
-            str(source),
-            str(target),
+            _windows_extended_path(source),
+            _windows_extended_path(target),
             0x00000001 | 0x00000008,  # REPLACE_EXISTING | WRITE_THROUGH
         ):
             return
@@ -1083,7 +1107,8 @@ def _windows_replace_open_fd(
     # Do not resolve the final component: replacing an existing symlink must
     # replace the link itself, never follow it and overwrite its referent.
     destination = os.path.abspath(os.fspath(target))
-    encoded_destination = destination.encode("utf-16-le")
+    api_destination = _windows_extended_path(destination)
+    encoded_destination = api_destination.encode("utf-16-le")
     utf16_units = len(encoded_destination) // 2
 
     class FILE_RENAME_INFO(ctypes.Structure):
@@ -1099,7 +1124,7 @@ def _windows_replace_open_fd(
     info.ReplaceIfExists = replace
     info.RootDirectory = None
     info.FileNameLength = len(encoded_destination)
-    info.FileName = destination
+    info.FileName = api_destination
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     set_info = kernel32.SetFileInformationByHandle

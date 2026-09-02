@@ -17,7 +17,7 @@ from maverick.providers.openai_provider import OpenAIClient
 
 
 class _FakeClient:
-    def __init__(self, api_key=None, base_url=None, timeout=None):
+    def __init__(self, api_key=None, base_url=None, timeout=None, max_retries=None):
         pass
 
 

@@ -67,6 +67,31 @@ def llm_http_timeout() -> Any | None:
         return None
 
 
+def sdk_http_timeout(sdk: Any) -> Any | None:
+    """Return the configured timeout in the provider SDK's native type.
+
+    Current OpenAI and Anthropic releases use ``httpx2`` internally while
+    Lightwork also supports integrations that still depend on ``httpx``.
+    Passing the latter's ``Timeout`` instance across that boundary can survive
+    client construction and fail only when the transport performs arithmetic
+    on it. Rebuild the same four timeout components with the class exported by
+    the installed SDK; older SDKs without that export receive the read timeout
+    as a supported scalar.
+    """
+    timeout = llm_http_timeout()
+    if timeout is None:
+        return None
+    sdk_timeout = getattr(sdk, "Timeout", None)
+    if sdk_timeout is None:  # pragma: no cover - legacy SDK fallback
+        return float(timeout.read)
+    return sdk_timeout(
+        connect=timeout.connect,
+        read=timeout.read,
+        write=timeout.write,
+        pool=timeout.pool,
+    )
+
+
 class Provider(Protocol):
     """Structural type for a provider client."""
 
@@ -94,4 +119,4 @@ class Provider(Protocol):
     ) -> LLMResponse: ...
 
 
-__all__ = ["Provider", "llm_http_timeout"]
+__all__ = ["Provider", "llm_http_timeout", "sdk_http_timeout"]

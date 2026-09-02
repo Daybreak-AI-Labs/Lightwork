@@ -221,9 +221,79 @@ def test_a_seal_that_does_not_take_effect_fails_the_containment():
     assert any("did not take effect" in f for f in result.failed)
 
 
+def test_failed_live_seal_does_not_skip_other_restrictive_authorities():
+    applied = []
+
+    result = edr.contain(
+        "worker-1",
+        reason="x",
+        registry=_Registry(seal_works=False),
+        durable_apply=lambda: applied.append("external") or True,
+    )
+
+    assert applied == ["external"]
+    assert result.revoked == ["worker-1"]
+    assert not result.contained
+    assert any("seal did not take effect" in failure for failure in result.failed)
+
+
+def test_failed_revocation_does_not_skip_other_restrictive_authorities(monkeypatch):
+    import maverick.revocation as rev
+
+    class BrokenRevocationRegistry:
+        def revoke(self, *_args, **_kwargs):
+            raise OSError("revocation store unavailable")
+
+        def revoked(self):
+            return {}
+
+    monkeypatch.setattr(rev, "shared", lambda: BrokenRevocationRegistry())
+    registry = _Registry()
+    applied = []
+
+    result = edr.contain(
+        "worker-1",
+        reason="x",
+        registry=registry,
+        durable_apply=lambda: applied.append("external") or True,
+    )
+
+    assert registry.is_sealed("worker-1")
+    assert applied == ["external"]
+    assert not result.contained
+    assert any("revoke failed" in failure for failure in result.failed)
+
+
+def test_revocation_callback_cannot_apply_dependents_twice(monkeypatch):
+    import maverick.revocation as rev
+
+    class DuplicateCallbackRegistry:
+        def revoke(self, principal, *, durable_apply=None, **_kwargs):
+            assert durable_apply is not None
+            durable_apply()
+            durable_apply()
+
+        def revoked(self):
+            return {"worker-1": object()}
+
+    monkeypatch.setattr(rev, "shared", lambda: DuplicateCallbackRegistry())
+    applied = []
+
+    result = edr.contain(
+        "worker-1",
+        reason="x",
+        registry=_Registry(),
+        durable_apply=lambda: applied.append("external") or True,
+    )
+
+    assert applied == ["external"]
+    assert result.contained
+
+
 def test_revocation_is_confirmed_rather_than_assumed(monkeypatch):
     """A write that silently did not land must not be reported as containment."""
     import maverick.revocation as rev
+    snapshot_reads = []
 
     class _Fake:
         def revoke(
@@ -240,12 +310,14 @@ def test_revocation_is_confirmed_rather_than_assumed(monkeypatch):
             if durable_apply is not None:
                 durable_apply()
             return [principal]
-        def is_revoked(self, principal):
-            return False
+        def revoked(self):
+            snapshot_reads.append(1)
+            return {}
     monkeypatch.setattr(rev, "shared", lambda: _Fake())
     result = edr.contain("worker-1", reason="x")
     assert not result.contained
     assert any("did not take effect" in f for f in result.failed)
+    assert snapshot_reads == [1]
 
 
 def test_containment_revokes_the_whole_capability_subtree():

@@ -1,7 +1,7 @@
 """The gate that keeps the egress guard's coverage claim true.
 
-``egress_guard`` wraps ``httpx``, ``requests`` and ``urllib``, which covers 93
-of the 94 production modules that make direct outbound HTTP. That claim has
+``egress_guard`` wraps ``httpx``, ``httpx2``, ``requests`` and ``urllib``,
+which covers direct application calls plus provider SDK traffic. That claim has
 exactly one way to quietly stop being true: someone adds a connector using a
 client library the guard does not wrap.
 
@@ -46,7 +46,12 @@ def test_the_guarded_libraries_are_actually_guarded() -> None:
     touches -- a green check certifying nothing.
     """
     from maverick.egress_guard import COVERED_LIBRARIES
-    assert set(COVERED_LIBRARIES) == {"httpx", "requests", "urllib"}
+    assert set(COVERED_LIBRARIES) == {
+        "httpx",
+        "httpx2",
+        "requests",
+        "urllib",
+    }
 
 
 # -- negative controls: the gate must be able to fail ----------------------
@@ -100,6 +105,18 @@ def test_an_aliased_guarded_import_is_resolved_too(tmp_path) -> None:
         import httpx as hx
         def go():
             return hx.get("https://api.example.com")
+    """)
+    _, uncovered = gate.classify(census)
+    assert census and not uncovered, (census, uncovered)
+
+
+def test_an_aliased_httpx2_import_is_guarded(tmp_path) -> None:
+    """Provider-SDK transport calls belong to the guarded family too."""
+    census = _scan_dir(tmp_path, """
+        import httpx2 as hx
+        async def go():
+            async with hx.AsyncClient() as client:
+                return await client.post("https://api.example.com")
     """)
     _, uncovered = gate.classify(census)
     assert census and not uncovered, (census, uncovered)

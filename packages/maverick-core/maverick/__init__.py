@@ -46,14 +46,28 @@ def _install_egress_guard() -> None:
     necessarily run.
 
     A no-op unless enterprise mode (or a compliance floor) is on, so the
-    default zero-config posture is unchanged. Guarded so it can never break
-    ``import maverick``; ``egress_guard.uninstall()`` reverses it.
+    default zero-config posture is unchanged. An ordinary bootstrap tolerates
+    an unsupported optional HTTP client, but an explicitly asserted enterprise
+    or compliance process refuses to start without its promised boundary.
+    ``egress_guard.uninstall()`` reverses a successful installation.
     """
     try:
         from .egress_guard import install
         install()
-    except Exception:  # failure-policy: best_effort
-        pass
+    except Exception as exc:
+        try:
+            from .enterprise import enterprise_enabled
+
+            boundary_required = enterprise_enabled()
+        # Failure to resolve an asserted security posture is itself a reason to
+        # fail closed; this branch runs only after guard installation failed.
+        except Exception:  # pragma: no cover - resolver already fails closed
+            boundary_required = True
+        if boundary_required:
+            raise RuntimeError(
+                "refusing to start: the enterprise/compliance process-wide "
+                "egress boundary could not be installed"
+            ) from exc
 
 
 _install_egress_guard()

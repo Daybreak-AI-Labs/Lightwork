@@ -31,6 +31,19 @@ updates:
     groups:
       python-minor-patch:
         update-types: ["minor", "patch"]
+    # cyclonedx-bom 7.3.1 (the current release) requires chardet>=5.1,<6.
+    # A standalone chardet major bump therefore cannot resolve the reviewed
+    # CI environment. Remove this range only after the SBOM tool supports it.
+    ignore:
+      - dependency-name: chardet
+        versions: [">=6"]
+      # Provider major releases can replace the HTTP transport and therefore
+      # require the egress/retry compatibility review enforced in CI. Minor
+      # and patch updates remain automated inside the supported major.
+      - dependency-name: anthropic
+        update-types: ["version-update:semver-major"]
+      - dependency-name: openai
+        update-types: ["version-update:semver-major"]
 
   # TypeScript plugin SDK (published npm artifact).
   - package-ecosystem: npm

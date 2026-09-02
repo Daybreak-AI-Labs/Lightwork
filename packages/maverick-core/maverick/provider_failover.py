@@ -65,7 +65,15 @@ def should_retry_llm_error(exc: Exception) -> bool:
         non_retryable.append(ConsentDenied)
     except Exception:  # pragma: no cover
         pass
-    return not non_retryable or not isinstance(exc, tuple(non_retryable))
+    if not non_retryable:
+        return True
+    try:
+        from .retry import _exception_chain
+        chain = _exception_chain(exc)
+    except Exception:  # pragma: no cover - retry helper import is fail-safe
+        chain = (exc,)
+    terminal = tuple(non_retryable)
+    return not any(isinstance(current, terminal) for current in chain)
 
 
 def _cooldown_ledger():
