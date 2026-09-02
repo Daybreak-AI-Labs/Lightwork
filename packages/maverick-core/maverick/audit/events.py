@@ -282,6 +282,13 @@ class EventKind:
     # payload: control, enabled, actor, acknowledged, previous_requested,
     # effective, state, blockers.
     LEARNING_CONTROL_CHANGED = "learning_control_changed"
+    # Cortex: the governed company memory. One row per recall across every
+    # memory source (knowledge, skills, lessons, the Operating Record, fleet
+    # memory) and one per deposit, so "who recalled what, from where" is
+    # provable for internal and external readers alike. payload: caller,
+    # tenant, sources, per_source hit counts, denied reasons, query digest.
+    CORTEX_RECALL = "cortex_recall"
+    CORTEX_DEPOSIT = "cortex_deposit"
     # Ekko work-discovery governance.  These events deliberately carry only
     # policy hashes, opaque ids, counts and decisions -- never window titles,
     # file names, URLs, application content, or other observed work data.
