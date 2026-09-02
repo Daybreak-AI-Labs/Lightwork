@@ -30,7 +30,7 @@ _HEADERS = {
 def _content_security_policy(style_nonce: str) -> str:
     return (
         "default-src 'none'; base-uri 'none'; connect-src 'self'; "
-        "font-src 'none'; form-action 'none'; frame-ancestors 'none'; "
+        "font-src 'self'; form-action 'none'; frame-ancestors 'none'; "
         "img-src 'self'; manifest-src 'none'; media-src 'none'; "
         "object-src 'none'; script-src 'self'; "
         f"style-src 'self' 'nonce-{style_nonce}'; worker-src 'none'"
