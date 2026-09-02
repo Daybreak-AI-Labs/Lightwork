@@ -369,6 +369,10 @@ Status markers:
   writer lock. A concurrent release cannot delete the generation between those
   writes; incomplete projection remains restrictively contained and is never
   reported as a successful containment.
+- [x] **QA-104 — Canonical Overview return navigation (P2).** Module return
+  actions target `/overview`, not the root Chat/onboarding entrypoint. Overview
+  smoke and scale regressions exercise the actual Overview page and its bounded
+  board payload rather than passing against an unrelated redirected surface.
 
 ## Focused regression evidence
 
@@ -478,6 +482,7 @@ working tree.
 - **QA-101** — `packages/maverick-core/tests/test_trust_receipt.py::{test_a_valid_historical_v1_receipt_verifies_with_v1_claim_semantics,test_malformed_and_unknown_receipt_versions_fail_closed}`
 - **QA-102** — `packages/maverick-core/tests/test_revocation.py::{test_stale_protected_release_preserves_new_generation_and_skips_callback,test_protected_release_refuses_degraded_cross_process_lock,test_legacy_protected_record_can_be_released_by_its_empty_generation}`; `packages/maverick-core/tests/test_agent_control_plane.py::{test_stale_release_cannot_clear_a_newer_external_containment,test_trust_cli_restore_linearizes_before_concurrent_containment}`; `packages/maverick-core/tests/test_cli_external_agents.py::test_ordinary_restore_and_gateway_release_refuse_security_containment`; `packages/maverick-dashboard/tests/test_external_agents_api.py::test_ordinary_admin_restore_and_release_refuse_security_containment`; `packages/maverick-core/tests/test_external_agents.py::test_admin_containment_and_release_verify_persisted_gateway_state`
 - **QA-103** — `packages/maverick-core/tests/test_agent_control_plane.py::test_release_cannot_delete_generation_between_containment_projections`; `packages/maverick-core/tests/test_agent_edr.py::test_revocation_is_confirmed_rather_than_assumed`
+- **QA-104** — `packages/maverick-dashboard/tests/test_privacy_data_discovery_page.py::test_page_renders_full_operator_contract`; `packages/maverick-dashboard/tests/test_app.py::test_overview_renders`; `packages/maverick-dashboard/tests/test_perf.py::test_overview_payload_handles_thousand_goals_without_loading_them_all`
 
 - **QA-099 live Postgres transaction** — `packages/maverick-core/tests/test_postgres_world.py::test_halt_durable_clear_failure_rolls_back_locked_generation`
 - **QA-099 cached-state arm** — `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_post_invalidates_a_cached_local_clear`
