@@ -557,90 +557,48 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-        # Keep in step with the COUNT in --shard below and the required
-        # checks in .github/rulesets/protect-main.json.
+        # A pull request tests the floor interpreter only; `test-window`
+        # below carries the rest of the supported window and runs only where
+        # the commit actually lands. Keep both version lists in step with the
+        # required checks in .github/rulesets/protect-main.json, and the shard
+        # COUNT with the --shard in .github/actions/test-shard.
+        python-version: ["3.10"]
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: ./.github/actions/test-shard
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install packages
-        run: |
-          set -x
-          python -m pip install --upgrade \
-            'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' \
-            'packaging==26.3'
-          # All local distributions are direct requirements in one resolver
-          # transaction, so no sibling can fall back to a public lookalike and
-          # every declared base dependency is present.
-          # OIDC (P4) verifier ships as the optional [oidc] extra (PyJWT);
-          # install it here so the adversarial security matrix in test_oidc.py
-          # actually RUNS in CI instead of self-skipping when PyJWT is absent.
-          # The OpenAI extra is installed in this existing required matrix so
-          # provider compatibility/retry tests run once on every supported
-          # interpreter without adding parallel status contexts.
-          python -m pip install \
-            -e './packages/maverick-core[openai]' \
-            -e ./packages/maverick-shield \
-            -e ./packages/maverick-channels \
-            -e ./packages/maverick-evolve \
-            -e ./packages/maverick-dashboard \
-            -e ./packages/maverick-mcp \
-            -e ./packages/maverick-knowledge \
-            -e ./apps/installer-cli \
-            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]'
-          python -m pip check
-          python scripts/verify_constraint_closure.py
-      - name: Show installed packages
-        run: python -m pip list
-      - name: Test (bounded, with diagnostics)
-        env:
-          PYTHONFAULTHANDLER: "1"
-        shell: bash
-        run: |
-          set -o pipefail
-          # Two exact-main jobs previously survived until GitHub's six-hour
-          # ceiling. pytest-timeout catches a stuck test; GNU timeout also
-          # bounds interpreter shutdown/non-daemon-thread leaks after the last
-          # test and SIGABRT gives faulthandler a chance to print stacks.
-          #
-          # Two phases per slice: everything under xdist, then the
-          # heavy_concurrency files (queue soak, discovery estate runner)
-          # serially so their own worker threads do not share the two cores
-          # with a second xdist worker -- that co-scheduling starved SQLite
-          # lock waits into "database is locked" findings. A slice with no
-          # heavy files exits 5 (nothing collected) from the second phase,
-          # which is a pass here.
-          status=0
-          timeout --verbose --signal=ABRT --kill-after=30s 20m \
-            python -m pytest -q -n auto --dist loadfile --shard "${{ matrix.shard }}/3" \
-              -m "not heavy_concurrency" --tb=short --durations=50 \
-              --timeout=180 --timeout-method=signal \
-              --junitxml="test-results-${{ matrix.python-version }}-${{ matrix.shard }}.xml" \
-            2>&1 | tee "pytest-${{ matrix.python-version }}-${{ matrix.shard }}.log" || status=$?
-          timeout --verbose --signal=ABRT --kill-after=30s 10m \
-            python -m pytest -q --shard "${{ matrix.shard }}/3" \
-              -m heavy_concurrency --tb=short \
-              --timeout=600 --timeout-method=signal \
-              --junitxml="test-results-${{ matrix.python-version }}-${{ matrix.shard }}-serial.xml" \
-            2>&1 | tee -a "pytest-${{ matrix.python-version }}-${{ matrix.shard }}.log" || serial=$?
-          if [ "${serial:-0}" -ne 0 ] && [ "${serial:-0}" -ne 5 ]; then status=$serial; fi
-          exit "$status"
-      - name: Upload test diagnostics
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: always()
+          shard: ${{ matrix.shard }}
+
+  test-window:
+    # The rest of the supported window. A pull request already proves the
+    # floor (`test`, above) and 3.12 (`posture` runs the whole suite there),
+    # so these legs are skipped on pull_request -- a job skipped by `if`
+    # reports success, so the required `test (3.11|3.12, n)` contexts stay
+    # satisfied -- and run for real on the merge queue's commit and on pushes
+    # to main, where a version-specific break still blocks the merge or goes
+    # red on main. The explicit name keeps the check contexts identical to
+    # the single-job matrix they replace.
+    name: test (${{ matrix.python-version }}, ${{ matrix.shard }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          name: pytest-${{ matrix.python-version }}-${{ matrix.shard }}
-          path: |
-            test-results-${{ matrix.python-version }}-${{ matrix.shard }}.xml
-            test-results-${{ matrix.python-version }}-${{ matrix.shard }}-serial.xml
-            pytest-${{ matrix.python-version }}-${{ matrix.shard }}.log
-          if-no-files-found: warn
-          retention-days: 14
+          persist-credentials: false
+      - uses: ./.github/actions/test-shard
+        with:
+          python-version: ${{ matrix.python-version }}
+          shard: ${{ matrix.shard }}
 
   windows-process-containment:
     name: Windows process containment (Python ${{ matrix.python-version }})
@@ -651,7 +609,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # The floor on every pull request; the rest of the window is
+        # windows-process-containment-window below (queue and main only).
+        python-version: ["3.10"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the focused test dependency
+        run: python -m pip install "pytest==9.1.1"
+      - name: Test Windows Job Object process-tree containment
+        env:
+          PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
+        run: >-
+          python -m pytest -q
+          packages/maverick-core/tests/test_local_backend_process_reaping.py
+
+  windows-process-containment-window:
+    # Same check names as the single-job matrix they replace; skipped on
+    # pull_request (a skipped job reports success), run for real on the
+    # merge queue's commit and on pushes to main.
+    name: Windows process containment (Python ${{ matrix.python-version }})
+    if: github.event_name != 'pull_request'
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

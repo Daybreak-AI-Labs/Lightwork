@@ -111,14 +111,19 @@ Follow these steps in order. Paths cited are the actual controls in this repo.
       removals/renumbers fail), `python -m maverick.a11y_audit --ci`,
       `python -m maverick.schema_migrations --ci`.
     - `audit` — dependency/security audit + SBOM.
-    - `test` — the **test matrix on Python 3.10, 3.11, 3.12**, three
-      file-level slices per interpreter (pytest-xdist, one worker per core);
-      `posture` — the same suite under the production security posture, in
-      the same three slices.
+    - `test` — the full `pytest` suite in three file-level slices
+      (pytest-xdist, one worker per core) on **Python 3.10 for every pull
+      request**; `test-window` — the same slices on **3.11 and 3.12**, skipped
+      on the pull request itself (GitHub counts a skipped required job as
+      passing) and run on the merge queue's commit and on `main`, so the
+      whole supported window is proven on the commit that lands;
+      `posture` — the same suite under the production security posture on
+      3.12, in the same three slices, on every event.
     - `harness-overhead`, `governance-frontier-offline` — the tracked benchmark
       manifests verify against the current sources.
-    - `redteam`, `eval-smoke`, `release-cohort`, `postgres`, `docker`, the three
-      `Windows process containment` legs — as configured.
+    - `redteam`, `eval-smoke`, `release-cohort`, `postgres`, `docker`, the
+      `Windows process containment` legs (3.10 on every pull request, 3.11 and
+      3.12 on the queue and `main`) — as configured.
   - **`.github/workflows/conventional-commits.yml`**, job `lint-pr-title` — PR
     title check.
   - **`.github/workflows/commit-hygiene.yml`**, job `no-ai-attribution` — no AI
