@@ -484,6 +484,10 @@ max_cart_lines = 25        # distinct lines per cart
 # applies a price/inventory/listing/campaign/order change) and the opaque
 # checkout handoff are enforced in maverick.commerce, not in prompts. The
 # agent never sees payment, address, or checkout-page details.
+[shoring]                  # Autonomous Shoring engagement tooling (dashboard
+                           #   /shoring: book of work, measured SLAs, exception
+                           #   desk). ON by default — a kill switch, not a gate.
+enable = true              # set false to hide the surface. Env: MAVERICK_SHORING.
 
 [suites]                   # disable whole suites (all on by default)
 # healthcare = false

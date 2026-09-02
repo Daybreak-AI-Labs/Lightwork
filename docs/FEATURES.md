@@ -1483,6 +1483,19 @@ here.
   and hours given back. Read-only over the same episode ledger as Spend;
   zeros (never invented numbers) until goals have run.
 - **2,031-agent specialist portfolio across 54 suites** — the original 8
+- **Autonomous Shoring** (`shoring.py`, dashboard `/shoring` +
+  `/api/v1/shoring`; `[shoring] enable`, `MAVERICK_SHORING`) — the engagement
+  tooling for moving a whole business function onto the workforce: a tenant-
+  scoped **Book of Work** (each function mapped to an operating department,
+  with a scope, an owner, target service levels, and a lifecycle in
+  {scoping, demonstrating, running, proving}), an **SLA view** measuring
+  target-vs-actual (throughput/day, exception rate %) from real completed work
+  in the Operating Record with a met/at-risk/breached indicator, and an
+  **exception desk** — the pending human sign-offs filtered to each function's
+  department, the same queue behind `/approvals` seen through the shoring lens.
+  The Shoring P&L is the Savings report above. Read-only over existing stores;
+  the book is a small governed JSON store, not a world-model migration.
+- **2,020-agent specialist portfolio across 53 suites** — the original 8
   business suites plus customer experience, marketing, procurement,
   data & analytics, security ops, executive office, facilities/EHS, tax
   preparation, commerce (shopper + merchant agents), and 30+ industry

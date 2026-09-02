@@ -3987,6 +3987,14 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "shoring": _q_confirm(
+            "Autonomous Shoring tooling (recommended)? The engagement surface for "
+            "moving a whole business function onto the workforce: a tenant-scoped "
+            "Book of Work, service levels measured from real completed work, and "
+            "the exception desk over the approvals queue, at /shoring. ON by "
+            "default; a deliberate no is written as an explicit opt-out.",
+            default=True,
+        ),
         "external_agents": _q_confirm(
             "External-agent gateway? Govern agents built on OTHER platforms "
             "(Salesforce Agentforce, AWS Bedrock, custom runtimes): enroll "
@@ -6780,6 +6788,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         "operations_scientist": "operations_scientist",
         "consequence": "consequence",
         "cortex": "cortex",
+        "shoring": "shoring",
     }
     for choice, section in _learning_sections.items():
         if choice in advanced and advanced[choice] is False:
@@ -7315,6 +7324,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# max_session_spend = 500.0 # per-session cart cap, store currency")
         lines.append("# max_line_quantity = 10    # per-line quantity cap")
         lines.append("# max_cart_lines = 25       # distinct lines per cart")
+    if advanced.get("shoring"):
+        lines.append("")
+        lines.append("[shoring]")
+        lines.append("# Autonomous Shoring (maverick.shoring): the Book of Work, service levels")
+        lines.append("# measured from the Operating Record, and the exception desk at /shoring.")
+        lines.append("# On by default; this section only lets an operator turn the surface off.")
+        lines.append("enable = true")
     if advanced.get("external_agents"):
         lines.append("")
         lines.append("[external_agents]")
@@ -8429,6 +8445,7 @@ _EXPRESS_ADVANCED: dict[str, Any] = {
     "rehearsal": True,
     "evaluator_evolution": True,
     "cortex": True,
+    "shoring": True,
     # governed memory + provable-learning audit (non-blocking)
     "memory_guard": True,
     "temporal_memory": True,
@@ -8482,6 +8499,7 @@ _LEARNING_LIFECYCLE: dict[str, Any] = {
     "consequence": True,
     "rehearsal": True,
     "cortex": True,
+    "shoring": True,
 }
 
 _PROFILE_SELF_LEARNING: dict[str, Any] = dict(_EXPRESS_SELF_LEARNING)
