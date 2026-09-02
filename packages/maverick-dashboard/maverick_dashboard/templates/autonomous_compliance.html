@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Autonomous Compliance · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .acm-shell { max-width: 1180px; margin: 0 auto; padding: 1.25rem; }
+  .acm-suite { margin: 1.75rem 0; }
+  .acm-suite__head { margin-bottom: .75rem; }
+  .acm-suite__head h2 { margin: 0 0 .2rem; }
+  .acm-suite__desc { color: var(--muted); margin: 0; max-width: 52rem; }
+  .acm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .75rem; }
+  .acm-card { text-decoration: none; color: inherit; gap: .6rem; }
+  .acm-card__row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+  .acm-card__name { font-weight: 600; }
+  .acm-card__path { color: var(--muted); font-size: var(--text-sm); word-break: break-all; }
+  .acm-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .75rem; margin: .5rem 0 0; padding: 0; list-style: none; }
+  .acm-legend li { display: flex; flex-direction: column; gap: .3rem; }
+  .acm-legend p { margin: 0; color: var(--muted); font-size: var(--text-sm); }
+  .acm-price { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+  .acm-price p { margin: 0; max-width: 44rem; }
+</style>
+<div class="acm-shell">
+  {% from "_hero.html" import hero %}
+  {% call hero('Compliance, run by governed agents', 'Autonomous Compliance',
+               subtitle='One product, six suites, one workforce',
+               lede='The six compliance suites are one platform, operated by governed
+                     agents. Every module below is labelled with its honest status
+                     &mdash; shipped, preview or external &mdash; and links straight to
+                     the working page.') %}
+    {% from "_hero.html" import state %}
+    {{ state('Status vocabulary',
+             module_count ~ ' modules across ' ~ (suites | length) ~ ' suites',
+             badge='shipped · preview · external', badge_class='info',
+             copy='Status is read from the shared compliance catalog, not written here.') }}
+  {% endcall %}
+
+  {% for suite in suites %}
+  <section class="acm-suite" aria-labelledby="acm-suite-{{ suite.key }}">
+    <div class="acm-suite__head">
+      <h2 id="acm-suite-{{ suite.key }}">{{ suite.label }}</h2>
+      <p class="acm-suite__desc">{{ suite.description }}</p>
+    </div>
+    <div class="acm-grid">
+      {% for module in suite.modules %}
+      <a class="card acm-card" href="{{ module.path }}">
+        <span class="acm-card__row">
+          <span class="acm-card__name">{{ module.label }}</span>
+          <span class="badge {{ status_badge_class[module.status] }}">{{ status_labels[module.status] }}</span>
+        </span>
+        <span class="acm-card__path">{{ module.path }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+  <section class="panel acm-legend-panel" aria-labelledby="acm-legend-title">
+    <h2 id="acm-legend-title">What the labels mean</h2>
+    <ul class="acm-legend">
+      {% for status in status_order %}
+      <li>
+        <span class="badge {{ status_badge_class[status] }}">{{ status_labels[status] }}</span>
+        <p>{{ status_meanings[status] }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="panel" aria-labelledby="acm-price-title">
+    <div class="acm-price">
+      <div>
+        <h2 id="acm-price-title">Packaging &amp; pricing</h2>
+        <p class="muted">One product, six suites, one workforce. For packaging and
+          pricing, contact us.</p>
+      </div>
+      <a class="btn btn--primary" href="{{ pricing_mailto }}">Contact us about pricing</a>
+    </div>
+  </section>
+</div>
+{% endblock %}

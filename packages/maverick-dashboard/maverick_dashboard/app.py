@@ -909,6 +909,9 @@ from .ai_evidence_analysis_page import (  # noqa: E402
 from .assessment_evidence_autopopulation_page import (  # noqa: E402
     create_assessment_evidence_autopopulation_page_router,
 )
+from .autonomous_compliance_page import (  # noqa: E402
+    create_autonomous_compliance_page_router,
+)
 from .consent_application_scanner_page import (  # noqa: E402
     create_consent_application_scanner_page_router,
 )
@@ -973,6 +976,7 @@ app.include_router(create_agent_control_plane_page_router(templates))
 app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
 app.include_router(create_cortex_page_router(templates))
+app.include_router(create_autonomous_compliance_page_router(templates))
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
@@ -3424,6 +3428,8 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
     except Exception:
         section = {}
     compiler = section.get("compiler") if isinstance(section, Mapping) else None
+    from maverick.compliance_catalog import module_status
+
     return templates.TemplateResponse(
         request,
         "data_use_governance.html",
@@ -3432,6 +3438,7 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
             "data_use_compiler_enabled": (
                 isinstance(compiler, Mapping) and compiler.get("enable") is True
             ),
+            "acm_module_status": module_status("/data-use"),
         },
     )
 
@@ -3475,6 +3482,7 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
 
     require_permission(request, "view")
     from maverick import privacy_data_discovery
+    from maverick.compliance_catalog import module_status
     from maverick.paths import current_tenant_id_strict
 
     from .auth import has_global_permission
@@ -3501,6 +3509,7 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
             "privacy_data_discovery_can_audit": has_permission(request, "audit"),
             "privacy_data_discovery_can_admin": has_global_permission(request, "admin"),
             "csp_style_nonce": nonce,
+            "acm_module_status": module_status("/privacy/data-discovery"),
         },
     )
     response.headers["Cache-Control"] = "no-store, private, max-age=0"
@@ -5648,6 +5657,8 @@ async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
     """Continuous technical-evidence collector operations workbench."""
 
     require_permission(request, "operate")
+    from maverick.compliance_catalog import module_status
+
     from .trc_continuous_evidence_api import (
         trc_continuous_evidence_enabled_for_page,
     )
@@ -5658,7 +5669,8 @@ async def trc_continuous_evidence_page(request: Request) -> HTMLResponse:
         {
             "trc_continuous_evidence_enabled": (
                 trc_continuous_evidence_enabled_for_page()
-            )
+            ),
+            "acm_module_status": module_status("/compliance/continuous-evidence"),
         },
     )
 
