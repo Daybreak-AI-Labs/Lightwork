@@ -580,8 +580,11 @@ jobs:
           # OIDC (P4) verifier ships as the optional [oidc] extra (PyJWT);
           # install it here so the adversarial security matrix in test_oidc.py
           # actually RUNS in CI instead of self-skipping when PyJWT is absent.
+          # The OpenAI extra is installed in this existing required matrix so
+          # provider compatibility/retry tests run once on every supported
+          # interpreter without adding parallel status contexts.
           python -m pip install \
-            -e ./packages/maverick-core \
+            -e './packages/maverick-core[openai]' \
             -e ./packages/maverick-shield \
             -e ./packages/maverick-channels \
             -e ./packages/maverick-evolve \

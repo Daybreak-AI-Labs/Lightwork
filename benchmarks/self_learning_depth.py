@@ -18,7 +18,8 @@ then promotes and signs.
                             beats the incumbent it is promoted on the evaluator rung.
 
 Every LLM call is priced; a hard --max-dollars ceiling stops the run. All
-promotions sign into the audit chain. Needs ANTHROPIC_API_KEY.
+promotions sign into the audit chain. Needs MAVERICK_PROVIDER_READY=1 and a
+nonempty ANTHROPIC_API_KEY.
 
     python benchmarks/self_learning_depth.py --max-dollars 10
 """
@@ -31,6 +32,11 @@ import tempfile
 import time
 import traceback
 from pathlib import Path
+
+try:
+    from benchmarks._common.provider_consent import paid_anthropic_benchmark_ready
+except ModuleNotFoundError:  # direct ``python benchmarks/self_learning_depth.py``
+    from _common.provider_consent import paid_anthropic_benchmark_ready
 
 _HERE = Path(__file__).resolve().parent
 _ROOT = _HERE.parent
@@ -185,6 +191,18 @@ def flagship_evaluator(home: Path) -> str:
 
 # --- Flagship B: self-harness LLM proposer, gated on held-out -------------------
 
+_SELF_HARNESS_QUESTIONS = (
+    (12, 3, "*"),
+    (7, 8, "+"),
+    (20, 4, "-"),
+    (9, 9, "*"),
+    (15, 6, "+"),
+    (6, 7, "*"),
+    (30, 12, "-"),
+)
+_SELF_HARNESS_DEVELOPMENT_CASES = 2
+
+
 def flagship_self_harness(home: Path) -> str:
     import re
 
@@ -208,11 +226,11 @@ def flagship_self_harness(home: Path) -> str:
     llm = LLM()
     # The held-out validation actually RUNS each task with the LLM (with vs without
     # the candidate line) -- llm_runner injects the line into the system prompt.
-    qs = [(12, 3, "*"), (7, 8, "+"), (20, 4, "-"), (9, 9, "*"), (15, 6, "+"), (6, 7, "*")]
     def _val(a, b, o):
         return a * b if o == "*" else a + b if o == "+" else a - b
     cases = [{"goal": f"For the ledger, what is {a} {o} {b}? Answer.",
-              "expected": str(_val(a, b, o))} for a, b, o in qs]
+              "expected": str(_val(a, b, o))}
+             for a, b, o in _SELF_HARNESS_QUESTIONS]
 
     def _judge(goal: str, output: str, expected: str) -> bool:
         # The learned contract: the correct integer wrapped in the RESULT: tag.
@@ -221,19 +239,26 @@ def flagship_self_harness(home: Path) -> str:
 
     run_fn = llm_runner(llm, max_tokens=40)
     score_with, score_without = corpus_ab_scorers(cases, run_fn=run_fn, judge_fn=_judge)
-    held_in = [c["goal"] for c in cases[:2]]
-    held_out = [c["goal"] for c in cases[2:]]
+    held_in = [c["goal"] for c in cases[:_SELF_HARNESS_DEVELOPMENT_CASES]]
+    held_out = [c["goal"] for c in cases[_SELF_HARNESS_DEVELOPMENT_CASES:]]
 
     ctrl = SelfImprovementController(frozen_fn=lambda: False, ledger=PromotionLedger())
+    prompt_floor = int(ctrl.rung_policy["prompt"]["min_samples"])
+    assert len(held_out) >= prompt_floor, (
+        f"self-harness benchmark has {len(held_out)} confirmation cases, below "
+        f"the prompt-promotion floor of {prompt_floor}")
     rep = run_self_harness(recs, model_id="M", min_support=3, controller=ctrl, path=store,
                            held_in=held_in, held_out=held_out,
                            score_with=score_with, score_without=score_without,
-                           propose_fn=llm_proposer(llm, max_tokens=120))
+                           propose_fn=llm_proposer(llm, max_tokens=120),
+                           require_held_out=True, min_held_out=prompt_floor)
     # Honest, strict assertions: the LLM proposer must have actually run and the
     # governed harness must have promoted the validated line on held-out.
     assert rep.mined >= 1, f"no failure signature mined (mined={rep.mined})"
     assert rep.proposed >= 1, f"LLM proposer produced no proposal (proposed={rep.proposed})"
-    assert rep.promoted >= 1, f"validated line not promoted (promoted={rep.promoted}, validated={rep.validated})"
+    assert rep.promoted >= 1, (
+        f"validated line not promoted (promoted={rep.promoted}, "
+        f"validated={rep.validated}, skipped={rep.skipped})")
     from maverick.self_harness import recall_addendum
     learned = recall_addendum("M", store)
     assert learned, "promoted line not recalled from the addendum store"
@@ -266,8 +291,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     _SPEND["cap"] = args.max_dollars
 
-    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
-        print("NO PROVIDER KEY: set ANTHROPIC_API_KEY (this makes real LLM calls).")
+    if not paid_anthropic_benchmark_ready():
+        print(
+            "PROVIDER NOT READY: set MAVERICK_PROVIDER_READY=1 and a nonempty "
+            "ANTHROPIC_API_KEY (this makes real paid LLM calls)."
+        )
         return 2
 
     home = Path(tempfile.mkdtemp(prefix="self_learning_depth_"))

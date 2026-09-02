@@ -17,12 +17,13 @@ handful of hand-picked wrappers, so it was structurally incapable of noticing a
 bypass. Sixty connectors under ``tools/`` drifted out of coverage exactly that
 way.
 
-So the check moves to where requests are actually issued. 86 of those 88
-modules use ``httpx`` and one uses ``requests``; both funnel every call --
-module-level ``httpx.get``, a hand-built ``Client``, a pooled ``Session`` --
-through a one-request network seam. Wrapping those methods covers 87 of 88
-modules without touching a single connector, covers connectors not yet
-written, and re-checks every followed redirect hop.
+So the check moves to where requests are actually issued. Most direct callers
+use ``httpx`` and one uses ``requests``; provider SDKs can use the compatible
+``httpx2`` family internally. All three funnel every call -- module-level
+``httpx.get``, a hand-built ``Client``, an SDK client, or a pooled ``Session``
+-- through a one-request network seam. Wrapping those methods covers existing
+connectors and provider SDK traffic, covers connectors not yet written, and
+re-checks every followed redirect hop.
 
 **This does not weaken SSRF pinning.** ``tools/_ssrf`` installs a custom
 *transport*, which sits below the one-hop client method; the guard runs first
@@ -47,22 +48,133 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from typing import Any
 
 log = logging.getLogger(__name__)
 
 #: HTTP client libraries this guard wraps. The egress_contract gate refuses a
 #: production module that reaches the network through anything else.
-COVERED_LIBRARIES = ("httpx", "requests", "urllib")
+COVERED_LIBRARIES = ("httpx", "httpx2", "requests", "urllib")
+
+#: The two independently distributed HTTPX-compatible client families. Keep
+#: this list aligned with ``_TARGETS`` and the egress-contract census.
+_HTTPX_FAMILIES = ("httpx", "httpx2")
 
 _installed = False
-_originals: dict[str, Any] = {}
+# A target can be reloaded while the guard is active.  Keep every class/module
+# generation by direct object reference so teardown restores both the current
+# methods and any older classes retained by callers across that reload.
+_originals: dict[str, list[tuple[Any, str, Any, Any]]] = {}
 _compatibility: dict[str, dict[str, Any]] = {}
+_lifecycle_lock = threading.RLock()
+
+_WRAPPER_TARGET = "__maverick_egress_guard_target__"
+_WRAPPER_ORIGINAL = "__maverick_egress_guard_original__"
+# A module reload creates a new ``_PatchOnImport`` class and resets ``_hook``,
+# while the prior-generation finder remains in ``sys.meta_path``.  Mark finder
+# instances with a stable string attribute so the reloaded module can discover
+# and remove every generation instead of retaining only the newest reference.
+_HOOK_MARKER = "__maverick_egress_guard_import_hook__"
 
 #: Distinguishes "caller omitted timeout" from "caller passed None", which
 #: urllib treats differently (None means no timeout; omitted means the global
 #: default socket timeout).
 _SENTINEL = object()
+
+
+def _is_guard_wrapper(value: Any, target: str) -> bool:
+    return getattr(value, _WRAPPER_TARGET, None) == target
+
+
+def _recorded(owner: Any, attribute: str, wrapper: Any) -> bool:
+    return any(
+        saved_owner is owner
+        and saved_attribute == attribute
+        and saved_wrapper is wrapper
+        for records in _originals.values()
+        for saved_owner, saved_attribute, _, saved_wrapper in records
+    )
+
+
+def _replace_with_guard(
+    target: str,
+    owner: Any,
+    attribute: str,
+    wrapper: Any,
+) -> None:
+    """Replace one method and retain enough identity to undo every generation."""
+    current = getattr(owner, attribute)
+    if _is_guard_wrapper(current, target):
+        # This can happen when a package reload re-exports a class from an
+        # already-loaded submodule, or after egress_guard itself was reloaded.
+        # Adopt the wrapper rather than stacking another policy check.
+        if not _recorded(owner, attribute, current):
+            original = getattr(current, _WRAPPER_ORIGINAL, current)
+            _originals.setdefault(target, []).append(
+                (owner, attribute, original, current)
+            )
+        return
+
+    setattr(wrapper, _WRAPPER_TARGET, target)
+    setattr(wrapper, _WRAPPER_ORIGINAL, current)
+    records = _originals.setdefault(target, [])
+    record = (owner, attribute, current, wrapper)
+    records.append(record)
+    try:
+        setattr(owner, attribute, wrapper)
+    except Exception:
+        # A metaclass can reject one half of a sync/async pair.  Remove this
+        # record immediately; the caller's transaction restores earlier ones.
+        try:
+            if getattr(owner, attribute) is wrapper:
+                setattr(owner, attribute, current)
+        except Exception:  # pragma: no cover - pathological metaclass
+            log.exception(
+                "egress guard: failed to restore rejected patch %r.%s",
+                owner,
+                attribute,
+            )
+        records.pop()
+        if not records:
+            _originals.pop(target, None)
+        raise
+
+
+def _restore_record(record: tuple[Any, str, Any, Any]) -> None:
+    owner, attribute, original, wrapper = record
+    try:
+        current = getattr(owner, attribute)
+    except Exception:  # pragma: no cover - exotic class teardown
+        return
+    if current is wrapper or _is_guard_wrapper(
+        current,
+        getattr(wrapper, _WRAPPER_TARGET, ""),
+    ):
+        try:
+            setattr(owner, attribute, original)
+        except Exception:  # pragma: no cover - exotic immutable class
+            log.exception(
+                "egress guard: could not restore %r.%s",
+                owner,
+                attribute,
+            )
+
+
+def _record_lengths() -> dict[str, int]:
+    return {target: len(records) for target, records in _originals.items()}
+
+
+def _restore_since(snapshot: dict[str, int]) -> None:
+    """Undo records added after ``snapshot``, newest assignment first."""
+    for target in reversed(list(_originals)):
+        records = _originals[target]
+        keep = snapshot.get(target, 0)
+        for record in reversed(records[keep:]):
+            _restore_record(record)
+        del records[keep:]
+        if not records:
+            _originals.pop(target, None)
 
 
 def _denied(url: str) -> str | None:
@@ -146,21 +258,23 @@ def _is_network_transport(transport: Any) -> bool:
     A mock handler that itself makes a real request is checked when that request
     goes back through a guarded library.
     """
-    try:
-        import httpx
-    except Exception:  # pragma: no cover - httpx absent
-        return True
-
     transport_type = type(transport)
-    if any(
-        transport_type is known_type
-        for known_type in (
-            getattr(httpx, "ASGITransport", None),
-            getattr(httpx, "WSGITransport", None),
-            getattr(httpx, "MockTransport", None),
-        )
-    ):
-        return False
+    for family in _HTTPX_FAMILIES:
+        # Do not import either optional family here. The guard deliberately
+        # preserves Maverick's cold-start contract, and the transport can only
+        # have come from a family that is already loaded.
+        module = sys.modules.get(family)
+        if module is None:
+            continue
+        if any(
+            transport_type is known_type
+            for known_type in (
+                getattr(module, "ASGITransport", None),
+                getattr(module, "WSGITransport", None),
+                getattr(module, "MockTransport", None),
+            )
+        ):
+            return False
 
     starlette_testclient = sys.modules.get("starlette.testclient")
     if starlette_testclient is not None:
@@ -184,8 +298,8 @@ def _reaches_the_network(client: Any, request: Any) -> bool:
     return _is_network_transport(transport)
 
 
-def _httpx_degraded_check(request: Any) -> None:
-    """Deny every HTTPX send when the per-hop guard cannot be installed.
+def _httpx_degraded_check(request: Any, *, client_name: str) -> None:
+    """Deny every HTTPX-family send when its per-hop guard cannot be installed.
 
     A public ``send`` wrapper cannot observe a redirect chain's later hops.
     Therefore, when HTTPX no longer exposes the one-hop seam, enterprise and
@@ -220,30 +334,38 @@ def _httpx_degraded_check(request: Any) -> None:
 
         audit_event(
             EventKind.EGRESS_BLOCKED,
-            provider="httpx-compatibility-fallback",
+            provider=f"{client_name}-compatibility-fallback",
             host=host or "?",
         )
     except Exception:  # failure-policy: best_effort
         log.exception(
-            "egress guard: could not audit degraded HTTPX refusal for %r",
+            "egress guard: could not audit degraded %s refusal for %r",
+            client_name,
             host or url,
         )
 
     from .enterprise import EgressBlocked
 
     raise EgressBlocked(
-        "enterprise/compliance mode: installed HTTPX cannot be guarded at "
-        "every redirect hop, so all HTTPX sends are refused until a compatible "
-        "version is installed."
+        f"enterprise/compliance mode: installed {client_name} cannot be "
+        "guarded at every redirect hop, so all sends through that client are "
+        "refused until a compatible version is installed."
     )
 
 
-def _patch_httpx_fail_closed(mod: Any, reason: str) -> bool:
+def _patch_httpx_fail_closed(
+    mod: Any,
+    reason: str,
+    *,
+    client_name: str,
+) -> bool:
     """Install the degraded public-send boundary; return whether it succeeded."""
-    sync_method = getattr(mod.Client, "send", None)
-    async_method = getattr(mod.AsyncClient, "send", None)
+    sync_owner = getattr(mod, "Client", None)
+    async_owner = getattr(mod, "AsyncClient", None)
+    sync_method = getattr(sync_owner, "send", None)
+    async_method = getattr(async_owner, "send", None)
     if not callable(sync_method) or not callable(async_method):
-        _compatibility["httpx"] = {
+        _compatibility[client_name] = {
             "compatible": False,
             "reason": f"{reason}; public send fallback is unavailable",
             "seam": "_send_single_request",
@@ -251,22 +373,20 @@ def _patch_httpx_fail_closed(mod: Any, reason: str) -> bool:
         }
         return False
 
-    sync_key = "httpx.Client.send"
-    async_key = "httpx.AsyncClient.send"
-    _originals[sync_key] = sync_method
-    _originals[async_key] = async_method
+    sync_key = f"{client_name}.Client.send"
+    async_key = f"{client_name}.AsyncClient.send"
 
     def _sync_send(self, request, *args, **kwargs):
-        _httpx_degraded_check(request)
+        _httpx_degraded_check(request, client_name=client_name)
         return sync_method(self, request, *args, **kwargs)
 
     async def _async_send(self, request, *args, **kwargs):
-        _httpx_degraded_check(request)
+        _httpx_degraded_check(request, client_name=client_name)
         return await async_method(self, request, *args, **kwargs)
 
-    mod.Client.send = _sync_send
-    mod.AsyncClient.send = _async_send
-    _compatibility["httpx"] = {
+    _replace_with_guard(sync_key, sync_owner, "send", _sync_send)
+    _replace_with_guard(async_key, async_owner, "send", _async_send)
+    _compatibility[client_name] = {
         "compatible": False,
         "reason": reason,
         "seam": "_send_single_request",
@@ -276,8 +396,8 @@ def _patch_httpx_fail_closed(mod: Any, reason: str) -> bool:
     return True
 
 
-def _patch_httpx(mod: Any) -> None:
-    """Wrap httpx at the one-network-request seam.
+def _patch_httpx_family(mod: Any, *, client_name: str) -> None:
+    """Wrap an HTTPX-compatible family at the one-network-request seam.
 
     ``Client.send`` owns a complete redirect chain, so wrapping it checks only
     the first URL. ``_send_single_request`` is entered once for every actual
@@ -289,22 +409,25 @@ def _patch_httpx(mod: Any) -> None:
     In-process ASGI/WSGI/TestClient and mock transports are still exempt through
     :func:`_reaches_the_network`; a request that opens no socket is not egress.
     """
-    sync_method = getattr(mod.Client, "_send_single_request", None)
-    async_method = getattr(mod.AsyncClient, "_send_single_request", None)
+    sync_owner = getattr(mod, "Client", None)
+    async_owner = getattr(mod, "AsyncClient", None)
+    sync_method = getattr(sync_owner, "_send_single_request", None)
+    async_method = getattr(async_owner, "_send_single_request", None)
     if not callable(sync_method) or not callable(async_method):
         reason = (
-            "installed HTTPX does not expose compatible sync and async "
+            f"installed {client_name} does not expose compatible sync and async "
             "_send_single_request seams"
         )
-        if _patch_httpx_fail_closed(mod, reason):
+        if _patch_httpx_fail_closed(
+            mod,
+            reason,
+            client_name=client_name,
+        ):
             return
-        raise RuntimeError(_compatibility["httpx"]["reason"])
+        raise RuntimeError(_compatibility[client_name]["reason"])
 
-    async_key = "httpx.AsyncClient._send_single_request"
-    sync_key = "httpx.Client._send_single_request"
-    _originals[sync_key] = sync_method
-    _originals[async_key] = async_method
-
+    async_key = f"{client_name}.AsyncClient._send_single_request"
+    sync_key = f"{client_name}.Client._send_single_request"
     def _sync_send_single_request(self, request, *args, **kwargs):
         if _reaches_the_network(self, request):
             _check(str(request.url))
@@ -315,24 +438,44 @@ def _patch_httpx(mod: Any) -> None:
             _check(str(request.url))
         return await async_method(self, request, *args, **kwargs)
 
-    mod.Client._send_single_request = _sync_send_single_request
-    mod.AsyncClient._send_single_request = _async_send_single_request
-    _compatibility["httpx"] = {
+    _replace_with_guard(
+        sync_key,
+        sync_owner,
+        "_send_single_request",
+        _sync_send_single_request,
+    )
+    _replace_with_guard(
+        async_key,
+        async_owner,
+        "_send_single_request",
+        _async_send_single_request,
+    )
+    _compatibility[client_name] = {
         "compatible": True,
         "reason": "",
         "seam": "_send_single_request",
     }
 
 
+def _patch_httpx(mod: Any) -> None:
+    """Wrap the original ``httpx`` distribution."""
+    _patch_httpx_family(mod, client_name="httpx")
+
+
+def _patch_httpx2(mod: Any) -> None:
+    """Wrap the provider-SDK ``httpx2`` distribution."""
+    _patch_httpx_family(mod, client_name="httpx2")
+
+
 def _patch_requests(mod: Any) -> None:
     original_send = mod.Session.send
-    _originals["requests.Session.send"] = original_send
+    target = "requests.Session.send"
 
     def _send(self, request, **kwargs):
         _check(str(getattr(request, "url", "")))
         return original_send(self, request, **kwargs)
 
-    mod.Session.send = _send
+    _replace_with_guard(target, mod.Session, "send", _send)
 
 
 def _patch_urllib(mod: Any) -> None:
@@ -342,7 +485,7 @@ def _patch_urllib(mod: Any) -> None:
     ``OpenerDirector.open``, so one wrapper covers every form.
     """
     original_open = mod.OpenerDirector.open
-    _originals["urllib.OpenerDirector.open"] = original_open
+    target = "urllib.OpenerDirector.open"
 
     def _open(self, fullurl, data=None, timeout=_SENTINEL):
         # `fullurl` is a str or a Request; Request.full_url holds the target.
@@ -353,33 +496,30 @@ def _patch_urllib(mod: Any) -> None:
             return original_open(self, fullurl, data)
         return original_open(self, fullurl, data, timeout)
 
-    mod.OpenerDirector.open = _open
+    _replace_with_guard(target, mod.OpenerDirector, "open", _open)
 
 
-def _unpatch(name: str, mod: Any) -> None:
-    if name == "httpx":
-        sync_key = "httpx.Client._send_single_request"
-        async_key = "httpx.AsyncClient._send_single_request"
-        if sync_key in _originals:
-            mod.Client._send_single_request = _originals.pop(sync_key)
-            mod.AsyncClient._send_single_request = _originals.pop(async_key)
-        fallback_sync_key = "httpx.Client.send"
-        fallback_async_key = "httpx.AsyncClient.send"
-        if fallback_sync_key in _originals:
-            mod.Client.send = _originals.pop(fallback_sync_key)
-            mod.AsyncClient.send = _originals.pop(fallback_async_key)
-    elif name == "requests":
-        mod.Session.send = _originals.pop(
-            "requests.Session.send", mod.Session.send)
-    elif name == "urllib.request":
-        mod.OpenerDirector.open = _originals.pop(
-            "urllib.OpenerDirector.open", mod.OpenerDirector.open)
+def _unpatch(name: str, mod: Any = None) -> None:
+    """Restore every recorded generation for one import target."""
+    del mod  # records retain the exact owners; sys.modules may be a new generation
+    prefixes = (
+        (f"{name}.",)
+        if name in _HTTPX_FAMILIES or name == "requests"
+        else ("urllib.",)
+    )
+    for target in reversed(list(_originals)):
+        if not target.startswith(prefixes):
+            continue
+        records = _originals.pop(target)
+        for record in reversed(records):
+            _restore_record(record)
 
 
 #: Module name -> patcher. Keyed on the importable name so the hook below can
 #: match it exactly.
 _TARGETS = {
     "httpx": _patch_httpx,
+    "httpx2": _patch_httpx2,
     "requests": _patch_requests,
     "urllib.request": _patch_urllib,
 }
@@ -390,9 +530,9 @@ _patched: set[str] = set()
 class _PatchOnImport:
     """Patch a client library the moment it is first imported.
 
-    Importing httpx eagerly from ``import maverick`` costs real time and breaks
+    Importing an HTTPX family eagerly from ``import maverick`` costs real time and breaks
     the CLI cold-start guarantee -- ``maverick --help`` is pinned not to load
-    httpx, the provider SDKs, numpy, or fastapi, and a stray module-level
+    httpx/httpx2, the provider SDKs, numpy, or fastapi, and a stray module-level
     import taxes every invocation. So the guard arms itself instead: it patches
     what is already loaded, and registers this finder to catch the rest.
 
@@ -402,8 +542,10 @@ class _PatchOnImport:
     attribute here does not leak into unrelated imports.
     """
 
+    __maverick_egress_guard_import_hook__ = True
+
     def find_spec(self, fullname, path=None, target=None):
-        if fullname not in _TARGETS or fullname in _patched:
+        if fullname not in _TARGETS:
             return None
         spec = None
         for finder in sys.meta_path:
@@ -423,10 +565,31 @@ class _PatchOnImport:
         real_exec = spec.loader.exec_module
 
         def exec_module(module, _real=real_exec, _name=fullname):
+            # Reload executes into the existing module object. Mark readiness
+            # unavailable before that object can expose freshly defined,
+            # unwrapped classes to another thread.
+            with _lifecycle_lock:
+                participating = _installed and _hook is self
+                if participating:
+                    _patched.discard(_name)
+                    _compatibility[_name] = {
+                        "compatible": False,
+                        "reason": "client import or reload is in progress",
+                        "fail_closed_fallback": False,
+                    }
             _real(module)
+            if not participating:
+                return
             try:
-                _TARGETS[_name](module)
-                _patched.add(_name)
+                with _lifecycle_lock:
+                    # The guard may have been uninstalled while the real loader
+                    # executed. Never leave an untracked wrapper behind.
+                    if not _installed or _hook is not self:
+                        return
+                    _patch_target(_name, module)
+                    _patched.add(_name)
+                    if _name not in _HTTPX_FAMILIES:
+                        _compatibility.pop(_name, None)
             # failure-policy: fail_closed
             except Exception as exc:
                 # An imported-but-unwrapped client would remain usable if
@@ -457,54 +620,159 @@ class _PatchOnImport:
 _hook: _PatchOnImport | None = None
 
 
+def _patch_target(name: str, module: Any) -> None:
+    """Patch one loaded target atomically across all of its network seams."""
+    snapshot = _record_lengths()
+    try:
+        _TARGETS[name](module)
+    except Exception:
+        _restore_since(snapshot)
+        raise
+
+
+def _remove_hook() -> None:
+    global _hook
+    # Do not rely only on ``_hook``. ``importlib.reload(egress_guard)`` resets
+    # that module global but cannot remove the prior finder from meta_path.
+    # Multiple retained finders wrap the same loader recursively and can make a
+    # later target import fail with RecursionError.
+    for finder in tuple(sys.meta_path):
+        if finder is not _hook and not getattr(finder, _HOOK_MARKER, False):
+            continue
+        try:
+            sys.meta_path.remove(finder)
+        except ValueError:
+            pass
+    _hook = None
+
+
+def _teardown(*, clear_compatibility: bool = True) -> None:
+    """Restore all recorded seams, including incomplete install state."""
+    global _installed
+    for name in reversed(tuple(_TARGETS)):
+        _unpatch(name)
+    _originals.clear()
+    _patched.clear()
+    _remove_hook()
+    if clear_compatibility:
+        _compatibility.clear()
+    _installed = False
+
+
 def install() -> bool:
     """Arm the guard. Idempotent; returns whether it is active.
 
     Patches every target already imported, and hooks the rest so they are
-    wrapped on first import. Deliberately does NOT import httpx: see
+    wrapped on first import. Deliberately does NOT import httpx or httpx2: see
     :class:`_PatchOnImport`.
     """
     global _installed, _hook
-    if _installed:
+    with _lifecycle_lock:
+        # A prior failed install can leave records even though `_installed`
+        # never became true. Start from a known, fully restored baseline.
+        if not _installed:
+            _teardown()
+
+        failed_name = "unknown"
+        try:
+            # First cover everything already loaded.
+            for name in _TARGETS:
+                failed_name = name
+                module = sys.modules.get(name)
+                if module is not None:
+                    _patch_target(name, module)
+                    _patched.add(name)
+                    if name not in _HTTPX_FAMILIES:
+                        _compatibility.pop(name, None)
+
+            # Then arm lazy imports. A second scan closes the interval between
+            # the first scan and hook insertion for another importing thread.
+            if _hook is None:
+                _hook = _PatchOnImport()
+                sys.meta_path.insert(0, _hook)
+            for name in _TARGETS:
+                failed_name = name
+                module = sys.modules.get(name)
+                if module is not None:
+                    _patch_target(name, module)
+                    _patched.add(name)
+                    if name not in _HTTPX_FAMILIES:
+                        _compatibility.pop(name, None)
+        except Exception:
+            failure = dict(
+                _compatibility.get(
+                    failed_name,
+                    {
+                        "compatible": False,
+                        "reason": "egress guard installation failed",
+                        "fail_closed_fallback": False,
+                    },
+                )
+            )
+            failure["compatible"] = False
+            if not failure.get("reason"):
+                failure["reason"] = "egress guard installation failed"
+            _teardown()
+            _compatibility[failed_name] = failure
+            raise
+
+        _installed = True
         return True
-    for name, patcher in _TARGETS.items():
-        mod = sys.modules.get(name)
-        if mod is not None and name not in _patched:
-            patcher(mod)
-            _patched.add(name)
-    if _hook is None:
-        _hook = _PatchOnImport()
-        sys.meta_path.insert(0, _hook)
-    _installed = True
-    return True
 
 
 def uninstall() -> None:
     """Restore the unwrapped network paths. For tests and controlled teardown."""
-    global _installed, _hook
-    if not _installed:
-        return
-    for name in list(_patched):
-        mod = sys.modules.get(name)
-        if mod is not None:
-            _unpatch(name, mod)
-    _patched.clear()
-    if _hook is not None:
-        try:
-            sys.meta_path.remove(_hook)
-        except ValueError:  # pragma: no cover
-            pass
-        _hook = None
-    _originals.clear()
-    _compatibility.clear()
-    _installed = False
+    with _lifecycle_lock:
+        # Do not trust `_installed`: an exception can occur after the first
+        # family or method was wrapped but before that flag is committed.
+        _teardown()
+
+
+def _target_is_guarded(name: str, module: Any) -> bool:
+    if name in _HTTPX_FAMILIES:
+        status = _compatibility.get(name)
+        if not status or status.get("compatible") is not True:
+            return False
+        attribute = "_send_single_request"
+        owners = (getattr(module, "Client", None), getattr(module, "AsyncClient", None))
+        targets = (
+            f"{name}.Client.{attribute}",
+            f"{name}.AsyncClient.{attribute}",
+        )
+        return all(
+            owner is not None
+            and _is_guard_wrapper(getattr(owner, attribute, None), target)
+            for owner, target in zip(owners, targets, strict=True)
+        )
+    if name == "requests":
+        owner = getattr(module, "Session", None)
+        return owner is not None and _is_guard_wrapper(
+            getattr(owner, "send", None),
+            "requests.Session.send",
+        )
+    if name == "urllib.request":
+        owner = getattr(module, "OpenerDirector", None)
+        return owner is not None and _is_guard_wrapper(
+            getattr(owner, "open", None),
+            "urllib.OpenerDirector.open",
+        )
+    return False
 
 
 def active() -> bool:
-    return _installed and all(
-        status.get("compatible") is True
-        for status in _compatibility.values()
-    )
+    with _lifecycle_lock:
+        if not _installed or _hook is None or _hook not in sys.meta_path:
+            return False
+        if not all(
+            status.get("compatible") is True
+            for status in _compatibility.values()
+        ):
+            return False
+        return all(
+            _target_is_guarded(name, module)
+            for name in _TARGETS
+            if (module := sys.modules.get(name)) is not None
+        )
 
 
 def compatibility_status() -> dict[str, Any]:
@@ -515,14 +783,15 @@ def compatibility_status() -> dict[str, Any]:
     client cannot be wrapped, giving readiness/doctor integrations a
     fail-closed signal instead of silently claiming the boundary is installed.
     """
-    return {
-        "installed": _installed,
-        "active": active(),
-        "clients": {
-            name: dict(status)
-            for name, status in sorted(_compatibility.items())
-        },
-    }
+    with _lifecycle_lock:
+        return {
+            "installed": _installed,
+            "active": active(),
+            "clients": {
+                name: dict(status)
+                for name, status in sorted(_compatibility.items())
+            },
+        }
 
 
 __all__ = [

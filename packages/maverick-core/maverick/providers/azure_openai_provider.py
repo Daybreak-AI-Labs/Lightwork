@@ -150,6 +150,7 @@ class AzureOpenAIClient(OpenAIClient):
         environment: Mapping[str, str] | None = None,
     ):
         try:
+            import openai
             from openai import AsyncAzureOpenAI, AzureOpenAI
         except ImportError as e:
             raise ImportError(
@@ -185,15 +186,18 @@ class AzureOpenAIClient(OpenAIClient):
         self._azure_credential = credential
         # Apply the configured HTTP timeout (the base OpenAIClient does this;
         # we bypass it here, so wire it in manually or Azure calls can hang).
-        from .base import llm_http_timeout
-        _timeout = llm_http_timeout()
+        from .base import sdk_http_timeout
+        _timeout = sdk_http_timeout(openai)
         _extra = {"timeout": _timeout} if _timeout is not None else {}
         if default_headers:
             _extra["default_headers"] = dict(default_headers)
+        # ``complete`` / ``complete_async`` are inherited from OpenAIClient,
+        # whose bounded Lightwork retry layer is the sole retry authority.
         self._sync = AzureOpenAI(
             azure_endpoint=endpoint,
             api_version=version,
             azure_deployment=deployment,
+            max_retries=0,
             **auth,
             **_extra,
         )
@@ -201,6 +205,7 @@ class AzureOpenAIClient(OpenAIClient):
             azure_endpoint=endpoint,
             api_version=version,
             azure_deployment=deployment,
+            max_retries=0,
             **auth,
             **_extra,
         )

@@ -1,8 +1,8 @@
 """Every outbound HTTP path must go through a library the egress guard wraps.
 
 ``egress_guard`` moved the enterprise boundary from 11 hand-written per-tool
-checks to the ``send`` methods of ``httpx`` and ``requests``, which covers 87
-of the 88 production modules that make direct outbound HTTP. That is a real
+checks to the per-request methods of ``httpx``, ``httpx2`` and ``requests``,
+which covers direct application calls plus provider SDK traffic. That is a real
 fix, and it has exactly one way to silently stop being true: someone adds a
 connector using a client library the guard does not wrap.
 
@@ -16,8 +16,8 @@ commit did.
 So this gate enumerates every production module that issues outbound HTTP and
 classifies the library it uses:
 
-``COVERED``    httpx / requests -- the guard's ``send`` wrappers apply
-``UNCOVERED``  anything else (aiohttp, urllib, raw sockets, http.client)
+``COVERED``    httpx / httpx2 / requests / urllib -- guard wrappers apply
+``UNCOVERED``  anything else (aiohttp, raw sockets, http.client)
 
 An UNCOVERED module is not automatically a build failure -- one exists today
 and is recorded below. It is a failure to add a *new* one, or to leave a
@@ -54,6 +54,11 @@ _HTTP_CALLS = {
     "httpx.get": "httpx", "httpx.post": "httpx", "httpx.put": "httpx",
     "httpx.patch": "httpx", "httpx.delete": "httpx", "httpx.head": "httpx",
     "httpx.options": "httpx", "httpx.request": "httpx", "httpx.stream": "httpx",
+    "httpx2.Client": "httpx2", "httpx2.AsyncClient": "httpx2",
+    "httpx2.get": "httpx2", "httpx2.post": "httpx2", "httpx2.put": "httpx2",
+    "httpx2.patch": "httpx2", "httpx2.delete": "httpx2",
+    "httpx2.head": "httpx2", "httpx2.options": "httpx2",
+    "httpx2.request": "httpx2", "httpx2.stream": "httpx2",
     "requests.Session": "requests", "requests.get": "requests",
     "requests.post": "requests", "requests.put": "requests",
     "requests.patch": "requests", "requests.delete": "requests",

@@ -286,7 +286,7 @@ class AnthropicClient:
         # operator sees "API outage" instead of the real "key has
         # whitespace" issue.
         key = (api_key or os.environ.get("ANTHROPIC_API_KEY") or "").strip() or None
-        from .base import llm_http_timeout
+        from .base import sdk_http_timeout
         kw: dict = {"api_key": key}
         # Thread an explicit `[providers.anthropic] base_url` into the SDK so a
         # configured endpoint (proxy / gateway) is honored. ``None`` leaves the
@@ -299,28 +299,11 @@ class AnthropicClient:
         # (e.g. {"anthropic-region": "eu"}). Empty by default -> no extra headers.
         if default_headers:
             kw["default_headers"] = dict(default_headers)
-        timeout = llm_http_timeout()
+        timeout = sdk_http_timeout(anthropic)
         if timeout is not None:
-            # Anthropic 1.x deliberately ships against ``httpx2`` while the
-            # rest of Lightwork still uses ``httpx``.  Passing an
-            # ``httpx.Timeout`` across that SDK boundary is accepted by the
-            # constructor but is later treated as a scalar delay, producing a
-            # ``float + Timeout`` TypeError in the transport.  Always rebuild
-            # the value with the timeout class exported by the installed SDK;
-            # this remains compatible with older Anthropic releases where the
-            # exported class was the ordinary httpx timeout.
-            sdk_timeout = getattr(anthropic, "Timeout", None)
-            if sdk_timeout is None:  # pragma: no cover - legacy SDK fallback
-                kw["timeout"] = float(timeout.read)
-            else:
-                kw["timeout"] = sdk_timeout(
-                    connect=timeout.connect,
-                    read=timeout.read,
-                    write=timeout.write,
-                    pool=timeout.pool,
-                )
-        self.client = anthropic.Anthropic(**kw)
-        self.aclient = anthropic.AsyncAnthropic(**kw)
+            kw["timeout"] = timeout
+        self.client = anthropic.Anthropic(max_retries=0, **kw)
+        self.aclient = anthropic.AsyncAnthropic(max_retries=0, **kw)
 
     def _build_request(
         self,

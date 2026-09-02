@@ -105,7 +105,9 @@ def _whisper_openai(audio_path: Path, language: str | None) -> str | None:
     except ImportError:
         return None
     try:
-        client = OpenAI(api_key=key)
+        # One attempt per hosted backend: ``auto`` falls through to the next
+        # provider/local engine, so SDK retries would multiply that policy.
+        client = OpenAI(api_key=key, max_retries=0)
         with open(audio_path, "rb") as f:
             kwargs: dict[str, Any] = {
                 "model": _hosted_model(
@@ -132,7 +134,12 @@ def _whisper_groq(audio_path: Path, language: str | None) -> str | None:
     except ImportError:
         return None
     try:
-        client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
+        # One attempt per hosted backend; the outer voice router owns fallback.
+        client = OpenAI(
+            api_key=key,
+            base_url="https://api.groq.com/openai/v1",
+            max_retries=0,
+        )
         with open(audio_path, "rb") as f:
             kwargs: dict[str, Any] = {
                 "model": _hosted_model(
@@ -463,7 +470,8 @@ def _tts_openai(text: str, voice: str | None, output: Path) -> bool:
     except ImportError:
         return False
     try:
-        client = OpenAI(api_key=key)
+        # One OpenAI attempt, then the outer router can try ElevenLabs.
+        client = OpenAI(api_key=key, max_retries=0)
         resp = client.audio.speech.create(
             model=_hosted_model("MAVERICK_TTS_OPENAI_MODEL", "tts-1"),
             voice=voice or "alloy",

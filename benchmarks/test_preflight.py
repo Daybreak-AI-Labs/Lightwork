@@ -10,6 +10,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
 
 def _load_preflight():
@@ -86,6 +88,62 @@ def test_check_disk_space_fails_on_petabyte_threshold():
 def test_check_api_key_fails_when_unset(monkeypatch):
     pf = _load_preflight()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert pf.check_api_key() is False
+
+
+def test_check_api_key_arms_egress_before_one_shot(monkeypatch):
+    from maverick import egress_guard
+
+    pf = _load_preflight()
+    events: list[str] = []
+    fake = ModuleType("anthropic")
+
+    class AuthenticationError(Exception):
+        pass
+
+    class PermissionDeniedError(Exception):
+        pass
+
+    class NotFoundError(Exception):
+        pass
+
+    class Client:
+        def __init__(self, **kwargs: Any) -> None:
+            events.append("client")
+            assert kwargs == {
+                "api_key": "sk-test",  # pragma: allowlist secret
+                "max_retries": 0,
+            }
+            self.messages = SimpleNamespace(create=self._create)
+
+        @staticmethod
+        def _create(**_kwargs: Any) -> SimpleNamespace:
+            events.append("request")
+            return SimpleNamespace(id="response-id")
+
+    fake.Anthropic = Client  # type: ignore[attr-defined]
+    fake.AuthenticationError = AuthenticationError  # type: ignore[attr-defined]
+    fake.PermissionDeniedError = PermissionDeniedError  # type: ignore[attr-defined]
+    fake.NotFoundError = NotFoundError  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "anthropic", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        egress_guard,
+        "install",
+        lambda: events.append("guard") or True,
+    )
+
+    assert pf.check_api_key() is True
+    assert events == ["guard", "client", "request"]
+
+
+def test_check_api_key_refuses_ping_when_egress_guard_cannot_arm(monkeypatch):
+    from maverick import egress_guard
+
+    pf = _load_preflight()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(egress_guard, "install", lambda: False)
+
     assert pf.check_api_key() is False
 
 

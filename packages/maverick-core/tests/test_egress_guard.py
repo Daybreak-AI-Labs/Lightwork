@@ -459,7 +459,7 @@ def test_a_block_is_audited(guarded, monkeypatch) -> None:
 
 # -- install/uninstall mechanics -------------------------------------------
 
-#: The attribute the httpx wrapper actually replaces. Named here so these
+#: The attribute the HTTPX-family wrappers actually replace. Named here so these
 #: mechanics tests fail loudly if the seam moves again, rather than quietly
 #: asserting nothing about the method that carries the check.
 _SEAM = "_send_single_request"
@@ -530,7 +530,130 @@ async def test_one_hop_wrappers_forward_signature_extensions(
     ]
 
 
-def test_incompatible_httpx_seam_is_visible_in_readiness(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_httpx2_one_hop_wrappers_enforce_sync_and_async(
+    monkeypatch,
+) -> None:
+    """Provider SDK traffic cannot bypass policy through the httpx2 fork."""
+    egress_guard.uninstall()
+    delegated = []
+
+    class SyncClient:
+        def _send_single_request(self, request, *args, **kwargs):
+            delegated.append(("sync", request, args, kwargs))
+            return "network"
+
+    class AsyncClient:
+        async def _send_single_request(self, request, *args, **kwargs):
+            delegated.append(("async", request, args, kwargs))
+            return "network"
+
+    fake_httpx2 = type(
+        "FakeHttpx2",
+        (),
+        {"Client": SyncClient, "AsyncClient": AsyncClient},
+    )
+    request = type("Request", (), {"url": "https://api.example.com/x"})()
+
+    def deny(url):
+        raise EgressBlocked(f"refused {url}")
+
+    monkeypatch.setattr(egress_guard, "_reaches_the_network", lambda *a: True)
+    monkeypatch.setattr(egress_guard, "_check", deny)
+    egress_guard._patch_httpx2(fake_httpx2)
+
+    with pytest.raises(EgressBlocked, match="api.example.com"):
+        SyncClient()._send_single_request(request, "future", option=1)
+    with pytest.raises(EgressBlocked, match="api.example.com"):
+        await AsyncClient()._send_single_request(request, "future", option=2)
+    assert delegated == []
+    assert egress_guard.compatibility_status()["clients"]["httpx2"] == {
+        "compatible": True,
+        "reason": "",
+        "seam": _SEAM,
+    }
+
+
+@pytest.mark.asyncio
+async def test_installed_httpx2_enforces_and_exempts_local_mock(guarded) -> None:
+    """Exercise the exact provider-SDK transport version when it is installed."""
+    httpx2 = pytest.importorskip("httpx2")
+
+    assert egress_guard.compatibility_status()["clients"]["httpx2"] == {
+        "compatible": True,
+        "reason": "",
+        "seam": _SEAM,
+    }
+    with pytest.raises(EgressBlocked):
+        httpx2.get("https://api.example.com/x", timeout=0.1)
+    async with httpx2.AsyncClient(timeout=0.1) as client:
+        with pytest.raises(EgressBlocked):
+            await client.get("https://api.example.com/x")
+
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx2.Response(200, text="local")
+
+    with httpx2.Client(transport=httpx2.MockTransport(handler)) as client:
+        response = client.get("https://in-process.invalid/x")
+    assert response.status_code == 200
+    assert seen == ["https://in-process.invalid/x"]
+
+
+def test_httpx2_exact_in_process_transports_are_exempt() -> None:
+    """The new family keeps exact-type local transports off the egress path."""
+    import sys
+
+    class MockTransport:
+        pass
+
+    class ASGITransport:
+        pass
+
+    class WSGITransport:
+        pass
+
+    fake_httpx2 = type(
+        "FakeHttpx2",
+        (),
+        {
+            "MockTransport": MockTransport,
+            "ASGITransport": ASGITransport,
+            "WSGITransport": WSGITransport,
+        },
+    )
+    missing = object()
+    previous = sys.modules.get("httpx2", missing)
+    sys.modules["httpx2"] = fake_httpx2
+    try:
+        assert egress_guard._is_network_transport(MockTransport()) is False
+        assert egress_guard._is_network_transport(ASGITransport()) is False
+        assert egress_guard._is_network_transport(WSGITransport()) is False
+
+        class SocketCapableSubclass(MockTransport):
+            pass
+
+        assert (
+            egress_guard._is_network_transport(SocketCapableSubclass()) is True
+        )
+    finally:
+        if previous is missing:
+            sys.modules.pop("httpx2", None)
+        else:
+            sys.modules["httpx2"] = previous
+
+
+@pytest.mark.parametrize(
+    ("client_name", "patcher_name"),
+    (("httpx", "_patch_httpx"), ("httpx2", "_patch_httpx2")),
+)
+def test_incompatible_httpx_seam_is_visible_in_readiness(
+    monkeypatch,
+    client_name,
+    patcher_name,
+) -> None:
     egress_guard.uninstall()
 
     class MissingSeam:
@@ -541,18 +664,24 @@ def test_incompatible_httpx_seam_is_visible_in_readiness(monkeypatch) -> None:
         AsyncClient = MissingSeam
 
     with pytest.raises(RuntimeError, match="_send_single_request"):
-        egress_guard._patch_httpx(IncompatibleHttpx)
+        getattr(egress_guard, patcher_name)(IncompatibleHttpx)
 
     status = egress_guard.compatibility_status()
     assert status["active"] is False
-    assert status["clients"]["httpx"]["compatible"] is False
-    assert status["clients"]["httpx"]["fail_closed_fallback"] is False
-    assert "_send_single_request" in status["clients"]["httpx"]["reason"]
+    assert status["clients"][client_name]["compatible"] is False
+    assert status["clients"][client_name]["fail_closed_fallback"] is False
+    assert "_send_single_request" in status["clients"][client_name]["reason"]
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("client_name", "patcher_name"),
+    (("httpx", "_patch_httpx"), ("httpx2", "_patch_httpx2")),
+)
 async def test_incompatible_httpx_fails_closed_without_delegating(
     monkeypatch,
+    client_name,
+    patcher_name,
 ) -> None:
     """A future HTTPX cannot silently open the enterprise data boundary."""
     egress_guard.uninstall()
@@ -577,13 +706,13 @@ async def test_incompatible_httpx_fails_closed_without_delegating(
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr("maverick.audit.writer.audit_event", lambda *a, **k: True)
 
-    egress_guard._patch_httpx(FakeHttpx)
+    getattr(egress_guard, patcher_name)(FakeHttpx)
 
     status = egress_guard.compatibility_status()
     assert status["active"] is False
-    assert status["clients"]["httpx"]["compatible"] is False
-    assert status["clients"]["httpx"]["fail_closed_fallback"] is True
-    assert status["clients"]["httpx"]["fallback_seam"] == "send"
+    assert status["clients"][client_name]["compatible"] is False
+    assert status["clients"][client_name]["fail_closed_fallback"] is True
+    assert status["clients"][client_name]["fallback_seam"] == "send"
     with pytest.raises(EgressBlocked, match="every redirect hop"):
         SyncClient().send(request, "future", option=1)
     with pytest.raises(EgressBlocked, match="every redirect hop"):
@@ -640,7 +769,163 @@ def test_uninstall_restores_the_original_method() -> None:
     assert egress_guard.active() is False
 
 
-def test_importing_maverick_does_not_import_httpx() -> None:
+def test_install_rolls_back_every_family_when_a_later_family_fails(
+    monkeypatch,
+) -> None:
+    """Install is one transaction, not a sequence of lasting partial patches."""
+    requests = pytest.importorskip("requests")
+    egress_guard.uninstall()
+    original_httpx = getattr(httpx.Client, _SEAM)
+    original_requests = requests.Session.send
+    original_patcher = egress_guard._TARGETS["requests"]
+
+    def fail_requests(_module):
+        raise RuntimeError("synthetic requests patch failure")
+
+    monkeypatch.setitem(egress_guard._TARGETS, "requests", fail_requests)
+    try:
+        with pytest.raises(RuntimeError, match="synthetic requests"):
+            egress_guard.install()
+
+        assert getattr(httpx.Client, _SEAM) is original_httpx
+        assert requests.Session.send is original_requests
+        assert egress_guard._originals == {}
+        assert egress_guard._patched == set()
+        assert egress_guard._hook is None
+        assert egress_guard.compatibility_status()["installed"] is False
+        assert egress_guard.active() is False
+    finally:
+        # Restore before the autouse fixture re-arms the process-wide guard.
+        egress_guard._TARGETS["requests"] = original_patcher
+
+
+def test_install_rolls_back_a_half_patched_client_family() -> None:
+    """A rejected async seam also restores the sync seam already replaced."""
+    import sys
+    import types
+
+    egress_guard.uninstall()
+
+    class SyncClient:
+        def _send_single_request(self, request):
+            return request
+
+    class RejectGuardWrapper(type):
+        def __setattr__(cls, name, value):
+            target = getattr(
+                value,
+                egress_guard._WRAPPER_TARGET,
+                None,
+            )
+            if name == _SEAM and target == "httpx2.AsyncClient." + _SEAM:
+                raise RuntimeError("synthetic async seam rejection")
+            super().__setattr__(name, value)
+
+    class AsyncClient(metaclass=RejectGuardWrapper):
+        async def _send_single_request(self, request):
+            return request
+
+    fake_httpx2 = types.ModuleType("httpx2")
+    fake_httpx2.Client = SyncClient
+    fake_httpx2.AsyncClient = AsyncClient
+    original_sync = SyncClient._send_single_request
+    original_async = AsyncClient._send_single_request
+    missing = object()
+    previous = sys.modules.get("httpx2", missing)
+    sys.modules["httpx2"] = fake_httpx2
+    try:
+        with pytest.raises(RuntimeError, match="async seam rejection"):
+            egress_guard.install()
+
+        assert SyncClient._send_single_request is original_sync
+        assert AsyncClient._send_single_request is original_async
+        assert egress_guard._originals == {}
+        assert egress_guard._hook is None
+        assert egress_guard.active() is False
+    finally:
+        egress_guard.uninstall()
+        if previous is missing:
+            sys.modules.pop("httpx2", None)
+        else:
+            sys.modules["httpx2"] = previous
+
+
+def test_uninstall_cleans_partial_state_when_installed_flag_is_false() -> None:
+    """A failed install must remain recoverable before its commit flag is set."""
+    egress_guard.uninstall()
+
+    class SyncClient:
+        def _send_single_request(self, request):
+            return request
+
+    class AsyncClient:
+        async def _send_single_request(self, request):
+            return request
+
+    fake_httpx = type(
+        "FakeHttpx",
+        (),
+        {"Client": SyncClient, "AsyncClient": AsyncClient},
+    )
+    original_sync = SyncClient._send_single_request
+    original_async = AsyncClient._send_single_request
+
+    egress_guard._patch_httpx(fake_httpx)
+    assert egress_guard._installed is False
+    assert SyncClient._send_single_request is not original_sync
+    assert AsyncClient._send_single_request is not original_async
+
+    egress_guard.uninstall()
+
+    assert SyncClient._send_single_request is original_sync
+    assert AsyncClient._send_single_request is original_async
+    assert egress_guard._originals == {}
+    assert egress_guard._compatibility == {}
+
+
+def test_install_and_uninstall_restore_httpx2() -> None:
+    """Lifecycle bookkeeping is isolated by family and fully reversible."""
+    import sys
+    import types
+
+    egress_guard.uninstall()
+
+    class SyncClient:
+        def _send_single_request(self, request):
+            return request
+
+    class AsyncClient:
+        async def _send_single_request(self, request):
+            return request
+
+    fake_httpx2 = types.ModuleType("httpx2")
+    fake_httpx2.Client = SyncClient
+    fake_httpx2.AsyncClient = AsyncClient
+    missing = object()
+    previous = sys.modules.get("httpx2", missing)
+    sys.modules["httpx2"] = fake_httpx2
+    original_sync = SyncClient._send_single_request
+    original_async = AsyncClient._send_single_request
+    try:
+        assert egress_guard.install() is True
+        assert SyncClient._send_single_request is not original_sync
+        assert AsyncClient._send_single_request is not original_async
+        assert egress_guard.compatibility_status()["clients"]["httpx2"][
+            "compatible"
+        ] is True
+
+        egress_guard.uninstall()
+        assert SyncClient._send_single_request is original_sync
+        assert AsyncClient._send_single_request is original_async
+    finally:
+        egress_guard.uninstall()
+        if previous is missing:
+            sys.modules.pop("httpx2", None)
+        else:
+            sys.modules["httpx2"] = previous
+
+
+def test_importing_maverick_does_not_import_httpx_families() -> None:
     """Arming the guard must not cost cold-start time.
 
     The first version imported httpx eagerly and broke the CLI's cold-start
@@ -652,10 +937,13 @@ def test_importing_maverick_does_not_import_httpx() -> None:
     import sys
     out = subprocess.run(
         [sys.executable, "-c",
-         "import maverick, sys; print('httpx' in sys.modules)"],
+         "import maverick, sys; print('httpx' in sys.modules, "
+         "'httpx2' in sys.modules)"],
         capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "False", "importing maverick pulled in httpx"
+    assert out.stdout.strip() == "False False", (
+        "importing maverick pulled in an HTTPX family"
+    )
 
 
 def test_a_library_imported_after_the_guard_is_still_wrapped() -> None:
@@ -698,12 +986,174 @@ def test_a_library_imported_after_the_guard_is_still_wrapped() -> None:
     assert out.stdout.strip() == "blocked"
 
 
-def test_late_client_import_is_refused_when_no_guard_seam_exists() -> None:
-    """A future client shape cannot remain imported and silently unguarded."""
+def test_httpx2_imported_after_the_guard_is_still_wrapped() -> None:
+    """A provider SDK's lazy httpx2 import is intercepted immediately."""
     import subprocess
     import sys
 
     script = """
+import os
+import pathlib
+import sys
+import tempfile
+
+root = pathlib.Path(tempfile.mkdtemp())
+(root / "httpx2.py").write_text(
+    "class Client:\\n"
+    "    def _transport_for_url(self, url): return object()\\n"
+    "    def _send_single_request(self, request): return 'network'\\n"
+    "class AsyncClient:\\n"
+    "    def _transport_for_url(self, url): return object()\\n"
+    "    async def _send_single_request(self, request): return 'network'\\n",
+    encoding="utf-8",
+)
+sys.path.insert(0, str(root))
+os.environ["MAVERICK_ENTERPRISE"] = "1"
+import maverick
+assert "httpx2" not in sys.modules
+import httpx2
+from maverick.enterprise import EgressBlocked
+request = type("Request", (), {"url": "https://api.example.com/x"})()
+try:
+    httpx2.Client()._send_single_request(request)
+except EgressBlocked:
+    print("blocked")
+else:
+    raise SystemExit("late httpx2 import was not guarded")
+"""
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "blocked"
+
+
+@pytest.mark.parametrize("client_name", ("httpx", "httpx2"))
+def test_reloading_a_client_family_rearms_both_module_generations(
+    client_name,
+) -> None:
+    """Reload cannot replace guarded classes while readiness remains active."""
+    import subprocess
+    import sys
+
+    script = f'''
+import importlib
+import os
+import pathlib
+import sys
+import tempfile
+
+root = pathlib.Path(tempfile.mkdtemp())
+(root / "{client_name}.py").write_text(
+    "class Client:\\n"
+    "    def _transport_for_url(self, url): return object()\\n"
+    "    def _send_single_request(self, request): return 'network'\\n"
+    "class AsyncClient:\\n"
+    "    def _transport_for_url(self, url): return object()\\n"
+    "    async def _send_single_request(self, request): return 'network'\\n",
+    encoding="utf-8",
+)
+sys.path.insert(0, str(root))
+os.environ["MAVERICK_ENTERPRISE"] = "1"
+import maverick
+client = importlib.import_module("{client_name}")
+from maverick import egress_guard
+from maverick.enterprise import EgressBlocked
+
+old_client = client.Client
+old_method = old_client._send_single_request
+assert egress_guard.active()
+client = importlib.reload(client)
+new_client = client.Client
+new_method = new_client._send_single_request
+assert new_client is not old_client
+assert egress_guard.active()
+request = type("Request", (), {{"url": "https://api.example.com/x"}})()
+for owner in (old_client, new_client):
+    try:
+        owner()._send_single_request(request)
+    except EgressBlocked:
+        pass
+    else:
+        raise SystemExit("module generation bypassed the egress guard")
+
+egress_guard.uninstall()
+assert old_client._send_single_request is not old_method
+assert new_client._send_single_request is not new_method
+assert old_client()._send_single_request(request) == "network"
+assert new_client()._send_single_request(request) == "network"
+print("reload-guarded")
+'''
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "reload-guarded"
+
+
+def test_reloading_the_guard_does_not_leak_import_hooks() -> None:
+    """Each module generation replaces, rather than stacks, its import hook."""
+    import subprocess
+    import sys
+
+    script = r'''
+import importlib
+import sys
+
+import maverick.egress_guard as guard
+
+marker = "__maverick_egress_guard_import_hook__"
+
+def hooks():
+    return [finder for finder in sys.meta_path if getattr(finder, marker, False)]
+
+assert len(hooks()) == 1
+for _ in range(3):
+    guard = importlib.reload(guard)
+    assert guard.install()
+    assert len(hooks()) == 1
+
+import httpx2
+
+assert guard.active()
+guard.uninstall()
+assert not guard.active()
+assert hooks() == []
+print("guard-reload-clean")
+'''
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "guard-reload-clean"
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    (
+        ("MAVERICK_ENTERPRISE", "1"),
+        ("MAVERICK_COMPLIANCE_PROFILES", "hipaa"),
+    ),
+)
+def test_asserted_boundary_refuses_preloaded_incompatible_client_startup(
+    setting,
+    value,
+) -> None:
+    """An asserted boundary cannot be converted into best-effort bootstrap."""
+    import subprocess
+    import sys
+
+    script = f'''
+import os
 import pathlib
 import sys
 import tempfile
@@ -714,14 +1164,94 @@ root = pathlib.Path(tempfile.mkdtemp())
     encoding="utf-8",
 )
 sys.path.insert(0, str(root))
+os.environ["MAVERICK_HOME"] = str(root / "home")
+os.environ.pop("MAVERICK_ENTERPRISE", None)
+os.environ.pop("MAVERICK_COMPLIANCE_PROFILES", None)
+os.environ["{setting}"] = "{value}"
+import httpx
+try:
+    import maverick
+except RuntimeError as exc:
+    assert "process-wide egress boundary could not be installed" in str(exc)
+    print("startup-refused")
+else:
+    raise SystemExit("asserted boundary started without an enforceable guard")
+'''
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "startup-refused"
+
+
+def test_default_startup_tolerates_a_preloaded_incompatible_client() -> None:
+    """The zero-config import contract stays tolerant outside the boundary."""
+    import subprocess
+    import sys
+
+    script = r'''
+import os
+import pathlib
+import sys
+import tempfile
+
+root = pathlib.Path(tempfile.mkdtemp())
+(root / "httpx.py").write_text(
+    "class Client:\n    pass\nclass AsyncClient:\n    pass\n",
+    encoding="utf-8",
+)
+sys.path.insert(0, str(root))
+os.environ["MAVERICK_HOME"] = str(root / "home")
+os.environ["MAVERICK_ENTERPRISE"] = "0"
+os.environ.pop("MAVERICK_COMPLIANCE_PROFILES", None)
+import httpx
+import maverick
+from maverick import egress_guard
+status = egress_guard.compatibility_status()
+assert status["installed"] is False
+assert status["active"] is False
+print("startup-tolerated")
+'''
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "startup-tolerated"
+
+
+@pytest.mark.parametrize("client_name", ("httpx", "httpx2"))
+def test_late_client_import_is_refused_when_no_guard_seam_exists(
+    client_name,
+) -> None:
+    """A future client shape cannot remain imported and silently unguarded."""
+    import subprocess
+    import sys
+
+    script = f"""
+import pathlib
+import sys
+import tempfile
+
+root = pathlib.Path(tempfile.mkdtemp())
+(root / "{client_name}.py").write_text(
+    "class Client:\\n    pass\\nclass AsyncClient:\\n    pass\\n",
+    encoding="utf-8",
+)
+sys.path.insert(0, str(root))
 import maverick
 try:
-    import httpx
+    __import__("{client_name}")
 except RuntimeError as exc:
     assert "egress boundary could not be installed" in str(exc)
     print("refused")
 else:
-    raise SystemExit("incompatible HTTPX remained importable without a guard")
+    raise SystemExit("incompatible HTTP client remained importable without a guard")
 """
     out = subprocess.run(
         [sys.executable, "-c", script],

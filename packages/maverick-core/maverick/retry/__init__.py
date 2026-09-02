@@ -21,7 +21,7 @@ import asyncio
 import logging
 import random
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from typing import TypeVar
 
 from .._envparse import env_float, env_int
@@ -130,12 +130,51 @@ _TERMINAL_CLASSES = frozenset({
 })
 
 
+def _exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield an exception and its explicit/implicit wrappers once each."""
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        identity = id(current)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        yield current
+        # Push context first so an explicit cause is examined first. Traverse
+        # suppressed context too: SDK wrappers can hide the transport detail
+        # from display, but it must still retain terminal policy semantics.
+        context = getattr(current, "__context__", None)
+        cause = getattr(current, "__cause__", None)
+        if isinstance(context, BaseException):
+            pending.append(context)
+        if isinstance(cause, BaseException):
+            pending.append(cause)
+
+
 def _is_terminal(exc: Exception) -> bool:
     try:
         from .classifier import classify
-        return classify(exc).value in _TERMINAL_CLASSES
     except Exception:  # pragma: no cover - classifier must never break retry
         return False
+    try:
+        from ..enterprise import EgressBlocked
+        egress_types: tuple[type[BaseException], ...] = (EgressBlocked,)
+    except Exception:  # pragma: no cover - optional enterprise import safety
+        egress_types = ()
+
+    for current in _exception_chain(exc):
+        if egress_types and isinstance(current, egress_types):
+            return True
+        try:
+            if classify(current).value in _TERMINAL_CLASSES:
+                return True
+        except Exception:
+            # A hostile provider exception can have a broken ``__str__``.
+            # Continue into its cause/context instead of losing a buried
+            # fail-closed signal.
+            continue
+    return False
 
 
 def sync_retry(fn: Callable[[], T]) -> T:

@@ -2,6 +2,7 @@
 content-filter, context-overflow) must stop retrying immediately even when
 the exception type/status looks transient."""
 import maverick.retry as retry
+import pytest
 
 
 class _FakeStatusError(Exception):
@@ -80,3 +81,51 @@ def test_is_terminal_classification():
     assert retry._is_terminal(_FakeStatusError("maximum context length exceeded")) is True
     assert retry._is_terminal(_FakeStatusError("503 service unavailable")) is False
     assert retry._is_terminal(_FakeStatusError("connection reset")) is False
+
+
+def test_wrapped_egress_block_is_not_retried_via_explicit_cause(monkeypatch):
+    """An SDK APIConnectionError must not hide a fail-closed transport denial."""
+    from maverick.enterprise import EgressBlocked
+
+    calls = []
+    slept = []
+
+    def blocked():
+        calls.append(1)
+        try:
+            raise EgressBlocked("openai")
+        except EgressBlocked as exc:
+            raise _FakeStatusError("connection error") from exc
+
+    monkeypatch.setattr(
+        retry, "_retryable_exception_classes", lambda: (_FakeStatusError,),
+    )
+    monkeypatch.setattr(retry.time, "sleep", lambda delay: slept.append(delay))
+
+    with pytest.raises(_FakeStatusError, match="connection error"):
+        retry.sync_retry(blocked)
+    assert calls == [1]
+    assert slept == []
+
+
+@pytest.mark.asyncio
+async def test_wrapped_egress_block_is_not_retried_via_implicit_context(monkeypatch):
+    """The async path also preserves a buried policy denial without backoff."""
+    from maverick.enterprise import EgressBlocked
+
+    calls = []
+
+    async def blocked():
+        calls.append(1)
+        try:
+            raise EgressBlocked("anthropic")
+        except EgressBlocked:
+            raise _FakeStatusError("connection error") from None
+
+    monkeypatch.setattr(
+        retry, "_retryable_exception_classes", lambda: (_FakeStatusError,),
+    )
+
+    with pytest.raises(_FakeStatusError, match="connection error"):
+        await retry.async_retry(blocked)
+    assert calls == [1]

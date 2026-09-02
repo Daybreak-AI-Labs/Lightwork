@@ -995,7 +995,9 @@ def run_sonnet_single(instance_id: str, brief: str, **_kwargs) -> Row:
     from maverick.llm import MODEL_SONNET
 
     start = time.monotonic()
-    client = anthropic.Anthropic()
+    # This baseline records one treatment call. A transport retry would change
+    # both its spend and its comparability with the governed arms.
+    client = anthropic.Anthropic(max_retries=0)
     budget = Budget(max_dollars=3.0)
     resp = client.messages.create(
         model=MODEL_SONNET,
@@ -1084,7 +1086,9 @@ def run_sonnet_tools(instance_id: str, brief: str, **kwargs) -> Row:
     # one left over from a prior instance (mirrors run_maverick).
     _reset_workdir(sandbox.workdir, base_commit=str(kwargs.get("base_commit") or ""))
 
-    client = anthropic.Anthropic()
+    # Each recorded tool turn is one provider attempt; failed turns remain
+    # visible benchmark outcomes instead of hidden extra inference.
+    client = anthropic.Anthropic(max_retries=0)
     budget = Budget(max_dollars=3.0)
     tools = [{
         "name": "bash",
@@ -1211,7 +1215,9 @@ def run_sonnet_self_consistency_n8(instance_id: str, brief: str, **_kwargs) -> R
     except ValueError:
         n = 8
     start = time.monotonic()
-    client = anthropic.Anthropic()
+    # ``n`` is the treatment size. SDK retries would silently turn n samples
+    # into more than n paid attempts and invalidate the comparison.
+    client = anthropic.Anthropic(max_retries=0)
     budget = Budget(max_dollars=8.0)
     prompt = (
         f"You are solving SWE-bench instance {instance_id}.\n\n"
