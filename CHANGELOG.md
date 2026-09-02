@@ -7,6 +7,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Cortex, the company brain** — one governed recall/deposit surface
+  (`maverick.cortex`) over the five memories the workforce already has:
+  knowledge with citations, skills, self-harness lessons, the Operating Record
+  and fleet memory. One query, one provenance envelope (source, kind, text,
+  citation, score), one signed audit row per read (`cortex_recall`) and per
+  write (`cortex_deposit`) recording who asked, which sources answered with how
+  many hits, which were denied and why, and a digest of the query — never the
+  text; the Agent Trust Plane gates external callers before any source is
+  touched. Tenant-exact by construction, fail-open per source but never
+  silently. New `maverick cortex status` (what each source holds plus the
+  encryption-at-rest and isolation posture; `--json`), `maverick cortex recall
+  QUERY` (hits grouped by source with citations; `--source`, `--domain`,
+  `--model`, `--k`, `--json`, `--context` for the prompt block) and `maverick
+  cortex deposit` (`--kind knowledge|fleet`, `--collection`, `--source`,
+  `--domain`, `TEXT` or `--file PATH`). Default-on under `[cortex] enable`
+  (`MAVERICK_CORTEX` overrides), offered as an advanced installer step beside
+  fleet memory and included in the express and governance-profile presets.
 - **AI Evidence-Ready Gateway and operator cockpit** — governed evidence intake,
   review queues, readiness/health visibility, and first-run guidance now share
   one operator-facing workflow with durable audit checkpoints.
