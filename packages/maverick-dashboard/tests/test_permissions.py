@@ -208,7 +208,7 @@ def test_permissions_uses_same_env_provider_provenance_as_settings(
     body = _client().get("/api/v1/permissions").json()
     state = next(row for row in body["provider_states"] if row["name"] == "openai")
     assert state["configured"] is True
-    assert state["api_key_source"] == "environment:OPENAI_API_KEY"
+    assert state["api_key_source"] == "environment:OPENAI_API_KEY"  # pragma: allowlist secret
     assert "openai" in body["providers"]
     assert "env-only-secret" not in str(body)  # pragma: allowlist secret
 

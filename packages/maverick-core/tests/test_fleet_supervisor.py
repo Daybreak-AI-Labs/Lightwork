@@ -82,7 +82,11 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
 
     class FakeWorld:
         def get_goal(self, goal_id):
-            return SimpleNamespace(id=goal_id, status="done")
+            return SimpleNamespace(
+                id=goal_id,
+                status="done",
+                execution_principal="agent:acme.bob",
+            )
 
         def close(self):
             pass
@@ -129,7 +133,11 @@ def test_run_goal_in_thread_closes_sandbox(monkeypatch):
 
     class FakeWorld:
         def get_goal(self, goal_id):
-            return SimpleNamespace(id=goal_id, status="done")
+            return SimpleNamespace(
+                id=goal_id,
+                status="done",
+                execution_principal="user:local",
+            )
 
         def close(self):
             closed["world"] = True
@@ -158,7 +166,11 @@ def test_run_goal_in_thread_default_capability_is_none(monkeypatch):
 
     class FakeWorld:
         def get_goal(self, goal_id):
-            return SimpleNamespace(id=goal_id, status="done")
+            return SimpleNamespace(
+                id=goal_id,
+                status="done",
+                execution_principal="user:local",
+            )
 
         def close(self):
             pass
@@ -230,6 +242,8 @@ def test_fleet_run_creates_goal_and_run_index(monkeypatch, tmp_path):
     finally:
         w.close()
     assert g is not None and g.title == "Summarize the Q3 report"
+    assert g.owner == "user:alice"
+    assert g.execution_principal == "agent:acme.researcher"
 
     # ...and recorded in the per-fleet run index, under the agent.
     from maverick.file_lock import private_path_is_restricted

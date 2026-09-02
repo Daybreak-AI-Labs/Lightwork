@@ -100,7 +100,7 @@ def test_automatic_scheduler_rejects_legacy_arbitrary_directory(
             {
                 "host": "mail.example",
                 "username": "operator",
-                "password_env": "IMAP_PASSWORD",
+                "password_env": "IMAP_PASSWORD",  # pragma: allowlist secret
             },
         ),
         ("github_issues", {"owner": "acme", "repo": "private"}),

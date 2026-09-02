@@ -217,19 +217,18 @@ def at_rest_enabled() -> bool:
 
 def _deployment_compliance_encryption_floor(
     config: Mapping[str, object],
+    *,
+    source_errors: object,
 ) -> tuple[bool, bool]:
     """Return ``(policy_valid, floor_required)`` from one global snapshot."""
-    compliance = config.get("compliance")
-    if compliance is None:
-        return True, False
-    if not isinstance(compliance, Mapping):
-        return False, False
-    profiles = compliance.get("profiles", [])
-    if not isinstance(profiles, (list, tuple)):
-        return False, False
     try:
-        from .compliance_profiles import FLOOR_ENCRYPTION_AT_REST, required_floors
+        from .compliance_profiles import (
+            FLOOR_ENCRYPTION_AT_REST,
+            required_floors,
+            resolve_profiles,
+        )
 
+        profiles = resolve_profiles(config, source_errors=source_errors)
         return True, FLOOR_ENCRYPTION_AT_REST in required_floors(profiles)
     except Exception:
         return False, False
@@ -291,7 +290,10 @@ def deployment_at_rest_enabled(
         return False
 
     compliance_valid, compliance_floor = (
-        _deployment_compliance_encryption_floor(config)
+        _deployment_compliance_encryption_floor(
+            config,
+            source_errors=source_errors,
+        )
     )
     if not compliance_valid:
         return False

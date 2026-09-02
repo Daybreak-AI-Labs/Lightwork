@@ -83,14 +83,14 @@
     </a>
     <span class="topbar__controls">
       {% if can_halt %}
-      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: stop or resume all work">
+      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: inspect or change the configured halt scope">
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label" aria-live="polite">checking</span>
       </a>
       {% else %}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
-            aria-label="Emergency stop status. A global administrator is required to change it."
-            title="Read only: a global administrator is required to stop or resume all work.">
+            aria-label="Emergency stop status. Halt permission is required to change it."
+            title="Read only: permission for the configured halt scope is required.">
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label" aria-live="polite">checking</span>
       </span>

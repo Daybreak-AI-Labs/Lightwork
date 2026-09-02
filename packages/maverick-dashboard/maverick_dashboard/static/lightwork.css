@@ -85,6 +85,7 @@
        inherit these and still get correct surfaces + brand automatically. */
     body {
       --brand: var(--accent); --brand-hi: var(--accent); --brand-fg: #ffffff; --info: var(--accent);
+      --text-muted: var(--muted);
       --surface-1: var(--panel);
       --surface-2: color-mix(in srgb, var(--panel) 86%, var(--text) 14%);
       --surface-sunken: color-mix(in srgb, var(--panel) 78%, var(--bg) 22%);

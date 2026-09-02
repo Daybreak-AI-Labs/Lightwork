@@ -6,6 +6,8 @@ The full round-trip lives in test_postgres_world.py (skipped without a DSN).
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import maverick.world_model_backends.postgres as pg
 import pytest
 
@@ -29,63 +31,64 @@ def test_pending_skips_already_applied():
     # corpus family (v26), episode cache-token spend columns (v27), and
     # per-principal goal ownership (v28), erasure receipts (v29), and the
     # approval-audit transactional outbox (v30), and the 64-bit fact write
-    # sequence (v31).
+    # sequence (v31), execution principal binding (v32), and the shared-HALT
+    # compare-and-delete generation (v33).
     pending = pg.pending_migrations(1)
     assert [v for v, _ in pending] == [
-        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v10 still needs the remaining upgrades.
     assert [v for v, _ in pg.pending_migrations(10)] == [
-        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v11 still needs the rest of the ladder.
     assert [v for v, _ in pg.pending_migrations(11)] == [
-        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v13 still needs goal-domain + projects + artifacts + share/etc.
     assert [v for v, _ in pg.pending_migrations(13)] == [
-        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v14 still needs projects + artifacts + share/signoff/origin.
     assert [v for v, _ in pg.pending_migrations(14)] == [
-        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v15 still needs artifacts + share/signoff/origin + fact_history.
     assert [v for v, _ in pg.pending_migrations(15)] == [
-        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v16 still needs the share/signoff/origin + fact_history migrations.
     assert [v for v, _ in pg.pending_migrations(16)] == [
-        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v17 still needs fact_history + rate_events.
     assert [v for v, _ in pg.pending_migrations(17)] == [
-        18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v18 still needs the rate_events migration.
     assert [v for v, _ in pg.pending_migrations(18)] == [
-        19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v19 still needs dual-control + halt + provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(19)] == [
-        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v21 still needs halt + provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(21)] == [
-        22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+        22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v22 still needs provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(22)] == [
-        23, 24, 25, 26, 27, 28, 29, 30, 31,
+        23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v23 still needs the facts provenance migration + the store.
     assert [v for v, _ in pg.pending_migrations(23)] == [
-        24, 25, 26, 27, 28, 29, 30, 31,
+        24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
     ]
     # A DB at v24 still needs the fleet learning store + corpus family.
-    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28, 29, 30, 31]
+    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28, 29, 30, 31, 32, 33]
     # A DB at v25 still needs the corpus family.
-    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28, 29, 30, 31]
+    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28, 29, 30, 31, 32, 33]
 
 
 def test_pending_is_ordered_with_custom_ladder():
@@ -123,7 +126,7 @@ def test_approval_claims_migration_adds_collaboration_columns():
 
 
 def test_schema_version_is_latest_migration():
-    assert pg._PG_SCHEMA_VERSION == 31
+    assert pg._PG_SCHEMA_VERSION == 33
     assert max(v for v, _ in pg.MIGRATIONS) == pg._PG_SCHEMA_VERSION
 
 
@@ -138,7 +141,7 @@ def test_goal_owner_migration_is_additive_and_backfills_legacy_rows():
         "ALTER TABLE goals ADD COLUMN IF NOT EXISTS owner "
         "TEXT NOT NULL DEFAULT '';",
     ]
-    assert [v for v, _ in pg.pending_migrations(27)] == [28, 29, 30, 31]
+    assert [v for v, _ in pg.pending_migrations(27)] == [28, 29, 30, 31, 32, 33]
 
 
 def test_erasure_receipt_migration_is_tenant_scoped_and_immutable():
@@ -147,7 +150,88 @@ def test_erasure_receipt_migration_is_tenant_scoped_and_immutable():
     assert "PRIMARY KEY (tenant_id, receipt_id)" in joined
     assert "erasure_receipts_no_update" in joined
     assert "erasure_receipts_no_early_delete" in joined
-    assert [v for v, _ in pg.pending_migrations(28)] == [29, 30, 31]
+    assert [v for v, _ in pg.pending_migrations(28)] == [29, 30, 31, 32, 33]
+
+
+def test_goal_execution_principal_migration_is_additive():
+    assert dict(pg.MIGRATIONS)[32] == [
+        "ALTER TABLE goals ADD COLUMN IF NOT EXISTS execution_principal "
+        "TEXT NOT NULL DEFAULT '';",
+    ]
+
+
+def test_halt_generation_migration_is_additive_and_last():
+    assert dict(pg.MIGRATIONS)[33] == [
+        "ALTER TABLE halt ADD COLUMN IF NOT EXISTS generation "
+        "TEXT NOT NULL DEFAULT '';",
+    ]
+    assert [v for v, _ in pg.pending_migrations(32)] == [33]
+
+
+def test_postgres_halt_clear_is_generation_bound(monkeypatch):
+    executed = []
+    cleared = []
+
+    class _Cursor:
+        rowcount = 0
+        selected_generation = "different-generation"
+
+        def execute(self, statement, params=None):
+            executed.append((statement, params))
+
+        def fetchone(self):
+            return (self.selected_generation,)
+
+    cursor = _Cursor()
+
+    @contextmanager
+    def _tx():
+        yield cursor
+
+    world = object.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(world, "_tx", _tx)
+
+    assert world.disarm_halt(
+        expected_generation="observed-generation",
+        durable_clear=lambda: cleared.append("unexpected"),
+    ) is False
+    assert "SELECT generation" in executed[-1][0]
+    assert "FOR UPDATE" in executed[-1][0]
+    assert cleared == []
+
+    cursor.selected_generation = "current-generation"
+    cursor.rowcount = 1
+    assert world.disarm_halt(
+        expected_generation="current-generation",
+        durable_clear=lambda: cleared.append("cleared"),
+    ) is True
+    assert cleared == ["cleared"]
+    assert "DELETE FROM halt" in executed[-1][0]
+    assert "generation = %s" in executed[-1][0]
+    assert executed[-1][1] == ("current-generation",)
+
+
+def test_goal_decoder_keeps_owner_and_execution_principal_distinct(monkeypatch):
+    monkeypatch.setattr(pg, "_unseal", lambda value: value)
+
+    goal = pg._dec_goal_row(
+        (
+            7,
+            None,
+            "title",
+            "description",
+            "pending",
+            1.0,
+            2.0,
+            None,
+            None,
+            "user:human-owner",
+            "agent:worker",
+        )
+    )
+
+    assert goal.owner == "user:human-owner"
+    assert goal.execution_principal == "agent:worker"
 
 
 def test_rate_events_migration_adds_table():
@@ -203,6 +287,49 @@ def test_fact_mutation_scope_is_exact_when_unbound_or_bound(monkeypatch):
         "f.tenant_id = %s",
         ["Acme"],
     )
+
+
+def test_open_fact_history_uses_exact_mutation_scope(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "Acme")
+    cursor = _RetentionCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+
+    _row, fragment, params = model._locked_open_fact_history(
+        cursor, "shared-key", "Acme",
+    )
+
+    assert fragment == "tenant_id = %s"
+    assert params == ["Acme"]
+    sql, query_params = cursor.calls[1]
+    assert "tenant_id = %s" in sql
+    assert "OR tenant_id IS NULL" not in sql
+    assert query_params == ("shared-key", "Acme")
+
+
+@pytest.mark.parametrize(
+    ("tenant", "scope", "params"),
+    [
+        (None, "tenant_id IS NULL", ("shared-key",)),
+        ("Acme", "tenant_id = %s", ("shared-key", "Acme")),
+    ],
+)
+def test_delete_fact_uses_exact_mutation_scope(
+    monkeypatch, tenant, scope, params,
+):
+    from maverick import world_model as wm
+
+    monkeypatch.setattr(pg, "_active_tenant", lambda: tenant)
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: False)
+    cursor = _RetentionCursor()
+    cursor.rowcount = 1
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert model.delete_fact("shared-key") == 1
+    sql, query_params = cursor.calls[0]
+    assert scope in sql
+    assert "OR tenant_id IS NULL" not in sql
+    assert query_params == params
 
 
 def test_compatibility_precedence_prefers_active_tenant(monkeypatch):
@@ -405,13 +532,84 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
     monkeypatch.setattr(model, "_tx", lambda: FakeTx(cursor))
 
     assert model.create_goal(
-        "owned goal", "description", parent_id=4, owner="user:alice",
+        "owned goal",
+        "description",
+        parent_id=4,
+        owner="user:alice",
+        execution_principal="agent:worker",
     ) == 99
     sql, params = cursor.calls[0]
-    assert "created_at, updated_at, owner, tenant_id" in sql
+    assert "owner, execution_principal, tenant_id" in sql
     assert params == (
-        4, "owned goal", "description", 123.0, 123.0, "user:alice", "tenant-a",
+        4,
+        "owned goal",
+        "description",
+        123.0,
+        123.0,
+        "user:alice",
+        "agent:worker",
+        "tenant-a",
     )
+
+
+def test_execution_binding_atomically_backfills_legacy_null_tenant(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+    cursor = _RetentionCursor()
+    cursor.rowcount = 1
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert model.bind_goal_execution_principal(42, "agent:worker") is True
+    sql, params = cursor.calls[0]
+    assert "execution_principal=%s" in sql
+    assert "tenant_id=COALESCE(tenant_id, %s)" in sql
+    assert "(tenant_id = %s OR tenant_id IS NULL)" in sql
+    assert params == (
+        "agent:worker",
+        "tenant-a",
+        42,
+        "agent:worker",
+        "tenant-a",
+    )
+
+
+def test_execution_binding_strict_tenant_cannot_claim_legacy_null(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: True)
+    cursor = _RetentionCursor()
+    cursor.rowcount = 0
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert model.bind_goal_execution_principal(42, "agent:worker") is False
+    sql, params = cursor.calls[0]
+    assert "tenant_id = %s" in sql
+    assert "OR tenant_id IS NULL" not in sql
+    assert params == (
+        "agent:worker",
+        "tenant-a",
+        42,
+        "agent:worker",
+        "tenant-a",
+    )
+
+
+def test_owner_aware_claim_uses_exact_tenant_compare_and_swap(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+    monkeypatch.setattr(pg.time, "time", lambda: 123.0)
+    cursor = _RetentionCursor()
+    cursor.rowcount = 1
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert model.claim_goal_for_run(42, expected_owner="agent:worker") is True
+    sql, params = cursor.calls[0]
+    assert "status='pending' AND owner=%s" in sql
+    assert "tenant_id = %s" in sql
+    assert "OR tenant_id IS NULL" not in sql
+    assert params == (123.0, 42, "agent:worker", "tenant-a")
 
 
 def test_list_episodes_combines_owner_goal_and_tenant_scopes(monkeypatch):

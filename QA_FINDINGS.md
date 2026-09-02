@@ -7,9 +7,9 @@ item means the implementation and its focused regression test
 are both present on this branch; broad-suite and rendered-browser acceptance are
 tracked separately at the end.
 
-PR #2407 is merged. This branch includes the current `origin/main` generation
-`f3042d94` through merge `de393c30`; the evidence below describes the
-reconciled working tree rather than the old draft-PR snapshot.
+PR #2407 is merged. The evidence below describes this branch's reconciled
+working tree rather than the old draft-PR snapshot; the final fetch/base check
+is recorded separately in **QA-V05** so this ledger does not freeze a stale SHA.
 
 Status markers:
 
@@ -258,6 +258,118 @@ Status markers:
   learning components from separate feature switches and no longer implies one
   aggregate controls every learning system.
 
+## Agent control, compliance, and portable-evidence pass
+
+- [x] **QA-085 — Protected containment integrity (P1).** Security containment
+  cannot be cleared or have its provenance repainted by ordinary resume/unrevoke;
+  external-gateway contain/release operations verify persisted post-state and
+  fail closed when the gateway cannot confirm it.
+- [x] **QA-086 — Coherent bounded control-plane reads (P1).** Status and roster
+  pagination derive from one bounded snapshot, dependency outages are sanitized
+  `503` responses rather than healthy empty state, and concurrent attenuation is
+  atomic, narrowing-only, and no-op safe.
+- [x] **QA-087 — HALT authority and confidentiality (P1).** Deployment-local and
+  shared HALT scope detection fails closed; dashboard mutations require
+  deployment-global operate authority for local scope and global-admin authority
+  for shared scope; inactive shared state is explicit; viewers cannot read raw
+  incident reasons, actors, or absolute host paths.
+- [x] **QA-088 — Agent-console response truthfulness (P1).** Protected conflicts
+  are non-2xx structured responses, control-plane audit status is distinguished
+  from component notes, stale/out-of-range pages recover sanely, native
+  containment is counted, and incomplete cluster state disables controls without
+  painting them enabled.
+- [x] **QA-089 — Strict compliance-profile activation (P1).** Config and
+  environment profiles use one strict resolver; malformed lists, blank entries,
+  unknown names, or unreadable policy sources fail closed across governance,
+  enterprise admission, encryption, and deployment floors instead of silently
+  compiling a default-open posture. A genuinely absent/empty profile selection
+  remains the supported no-profile state.
+- [x] **QA-090 — Exact obligation-evidence provenance (P1).** Denial and
+  admitted-dispatch evidence use the exact evaluated verdict profile snapshot;
+  known-empty and unavailable provenance remain distinct; citations are
+  deterministic, bounded, and disclose truncation.
+- [x] **QA-091 — Complete tool lifecycle evidence (P1).** Agent and flow
+  dispatches refuse to run when the mandatory call audit is unavailable; every
+  post-dispatch success, tool error, exception, stop signal, or withheld output
+  attempts exactly one correlated terminal result, with strict `ok`/`error`
+  semantics and no blocked-output disclosure. Post-effect audit or processing
+  uncertainty is quarantined as indeterminate and is not automatically retried.
+- [x] **QA-092 — Trust-receipt correlation and privacy (P1).** Executed/failed
+  claims require a genuine signed call/result pair with a recomputed shared
+  commitment; unknown status cannot mean failure; the full call row and its
+  `input_summary` are excluded by default and require an explicit bounded
+  disclosure opt-in.
+- [x] **QA-093 — Trust-root roles and temporal honesty (P1).** Receipt-envelope,
+  historical audit-row, checkpoint, and anchor-ledger trust inputs are
+  role-scoped without claiming that a deployment uses physically distinct keys.
+  Envelope and checkpoint authority windows are evaluated at verification time;
+  historical row and anchor-ledger windows intentionally use issuer-signed
+  timestamps and disclose that limit. Mutable checkpoint files do not count as
+  independent anchoring.
+- [x] **QA-094 — Receipt publication and verifier recovery (P1).** Minting uses a
+  stable bounded evidence snapshot and byte-exact, exclusive two-phase
+  publication; it never clobbers a recipient file, preserves pending recovery
+  state after incomplete completion evidence, and rejects oversized, malformed,
+  raced, aliased, or invalid-UTF-8 inputs without a verifier crash.
+- [x] **QA-095 — Regulatory setup discoverability (P2).** The installer always
+  reaches the regulatory-profile choice independently of optional residency
+  disclosure, and regulated guidance does not overclaim signed-audit readiness.
+
+## Final principal, HALT, and console-integrity pass
+
+- [x] **QA-096 — Exact runtime-principal binding (P1).** Native active work
+  reports its real execution principal without replacing the human/resource
+  owner; first execution-principal binding and run claiming are atomic; an
+  explicit opaque capability principal is preserved exactly. An agent cannot
+  adopt an unbound human-owned goal, and an unavailable or mismatched binding is
+  refused before goal state, episode, event, model, trace, or dispatch side
+  effects.
+- [x] **QA-097 — Opaque-principal transport and storage (P1).** Bounded printable
+  identity-provider subjects round-trip without trimming or path interpolation,
+  use body/query transport instead of path segments, remain exact in
+  execution-principal and revocation storage, and reject blank-padded or
+  control-character aliases.
+- [x] **QA-098 — Flow stop-signal terminal evidence (P1).** Cancellation and
+  process stop signals attempt exactly one correlated, sanitized terminal result
+  before the original signal propagates; a strict terminal-audit refusal does
+  not replace or suppress that original signal.
+- [x] **QA-099 — HALT transition and presentation truth (P1).** Caller-selected
+  HALT parents use fail-closed private-directory validation; failed shared or
+  local clear barriers retain or restore the durable stop without disarming the
+  other authority out of order; the shared database row stays transactionally
+  locked while the exact local generation is removed and an exact-owner process
+  hold covers commit/rollback; generation-bound compare-and-delete preserves a
+  concurrent re-arm and a degraded cross-process lock fails closed;
+  authoritative shared attribution supersedes stale local detail; and
+  post-effect HALT or principal-action audit refusal reports the applied state
+  without leaking custody detail. The shell renders divergent local/shared state
+  as partial and unverified, keeps controls disabled, and does not treat a `204`
+  mutation as confirmed until a complete same-scope read succeeds.
+- [x] **QA-100 — Bounded, ordered, accessible agent-console state (P1).** The
+  client bounds declared, streamed, fallback, and stalled responses; globally
+  orders concurrent ledger and mutation results; rejects malformed roster
+  contracts before rendering controls; recomputes action eligibility; exposes
+  stale health and table context to assistive technology; and does not steal
+  unrelated focus during background failure.
+- [x] **QA-101 — Historical trust-receipt compatibility (P1).** The verifier
+  dispatches exact integer schema versions, preserves the immutable schema-v1
+  claim contract for already-issued receipts, and applies current size,
+  cryptographic, and safety checks without weakening schema-v2 semantics.
+  Boolean, malformed, and unknown schema versions fail closed.
+- [x] **QA-102 — Generation-bound protected containment (P1).** Protected
+  containment rotates an opaque generation and releases only the exact observed
+  generation under one strict cross-process authority lock. A concurrent newer
+  containment wins, dependent trust/gateway/live-seal projections are cleared
+  atomically or restored, and ordinary trust or gateway release paths refuse to
+  bypass protected state. Legacy protected rows remain explicitly releasable by
+  their empty compatibility generation.
+- [x] **QA-103 — Atomic containment publication and projection (P1).** Protected
+  generation publication, live sealing, and dependent trust/gateway restriction
+  linearize under one stable per-principal strict authority and the registry
+  writer lock. A concurrent release cannot delete the generation between those
+  writes; incomplete projection remains restrictively contained and is never
+  reported as a successful containment.
+
 ## Focused regression evidence
 
 Each finding maps to at least one exact focused regression in the current
@@ -347,19 +459,53 @@ working tree.
 - **QA-082** — `packages/maverick-dashboard/tests/test_sidebar_navfinder.py::test_page_finder_accepts_the_workflow_name_for_the_grc_builder`; `packages/maverick-dashboard/tests/test_workflow_builder.py::test_workflow_builder_page_renders`
 - **QA-083** — `packages/maverick-dashboard/tests/test_error_pages.py::test_404_html_for_browser`; `packages/maverick-dashboard/tests/test_error_pages.py::test_browser_500_has_a_single_primary_heading`
 - **QA-084** — `packages/maverick-dashboard/tests/test_learning.py::test_learning_page_renders_the_moat`; `packages/maverick-dashboard/tests/test_learning.py::test_learning_page_has_enable_button`
+- **QA-085** — `packages/maverick-core/tests/test_revocation.py::test_protected_containment_requires_explicit_release`; `packages/maverick-core/tests/test_revocation.py::test_ordinary_revoke_cannot_repaint_protected_provenance`; `packages/maverick-core/tests/test_revocation.py::test_contain_racing_ordinary_unrevoke_never_loses_protection`; `packages/maverick-core/tests/test_agent_control_plane.py::test_external_contain_and_release_verify_gateway_post_state`; `packages/maverick-core/tests/test_agent_control_plane.py::test_external_gateway_containment_failure_is_not_reported_as_success`; `packages/maverick-core/tests/test_agent_control_plane.py::test_external_gateway_release_failure_retains_other_containment`
+- **QA-086** — `packages/maverick-core/tests/test_agent_control_plane.py::test_snapshot_reuses_one_authority_scan_for_status_roster_and_page`; `packages/maverick-core/tests/test_agent_control_plane.py::test_native_goal_roster_scan_is_bounded`; `packages/maverick-core/tests/test_agent_control_plane.py::test_concurrent_attenuation_denies_union_without_lost_update`; `packages/maverick-core/tests/test_agent_control_plane.py::test_empty_or_unchanged_attenuation_does_not_write`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_dependency_outages_are_sanitized_503`
+- **QA-087** — `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_scope_uncertainty_and_shared_status_outage_are_503`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_shared_halt_status_explicitly_confirms_inactive_cluster`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_local_halt_mutation_requires_global_operator`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_get_redacts_and_parses_incident_detail`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_get_refuses_a_multiply_linked_authority`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_post_atomically_replaces_alias_without_touching_referent`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_post_uses_private_atomic_publication`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_get_does_not_read_oversized_incident_detail`
+- **QA-088** — `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_protected_resume_is_409_and_only_release_clears_it`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_fail_soft_audit_state_is_preserved_in_http_result`; `packages/maverick-dashboard/tests/js/agent_control_plane_client.test.js` cases `one combined snapshot drives status and roster and counts native containment`, `cluster halt status without an explicit cluster verdict stays disabled`, and `a stale second page recovers when the bounded roster becomes empty`
+- **QA-089** — `packages/maverick-core/tests/test_compliance_profiles.py::test_configured_profiles_reject_malformed_or_unknown_policy`; `packages/maverick-core/tests/test_compliance_profiles.py::test_deployment_encryption_floor_uses_strict_shared_resolver`; `packages/maverick-core/tests/test_compliance_profiles.py::test_floor_consumers_fail_closed_when_policy_source_is_invalid`; `packages/maverick-core/tests/test_compliance_profiles.py::test_deployment_enterprise_admission_cannot_bypass_strict_profiles`; `packages/maverick-core/tests/test_governance.py::test_from_config_refuses_malformed_or_unknown_compliance_profiles`
+- **QA-090** — `packages/maverick-core/tests/test_regulatory_compiler.py::test_evidence_can_use_the_exact_verdict_profile_snapshot`; `packages/maverick-core/tests/test_regulatory_compiler.py::test_denial_evidence_retains_all_applicable_citations_deterministically`; `packages/maverick-core/tests/test_regulatory_compiler.py::test_denial_evidence_is_bounded_and_reports_truncation`; `packages/maverick-core/tests/test_regulatory_compiler.py::test_governance_known_empty_profile_snapshot_returns_empty_tuple`; `packages/maverick-core/tests/test_regulatory_compiler.py::test_governance_policy_outage_returns_unavailable_profile_provenance`
+- **QA-091** — `packages/maverick-core/tests/test_agent_loop.py::TestToolLifecycleAudit::{test_success_records_one_correlated_completed_result,test_tool_error_records_one_correlated_error_result,test_runtime_exception_records_one_correlated_result_then_propagates,test_cancellation_records_one_correlated_result_then_propagates,test_output_withheld_still_records_one_terminal_result,test_control_flow_stop_records_terminal_then_propagates,test_missing_call_audit_refuses_dispatch,test_missing_result_audit_withholds_completed_outcome,test_terminal_audit_refusal_after_effect_is_indeterminate,test_call_audit_refusal_propagates_before_effect,test_post_tool_hook_failure_preserves_completed_effect_status}`; `packages/maverick-core/tests/test_tool_authz.py::{test_missing_dispatch_audit_refuses_flow_before_tool_effect,test_result_audit_outage_is_indeterminate_and_never_retries,test_flow_control_stop_records_one_correlated_terminal_then_propagates,test_flow_control_stop_survives_terminal_audit_refusal,test_flow_success_pairs_attempt_with_executed_result,test_flow_failures_pair_attempt_with_failed_result}`
+- **QA-092** — `packages/maverick-core/tests/test_trust_receipt.py::{test_tool_result_receipt_omits_call_row_by_default,test_execution_pair_is_an_explicit_bounded_disclosure,test_output_withheld_disposition_is_portable_claim_evidence,test_v2_pair_survives_real_writer_goal_resolution_and_anonymization,test_execution_pair_rejects_uncommitted_correlation,test_execution_pair_rejects_unknown_result_status,test_execution_pair_call_row_has_a_hard_size_limit}`
+- **QA-093** — `packages/maverick-core/tests/test_trust_receipt.py::{test_historical_row_key_cannot_authorize_a_new_envelope,test_backdated_envelope_cannot_bypass_current_revocation,test_backdated_checkpoint_cannot_bypass_current_revocation,test_a_checkpoint_reaches_anchored_only_with_something_external,test_anchor_ledger_uses_audit_keys_not_checkpoint_keys,test_checkpoint_uses_checkpoint_keys_not_audit_keys}`
+- **QA-094** — `packages/maverick-core/tests/test_trust_receipt.py::{test_export_surfaces_completion_audit_failure_as_recovery_state,test_export_preserves_recovery_marker_when_publish_raises_after_visibility,test_export_never_clobbers_an_existing_recipient_file,test_export_checks_the_final_serialized_byte_limit,test_receipt_file_read_is_bounded,test_receipt_file_with_invalid_utf8_fails_closed,test_receipt_file_symlink_or_reparse_alias_is_rejected,test_receipt_file_hardlink_is_rejected,test_receipt_identity_swap_during_read_is_rejected,test_build_uses_one_day_snapshot_for_verify_locate_and_pair,test_excessively_nested_suffix_is_a_failed_verdict_not_a_crash,test_wrapper_converts_unexpected_verifier_exception_to_closed_verdict}`
+- **QA-095** — `apps/installer-cli/tests/test_wizard_regulatory.py::test_declining_residency_still_reaches_regulatory_picker`; `apps/installer-cli/tests/test_wizard_control_plane.py::test_the_wizard_asks_the_question`; `apps/installer-cli/tests/test_wizard_compliance.py::{test_compliance_guidance_does_not_overclaim_runtime_proof,test_panel_prints_only_for_a_regulated_deployment}`
+- **QA-096** — `packages/maverick-core/tests/test_agent_control_plane.py::test_native_roster_uses_real_active_status_and_preserves_opaque_subjects`; `packages/maverick-core/tests/test_world_owner.py::{test_goal_execution_binding_is_durable_idempotent_and_mismatch_safe,test_goal_execution_principal_validation_is_at_the_store_boundary,test_concurrent_goal_execution_binding_has_one_winner,test_explicit_goal_selectors_preserve_both_principal_fields}`; `packages/maverick-core/tests/test_orchestrator.py::{test_goal_execution_principal_mismatch_refuses_before_side_effects,test_explicit_opaque_capability_principal_binds_owner_and_runs}`; `packages/maverick-core/tests/test_runner_identity.py::test_runner_refuses_mismatched_principal_before_setup_or_trace`; `packages/maverick-core/tests/test_grpc_service.py::{test_start_goal_preserves_distinct_owner_and_runtime_principal,test_run_goal_refuses_execution_principal_mismatch_before_claim,test_run_goal_preserves_human_owner_for_bound_agent_execution,test_per_agent_cannot_adopt_unbound_human_goal,test_run_goal_fails_closed_when_execution_principal_binding_is_unavailable,test_run_goal_claim_is_atomic_across_world_connections}`; `packages/maverick-dashboard/tests/test_fleet_dispatch.py::test_authenticated_owner_can_observe_real_principal_bound_fleet_run`; `packages/maverick-core/tests/test_postgres_tenant_migrations.py::{test_execution_binding_atomically_backfills_legacy_null_tenant,test_execution_binding_strict_tenant_cannot_claim_legacy_null,test_owner_aware_claim_uses_exact_tenant_compare_and_swap}`
+- **QA-097** — `packages/maverick-core/tests/test_agent_control_plane.py::{test_opaque_principal_round_trips_without_becoming_a_path,test_principal_domain_rejects_blank_padded_or_control_text}`; `packages/maverick-core/tests/test_world_owner.py::test_goal_execution_binding_is_durable_idempotent_and_mismatch_safe`; `packages/maverick-core/tests/test_orchestrator.py::test_explicit_opaque_capability_principal_binds_owner_and_runs`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::{test_opaque_principal_uses_body_and_query_transport_end_to_end,test_opaque_principal_transport_rejects_ambiguous_values}`; `packages/maverick-core/tests/test_oidc_server.py::test_oidc_opaque_subject_is_bound_exactly_without_path_interpolation`; `packages/maverick-core/tests/test_world_tenancy.py::test_handle_message_keeps_opaque_principal_out_of_raw_tenant_paths`; `packages/maverick-dashboard/tests/js/agent_control_plane_client.test.js` case `opaque identity-provider subjects use body transport without canonicalization`
+- **QA-098** — `packages/maverick-core/tests/test_tool_authz.py::{test_flow_control_stop_records_one_correlated_terminal_then_propagates,test_flow_control_stop_survives_terminal_audit_refusal}`
+- **QA-099** — `packages/maverick-core/tests/test_agent_control_plane.py::{test_halt_uses_prepare_contract_for_caller_selected_parent,test_local_clear_barrier_failure_leaves_durable_stop,test_local_clear_preserves_a_generation_armed_while_waiting_for_lock,test_local_clear_preserves_a_concurrent_in_process_halt,test_local_clear_refuses_a_degraded_cross_process_lock}`; `packages/maverick-core/tests/test_cluster_killswitch.py::{test_world_halt_compare_and_delete_preserves_concurrent_rearm,test_world_halt_callback_failure_rolls_back_shared_clear,test_world_halt_mismatch_does_not_run_durable_clear,test_clear_transition_holds_are_exact_owner_and_preserve_concurrent_halt}`; `packages/maverick-core/tests/test_postgres_tenant_migrations.py::{test_halt_generation_migration_is_additive_and_last,test_postgres_halt_clear_is_generation_bound}`; `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::{test_halt_get_refuses_a_multiply_linked_authority,test_halt_clear_refuses_a_multiply_linked_authority,test_halt_post_atomically_replaces_alias_without_touching_referent,test_halt_post_uses_private_atomic_publication,test_shared_halt_arm_and_clear_record_cluster_scope,test_shared_halt_status_prefers_authoritative_shared_attribution,test_shared_clear_rearms_local_stop_when_cluster_clear_is_indeterminate,test_local_clear_does_not_delete_a_concurrent_newer_generation,test_shared_clear_compare_and_delete_preserves_a_concurrent_rearm,test_shared_clear_does_not_disarm_cluster_when_local_unlink_fails,test_strict_audit_refusal_reports_already_applied_halt_state,test_strict_audit_refusal_reports_already_applied_halt_clear,test_strict_audit_refusal_re_reads_applied_principal_state}`; `packages/maverick-dashboard/tests/test_qa_global_control_gates.py::{test_shared_halt_arm_failure_is_reported_and_keeps_local_stop,test_shared_halt_clear_failure_leaves_local_file_armed,test_halt_shell_authority_copy_is_scope_neutral}`; `packages/maverick-dashboard/tests/js/lightwork_ui_halt.test.js` cases `a local/shared disagreement is partial and never renders STOPPED`, `204 arm and clear responses stay unknown until a strict GET verifies state`, `a post-mutation GET from another scope cannot verify the change`, `failed, non-OK, and invalid polls invalidate a previously known state`, `an older overlapping poll cannot overwrite a newer verified result`, and `a stalled status read times out and invalidates known state`
+- **QA-100** — `packages/maverick-dashboard/tests/test_agent_control_plane_page.py::test_agent_console_source_uses_bounded_governed_interactions`; `packages/maverick-dashboard/tests/js/agent_control_plane_client.test.js` cases `changing between mutation and ledger recomputes Apply eligibility`, `the latest concurrent ledger read owns the Last operation panel`, `a newer ledger result cannot be overwritten by an older mutation`, `malformed roster control fields fail closed before action rendering`, `a roster refresh error does not steal unrelated focus`, `refresh marks visible health stale until the snapshot settles`, `a stalled request times out and leaves controls fail closed`, `fallback response limits count UTF-8 bytes rather than JS characters`, `a declared oversized response is cancelled before body allocation`, `a chunked response is cancelled as soon as its byte budget is exceeded`, and `timeout aborts a response whose streamed body stalls`
+- **QA-101** — `packages/maverick-core/tests/test_trust_receipt.py::{test_a_valid_historical_v1_receipt_verifies_with_v1_claim_semantics,test_malformed_and_unknown_receipt_versions_fail_closed}`
+- **QA-102** — `packages/maverick-core/tests/test_revocation.py::{test_stale_protected_release_preserves_new_generation_and_skips_callback,test_protected_release_refuses_degraded_cross_process_lock,test_legacy_protected_record_can_be_released_by_its_empty_generation}`; `packages/maverick-core/tests/test_agent_control_plane.py::{test_stale_release_cannot_clear_a_newer_external_containment,test_trust_cli_restore_linearizes_before_concurrent_containment}`; `packages/maverick-core/tests/test_cli_external_agents.py::test_ordinary_restore_and_gateway_release_refuse_security_containment`; `packages/maverick-dashboard/tests/test_external_agents_api.py::test_ordinary_admin_restore_and_release_refuse_security_containment`; `packages/maverick-core/tests/test_external_agents.py::test_admin_containment_and_release_verify_persisted_gateway_state`
+- **QA-103** — `packages/maverick-core/tests/test_agent_control_plane.py::test_release_cannot_delete_generation_between_containment_projections`; `packages/maverick-core/tests/test_agent_edr.py::test_revocation_is_confirmed_rather_than_assumed`
+
+- **QA-099 live Postgres transaction** — `packages/maverick-core/tests/test_postgres_world.py::test_halt_durable_clear_failure_rolls_back_locked_generation`
+- **QA-099 cached-state arm** — `packages/maverick-dashboard/tests/test_agent_control_plane_api.py::test_halt_post_invalidates_a_cached_local_clear`
 
 ## Verification gates
 
-- [ ] **QA-V01 — Focused regression matrix.** Every checked item above names and
+- [x] **QA-V01 — Focused regression matrix.** Every checked item above names and
   passes at least one focused regression test.
-- [ ] **QA-V02 — Dashboard/core/installer suites.** All affected package suites
-  pass from the target checkout with `python -m pytest -q`.
-- [ ] **QA-V03 — Static gates.** `python -m ruff check .`, `python -m vulture`,
+- [x] **QA-V02 — Dashboard/core/installer suites.** All affected package suites
+  passed from the target checkout. To avoid repeating multi-thousand-test runs,
+  the completed broad runs were reconciled with exact reruns of every observed
+  failure: core `19,539 passed, 269 skipped` plus five corrected nodes;
+  dashboard `3,968 passed, 1 skipped` plus one corrected node; installer `356
+  passed`; and dashboard JavaScript `189 passed`.
+- [x] **QA-V03 — Static gates.** `python -m ruff check .`, `python -m vulture`,
   and `git diff --check` pass or have explicitly scoped, pre-existing failures.
 - [ ] **QA-V04 — Rendered user journeys.** Fresh install, active-tenant switch,
   global versus tenant roles, stale tabs, failure recovery, keyboard-only use,
   and responsive layouts pass in the live dashboard without real provider
-  spend.
-- [ ] **QA-V05 — Merge integrity.** The merged PR #2407 content and this
+  spend. Fresh-workspace setup, two-tenant switching, desktop/mobile layouts,
+  keyboard navigation, page-specific Copilot, opaque principals, HALT arm/clear,
+  and live server-outage recovery were exercised against an isolated local
+  dashboard. Global-versus-tenant role rendering and an unsafe stale-tab
+  mutation remain unverified because the isolated modules were fail-closed and
+  no alternate live identity provider was configured.
+- [x] **QA-V05 — Merge integrity.** The merged PR #2407 content and this
   remediation branch are reconciled against the latest origin merge without
-  dropping tests or configuration serializer fields.
+  dropping tests or configuration serializer fields. After a fresh fetch,
+  `origin/main` is the branch merge-base, the branch is 16 commits ahead and
+  zero behind before this handoff commit, and PR #2407 merge commit
+  `34472745f91a7fcb7e51850388b5b187bcd9ac23` is an ancestor of `HEAD`.

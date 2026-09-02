@@ -202,6 +202,29 @@ def test_revoke_and_restore():
     assert r.exit_code == 1
 
 
+def test_ordinary_restore_and_gateway_release_refuse_security_containment():
+    from maverick import agent_trust
+    from maverick.revocation import shared
+
+    assert _enroll_cli().exit_code == 0
+    contained = shared().revoke(
+        "agent:sf-quotebot", reason="soc: incident", protected=True,
+    )
+    assert agent_trust.set_revoked("sf-quotebot", True)
+    assert xa.contain("sf-quotebot", contained_by="soc")
+
+    restored = _run("external-agents", "restore", "sf-quotebot")
+    assert restored.exit_code == 1
+    assert "security-contained" in restored.output
+    released = _run("external-agents", "release", "sf-quotebot")
+    assert released.exit_code == 1
+    assert "security-contained" in released.output
+
+    assert shared().revoked()["agent:sf-quotebot"] == contained
+    assert agent_trust.load_registry()["sf-quotebot"].revoked is True
+    assert xa.containment_state("sf-quotebot") is True
+
+
 # ---- release / reset-budget ------------------------------------------------
 
 

@@ -13,8 +13,12 @@ Payload shapes (kind -> required fields, all events also carry
   goal_end:          status:str (succeeded|failed|cancelled), result:str|None
   episode_start:     attempt:int, model:str
   episode_end:       outcome:str, cost_dollars:float, in_tok:int, out_tok:int
-  tool_call:         name:str, input_summary:str (truncated)
-  tool_result:       name:str, status:str, output_summary:str
+  tool_call:         name:str, call_id:str, call_commitment:str,
+                     call_commitment_algorithm:str, input_summary:str (truncated);
+                     records an attempted governed dispatch, not completion
+  tool_result:       name:str, call_id:str, call_commitment:str,
+                     call_commitment_algorithm:str, status:str, output_summary:str;
+                     status=ok is the execution-completion evidence
   shield_block:      stage:str (input|tool|output), reason:str, score:float|None
   capability_denied: tool:str, principal:str, channel:str|None, user_id:str|None
   egress_blocked:    provider:str (enterprise-mode egress lock denial)
@@ -83,13 +87,41 @@ Payload shapes (kind -> required fields, all events also carry
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_CALL_ID_RE = re.compile(r"^[0-9a-f]{24}$")
+TOOL_CALL_COMMITMENT_ALGORITHM = "sha256:lightwork.tool-call-id:v2"
+
+
+def tool_call_commitment(
+    *,
+    call_id: str,
+) -> str:
+    """Return the v2 domain-separated commitment shared by one call/result pair.
+
+    Only the stable random call identifier is committed here. The audit writer
+    may legitimately replace an omitted goal from ambient context and may
+    pseudonymize ``goal_id`` / ``principal`` before signing. Binding those
+    pre-write values made an honest persisted row fail verification. The
+    verifier separately compares every persisted signed identity field between
+    the call and result; this digest prevents substitution of the correlation id.
+    """
+    if not isinstance(call_id, str) or not _CALL_ID_RE.fullmatch(call_id):
+        raise ValueError("tool call_id must be exactly 24 lowercase hex characters")
+    payload = {
+        "domain": "lightwork.tool-call-id.v2",
+        "call_id": call_id,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def is_valid_day(day: Any) -> bool:
@@ -142,8 +174,12 @@ class EventKind:
     CONSENT_RESULT  = "consent_result"
     SECRET_REDACTED = "secret_redacted"
     ERASE           = "erase"
-    # A bearer-verifiable receipt for one audited decision was minted
-    # (trust_receipt.py). Payload: day, row_hash, committed, key_id.
+    # Two-phase bearer receipt publication. PREPARED means the private staged
+    # artifact existed but was not yet published; ISSUED means the same digest
+    # reached its requested path. Payload: day, row_hash, committed, key_id,
+    # artifact_sha256. A PREPARED row without ISSUED is explicit recovery state,
+    # not a false claim that the recipient could access the artifact.
+    TRUST_RECEIPT_PREPARED = "trust_receipt_prepared"
     TRUST_RECEIPT_ISSUED = "trust_receipt_issued"
     # Data-retention enforcement deleted aged audit day-files / world rows. One
     # signed row per non-dry-run purge so a gap in the day-files (or shrunken
@@ -184,7 +220,9 @@ class EventKind:
     # from the console or `maverick control-plane`. payload: verb:str,
     # principal:str ("*" for a fleet verb), actor:str, ok:bool (what was
     # CONFIRMED to land, not what was asked), detail:str; attenuate adds
-    # ceiling:dict (the narrowed deny_tools / max_risk / caps).
+    # ceiling:dict (the narrowed deny_tools / max_risk / caps). Dashboard HALT
+    # rows additionally carry operation:str, scope:str (local|cluster),
+    # result:str (succeeded|failed|partial), and a bounded reason:str.
     CONTROL_PLANE_ACTION = "control_plane_action"
     # Bring-your-own-agent gateway: enrollment lifecycle and the governed
     # traffic of agents that run on OTHER platforms (Agentforce, Bedrock, ...).

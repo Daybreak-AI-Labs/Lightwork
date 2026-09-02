@@ -11,10 +11,10 @@ came for provenance.
 This module builds the artifact that answers them. A bundle binds three claims
 to evidence somebody else can re-derive:
 
-1. **policy_envelope** -- every recorded action stayed inside the declared
-   governance envelope. Checkable because the signed chain records one
-   ``tool_call`` row per executed tool, and the envelope names what was
-   forbidden.
+1. **policy_envelope** -- every recorded governed dispatch attempt stayed inside
+   the declared governance envelope. Checkable because the signed chain records
+   a pre-dispatch ``tool_call`` row and the envelope names what was forbidden.
+   Completion is evidenced separately by a correlated ``tool_result`` row.
 2. **bounded_self_improvement** -- the learning loop never granted itself
    authority it did not already have. Bet 1's distinctive claim, and the reason
    :class:`maverick.self_improvement.PromotionRecord` now records *how* the

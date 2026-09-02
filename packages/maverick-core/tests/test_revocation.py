@@ -1,10 +1,17 @@
 """Capability revocation list: registry behavior + the tool-chokepoint gate."""
 from __future__ import annotations
 
+import threading
+
 import pytest
 from maverick.capability import Capability
 from maverick.file_lock import private_path_is_restricted
-from maverick.revocation import RevocationRegistry, RevocationStoreError
+from maverick.revocation import (
+    ProtectedRevocationError,
+    RevocationGenerationMismatch,
+    RevocationRegistry,
+    RevocationStoreError,
+)
 from maverick.tools import Tool
 
 # ---- registry ----
@@ -23,6 +30,128 @@ def test_unrevoke(tmp_path):
     assert reg.unrevoke("agent:x") is True
     assert reg.is_revoked("agent:x") is False
     assert reg.unrevoke("agent:x") is False  # already gone
+
+
+def test_protected_containment_requires_explicit_release(tmp_path):
+    reg = RevocationRegistry(tmp_path / "rev.json")
+    contained = reg.revoke(
+        "agent:x", reason="soc: honeytoken", now=10, protected=True,
+    )
+    with pytest.raises(ProtectedRevocationError, match="security-contained"):
+        reg.unrevoke("agent:x")
+    assert reg.revoked()["agent:x"] == contained
+    with pytest.raises(ProtectedRevocationError, match="generation"):
+        reg.unrevoke("agent:x", allow_protected=True)
+    assert reg.unrevoke(
+        "agent:x",
+        allow_protected=True,
+        expected_generation=contained.generation,
+    ) is True
+    assert not reg.is_revoked("agent:x")
+
+
+def test_stale_protected_release_preserves_new_generation_and_skips_callback(tmp_path):
+    reg = RevocationRegistry(tmp_path / "rev.json")
+    first = reg.revoke(
+        "agent:x", reason="incident one", now=10, protected=True,
+    )
+    second = reg.revoke(
+        "agent:x", reason="incident two", now=20, protected=True,
+    )
+    callbacks = []
+
+    with pytest.raises(RevocationGenerationMismatch, match="newer"):
+        reg.unrevoke(
+            "agent:x",
+            allow_protected=True,
+            expected_generation=first.generation,
+            durable_clear=lambda: callbacks.append("cleared"),
+        )
+
+    assert callbacks == []
+    assert first.generation and second.generation
+    assert first.generation != second.generation
+    assert reg.revoked()["agent:x"] == second
+
+
+def test_protected_release_refuses_degraded_cross_process_lock(
+    tmp_path, monkeypatch,
+):
+    from contextlib import contextmanager
+
+    from maverick import file_lock
+
+    reg = RevocationRegistry(tmp_path / "rev.json")
+    contained = reg.revoke("agent:x", protected=True)
+
+    @contextmanager
+    def _degraded(_path, *, strict=False):
+        assert strict is True
+        raise RuntimeError("cross-process lock backend is unavailable")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(file_lock, "cross_process_lock", _degraded)
+    with pytest.raises(RuntimeError, match="cross-process lock"):
+        reg.unrevoke(
+            "agent:x",
+            allow_protected=True,
+            expected_generation=contained.generation,
+        )
+    assert reg.revoked()["agent:x"] == contained
+
+
+def test_ordinary_revoke_cannot_repaint_protected_provenance(tmp_path):
+    reg = RevocationRegistry(tmp_path / "rev.json")
+    contained = reg.revoke(
+        "agent:x", reason="soc: original incident", now=10, protected=True,
+    )
+    assert reg.revoke(
+        "agent:x", reason="operator: ordinary suspend", now=20,
+    ) == contained
+    assert reg.revoked()["agent:x"] == contained
+    reg.revoke_subtree(
+        "agent:x", {"agent:x": ["agent:child"]},
+        reason="operator: subtree suspend", now=30,
+    )
+    assert reg.revoked()["agent:x"] == contained
+    assert reg.revoked()["agent:child"].protected is False
+
+
+def test_contain_racing_ordinary_unrevoke_never_loses_protection(tmp_path):
+    path = tmp_path / "rev.json"
+    failures: list[BaseException] = []
+    start = threading.Barrier(3)
+
+    def _contain() -> None:
+        try:
+            start.wait(timeout=5)
+            RevocationRegistry(path).revoke(
+                "agent:x", reason="soc incident", protected=True,
+            )
+        except BaseException as exc:  # captured for the assertion thread
+            failures.append(exc)
+
+    def _ordinary_resume() -> None:
+        try:
+            start.wait(timeout=5)
+            try:
+                RevocationRegistry(path).unrevoke("agent:x")
+            except ProtectedRevocationError:
+                pass
+        except BaseException as exc:  # captured for the assertion thread
+            failures.append(exc)
+
+    threads = [threading.Thread(target=_contain), threading.Thread(target=_ordinary_resume)]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    assert failures == []
+    record = RevocationRegistry(path).revoked()["agent:x"]
+    assert record.protected is True
+    assert record.reason == "soc incident"
 
 
 def test_blank_principal_never_revoked(tmp_path):
@@ -61,6 +190,7 @@ def test_corrupt_file_fails_closed(tmp_path):
         '{"agent:x": {"revoked_at": "yesterday"}}',
         '{"agent:x": {"revoked_at": NaN}}',
         '{"agent:x": {"revoked_at": 1, "reason": []}}',
+        '{"agent:x": {"revoked_at": 1, "protected": "yes"}}',
         '{"agent:x": {"revoked_at": 1}, "agent:x": {"revoked_at": 2}}',
     ],
 )
@@ -69,6 +199,31 @@ def test_malformed_registry_records_fail_closed(tmp_path, payload):
     p.write_text(payload, encoding="utf-8")
     with pytest.raises(RevocationStoreError, match="corrupt"):
         RevocationRegistry(p).is_revoked("agent:x")
+
+
+def test_legacy_record_without_protected_flag_remains_ordinary(tmp_path):
+    path = tmp_path / "rev.json"
+    path.write_text(
+        '{"agent:x": {"revoked_at": 1, "reason": "legacy"}}',
+        encoding="utf-8",
+    )
+    reg = RevocationRegistry(path)
+    assert reg.revoked()["agent:x"].protected is False
+    assert reg.unrevoke("agent:x") is True
+
+
+def test_legacy_protected_record_can_be_released_by_its_empty_generation(tmp_path):
+    path = tmp_path / "rev.json"
+    path.write_text(
+        '{"agent:x": {"revoked_at": 1, "reason": "legacy", '
+        '"protected": true}}',
+        encoding="utf-8",
+    )
+    reg = RevocationRegistry(path)
+    assert reg.revoked()["agent:x"].generation == ""
+    assert reg.unrevoke(
+        "agent:x", allow_protected=True, expected_generation="",
+    ) is True
 
 
 def test_unreadable_registry_fails_closed(tmp_path, monkeypatch):

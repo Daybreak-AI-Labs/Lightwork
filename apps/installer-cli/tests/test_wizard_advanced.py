@@ -154,6 +154,11 @@ def test_pick_advanced_can_enable_shared_governance_inventory(monkeypatch):
         "_q_text",
         lambda *args, default="", **kwargs: default,
     )
+    monkeypatch.setattr(
+        wizard,
+        "_q_checkbox",
+        lambda *args, default=None, **kwargs: default or [],
+    )
 
     advanced = wizard.pick_advanced()
 

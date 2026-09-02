@@ -626,6 +626,27 @@ def test_repeated_denials_auto_contain_until_released():
     assert xa.release("ghost") is False
 
 
+def test_admin_containment_and_release_verify_persisted_gateway_state():
+    _enroll()
+    assert xa.containment_state("sf-quotebot") is False
+    assert xa.contain("sf-quotebot", contained_by="soc") is True
+    assert xa.containment_state("sf-quotebot") is True
+    assert xa.release("sf-quotebot", released_by="soc") is True
+    assert xa.containment_state("sf-quotebot") is False
+    assert xa.containment_state("ghost") is None
+    assert xa.contain("ghost", contained_by="soc") is False
+
+
+@pytest.mark.parametrize("payload", ["{not-json", '{"bad": 1}'])
+def test_operator_roster_raises_when_sidecar_authority_is_corrupt(payload):
+    xa.registry_path().parent.mkdir(parents=True, exist_ok=True)
+    xa.registry_path().write_text(payload, encoding="utf-8")
+    with pytest.raises(
+        xa.ExternalAgentsDependencyError, match="authority is unavailable",
+    ):
+        xa.roster()
+
+
 # -- governed execution (the enforcement tier above screening) ----------------
 
 class _FakeConn:

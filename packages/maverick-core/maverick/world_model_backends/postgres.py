@@ -32,7 +32,7 @@ import os
 import secrets
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -618,6 +618,22 @@ _FACT_WRITE_SEQUENCE_MIGRATION = [
     "ON facts(write_seq DESC);",
 ]
 
+# v32: keep the dashboard/resource owner distinct from the authority that
+# executes the goal. The empty default lets the first legitimate dispatcher
+# bind legacy rows atomically.
+_GOAL_EXECUTION_PRINCIPAL_MIGRATION = [
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS execution_principal "
+    "TEXT NOT NULL DEFAULT '';",
+]
+
+# v33: compare-and-delete token for the shared emergency stop.  Every arm
+# rotates the token, so an older clear cannot delete a concurrently re-armed
+# row.
+_HALT_GENERATION_MIGRATION = [
+    "ALTER TABLE halt ADD COLUMN IF NOT EXISTS generation "
+    "TEXT NOT NULL DEFAULT '';",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -640,6 +656,8 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (29, _ERASURE_RECEIPTS_MIGRATION),
     (30, _APPROVAL_AUDIT_OUTBOX_MIGRATION),
     (31, _FACT_WRITE_SEQUENCE_MIGRATION),
+    (32, _GOAL_EXECUTION_PRINCIPAL_MIGRATION),
+    (33, _HALT_GENERATION_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.
@@ -956,6 +974,7 @@ class PGGoal:
     deadline: float | None
     result: str | None
     owner: str = ""
+    execution_principal: str = ""
 
 
 def _seal(text):
@@ -983,6 +1002,7 @@ def _dec_goal_row(row) -> PGGoal:
         row[0], row[1], _unseal(row[2]), _unseal(row[3]), row[4],
         row[5], row[6], row[7], _unseal(row[8]),
         str(row[9] or "") if len(row) > 9 else "",
+        str(row[10] or "") if len(row) > 10 else "",
     )
 
 
@@ -1288,15 +1308,34 @@ class PostgresWorldModel:
         parent_id: int | None = None,
         *,
         owner: str = "",
+        execution_principal: str = "",
     ) -> int:
+        if execution_principal is None:
+            execution_principal = ""
+        if not isinstance(execution_principal, str):
+            raise ValueError("invalid execution principal")
+        if execution_principal:
+            from ..agent_control_plane import valid_principal
+
+            if not valid_principal(execution_principal):
+                raise ValueError("invalid execution principal")
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
             cur.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, owner, tenant_id) "
-                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id",
-                (parent_id, _seal(title), _seal(description), now, now, owner, tenant),
+                "created_at, updated_at, owner, execution_principal, tenant_id) "
+                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    parent_id,
+                    _seal(title),
+                    _seal(description),
+                    now,
+                    now,
+                    owner,
+                    execution_principal,
+                    tenant,
+                ),
             )
             row = cur.fetchone()
         return int(row[0])
@@ -1305,7 +1344,7 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner "
+            "created_at, updated_at, deadline, result, owner, execution_principal "
             "FROM goals WHERE id=%s"
         )
         p: list = [goal_id]
@@ -1340,28 +1379,77 @@ class PostgresWorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
 
+    def bind_goal_execution_principal(self, goal_id: int, principal: str) -> bool:
+        """Atomically bind a goal's execution authority and tenant.
+
+        Idempotent same-principal retries succeed; a different established
+        principal fails closed. In compatibility mode, claiming a legacy
+        ``NULL``-tenant row also stamps the active tenant in the same UPDATE;
+        otherwise the newly bound row would remain visible to every tenant.
+        """
+        from ..agent_control_plane import valid_principal
+
+        if not valid_principal(principal):
+            raise ValueError("invalid execution principal")
+        tenant = _active_tenant()
+        if tenant is None:
+            frag, fparams = "tenant_id IS NULL", []
+        else:
+            # Compatibility mode may claim a legacy NULL row only because the
+            # same UPDATE below backfills tenant_id atomically. Strict/RLS mode
+            # returns the exact predicate and therefore fails closed instead.
+            frag, fparams = _tenant_scope()
+        sql = (
+            "UPDATE goals SET execution_principal=%s"
+        )
+        params: list = [principal]
+        if tenant is not None:
+            sql += ", tenant_id=COALESCE(tenant_id, %s)"
+            params.append(tenant)
+        sql += (
+            " WHERE id=%s AND (execution_principal='' "
+            "OR execution_principal=%s) AND " + frag
+        )
+        params += [int(goal_id), principal, *fparams]
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount == 1
+
+    def bind_goal_owner(self, goal_id: int, principal: str) -> bool:
+        """Backward-compatible resource-owner binder with exact tenant scope."""
+        if not isinstance(principal, str) or not principal:
+            raise ValueError("principal is required")
+        frag, fparams = _mutation_tenant_scope()
+        sql = (
+            "UPDATE goals SET owner=%s WHERE id=%s "
+            "AND (owner='' OR owner=%s) AND " + frag
+        )
+        params: list = [principal, int(goal_id), principal, *fparams]
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount == 1
+
     def claim_goal_for_run(
         self, goal_id: int, *, expected_owner: str | None = None,
     ) -> bool:
         """Atomically claim a pending goal at the remote execution boundary.
 
-        Owner-aware remote claiming remains outside this method's parity scope,
-        so a concrete ``expected_owner`` still fails closed. Shared-operator
-        calls receive the tenant-scoped compare-and-swap used by cross-host
-        dispatch; storing ``goals.owner`` must never silently weaken that gate.
+        ``expected_owner`` rides in the same UPDATE as the pending-to-active
+        compare-and-swap. Tenant mutation scope is exact: compatibility reads
+        of legacy ``NULL`` rows do not grant authority to claim them.
         """
-        if expected_owner is not None:
-            return False
         now = time.time()
-        frag, fparams = _tenant_scope()
+        frag, fparams = _mutation_tenant_scope()
         sql = (
             "UPDATE goals SET status='active', updated_at=%s "
             "WHERE id=%s AND status='pending'"
         )
         params: list = [now, int(goal_id)]
-        if frag:
-            sql += " AND " + frag
-            params += fparams
+        if expected_owner is not None:
+            sql += " AND owner=%s"
+            params.append(str(expected_owner))
+        sql += " AND " + frag
+        params += fparams
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             return cur.rowcount == 1
@@ -1458,7 +1546,8 @@ class PostgresWorldModel:
         from ..crypto_at_rest import at_rest_enabled
         sealed = at_rest_enabled()
         cols = ("SELECT id, parent_id, title, description, status, "
-                "created_at, updated_at, deadline, result FROM goals")
+                "created_at, updated_at, deadline, result, owner, "
+                "execution_principal FROM goals")
         frag, fparams = _tenant_scope()
         cap = max(1, int(limit))
         if sealed:
@@ -2024,7 +2113,8 @@ class PostgresWorldModel:
         """
         frag, fparams = _tenant_scope("g.tenant_id")
         sql = ("SELECT g.id, g.parent_id, g.title, g.description, g.status, "
-               "g.created_at, g.updated_at, g.deadline, g.result FROM goals g "
+               "g.created_at, g.updated_at, g.deadline, g.result, g.owner, "
+               "g.execution_principal FROM goals g "
                "JOIN goal_origins o ON o.goal_id = g.id "
                "WHERE o.kind=%s AND o.ref=%s")
         params: list = [str(kind), str(ref)]
@@ -2062,7 +2152,8 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result FROM goals "
+            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "FROM goals "
             "WHERE status IN ('pending', 'in_progress', 'running')"
         )
         p: list = []
@@ -2089,7 +2180,8 @@ class PostgresWorldModel:
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result, owner FROM goals"
+            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "FROM goals"
         )
         params: list = []
         conds: list[str] = []
@@ -2119,7 +2211,8 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result FROM goals"
+            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "FROM goals"
         )
         if frag:
             sql += " WHERE " + frag
@@ -2133,7 +2226,8 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result FROM goals "
+            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "FROM goals "
             "WHERE status IN ('active', 'blocked')"
         )
         params: list = []
@@ -2151,7 +2245,8 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result FROM goals "
+            "created_at, updated_at, deadline, result, owner, execution_principal "
+            "FROM goals "
             "WHERE status IN ('active', 'pending')"
         )
         params: list = []
@@ -2180,7 +2275,8 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "SELECT id, parent_id, title, description, status, created_at, "
-                "updated_at, deadline, result FROM goals WHERE "
+                "updated_at, deadline, result, owner, execution_principal "
+                "FROM goals WHERE "
                 + " AND ".join(conds)
                 + " ORDER BY updated_at DESC LIMIT %s",
                 tuple(params),
@@ -2192,7 +2288,8 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, created_at, "
-            "updated_at, deadline, result FROM goals WHERE parent_id = %s"
+            "updated_at, deadline, result, owner, execution_principal "
+            "FROM goals WHERE parent_id = %s"
         )
         params: list = [parent_id]
         if frag:
@@ -4401,30 +4498,61 @@ class PostgresWorldModel:
     # Untenanted single-row global emergency stop; on shared Postgres every
     # replica's killswitch.check() consults this so a halt stops the whole fleet.
     def arm_halt(self, reason: str = "", source: str = "manual",
-                 armed_by: str = "") -> None:
+                 armed_by: str = "") -> str:
+        generation = secrets.token_urlsafe(24)
         with self._tx() as cur:
             cur.execute(
-                "INSERT INTO halt(scope, reason, source, armed_by, armed_at) "
-                "VALUES('', %s, %s, %s, %s) "
+                "INSERT INTO halt(scope, reason, source, armed_by, armed_at, generation) "
+                "VALUES('', %s, %s, %s, %s, %s) "
                 "ON CONFLICT(scope) DO UPDATE SET reason=EXCLUDED.reason, "
                 "source=EXCLUDED.source, armed_by=EXCLUDED.armed_by, "
-                "armed_at=EXCLUDED.armed_at",
-                (reason or "", source or "manual", armed_by or "", time.time()),
+                "armed_at=EXCLUDED.armed_at, generation=EXCLUDED.generation",
+                (
+                    reason or "",
+                    source or "manual",
+                    armed_by or "",
+                    time.time(),
+                    generation,
+                ),
             )
+        return generation
 
-    def disarm_halt(self) -> None:
+    def disarm_halt(
+        self,
+        *,
+        expected_generation: str,
+        durable_clear: Callable[[], None] | None = None,
+    ) -> bool:
+        """Bind a durable local clear to the exact locked shared generation."""
+        if not isinstance(expected_generation, str):
+            raise TypeError("expected_generation must be a string")
         with self._tx() as cur:
-            cur.execute("DELETE FROM halt WHERE scope = ''")
+            cur.execute(
+                "SELECT generation FROM halt WHERE scope = '' FOR UPDATE"
+            )
+            row = cur.fetchone()
+            if row is None or (row[0] or "") != expected_generation:
+                return False
+            if durable_clear is not None:
+                durable_clear()
+            cur.execute(
+                "DELETE FROM halt WHERE scope = '' AND generation = %s",
+                (expected_generation,),
+            )
+            deleted = cur.rowcount
+        return bool(deleted and deleted > 0)
 
     def active_halt(self) -> dict | None:
         with self._tx() as cur:
             cur.execute(
-                "SELECT reason, source, armed_by, armed_at FROM halt WHERE scope = ''")
+                "SELECT reason, source, armed_by, armed_at, generation "
+                "FROM halt WHERE scope = ''")
             row = cur.fetchone()
         if row is None:
             return None
         return {"reason": row[0] or "", "source": row[1] or "",
-                "armed_by": row[2] or "", "armed_at": row[3]}
+                "armed_by": row[2] or "", "armed_at": row[3],
+                "generation": row[4] or ""}
 
     # ----- cluster-wide provider spend ledger (v23) -----
     def add_provider_spend(self, period_key: str, provider: str,

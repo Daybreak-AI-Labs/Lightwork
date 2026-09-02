@@ -264,6 +264,7 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
     class _World:
         def __init__(self):
             self.seen_tenants = []
+            self.created_goal = None
 
         def get_or_create_conversation(self, channel, user_id):
             self.seen_tenants.append(current_tenant())
@@ -274,8 +275,11 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
             self.seen_tenants.append(current_tenant())
             return None
 
-        def create_goal(self, title, text):
+        def create_goal(
+            self, title, text, *, owner="", execution_principal="",
+        ):
             self.seen_tenants.append(current_tenant())
+            self.created_goal = (title, text, owner, execution_principal)
             return 7
 
         def set_goal_status(self, *args, **kwargs):
@@ -313,6 +317,9 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
     assert world.conversation_key == ("slack", "UALICE")
     assert captured["kwargs"]["user_id"] == "slack:UALICE"
     assert captured["tenant"] == "slack%3AUALICE"
+    assert world.created_goal == (
+        "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
+    )
     assert world.seen_tenants == ["slack%3AUALICE"] * 4
     assert current_tenant() is None
 
@@ -332,6 +339,7 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
         def __init__(self):
             # Deliberately skip the real psycopg connection.
             self.seen_tenants = []
+            self.created_goal = None
 
         def get_or_create_conversation(self, channel, user_id):
             self.seen_tenants.append(("conversation", current_tenant()))
@@ -340,8 +348,11 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
         def append_turn(self, conversation_id, role, text):
             self.seen_tenants.append(("turn", current_tenant()))
 
-        def create_goal(self, title, text):
+        def create_goal(
+            self, title, text, *, owner="", execution_principal="",
+        ):
             self.seen_tenants.append(("goal", current_tenant()))
+            self.created_goal = (title, text, owner, execution_principal)
             return 7
 
         def set_goal_status(self, *args, **kwargs):
@@ -381,6 +392,9 @@ def test_server_per_user_postgres_reuses_backend_and_scopes_all_writes(monkeypat
         ("goal", expected_tenant),
         ("result", expected_tenant),
     ]
+    assert world.created_goal == (
+        "hello", "hello", "user:slack:UALICE", "user:slack:UALICE",
+    )
     assert dispatch_tenants == [expected_tenant]
     assert current_tenant() is None
 

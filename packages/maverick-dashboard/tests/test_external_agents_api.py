@@ -726,6 +726,35 @@ def test_admin_release_and_reset_budget_routes():
                        json={}).status_code == 404
 
 
+def test_ordinary_admin_restore_and_release_refuse_security_containment():
+    from maverick import agent_trust
+    from maverick import external_agents as xa
+    from maverick.revocation import shared
+
+    assert _enroll().status_code == 201
+    contained = shared().revoke(
+        "agent:sf-quotebot", reason="soc: incident", protected=True,
+    )
+    assert agent_trust.set_revoked("sf-quotebot", True)
+    assert xa.contain("sf-quotebot", contained_by="soc")
+
+    restored = client.post(
+        "/api/v1/trust/agents/sf-quotebot/revoke",
+        json={"revoked": False},
+    )
+    assert restored.status_code == 409
+    assert "security-contained" in restored.json()["detail"]
+    released = client.post(
+        "/api/v1/external-agents/sf-quotebot/release", json={},
+    )
+    assert released.status_code == 409
+    assert "security-contained" in released.json()["detail"]
+
+    assert shared().revoked()["agent:sf-quotebot"] == contained
+    assert agent_trust.load_registry()["sf-quotebot"].revoked is True
+    assert xa.containment_state("sf-quotebot") is True
+
+
 # -- governed execution over HTTP ---------------------------------------------
 
 class _FakeConn:

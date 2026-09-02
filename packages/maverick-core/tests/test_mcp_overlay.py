@@ -41,7 +41,7 @@ def test_add_http_server_roundtrips_via_toml():
         "oauth": {
             "token_url": "https://host.example/token",
             "client_id": "client-one",
-            "client_secret": "oauth-secret",
+            "client_secret": "oauth-secret",  # pragma: allowlist secret
         },
     })
     persisted = ro.OVERRIDES_PATH.read_text(encoding="utf-8")
@@ -51,7 +51,7 @@ def test_add_http_server_roundtrips_via_toml():
     overlay = mcp_overlay()
     assert overlay["remote"]["url"] == "https://host.example/mcp"
     assert overlay["remote"]["headers"]["X-Org"] == "acme"
-    assert overlay["remote"]["oauth"]["client_secret"] == "oauth-secret"
+    assert overlay["remote"]["oauth"]["client_secret"] == "oauth-secret"  # pragma: allowlist secret
     # the inline-table / list rendering must parse back cleanly
     assert overlay["remote"]["auth_token"] == "t0ken"
 

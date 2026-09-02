@@ -2232,7 +2232,11 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
         sys.exit(2)
     world = open_world(ctx.obj["db"])
     try:
-        goal_id = world.create_goal(prompt)
+        goal_id = world.create_goal(
+            prompt,
+            owner=f.owner,
+            execution_principal=principal,
+        )
     finally:
         world.close()
     record_run(fleet_name, agent.name, goal_id)

@@ -11,6 +11,7 @@ from maverick.governance import (
     Decision,
     GovernancePolicyError,
     Policy,
+    Verdict,
     evaluate,
 )
 
@@ -18,6 +19,12 @@ from maverick.governance import (
 def test_empty_policy_allows():
     v = evaluate("read_file", policy=Policy())
     assert v.decision is Decision.ALLOW and v.allowed and v.rule == "default"
+    assert v.compliance_profiles == ()
+
+
+def test_unavailable_verdict_provenance_is_distinct_from_no_active_profiles():
+    unavailable = Verdict(Decision.DENY, "policy unavailable", "policy_unavailable")
+    assert unavailable.compliance_profiles is None
 
 
 def test_deny_actions():
@@ -140,8 +147,27 @@ def test_from_config_refuses_lost_compliance_overlay(monkeypatch):
     monkeypatch.setattr(
         compliance_profiles,
         "configured_profiles",
-        lambda: (_ for _ in ()).throw(OSError("profile store unavailable")),
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("profile store unavailable")),
     )
+
+    with pytest.raises(GovernancePolicyError, match="compliance governance"):
+        Policy.from_config()
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"compliance": "hipaa"},
+        {"compliance": {"profiles": "hipaa"}},
+        {"compliance": {"profiles": ["unknown"]}},
+    ],
+)
+def test_from_config_refuses_malformed_or_unknown_compliance_profiles(
+    monkeypatch, config
+):
+    monkeypatch.delenv("MAVERICK_COMPLIANCE_PROFILES", raising=False)
+    monkeypatch.setattr("maverick.config.config_source_errors", dict)
+    monkeypatch.setattr("maverick.config.load_config", lambda: config)
 
     with pytest.raises(GovernancePolicyError, match="compliance governance"):
         Policy.from_config()

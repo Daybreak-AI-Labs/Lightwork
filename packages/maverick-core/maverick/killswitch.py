@@ -18,8 +18,11 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
+import stat
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .paths import data_dir
@@ -52,6 +55,12 @@ class Halted(Exception):
 
 _state_lock = threading.Lock()
 _in_process_halt: tuple[str, str] | None = None  # (reason, source)
+_in_process_generation: str | None = None
+# Exact-owner transition holds keep the serving process stopped while a shared
+# HALT transaction removes the local file.  They are separate from ordinary
+# in-process halts so concurrent clears cannot release each other's hold and a
+# concurrent ``halt()`` remains independently armed.
+_clear_transition_holds: dict[str, tuple[str, str]] = {}
 _last_file_check_ts: float = 0.0
 _last_file_present: bool = False
 # Cluster-wide halt (v22): consulted from the shared world store so an emergency
@@ -61,17 +70,113 @@ _last_shared_check_ts: float = 0.0
 _last_shared_halt: tuple[str, str] | None = None
 _shared_world = None  # cached world handle for the shared-halt consult
 
+_HALT_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_HALT_GENERATION_ATTEMPTS = 3
+_CLEAR_ANY_GENERATION = object()
+
+
+class HaltGenerationChanged(RuntimeError):
+    """A newer in-process halt superseded an exact-generation clear."""
+
 
 def _halt_file_path() -> Path:
     override = os.environ.get("MAVERICK_HALT_FILE")
     return Path(override) if override else _default_halt_file()
 
 
+def _halt_authority_lock_path(path: Path | None = None) -> Path:
+    """One stable lock path shared by every built-in local HALT writer.
+
+    The HALT file itself is atomically replaced and removed, so it cannot be
+    used as the lock inode.  A sibling sidecar survives those publications and
+    lets an arm that overlaps a clear serialize after it instead of being
+    unlinked by the older clear request.
+    """
+
+    target = Path(path) if path is not None else _halt_file_path()
+    return target.with_name(f".{target.name}.authority.lock")
+
+
+def _halt_path_is_alias(info: os.stat_result) -> bool:
+    return bool(
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & _HALT_REPARSE_ATTRIBUTE
+    )
+
+
+def _halt_generation(info: os.stat_result) -> tuple[int, ...]:
+    """Identity plus mutation metadata for one exact local HALT generation."""
+
+    return (
+        int(info.st_dev),
+        int(info.st_ino),
+        int(info.st_mode),
+        int(info.st_nlink),
+        int(info.st_size),
+        int(info.st_mtime_ns),
+    )
+
+
+def _validate_halt_file(info: os.stat_result) -> None:
+    if (
+        _halt_path_is_alias(info)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_ino == 0
+    ):
+        raise PermissionError("HALT authority is not a single-link regular file")
+
+
+def _halt_file_generation(path: Path | None = None) -> tuple[int, ...] | None:
+    """Bind the visible HALT pathname to one verified file generation.
+
+    The descriptor/path comparison closes the lstat/open substitution window.
+    Callers compare the returned token again while holding
+    :func:`_halt_authority_lock_path` before deleting.  ``None`` is a stable
+    absent observation; aliases, hard links, zero-inode results, and repeated
+    identity churn are authority failures rather than a healthy clear state.
+    """
+
+    target = Path(path) if path is not None else _halt_file_path()
+    last_error: BaseException | None = None
+    for _attempt in range(_HALT_GENERATION_ATTEMPTS):
+        try:
+            before = target.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            last_error = exc
+            continue
+        _validate_halt_file(before)
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_BINARY", 0)
+        try:
+            fd = os.open(os.fspath(target), flags)
+            try:
+                opened = os.fstat(fd)
+            finally:
+                os.close(fd)
+            after = target.lstat()
+        except OSError as exc:
+            last_error = exc
+            continue
+        _validate_halt_file(opened)
+        _validate_halt_file(after)
+        before_generation = _halt_generation(before)
+        if (
+            before_generation == _halt_generation(opened)
+            and before_generation == _halt_generation(after)
+        ):
+            return before_generation
+    raise PermissionError("HALT authority identity could not be verified") from last_error
+
+
 def halt(reason: str, source: str = "manual") -> None:
     """Trigger an in-process halt. All subsequent check() calls raise."""
-    global _in_process_halt
+    global _in_process_generation, _in_process_halt
     with _state_lock:
         _in_process_halt = (reason, source)
+        _in_process_generation = secrets.token_urlsafe(24)
     # Set the safety state first, then wait for any Ekko commit that sampled the
     # prior state. A lock outage can never undo the halt; it only weakens the
     # return-time barrier and is logged for operators.
@@ -104,15 +209,76 @@ def halt(reason: str, source: str = "manual") -> None:
             pass
 
 
-def clear() -> None:
-    """Reset the in-process halt. Doesn't delete the HALT file."""
-    global _in_process_halt
+def _in_process_halt_generation() -> str | None:
+    """Return the exact current in-process HALT token under the state lock."""
+
+    with _state_lock:
+        return _in_process_generation
+
+
+def _begin_clear_transition_hold(
+    reason: str = "HALT clear transaction in progress",
+    source: str = "control-plane-clear",
+) -> str:
+    """Arm and return one exact-owner temporary process stop.
+
+    The hold is visible to :func:`check` before waiting for the strict control
+    barrier.  If that barrier is unavailable the hold deliberately remains:
+    an authority-expanding clear must fail stopped rather than continue with an
+    uncoordinated transition.
+    """
+
+    token = secrets.token_urlsafe(24)
+    with _state_lock:
+        _clear_transition_holds[token] = (reason, source)
+    from .ekko_control import control_barrier
+
+    with control_barrier():
+        pass
+    return token
+
+
+def _end_clear_transition_hold(token: str) -> None:
+    """Release only the transition hold owned by ``token``."""
+
+    from .ekko_control import control_barrier
+
+    with control_barrier(), _state_lock:
+        if token not in _clear_transition_holds:
+            raise HaltGenerationChanged("clear transition hold changed")
+        del _clear_transition_holds[token]
+
+
+def clear(
+    *,
+    durable_clear: Callable[[], None] | None = None,
+    expected_in_process_generation: str | None | object = _CLEAR_ANY_GENERATION,
+) -> None:
+    """Reset the in-process halt after an optional durable-clear callback.
+
+    ``durable_clear`` runs inside the same strict control barrier and state lock
+    as the in-process transition.  A caller that removes a HALT file can
+    therefore fail before *either* authority is cleared; the old ordering could
+    clear the process flag, discover a replaced/unreadable file, and still
+    report that the stop remained armed.  When an expected process generation
+    is supplied, a concurrent :func:`halt` wins.  Exact-owner shared-clear
+    transition holds are intentionally unaffected by this general primitive.
+    """
+    global _in_process_generation, _in_process_halt
     from .ekko_control import control_barrier
 
     # Clearing is expansive, so unlike halt it fails closed if the strict
     # cross-process authority barrier is unavailable.
     with control_barrier(), _state_lock:
+        if (
+            expected_in_process_generation is not _CLEAR_ANY_GENERATION
+            and _in_process_generation != expected_in_process_generation
+        ):
+            raise HaltGenerationChanged("newer in-process HALT generation observed")
+        if durable_clear is not None:
+            durable_clear()
         _in_process_halt = None
+        _in_process_generation = None
 
 
 def _file_halt_active(
@@ -223,8 +389,11 @@ def check(*, force_refresh: bool = False, fail_closed: bool = False) -> None:
     """
     with _state_lock:
         ip = _in_process_halt
+        transition = next(iter(_clear_transition_holds.values()), None)
     if ip is not None:
         raise Halted(ip[0], ip[1])
+    if transition is not None:
+        raise Halted(transition[0], transition[1])
     file_interval = 0.0 if force_refresh else 1.0
     shared_interval = 0.0 if force_refresh else 2.0
     if _file_halt_active(

@@ -20,7 +20,7 @@ def test_anthropic_client_uses_the_sdk_native_timeout(monkeypatch) -> None:
     monkeypatch.setattr(anthropic_provider.anthropic, "Anthropic", _CaptureClient)
     monkeypatch.setattr(anthropic_provider.anthropic, "AsyncAnthropic", _CaptureClient)
 
-    anthropic_provider.AnthropicClient(api_key="test-key")
+    anthropic_provider.AnthropicClient(api_key="test-key")  # pragma: allowlist secret
 
     assert len(_CaptureClient.calls) == 2
     for kwargs in _CaptureClient.calls:

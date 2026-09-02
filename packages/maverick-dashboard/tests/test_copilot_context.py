@@ -10,6 +10,7 @@ CANONICAL_CONTEXTS = {
     "/administration/document-vault": "Governed Document Vault",
     "/ai-entity-tasks": "AI Entity Tasks",
     "/governance-agents": "Governance Agents",
+    "/agent-control-plane": "Agent Control Plane",
     "/governance/inventory": "Governance Inventory",
     "/consent": "Consent and Preferences",
     "/consent/publishing": "Consent Publishing",
@@ -215,6 +216,25 @@ def test_evidence_context_names_every_supported_media_family() -> None:
 
     for media_name in ("pdf", "jpeg", "png", "xls", "xlsx", "plain-text"):
         assert media_name in capabilities
+
+
+def test_agent_control_plane_context_names_runtime_and_audit_boundaries() -> None:
+    context = copilot_context.context_for_page("/agent-control-plane")
+    guidance = " ".join(
+        (*context.capabilities, *context.boundaries, *context.next_steps)
+    ).casefold()
+
+    for concept in (
+        "bounded, paginated roster",
+        "hardened local or shared-cluster halt",
+        "refused",
+        "named principal",
+        "does not claim a live-swarm seal",
+        "fail-soft",
+        "already landed",
+        "inspect the principal ledger separately",
+    ):
+        assert concept in guidance
 
 
 def test_third_party_context_names_closed_feeds_and_live_acceptance_boundary() -> None:

@@ -182,10 +182,58 @@ def run_goal_in_thread(
     try:
         from .budget import budget_from_config
         from .llm import LLM
-        from .orchestrator import run_goal_sync
+        from .orchestrator import (
+            _bind_goal_execution_principal,
+            _execution_principal,
+            run_goal_sync,
+        )
         from .sandbox import build_sandbox
         from .world_model import close_world_if_owned, open_world
         world = open_world()  # client/tenant-floored canonical world
+        # Bind/refuse the exact runtime authority before constructing provider
+        # or sandbox clients and before trace pinning appends an event. The
+        # orchestrator repeats this at its own public boundary; this earlier
+        # check protects the runner's setup path too.
+        execution_principal = _execution_principal(
+            user_id=user_id,
+            capability=capability,
+        )
+        goal = world.get_goal(goal_id)
+        if goal is None:
+            return None
+        was_unbound = not bool(
+            getattr(goal, "execution_principal", "") or ""
+        )
+        try:
+            principal_matches = _bind_goal_execution_principal(
+                world,
+                goal,
+                execution_principal,
+            )
+        except Exception:
+            log.exception(
+                "goal #%s execution-principal binding is unavailable",
+                goal_id,
+            )
+            return None
+        if not principal_matches:
+            log.warning(
+                "goal #%s execution principal does not match its binding",
+                goal_id,
+            )
+            return "blocked"
+        if was_unbound:
+            rebound = world.get_goal(goal_id)
+            if (
+                rebound is None
+                or (getattr(rebound, "execution_principal", "") or "")
+                != execution_principal
+            ):
+                log.error(
+                    "goal #%s execution-principal binding was not observable",
+                    goal_id,
+                )
+                return None
         llm = LLM()
         sandbox = build_sandbox()
         # Precedence: explicit caller arg > [budget] config > the

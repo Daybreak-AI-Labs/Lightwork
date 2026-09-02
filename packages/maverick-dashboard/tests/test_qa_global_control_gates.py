@@ -1,6 +1,7 @@
 """Regression coverage for deployment-global QA control-plane boundaries."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,7 @@ def test_tenant_admin_cannot_toggle_shared_halt(tmp_path, monkeypatch):
 
 
 def test_shared_halt_arm_failure_is_reported_and_keeps_local_stop(tmp_path, monkeypatch):
+    from maverick import audit
     from maverick_dashboard import api
 
     class UnavailableWorld:
@@ -95,6 +97,12 @@ def test_shared_halt_arm_failure_is_reported_and_keeps_local_stop(tmp_path, monk
     monkeypatch.setenv("MAVERICK_HALT_FILE", str(halt_file))
     monkeypatch.setattr(api, "_shared_halt_backend", lambda: True)
     monkeypatch.setattr(api, "_world", lambda: UnavailableWorld())
+    events = []
+    monkeypatch.setattr(
+        audit,
+        "record_global",
+        lambda kind, **payload: events.append((str(kind), payload)) or True,
+    )
     rbac.set_role("user:alice", "admin")
 
     response = client.post(
@@ -105,14 +113,36 @@ def test_shared_halt_arm_failure_is_reported_and_keeps_local_stop(tmp_path, monk
 
     assert response.status_code == 503
     assert "cluster-wide propagation failed" in response.json()["detail"]
-    assert halt_file.read_text(encoding="utf-8") == "safety incident\n"
+    local_detail = json.loads(halt_file.read_text(encoding="utf-8"))
+    assert local_detail["reason"] == "safety incident"
+    assert local_detail["actor"] == "user:alice"
+    assert local_detail["scope"] == "cluster"
+    assert response.headers[api._HALT_AUDIT_HEADER] == "true"
+    assert events[0][1]["operation"] == "halt"
+    assert events[0][1]["result"] == "partial"
+    assert events[0][1]["scope"] == "cluster"
+    assert events[0][1]["actor"] == "user:alice"
+    assert events[0][1]["reason"] == "safety incident"
 
 
 def test_shared_halt_clear_failure_leaves_local_file_armed(tmp_path, monkeypatch):
     from maverick_dashboard import api
 
     class UnavailableWorld:
-        def disarm_halt(self):
+        state = {
+            "reason": "existing stop",
+            "source": "dashboard",
+            "armed_by": "user:alice",
+            "armed_at": 123.0,
+            "generation": "shared-generation-before-outage",
+        }
+
+        def active_halt(self):
+            return self.state
+
+        def disarm_halt(self, *, expected_generation, durable_clear=None):
+            assert expected_generation == self.state["generation"]
+            assert durable_clear is not None
             raise RuntimeError("shared store offline")
 
     halt_file = tmp_path / "HALT"
@@ -125,7 +155,8 @@ def test_shared_halt_clear_failure_leaves_local_file_armed(tmp_path, monkeypatch
     response = client.delete("/api/v1/halt", headers=_headers())
 
     assert response.status_code == 503
-    assert "cluster-wide halt remains armed" in response.json()["detail"]
+    assert "cluster halt clear is indeterminate" in response.json()["detail"]
+    assert "local fail-safe was retained" in response.json()["detail"]
     assert halt_file.read_text(encoding="utf-8") == "existing stop\n"
 
 
@@ -235,6 +266,24 @@ def test_halt_shell_reports_failed_mutations():
     assert "Stop status unavailable" in response.text
     assert "aria-pressed', known ?" in response.text
     assert ": 'mixed'" in response.text
-    assert "if (pending || haltState === 'unknown')" in response.text
+    assert "if (pending || !knownState())" in response.text
     assert "haltState = 'unknown'" in response.text
+    assert "renderVerifiedPayload(result.body)" in response.text
+    assert "Partial stop — configured scope unverified" in response.text
+    assert "Stop accepted — verifying configured scope" in response.text
     assert "const verified = await refresh()" in response.text
+
+
+def test_halt_shell_authority_copy_is_scope_neutral():
+    _tenant_admin()
+    page = client.get("/", headers=_headers())
+    assert page.status_code == 200
+    assert "Halt permission is required to change it." in page.text
+    assert "permission for the configured halt scope is required" in page.text
+    assert "A global administrator is required to change it." not in page.text
+
+    script = client.get("/static/lightwork-ui.js", headers=_headers())
+    assert script.status_code == 200
+    assert "permission for the configured halt scope is required" in script.text
+    assert "a global administrator is required to stop or resume" not in script.text
+    assert "Stop all work?" not in script.text

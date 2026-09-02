@@ -286,9 +286,24 @@ the active and standby hosts' secret manager. `--force` never bypasses manifest
 authentication, archive limits, or path/type validation.
 
 **Upgrade:** a pre-migration snapshot is written automatically
-(`world.db.pre-migration-v<N>.bak`); migrations are forward-only and CI-gated to
-be online-safe for rolling upgrades. Rollback = stop → restore the snapshot →
-start the prior version.
+(`world.db.pre-migration-v<N>.bak`); migrations are forward-only and CI-gated
+for their SQL/locking shape. That gate does not prove mixed-version control
+semantics. For an upgrade crossing world schema v32 or v33:
+
+1. Drain dispatch and quiesce every executor, plus every process allowed to arm
+   or clear the shared HALT.
+2. Upgrade those processes as one cohort and allow one upgraded process to run
+   the additive database migrations.
+3. Verify all executors/HALT writers run the upgraded build before resuming
+   dispatch or relying on exact execution-principal binding or generation-safe
+   HALT clear.
+
+A pre-v32 executor does not enforce the new execution binding, and a pre-v33
+HALT writer does not rotate/compare the generation. The database migration is
+compatible with retained rows, but old/new writer coexistence is not a security
+guarantee. Rollback = stop all writers → restore the snapshot → start the prior
+version; do not run the prior binary against writes made under the newer control
+contract.
 
 **Secret / key rotation:** API keys — edit `~/.maverick/.env` and reload (no
 downtime). **Audit signing key:** `maverick audit rotate-key` (additive — old

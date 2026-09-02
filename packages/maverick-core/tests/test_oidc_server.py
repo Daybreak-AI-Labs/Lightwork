@@ -17,8 +17,8 @@ class _World:
     def append_turn(self, conversation_id, role, text):
         self.turns.append((conversation_id, role, text))
 
-    def create_goal(self, title, text):
-        self.goals.append((title, text))
+    def create_goal(self, title, text, *, owner="", execution_principal=""):
+        self.goals.append((title, text, owner, execution_principal))
         return 7
 
     def set_goal_status(self, *args, **kwargs):
@@ -120,6 +120,50 @@ def test_oidc_enabled_uses_verified_principal_for_goal_context(monkeypatch):
     assert seen_tokens == ["signed.jwt"]
     assert srv.world.conversation_key == ("slack", "user:alice")
     assert srv.world.turns == [(1, "user", "hello")]
-    assert srv.world.goals == [("hello", "hello")]
+    assert srv.world.goals == [
+        ("hello", "hello", "user:slack:user:alice", "user:slack:user:alice")
+    ]
     assert captured["channel"] == "slack"
     assert captured["user_id"] == "slack:user:alice"
+
+
+def test_oidc_opaque_subject_is_bound_exactly_without_path_interpolation(monkeypatch):
+    from maverick import oidc as oidc_mod
+    from maverick import server as server_mod
+
+    subject = "auth0|North America/María 李"
+    monkeypatch.setattr(oidc_mod, "oidc_enabled", lambda: True)
+    monkeypatch.setattr("maverick.paths.tenant_by_user_enabled", lambda: False)
+    monkeypatch.setattr(
+        "maverick.compliance.first_turn_disclosure", lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        oidc_mod,
+        "verify_oidc_token",
+        lambda _token: _Principal(subject),
+    )
+    captured = {}
+
+    async def _fake_dispatch(*args, **kwargs):
+        captured.update(kwargs)
+        return "done"
+
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
+
+    class _Msg:
+        channel = "slack"
+        user_id = "CROOM"
+        principal_id = "attacker"
+        authorization = "Bearer signed.jwt"
+        text = "hello"
+
+    srv = _server(server_mod)
+    assert asyncio.run(srv._handle_message(_Msg())) == "ok"
+
+    expected_user_id = f"slack:{subject}"
+    assert captured["user_id"] == expected_user_id
+    assert srv.world.goals == [
+        ("hello", "hello", f"user:{expected_user_id}", f"user:{expected_user_id}")
+    ]

@@ -45,9 +45,11 @@ it to be inferred from an absence.
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
 log = logging.getLogger(__name__)
+_PROFILE_KEYS_UNSET = object()
 
 #: Dispatch sites permitted to call the registry directly, enforced by
 #: ``maverick.dispatch_contract``. Everything else must come through here.
@@ -70,6 +72,7 @@ def authorize(
     goal_id: int | None = None,
     principal: str | None = None,
     risk: str | None = None,
+    call_id: str | None = None,
 ) -> str | None:
     """Authorize a non-agent tool dispatch. ``None`` allows; a string denies.
 
@@ -105,51 +108,107 @@ def authorize(
 
     # 3. Org governance policy (deny / require-human). Default-open for
     #    non-enterprise installs, exactly as on the agent path.
+    compliance_profiles: tuple[str, ...] | None = None
     try:
         from .governance import Decision, evaluate
 
         verdict = evaluate(tool, risk=risk)
-        if verdict.decision is Decision.DENY:
-            _record_denial(tool, origin, goal_id, verdict.rule, verdict.reason)
-            return f"ERROR: DENIED by org policy ({verdict.rule}): {verdict.reason}"
-        if verdict.decision is Decision.REQUIRE_HUMAN:
-            # A flow node runs unattended by construction; there is nobody to
-            # ask. Refusing is the only honest outcome -- silently downgrading
-            # a require-human action to auto-run is the failure this gate is
-            # here to prevent.
-            _record_denial(tool, origin, goal_id, verdict.rule,
-                           "requires human approval; a flow node runs unattended")
-            return (
-                f"ERROR: BLOCKED by org policy ({verdict.rule}): this action "
-                "requires human sign-off and cannot run unattended in a flow. "
-                "Route it through an agent node or an approval step."
-            )
-    except ImportError:  # pragma: no cover -- governance is optional
-        pass
+    except Exception:
+        log.warning(
+            "governance enforcement unavailable for non-agent dispatch %r",
+            tool,
+            exc_info=True,
+        )
+        _record_denial(
+            tool,
+            origin,
+            goal_id,
+            "policy_unavailable",
+            "governance enforcement unavailable (failed closed)",
+            compliance_profiles=None,
+        )
+        return (
+            "ERROR: governance enforcement was unavailable; dispatch refused "
+            "under the fail-closed policy"
+        )
+    compliance_profiles = verdict.compliance_profiles
+    if verdict.decision is Decision.DENY:
+        _record_denial(
+            tool,
+            origin,
+            goal_id,
+            verdict.rule,
+            verdict.reason,
+            compliance_profiles=compliance_profiles,
+        )
+        return f"ERROR: DENIED by org policy ({verdict.rule}): {verdict.reason}"
+    if verdict.decision is Decision.REQUIRE_HUMAN:
+        # A flow node runs unattended by construction; there is nobody to ask.
+        # Refusing is the only honest outcome -- silently downgrading a
+        # require-human action to auto-run is the failure this gate prevents.
+        _record_denial(
+            tool,
+            origin,
+            goal_id,
+            verdict.rule,
+            "requires human approval; a flow node runs unattended",
+            compliance_profiles=compliance_profiles,
+        )
+        return (
+            f"ERROR: BLOCKED by org policy ({verdict.rule}): this action "
+            "requires human sign-off and cannot run unattended in a flow. "
+            "Route it through an agent node or an approval step."
+        )
 
     # 4. Record the dispatch on the signed chain. This is what makes the
     #    attestation's policy_envelope claim falsifiable for flow actions.
-    from .audit import EventKind, audit_event
+    from .audit import (
+        TOOL_CALL_COMMITMENT_ALGORITHM,
+        EventKind,
+        audit_event,
+        tool_call_commitment,
+    )
     from .regulatory_compiler import checked_tags
 
-    audit_event(
+    resolved_call_id = call_id or secrets.token_hex(12)
+    try:
+        commitment = tool_call_commitment(
+            call_id=resolved_call_id,
+        )
+    except ValueError:
+        return "ERROR: invalid tool-call evidence identifier; dispatch refused"
+    written = audit_event(
         EventKind.TOOL_CALL, agent=f"{origin}:action", goal_id=goal_id,
         name=tool, origin=origin, principal=principal,
+        call_id=resolved_call_id,
+        call_commitment=commitment,
+        call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
         input_summary=_audit_summary(params),
-        **checked_tags(tool),
+        **checked_tags(tool, keys=compliance_profiles),
     )
+    if not written:
+        return (
+            "ERROR: dispatch refused because its required audit evidence "
+            "could not be written"
+        )
     return None
 
 
 def _record_denial(tool: str, origin: str, goal_id: int | None,
-                   rule: str, reason: str) -> None:
+                   rule: str, reason: str, *,
+                   compliance_profiles: object = _PROFILE_KEYS_UNSET) -> None:
     from .audit import EventKind, audit_event
     from .regulatory_compiler import audit_tags
 
+    obligation_tags = (
+        audit_tags(tool, rule)
+        if compliance_profiles is _PROFILE_KEYS_UNSET
+        else audit_tags(tool, rule, keys=compliance_profiles)
+    )
     audit_event(
         EventKind.GOVERNANCE_DENIED, agent=f"{origin}:action", goal_id=goal_id,
         tool=tool, origin=origin, rule=rule, reason=reason,
-        **audit_tags(tool, rule),
+        **obligation_tags,
     )
 
 
@@ -165,7 +224,8 @@ def gate_summary() -> dict[str, list[str]]:
             "shield scan of the tool name and rendered params",
             "org governance policy (deny)",
             "org governance policy (require-human -> refused, not downgraded)",
-            "signed audit row for both dispatch and denial",
+            "required audit row before every allowed dispatch (signed when "
+            "audit signing is enabled or a compliance floor requires it)",
         ],
         "not_enforced_needs_an_agent": [
             "per-agent capability attenuation",

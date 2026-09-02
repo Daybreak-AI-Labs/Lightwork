@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from maverick.capability import Capability
 from maverick.grpc_api import server as grpc_server
-from maverick.grpc_api.service import EventDTO, GoalStatusDTO
+from maverick.grpc_api.service import EventDTO, GoalService, GoalStatusDTO
 
 
 class _Codes:
@@ -185,6 +185,7 @@ def test_per_agent_token_binds_owner_and_execution_identity(monkeypatch):
 
     calls = {name: kwargs for name, _args, kwargs in svc.calls}
     assert calls["start_goal"]["owner"] == "agent:alice"
+    assert calls["start_goal"]["capability"].principal == "agent:alice"
     assert calls["start_goal"]["channel"] == "grpc"
     assert calls["start_goal"]["user_id"] == "alice"
     assert calls["start_goal"]["max_dollars"] == 2.0
@@ -192,7 +193,8 @@ def test_per_agent_token_binds_owner_and_execution_identity(monkeypatch):
     assert calls["stream_episode"]["expected_owner"] == "agent:alice"
     assert calls["cancel"]["expected_owner"] == "agent:alice"
     assert calls["status"]["expected_owner"] == "agent:alice"
-    assert calls["run_goal"]["expected_owner"] == "agent:alice"
+    assert calls["run_goal"]["expected_execution_principal"] == "agent:alice"
+    assert calls["run_goal"]["capability"].principal == "agent:alice"
     assert calls["run_goal"]["channel"] == "grpc"
     assert calls["run_goal"]["user_id"] == "alice"
     # A caller may voluntarily request a stricter budget than the registry cap.
@@ -294,6 +296,142 @@ def test_run_goal_intersects_rpc_capability_with_local_policy(monkeypatch):
     assert cap.max_risk == "medium"
     assert cap.allow_paths == frozenset({"/safe/*"})
     assert cap.allow_hosts == frozenset({"good.example"})
+
+
+@pytest.mark.parametrize(
+    ("wire_principal", "found"),
+    [
+        ("agent:acme.coder", True),
+        ("agent:acme.researcher", False),
+    ],
+)
+def test_shared_operator_fleet_dispatch_preserves_exact_bound_agent(
+    monkeypatch,
+    wire_principal,
+    found,
+):
+    """The shared worker token keeps an agreed opaque agent identity.
+
+    This crosses the protobuf servicer and real GoalService binding/claim seam:
+    the human resource owner remains visible, the exact pre-bound fleet agent
+    can execute, and a different agent cannot adopt the row.
+    """
+    monkeypatch.setattr(grpc_server, "_grpc_code", lambda: _Codes)
+    monkeypatch.setattr(grpc_server, "_trust_capability", lambda *_args: None)
+    import maverick.capability as capability_mod
+    import maverick.queue_dispatcher as queue_dispatcher
+
+    policy_principals = []
+
+    def _local_policy(**kwargs):
+        policy_principals.append(kwargs["principal"])
+        return Capability(
+            principal=kwargs["principal"],
+            deny_tools=frozenset({"shell"}),
+            max_risk="medium",
+        )
+
+    monkeypatch.setattr(capability_mod, "capability_enforced", lambda: True)
+    monkeypatch.setattr(capability_mod, "capability_from_config", _local_policy)
+    monkeypatch.setattr(queue_dispatcher, "_queue_signing_key", lambda: None)
+
+    goal = SimpleNamespace(
+        id=7,
+        status="pending",
+        result=None,
+        owner="user:dana",
+        execution_principal="agent:acme.coder",
+    )
+    dispatches = []
+
+    class _World:
+        def get_goal(self, goal_id):
+            return goal if goal_id == goal.id else None
+
+        def bind_goal_execution_principal(self, goal_id, principal):
+            if goal_id != goal.id or (
+                goal.execution_principal
+                and goal.execution_principal != principal
+            ):
+                return False
+            goal.execution_principal = principal
+            return True
+
+        def claim_goal_for_run(self, goal_id, *, expected_owner=None):
+            if (
+                goal_id != goal.id
+                or goal.status != "pending"
+                or (expected_owner is not None and goal.owner != expected_owner)
+            ):
+                return False
+            goal.status = "active"
+            return True
+
+        def close(self):
+            return None
+
+    def _dispatch(goal_id, **kwargs):
+        dispatches.append((goal_id, kwargs["capability"].principal))
+        goal.status = "done"
+        goal.result = "finished"
+
+    service = GoalService(world_factory=_World, dispatch=_dispatch)
+    servicer = grpc_server._servicer(
+        service,
+        _Pb2,
+        _Pb2Grpc,
+        bearer_token="operator-secret",
+    )
+    supplied = queue_dispatcher._serialize_capability(
+        Capability(principal=wire_principal),
+    )
+    request = SimpleNamespace(
+        goal_id=7,
+        max_dollars=0,
+        max_wall_seconds=0,
+        channel="fleet",
+        user_id=wire_principal,
+        max_depth=0,
+        capability_json=json.dumps(supplied),
+    )
+
+    response = servicer.RunGoal(
+        request,
+        _Context((("authorization", "Bearer operator-secret"),)),
+    )
+
+    assert response.found is found
+    assert policy_principals == [wire_principal]
+    assert goal.owner == "user:dana"
+    assert goal.execution_principal == "agent:acme.coder"
+    if found:
+        assert response.status == "done"
+        assert dispatches == [(7, "agent:acme.coder")]
+    else:
+        assert goal.status == "pending"
+        assert dispatches == []
+
+
+def test_authenticated_agent_overrides_matching_wire_principal(monkeypatch):
+    import maverick.capability as capability_mod
+
+    seen = []
+    monkeypatch.setattr(capability_mod, "capability_enforced", lambda: True)
+
+    def _local_policy(**kwargs):
+        seen.append(kwargs["principal"])
+        return Capability(principal=kwargs["principal"])
+
+    monkeypatch.setattr(capability_mod, "capability_from_config", _local_policy)
+
+    capability = grpc_server._rpc_capability(
+        Capability(principal="agent:bob"),
+        user_id="agent:bob",
+        principal="agent:alice",
+    )
+
+    assert seen == ["agent:alice"]
+    assert capability.principal == "agent:alice"
 
 
 def test_run_goal_omitted_capability_still_installs_local_policy(monkeypatch):

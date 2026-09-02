@@ -411,7 +411,7 @@ def load_trust_state() -> tuple[bool, dict[str, TrustedAgent]]:
     trust_cfg = cfg.get("agent_trust")
     if trust_cfg is not None and not isinstance(trust_cfg, dict):
         raise AgentTrustError("agent_trust config section must be a table")
-    return agent_trust_enforced(cfg), load_registry(cfg)
+    return agent_trust_enforced(cfg), load_registry(cfg, strict=True)
 
 
 def _agent_from_entry(entry: dict) -> TrustedAgent | None:
@@ -531,28 +531,49 @@ def _agent_from_entry(entry: dict) -> TrustedAgent | None:
     )
 
 
-def load_registry(cfg: dict | None = None) -> dict[str, TrustedAgent]:
-    """Parse ``[agent_trust] agents`` into ``{id: TrustedAgent}``.
-
-    Forgiving like ``federation.load_peers``: junk entries are skipped with a
-    warning, duplicates keep the first occurrence, and nothing here ever raises
-    — an unreadable config yields an empty registry (which, when the plane is
-    engaged, denies every external agent: the fail-closed direction).
-    """
+def _registry_config(cfg: dict | None, *, strict: bool) -> dict | None:
+    """Validate the registry's config authority for strict/transport callers."""
     if cfg is None:
         try:
-            from .config import load_config
+            from .config import config_source_errors, load_config
             cfg = load_config() or {}
-        except Exception:
+            if config_source_errors():
+                raise AgentTrustError("agent trust config source is unreadable")
+        except Exception as exc:
+            if strict:
+                raise AgentTrustError(
+                    "agent trust registry authority is unavailable"
+                ) from exc
             log.warning("agent_trust: config unreadable; registry is empty")
-            return {}
+            return None
     if not isinstance(cfg, dict):
+        if strict:
+            raise AgentTrustError("agent trust registry authority is unavailable")
         log.warning("agent_trust: config root must be a table; registry is empty")
-        return {}
+        return None
     trust_cfg = cfg.get("agent_trust")
     if trust_cfg is not None and not isinstance(trust_cfg, dict):
+        if strict:
+            raise AgentTrustError("agent trust registry authority is unavailable")
         log.warning("agent_trust: config section must be a table; registry is empty")
+        return None
+    return cfg
+
+
+def load_registry(
+    cfg: dict | None = None, *, strict: bool = False,
+) -> dict[str, TrustedAgent]:
+    """Parse ``[agent_trust] agents`` into ``{id: TrustedAgent}``.
+
+    The default remains forgiving for transport authorization: junk entries are
+    skipped and an unreadable authority becomes an empty, fail-closed registry.
+    Operator roster callers pass ``strict=True`` so an authority outage cannot
+    masquerade as a healthy deployment with zero external agents.
+    """
+    cfg = _registry_config(cfg, strict=strict)
+    if cfg is None:
         return {}
+    trust_cfg = cfg.get("agent_trust")
     raw = (trust_cfg or {}).get("agents")
     out: dict[str, TrustedAgent] = {}
     if isinstance(raw, list):
@@ -564,6 +585,8 @@ def load_registry(cfg: dict | None = None) -> dict[str, TrustedAgent]:
             if agent is not None and agent.id not in out:
                 out[agent.id] = agent
     elif raw is not None:
+        if strict:
+            raise AgentTrustError("agent trust registry authority is unavailable")
         log.warning("[agent_trust] agents must be a list; ignoring")
     # Merge the CLI-managed registry overlay (agent_trust.json, client-scoped):
     # managed entries add to / override the hand-edited config ones, so
@@ -574,17 +597,30 @@ def load_registry(cfg: dict | None = None) -> dict[str, TrustedAgent]:
         # The overlay may contain a revocation or stricter replacement for a
         # TOML entry.  Continuing with TOML after losing that overlay would
         # silently re-trust the agent, so invalidate the whole snapshot.
+        if strict:
+            raise AgentTrustError(
+                "agent trust registry authority is unavailable"
+            ) from e
         log.warning("agent_trust: %s; registry is empty (fail-closed)", e)
         return {}
     for item in managed:
         agent = _agent_from_entry(item)
         if agent is None:
+            if strict:
+                raise AgentTrustError(
+                    "agent trust registry authority is unavailable"
+                )
             log.warning("agent_trust: malformed managed entry; registry is "
                         "empty (fail-closed)")
             return {}
         if agent.id in out or len(out) < _MAX_AGENTS:
             out[agent.id] = agent
     return out
+
+
+def load_registry_strict(cfg: dict | None = None) -> dict[str, TrustedAgent]:
+    """Operator-authority registry read that raises on dependency failure."""
+    return load_registry(cfg, strict=True)
 
 
 # -- CLI-managed registry overlay (JSON; client-scoped via the tenant floor) --
@@ -654,6 +690,150 @@ def _save_managed(entries: list[dict]) -> None:
     ensure_private_directory(p.parent)
     body = json.dumps(entries[:_MAX_AGENTS], indent=2, sort_keys=True)
     atomic_write_text(p, body, mode=0o600)
+
+
+def _entry_from_agent(agent: TrustedAgent) -> dict[str, Any]:
+    """Serialize an effective entry into managed-overlay JSON values."""
+    out: dict[str, Any] = {}
+    for name in agent.__dataclass_fields__:
+        value = getattr(agent, name)
+        out[name] = sorted(value) if isinstance(value, frozenset) else value
+    return out
+
+
+def attenuate_agent(
+    agent_id: str,
+    *,
+    deny_tools: object = (),
+    max_risk: str | None = None,
+    max_dollars: float | None = None,
+    max_wall_seconds: float | None = None,
+) -> tuple[TrustedAgent, bool]:
+    """Atomically narrow one effective trust entry.
+
+    The effective read, union/tightening calculation, managed-overlay write and
+    post-write verification all occur under the managed registry's thread and
+    cross-process locks. Concurrent deny additions therefore union instead of
+    overwriting one another. Empty, widening, and unchanged requests raise
+    before :func:`_save_managed`, so no cosmetic write can look like a policy
+    change. Returns ``(persisted_agent, created_overlay)``.
+    """
+    if not valid_agent_id(agent_id):
+        raise AgentTrustError("invalid agent id")
+    if isinstance(deny_tools, str):
+        raw_deny: object = [deny_tools]
+    else:
+        raw_deny = deny_tools
+    if not isinstance(raw_deny, (list, tuple, set, frozenset)):
+        raise AgentTrustError("deny_tools must be a collection of names")
+    extra_deny: set[str] = set()
+    for value in raw_deny:
+        if not isinstance(value, str) or not value.strip():
+            raise AgentTrustError("deny_tools contains an invalid name")
+        extra_deny.add(value.strip())
+    if (
+        not extra_deny
+        and max_risk is None
+        and max_dollars is None
+        and max_wall_seconds is None
+    ):
+        raise AgentTrustError("attenuation requires at least one tighter constraint")
+    if max_risk is not None and max_risk not in _RISK_LEVELS:
+        raise AgentTrustError("max_risk must be one of low, medium, high")
+
+    def _cap(current: float | None, requested: float | None, label: str) -> float | None:
+        if requested is None:
+            return current
+        parsed = _positive_float(requested)
+        if parsed is None:
+            raise AgentTrustError(f"{label} must be finite and positive")
+        if current is not None and parsed > current:
+            raise AgentTrustError(
+                f"{label} {parsed} would widen the current ceiling {current}"
+            )
+        return parsed
+
+    with _managed_locked():
+        registry = load_registry(strict=True)
+        agent = registry.get(agent_id)
+        if agent is None:
+            raise AgentTrustError(f"agent:{agent_id} is not in the trust registry")
+        entries = _load_managed()
+        managed = next(
+            (dict(entry) for entry in entries
+             if str(entry.get("id") or "") == agent_id),
+            None,
+        )
+        created_overlay = managed is None
+        entry = managed if managed is not None else _entry_from_agent(agent)
+
+        new_deny = frozenset(agent.deny_tools) | frozenset(extra_deny)
+        new_risk = agent.max_risk
+        if max_risk is not None:
+            current_rank = (
+                _RISK_LEVELS.index(agent.max_risk)
+                if agent.max_risk in _RISK_LEVELS else len(_RISK_LEVELS)
+            )
+            if _RISK_LEVELS.index(max_risk) > current_rank:
+                raise AgentTrustError(
+                    f"max_risk {max_risk} would widen {agent.max_risk}"
+                )
+            new_risk = max_risk
+        new_dollars = _cap(agent.max_dollars, max_dollars, "max_dollars")
+        new_wall = _cap(
+            agent.max_wall_seconds, max_wall_seconds, "max_wall_seconds",
+        )
+        if (
+            new_deny == agent.deny_tools
+            and new_risk == agent.max_risk
+            and new_dollars == agent.max_dollars
+            and new_wall == agent.max_wall_seconds
+        ):
+            raise AgentTrustError(
+                "attenuation request does not tighten the current ceiling"
+            )
+
+        entry.update({
+            "deny_tools": sorted(new_deny),
+            "max_risk": new_risk,
+            "max_dollars": new_dollars,
+            "max_wall_seconds": new_wall,
+        })
+        clean = {
+            key: (sorted(value) if isinstance(value, frozenset) else value)
+            for key, value in entry.items()
+            if value not in (None, "", [], {})
+        }
+        clean["id"] = agent_id
+        candidate = _agent_from_entry(clean)
+        if candidate is None:
+            raise AgentTrustError("attenuation produced an invalid trust entry")
+        kept = [
+            existing for existing in entries
+            if str(existing.get("id") or "") != agent_id
+        ]
+        if len(kept) >= _MAX_AGENTS:
+            raise AgentTrustError("managed registry is at capacity")
+        kept.append(clean)
+        _save_managed(kept)
+
+        persisted_entry = next(
+            (item for item in _load_managed()
+             if str(item.get("id") or "") == agent_id),
+            None,
+        )
+        persisted = (
+            _agent_from_entry(persisted_entry)
+            if isinstance(persisted_entry, dict) else None
+        )
+        if persisted is None or (
+            persisted.deny_tools != new_deny
+            or persisted.max_risk != new_risk
+            or persisted.max_dollars != new_dollars
+            or persisted.max_wall_seconds != new_wall
+        ):
+            raise AgentTrustError("attenuated trust entry did not persist")
+        return persisted, created_overlay
 
 
 def put_agent(entry: dict) -> TrustedAgent:
@@ -1070,8 +1250,10 @@ __all__ = [
     "TrustedAgent",
     "TrustDecision",
     "agent_trust_enforced",
+    "attenuate_agent",
     "load_trust_state",
     "load_registry",
+    "load_registry_strict",
     "managed_path",
     "put_agent",
     "remove_agent",

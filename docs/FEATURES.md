@@ -1583,28 +1583,42 @@ here.
   portable artifact for a single signed audit row ("`wire_transfer` was denied
   under `deny_actions` for `agent:finance-1` at T", "`read_file` ran") that an
   auditor, regulator or a customer's customer verifies offline with a public key
-  obtained out of band. The receipt embeds the row, every row that follows it
-  up to a chain tip, and — with `--checkpoint-dir` — the signed checkpoint that
-  committed that tip. Verification re-derives all of it: the envelope
+  obtained out of band. An executed/failed tool claim is available only when a
+  signed call and terminal-result row carry the same recomputed commitment; a
+  call row on its own proves only a recorded dispatch attempt. The call row and
+  its input summary are omitted by default and require the explicit bounded
+  `--include-execution-pair` disclosure. The receipt always embeds the claim
+  row; `--include-chain` additionally embeds every following row up to the tip,
+  while the default signed-only receipt reports chain linkage indeterminate
+  instead of implying that omitted evidence was checked. With
+  `--checkpoint-dir`, the receipt can also carry the signed checkpoint that
+  committed that tip. Verification re-derives all included evidence: the envelope
   signature, the row's own hash and signature, the **claim recomputed from the
   row** (a stated claim that drifts from the row FAILS, however validly it was
   re-signed), the hash links to the tip, and the checkpoint's agreement with
   it. Three depths that are not synonyms: *signed* (a genuine row), *chained*
   (provably linked to an issuer-committed tip), *anchored* (that commitment
-  matched a digest the verifier brought from OUTSIDE the receipt —
-  `--anchor-digest` or the checkpoint file via `--checkpoint-dir` — the only
-  depth at which history could not have been quietly re-committed afterwards).
-  The minter refuses a broken chain, never mutates the audit files, and stamps
+  matched a digest the verifier retained OUTSIDE the receipt and supplies with
+  `--anchor-digest` — the only depth at which history could not have been
+  quietly re-committed afterwards). `--checkpoint-dir` checks byte agreement
+  with the issuer's mutable checkpoint directory, but does not independently
+  anchor history. The minter refuses a broken chain, never mutates the audit
+  files, publishes through a byte-exact exclusive two-phase protocol, and stamps
   `issuer.key_custody` so a co-located key is reported as integrity rather than
-  tamper-evidence. Point-in-time by design: a later lawful erasure re-signs the
-  day, and the verifier says so.
-- **Agent Control Plane — one console over every agent the runtime enforces**
+  tamper-evidence. The verifier accepts role-scoped trust inputs for the receipt
+  envelope, historical audit rows, checkpoints, and the anchor ledger without
+  claiming that a deployment uses physically distinct keys. Envelope and
+  checkpoint key windows are evaluated at verification time; historical row and
+  anchor-ledger windows use issuer-signed event timestamps, not an independent
+  time authority, and the report discloses that limit. Point-in-time by design:
+  a later lawful erasure re-signs the day, and the verifier says so.
+- **Agent Control Plane — one console over currently resolvable principals**
   (`agent_control_plane.py`, dashboard `/agent-control-plane`,
   `maverick control-plane status|list|ledger|suspend|resume|contain|release|
   attenuate|halt|clear-halt`, opt-in `[control_plane] enable` /
-  `MAVERICK_CONTROL_PLANE=1`) — the roster of every principal the deployment
-  governs (native runs by the `user:<id>` capability principal their goals run
-  under; external agents as `agent:<id>` from the trust registry) and one set
+  `MAVERICK_CONTROL_PLANE=1`) — a bounded roster of WorldModel `active` or
+  revoked native principals currently visible in the goal/revocation stores plus
+  enrolled external agents (`agent:<id>`) from the trust registry, and one set
   of operator verbs whose effects are the stores the runtime already consults
   on its next tool call: **suspend/resume** land in the capability revocation
   registry (a native subtree's next tool call is denied; an external agent's
@@ -1613,13 +1627,22 @@ here.
   bring-your-own-agent gateway's, **attenuate** narrows an external agent's
   deny-tools / risk / budget / wall ceiling in the trust registry and refuses
   any change that would widen it, and **halt/clear-halt** arm and disarm the
-  fleet killswitch every kernel checks at its tool boundary. No new
+  local deployment killswitch every kernel checks at its tool boundary. Native
+  goal execution atomically binds an ownerless `Goal.owner` to the exact root
+  capability/runtime principal and refuses a different non-empty owner before
+  status, audit, episode, model, or tool effects. OIDC/SAML subjects remain
+  opaque (including Unicode, spaces, `|`, and `/`) and the dashboard's current
+  control endpoints carry them in request bodies/query values rather than path
+  components; restricted legacy path routes remain for simple ids. No new
   enforcement is added; each verb reports what it *confirmed* landed (a
   revocation that did not persist is a failure, not a success with a
-  footnote), and each is one signed `control_plane_action` audit row carrying
-  the verb, the principal, the actor and the outcome. Reads (roster, status,
-  the principal's forensic ledger off the signed chain) work on every
-  deployment; the verbs refuse while the plane is off.
+  footnote). Each verb also attempts a `control_plane_action` audit row carrying
+  the verb, the principal, the actor and the outcome; the response reports
+  whether audit emission succeeded instead of claiming that enforced state and
+  durable audit evidence are the same thing. Bounded roster, status, and
+  principal-timeline reads remain available while the verb gate is off, expose
+  signing/completeness posture instead of assuming a signed chain, and fail
+  closed when a required authority is unreadable.
 - **Memory Guard — governed reads/writes (OWASP ASI06)** (`memory_guard.py`,
   opt-in `[memory_guard] enable` / `MAVERICK_MEMORY_GUARD`) — the screen
   between an agent and its memory store. Every fact write is stamped with
@@ -3429,10 +3452,11 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   minimum necessary — PHI never leaves through an ungoverned channel, as an
   attenuation no ACL or role can widen). Activation is `[compliance] profiles`,
   the switch the compliance profiles already use, with a wizard step. Two
-  things a document cannot do: **proof the gate was live** — every denial the
-  compiled rules produce is audited with `obligation_id`/`regulation`/`article`,
-  and every call that ran carries `obligations_checked`, so a trust receipt for
-  that row cites the regulation — and **anti-vacuity**: `verify` proves each
+  things a document cannot do: **evidence the gate decision** — emitted denial
+  rows retain `obligation_id`/`regulation`/`article`, and every admitted dispatch
+  has mandatory `obligations_checked` attempt evidence. A trust receipt may cite
+  that attempt; an executed/failed claim additionally requires its paired
+  terminal result. **Anti-vacuity**: `verify` checks that each
   active obligation bites (every bound tool is a classified tool, the compiled
   policy denies or pauses it, a floor catches a real tool, an attenuation
   narrows a capability); the CI gate fails on a stale tool name or a silent

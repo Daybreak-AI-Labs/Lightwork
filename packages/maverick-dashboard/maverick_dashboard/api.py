@@ -13,8 +13,11 @@ import hmac
 import json
 import logging
 import os
+import secrets
+import stat
 import threading
 import time
+from typing import NoReturn
 
 from fastapi import (
     APIRouter,
@@ -224,29 +227,47 @@ _IDEMPOTENCY_CHANNEL = "idempotency:api:goals"
 
 
 def _shared_halt_backend() -> bool:
-    """Whether the cluster-wide (shared-store) halt is in play. Only on a shared
-    backend (Postgres); on single-host SQLite the local HALT file is the whole
-    mechanism and the killswitch never consults the shared row, so the dashboard
-    leaves it untouched (keeps single-host behavior unchanged)."""
+    """Resolve whether the shared-store halt is authoritative.
+
+    This is a security decision, so an unreadable backend configuration must
+    propagate to callers rather than silently becoming the less-privileged
+    local path.
+    """
+
+    from maverick.config import config_source_errors, load_config
+    from maverick.world_model_backends import is_postgres_configured
+
+    load_config()
+    if config_source_errors():
+        raise RuntimeError("halt backend configuration is unavailable")
+    return bool(is_postgres_configured())
+
+
+def _halt_backend_or_503() -> bool:
     try:
-        from maverick.world_model_backends import is_postgres_configured
+        return _shared_halt_backend()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="halt authority is unavailable",
+        ) from exc
 
-        return bool(is_postgres_configured())
-    except Exception:
-        return False
 
-
-def _require_halt_permission(request: Request) -> None:
+def _require_halt_permission(request: Request) -> bool:
     """Gate dashboard halt toggles at the correct blast radius.
 
     In local/SQLite mode the halt is process-local and remains an operator action.
     In shared Postgres mode the halt row is fleet-wide and untenanted, so toggling
     it is a global control-plane action reserved for dashboard admins.
     """
-    if _shared_halt_backend():
+    shared = _halt_backend_or_503()
+    if shared:
         require_global_permission(request, "admin")
     else:
-        require_permission(request, "operate")
+        # The local HALT file is tenant=None and stops every tenant in this
+        # process. A tenant-local role must not gain deployment-wide authority.
+        require_global_permission(request, "operate")
+    return shared
 
 
 _PERF_SLA_CACHE_TTL_SECONDS = 60.0
@@ -8146,143 +8167,792 @@ async def security_register() -> dict:
 # ---------- council pass: control surface ----------
 
 
-@router.get("/halt")
-async def halt_status() -> dict:
-    """Is the killswitch armed?
+_HALT_DETAIL_MAX_BYTES = 8 * 1024
+_HALT_REASON_MAX_CHARS = 200
+_HALT_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_HALT_AUDIT_HEADER = "X-Lightwork-Audit-Written"
 
-    Council round-2 capabilities-seat fix: round-1 only surfaced the
-    file path. Now also returns the reason string (from the file body
-    when the halt was set via POST) and the file's mtime as ``armed_at``
-    so the UI can show "halted 3m ago for: <reason>".
+
+class _ConcurrentHalt(RuntimeError):
+    """A newer local or shared HALT superseded an in-flight clear."""
+
+
+def _bounded_halt_reason(reason: object, *, fallback: str) -> str:
+    value = reason.strip() if isinstance(reason, str) else ""
+    return (value or fallback)[:_HALT_REASON_MAX_CHARS]
+
+
+def _publish_local_halt(
+    path,
+    *,
+    actor: str,
+    reason: str,
+    scope: str,
+    source: str,
+) -> str:
+    """Publish one private local stop without taking over a shared parent."""
+
+    from maverick.file_lock import (
+        atomic_write_text,
+        cross_process_lock,
+        prepare_private_directory,
+    )
+    from maverick.killswitch import (
+        _file_halt_active,
+        _halt_authority_lock_path,
+        _halt_file_generation,
+    )
+
+    # ``MAVERICK_HALT_FILE`` is caller-selected.  Tightening an existing
+    # parent can revoke unrelated services' access, so only create a missing
+    # dedicated directory or require the existing parent to already be private.
+    prepare_private_directory(path.parent)
+    generation = secrets.token_urlsafe(24)
+    with cross_process_lock(_halt_authority_lock_path(path), strict=True):
+        local_detail = json.dumps(
+            {
+                "actor": actor,
+                "created_at": time.time(),
+                "generation": generation,
+                "reason": _bounded_halt_reason(
+                    reason,
+                    fallback="manual via dashboard",
+                ),
+                "scope": scope,
+                "source": source,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        atomic_write_text(path, local_detail + "\n", mode=0o600)
+        if (
+            _halt_file_generation(path) is None
+            or not _file_halt_active(min_interval=0.0, fail_closed=True)
+        ):
+            raise RuntimeError("local HALT publication could not be verified")
+    return generation
+
+
+def _ensure_local_halt_fail_safe(
+    path,
+    *,
+    actor: str,
+    reason: str,
+) -> str:
+    """Preserve a concurrent local stop or publish compensation if absent."""
+
+    from maverick.file_lock import cross_process_lock, prepare_private_directory
+    from maverick.killswitch import (
+        _halt_authority_lock_path,
+        _halt_file_generation,
+    )
+
+    prepare_private_directory(path.parent)
+    with cross_process_lock(_halt_authority_lock_path(path), strict=True):
+        if _halt_file_generation(path) is not None:
+            return "retained"
+        _publish_local_halt(
+            path,
+            actor=actor,
+            reason=reason,
+            scope="local-compensation",
+            source="dashboard-clear-compensation",
+        )
+        return "re-armed"
+
+
+def _halt_control_audit(
+    *,
+    operation: str,
+    actor: str,
+    scope: str,
+    result: str,
+    reason: str,
+) -> bool:
+    """Record one deployment-global, bounded HALT control-plane result.
+
+    The shared audit helper propagates a configured ``AuditRefused`` posture
+    and returns ``False`` for an ordinary fail-soft outage. Callers expose the
+    latter in a response header and translate the former after describing the
+    already-observed HALT state.
     """
-    from maverick.killswitch import _halt_file_path, is_active
 
-    p = _halt_file_path()
-    out: dict = {
-        "active": is_active(),
-        "file": str(p),
-        "file_present": p.exists(),
-        "reason": None,
-        "armed_at": None,
+    from maverick.audit import EventKind, audit_event
+
+    bounded_reason = _bounded_halt_reason(
+        reason,
+        fallback="operator requested HALT state change",
+    )
+    return audit_event(
+        EventKind.CONTROL_PLANE_ACTION,
+        agent="control_plane",
+        _global=True,
+        verb=operation,
+        operation=operation,
+        principal="*",
+        actor=actor,
+        scope=scope,
+        ok=result == "succeeded",
+        result=result,
+        reason=bounded_reason,
+        detail=bounded_reason,
+    )
+
+
+def _halt_audit_headers(
+    *,
+    operation: str,
+    actor: str,
+    scope: str,
+    result: str,
+    reason: str,
+    refusal_detail: str,
+) -> dict[str, str]:
+    from maverick.audit import AuditRefused
+
+    try:
+        written = _halt_control_audit(
+            operation=operation,
+            actor=actor,
+            scope=scope,
+            result=result,
+            reason=reason,
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail=refusal_detail) from exc
+    return {_HALT_AUDIT_HEADER: str(bool(written)).lower()}
+
+
+def _halt_failure(
+    *,
+    operation: str,
+    actor: str,
+    scope: str,
+    result: str,
+    reason: str,
+    detail: str,
+    refusal_detail: str,
+    cause: BaseException,
+    status_code: int = 503,
+) -> NoReturn:
+    headers = _halt_audit_headers(
+        operation=operation,
+        actor=actor,
+        scope=scope,
+        result=result,
+        reason=reason,
+        refusal_detail=refusal_detail,
+    )
+    raise HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers=headers,
+    ) from cause
+
+
+def _halt_path_is_alias(info) -> bool:
+    return bool(
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & _HALT_REPARSE_ATTRIBUTE
+    )
+
+
+def _halt_file_identity(info) -> tuple[int, int]:
+    return int(info.st_dev), int(info.st_ino)
+
+
+def _stable_local_halt_read(path) -> tuple[bytes | None, object | None]:
+    """Read bounded HALT detail from the regular file verified by its handle.
+
+    ``None`` bytes with a stat result means the file is deliberately too large
+    to disclose.  ``(None, None)`` is a stable absent file.  Aliases, hard links
+    and identity-changing reads fail closed.
+    """
+
+    last_error: Exception | None = None
+    for _attempt in range(3):
+        try:
+            before = path.lstat()
+        except FileNotFoundError:
+            return None, None
+        except OSError as exc:
+            last_error = exc
+            continue
+        if (
+            _halt_path_is_alias(before)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_ino == 0
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            )
+        if before.st_size > _HALT_DETAIL_MAX_BYTES:
+            return None, before
+        try:
+            with open(path, "rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or _halt_file_identity(before) != _halt_file_identity(opened)
+                ):
+                    continue
+                raw = stream.read(_HALT_DETAIL_MAX_BYTES + 1)
+                after_handle = os.fstat(stream.fileno())
+        except OSError as exc:
+            last_error = exc
+            continue
+        if len(raw) > _HALT_DETAIL_MAX_BYTES:
+            return None, after_handle
+        try:
+            after_path = path.lstat()
+        except OSError as exc:
+            last_error = exc
+            continue
+        stable = (
+            not _halt_path_is_alias(after_path)
+            and stat.S_ISREG(after_path.st_mode)
+            and after_path.st_nlink == 1
+            and _halt_file_identity(before) == _halt_file_identity(after_handle)
+            and _halt_file_identity(after_handle) == _halt_file_identity(after_path)
+            and before.st_size == after_handle.st_size == after_path.st_size == len(raw)
+            and before.st_mtime_ns
+            == after_handle.st_mtime_ns
+            == after_path.st_mtime_ns
+        )
+        if stable:
+            return raw, after_handle
+    raise HTTPException(
+        status_code=503,
+        detail="halt authority is unavailable",
+    ) from last_error
+
+
+def _local_halt_details(path) -> dict:
+    """Read bounded local HALT metadata without returning its raw payload."""
+
+    raw, info = _stable_local_halt_read(path)
+    if info is None:
+        return {"file_present": False, "reason": None, "armed_at": None,
+                "armed_by": None}
+
+    reason = None
+    armed_by = None
+    if raw is not None:
+        body = raw.decode("utf-8", errors="replace").strip()
+        if body:
+            try:
+                parsed = json.loads(body)
+            except (TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                value = parsed.get("reason")
+                reason = str(value)[:500] if value else None
+                actor = parsed.get("actor") or parsed.get("source")
+                armed_by = str(actor)[:256] if actor else None
+            else:
+                reason = body[:500]
+    return {
+        "file_present": True,
+        "reason": reason,
+        "armed_at": info.st_mtime,
+        "armed_by": armed_by,
     }
-    if p.exists():
+
+
+@router.get("/halt")
+async def halt_status(request: Request) -> dict:
+    """Return a verified halt state; sensitive incident detail is audit-only."""
+
+    require_global_permission(request, "view")
+    shared_backend = _halt_backend_or_503()
+
+    from maverick.killswitch import Halted, _halt_file_path, check
+
+    try:
+        check(force_refresh=True, fail_closed=True)
+    except Halted as exc:
+        if exc.source in {"file-error", "shared-error"}:
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            ) from exc
+        active = True
+    else:
+        active = False
+
+    path = _halt_file_path()
+    local = _local_halt_details(path)
+    shared_state = None
+    if shared_backend:
         try:
-            body = p.read_text(errors="replace").strip()
-            out["reason"] = body or None
-        except OSError:
-            pass
-        try:
-            out["armed_at"] = p.stat().st_mtime
-        except OSError:
-            pass
-    # Reflect the cluster-wide halt too: on a shared backend it may be armed by
-    # another replica with no local file here. Postgres only; best-effort.
-    shared = None
-    if _shared_halt_backend():
-        try:
-            shared = _world().active_halt()
-        except Exception:
-            shared = None
-    if shared:
-        out["active"] = True
-        out["cluster_halt"] = True
-        out["reason"] = out["reason"] or (shared.get("reason") or None)
-        out["armed_at"] = out["armed_at"] or shared.get("armed_at")
-        out["armed_by"] = shared.get("armed_by") or None
+            shared_state = _world().active_halt()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            ) from exc
+        if shared_state is not None and not isinstance(shared_state, dict):
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            )
+        active = bool(active or shared_state)
+
+    out: dict = {
+        "active": active,
+        "scope": "cluster" if shared_backend else "local",
+    }
+    if shared_backend:
+        out["cluster_halt"] = bool(shared_state)
+
+    if has_global_permission(request, "audit"):
+        if shared_state:
+            # An old local file can survive a prior partial clear.  While the
+            # shared halt is active, its row is the cluster authority and must
+            # own the incident attribution instead of being shadowed by stale
+            # local metadata.
+            shared_reason = shared_state.get("reason")
+            shared_actor = shared_state.get("armed_by")
+            reason = str(shared_reason)[:500] if shared_reason else None
+            armed_at = shared_state.get("armed_at")
+            armed_by = str(shared_actor)[:256] if shared_actor else None
+        else:
+            reason = local["reason"]
+            armed_at = local["armed_at"]
+            armed_by = local["armed_by"]
+        out.update({
+            "file_present": local["file_present"],
+            "reason": reason,
+            "armed_at": armed_at,
+            "armed_by": armed_by,
+        })
+    if has_global_permission(request, "admin"):
+        out["file"] = str(path)
     return out
 
 
 @router.post("/halt", status_code=204)
-async def halt_set(request: Request, payload: HaltIn) -> None:
-    """Arm the killswitch by touching ~/.maverick/HALT.
+async def halt_set(request: Request, payload: HaltIn, response: Response) -> None:
+    """Arm the verified local HALT authority and any configured shared one.
 
-    Honoured by every agent at the next tool-call boundary. Use the
-    DELETE endpoint or ``rm ~/.maverick/HALT`` to clear.
+    The mutation always attempts a deployment-global control-plane audit row.
+    A configured audit refusal is returned after reporting the observed HALT
+    state; an ordinary fail-soft audit outage is exposed by
+    ``X-Lightwork-Audit-Written: false``.
     """
-    _require_halt_permission(request)
+    shared_backend = _require_halt_permission(request)
     from maverick.killswitch import _halt_file_path
 
-    reason = payload.reason or "manual via dashboard"
+    actor = _request_actor(request)
+    scope = "cluster" if shared_backend else "local"
+    reason = _bounded_halt_reason(
+        payload.reason,
+        fallback="manual via dashboard",
+    )
     p = _halt_file_path()
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(reason + "\n")
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"cannot write halt file: {e}") from e
+        _publish_local_halt(
+            p,
+            actor=actor,
+            reason=reason,
+            scope=scope,
+            source="dashboard",
+        )
+    except Exception as exc:
+        _halt_failure(
+            operation="halt",
+            actor=actor,
+            scope=scope,
+            result="failed",
+            reason=reason,
+            detail="halt authority is unavailable",
+            refusal_detail=(
+                "halt was not confirmed and the required control-plane audit "
+                "was refused"
+            ),
+            cause=exc,
+        )
     # Also arm the cluster-wide halt in the shared store so the stop propagates
     # to every replica (the file only halts this one). Only on a shared backend
     # (Postgres): on single-host SQLite the file halt is the whole mechanism and
     # the killswitch doesn't consult the shared row. Best-effort -- a shared-store
     # error keeps the local stop armed but MUST be reported: a 204 would tell
     # the operator that every replica stopped when propagation actually failed.
-    if _shared_halt_backend():
+    if shared_backend:
         try:
-            _world().arm_halt(reason, source="dashboard", armed_by=caller_principal(request) or "")
+            _world().arm_halt(reason, source="dashboard", armed_by=actor)
         except Exception as exc:
             log.warning("cluster-wide halt arm failed (local file halt still set)", exc_info=True)
-            raise HTTPException(
-                status_code=503,
+            _halt_failure(
+                operation="halt",
+                actor=actor,
+                scope=scope,
+                result="partial",
+                reason=reason,
                 detail=(
                     "local halt is armed, but cluster-wide propagation failed; "
                     "other replicas may still be running"
                 ),
-            ) from exc
+                refusal_detail=(
+                    "local halt is armed, cluster propagation failed, and the "
+                    "required control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+    headers = _halt_audit_headers(
+        operation="halt",
+        actor=actor,
+        scope=scope,
+        result="succeeded",
+        reason=reason,
+        refusal_detail=(
+            "halt is armed, but the required control-plane audit was refused"
+        ),
+    )
+    response.headers.update(headers)
 
 
 @router.delete("/halt", status_code=204)
-async def halt_clear(request: Request) -> None:
-    """Clear the killswitch (delete ~/.maverick/HALT)."""
-    _require_halt_permission(request)
-    from maverick.killswitch import _halt_file_path, clear
+async def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
+    request: Request,
+    response: Response,
+) -> None:
+    """Clear the verified local HALT authority and any configured shared one."""
+    shared = _require_halt_permission(request)
+    from maverick import killswitch
+    from maverick.file_lock import cross_process_lock, require_private_directory
+    from maverick.killswitch import (
+        _begin_clear_transition_hold,
+        _end_clear_transition_hold,
+        _halt_authority_lock_path,
+        _halt_file_generation,
+        _halt_file_path,
+    )
 
+    actor = _request_actor(request)
+    scope = "cluster" if shared else "local"
+    reason = "operator requested halt clear"
     p = _halt_file_path()
-    # Clearing expands authority, so validate the local cross-process barrier
-    # first and leave the file/shared stop in place if it is unavailable.
     try:
-        clear()
+        require_private_directory(p.parent)
+        local_before = _halt_file_generation(p)
+        process_before = killswitch._in_process_halt_generation()
     except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="halt remains armed because the local clear barrier failed",
-        ) from exc
+        _halt_failure(
+            operation="clear-halt",
+            actor=actor,
+            scope=scope,
+            result="failed",
+            reason=reason,
+            detail="halt clear was not attempted because its local authority is unavailable",
+            refusal_detail=(
+                "halt clear was not attempted and the required control-plane "
+                "audit was refused"
+            ),
+            cause=exc,
+        )
 
-    shared = _shared_halt_backend()
+    world = None
+    shared_before = None
+    shared_generation = None
     if shared:
+        # Resolve and read the shared authority while the durable local stop is
+        # still present.  A connection/read failure must not begin a clear.
         try:
-            _world().disarm_halt()
+            world = _world()
+            shared_before = world.active_halt()
+            if shared_before is not None and not isinstance(shared_before, dict):
+                raise RuntimeError("invalid shared halt state")
+            if shared_before is not None:
+                shared_generation = shared_before.get("generation")
+                if not isinstance(shared_generation, str):
+                    raise RuntimeError("shared halt generation is unavailable")
         except Exception as exc:
-            log.warning("cluster-wide halt clear failed", exc_info=True)
-            raise HTTPException(
-                status_code=503,
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="failed",
+                reason=reason,
                 detail=(
-                    "cluster-wide halt remains armed; the local halt file was "
-                    "not cleared"
+                    "halt clear was not attempted because the cluster halt "
+                    "authority is unavailable"
                 ),
-            ) from exc
+                refusal_detail=(
+                    "halt clear was not attempted and the required "
+                    "control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+    def _delete_exact_local_generation() -> None:
+        """Remove only the local generation observed before this clear."""
 
-    if p.exists():
+        with cross_process_lock(_halt_authority_lock_path(p), strict=True):
+            if _halt_file_generation(p) != local_before:
+                raise _ConcurrentHalt("newer local HALT generation observed")
+            if local_before is not None:
+                p.unlink()
+
+    if not shared:
+        # A local clear can bind the exact file deletion and in-process CAS in
+        # one strict control barrier.  An overlapping arm changes either token
+        # and is retained.
         try:
-            p.unlink()
-        except OSError as exc:
-            # The file still stops this replica. Restore the shared stop when
-            # possible so a local filesystem failure cannot silently resume
-            # the rest of the fleet.
-            if shared:
-                try:
-                    _world().arm_halt(
-                        "local halt clear failed; fail-safe cluster re-arm",
-                        source="dashboard-clear-rollback",
-                        armed_by=caller_principal(request) or "",
+            killswitch.clear(
+                durable_clear=_delete_exact_local_generation,
+                expected_in_process_generation=process_before,
+            )
+        except (killswitch.HaltGenerationChanged, _ConcurrentHalt) as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="superseded",
+                reason=reason,
+                detail=(
+                    "halt clear was not applied because a newer local halt is armed"
+                ),
+                refusal_detail=(
+                    "a newer local halt remains armed and the required "
+                    "control-plane audit was refused"
+                ),
+                cause=exc,
+                status_code=409,
+            )
+        except Exception as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="failed",
+                reason=reason,
+                detail="halt remains armed because the local clear barrier failed",
+                refusal_detail=(
+                    "halt remains armed and the required control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+    else:
+        # The shared transaction locks the exact database generation before it
+        # invokes the local unlink.  The temporary process hold covers this
+        # server until commit/rollback and is released only by its own token.
+        try:
+            transition_hold = _begin_clear_transition_hold()
+        except Exception as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="failed",
+                reason=reason,
+                detail="halt remains armed because its clear barrier is unavailable",
+                refusal_detail=(
+                    "halt remains armed and the required control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+
+        try:
+            assert world is not None
+            if shared_before is None:
+                _delete_exact_local_generation()
+            else:
+                removed = world.disarm_halt(
+                    expected_generation=shared_generation,
+                    durable_clear=_delete_exact_local_generation,
+                )
+                if not removed:
+                    current = world.active_halt()
+                    if current is not None and not isinstance(current, dict):
+                        raise RuntimeError("invalid shared halt state")
+                    current_generation = (
+                        current.get("generation") if current is not None else None
                     )
+                    if current is not None and not isinstance(
+                        current_generation, str,
+                    ):
+                        raise RuntimeError("shared halt generation is unavailable")
+                    if current_generation != shared_generation:
+                        raise _ConcurrentHalt(
+                            "newer shared HALT generation observed"
+                        )
+                    raise RuntimeError("shared halt compare-and-delete was refused")
+
+            shared_after = world.active_halt()
+            if shared_after is not None and not isinstance(shared_after, dict):
+                raise RuntimeError("invalid shared halt state")
+            if shared_after is not None:
+                after_generation = shared_after.get("generation")
+                if not isinstance(after_generation, str):
+                    raise RuntimeError("shared halt generation is unavailable")
+                if shared_before is None or after_generation != shared_generation:
+                    raise _ConcurrentHalt("newer shared HALT generation observed")
+                raise RuntimeError("shared halt remained active after clear")
+
+            if _halt_file_generation(p) is not None:
+                raise _ConcurrentHalt("newer local HALT generation observed")
+            killswitch.clear(
+                expected_in_process_generation=process_before,
+            )
+            _end_clear_transition_hold(transition_hold)
+        except (killswitch.HaltGenerationChanged, _ConcurrentHalt) as exc:
+            try:
+                compensation = _ensure_local_halt_fail_safe(
+                    p,
+                    actor=actor,
+                    reason=(
+                        "newer halt superseded an in-flight clear; "
+                        "local fail-safe retained"
+                    ),
+                )
+            except Exception as compensation_exc:
+                log.critical(
+                    "local HALT compensation failed after concurrent halt",
+                    exc_info=True,
+                )
+                detail = (
+                    "a newer halt remains armed, but its local fail-safe could "
+                    "not be confirmed; verify this replica immediately"
+                )
+                refusal_detail = (
+                    "a newer halt remains armed, local compensation is unconfirmed, "
+                    "and the required control-plane audit was refused"
+                )
+                cause = compensation_exc
+            else:
+                try:
+                    _end_clear_transition_hold(transition_hold)
                 except Exception:
                     log.critical(
-                        "cluster halt rollback failed after local clear failure",
+                        "HALT clear transition hold could not be released safely",
                         exc_info=True,
                     )
-            raise HTTPException(
-                status_code=503,
-                detail="halt remains armed locally because its file could not be removed",
-            ) from exc
+                detail = (
+                    "halt clear was superseded by a newer cluster halt; the local "
+                    f"fail-safe was {compensation}"
+                )
+                refusal_detail = (
+                    "a newer cluster halt and its local fail-safe remain armed, "
+                    "and the required control-plane audit was refused"
+                )
+                cause = exc
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="superseded",
+                reason=reason,
+                detail=detail,
+                refusal_detail=refusal_detail,
+                cause=cause,
+                status_code=409,
+            )
+        except Exception as exc:
+            # A transaction/commit failure can have an indeterminate external
+            # result.  Restore a durable local stop before releasing this
+            # process's temporary hold.
+            log.warning(
+                "cluster-wide halt clear could not be confirmed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            try:
+                compensation = _ensure_local_halt_fail_safe(
+                    p,
+                    actor=actor,
+                    reason=(
+                        "cluster halt clear could not be confirmed; "
+                        "local fail-safe re-armed"
+                    ),
+                )
+            except Exception as compensation_exc:
+                log.critical(
+                    "local HALT compensation failed after cluster clear uncertainty",
+                    exc_info=True,
+                )
+                detail = (
+                    "cluster halt clear is indeterminate and the local fail-safe "
+                    "could not be re-armed; verify every replica immediately"
+                )
+                refusal_detail = (
+                    "halt clear and local compensation are indeterminate, and the "
+                    "required control-plane audit was refused"
+                )
+                cause = compensation_exc
+            else:
+                try:
+                    _end_clear_transition_hold(transition_hold)
+                except Exception:
+                    log.critical(
+                        "HALT clear transition hold could not be released safely",
+                        exc_info=True,
+                    )
+                detail = (
+                    "cluster halt clear is indeterminate; the local fail-safe was "
+                    f"{compensation}, but other replicas may be running"
+                )
+                refusal_detail = (
+                    "the local fail-safe was restored after an indeterminate "
+                    "cluster clear, and the required control-plane audit was refused"
+                )
+                cause = exc
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="partial",
+                reason=reason,
+                detail=detail,
+                refusal_detail=refusal_detail,
+                cause=cause,
+            )
+
+    # Never claim success while a newer local generation is visible.  This is
+    # also the final guard for local-only clears.
+    try:
+        local_after = _halt_file_generation(p)
+    except Exception as exc:
+        _halt_failure(
+            operation="clear-halt",
+            actor=actor,
+            scope=scope,
+            result="indeterminate",
+            reason=reason,
+            detail="halt clear completed, but the local authority cannot be verified",
+            refusal_detail=(
+                "local halt state is unverified and the required control-plane "
+                "audit was refused"
+            ),
+            cause=exc,
+        )
+    if local_after is not None:
+        _halt_failure(
+            operation="clear-halt",
+            actor=actor,
+            scope=scope,
+            result="superseded",
+            reason=reason,
+            detail="halt clear was superseded by a newer local halt",
+            refusal_detail=(
+                "a newer local halt remains armed and the required control-plane "
+                "audit was refused"
+            ),
+            cause=_ConcurrentHalt("newer local HALT generation observed"),
+            status_code=409,
+        )
+    headers = _halt_audit_headers(
+        operation="clear-halt",
+        actor=actor,
+        scope=scope,
+        result="succeeded",
+        reason=reason,
+        refusal_detail=(
+            "halt was cleared, but the required control-plane audit was refused"
+        ),
+    )
+    response.headers.update(headers)
 
 
 @router.post("/goals/{goal_id}/cancel", status_code=204)
@@ -11223,8 +11893,29 @@ async def trust_agent_revoke(request: Request, agent_id: str, payload: TrustRevo
     from the app first to take it under management."""
     require_permission(request, "admin")
     from maverick.agent_trust import set_revoked
+    from maverick.revocation import ProtectedRevocationError, shared
 
-    if not set_revoked(agent_id, payload.revoked):
+    try:
+        changed = (
+            set_revoked(agent_id, True)
+            if payload.revoked
+            else shared().run_if_unprotected(
+                f"agent:{agent_id}",
+                lambda: set_revoked(agent_id, False),
+            )
+        )
+    except ProtectedRevocationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="agent is security-contained; use the control-plane release",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="containment authority is unavailable; restore refused",
+        ) from exc
+
+    if not changed:
         raise HTTPException(
             status_code=404,
             detail="this agent is defined in the server's config file, not in "
@@ -11298,8 +11989,28 @@ async def external_agent_release(request: Request, agent_id: str) -> dict:
     """Lift an auto-containment and clear the denial window (admin)."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
+    from maverick.revocation import ProtectedRevocationError, shared
 
-    if not xa.release(agent_id, released_by=caller_principal(request) or "admin"):
+    try:
+        released = shared().run_if_unprotected(
+            f"agent:{agent_id}",
+            lambda: xa.release(
+                agent_id,
+                released_by=caller_principal(request) or "admin",
+            ),
+        )
+    except ProtectedRevocationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="agent is security-contained; use the control-plane release",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="containment authority is unavailable; gateway release refused",
+        ) from exc
+
+    if not released:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} is not enrolled")
     return {"ok": True, "id": agent_id}
 
@@ -12067,7 +12778,12 @@ async def run_fleet_agent(
     )
 
     w = _world()
-    goal_id = w.create_goal(prompt[:200], prompt, owner=fleet.owner)
+    goal_id = w.create_goal(
+        prompt[:200],
+        prompt,
+        owner=fleet.owner,
+        execution_principal=agent_principal,
+    )
     record_run(fleet_name, agent.name, goal_id)
     # Schedule against the authenticated caller (or the shared anonymous lane
     # when auth is off), not the fleet-agent audit principal.  Agent names are

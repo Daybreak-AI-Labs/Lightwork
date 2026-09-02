@@ -42,11 +42,92 @@ def test_world_halt_roundtrip(world):
     assert st["source"] == "dashboard"
     assert st["armed_by"] == "user:alice"
     assert isinstance(st["armed_at"], (int, float))
+    assert isinstance(st["generation"], str) and st["generation"]
     # Re-arm replaces the single global row (no duplicate).
     world.arm_halt("second reason", source="cli")
-    assert world.active_halt()["reason"] == "second reason"
-    world.disarm_halt()
+    latest = world.active_halt()
+    assert latest["reason"] == "second reason"
+    assert latest["generation"] != st["generation"]
+    assert world.disarm_halt(expected_generation=latest["generation"]) is True
     assert world.active_halt() is None
+
+
+def test_world_halt_compare_and_delete_preserves_concurrent_rearm(world):
+    world.arm_halt("first", source="dashboard")
+    first = world.active_halt()
+    world.arm_halt("new incident", source="dashboard")
+    second = world.active_halt()
+
+    assert first["generation"] != second["generation"]
+    assert world.disarm_halt(expected_generation=first["generation"]) is False
+    assert world.active_halt() == second
+
+
+def test_world_halt_callback_failure_rolls_back_shared_clear(world):
+    world.arm_halt("incident", source="dashboard")
+    observed = world.active_halt()
+    callbacks = []
+
+    def _local_clear_failure():
+        callbacks.append("attempted")
+        raise OSError("local authority unavailable")
+
+    with pytest.raises(OSError, match="local authority unavailable"):
+        world.disarm_halt(
+            expected_generation=observed["generation"],
+            durable_clear=_local_clear_failure,
+        )
+
+    assert callbacks == ["attempted"]
+    assert world.active_halt() == observed
+
+
+def test_world_halt_mismatch_does_not_run_durable_clear(world):
+    world.arm_halt("first", source="dashboard")
+    first = world.active_halt()
+    world.arm_halt("new incident", source="dashboard")
+    second = world.active_halt()
+    callbacks = []
+
+    assert world.disarm_halt(
+        expected_generation=first["generation"],
+        durable_clear=lambda: callbacks.append("unsafe"),
+    ) is False
+    assert callbacks == []
+    assert world.active_halt() == second
+
+
+def test_clear_transition_holds_are_exact_owner_and_preserve_concurrent_halt(
+    world,
+):
+    first = killswitch._begin_clear_transition_hold()
+    second = killswitch._begin_clear_transition_hold()
+    try:
+        with pytest.raises(killswitch.Halted) as held:
+            killswitch.check(force_refresh=True)
+        assert held.value.source == "control-plane-clear"
+
+        killswitch.clear()
+        with pytest.raises(killswitch.Halted):
+            killswitch.check(force_refresh=True)
+
+        killswitch._end_clear_transition_hold(first)
+        with pytest.raises(killswitch.Halted):
+            killswitch.check(force_refresh=True)
+
+        killswitch.halt("new incident", source="concurrent-arm")
+        killswitch._end_clear_transition_hold(second)
+        with pytest.raises(killswitch.Halted) as concurrent:
+            killswitch.check(force_refresh=True)
+        assert concurrent.value.reason == "new incident"
+        assert concurrent.value.source == "concurrent-arm"
+    finally:
+        for token in (first, second):
+            try:
+                killswitch._end_clear_transition_hold(token)
+            except killswitch.HaltGenerationChanged:
+                pass
+        killswitch.clear()
 
 
 def test_shared_consult_skipped_on_sqlite(world):

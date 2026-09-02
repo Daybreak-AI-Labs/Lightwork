@@ -68,6 +68,21 @@ sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 sudo systemctl enable --now maverick
 ```
 
+### Security-sensitive world-schema upgrades
+
+The v32 execution-principal and v33 HALT-generation migrations are additive
+database changes, but they are not a mixed-binary security guarantee. Before an
+upgrade that crosses either version, drain and stop every goal executor and
+every process that can arm or clear the shared HALT, upgrade those processes as
+one cohort, let one upgraded process migrate the world store, and only then
+resume dispatch. A pre-v32 executor does not enforce the exact execution binding;
+a pre-v33 HALT writer does not rotate or compare the clear generation.
+
+Do not treat the SQL migration's online-safe classification as permission to
+run old and new executors concurrently when relying on either property. The
+database remains upgrade-compatible; the security semantics take effect after
+all relevant writers are on the upgraded code.
+
 ## Phone (companion mode)
 
 Lightwork itself runs on Desktop or VPS — your phone is a frontend that

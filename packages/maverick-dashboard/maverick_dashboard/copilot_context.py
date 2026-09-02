@@ -198,6 +198,35 @@ _CONTEXTS = tuple(
             ),
         ),
         CopilotPageContext(
+            path="/agent-control-plane",
+            title="Agent Control Plane",
+            summary=(
+                "Inspect and operate bounded controls over native principals and registered "
+                "external agents, with a separately scoped deployment emergency halt."
+            ),
+            capabilities=(
+                "Inspect status and one bounded, paginated roster page without accumulating an unbounded browser inventory.",
+                "Suspend or resume a named principal, durably contain or release a named principal, and narrow an external agent's capability ceiling when the current role and runtime permit.",
+                "Read a named principal's bounded ledger and request or clear the hardened local or shared-cluster halt under its exact authority gate.",
+            ),
+            boundaries=(
+                "Roster completeness is refused when a required authority is unreadable; an unavailable response is not an empty estate.",
+                "Containment from this page durably protects the named principal but does not claim a live-swarm seal or subtree revocation.",
+                "Ordinary audit outages are fail-soft, while a configured audit-guarantee refusal can be reported after a control change has already landed.",
+                "A local result does not prove complete estate discovery, live external-agent acceptance, or production recovery and scale.",
+            ),
+            next_steps=(
+                "Refresh status and confirm the control-plane runtime and exact halt scope are available before selecting a mutation.",
+                "Use the bounded roster page to select the exact principal and read the returned enforced state after an operation.",
+                "Inspect the principal ledger separately when durable audit evidence is required, especially after an audit-related refusal.",
+            ),
+            suggested_questions=(
+                "Which controls are available to my role right now?",
+                "What does containment from this page actually protect?",
+                "How should I verify state and audit evidence after a control attempt?",
+            ),
+        ),
+        CopilotPageContext(
             path="/consent",
             title="Consent and Preferences",
             summary=(

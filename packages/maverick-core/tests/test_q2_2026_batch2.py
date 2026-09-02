@@ -123,6 +123,7 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
         def __init__(self):
             self._cid = 1
             self._gid = 1
+            self.created_goal = None
         def get_or_create_conversation(self, channel, user_id):
             class C:
                 pass
@@ -131,7 +132,10 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
             return c
         def append_turn(self, conversation_id, role, text):
             return None
-        def create_goal(self, title, text):
+        def create_goal(
+            self, title, text, *, owner="", execution_principal="",
+        ):
+            self.created_goal = (title, text, owner, execution_principal)
             return self._gid
         def set_goal_status(self, *args, **kwargs):
             return None
@@ -149,7 +153,8 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
     monkeypatch.setattr(server_mod, "build_sandbox", lambda: object())
     monkeypatch.setattr("maverick.compliance.first_turn_disclosure", lambda *a, **k: None)
 
-    srv = server_mod.Server(world=_World(), llm=object(), sandbox=object())
+    world = _World()
+    srv = server_mod.Server(world=world, llm=object(), sandbox=object())
 
     class _Msg:
         channel = "telegram"
@@ -161,6 +166,9 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
     assert out == "ok"
     assert captured["channel"] == "telegram"
     assert captured["user_id"] == "telegram:42"
+    assert world.created_goal == (
+        "hello", "hello", "user:telegram:42", "user:telegram:42",
+    )
 
 # ---------- file_cache ----------
 

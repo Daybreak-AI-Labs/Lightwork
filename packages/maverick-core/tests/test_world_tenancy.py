@@ -209,6 +209,7 @@ def test_handle_message_routes_goal_to_user_tenant(monkeypatch):
     assert captured["world"] is tenant_world
     assert tenant_world.get_goal(captured["goal_id"]) is not None
     assert tenant_world.get_goal(captured["goal_id"]).title == "hello from X"
+    assert tenant_world.get_goal(captured["goal_id"]).owner == "user:tg:X"
     # ...and the conversation + user turn did too.
     convs = tenant_world.list_conversations()
     assert [(c.channel, c.user_id) for c in convs] == [("tg", "X")]
@@ -218,6 +219,41 @@ def test_handle_message_routes_goal_to_user_tenant(monkeypatch):
     # The shared default world is untouched -- nothing leaked there.
     assert shared.list_goals() == []
     assert shared.list_conversations() == []
+
+
+def test_handle_message_keeps_opaque_principal_out_of_raw_tenant_paths(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    server_mod, srv, shared = _build_server(monkeypatch)
+    subject = "auth0|North America/María 李"
+    tenant = f"tg:{subject}"
+    captured = {}
+
+    async def _fake_dispatch(goal_id, **kwargs):
+        captured["goal_id"] = goal_id
+        captured.update(kwargs)
+        world_for_tenant(tenant).set_goal_status(goal_id, "done", result="done")
+        return "done"
+
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
+
+    out = asyncio.run(srv._handle_message(
+        _Msg(text="opaque subject", channel="tg", user_id=subject),
+    ))
+
+    tenant_world = world_for_tenant(tenant)
+    encoded_segment = tenant_world.path.parent.name
+    goal = tenant_world.get_goal(captured["goal_id"])
+    assert "done" in out
+    assert goal.owner == f"user:tg:{subject}"
+    assert captured["user_id"] == f"tg:{subject}"
+    assert "%2F" in encoded_segment
+    assert "%7C" in encoded_segment
+    assert "%20" in encoded_segment
+    assert tenant_world.path.parent.parent == maverick_home() / "tenants"
+    assert shared.list_goals() == []
 
 
 def test_world_for_tenant_rejects_overlong_tenant(monkeypatch):

@@ -12,6 +12,7 @@ stub so no real goal runs.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from maverick.oidc import VerifiedPrincipal
 
 
 def _client():
@@ -40,6 +41,22 @@ def _save_fleet(owner="user:dana"):
     )))
 
 
+def _enable_oidc_principal_map(monkeypatch):
+    import maverick_dashboard.auth as auth
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth,
+        "verify_oidc_token",
+        lambda token, **_kw: VerifiedPrincipal(
+            sub=token,
+            issuer="https://issuer.example",
+            audience="maverick",
+            claims={"sub": token},
+        ),
+    )
+
+
 def _stub_runner(monkeypatch):
     calls: list[dict] = []
 
@@ -65,10 +82,11 @@ def test_dispatch_runs_agent_under_role_capability(monkeypatch, tmp_path):
     assert body["principal"] == "agent:acme.coder"
     assert body["role"] == "engineer"
 
-    # the goal exists, owned by the fleet owner (so it shows in the owner's views)
+    # Resource ownership and exact agent execution authority are both durable.
     from maverick.world_model import WorldModel
     g = WorldModel(tmp_path / "world.db").get_goal(gid)
     assert g is not None and g.owner == "user:dana"
+    assert g.execution_principal == "agent:acme.coder"
 
     # the run is recorded against the fleet for the supervisor trail
     from maverick.fleet import load_runs
@@ -81,6 +99,77 @@ def test_dispatch_runs_agent_under_role_capability(monkeypatch, tmp_path):
     assert kw["user_id"] == "agent:acme.coder"
     assert kw["capability"] is not None
     assert kw["capability"].principal == "agent:acme.coder"
+
+
+def test_authenticated_owner_can_observe_real_principal_bound_fleet_run(
+    monkeypatch,
+    tmp_path,
+):
+    """Exercise the route through the real runner binding boundary.
+
+    Only the expensive swarm body is replaced; ``run_goal_in_thread`` performs
+    its real durable principal check before the stub marks the row complete.
+    """
+    _isolate(monkeypatch, tmp_path)
+    _enable_oidc_principal_map(monkeypatch)
+    _save_fleet(owner="user:dana")
+
+    from maverick import budget as budget_mod
+    from maverick import llm as llm_mod
+    from maverick import orchestrator, trace_pin
+    from maverick import sandbox as sandbox_mod
+
+    observed: dict[str, str] = {}
+
+    class _Sandbox:
+        def close(self):
+            return None
+
+    def _finish_without_provider(*args, **kwargs):
+        world = args[1]
+        goal_id = args[3]
+        goal = world.get_goal(goal_id)
+        observed["owner"] = goal.owner
+        observed["execution_principal"] = goal.execution_principal
+        observed["capability_principal"] = kwargs["capability"].principal
+        world.set_goal_status(goal_id, "done", result="finished")
+        return "DONE."
+
+    monkeypatch.setattr(llm_mod, "LLM", lambda: object())
+    monkeypatch.setattr(sandbox_mod, "build_sandbox", _Sandbox)
+    monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kw: object())
+    monkeypatch.setattr(trace_pin, "pin_trace", lambda *_a, **_kw: None)
+    monkeypatch.setattr(orchestrator, "run_goal_sync", _finish_without_provider)
+
+    client = _client()
+    owner_headers = {
+        "Authorization": "Bearer dana",
+        "Origin": "http://testserver",
+    }
+    response = client.post(
+        "/api/v1/fleets/acme/run",
+        json={"agent": "coder", "prompt": "ship the governed build"},
+        headers=owner_headers,
+    )
+    assert response.status_code == 201, response.text
+    goal_id = response.json()["goal_id"]
+
+    assert observed == {
+        "owner": "user:dana",
+        "execution_principal": "agent:acme.coder",
+        "capability_principal": "agent:acme.coder",
+    }
+    visible = client.get(
+        f"/api/v1/goals/{goal_id}",
+        headers={"Authorization": "Bearer dana"},
+    )
+    assert visible.status_code == 200, visible.text
+    assert visible.json()["status"] == "done"
+    hidden = client.get(
+        f"/api/v1/goals/{goal_id}",
+        headers={"Authorization": "Bearer eve"},
+    )
+    assert hidden.status_code == 404
 
 
 def test_dispatch_attenuates_legacy_bad_roles_to_caller_capability(monkeypatch, tmp_path):

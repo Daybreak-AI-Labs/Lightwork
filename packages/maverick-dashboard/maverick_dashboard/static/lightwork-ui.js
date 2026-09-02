@@ -242,11 +242,27 @@
       const label = document.getElementById('halt-label');
       if (!pill || !label) return;
       const canHalt = pill.dataset.canHalt === 'true';
+      const configuredTimeout = Number(pill.dataset.haltTimeoutMs);
+      const haltTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? Math.min(configuredTimeout, 10000)
+        : 10000;
       // A failed read is not equivalent to a cleared stop.  Keep an explicit
       // unknown state so the shell can never invite a mutation based on a
       // fabricated answer.
       let haltState = 'unknown';
+      // The shell learns its configured scope from the first complete status
+      // response and then requires every later read to agree.  A scope change
+      // needs a page reload; silently switching authorities in a live tab would
+      // make the same control mean two different things.
+      let haltScope = null;
       let pending = false;
+      // Every status read owns a generation.  A later-started poll or the
+      // post-mutation verification supersedes every older in-flight read, so a
+      // slow interval request cannot repaint stale state over newer evidence.
+      let refreshGeneration = 0;
+      function knownState() {
+        return haltState === 'armed' || haltState === 'clear';
+      }
       function render(state, detail) {
         haltState = state;
         const armed = state === 'armed';
@@ -256,7 +272,7 @@
         label.textContent = detail || (armed
           ? (canHalt ? 'STOPPED — click to resume' : 'STOPPED')
           : state === 'clear'
-            ? (canHalt ? 'Stop all' : 'Stop status: clear')
+            ? (canHalt ? 'Stop configured scope' : 'Stop status: clear')
             : 'Stop status unavailable');
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
@@ -265,71 +281,139 @@
         }
         pill.setAttribute('aria-disabled', (!canHalt || !known || pending) ? 'true' : 'false');
       }
+      function renderVerifiedPayload(payload) {
+        if (!payload || typeof payload.active !== 'boolean' ||
+            (payload.scope !== 'local' && payload.scope !== 'cluster') ||
+            (payload.scope === 'cluster' && typeof payload.cluster_halt !== 'boolean')) {
+          render('unknown');
+          return false;
+        }
+        if (haltScope === null) haltScope = payload.scope;
+        if (payload.scope !== haltScope) {
+          render('unknown', 'Stop scope changed — reload to verify status');
+          return false;
+        }
+        if (haltScope === 'cluster' && payload.active !== payload.cluster_halt) {
+          // `active` includes the local file while `cluster_halt` is the shared
+          // authority.  Disagreement is a partial/unverified stop, not proof
+          // that the configured cluster scope is stopped or clear.
+          render('partial', 'Partial stop — configured scope unverified');
+          return false;
+        }
+        render(payload.active ? 'armed' : 'clear');
+        return true;
+      }
+      async function requestHalt(options, readBody) {
+        const controller = typeof AbortController === 'function'
+          ? new AbortController()
+          : null;
+        const requestOptions = Object.assign({cache: 'no-store'}, options || {});
+        if (controller) requestOptions.signal = controller.signal;
+        let timer;
+        const timeout = new Promise(function(_resolve, reject) {
+          timer = setTimeout(function() {
+            if (controller) controller.abort();
+            reject(new Error('halt request timed out'));
+          }, haltTimeoutMs);
+        });
+        const request = (async function() {
+          const response = await fetch('/api/v1/halt', requestOptions);
+          const body = readBody ? await readBody(response) : undefined;
+          return {response: response, body: body};
+        })();
+        try {
+          return await Promise.race([request, timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
       render('unknown', 'checking');
       async function refresh() {
+        if (pending) return false;
+        const generation = ++refreshGeneration;
         try {
-          const r = await fetch('/api/v1/halt');
+          const result = await requestHalt({}, function(response) {
+            return response.json();
+          });
+          if (generation !== refreshGeneration) return false;
+          const r = result.response;
           if (!r.ok) throw new Error('halt status ' + r.status);
-          const j = await r.json();
-          render(j.active ? 'armed' : 'clear');
-          return true;
+          return renderVerifiedPayload(result.body);
         } catch (e) {
-          // Preserve a previously verified state during an ordinary poll
-          // outage.  If no state was ever verified, or a mutation just failed
-          // with an ambiguous outcome, the caller sets/keeps unknown.
-          if (haltState === 'unknown') render('unknown');
+          if (generation !== refreshGeneration) return false;
+          // A stale known state is unsafe after any failed, non-OK, timed-out,
+          // or invalid read.  Only a complete current response may re-enable
+          // the mutation control.
+          render('unknown');
           return false;
         }
       }
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
         if (!canHalt) {
-          mvToast('Read only: a global administrator is required to stop or resume all work.', { error: true });
+          mvToast('Read only: permission for the configured halt scope is required.', { error: true });
           return;
         }
-        if (pending || haltState === 'unknown') {
+        if (pending || !knownState()) {
           mvToast('Emergency stop status is unavailable. Retry after the dashboard can verify it.', { error: true });
           return;
         }
         const wasArmed = haltState === 'armed';
+        let responseCompleted = false;
         try {
-          let response;
+          let requestOptions;
           if (wasArmed) {
             pending = true;
+            refreshGeneration += 1;
             render(haltState, 'Resuming…');
-            response = await fetch('/api/v1/halt', { method: 'DELETE' });
+            requestOptions = {method: 'DELETE'};
           } else {
-            if (!(await mvConfirm('Stop all work? Every running goal pauses safely at its next step and waits for you to resume.', { okText: 'Stop all work' }))) return;
+            if (!(await mvConfirm('Stop the configured halt scope? Governed work covered by that scope pauses safely at its next step and waits for an authorized resume.', { okText: 'Stop configured scope' }))) return;
             pending = true;
+            refreshGeneration += 1;
             render(haltState, 'Stopping…');
-            response = await fetch('/api/v1/halt', {
+            requestOptions = {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({reason: 'manual via dashboard'}),
-            });
+            };
           }
+          const result = await requestHalt(requestOptions, async function(response) {
+            if (response.ok) return null;
+            try { return await response.json(); } catch (parseError) { return null; }
+          });
+          responseCompleted = true;
+          const response = result.response;
           if (!response.ok) {
             // A failed arm may still have stopped this replica, and a failed
             // clear may still have changed one backend.  Do not display the
             // pre-request state as verified until a fresh read succeeds.
-            haltState = 'unknown';
+            render('unknown');
             let detail = 'Emergency stop change failed (error ' + response.status + ').';
-            try {
-              const body = await response.json();
-              if (body && body.detail) detail = String(body.detail);
-            } catch (parseError) { /* keep the bounded fallback */ }
+            if (result.body && result.body.detail) detail = String(result.body.detail);
             mvToast(detail, { error: true });
           } else {
-            render(wasArmed ? 'clear' : 'armed');
+            // A 204 only acknowledges the mutation request.  It is not a
+            // status document and cannot prove either local or cluster state.
+            render('unknown', wasArmed
+              ? 'Resume accepted — verifying configured scope…'
+              : 'Stop accepted — verifying configured scope…');
           }
         } catch (e) {
-          haltState = 'unknown';
+          render('unknown');
           mvToast('Emergency stop change failed: the dashboard is unreachable.', { error: true });
         } finally {
           pending = false;
         }
+        // A transport timeout has an ambiguous server outcome.  Do not let an
+        // immediate read certify the old pre-request state; a later independent
+        // poll must establish current truth after the request has settled.
+        if (!responseCompleted) return;
         const verified = await refresh();
-        if (!verified && haltState === 'unknown') render('unknown');
+        // `refresh` renders every verified, partial, or unavailable outcome;
+        // retaining its detail keeps scope disagreement distinguishable from
+        // an ordinary transport outage.
+        if (!verified) return;
       });
       pill.addEventListener('keydown', function(ev) {
         // role="button" must activate on Space; the native <a href>

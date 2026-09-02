@@ -71,6 +71,7 @@ def test_channel_submission_uses_dispatcher_and_never_runs_locally(
     goal_id, kwargs = submitted[0]
     assert goal_id > 0
     assert goal.status == goal_status
+    assert goal.owner == "user:telegram:alice"
     assert kwargs["channel"] == "telegram"
     assert kwargs["user_id"] == "telegram:alice"
     assert kwargs["conversation_id"] > 0

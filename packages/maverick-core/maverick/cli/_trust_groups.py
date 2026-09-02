@@ -33,9 +33,13 @@ def capability_revoke_cmd(principal: str, reason: str) -> None:
 @capability_group.command("unrevoke")
 @click.argument("principal")
 def capability_unrevoke_cmd(principal: str) -> None:
-    """Restore PRINCIPAL (remove it from the revocation list)."""
-    from ..revocation import shared
-    if shared().unrevoke(principal):
+    """Restore an ordinary revocation; containment requires security release."""
+    from ..revocation import ProtectedRevocationError, shared
+    try:
+        restored = shared().unrevoke(principal)
+    except ProtectedRevocationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if restored:
         click.echo(click.style(f"restored {principal!r}", fg="green"))
     else:
         click.echo(f"{principal!r} was not revoked")
@@ -51,7 +55,8 @@ def capability_revocations_cmd(as_json: bool) -> None:
     revs = shared().revoked()
     if as_json:
         click.echo(_json.dumps(
-            {p: {"revoked_at": r.revoked_at, "reason": r.reason}
+            {p: {"revoked_at": r.revoked_at, "reason": r.reason,
+                 "protected": r.protected}
              for p, r in revs.items()}, default=str))
         return
     if not revs:
@@ -59,6 +64,7 @@ def capability_revocations_cmd(as_json: bool) -> None:
         return
     for p, r in sorted(revs.items()):
         click.echo(f"  {p}  (at {r.revoked_at:.0f})"
+                   + ("  [CONTAINED]" if r.protected else "")
                    + (f"  — {r.reason}" if r.reason else ""))
 
 
@@ -202,7 +208,23 @@ def trust_revoke_cmd(agent_id: str) -> None:
 def trust_unrevoke_cmd(agent_id: str) -> None:
     """Lift a revocation on a managed agent."""
     from .. import agent_trust
-    if agent_trust.set_revoked(agent_id, False):
+    from ..revocation import ProtectedRevocationError, RevocationStoreError, shared
+    try:
+        changed = shared().run_if_unprotected(
+            f"agent:{agent_id}",
+            lambda: agent_trust.set_revoked(agent_id, False),
+        )
+    except ProtectedRevocationError as exc:
+        raise click.ClickException(
+            "agent is security-contained; use `maverick control-plane release`"
+        ) from exc
+    except (RevocationStoreError, RuntimeError, OSError) as exc:
+        raise click.ClickException(
+            "containment authority is unavailable; unrevocation refused"
+        ) from exc
+    except agent_trust.AgentTrustError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if changed:
         click.echo(click.style(f"unrevoked {agent_id!r}", fg="green"))
     else:
         raise click.ClickException(f"no managed agent {agent_id!r}")
@@ -427,7 +449,8 @@ def attest_export_verifier_cmd(out: str) -> None:
 def security_group() -> None:
     """Agent-EDR: detect, contain and prove compromise across the fleet.
 
-    Reads detections off the signed audit chain, contains a compromised agent
+    Reads detections off the audit chain with explicit signature posture,
+    contains a compromised agent
     in one act, and prints a forensic timeline. Every command reports the
     deployment's POSTURE alongside its findings: an empty detection list from a
     deployment with the shield off means "not watched", not "not attacked".
@@ -463,7 +486,7 @@ def security_posture_cmd(as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
 def security_detections_cmd(subject: str, min_severity: str, limit: int,
                             as_json: bool) -> None:
-    """Security detections from the signed audit chain, newest first.
+    """Security detections from the audit chain, newest first.
 
     Uses ``scan`` rather than ``detections`` so the operator surface -- the one
     place completeness actually matters -- can say when the sweep was bounded
@@ -633,7 +656,8 @@ def receipt_group() -> None:
     """Bearer-verifiable receipts for single audited decisions.
 
     A receipt binds ONE signed audit row -- "tool X was denied under rule R",
-    "tool X ran" -- to the chain it sits in and (with ``--checkpoint-dir``) to
+    "tool X was attempted", or an ok result that says "tool X executed" -- to
+    the chain it sits in and (with ``--checkpoint-dir``) to
     a signed checkpoint whose digest the operator publishes out of band. A
     third party verifies it offline with ``receipt export-verifier`` and the
     publisher's key from ``attest key``; nothing is trusted from inside the
@@ -650,58 +674,115 @@ def receipt_group() -> None:
               help="Audit directory holding the day-file (default: this instance's).")
 @click.option("--checkpoint-dir", type=click.Path(), default=None,
               help="Publish (or reuse) a signed checkpoint committing to the "
-                   "row's chain, so the receipt can verify at depth 'anchored'.")
-@click.option("--no-suffix", is_flag=True,
-              help="Omit the rows after the cited one: a smaller receipt that "
-                   "verifies at depth 'signed' only.")
+                   "row's chain (issuer evidence at depth 'chained'). Publish "
+                   "and retain its digest separately to reach 'anchored'.")
+@click.option("--include-chain/--no-suffix", default=False,
+              help="DISCLOSURE OPT-IN: include every later full audit row needed "
+                   "to walk the linear chain. Default --no-suffix prevents a "
+                   "one-row receipt from exposing unrelated same-day activity.")
+@click.option("--include-execution-pair", is_flag=True,
+              help="DISCLOSURE OPT-IN for a tool-result receipt: include its one "
+                   "full signed call row (including input_summary) to prove a "
+                   "committed call/result pair.")
 def receipt_mint_cmd(day: str, row_hash: str, out: str, audit_dir: str | None,
-                     checkpoint_dir: str | None, no_suffix: bool) -> None:
+                     checkpoint_dir: str | None, include_chain: bool,
+                     include_execution_pair: bool) -> None:
     """Mint a signed receipt for the audit row ROW_HASH recorded on DAY."""
-    import json as _json
-
     from ..trust_receipt import export
+    from ..trust_receipt_verify import load_receipt
     try:
         path = export(out, audit_dir=audit_dir, day=day, row_hash=row_hash,
-                      checkpoint_dir=checkpoint_dir, include_suffix=not no_suffix)
-    except (LookupError, ValueError, RuntimeError) as e:
+                      checkpoint_dir=checkpoint_dir, include_suffix=include_chain,
+                      include_execution_pair=include_execution_pair)
+    except (LookupError, OSError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
+    try:
+        receipt = load_receipt(path)
+    except Exception as exc:
+        raise click.ClickException(
+            f"receipt was published at {path}, but its metadata could not be "
+            "read back safely"
+        ) from exc
     click.echo(f"receipt -> {path}")
-    receipt = _json.loads(path.read_text(encoding="utf-8"))
     claim = receipt.get("claim") or {}
     click.echo(f"claim:      {claim.get('decision')} {claim.get('tool') or ''}".rstrip())
+    if (receipt.get("disclosure") or {}).get("execution_pair_included"):
+        click.echo(click.style(
+            "disclosure: one full signed TOOL_CALL row, including its bounded "
+            "input_summary", fg="yellow"))
     commitment = receipt.get("commitment") or {}
+    chain = receipt.get("chain") or {}
+    locator = receipt.get("locator") or {}
+    suffix = chain.get("suffix_ndjson") or []
+    chain_walkable = (
+        isinstance(locator.get("position"), int)
+        and isinstance(chain.get("row_count"), int)
+        and locator["position"] + len(suffix) == chain["row_count"]
+    )
     if commitment.get("source") == "checkpoint":
         click.echo(f"checkpoint: #{commitment.get('sequence')} "
                    f"sha256={commitment.get('raw_sha256')}")
-        click.echo("Publish that digest out of band; a verifier passes it as "
-                   "--anchor-digest to reach depth 'anchored'.")
+        if chain_walkable:
+            click.echo("Publish that digest out of band; a verifier passes it as "
+                       "--anchor-digest to reach depth 'anchored'.")
+        else:
+            click.echo(click.style(
+                "privacy-safe receipt omitted later audit rows, so the checkpoint "
+                "cannot be reached from this row. Re-mint with --include-chain "
+                "only with recipient disclosure approval if anchored depth is "
+                "required.", fg="yellow"))
     elif commitment.get("source") == "anchor_ledger":
-        click.echo("committed by the issuer's anchor ledger (depth 'chained'; "
-                   "pass --checkpoint-dir for an externally anchorable receipt)")
+        if chain_walkable:
+            click.echo("committed by the issuer's anchor ledger (depth 'chained'; "
+                       "pass --checkpoint-dir for an externally anchorable receipt)")
+        else:
+            click.echo("issuer anchor exists, but the privacy-safe receipt omits "
+                       "later rows and therefore verifies at depth 'signed' only")
     else:
         click.echo(click.style(
             "no commitment: verifiable at depth 'signed' only "
-            "(pass --checkpoint-dir to anchor it)", fg="yellow"))
+            "(pass --checkpoint-dir to create a publishable checkpoint "
+            "commitment)", fg="yellow"))
 
 
 @receipt_group.command("verify")
 @click.argument("receipt", type=click.Path(exists=True))
 @click.option("--key", "keys", multiple=True, metavar="HEX",
-              help="Trusted Ed25519 public key obtained OUT OF BAND (repeatable).")
+              help="CURRENT receipt-issuer Ed25519 key obtained OUT OF BAND.")
+@click.option("--history-key", "history_keys", multiple=True, metavar="HEX",
+              help="Retired key trusted only for historical audit rows.")
+@click.option("--checkpoint-key", "checkpoint_keys", multiple=True, metavar="HEX",
+              help="Current checkpoint-authority key (defaults to --key).")
 @click.option("--anchor-digest", default=None, metavar="SHA256",
               help="Published sha256 of the checkpoint file the receipt cites.")
 @click.option("--checkpoint-dir", type=click.Path(), default=None,
-              help="Issuer's checkpoint directory, to compare on-disk bytes.")
+              help="Issuer checkpoint directory for byte comparison only; it "
+                   "does not independently anchor history. Use a retained "
+                   "--anchor-digest for anchored depth.")
+@click.option("--require-depth", type=click.Choice(["signed", "chained", "anchored"]),
+              default=None,
+              help="Reject a valid receipt below this proof depth. "
+                   "--anchor-digest implicitly requires anchored depth.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
-def receipt_verify_cmd(receipt: str, keys: tuple[str, ...], anchor_digest: str | None,
-                       checkpoint_dir: str | None, as_json: bool) -> None:
+def receipt_verify_cmd(receipt: str, keys: tuple[str, ...],
+                       history_keys: tuple[str, ...],
+                       checkpoint_keys: tuple[str, ...],
+                       anchor_digest: str | None, checkpoint_dir: str | None,
+                       require_depth: str | None, as_json: bool) -> None:
     """Verify RECEIPT against trusted keys (fails closed without one)."""
     import json as _json
 
     from ..trust_receipt import verify
     from ..trust_receipt_verify import format_report
-    result = verify(receipt, trusted_keys=keys, anchor_digest=anchor_digest,
-                    checkpoint_dir=checkpoint_dir)
+    result = verify(
+        receipt,
+        trusted_keys=keys,
+        historical_keys=history_keys,
+        checkpoint_keys=checkpoint_keys or None,
+        anchor_digest=anchor_digest,
+        checkpoint_dir=checkpoint_dir,
+        require_depth=require_depth,
+    )
     click.echo(_json.dumps(result.to_dict(), indent=2) if as_json
                else format_report(result))
     if not result.ok:
@@ -714,14 +795,25 @@ def receipt_export_verifier_cmd(out: str) -> None:
     """Write the standalone receipt verifier to OUT (no maverick install needed)."""
     import pathlib
 
+    from ..file_lock import atomic_create_bytes
     from ..trust_receipt import verifier_source
-    text, digest = verifier_source()
     path = pathlib.Path(out)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    try:
+        text, digest = verifier_source()
+        raw = text.encode("utf-8")
+        atomic_create_bytes(path, raw, mode=0o600)
+    except FileExistsError as exc:
+        raise click.ClickException(
+            f"refusing to overwrite existing verifier path: {path}"
+        ) from exc
+    except Exception as exc:
+        raise click.ClickException(
+            f"could not export verifier safely to {path}"
+        ) from exc
     click.echo(f"verifier -> {path}")
     click.echo(f"sha256:     {digest}")
     click.echo("")
-    click.echo(f"  python {path.name} <receipt.json> --key <pubkey-hex> "
-               "[--anchor-digest <sha256>] [--checkpoint-dir <dir>]")
+    click.echo(f"  python {path.name} <receipt.json> --key <current-pubkey-hex> "
+               "[--history-key <retired-row-key>] [--anchor-digest <sha256>] "
+               "[--checkpoint-dir <dir>]")
     click.echo("Needs only Python and 'cryptography'.")

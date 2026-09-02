@@ -37,7 +37,7 @@ def _run(fn, *args, **kwargs):
     from .. import agent_control_plane as acp
     try:
         return fn(*args, **kwargs)
-    except acp.ControlPlaneDisabled as e:
+    except acp.ControlPlaneError as e:
         raise click.ClickException(str(e)) from e
     except (ValueError, LookupError) as e:
         raise click.ClickException(str(e)) from e
@@ -50,7 +50,7 @@ def control_plane_group() -> None:
     One roster over the principals the runtime already enforces, and one set
     of verbs whose effects are the stores it already consults -- the
     capability revocation registry, the external trust registry, the security
-    plane's containment and the fleet killswitch. Reads work always; the
+    plane's containment and the local deployment killswitch. Reads work always; the
     verbs need ``[control_plane] enable = true`` (or MAVERICK_CONTROL_PLANE=1).
     """
 
@@ -58,7 +58,7 @@ def control_plane_group() -> None:
 @control_plane_group.command("status")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
 def cp_status(as_json: bool) -> None:
-    """Plane on/off, fleet halt state, and governed-principal counts."""
+    """Plane on/off, observed halt state, and governed-principal counts."""
     from .. import agent_control_plane as acp
     st = acp.status()
     if as_json:
@@ -66,11 +66,11 @@ def cp_status(as_json: bool) -> None:
         return
     on = click.style("enabled", fg="green") if st["enabled"] else click.style("off", fg="yellow")
     halted = click.style("HALTED", fg="red") if st["halted"] else "running"
-    click.echo(f"control plane: {on}   fleet: {halted}   "
+    click.echo(f"control plane: {on}   observed halt: {halted}   "
                f"trust plane: {'enforced' if st['trust_enforced'] else 'open'}")
     n, x = st["native"], st["external"]
     click.echo(f"  native   : {n['principals']} principal(s), {n['running_goals']} running "
-               f"goal(s), {n['suspended']} suspended")
+               f"goal(s), {n['suspended']} suspended, {n['contained']} contained")
     click.echo(f"  external : {x['agents']} agent(s), {x['active']} active, "
                f"{x['suspended']} suspended, {x['contained']} contained")
 
@@ -101,7 +101,7 @@ def cp_list(as_json: bool) -> None:
 
 @control_plane_group.command("suspend")
 @click.argument("principal")
-@click.option("--reason", required=True, help="Why (recorded on the signed chain).")
+@click.option("--reason", required=True, help="Why (submitted to the audit log).")
 def cp_suspend(principal: str, reason: str) -> None:
     """Revoke PRINCIPAL: its next tool call is denied. Reversible with resume."""
     from .. import agent_control_plane as acp
@@ -111,14 +111,14 @@ def cp_suspend(principal: str, reason: str) -> None:
 @control_plane_group.command("resume")
 @click.argument("principal")
 def cp_resume(principal: str) -> None:
-    """Lift a suspend (or a containment's revocation)."""
+    """Lift an ordinary suspend; contained principals require release."""
     from .. import agent_control_plane as acp
     _echo_result(_run(acp.resume, principal, actor=_actor()))
 
 
 @control_plane_group.command("contain")
 @click.argument("principal")
-@click.option("--reason", required=True, help="Why (recorded on the signed chain).")
+@click.option("--reason", required=True, help="Why (submitted to the audit log).")
 def cp_contain(principal: str, reason: str) -> None:
     """Security-plane containment: revoke the subtree and record the incident."""
     from .. import agent_control_plane as acp
@@ -149,16 +149,16 @@ def cp_attenuate(principal: str, deny_tools: tuple[str, ...], max_risk: str | No
 
 
 @control_plane_group.command("halt")
-@click.option("--reason", required=True, help="Why (recorded on the signed chain).")
+@click.option("--reason", required=True, help="Why (submitted to the audit log).")
 def cp_halt(reason: str) -> None:
-    """Stop the whole fleet: every kernel halts at its next tool boundary."""
+    """Arm the durable local HALT file for this deployment."""
     from .. import agent_control_plane as acp
     _echo_result(_run(acp.halt_all, reason, actor=_actor()))
 
 
 @control_plane_group.command("clear-halt")
 def cp_clear_halt() -> None:
-    """Disarm the in-process halt (a HALT file must be removed by hand)."""
+    """Clear this deployment's local HALT file and in-process halt."""
     from .. import agent_control_plane as acp
     _echo_result(_run(acp.clear_halt, actor=_actor()))
 
@@ -168,7 +168,7 @@ def cp_clear_halt() -> None:
 @click.option("--limit", type=int, default=50, show_default=True)
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
 def cp_ledger(principal: str, limit: int, as_json: bool) -> None:
-    """The principal's forensic timeline off the signed audit chain."""
+    """The principal's recorded forensic timeline."""
     from .. import agent_control_plane as acp
     rows = _run(acp.ledger, principal, limit=limit)
     if as_json:

@@ -33,11 +33,27 @@ def test_principal_semaphore_is_per_principal():
 def _stub_run(monkeypatch, *, gate: threading.Event, started: dict):
     """Stub run_goal_in_thread's heavy deps; run_goal_sync blocks on ``gate``."""
     class _Goal:
-        status = "done"
+        def __init__(self, goal_id):
+            self.id = goal_id
+            self.status = "done"
+            self.execution_principal = ""
 
     class _World:
+        def __init__(self):
+            self.goals = {}
+
         def get_goal(self, gid):
-            return _Goal()
+            return self.goals.setdefault(gid, _Goal(gid))
+
+        def bind_goal_execution_principal(self, gid, principal):
+            goal = self.get_goal(gid)
+            if (
+                goal.execution_principal
+                and goal.execution_principal != principal
+            ):
+                return False
+            goal.execution_principal = principal
+            return True
 
         def set_goal_status(self, *a, **k):
             pass

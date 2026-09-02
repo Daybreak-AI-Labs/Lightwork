@@ -42,6 +42,8 @@ _EXPORT_MODULE = {
     "AuditRefused": ".errors",
     "AuditEvent": ".events",
     "EventKind": ".events",
+    "TOOL_CALL_COMMITMENT_ALGORITHM": ".events",
+    "tool_call_commitment": ".events",
     "day_files": ".reader",
     "event_paths": ".reader",
     "iter_events": ".reader",
@@ -81,6 +83,8 @@ def __dir__() -> list[str]:
 __all__ = [
     "AuditEvent",
     "EventKind",
+    "TOOL_CALL_COMMITMENT_ALGORITHM",
+    "tool_call_commitment",
     "AuditLog",
     "AuditRefused",
     "AuditWriteRefused",

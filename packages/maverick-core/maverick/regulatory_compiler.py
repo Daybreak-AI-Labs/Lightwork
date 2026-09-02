@@ -11,11 +11,12 @@ else, deny-wins, strictest-wins.
 
 Two things this adds that a document cannot:
 
-* **Proof the gate was live.** Every decision the compiled rules produce is
-  audited with the obligation that produced it (``obligation_id``,
-  ``regulation``, ``article``), and every tool call that ran is audited with
-  the obligations it was checked against (``obligations_checked``). A receipt
-  (``trust_receipt.py``) for that row therefore cites the regulation.
+* **Evidence the gate decision.** Emitted denial rows retain the obligation
+  that produced them (``obligation_id``, ``regulation``, ``article``), and
+  every admitted dispatch has mandatory attempt evidence naming the obligations
+  checked (``obligations_checked``). A receipt (``trust_receipt.py``) for that
+  row can cite the regulation; an executed/failed claim additionally requires
+  the correlated terminal-result row.
 * **Anti-vacuity.** ``verify`` proves each active obligation actually bites:
   every bound tool name is a classified tool, the compiled policy denies or
   pauses it, a risk floor catches at least one real tool, an attenuation
@@ -36,8 +37,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
 
 from .finance.regimes import union_policies
 from .governance import Policy
@@ -48,6 +49,10 @@ EFFECT_ATTENUATE = "attenuate"
 _EFFECTS = (EFFECT_DENY, EFFECT_REQUIRE_HUMAN, EFFECT_ATTENUATE)
 
 _RISK_ORDER = ("low", "medium", "high")
+_MAX_AUDIT_CITATIONS = 16
+_EVIDENCE_ERROR = "active compliance obligation evidence is unavailable"
+_PROFILE_KEYS_UNSET = object()
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -148,7 +153,8 @@ def _known_keys(keys) -> list[str]:
 
 def compile_obligations(keys) -> CompiledObligations:
     """Compile the obligations for ``keys`` (unknown keys ignored), strictest-wins."""
-    obligations = tuple(o for k in _known_keys(keys) for o in REGULATIONS[k])
+    known_keys = _known_keys(keys)
+    obligations = tuple(o for k in known_keys for o in REGULATIONS[k])
     policies: list[Policy] = []
     deny_tools: set[str] = set()
     for ob in obligations:
@@ -161,7 +167,10 @@ def compile_obligations(keys) -> CompiledObligations:
             deny_tools |= set(ob.deny_tools)
         else:  # pragma: no cover -- library is validated by verify()
             raise ValueError(f"{ob.id}: unknown effect {ob.effect!r}")
-    return CompiledObligations(union_policies(policies), frozenset(deny_tools), obligations)
+    policy = replace(
+        union_policies(policies), compliance_profiles=tuple(known_keys)
+    )
+    return CompiledObligations(policy, frozenset(deny_tools), obligations)
 
 
 def active_keys() -> list[str]:
@@ -171,15 +180,12 @@ def active_keys() -> list[str]:
     compliance profiles that feed the same live policy; ``MAVERICK_COMPLIANCE_PROFILES``
     (comma-separated) adds to it for environments configured by variables.
     """
-    keys: list[str] = []
-    try:
-        from .compliance_profiles import configured_profiles
-        keys.extend(configured_profiles())
-    except Exception:  # config never blocks the chokepoint
-        pass
-    env = os.environ.get("MAVERICK_COMPLIANCE_PROFILES", "")
-    keys.extend(p for p in env.split(",") if p.strip())
-    return _known_keys(keys)
+    from .compliance_profiles import configured_profiles
+
+    # configured_profiles is the single strict config+environment resolver.
+    # Do not catch its policy error here: capability_from_config and
+    # Policy.from_config turn uncertainty into their existing deny-all paths.
+    return configured_profiles()
 
 
 def _active() -> CompiledObligations:
@@ -194,60 +200,127 @@ def _tool_risk(action: str) -> str | None:
         return None
 
 
-# Which compiled clause each obligation effect lands in, so a chokepoint
-# verdict's ``rule`` can be traced back to the obligation that produced it.
-_RULES_FOR_EFFECT = {
-    EFFECT_DENY: ("deny_actions", "deny_min_risk"),
-    EFFECT_REQUIRE_HUMAN: ("require_human_actions", "require_human_min_risk"),
-    EFFECT_ATTENUATE: ("capability",),
-}
-
-
 def _tags_for(ob: Obligation) -> dict:
     return {"obligation_id": ob.id, "regulation": ob.regulation, "article": ob.article}
 
 
-def audit_tags(action: str, rule: str) -> dict:
-    """The obligation behind a chokepoint verdict, for the audit row. ``{}`` if none.
+_EFFECT_FOR_RULE = {
+    "deny_actions": EFFECT_DENY,
+    "deny_min_risk": EFFECT_DENY,
+    "require_human_actions": EFFECT_REQUIRE_HUMAN,
+    "require_human_min_risk": EFFECT_REQUIRE_HUMAN,
+    "capability": EFFECT_ATTENUATE,
+}
 
-    An action-level obligation outranks a floor-level one for the same rule,
-    because it is the more specific citation. Never raises: tagging must not
-    be able to break the gate it describes.
+
+def _rule_matches(ob: Obligation, action: str, risk: str | None, rule: str) -> bool:
+    """Whether this obligation independently supports the emitted verdict.
+
+    ``evaluate`` reports the first strictest clause that fired. Another active
+    obligation with the same effect can still cover the action (for example an
+    action-specific GDPR rule plus the GDPR high-risk floor). Both were enforced
+    and both must survive in evidence even though only one clause names the
+    scalar ``Verdict.rule``.
+    """
+    if ob.effect != _EFFECT_FOR_RULE.get(rule):
+        return False
+    if rule == "capability":
+        return action in ob.deny_tools
+    return ob.covers(action, risk)
+
+
+def _rule_specificity(ob: Obligation, action: str, risk: str | None, rule: str) -> int:
+    """Prefer the exact verdict clause for stable legacy scalar aliases."""
+    if rule.endswith("_actions") and action in ob.actions:
+        return 0
+    if rule.endswith("_min_risk") and ob.min_risk and ob.covers(action, risk):
+        return 0
+    if rule == "capability" and action in ob.deny_tools:
+        return 0
+    return 1
+
+
+def _audit_tags_under(action: str, rule: str, obligations) -> dict:
+    risk = _tool_risk(action)
+    matches = sorted(
+        (ob for ob in obligations if _rule_matches(ob, action, risk, rule)),
+        key=lambda ob: (
+            _rule_specificity(ob, action, risk, rule),
+            ob.id,
+            ob.regulation,
+            ob.article,
+        ),
+    )
+    if not matches:
+        return {}
+    # IDs are unique in the shipped library, but fault-injected/custom libraries
+    # should not duplicate evidence rows. Preserve the first deterministic entry.
+    unique: list[Obligation] = []
+    seen: set[str] = set()
+    for ob in matches:
+        if ob.id not in seen:
+            unique.append(ob)
+            seen.add(ob.id)
+    bounded = unique[:_MAX_AUDIT_CITATIONS]
+    legacy = _tags_for(bounded[0])
+    return {
+        **legacy,
+        "obligations_enforced": [_tags_for(ob) for ob in bounded],
+        "obligations_enforced_count": len(unique),
+        **(
+            {"obligations_enforced_truncated": True}
+            if len(unique) > len(bounded)
+            else {}
+        ),
+    }
+
+
+def _compiled_for_evidence(keys) -> CompiledObligations:
+    if keys is _PROFILE_KEYS_UNSET:
+        return _active()
+    if keys is None:
+        raise RuntimeError(_EVIDENCE_ERROR)
+    return compile_obligations(keys)
+
+
+def audit_tags(action: str, rule: str, *, keys=_PROFILE_KEYS_UNSET) -> dict:
+    """Every obligation behind a chokepoint verdict, for the audit row.
+
+    ``keys`` is the exact ``Verdict.compliance_profiles`` snapshot used by the
+    policy decision. Supplying it prevents a concurrent config/tenant change
+    from relabelling the decision. An explicit ``None`` means provenance was
+    unavailable and produces an evidence-error marker; omitting ``keys`` keeps
+    the legacy live-resolution helper behavior. The first deterministic citation
+    is retained in the legacy scalar aliases; ``obligations_enforced`` retains
+    all bounded applicable citations.
     """
     try:
-        compiled = _active()
-        risk = _tool_risk(action)
-        floor_match: Obligation | None = None
-        for ob in compiled.obligations:
-            if rule not in _RULES_FOR_EFFECT.get(ob.effect, ()):
-                continue
-            if action in ob.actions or action in ob.deny_tools:
-                return _tags_for(ob)
-            if floor_match is None and ob.min_risk and ob.covers(action, risk):
-                floor_match = ob
-        return _tags_for(floor_match) if floor_match else {}
+        compiled = _compiled_for_evidence(keys)
+        return _audit_tags_under(action, rule, compiled.obligations)
     except Exception:
-        return {}
+        log.exception("regulatory obligation evidence is unavailable")
+        return {"obligation_evidence_error": _EVIDENCE_ERROR}
 
 
-def obligations_checked(action: str) -> list[str]:
+def obligations_checked(action: str, *, keys=_PROFILE_KEYS_UNSET) -> list[str]:
     """Ids of every active obligation whose scope covers ``action``."""
-    try:
-        compiled = _active()
-        risk = _tool_risk(action)
-        return [ob.id for ob in compiled.obligations if ob.covers(action, risk)]
-    except Exception:
-        return []
+    compiled = _compiled_for_evidence(keys)
+    risk = _tool_risk(action)
+    return sorted({ob.id for ob in compiled.obligations if ob.covers(action, risk)})
 
 
-def checked_tags(action: str) -> dict:
+def checked_tags(action: str, *, keys=_PROFILE_KEYS_UNSET) -> dict:
     """``{"obligations_checked": [...]}`` for the success-path audit row, or ``{}``.
 
     Empty when nothing is active, so a deployment without obligations writes
     exactly the rows it always did.
     """
-    ids = obligations_checked(action)
-    return {"obligations_checked": ids} if ids else {}
+    try:
+        ids = obligations_checked(action, keys=keys)
+        return {"obligations_checked": ids} if ids else {}
+    except Exception:
+        log.exception("regulatory obligation evidence is unavailable")
+        return {"obligation_evidence_error": _EVIDENCE_ERROR}
 
 
 def attenuate(cap):
@@ -319,11 +392,7 @@ def _verify_gate(ob: Obligation, policy: Policy) -> list[str]:
 
 def audit_tags_under(action: str, rule: str, obligations) -> dict:
     """``audit_tags`` against an explicit obligation set (used by verify)."""
-    risk = _tool_risk(action)
-    for ob in obligations:
-        if rule in _RULES_FOR_EFFECT.get(ob.effect, ()) and ob.covers(action, risk):
-            return _tags_for(ob)
-    return {}
+    return _audit_tags_under(action, rule, obligations)
 
 
 def _verify_attenuation(ob: Obligation, deny_tools: frozenset[str]) -> list[str]:
@@ -391,8 +460,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
 
-    keys = ([p for p in args.profiles.split(",") if p.strip()]
-            if args.profiles is not None else active_keys())
+    try:
+        keys = ([p for p in args.profiles.split(",") if p.strip()]
+                if args.profiles is not None else active_keys())
+    except Exception as exc:
+        print(f"regulatory compiler: invalid compliance activation: {exc}")
+        return 2
     keys = _known_keys(keys)
     problems = verify(keys) if keys else []
     report = {**describe(keys), "problems": problems,
@@ -411,7 +484,10 @@ def main(argv: list[str] | None = None) -> int:
         if keys and not problems:
             print(f"regulatory compiler: {report['inspected']} obligation(s) compile to "
                   "live, non-vacuous gates")
-    if args.ci and not keys:
+    # A verification command that inspected nothing is never successful. The
+    # --ci switch remains accepted for compatibility, but vacuity is an error in
+    # interactive use too: show/describe are the non-gating discovery surfaces.
+    if not keys:
         return 2
     return 1 if problems else 0
 

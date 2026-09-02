@@ -111,7 +111,7 @@ def test_tenant_provider_source_is_displayed_and_dashboard_rotation_refused(
     config.reset_config_cache()
 
     state = config.provider_configuration_state("openai")
-    assert state["api_key_source"] == "tenant config"
+    assert state["api_key_source"] == "tenant config"  # pragma: allowlist secret
     assert state["dashboard_can_set_api_key"] is False
     page = c.get("/settings").text
     assert "API key is controlled by tenant config" in page
@@ -137,7 +137,7 @@ def test_post_commit_provider_mismatch_rolls_back_dashboard_overlay(
     monkeypatch.setattr(
         config,
         "get_provider_config",
-        lambda _name: {"api_key": "higher-authority-secret"},
+        lambda _name: {"api_key": "higher-authority-secret"},  # pragma: allowlist secret
     )
 
     response = c.post(
@@ -299,7 +299,7 @@ def test_provider_rotation_rollback_restores_exact_bytes_and_mode(
     monkeypatch.setattr(
         config,
         "get_provider_config",
-        lambda _name: {"api_key": "higher-authority-secret"},
+        lambda _name: {"api_key": "higher-authority-secret"},  # pragma: allowlist secret
     )
     response = c.post(
         "/settings/providers",
@@ -359,7 +359,7 @@ def test_environment_key_can_be_replaced_and_effective_digest_is_verified(
     from maverick import config
 
     before = config.provider_configuration_state("openai")
-    assert before["api_key_source"] == "environment:OPENAI_API_KEY"
+    assert before["api_key_source"] == "environment:OPENAI_API_KEY"  # pragma: allowlist secret
     assert before["dashboard_can_set_api_key"] is True
 
     response = c.post(
@@ -368,7 +368,7 @@ def test_environment_key_can_be_replaced_and_effective_digest_is_verified(
     )
     assert response.status_code == 200, response.text
     after = config.provider_configuration_state("openai")
-    assert after["api_key_source"] == "dashboard"
+    assert after["api_key_source"] == "dashboard"  # pragma: allowlist secret
     assert config.get_provider_config("openai")["api_key"] == "rotated-secret"  # pragma: allowlist secret
 
 

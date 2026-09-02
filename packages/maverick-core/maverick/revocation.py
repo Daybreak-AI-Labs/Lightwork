@@ -27,16 +27,20 @@ principal to revoke against).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
 import os
+import secrets
 import stat
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +48,9 @@ _MAX_STORE_BYTES = 2 * 1024 * 1024
 _MAX_ENTRIES = 10_000
 _MAX_PRINCIPAL_LENGTH = 1024
 _MAX_REASON_LENGTH = 4096
+_MAX_GENERATION_LENGTH = 128
+
+_T = TypeVar("_T")
 
 
 def _bounded_read_text(path: Path) -> str:
@@ -80,10 +87,27 @@ class Revocation:
     principal: str
     revoked_at: float
     reason: str = ""
+    # Security containment is stronger than an ordinary operator suspension.
+    # Older registries omit this field and therefore remain ordinary,
+    # backwards-compatible revocations.
+    protected: bool = False
+    # Every new protected containment receives an opaque generation. Release
+    # binds to this value so an operator who started releasing incident A
+    # cannot delete a concurrently-published incident B. Legacy records omit
+    # the field and use the empty generation until they are re-contained.
+    generation: str = ""
 
 
 class RevocationStoreError(RuntimeError):
     """The configured revocation state exists but cannot be trusted."""
+
+
+class ProtectedRevocationError(RuntimeError):
+    """An ordinary unrevoke attempted to clear security containment."""
+
+
+class RevocationGenerationMismatch(ProtectedRevocationError):
+    """A protected release was superseded by a newer containment."""
 
 
 def _valid_principal(value: object) -> bool:
@@ -99,6 +123,63 @@ def _valid_reason(value: object) -> bool:
     return isinstance(value, str) and len(value) <= _MAX_REASON_LENGTH
 
 
+def _valid_generation(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= _MAX_GENERATION_LENGTH
+        and (not value or (value.isascii() and value.isalnum()))
+    )
+
+
+def _new_generation() -> str:
+    return secrets.token_hex(16)
+
+
+def _parse_revocation_record(principal: object, record: object) -> Revocation:
+    if not _valid_principal(principal):
+        raise RevocationStoreError("revocation store corrupt: invalid principal")
+    principal = str(principal)
+    if not isinstance(record, dict):
+        raise RevocationStoreError(
+            f"revocation store corrupt: record for {principal!r} must be an object"
+        )
+    revoked_at = record.get("revoked_at")
+    reason = record.get("reason", "")
+    protected = record.get("protected", False)
+    generation = record.get("generation", "")
+    if isinstance(revoked_at, bool) or not isinstance(revoked_at, (int, float)):
+        raise RevocationStoreError(
+            f"revocation store corrupt: timestamp for {principal!r} must be numeric"
+        )
+    timestamp = float(revoked_at)
+    if not math.isfinite(timestamp) or timestamp <= 0:
+        raise RevocationStoreError(
+            f"revocation store corrupt: timestamp for {principal!r} "
+            "must be finite and positive"
+        )
+    if not isinstance(reason, str):
+        raise RevocationStoreError(
+            f"revocation store corrupt: reason for {principal!r} must be a string"
+        )
+    if not _valid_reason(reason):
+        raise RevocationStoreError(
+            f"revocation store corrupt: reason for {principal!r} is too long"
+        )
+    if not isinstance(protected, bool):
+        raise RevocationStoreError(
+            f"revocation store corrupt: protected flag for {principal!r} "
+            "must be a boolean"
+        )
+    if not _valid_generation(generation) or (generation and not protected):
+        raise RevocationStoreError(
+            f"revocation store corrupt: generation for {principal!r} "
+            "must be a bounded protected-containment token"
+        )
+    return Revocation(
+        principal, timestamp, reason, protected=protected, generation=generation,
+    )
+
+
 class RevocationRegistry:
     """A persisted ``principal -> Revocation`` set, re-read on file change."""
 
@@ -107,7 +188,10 @@ class RevocationRegistry:
         self._cache: dict[str, Revocation] = {}
         self._version: tuple[int, int, int, int] | None = None
         self._loaded = False
-        self._lock = threading.Lock()
+        # Containment callbacks can re-enter registry reads on the same thread.
+        # The strict cross-process lock is already re-entrant; mirror that
+        # property here so a nested enforcement check cannot self-deadlock.
+        self._lock = threading.RLock()
 
     @property
     def path(self) -> Path:
@@ -115,6 +199,23 @@ class RevocationRegistry:
             return self._explicit_path
         from .paths import data_dir
         return data_dir("capability_revocations.json")
+
+    def _containment_authority_path(self, principal: str) -> Path:
+        digest = hashlib.sha256(principal.encode("utf-8")).hexdigest()
+        return self.path.parent / f".{self.path.name}.containment-{digest}"
+
+    @contextmanager
+    def containment_authority(self, principal: str) -> Iterator[None]:
+        """Hold the stable strict authority for one principal's projections."""
+        if not _valid_principal(principal):
+            raise ValueError("invalid revocation principal")
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        ensure_private_directory(self.path.parent)
+        with cross_process_lock(
+            self._containment_authority_path(principal), strict=True,
+        ):
+            yield
 
     # -- read path (hot) --------------------------------------------------
 
@@ -197,41 +298,7 @@ class RevocationRegistry:
 
         out: dict[str, Revocation] = {}
         for principal, record in raw.items():
-            if not _valid_principal(principal):
-                raise RevocationStoreError(
-                    "revocation store corrupt: invalid principal"
-                )
-            if not isinstance(record, dict):
-                raise RevocationStoreError(
-                    f"revocation store corrupt: record for {principal!r} "
-                    "must be an object"
-                )
-            revoked_at = record.get("revoked_at")
-            reason = record.get("reason", "")
-            if isinstance(revoked_at, bool) or not isinstance(
-                revoked_at, (int, float)
-            ):
-                raise RevocationStoreError(
-                    f"revocation store corrupt: timestamp for {principal!r} "
-                    "must be numeric"
-                )
-            timestamp = float(revoked_at)
-            if not math.isfinite(timestamp) or timestamp <= 0:
-                raise RevocationStoreError(
-                    f"revocation store corrupt: timestamp for {principal!r} "
-                    "must be finite and positive"
-                )
-            if not isinstance(reason, str):
-                raise RevocationStoreError(
-                    f"revocation store corrupt: reason for {principal!r} "
-                    "must be a string"
-                )
-            if not _valid_reason(reason):
-                raise RevocationStoreError(
-                    f"revocation store corrupt: reason for {principal!r} "
-                    "is too long"
-                )
-            out[principal] = Revocation(principal, timestamp, reason)
+            out[str(principal)] = _parse_revocation_record(principal, record)
         return out
 
     def is_revoked(self, principal: str) -> bool:
@@ -262,8 +329,23 @@ class RevocationRegistry:
                 raise ValueError("invalid revocation principal")
             if not _valid_reason(revocation.reason):
                 raise ValueError("revocation reason is too long or not a string")
-        payload = {pr: {"revoked_at": r.revoked_at, "reason": r.reason}
-                   for pr, r in data.items()}
+            if not isinstance(revocation.protected, bool):
+                raise ValueError("revocation protected flag must be a boolean")
+            if (
+                not _valid_generation(revocation.generation)
+                or (revocation.generation and not revocation.protected)
+            ):
+                raise ValueError("revocation generation is invalid")
+        payload = {}
+        for principal, revocation in data.items():
+            record = {
+                "revoked_at": revocation.revoked_at,
+                "reason": revocation.reason,
+                "protected": revocation.protected,
+            }
+            if revocation.generation:
+                record["generation"] = revocation.generation
+            payload[principal] = record
         encoded = json.dumps(payload, allow_nan=False, sort_keys=True)
         if len(encoded.encode("utf-8")) > _MAX_STORE_BYTES:
             raise ValueError(
@@ -274,8 +356,15 @@ class RevocationRegistry:
         self._version = self._current_version()
         self._loaded = True
 
-    def revoke(self, principal: str, *, reason: str = "",
-               now: float | None = None) -> Revocation:
+    def revoke(
+        self,
+        principal: str,
+        *,
+        reason: str = "",
+        now: float | None = None,
+        protected: bool = False,
+        durable_apply: Callable[[], None] | None = None,
+    ) -> Revocation:
         if not _valid_principal(principal):
             raise ValueError("invalid revocation principal")
         if not _valid_reason(reason):
@@ -286,38 +375,129 @@ class RevocationRegistry:
         from .file_lock import cross_process_lock, ensure_private_directory
 
         ensure_private_directory(self.path.parent)
-        with self._lock:
-            with cross_process_lock(self.path):
-                # Re-read while holding the process lock. Atomic publication
-                # alone cannot prevent concurrent read-modify-write updates
-                # from overwriting another revocation.
-                self._loaded = False
-                self._load_if_changed()
-                data = dict(self._cache)
-                rev = Revocation(principal, ts, reason)
-                data[principal] = rev
-                self._write(data)
-                return rev
+        with self.containment_authority(principal):
+            with self._lock:
+                with cross_process_lock(self.path, strict=True):
+                    # Re-read while holding the process lock. Atomic publication
+                    # alone cannot prevent concurrent read-modify-write updates
+                    # from overwriting another revocation.
+                    self._loaded = False
+                    self._load_if_changed()
+                    data = dict(self._cache)
+                    previous = data.get(principal)
+                    if previous is not None and previous.protected and not protected:
+                        # A lower-authority suspension must not repaint containment
+                        # with a new timestamp/reason. Preserve the exact incident
+                        # provenance and avoid an unnecessary write.
+                        return previous
+                    # An ordinary revoke must never downgrade a durable security
+                    # containment that landed first in another thread/process.
+                    keep_protected = bool(protected or (
+                        previous is not None and previous.protected
+                    ))
+                    rev = Revocation(
+                        principal, ts, reason, protected=keep_protected,
+                        generation=_new_generation() if protected else "",
+                    )
+                    data[principal] = rev
+                    self._write(data)
+                    if durable_apply is not None:
+                        durable_apply()
+                    return rev
 
-    def unrevoke(self, principal: str) -> bool:
+    def unrevoke(
+        self,
+        principal: str,
+        *,
+        allow_protected: bool = False,
+        expected_generation: str | None = None,
+        durable_clear: Callable[[], None] | None = None,
+    ) -> bool:
+        """Remove an ordinary revocation.
+
+        Security containment is durable provenance, not merely a reason string.
+        It can only be cleared by an explicit security/admin release passing
+        ``allow_protected=True`` *and* the exact generation observed before the
+        release began. The optional ``durable_clear`` callback runs while the
+        same process and strict cross-process locks still exclude a concurrent
+        containment writer; if it fails, the protected row is retained.
+        """
         if not _valid_principal(principal):
             raise ValueError("invalid revocation principal")
         from .file_lock import cross_process_lock, ensure_private_directory
 
         ensure_private_directory(self.path.parent)
-        with self._lock:
-            with cross_process_lock(self.path):
-                self._loaded = False
-                self._load_if_changed()
-                if principal not in self._cache:
-                    return False
-                data = dict(self._cache)
-                data.pop(principal, None)
-                self._write(data)
-                return True
+        with self.containment_authority(principal):
+            with self._lock:
+                with cross_process_lock(self.path, strict=True):
+                    self._loaded = False
+                    self._load_if_changed()
+                    if principal not in self._cache:
+                        return False
+                    current = self._cache[principal]
+                    if current.protected and not allow_protected:
+                        raise ProtectedRevocationError(
+                            "principal is security-contained; use an explicit "
+                            "security/admin release"
+                        )
+                    if current.protected and expected_generation is None:
+                        raise ProtectedRevocationError(
+                            "protected release requires the observed containment generation"
+                        )
+                    if (
+                        expected_generation is not None
+                        and current.generation != expected_generation
+                    ):
+                        raise RevocationGenerationMismatch(
+                            "a newer security containment superseded this release"
+                        )
+                    if durable_clear is not None:
+                        durable_clear()
+                    data = dict(self._cache)
+                    data.pop(principal, None)
+                    self._write(data)
+                    return True
 
-    def revoke_subtree(self, principal: str, edges: dict[str, object], *,
-                       reason: str = "", now: float | None = None) -> list[str]:
+    def run_if_unprotected(
+        self,
+        principal: str,
+        action: Callable[[], _T],
+    ) -> _T:
+        """Run a dependent-store restore only while no protected row exists.
+
+        This closes check-then-clear races in trust/gateway operator surfaces:
+        a concurrent containment either lands first and refuses ``action``, or
+        waits for ``action`` and then re-applies the restrictive dependent
+        state after this lock is released.
+        """
+        if not _valid_principal(principal):
+            raise ValueError("invalid revocation principal")
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        ensure_private_directory(self.path.parent)
+        with self.containment_authority(principal):
+            with self._lock:
+                with cross_process_lock(self.path, strict=True):
+                    self._loaded = False
+                    self._load_if_changed()
+                    current = self._cache.get(principal)
+                    if current is not None and current.protected:
+                        raise ProtectedRevocationError(
+                            "principal is security-contained; use an explicit "
+                            "security/admin release"
+                        )
+                    return action()
+
+    def revoke_subtree(
+        self,
+        principal: str,
+        edges: dict[str, object],
+        *,
+        reason: str = "",
+        now: float | None = None,
+        protected: bool = False,
+        durable_apply: Callable[[], None] | None = None,
+    ) -> list[str]:
         """Revoke ``principal`` and every descendant reachable via ``edges``
         (``parent -> iterable[child]``). Cycle-safe; one atomic write."""
         if not _valid_reason(reason):
@@ -329,14 +509,29 @@ class RevocationRegistry:
         from .file_lock import cross_process_lock, ensure_private_directory
 
         ensure_private_directory(self.path.parent)
-        with self._lock:
-            with cross_process_lock(self.path):
-                self._loaded = False
-                self._load_if_changed()
-                data = dict(self._cache)
-                for pr in order:
-                    data[pr] = Revocation(pr, ts, reason)
-                self._write(data)
+        with self.containment_authority(principal):
+            with self._lock:
+                with cross_process_lock(self.path, strict=True):
+                    self._loaded = False
+                    self._load_if_changed()
+                    data = dict(self._cache)
+                    changed = False
+                    for pr in order:
+                        previous = data.get(pr)
+                        if previous is not None and previous.protected and not protected:
+                            continue
+                        keep_protected = bool(protected or (
+                            previous is not None and previous.protected
+                        ))
+                        data[pr] = Revocation(
+                            pr, ts, reason, protected=keep_protected,
+                            generation=_new_generation() if protected else "",
+                        )
+                        changed = True
+                    if changed:
+                        self._write(data)
+                    if durable_apply is not None:
+                        durable_apply()
         return order
 
 
@@ -419,5 +614,6 @@ def revoked_principal(principals: Iterable[str] | str) -> str | None:
     return None
 
 
-__all__ = ["Revocation", "RevocationRegistry", "RevocationStoreError",
+__all__ = ["ProtectedRevocationError", "Revocation", "RevocationGenerationMismatch",
+           "RevocationRegistry", "RevocationStoreError",
            "shared", "reset_shared", "is_revoked", "revoked_principal"]

@@ -260,7 +260,7 @@ def _nav_context(request: Request) -> dict:
         can_halt = (
             has_global_permission(request, "admin")
             if _shared_halt_backend()
-            else has_permission(request, "operate")
+            else has_global_permission(request, "operate")
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         can_halt = False

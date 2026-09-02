@@ -535,15 +535,34 @@ def test_shared_halt_allows_admin(monkeypatch, tmp_path):
     class FakeWorld:
         def __init__(self):
             self.armed = False
+            self.generation = None
 
         def arm_halt(self, reason="", source="manual", armed_by=""):
             self.armed = True
+            self.generation = "shared-generation-admin"
             self.reason = reason
             self.source = source
             self.armed_by = armed_by
+            return self.generation
 
-        def disarm_halt(self):
+        def active_halt(self):
+            if not self.armed:
+                return None
+            return {
+                "reason": self.reason,
+                "source": self.source,
+                "armed_by": self.armed_by,
+                "armed_at": 123.0,
+                "generation": self.generation,
+            }
+
+        def disarm_halt(self, *, expected_generation, durable_clear=None):
+            assert expected_generation == self.generation
+            assert durable_clear is not None
+            durable_clear()
             self.armed = False
+            self.generation = None
+            return True
 
     fake_world = FakeWorld()
     monkeypatch.setenv("MAVERICK_HALT_FILE", str(tmp_path / "HALT"))

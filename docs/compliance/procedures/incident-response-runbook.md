@@ -177,21 +177,27 @@ killswitch.is_active()   # True when any trigger is live
 killswitch.check()       # raises Halted(...) if halted
 ```
 
-**Clearing (Recovery only, IC-authorized — clear ALL three):**
+**Clearing (Recovery only, IC-authorized):** use the authenticated dashboard
+**Resume** action (`DELETE /api/v1/halt`) for the configured scope. Do **not**
+manually sequence `rm`, `killswitch.clear()`, and `world.disarm_halt()`: that
+creates a window in which one authority is clear while another operation is
+still unresolved.
 
-```bash
-rm -f "${MAVERICK_HALT_FILE:-$HOME/.maverick/HALT}"        # 1. file
-```
-```python
-from maverick import killswitch
-killswitch.clear()                                          # 2. in-process
-from maverick.world_model import open_world
-open_world().disarm_halt()                                  # 3. cluster (if armed)
-```
+The coordinated recovery action:
 
-> Note: `killswitch.clear()` resets only the in-process halt; it does **not**
-> delete the HALT file. You must remove the file and disarm the shared halt
-> separately or the system will re-halt.
+1. snapshots the exact local file, in-process, and shared generations;
+2. takes a temporary process stop;
+3. locks the observed shared row and invokes the exact local deletion inside
+   that database transaction;
+4. rolls the shared clear back if the local deletion fails; and
+5. releases only its own process hold after commit and verification.
+
+`world.disarm_halt(expected_generation=..., durable_clear=...)` is therefore a
+low-level transactional primitive, not a standalone recovery command. A
+concurrent arm rotates its generation and wins; an unavailable authority or
+indeterminate commit leaves or restores a local fail-safe and returns an error.
+For a deliberately local-only deployment, use the Agent Control Plane's
+`clear_halt` action, which applies the same exact-generation file/process CAS.
 
 ### 5.2 Circuit breakers
 

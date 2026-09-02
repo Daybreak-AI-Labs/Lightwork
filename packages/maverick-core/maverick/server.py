@@ -302,7 +302,16 @@ class Server:
             require_enterprise_or_die()
 
             title = msg.text[:80]
-            goal_id = world.create_goal(title, msg.text)
+            # Persist the exact principal the runner will execute under.  The
+            # identity is opaque and stays in the database; tenant path code
+            # independently percent-encodes it before any filesystem use.
+            execution_user_id = f"{msg.channel or 'unknown'}:{principal_id}"
+            goal_id = world.create_goal(
+                title,
+                msg.text,
+                owner=f"user:{execution_user_id}",
+                execution_principal=f"user:{execution_user_id}",
+            )
 
             # Inbound channel attachments (Slack files, email/Telegram
             # attachments) become goal attachments, exactly like a dashboard
@@ -333,7 +342,7 @@ class Server:
                 dispatch_status = await run_goal_in_background_async(
                     goal_id, max_depth=self.max_depth,
                     channel=msg.channel or "unknown",
-                    user_id=f"{msg.channel or 'unknown'}:{principal_id}",
+                    user_id=execution_user_id,
                     conversation_id=conversation.id,
                 )
             except Exception:
