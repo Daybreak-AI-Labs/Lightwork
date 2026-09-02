@@ -1213,7 +1213,13 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
         assert f"{name}=={version}" in workflow
         assert f"{name}>=" not in workflow
     assert "python -m detect_secrets scan --baseline" in workflow
-    assert workflow.count("python scripts/verify_constraint_closure.py") >= 4
+    # The `test` job's install lives in the shared composite action
+    # (.github/actions/test-shard); the closure check must run at every
+    # install site, so count across the workflow and the action.
+    composite = (REPO_ROOT / ".github" / "actions" / "test-shard" / "action.yml").read_text(
+        encoding="utf-8"
+    )
+    assert (workflow + composite).count("python scripts/verify_constraint_closure.py") >= 4
     assert "pgvector/pgvector:pg16@sha256:" in workflow
     for live_test in (
         "test_postgres_world.py",
