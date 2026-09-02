@@ -39,11 +39,14 @@ def test_lang_resolution_param_cookie_header():
 
 
 def test_lang_param_translates_chrome_and_sets_cookie():
-    r = client.get("/", params={"lang": "fr"})
+    # Use a non-redirecting page: ``/`` may send an unconfigured deployment
+    # through onboarding, where the cookie is correctly set on the 303 rather
+    # than repeated on the final ``/start`` response.
+    r = client.get("/overview", params={"lang": "fr"})
     assert r.status_code == 200
     assert 'lang="fr"' in r.text
     assert "mvk_lang=fr" in r.headers.get("set-cookie", "")
-    r2 = client.get("/", params={"lang": "ja"})
+    r2 = client.get("/overview", params={"lang": "ja"})
     assert 'lang="ja"' in r2.text
 
 
@@ -57,14 +60,14 @@ def test_language_selector_discloses_partial_translation_scope():
 
 
 def test_font_axis_cookie_and_body_class():
-    r = client.get("/", params={"font": "dyslexic"})
+    r = client.get("/overview", params={"font": "dyslexic"})
     assert r.status_code == 200
     assert "font-dyslexic" in r.text
     assert "mvk_font=dyslexic" in r.headers.get("set-cookie", "")
     # Bogus values are ignored (no cookie, default class) -- fresh client so
     # the previous request's cookie doesn't mask the fallback.
     fresh = TestClient(app)
-    r2 = fresh.get("/", params={"font": "comic"})
+    r2 = fresh.get("/overview", params={"font": "comic"})
     assert "mvk_font" not in r2.headers.get("set-cookie", "")
     assert 'font-default' in r2.text
 

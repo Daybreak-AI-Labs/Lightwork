@@ -106,9 +106,9 @@ def test_collapsed_sidebar_is_removed_from_keyboard_and_accessibility_navigation
 
 
 def test_overview_first_run_form_has_inline_error_region(monkeypatch, tmp_path):
-    """The landing-page first-goal form gets the same graceful errors."""
+    """The overview's first-goal form gets the same graceful errors."""
     _prep(monkeypatch, tmp_path)
-    r = _client().get("/")
+    r = _client().get("/overview")
     # Empty DB -> first-run branch with the goal form.
     assert 'action="/chat/send"' in r.text
     assert 'id="goal-error"' in r.text
