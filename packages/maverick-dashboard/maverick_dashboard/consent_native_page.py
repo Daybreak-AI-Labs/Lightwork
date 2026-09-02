@@ -20,7 +20,7 @@ _HEADERS = {
     "Pragma": "no-cache",
     "Content-Security-Policy": (
         "default-src 'none'; base-uri 'none'; connect-src 'self'; "
-        "font-src 'none'; form-action 'none'; frame-ancestors 'none'; "
+        "font-src 'self'; form-action 'none'; frame-ancestors 'none'; "
         "img-src 'self'; manifest-src 'none'; media-src 'none'; "
         "object-src 'none'; script-src 'self'; style-src 'self'; worker-src 'none'"
     ),

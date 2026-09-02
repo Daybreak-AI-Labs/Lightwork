@@ -266,6 +266,18 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
+    # Cortex, the company brain: one governed recall surface over knowledge,
+    # skills, lessons, the Operating Record and fleet memory. Read-only at
+    # the page (every read is audited by the kernel); the audit tail it shows
+    # is a separate "audit" grant, and deposits need "operate" at the API.
+    {
+        "path": "/cortex",
+        "label": "Cortex",
+        "group": "Observe",
+        "icon": "learned",
+        "floor": "view",
+        "default": "view",
+    },
     {
         "path": "/learning",
         "label": "Learning",

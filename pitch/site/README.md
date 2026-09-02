@@ -40,13 +40,14 @@ described, not linked).
 | `company.html` | The lab, the thesis, what we build, contact |
 | `onepager.html` | Printable one-page summary |
 | `privacy.html` | Privacy & cookies |
+| `terms.html` | Terms of use (website terms; the product runs under a separate agreement) |
 | `404.html` | Not found |
 | `styles.css` | The shared design system |
 | `lab.js`, `app.js` | Gate-instrument figure; demo modal |
 
 **Brand assets**: `daybreak-mark-dark.png` (the circuit-sunrise D mark, used in the
 nav and footer), `daybreak-logo.png` (full horizontal lockup with tagline, 970×305,
-kept for decks and social), `favicon-32/180/512.png`, and `og.png` (1200×630).
+kept for decks and social), `favicon-32/180/512.png`, and `og.png` (1200×630, neon-lab design).
 
 ## Preview
 Open `index.html` in any browser (fonts are local, so it works offline). For a
@@ -81,9 +82,20 @@ either:
 The key is the only thing standing between the live form and direct-to-inbox
 delivery — get a free one at web3forms.com (sends to chris@daybreakailabs.com).
 
-## Finish before launch
-- Set the Web3Forms access key (above) so demo requests reach the inbox directly.
-- Confirm the SOC 2 wording on `security.html` matches reality before publishing.
+## Finish before launch (owner sign-offs)
+- **Web3Forms access key** (above) so demo requests reach the inbox directly; the
+  mailto fallback works today. No code change — just set the key.
+- **SOC 2 wording**: confirm `index.html` ("status available on request") and
+  `autonomous-compliance.html` (SOC 2 in the control-framework list) match reality
+  before publishing; no completed certification is claimed.
+- **"Private alpha" footer line**: every footer's legal line ends "Private alpha" —
+  confirm or change.
+- **`terms.html`**: the website Terms of use is in place and linked from every footer;
+  section 9 (governing law) says "the state in which Daybreak Labs is established" —
+  pin the actual state and have counsel review before public launch.
+- **`chris@` mailbox**: DNS mail routing is confirmed intact after the Cloudflare zone
+  move (MX -> aspmx.l.google.com, SPF include:_spf.google.com, Google verification TXT);
+  confirm the chris@daybreakailabs.com mailbox itself exists in Google Workspace.
 - Legal rule for the compliance offering: the site never names another vendor, never
   claims a row-by-row or line-by-line comparison, and never cites capability counts
   from the internal competitive review; status is described only for our own product

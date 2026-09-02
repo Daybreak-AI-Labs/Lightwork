@@ -3968,6 +3968,14 @@ def pick_advanced() -> dict[str, Any]:
             "An explicit trust decision; OFF by default.",
             default=False,
         ),
+        "cortex": _q_confirm(
+            "Enable Cortex, the governed company memory over knowledge, skills, "
+            "lessons, the Operating Record and fleet memory (recommended)? One "
+            "recall/deposit surface, tenant-exact, one audit row per read and "
+            "per write; each source's own toggle still applies. Inspect it with "
+            "`maverick cortex status`. ON by default.",
+            default=True,
+        ),
         "external_agents": _q_confirm(
             "External-agent gateway? Govern agents built on OTHER platforms "
             "(Salesforce Agentforce, AWS Bedrock, custom runtimes): enroll "
@@ -6759,6 +6767,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         "data_engine": "data_engine",
         "operations_scientist": "operations_scientist",
         "consequence": "consequence",
+        "cortex": "cortex",
     }
     for choice, section in _learning_sections.items():
         if choice in advanced and advanced[choice] is False:
@@ -7276,6 +7285,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("fleet_memory"):
         lines.append("")
         lines.append("[fleet_memory]")
+        lines.append("enable = true")
+    if advanced.get("cortex"):
+        lines.append("")
+        lines.append("[cortex]")
+        lines.append("# Cortex, the company brain (maverick.cortex): one governed recall/deposit")
+        lines.append("# surface over knowledge, skills, lessons, the Operating Record and fleet")
+        lines.append("# memory -- tenant-exact, one audit row per read and per write. Each")
+        lines.append("# source's own toggle still applies. `maverick cortex status` shows it.")
         lines.append("enable = true")
     if advanced.get("external_agents"):
         lines.append("")
@@ -8390,6 +8407,7 @@ _EXPRESS_ADVANCED: dict[str, Any] = {
     "consequence": True,
     "rehearsal": True,
     "evaluator_evolution": True,
+    "cortex": True,
     # governed memory + provable-learning audit (non-blocking)
     "memory_guard": True,
     "temporal_memory": True,
@@ -8442,6 +8460,7 @@ _LEARNING_LIFECYCLE: dict[str, Any] = {
     "evaluator_evolution": True,
     "consequence": True,
     "rehearsal": True,
+    "cortex": True,
 }
 
 _PROFILE_SELF_LEARNING: dict[str, Any] = dict(_EXPRESS_SELF_LEARNING)
