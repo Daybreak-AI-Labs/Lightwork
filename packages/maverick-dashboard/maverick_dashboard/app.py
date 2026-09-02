@@ -925,6 +925,7 @@ from .consent_native_page import create_consent_native_page_router  # noqa: E402
 from .consent_web_publish_settings_page import (  # noqa: E402
     create_consent_web_publish_settings_page_router,
 )
+from .cortex_page import create_cortex_page_router  # noqa: E402
 from .evolution_ledger_page import (  # noqa: E402
     create_evolution_ledger_page_router,
 )
@@ -970,10 +971,12 @@ app.include_router(create_shared_governance_inventory_page_router(templates))
 app.include_router(create_agent_control_plane_page_router(templates))
 app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
+app.include_router(create_cortex_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
+from .cortex_api import router as cortex_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
 from .evolution_ledger_api import router as evolution_ledger_router  # noqa: E402
 from .regulatory_obligations_api import router as regulatory_obligations_router  # noqa: E402
@@ -989,6 +992,7 @@ app.include_router(shared_governance_inventory_router, prefix="/api/v1")
 app.include_router(agent_control_plane_router, prefix="/api/v1")
 app.include_router(regulatory_obligations_router, prefix="/api/v1")
 app.include_router(trust_receipts_router, prefix="/api/v1")
+app.include_router(cortex_router, prefix="/api/v1")
 app.include_router(evolution_ledger_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
