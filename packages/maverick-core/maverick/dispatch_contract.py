@@ -32,6 +32,8 @@ import ast
 import sys
 from pathlib import Path
 
+from .source_fingerprint import ScanMemo
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SEARCH_ROOTS = ("packages", "apps")
 _GENERATED_PARTS = frozenset({
@@ -182,8 +184,19 @@ def scan_file(path: Path) -> list[dict]:
     return out
 
 
+_MEMO: ScanMemo[tuple[list[dict], int]] = ScanMemo()
+
+
 def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
-    roots = SEARCH_ROOTS if roots is None else roots
+    """Memoised on the tree's content (see ``source_fingerprint``)."""
+    chosen = tuple(SEARCH_ROOTS if roots is None else roots)
+    return _MEMO.get(
+        REPO_ROOT, chosen, lambda: _scan_uncached(chosen),
+        lambda result: ([dict(h) for h in result[0]], result[1]),
+    )
+
+
+def _scan_uncached(roots: tuple[str, ...]) -> tuple[list[dict], int]:
     hits: list[dict] = []
     inspected = 0
     for root in roots:

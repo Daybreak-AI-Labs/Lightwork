@@ -224,11 +224,18 @@ def _find_callees(modules: dict[str, dict[str, Any]], symbol: str, cap: int) -> 
     return "\n".join(rows)
 
 
+_VIEWS = frozenset({"summary", "import_graph", "symbol_index", "callers", "callees"})
+
+
 def _run_dep_graph_factory(sandbox):
     def _run(args: dict[str, Any]) -> str:
         view = args.get("view")
         if not view:
             return "ERROR: view is required"
+        if view not in _VIEWS:
+            # Refuse before indexing the workspace, not after: the walk is the
+            # expensive part and an unknown view can never use it.
+            return f"ERROR: unknown view {view!r}"
         module_filter = args.get("module")
         symbol = args.get("symbol")
         cap = max(1, min(int(args.get("max_results") or 200), 1000))

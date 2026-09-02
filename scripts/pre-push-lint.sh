@@ -108,6 +108,17 @@ else
   echo "  skip detect-secrets not installed (python -m pip install 'detect-secrets>=1.5')"
 fi
 
+echo "== AI attribution in unpushed commit messages (commit-hygiene.yml) =="
+if base="$(git merge-base origin/main HEAD 2>/dev/null)" && [ -n "$base" ]; then
+  if [ "$base" = "$(git rev-parse HEAD)" ]; then
+    echo "  skip nothing ahead of origin/main"
+  else
+    run "check_attribution" python scripts/check_attribution.py --commits "$base..HEAD"
+  fi
+else
+  echo "  skip origin/main not available locally"
+fi
+
 echo "== custom CI gates =="
 run "plugin_matrix --ci"      python -m maverick.plugin_matrix --ci
 run "deprecations --ci"       python -m maverick.deprecations --ci

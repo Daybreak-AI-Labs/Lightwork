@@ -5,6 +5,12 @@ from __future__ import annotations
 import pytest
 from maverick import control_data_plane_soak as soak
 
+# Six worker threads contending on one SQLite queue: on a two-core CI runner a
+# second xdist worker on the same box starves the lock waits into "database
+# is locked", which the soak rightly reports as a finding. CI runs this file in
+# the serial phase (see .github/workflows/ci.yml) so the box is its own.
+pytestmark = pytest.mark.heavy_concurrency
+
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):

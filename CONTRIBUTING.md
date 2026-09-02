@@ -76,21 +76,63 @@ or non-technical users can't reach it.
 - Every package has a `tests/` directory with `test_*.py` files.
 - Use the `FakeLLM` fixture in `packages/maverick-core/tests/conftest.py`
   for any test that touches the agent loop -- never burn API credits in CI.
-- Tests run via `pytest -vvs --tb=long` in CI on Python 3.10/3.11/3.12.
+- Tests run in CI on Python 3.10/3.11/3.12 as three disjoint file-level
+  slices per interpreter (`--shard N/3`, defined in the root `conftest.py`),
+  each under pytest-xdist with one worker per core and tests grouped by file
+  (`-n auto --dist loadfile`). Run the whole suite the same way locally --
+  `python -m pytest -q -n auto --dist loadfile` -- and it takes minutes
+  instead of the half hour it takes serially. Tests must therefore be
+  file-independent: no fixed TCP ports, no shared paths outside `tmp_path`,
+  nothing that assumes another file ran first or after. xdist orders files
+  by size, not alphabetically, so "it only leaks into files that run later"
+  is not a defence; the root conftest fails any test that leaves a
+  `maverick.*` package attribute bound to a re-imported module copy, the
+  leak that took nine unrelated tests down the first time. A test whose
+  *own* concurrency contends on SQLite (the queue soak, the discovery
+  estate runner) carries `@pytest.mark.heavy_concurrency`; CI runs those in
+  a short serial phase after each slice's parallel pass so they never share
+  a two-core box with a second xdist worker.
 
 ## Continuous integration (read before merging)
 
-**A PR is not mergeable until every required check is green.** Don't merge
-on a red or still-running pipeline -- a single broken check on `main`
-blocks everyone. The required checks are:
+**A PR is not mergeable until every required check is green.** `main` is
+protected by the ruleset in `.github/rulesets/protect-main.json`: every
+change lands through a pull request, through the **merge queue**, as a
+**squash**, and only once every required check below has passed on the
+queue's merge of the PR onto the current `main` (so "it was green on my
+branch" and "main moved after I pushed" can no longer put a red commit on
+`main`). Force-pushes and branch deletion are refused, history stays linear,
+and nobody is on the bypass list. The ruleset requires **zero approving
+reviews** only because the repository has a single maintainer, who cannot
+approve their own PRs; the change-management policy wants an independent
+approver, so the day a second maintainer exists, set
+`required_approving_review_count` to 1 and `require_code_owner_review` to
+true in the JSON and re-import.
 
-| Check            | What it runs                                                        |
-| ---------------- | ------------------------------------------------------------------- |
-| `lint`           | `ruff check .` (whole repo) + a grep rejecting bare `import tomllib` |
-| `lint-pr-title`  | Conventional-Commit PR title (see below)                            |
-| `test (3.10/.11/.12)` | the full `pytest` suite on each interpreter                     |
-| `audit`          | `pip-audit` against the dependency graph                            |
-| `docker`         | the deploy image builds                                             |
+The ruleset is applied in **Settings -> Rules -> Rulesets -> New ruleset ->
+Import a ruleset** with that JSON file; edit the file and re-import to change
+it, so the protection is reviewed like code. Two repository settings go with
+it: **Settings -> General -> Pull Requests -> "Allow squash merging" -> default
+commit message = "Pull request title"** (the "Default message" option
+prefills the squash from every branch commit, which is how AI co-author
+trailers reached `main`), and the **merge queue** appears on each PR as
+"Merge when ready" once the ruleset is active.
+
+The required checks (each must also trigger on `merge_group`, or the queue
+can never merge -- `test_every_required_workflow_runs_in_the_merge_queue`
+pins that):
+
+| Check                              | What it runs                                                          |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| `lint`                             | `ruff check .`, vulture, the tomllib/shell=True greps, detect-secrets, and every `python -m maverick.<gate> --ci` contract gate |
+| `lint-pr-title`                    | Conventional-Commit PR title (see below)                              |
+| `no-ai-attribution`                | `scripts/check_attribution.py` over the PR's commits + title/body, the merge-queue commit, and pushes to `main`: no AI co-author trailers, generator footers or assistant session links (CLAUDE.md) |
+| `test (3.10/.11/.12, 1/2/3)`       | the full `pytest` suite on each interpreter, three file-level slices each |
+| `posture (1/2/3)`                  | the full suite again under the production security posture, three slices |
+| `harness-overhead`, `governance-frontier-offline` | the tracked benchmark manifests verify against the current sources (regenerate them when a control-tree source changes) |
+| `audit`                            | OSV/pip-audit/bandit/SBOM across every dependency surface             |
+| `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | packaging cohort, shield red-team corpus, eval harness, Postgres backend, deploy image |
+| `Windows process containment (Python 3.10/.11/.12)` | Job Object process-tree containment on Windows            |
 
 Two recurring foot-guns, both enforced by CI:
 

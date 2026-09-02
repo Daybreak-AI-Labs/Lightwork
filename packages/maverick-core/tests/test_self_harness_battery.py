@@ -568,6 +568,10 @@ def test_self_harness_fuzz(monkeypatch, tmp_path):
 # H. MODEL-BASED (STATEFUL) — an EXACT oracle, not just invariant bounds
 # ==========================================================================
 
+# ~35 s of pure CPU on a quiet four-core box; on a two-core CI runner sharing the
+# host with a second xdist worker it has exceeded the suite-wide 180 s hang cap.
+# It is long, not hung: give it the room instead of racing the ceiling.
+@pytest.mark.timeout(900)
 def test_self_harness_model_based(monkeypatch, tmp_path):
     """Stateful model-based test: drive sequential passes against persistent,
     REUSED stores while maintaining an INDEPENDENT reference of the exact

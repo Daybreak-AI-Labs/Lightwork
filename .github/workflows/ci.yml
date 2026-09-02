@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue builds a temporary branch per entry and gates the merge on
+  # this workflow's required checks. Without this trigger nothing reports on
+  # that branch and every entry times out (.github/rulesets/protect-main.json).
+  merge_group:
 
 # Resolve the test environment from one reviewed set. Consumer package
 # manifests keep compatible ranges; CI must not silently change behavior when
@@ -538,15 +542,24 @@ jobs:
 
   test:
     runs-on: ubuntu-24.04
-    # The complete deterministic suite is intentionally broad and currently
-    # takes about 46 minutes on a Windows validation host before dependency
-    # installation.  Keep enough job headroom that a healthy Linux matrix run
-    # cannot be killed by runner variance or setup time.
-    timeout-minutes: 60
+    # The complete deterministic suite is intentionally broad: ~24,700 tests,
+    # about 27 minutes serial on this runner class. Each leg runs one of three
+    # disjoint file-level slices (--shard, root conftest.py) under pytest-xdist
+    # (one worker per core, tests grouped by file so module-scoped fixtures
+    # and module-level TestClients stay per-worker). GitHub's hosted runners
+    # for private repositories have two cores, so in-job parallelism alone
+    # measured ~17 minutes; three slices bring a leg to well under ten for one
+    # extra install each. The ceiling below is headroom for runner variance
+    # and setup, not the expected duration: a run that needs it is hung, and
+    # pytest-timeout/GNU timeout say where.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+        # Keep in step with the COUNT in --shard below and the required
+        # checks in .github/rulesets/protect-main.json.
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -575,7 +588,7 @@ jobs:
             -e ./packages/maverick-mcp \
             -e ./packages/maverick-knowledge \
             -e ./apps/installer-cli \
-            pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
+            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]'
           python -m pip check
           python scripts/verify_constraint_closure.py
       - name: Show installed packages
@@ -590,19 +603,38 @@ jobs:
           # ceiling. pytest-timeout catches a stuck test; GNU timeout also
           # bounds interpreter shutdown/non-daemon-thread leaks after the last
           # test and SIGABRT gives faulthandler a chance to print stacks.
-          timeout --verbose --signal=ABRT --kill-after=30s 35m \
-            python -m pytest -q --tb=short --durations=50 \
+          #
+          # Two phases per slice: everything under xdist, then the
+          # heavy_concurrency files (queue soak, discovery estate runner)
+          # serially so their own worker threads do not share the two cores
+          # with a second xdist worker -- that co-scheduling starved SQLite
+          # lock waits into "database is locked" findings. A slice with no
+          # heavy files exits 5 (nothing collected) from the second phase,
+          # which is a pass here.
+          status=0
+          timeout --verbose --signal=ABRT --kill-after=30s 20m \
+            python -m pytest -q -n auto --dist loadfile --shard "${{ matrix.shard }}/3" \
+              -m "not heavy_concurrency" --tb=short --durations=50 \
               --timeout=180 --timeout-method=signal \
-              --junitxml="test-results-${{ matrix.python-version }}.xml" \
-            2>&1 | tee "pytest-${{ matrix.python-version }}.log"
+              --junitxml="test-results-${{ matrix.python-version }}-${{ matrix.shard }}.xml" \
+            2>&1 | tee "pytest-${{ matrix.python-version }}-${{ matrix.shard }}.log" || status=$?
+          timeout --verbose --signal=ABRT --kill-after=30s 10m \
+            python -m pytest -q --shard "${{ matrix.shard }}/3" \
+              -m heavy_concurrency --tb=short \
+              --timeout=600 --timeout-method=signal \
+              --junitxml="test-results-${{ matrix.python-version }}-${{ matrix.shard }}-serial.xml" \
+            2>&1 | tee -a "pytest-${{ matrix.python-version }}-${{ matrix.shard }}.log" || serial=$?
+          if [ "${serial:-0}" -ne 0 ] && [ "${serial:-0}" -ne 5 ]; then status=$serial; fi
+          exit "$status"
       - name: Upload test diagnostics
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: pytest-${{ matrix.python-version }}
+          name: pytest-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
-            test-results-${{ matrix.python-version }}.xml
-            pytest-${{ matrix.python-version }}.log
+            test-results-${{ matrix.python-version }}-${{ matrix.shard }}.xml
+            test-results-${{ matrix.python-version }}-${{ matrix.shard }}-serial.xml
+            pytest-${{ matrix.python-version }}-${{ matrix.shard }}.log
           if-no-files-found: warn
           retention-days: 14
 
@@ -645,7 +677,15 @@ jobs:
     # committed to the baseline in the open. requirements/ci.txt keeps the
     # measurement reproducible instead of absorbing dependency drift.
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    # Same suite as the test matrix, same slicing and pytest-xdist parallelism;
+    # see the test job for why the ceiling is headroom, not expected duration.
+    # The posture gate compares each slice against the (empty) baseline, so a
+    # slice is a complete gate on its own.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -668,7 +708,7 @@ jobs:
             -e ./packages/maverick-mcp \
             -e ./packages/maverick-knowledge \
             -e ./apps/installer-cli \
-            pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
+            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]'
           python -m pip check
           python scripts/verify_constraint_closure.py
       - name: Test and gate the production security posture
@@ -691,23 +731,36 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          timeout --verbose --signal=ABRT --kill-after=30s 40m \
-            python -m pytest -q -p no:randomly \
+          # Same two phases as the test job (parallel, then the
+          # heavy_concurrency files alone on the box); both append to one
+          # report so the gate sees every FAILED line. Exit 5 from the serial
+          # phase means the slice has no heavy files.
+          timeout --verbose --signal=ABRT --kill-after=30s 20m \
+            python -m pytest -q -p no:randomly -n auto --dist loadfile \
+              --shard "${{ matrix.shard }}/3" -m "not heavy_concurrency" \
               --tb=no --timeout=180 --timeout-method=signal \
-            2>&1 | tee posture-report.txt
+            2>&1 | tee "posture-report-${{ matrix.shard }}.txt"
           pytest_status=${PIPESTATUS[0]}
+          timeout --verbose --signal=ABRT --kill-after=30s 10m \
+            python -m pytest -q -p no:randomly \
+              --shard "${{ matrix.shard }}/3" -m heavy_concurrency \
+              --tb=no --timeout=600 --timeout-method=signal \
+            2>&1 | tee -a "posture-report-${{ matrix.shard }}.txt"
+          serial_status=${PIPESTATUS[0]}
           set -e
-          if [ "$pytest_status" -ne 0 ] && [ "$pytest_status" -ne 1 ]; then
-            echo "posture pytest did not complete normally (exit $pytest_status)" >&2
-            exit "$pytest_status"
-          fi
-          python -m maverick.posture_gate --ci --report posture-report.txt
+          for code in "$pytest_status" "$serial_status"; do
+            if [ "$code" -ne 0 ] && [ "$code" -ne 1 ] && [ "$code" -ne 5 ]; then
+              echo "posture pytest did not complete normally (exit $code)" >&2
+              exit "$code"
+            fi
+          done
+          python -m maverick.posture_gate --ci --report "posture-report-${{ matrix.shard }}.txt"
       - name: Upload the posture report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: posture-report
-          path: posture-report.txt
+          name: posture-report-${{ matrix.shard }}
+          path: posture-report-${{ matrix.shard }}.txt
           if-no-files-found: warn
           retention-days: 14
 

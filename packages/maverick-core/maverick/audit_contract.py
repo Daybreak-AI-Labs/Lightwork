@@ -47,6 +47,8 @@ import json
 import sys
 from pathlib import Path
 
+from .source_fingerprint import ScanMemo
+
 #: Names that, when called, write an audit row.
 AUDIT_WRITERS = frozenset({"record", "record_global"})
 
@@ -236,6 +238,9 @@ def _rel(path: Path) -> str:
         return path.as_posix()
 
 
+_MEMO: ScanMemo[tuple[list[dict], int]] = ScanMemo()
+
+
 def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
     """Return (violations, files_inspected).
 
@@ -243,8 +248,17 @@ def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
     time, not at definition time -- a default argument would bind the tuple
     once and make the vacuous-gate test unable to redirect it, which would
     leave the anti-vacuity check itself untested.
+
+    Memoised on the tree's content (see ``source_fingerprint``).
     """
-    roots = SEARCH_ROOTS if roots is None else roots
+    chosen = tuple(SEARCH_ROOTS if roots is None else roots)
+    return _MEMO.get(
+        REPO_ROOT, chosen, lambda: _scan_uncached(chosen),
+        lambda result: ([dict(v) for v in result[0]], result[1]),
+    )
+
+
+def _scan_uncached(roots: tuple[str, ...]) -> tuple[list[dict], int]:
     violations: list[dict] = []
     inspected = 0
     for root in roots:
