@@ -3500,7 +3500,7 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
     response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     response.headers["Content-Security-Policy"] = (
         "default-src 'none'; base-uri 'none'; connect-src 'self'; "
-        "font-src 'none'; form-action 'self'; frame-ancestors 'none'; "
+        "font-src 'self'; form-action 'self'; frame-ancestors 'none'; "
         "img-src 'self'; object-src 'none'; script-src 'self'; "
         f"style-src 'self' 'nonce-{nonce}'; worker-src 'none'"
     )
