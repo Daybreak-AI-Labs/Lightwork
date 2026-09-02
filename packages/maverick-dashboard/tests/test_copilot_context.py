@@ -11,6 +11,7 @@ CANONICAL_CONTEXTS = {
     "/ai-entity-tasks": "AI Entity Tasks",
     "/governance-agents": "Governance Agents",
     "/agent-control-plane": "Agent Control Plane",
+    "/audit/evolution-ledger": "Evolution Ledger",
     "/governance/inventory": "Governance Inventory",
     "/consent": "Consent and Preferences",
     "/consent/publishing": "Consent Publishing",
