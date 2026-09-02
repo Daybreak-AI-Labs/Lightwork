@@ -1259,6 +1259,13 @@ _AUTH_EXEMPT = {
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
     "/static/daybreak-logo.jpg",
+    # The brand mark and the self-hosted fonts are public, non-sensitive
+    # assets the login and share pages need before any session exists.
+    "/static/daybreak-mark.png",
+    "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
+    "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
+    "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
+    "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
     # The LLM gateway authenticates every call with its OWN bearer inside
     # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
     # agents that hold the gateway credential, never the dashboard bearer.
@@ -9474,6 +9481,40 @@ async def brand_logo() -> FileResponse:
         _STATIC_DIR / "daybreak-logo.jpg",
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/static/daybreak-mark.png")
+async def brand_mark() -> FileResponse:
+    """The Daybreak Labs mark (the circuit-sunrise D) used by the topbar brand.
+    Public by nature, cached a day."""
+    return FileResponse(
+        _STATIC_DIR / "daybreak-mark.png",
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+#: The self-hosted faces the design system declares. An allowlist, not a
+#: directory mount: nothing else under static/fonts/ is ever served.
+_FONT_FILES = frozenset({
+    "manrope-200.woff2", "manrope-300.woff2", "manrope-400.woff2",
+    "manrope-500.woff2", "manrope-600.woff2", "manrope-700.woff2",
+    "jbm-400.woff2", "jbm-500.woff2",
+})
+
+
+@app.get("/static/fonts/{name}")
+async def shell_font(name: str) -> FileResponse:
+    """Manrope and JetBrains Mono, served same-origin so the dashboard stays
+    offline-first (no third-party font request). Immutable: the file name is
+    the version."""
+    if name not in _FONT_FILES:
+        raise HTTPException(status_code=404)
+    return FileResponse(
+        _STATIC_DIR / "fonts" / name,
+        media_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 

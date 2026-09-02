@@ -75,6 +75,11 @@ _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
     {
         "/a2a/v1",
         "/static/daybreak-logo.jpg",
+        "/static/daybreak-mark.png",
+        "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
+        "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
+        "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
+        "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
         # The LLM gateway authenticates every call with its own bearer inside
         # maverick.llm_gateway (same trust-domain rationale as /a2a/v1).
         "/gateway/v1/chat/completions",
