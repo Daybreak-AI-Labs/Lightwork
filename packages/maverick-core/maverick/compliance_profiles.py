@@ -1,4 +1,4 @@
-"""Compliance mode profiles (roadmap: 2027 H1 safety — "HIPAA mode profile").
+"""Compliance mode profiles for the shipped regulatory compiler library.
 
 Cross-domain runtime postures you turn on the way the finance suite turns on
 ``[finance] regimes``: each profile asserts the safeguards it stands for, names
@@ -7,10 +7,12 @@ egress lock, audit), and compiles to a governance :class:`~maverick.governance.P
 (what must pause for a human). Selecting several unions them strictest-wins via
 the same helper the finance regimes use.
 
-The first profile is **HIPAA mode** — a PHI-handling posture. This is the
-enforcement counterpart to the HIPAA *assessment* template in
-:mod:`maverick.assessment`: the assessment scores readiness; the profile turns
-the guardrails on. Pure data + pure functions, so the compilation is unit-tested.
+HIPAA is a PHI-handling posture; GDPR and the EU AI Act supply legal-runtime
+overlays. NIST AI RMF, ISO/IEC 42001, SOC 2, and the SR 11-7 compatibility
+profile are intentionally bounded compatibility postures: they enforce only
+the tool-gate controls named here. They do not assert full framework coverage,
+organizational adoption, certification, attestation, or regulatory acceptance.
+Pure data + pure functions makes every compilation unit-testable.
 """
 from __future__ import annotations
 
@@ -94,6 +96,45 @@ PROFILES: dict[str, ComplianceProfile] = {
         "remain the packs' hard refusals.",
         required_floors=frozenset({FLOOR_AUDIT_LOG}),
         policy=compile_obligations(["eu_ai_act"]).policy,
+    ),
+    "nist_ai_rmf": ComplianceProfile(
+        "nist_ai_rmf",
+        "NIST AI RMF (bounded runtime compatibility)",
+        "Bounded MANAGE control only: every high-risk tool action pauses for "
+        "a human. This does not establish complete AI RMF coverage or a "
+        "NIST profile.",
+        required_floors=frozenset({FLOOR_AUDIT_LOG}),
+        policy=compile_obligations(["nist_ai_rmf"]).policy,
+    ),
+    "iso_42001": ComplianceProfile(
+        "iso_42001",
+        "ISO/IEC 42001:2023 (bounded runtime compatibility)",
+        "Bounded A.9.2 human-oversight control only: every high-risk tool "
+        "action pauses for a human. This does not establish full AIMS coverage "
+        "or ISO certification.",
+        required_floors=frozenset({FLOOR_AUDIT_LOG}),
+        policy=compile_obligations(["iso_42001"]).policy,
+    ),
+    "soc2": ComplianceProfile(
+        "soc2",
+        "SOC 2 Trust Services Criteria (bounded runtime compatibility)",
+        "Bounded CC6.1 least-privilege control only: known outbound side-effect "
+        "tools are attenuated from capabilities. This is not a SOC 2 "
+        "attestation.",
+        required_floors=frozenset({
+            FLOOR_ENCRYPTION_AT_REST, FLOOR_EGRESS_LOCK, FLOOR_AUDIT_LOG,
+        }),
+        policy=compile_obligations(["soc2"]).policy,
+    ),
+    "sr_11_7": ComplianceProfile(
+        "sr_11_7",
+        "SR 11-7 compatibility (current SR 26-2 successor)",
+        "Bounded high-risk human-review control by analogy only. SR 26-2 "
+        "supersedes SR 11-7 and expressly excludes generative and agentic AI "
+        "from its stated scope; this does not establish model approval, "
+        "validation, or supervisory acceptance.",
+        required_floors=frozenset({FLOOR_AUDIT_LOG}),
+        policy=compile_obligations(["sr_11_7"]).policy,
     ),
 }
 

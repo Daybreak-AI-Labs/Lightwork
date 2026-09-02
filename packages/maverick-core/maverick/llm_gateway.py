@@ -9,10 +9,14 @@ unknown traffic into shadow-AI discovery. Bodies are never stored: the
 ledger keeps caller digests, models, counts, token usage, and content
 digests only.
 
-v1 scope, stated plainly: one fixed upstream, the ``/v1/chat/completions``
-shape, no streaming (a ``stream`` request is refused with an explanation),
-and no response rewriting. Interception is opt-in per estate: point the
-agents at the gateway; nothing here can see traffic that never arrives.
+Current scope, stated plainly: independently configured fixed OpenAI
+``/v1/chat/completions`` and native Anthropic ``/v1/messages`` upstreams,
+optional deterministic prompt screening plus secret/PII redaction on both
+directions, and durable per-bearer-team call/input/output ceilings. Streaming,
+the OpenAI Responses API, provider contract acceptance, and traffic that never
+arrives at the gateway are out of scope.  Interception is opt-in per estate:
+point the agents at the gateway; nothing here can see traffic that never
+arrives.
 
 Kernel rule 3 (budget caps) and this gateway, decided: proxied calls are
 the CALLER's spend on the caller's own provider key, not a kernel agent
@@ -30,8 +34,11 @@ import hmac as hmac_mod
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from . import runtime_metrics
@@ -46,6 +53,13 @@ _MAX_LIST = 500
 _ABS_MAX_BODY = 4 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 _UPSTREAM_TIMEOUT_SECONDS = 120.0
+_MAX_TEAMS = 128
+_MAX_TEAM_BUDGET = 2_000_000_000
+_MAX_COMPLETION_TOKENS = 1_000_000
+_TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z")
+_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+_ANTHROPIC_VERSION_RE = re.compile(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}\Z")
+TEAM_BUDGET_SCHEMA = "lightwork.llm-gateway-team-budget.v1"
 
 
 class LLMGatewayError(RuntimeError):
@@ -56,7 +70,7 @@ class LLMGatewayConfigError(LLMGatewayError):
     """The gateway is not enabled or configured safely."""
 
 
-def get_llm_gateway_config() -> dict[str, Any]:
+def get_llm_gateway_config() -> dict[str, Any]:  # noqa: C901 - strict config boundary
     from .config import load_global_config
 
     try:
@@ -74,6 +88,15 @@ def get_llm_gateway_config() -> dict[str, Any]:
         "allowed_models",
         "max_body_bytes",
         "screen_prompts",
+        "redact_prompts",
+        "redact_completions",
+        "anthropic_upstream_url",
+        "anthropic_upstream_token_env",
+        "anthropic_version",
+        "team_tokens",
+        "team_budgets",
+        "budget_window_seconds",
+        "default_max_output_tokens",
     }
     unknown = set(section) - known
     if unknown:
@@ -94,6 +117,12 @@ def get_llm_gateway_config() -> dict[str, Any]:
     ).strip()
     if not upstream_token_env or not gateway_token_env:
         raise LLMGatewayConfigError("llm_gateway token env names must be non-empty")
+    if not _ENV_RE.fullmatch(upstream_token_env) or not _ENV_RE.fullmatch(
+        gateway_token_env
+    ):
+        raise LLMGatewayConfigError(
+            "llm_gateway token env names must be environment variable names"
+        )
     models = section.get("allowed_models", [])
     if not isinstance(models, list) or not all(
         isinstance(model, str) and model.strip() for model in models
@@ -111,6 +140,121 @@ def get_llm_gateway_config() -> dict[str, Any]:
     screen = section.get("screen_prompts", False)
     if not isinstance(screen, bool):
         raise LLMGatewayConfigError("llm_gateway.screen_prompts must be a boolean")
+    redact_prompts = section.get("redact_prompts", False)
+    redact_completions = section.get("redact_completions", False)
+    if not isinstance(redact_prompts, bool) or not isinstance(
+        redact_completions, bool
+    ):
+        raise LLMGatewayConfigError(
+            "llm_gateway redaction settings must be booleans"
+        )
+    anthropic_upstream = str(
+        section.get("anthropic_upstream_url") or ""
+    ).strip().rstrip("/")
+    if anthropic_upstream and not anthropic_upstream.startswith("https://"):
+        raise LLMGatewayConfigError(
+            "llm_gateway.anthropic_upstream_url must be an https URL"
+        )
+    anthropic_token_env = str(
+        section.get("anthropic_upstream_token_env")
+        or "LLM_GATEWAY_ANTHROPIC_TOKEN"
+    ).strip()
+    if not _ENV_RE.fullmatch(anthropic_token_env):
+        raise LLMGatewayConfigError(
+            "llm_gateway.anthropic_upstream_token_env must be an environment "
+            "variable name"
+        )
+    anthropic_version = str(
+        section.get("anthropic_version") or "2023-06-01"
+    ).strip()
+    if not _ANTHROPIC_VERSION_RE.fullmatch(anthropic_version):
+        raise LLMGatewayConfigError(
+            "llm_gateway.anthropic_version must be an ISO date such as 2023-06-01"
+        )
+    team_tokens_raw = section.get("team_tokens", {})
+    if not isinstance(team_tokens_raw, dict) or len(team_tokens_raw) > _MAX_TEAMS:
+        raise LLMGatewayConfigError(
+            "llm_gateway.team_tokens must be a bounded team-to-env table"
+        )
+    team_tokens: list[tuple[str, str]] = []
+    seen_envs = {gateway_token_env}
+    for team, env_name in sorted(team_tokens_raw.items(), key=lambda item: str(item[0])):
+        if (
+            not isinstance(team, str)
+            or team == "default"
+            or not _TEAM_RE.fullmatch(team)
+        ):
+            raise LLMGatewayConfigError("llm_gateway team name is invalid")
+        if not isinstance(env_name, str) or not _ENV_RE.fullmatch(env_name):
+            raise LLMGatewayConfigError(
+                f"llm_gateway.team_tokens.{team} must name an environment variable"
+            )
+        if env_name in seen_envs:
+            raise LLMGatewayConfigError(
+                "llm_gateway team token env names must be unique"
+            )
+        seen_envs.add(env_name)
+        team_tokens.append((team, env_name))
+    budget_window = section.get("budget_window_seconds", 3_600)
+    if (
+        isinstance(budget_window, bool)
+        or not isinstance(budget_window, int)
+        or not 60 <= budget_window <= 31_622_400
+    ):
+        raise LLMGatewayConfigError(
+            "llm_gateway.budget_window_seconds must be between 60 and 31622400"
+        )
+    default_max_output = section.get("default_max_output_tokens", 4_096)
+    if (
+        isinstance(default_max_output, bool)
+        or not isinstance(default_max_output, int)
+        or not 1 <= default_max_output <= _MAX_COMPLETION_TOKENS
+    ):
+        raise LLMGatewayConfigError(
+            "llm_gateway.default_max_output_tokens must be between 1 and 1000000"
+        )
+    team_budgets_raw = section.get("team_budgets", {})
+    if not isinstance(team_budgets_raw, dict) or len(team_budgets_raw) > _MAX_TEAMS:
+        raise LLMGatewayConfigError(
+            "llm_gateway.team_budgets must be a bounded team table"
+        )
+    known_teams = {"default", *(team for team, _env in team_tokens)}
+    team_budgets: list[tuple[str, dict[str, int]]] = []
+    for team, raw_budget in sorted(
+        team_budgets_raw.items(), key=lambda item: str(item[0])
+    ):
+        if not isinstance(team, str) or team not in known_teams:
+            raise LLMGatewayConfigError(
+                "llm_gateway.team_budgets may only name default or configured teams"
+            )
+        if not isinstance(raw_budget, dict):
+            raise LLMGatewayConfigError(
+                f"llm_gateway.team_budgets.{team} must be a table"
+            )
+        unknown_budget = set(raw_budget) - {
+            "max_requests", "max_prompt_tokens", "max_completion_tokens"
+        }
+        if unknown_budget:
+            raise LLMGatewayConfigError(
+                f"llm_gateway.team_budgets.{team} has unknown keys: "
+                + ", ".join(sorted(str(key) for key in unknown_budget))
+            )
+        budget: dict[str, int] = {}
+        for key in (
+            "max_requests", "max_prompt_tokens", "max_completion_tokens"
+        ):
+            value = raw_budget.get(key, 0)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= _MAX_TEAM_BUDGET
+            ):
+                raise LLMGatewayConfigError(
+                    f"llm_gateway.team_budgets.{team}.{key} must be between "
+                    f"0 and {_MAX_TEAM_BUDGET}"
+                )
+            budget[key] = int(value)
+        team_budgets.append((team, budget))
     return {
         "enable": flag,
         "upstream_url": upstream,
@@ -119,6 +263,15 @@ def get_llm_gateway_config() -> dict[str, Any]:
         "allowed_models": [model.strip() for model in models],
         "max_body_bytes": max_body,
         "screen_prompts": screen,
+        "redact_prompts": redact_prompts,
+        "redact_completions": redact_completions,
+        "anthropic_upstream_url": anthropic_upstream,
+        "anthropic_upstream_token_env": anthropic_token_env,
+        "anthropic_version": anthropic_version,
+        "team_tokens": tuple(team_tokens),
+        "team_budgets": tuple(team_budgets),
+        "budget_window_seconds": int(budget_window),
+        "default_max_output_tokens": int(default_max_output),
     }
 
 
@@ -129,17 +282,43 @@ def enabled() -> bool:
         return False
 
 
-def _caller_digest(token: str) -> str:
-    return hashlib.sha256(f"llm-gateway-caller:{token}".encode()).hexdigest()[:24]
+def _caller_digest(team: str) -> str:
+    """Return a stable opaque caller key without retaining bearer material."""
+
+    return hashlib.sha256(f"llm-gateway-team:{team}".encode()).hexdigest()[:24]
+
+
+def _team_for_token(caller_token: str, settings: Mapping[str, Any]) -> str | None:
+    """Resolve a configured opaque team only through its dedicated bearer.
+
+    A caller cannot choose a team with a header or request field: that would
+    let it move spending to another team's budget.  The legacy
+    ``gateway_token_env`` maps to ``default`` so deployments retain their
+    existing one-token setup, while an operator may add team-specific env
+    references under ``[llm_gateway.team_tokens]``.
+    """
+
+    token = str(caller_token or "")
+    if not token:
+        return None
+    candidates = [("default", str(settings["gateway_token_env"]))]
+    candidates.extend(
+        (str(team), str(env_name))
+        for team, env_name in settings.get("team_tokens", ())
+    )
+    matched: list[str] = []
+    for team, env_name in candidates:
+        expected = os.environ.get(env_name, "")
+        if expected and hmac_mod.compare_digest(token, expected):
+            matched.append(team)
+    # A malformed deployment environment with duplicate secret VALUES should
+    # not make budget identity ambiguous.  Fail closed instead of selecting
+    # the first table entry.
+    return matched[0] if len(matched) == 1 else None
 
 
 def _authorized(caller_token: str, settings: Mapping[str, Any]) -> bool:
-    expected = os.environ.get(settings["gateway_token_env"], "")
-    return bool(
-        expected
-        and caller_token
-        and hmac_mod.compare_digest(caller_token, expected)
-    )
+    return _team_for_token(caller_token, settings) is not None
 
 
 def verify_gateway_bearer(token: str) -> bool:
@@ -158,6 +337,536 @@ def verify_gateway_bearer(token: str) -> bool:
     if settings["enable"] is not True:
         return False
     return _authorized(str(token or ""), settings)
+
+
+@dataclass(frozen=True)
+class TeamBudgetReservation:
+    """A conservative pre-egress reservation for one external completion.
+
+    Foreign LLM traffic must not be charged to a kernel-agent ``Budget``:
+    there is no platform goal or platform provider account.  Instead this
+    records only an operator-configured team ceiling.  Input is estimated
+    conservatively before egress and output is reserved from the request's
+    declared cap; a confirmed smaller provider usage may release capacity.
+    If the gateway loses the post-egress response, the reservation remains.
+    """
+
+    allowed: bool
+    reason: str
+    team: str
+    window_started: float | None = None
+    prompt_reserved: int = 0
+    completion_reserved: int = 0
+    remaining_requests: int | None = None
+    remaining_prompt_tokens: int | None = None
+    remaining_completion_tokens: int | None = None
+
+
+class TeamTokenBudget:
+    """Durable, cross-process fixed-window token/call limiter.
+
+    This is intentionally small and local like the sidecar call budget.  Its
+    state contains only a SHA-256 team key, counters, and window timestamp —
+    never bearer values, prompts, completions, model names, or provider
+    responses.  Any unavailable/malformed authority fails closed when a
+    ceiling is configured.
+    """
+
+    def __init__(self, *, path: Path | None = None, clock: Callable[[], float] | None = None) -> None:
+        self._path = path
+        self._clock = clock or time.time
+
+    def _state_path(self) -> Path:
+        if self._path is not None:
+            return self._path
+        from .paths import data_dir
+
+        # Keep budget state in a distinct private directory.  The caller
+        # ledger is a governed-record collection under ``llm_gateway`` and
+        # treats any foreign JSON filename in that directory as tampering.
+        return data_dir("llm_gateway_team_budget", "team_budget.json")
+
+    @staticmethod
+    def _enabled(limits: Mapping[str, int]) -> bool:
+        return any(int(limits.get(key, 0) or 0) > 0 for key in (
+            "max_requests", "max_prompt_tokens", "max_completion_tokens"
+        ))
+
+    @staticmethod
+    def _row_key(team: str) -> str:
+        return hashlib.sha256(f"llm-gateway-budget:{team}".encode()).hexdigest()
+
+    def reserve(
+        self,
+        team: str,
+        limits: Mapping[str, int],
+        *,
+        prompt_tokens: int,
+        completion_tokens: int,
+        window_seconds: int,
+        now: float | None = None,
+    ) -> TeamBudgetReservation:
+        """Reserve worst-case usage before the request crosses egress."""
+
+        if not self._enabled(limits):
+            return TeamBudgetReservation(True, "budget_disabled", team)
+        if (
+            not isinstance(prompt_tokens, int)
+            or not isinstance(completion_tokens, int)
+            or prompt_tokens < 0
+            or completion_tokens < 0
+        ):
+            return TeamBudgetReservation(False, "budget_invalid_request", team)
+        current_time = float(self._clock() if now is None else now)
+        if not current_time > 0:
+            return TeamBudgetReservation(False, "budget_authority", team)
+        path = self._state_path()
+        try:
+            from .file_lock import (
+                atomic_read_text,
+                atomic_write_text,
+                cross_process_lock,
+                ensure_private_directory,
+                ensure_private_file,
+            )
+
+            ensure_private_directory(path.parent)
+            with cross_process_lock(path, strict=True):
+                state: dict[str, Any] = {"schema": TEAM_BUDGET_SCHEMA, "rows": {}}
+                if path.exists():
+                    ensure_private_file(path)
+                    raw = atomic_read_text(path)
+                    if len(raw.encode("utf-8")) > _MAX_RESPONSE_BYTES:
+                        raise ValueError("team budget state exceeds its byte bound")
+                    state = json.loads(raw)
+                if (
+                    not isinstance(state, dict)
+                    or state.get("schema") != TEAM_BUDGET_SCHEMA
+                    or not isinstance(state.get("rows"), dict)
+                ):
+                    raise ValueError("team budget state is malformed")
+                rows = state["rows"]
+                key = self._row_key(team)
+                row = rows.get(key, {})
+                if not isinstance(row, dict):
+                    raise ValueError("team budget row is malformed")
+                started = row.get("window_started")
+                used_requests = row.get("requests")
+                used_prompt = row.get("prompt_tokens")
+                used_completion = row.get("completion_tokens")
+                invalid_row = (
+                    isinstance(started, bool)
+                    or not isinstance(started, (int, float))
+                    or isinstance(used_requests, bool)
+                    or not isinstance(used_requests, int)
+                    or isinstance(used_prompt, bool)
+                    or not isinstance(used_prompt, int)
+                    or isinstance(used_completion, bool)
+                    or not isinstance(used_completion, int)
+                    or used_requests < 0
+                    or used_prompt < 0
+                    or used_completion < 0
+                    or current_time < float(started)
+                    or current_time - float(started) >= window_seconds
+                )
+                if invalid_row:
+                    started, used_requests, used_prompt, used_completion = (
+                        current_time, 0, 0, 0
+                    )
+                proposed_requests = used_requests + 1
+                proposed_prompt = used_prompt + prompt_tokens
+                proposed_completion = used_completion + completion_tokens
+                max_requests = int(limits.get("max_requests", 0) or 0)
+                max_prompt = int(limits.get("max_prompt_tokens", 0) or 0)
+                max_completion = int(limits.get("max_completion_tokens", 0) or 0)
+                if (
+                    (max_requests and proposed_requests > max_requests)
+                    or (max_prompt and proposed_prompt > max_prompt)
+                    or (max_completion and proposed_completion > max_completion)
+                ):
+                    return TeamBudgetReservation(
+                        False,
+                        "budget_exhausted",
+                        team,
+                        window_started=float(started),
+                        remaining_requests=(
+                            max(0, max_requests - used_requests)
+                            if max_requests else None
+                        ),
+                        remaining_prompt_tokens=(
+                            max(0, max_prompt - used_prompt) if max_prompt else None
+                        ),
+                        remaining_completion_tokens=(
+                            max(0, max_completion - used_completion)
+                            if max_completion else None
+                        ),
+                    )
+                rows[key] = {
+                    "window_started": float(started),
+                    "requests": proposed_requests,
+                    "prompt_tokens": proposed_prompt,
+                    "completion_tokens": proposed_completion,
+                }
+                atomic_write_text(
+                    path,
+                    json.dumps(state, sort_keys=True, separators=(",", ":")),
+                    mode=0o600,
+                )
+                return TeamBudgetReservation(
+                    True,
+                    "budget_reserved",
+                    team,
+                    window_started=float(started),
+                    prompt_reserved=prompt_tokens,
+                    completion_reserved=completion_tokens,
+                    remaining_requests=(
+                        max(0, max_requests - proposed_requests) if max_requests else None
+                    ),
+                    remaining_prompt_tokens=(
+                        max(0, max_prompt - proposed_prompt) if max_prompt else None
+                    ),
+                    remaining_completion_tokens=(
+                        max(0, max_completion - proposed_completion)
+                        if max_completion else None
+                    ),
+                )
+        except Exception:
+            log.warning("llm_gateway: team budget authority is unavailable", exc_info=True)
+            return TeamBudgetReservation(False, "budget_authority", team)
+
+    def reconcile(
+        self,
+        reservation: TeamBudgetReservation,
+        *,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        window_seconds: int,
+        now: float | None = None,
+    ) -> None:
+        """Release only confirmed unused reservation capacity.
+
+        Reconciliation never increases a cap after an indeterminate result;
+        it executes only after a bounded valid success payload.  Provider usage
+        larger than the pre-reserved amount is retained at the reservation so
+        a nonconforming upstream cannot silently expand a team ceiling.
+        """
+
+        if not reservation.allowed or reservation.window_started is None:
+            return
+        # Missing/malformed provider usage is not evidence of zero spend.
+        # Keep the full pre-egress reservation in that case.
+        prompt_release = (
+            max(0, reservation.prompt_reserved - _safe_usage_int(prompt_tokens))
+            if prompt_tokens is not None
+            else 0
+        )
+        completion_release = (
+            max(
+                0,
+                reservation.completion_reserved - _safe_usage_int(completion_tokens),
+            )
+            if completion_tokens is not None
+            else 0
+        )
+        if not prompt_release and not completion_release:
+            return
+        current_time = float(self._clock() if now is None else now)
+        path = self._state_path()
+        try:
+            from .file_lock import (
+                atomic_read_text,
+                atomic_write_text,
+                cross_process_lock,
+                ensure_private_directory,
+                ensure_private_file,
+            )
+
+            ensure_private_directory(path.parent)
+            with cross_process_lock(path, strict=True):
+                if not path.exists():
+                    return
+                ensure_private_file(path)
+                raw = atomic_read_text(path)
+                if len(raw.encode("utf-8")) > _MAX_RESPONSE_BYTES:
+                    return
+                state = json.loads(raw)
+                if (
+                    not isinstance(state, dict)
+                    or state.get("schema") != TEAM_BUDGET_SCHEMA
+                    or not isinstance(state.get("rows"), dict)
+                ):
+                    return
+                row = state["rows"].get(self._row_key(reservation.team))
+                if not isinstance(row, dict):
+                    return
+                started = row.get("window_started")
+                if (
+                    isinstance(started, bool)
+                    or not isinstance(started, (int, float))
+                    or float(started) != reservation.window_started
+                    or current_time < float(started)
+                    or current_time - float(started) >= window_seconds
+                ):
+                    return
+                prompt_used = row.get("prompt_tokens")
+                completion_used = row.get("completion_tokens")
+                if (
+                    isinstance(prompt_used, bool)
+                    or not isinstance(prompt_used, int)
+                    or isinstance(completion_used, bool)
+                    or not isinstance(completion_used, int)
+                ):
+                    return
+                row["prompt_tokens"] = max(0, prompt_used - prompt_release)
+                row["completion_tokens"] = max(
+                    0, completion_used - completion_release
+                )
+                atomic_write_text(
+                    path,
+                    json.dumps(state, sort_keys=True, separators=(",", ":")),
+                    mode=0o600,
+                )
+        except Exception:
+            # A success is already paid for.  Preserve the conservative
+            # reservation and avoid changing the provider response.
+            log.warning("llm_gateway: team budget reconciliation was skipped", exc_info=True)
+
+
+def _safe_usage_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, parsed)
+
+
+_TEAM_BUDGET = TeamTokenBudget()
+
+
+def _team_budget_limits(settings: Mapping[str, Any], team: str) -> dict[str, int]:
+    """Return the reviewed ceiling for an authenticated team, if any."""
+
+    for configured_team, limits in settings.get("team_budgets", ()):
+        if configured_team == team and isinstance(limits, Mapping):
+            return {
+                key: _safe_usage_int(limits.get(key, 0))
+                for key in (
+                    "max_requests", "max_prompt_tokens", "max_completion_tokens"
+                )
+            }
+    return {
+        "max_requests": 0,
+        "max_prompt_tokens": 0,
+        "max_completion_tokens": 0,
+    }
+
+
+def _provider_error(provider: str, status: int, message: str) -> tuple[int, dict[str, Any]]:
+    """Return a protocol-native, body-safe client error envelope."""
+
+    if provider == "anthropic":
+        error_type = (
+            "authentication_error" if status == 401
+            else "permission_error" if status == 403
+            else "invalid_request_error" if 400 <= status < 500
+            else "api_error"
+        )
+        return status, {"type": "error", "error": {"type": error_type, "message": message}}
+    return status, {
+        "error": {
+            "message": message,
+            "type": "invalid_request_error" if status < 500 else "server_error",
+        }
+    }
+
+
+_PROMPT_TEXT_KEYS = frozenset({
+    "arguments", "content", "input", "instructions", "prompt", "system", "text",
+})
+_RESPONSE_TEXT_KEYS = frozenset({"content", "output_text", "refusal", "text"})
+
+
+def _json_copy(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy JSON-compatible gateway data without retaining a caller object."""
+
+    try:
+        copied = json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise LLMGatewayError("the request must contain finite JSON-compatible data") from exc
+    if not isinstance(copied, dict):  # defensive after a Mapping input
+        raise LLMGatewayError("the request body must be a JSON object")
+    return copied
+
+
+def _redact_text(text: str) -> tuple[str, int]:
+    """Apply secret then PII redaction, failing closed if the DLP path breaks."""
+
+    try:
+        from .safety.pii_detector import redact as redact_pii
+        from .safety.secret_detector import redact as redact_secrets
+
+        redacted, secret_matches = redact_secrets(text)
+        redacted, pii_matches = redact_pii(redacted)
+        return redacted, len(secret_matches) + len(pii_matches)
+    except Exception as exc:
+        raise LLMGatewayError("the gateway redaction authority is unavailable") from exc
+
+
+def _transform_text_leaves(
+    value: object,
+    *,
+    text_keys: frozenset[str],
+    inherited_text: bool = False,
+    depth: int = 0,
+) -> tuple[object, int]:
+    """Redact only semantic text fields, not model IDs or structural values."""
+
+    if depth > 32:
+        raise LLMGatewayError("the request nesting exceeds the gateway limit")
+    if isinstance(value, str):
+        return _redact_text(value) if inherited_text else (value, 0)
+    if isinstance(value, list):
+        out: list[object] = []
+        total = 0
+        for item in value:
+            transformed, count = _transform_text_leaves(
+                item, text_keys=text_keys, inherited_text=inherited_text, depth=depth + 1
+            )
+            out.append(transformed)
+            total += count
+        return out, total
+    if isinstance(value, Mapping):
+        out: dict[str, object] = {}
+        total = 0
+        for key, item in value.items():
+            key_text = str(key)
+            transformed, count = _transform_text_leaves(
+                item,
+                text_keys=text_keys,
+                inherited_text=inherited_text or key_text in text_keys,
+                depth=depth + 1,
+            )
+            out[key_text] = transformed
+            total += count
+        return out, total
+    return value, 0
+
+
+def _redact_prompt(body: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
+    copied = _json_copy(body)
+    transformed, count = _transform_text_leaves(
+        copied, text_keys=_PROMPT_TEXT_KEYS
+    )
+    if not isinstance(transformed, dict):  # pragma: no cover - guarded by _json_copy
+        raise LLMGatewayError("the request body must be a JSON object")
+    return transformed, count
+
+
+def _redact_response(payload: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
+    copied = _json_copy(payload)
+    transformed, count = _transform_text_leaves(
+        copied, text_keys=_RESPONSE_TEXT_KEYS
+    )
+    if not isinstance(transformed, dict):  # pragma: no cover - guarded by _json_copy
+        raise LLMGatewayError("the upstream response must be a JSON object")
+    return transformed, count
+
+
+def _collect_prompt_text(value: object, *, inherited_text: bool = False, depth: int = 0) -> list[str]:
+    """Collect only text that can reach an LLM, for Shield and input reserve."""
+
+    if depth > 32:
+        return []
+    if isinstance(value, str):
+        return [value] if inherited_text else []
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(
+                _collect_prompt_text(item, inherited_text=inherited_text, depth=depth + 1)
+            )
+        return parts
+    if isinstance(value, Mapping):
+        parts = []
+        for key, item in value.items():
+            parts.extend(
+                _collect_prompt_text(
+                    item,
+                    inherited_text=inherited_text or str(key) in _PROMPT_TEXT_KEYS,
+                    depth=depth + 1,
+                )
+            )
+        return parts
+    return []
+
+
+def _estimate_prompt_tokens(body: Mapping[str, Any]) -> int:
+    """Conservatively reserve input using UTF-8 bytes, never provider text."""
+
+    # Four characters/token is often used as a rough accounting heuristic;
+    # three UTF-8 bytes/token deliberately errs toward retaining less unused
+    # capacity, not granting more.  This estimate is replaced with actual
+    # provider usage only after a successful bounded response.
+    size = sum(len(part.encode("utf-8", "ignore")) for part in _collect_prompt_text(body))
+    return (size + 2) // 3 if size else 0
+
+
+def _completion_cap(
+    body: Mapping[str, Any],
+    *,
+    provider: str,
+    require_cap: bool,
+    default_cap: int,
+) -> tuple[dict[str, Any], int]:
+    """Return a bounded outbound copy and maximum completion reservation."""
+
+    copied = _json_copy(body)
+    keys = ("max_tokens",) if provider == "anthropic" else (
+        "max_completion_tokens", "max_tokens"
+    )
+    value: object | None = None
+    selected_key = keys[0]
+    for key in keys:
+        if key in copied:
+            value = copied[key]
+            selected_key = key
+            break
+    if value is None:
+        if provider == "anthropic" or require_cap:
+            value = default_cap
+            copied[selected_key] = value
+        else:
+            return copied, 0
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= _MAX_COMPLETION_TOKENS
+    ):
+        raise ValueError("the request completion-token cap must be between 1 and 1000000")
+    return copied, int(value)
+
+
+def _usage_for_provider(
+    provider: str, payload: Mapping[str, Any]
+) -> dict[str, int] | None:
+    usage = payload.get("usage")
+    if not isinstance(usage, Mapping):
+        return None
+    if provider == "anthropic":
+        if "input_tokens" not in usage or "output_tokens" not in usage:
+            return None
+        return {
+            "prompt_tokens": _safe_usage_int(usage.get("input_tokens")),
+            "completion_tokens": _safe_usage_int(usage.get("output_tokens")),
+        }
+    if "prompt_tokens" not in usage or "completion_tokens" not in usage:
+        return None
+    return {
+        "prompt_tokens": _safe_usage_int(usage.get("prompt_tokens")),
+        "completion_tokens": _safe_usage_int(usage.get("completion_tokens")),
+    }
 
 
 def _default_upstream(
@@ -189,12 +898,14 @@ def _default_upstream(
 def _record_call(
     *,
     caller: str,
+    team: str = "default",
     model: str,
     status: str,
     prompt_sha256: str,
     usage: Mapping[str, Any] | None,
     now: float,
     requests: int = 1,
+    redaction_count: int = 0,
 ) -> None:
     """Aggregate call(s) into the caller ledger; never store bodies.
 
@@ -212,6 +923,7 @@ def _record_call(
     prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)
     completion_tokens = int((usage or {}).get("completion_tokens") or 0)
     count = max(1, int(requests))
+    safe_redaction_count = max(0, int(redaction_count))
 
     def mutate(row: dict[str, Any]) -> None:
         row["request_count"] = int(row.get("request_count") or 0) + count
@@ -222,6 +934,8 @@ def _record_call(
         row["completion_tokens"] = (
             int(row.get("completion_tokens") or 0) + completion_tokens
         )
+        row["redaction_count"] = int(row.get("redaction_count") or 0) + safe_redaction_count
+        row["team"] = team
 
     # Shadow accounting must NEVER fail the call it is accounting for: by
     # the time this runs the upstream completion may already have been paid
@@ -234,6 +948,7 @@ def _record_call(
                 "id": record_id,
                 "schema": LEDGER_SCHEMA,
                 "caller_digest": caller,
+                "team": team,
                 "model": model,
                 "request_count": count,
                 "first_seen": now,
@@ -242,6 +957,7 @@ def _record_call(
                 "last_prompt_sha256": prompt_sha256,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
+                "redaction_count": safe_redaction_count,
             }
             try:
                 _LEDGER.create(
@@ -301,28 +1017,12 @@ def _screen_messages(body: Mapping[str, Any]):
 
     parts: list[str] = []
     total = 0
-    for message in body.get("messages") or []:
-        if not isinstance(message, Mapping):
+    for chunk in _collect_prompt_text(body):
+        if not chunk:
             continue
-        content = message.get("content")
-        if isinstance(content, str):
-            chunks = [content]
-        elif isinstance(content, list):
-            chunks = [
-                str(part.get("text") or "")
-                for part in content
-                if isinstance(part, Mapping) and part.get("type") == "text"
-            ]
-        else:
-            continue
-        for chunk in chunks:
-            if not chunk:
-                continue
-            take = chunk[: max(0, _SCREEN_MAX_CHARS - total)]
-            parts.append(take)
-            total += len(take)
-            if total >= _SCREEN_MAX_CHARS:
-                break
+        take = chunk[: max(0, _SCREEN_MAX_CHARS - total)]
+        parts.append(take)
+        total += len(take)
         if total >= _SCREEN_MAX_CHARS:
             break
     if not parts:
@@ -438,6 +1138,225 @@ def ingest_otel_spans(payload: object) -> dict[str, int]:
     return {"ingested": ingested, "skipped": skipped}
 
 
+def _provider_upstream(
+    provider: str, settings: Mapping[str, Any]
+) -> tuple[str, dict[str, str]]:
+    """Resolve one fixed provider endpoint and never accept it from callers."""
+
+    if provider == "anthropic":
+        base = str(settings.get("anthropic_upstream_url") or "")
+        if not base:
+            raise LLMGatewayConfigError(
+                "Anthropic compatibility requires llm_gateway.anthropic_upstream_url"
+            )
+        token = os.environ.get(str(settings["anthropic_upstream_token_env"]), "")
+        if not token:
+            raise LLMGatewayError("The gateway's Anthropic upstream credential is not configured.")
+        return f"{base}/v1/messages", {
+            "x-api-key": token,
+            "anthropic-version": str(settings["anthropic_version"]),
+        }
+    token = os.environ.get(str(settings["upstream_token_env"]), "")
+    if not token:
+        raise LLMGatewayError("The gateway's upstream credential is not configured.")
+    return f"{settings['upstream_url']}/v1/chat/completions", {
+        "Authorization": f"Bearer {token}",
+    }
+
+
+def _handle_completion(  # noqa: C901 - the request boundary is deliberately linear
+    body: object,
+    *,
+    caller_token: str,
+    provider: str,
+    upstream: Callable[[str, Mapping[str, str], Mapping[str, Any]], tuple[int, Any]]
+    | None = None,
+    now: float | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Enforce the common OpenAI/Anthropic runtime firewall chain."""
+
+    settings = get_llm_gateway_config()
+    if settings["enable"] is not True:
+        raise LLMGatewayConfigError(
+            "the LLM gateway requires [llm_gateway] enable = true"
+        )
+    team = _team_for_token(str(caller_token or ""), settings)
+    if team is None:
+        return _provider_error(provider, 401, "The gateway bearer is missing or wrong.")
+    caller = _caller_digest(team)
+    if not isinstance(body, Mapping):
+        return _provider_error(provider, 400, "The request body must be a JSON object.")
+    try:
+        encoded = json.dumps(body, default=str, allow_nan=False).encode("utf-8", "ignore")
+    except (TypeError, ValueError):
+        return _provider_error(provider, 400, "The request must contain finite JSON data.")
+    if len(encoded) > settings["max_body_bytes"]:
+        return _provider_error(
+            provider, 413, "The request exceeds the gateway's configured size cap."
+        )
+    model = str(body.get("model") or "").strip()
+    if not model:
+        return _provider_error(provider, 400, "The request names no model.")
+    if body.get("stream"):
+        return _provider_error(
+            provider,
+            400,
+            "Streaming is not supported through this gateway yet; retry with stream disabled.",
+        )
+    current = time.time() if now is None else float(now)
+    original_sha = hashlib.sha256(encoded).hexdigest()
+    if settings["allowed_models"] and model not in settings["allowed_models"]:
+        _record_call(
+            caller=caller, team=team, model=model, status="blocked_model",
+            prompt_sha256=original_sha, usage=None, now=current,
+        )
+        return _provider_error(
+            provider, 403, f"Model {model!r} is not on the gateway's allowlist."
+        )
+    limits = _team_budget_limits(settings, team)
+    try:
+        outbound_body, completion_reservation = _completion_cap(
+            body,
+            provider=provider,
+            require_cap=int(limits["max_completion_tokens"]) > 0,
+            default_cap=int(settings["default_max_output_tokens"]),
+        )
+        prompt_redactions = 0
+        if settings["redact_prompts"]:
+            outbound_body, prompt_redactions = _redact_prompt(outbound_body)
+        outbound_encoded = json.dumps(
+            outbound_body, default=str, allow_nan=False
+        ).encode("utf-8", "ignore")
+    except ValueError as exc:
+        return _provider_error(provider, 400, str(exc))
+    except LLMGatewayError as exc:
+        _record_call(
+            caller=caller, team=team, model=model, status="redaction_unavailable",
+            prompt_sha256=original_sha, usage=None, now=current,
+        )
+        return _provider_error(provider, 503, str(exc))
+    if len(outbound_encoded) > settings["max_body_bytes"]:
+        return _provider_error(
+            provider, 413, "Redaction expanded the request beyond the gateway size cap."
+        )
+    prompt_sha = hashlib.sha256(outbound_encoded).hexdigest()
+    if settings["screen_prompts"]:
+        verdict = _screen_messages(outbound_body)
+        if verdict is not None and not verdict.allowed:
+            _record_call(
+                caller=caller, team=team, model=model, status="screened_blocked",
+                prompt_sha256=prompt_sha, usage=None, now=current,
+                redaction_count=prompt_redactions,
+            )
+            detectors = ", ".join(
+                str(code.get("detector") or "unknown")
+                for code in verdict.reason_codes
+                if isinstance(code, Mapping)
+            )
+            return _provider_error(
+                provider,
+                403,
+                "The gateway's content screen blocked this request "
+                f"(severity {verdict.severity}; detectors: {detectors}). "
+                "Contact your platform operator.",
+            )
+    try:
+        url, headers = _provider_upstream(provider, settings)
+    except LLMGatewayConfigError:
+        raise
+    except LLMGatewayError as exc:
+        return _provider_error(provider, 503, str(exc))
+    prompt_reservation = (
+        _estimate_prompt_tokens(outbound_body)
+        if int(limits["max_prompt_tokens"]) > 0
+        else 0
+    )
+    reservation = _TEAM_BUDGET.reserve(
+        team,
+        limits,
+        prompt_tokens=prompt_reservation,
+        completion_tokens=(
+            completion_reservation
+            if int(limits["max_completion_tokens"]) > 0
+            else 0
+        ),
+        window_seconds=int(settings["budget_window_seconds"]),
+        now=current,
+    )
+    if not reservation.allowed:
+        status = "budget_exhausted" if reservation.reason == "budget_exhausted" else "budget_authority"
+        _record_call(
+            caller=caller, team=team, model=model, status=status,
+            prompt_sha256=prompt_sha, usage=None, now=current,
+            redaction_count=prompt_redactions,
+        )
+        message = (
+            "The gateway team budget is exhausted."
+            if status == "budget_exhausted"
+            else "The gateway team budget authority is unavailable; egress is denied."
+        )
+        return _provider_error(provider, 429 if status == "budget_exhausted" else 503, message)
+    forward = upstream or _default_upstream
+    try:
+        status_code, payload = forward(url, headers, outbound_body)
+    except LLMGatewayError as exc:
+        _record_call(
+            caller=caller, team=team, model=model, status="egress_denied",
+            prompt_sha256=prompt_sha, usage=None, now=current,
+            redaction_count=prompt_redactions,
+        )
+        return _provider_error(provider, 502, str(exc))
+    except Exception:
+        log.warning("llm_gateway: upstream request failed", exc_info=True)
+        _record_call(
+            caller=caller, team=team, model=model, status="upstream_error",
+            prompt_sha256=prompt_sha, usage=None, now=current,
+            redaction_count=prompt_redactions,
+        )
+        return _provider_error(provider, 502, "The upstream request failed.")
+    if status_code >= 400 or not isinstance(payload, Mapping):
+        _record_call(
+            caller=caller, team=team, model=model, status=f"upstream_{status_code}",
+            prompt_sha256=prompt_sha, usage=None, now=current,
+            redaction_count=prompt_redactions,
+        )
+        return _provider_error(
+            provider,
+            502,
+            f"The upstream returned status {status_code}; its body is not relayed through the gateway.",
+        )
+    usage = _usage_for_provider(provider, payload)
+    response_redactions = 0
+    try:
+        response = _json_copy(payload)
+        if settings["redact_completions"]:
+            response, response_redactions = _redact_response(response)
+    except LLMGatewayError as exc:
+        # The upstream effect is known but an unredacted response is not safe
+        # to relay.  Keep the reservation and report an explicit outage.
+        _record_call(
+            caller=caller, team=team, model=model, status="response_redaction_unavailable",
+            prompt_sha256=prompt_sha, usage=None, now=current,
+            redaction_count=prompt_redactions,
+        )
+        return _provider_error(provider, 503, str(exc))
+    _TEAM_BUDGET.reconcile(
+        reservation,
+        prompt_tokens=usage["prompt_tokens"] if usage is not None else None,
+        completion_tokens=(
+            usage["completion_tokens"] if usage is not None else None
+        ),
+        window_seconds=int(settings["budget_window_seconds"]),
+        now=current,
+    )
+    _record_call(
+        caller=caller, team=team, model=model, status="ok",
+        prompt_sha256=prompt_sha, usage=usage, now=current,
+        redaction_count=prompt_redactions + response_redactions,
+    )
+    return 200, response
+
+
 def handle_chat_completion(
     body: object,
     *,
@@ -446,146 +1365,31 @@ def handle_chat_completion(
     | None = None,
     now: float | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Screen, forward, and ledger one ``/v1/chat/completions`` call.
+    """Handle one OpenAI-compatible ``/v1/chat/completions`` request."""
 
-    Returns ``(http_status, response_body)``; error bodies use the OpenAI
-    error envelope so unmodified SDKs surface them cleanly. Upstream error
-    bodies are never echoed (they can reflect credentials).
+    return _handle_completion(
+        body, caller_token=caller_token, provider="openai", upstream=upstream, now=now
+    )
+
+
+def handle_anthropic_message(
+    body: object,
+    *,
+    caller_token: str,
+    upstream: Callable[[str, Mapping[str, str], Mapping[str, Any]], tuple[int, Any]]
+    | None = None,
+    now: float | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Handle an Anthropic-compatible ``/v1/messages`` request.
+
+    The endpoint follows the native Anthropic bearer/header shape upstream,
+    but applies the exact same model, Shield, redaction, egress, team-budget,
+    and privacy-safe ledger gates as the OpenAI-compatible endpoint.
     """
 
-    settings = get_llm_gateway_config()
-    if settings["enable"] is not True:
-        raise LLMGatewayConfigError(
-            "the LLM gateway requires [llm_gateway] enable = true"
-        )
-    if not _authorized(str(caller_token or ""), settings):
-        return 401, {
-            "error": {
-                "message": "The gateway bearer is missing or wrong.",
-                "type": "invalid_request_error",
-            }
-        }
-    caller = _caller_digest(str(caller_token))
-    if not isinstance(body, Mapping):
-        return 400, {
-            "error": {
-                "message": "The request body must be a JSON object.",
-                "type": "invalid_request_error",
-            }
-        }
-    encoded = json.dumps(body, default=str).encode("utf-8", "ignore")
-    if len(encoded) > settings["max_body_bytes"]:
-        return 413, {
-            "error": {
-                "message": "The request exceeds the gateway's configured size cap.",
-                "type": "invalid_request_error",
-            }
-        }
-    model = str(body.get("model") or "").strip()
-    if not model:
-        return 400, {
-            "error": {
-                "message": "The request names no model.",
-                "type": "invalid_request_error",
-            }
-        }
-    if body.get("stream"):
-        return 400, {
-            "error": {
-                "message": (
-                    "Streaming is not supported through this gateway yet; "
-                    "retry with stream disabled."
-                ),
-                "type": "invalid_request_error",
-            }
-        }
-    current = time.time() if now is None else float(now)
-    prompt_sha = hashlib.sha256(encoded).hexdigest()
-    if settings["allowed_models"] and model not in settings["allowed_models"]:
-        _record_call(
-            caller=caller, model=model, status="blocked_model",
-            prompt_sha256=prompt_sha, usage=None, now=current,
-        )
-        return 403, {
-            "error": {
-                "message": f"Model {model!r} is not on the gateway's allowlist.",
-                "type": "invalid_request_error",
-            }
-        }
-    if settings["screen_prompts"]:
-        verdict = _screen_messages(body)
-        if verdict is not None and not verdict.allowed:
-            _record_call(
-                caller=caller, model=model, status="screened_blocked",
-                prompt_sha256=prompt_sha, usage=None, now=current,
-            )
-            return 403, {
-                "error": {
-                    "message": (
-                        "The gateway's content screen blocked this request "
-                        f"(severity {verdict.severity}; detectors: "
-                        + ", ".join(
-                            code["detector"] for code in verdict.reason_codes
-                        )
-                        + "). Contact your platform operator."
-                    ),
-                    "type": "invalid_request_error",
-                }
-            }
-    upstream_token = os.environ.get(settings["upstream_token_env"], "")
-    if not upstream_token:
-        return 503, {
-            "error": {
-                "message": "The gateway's upstream credential is not configured.",
-                "type": "server_error",
-            }
-        }
-    url = f"{settings['upstream_url']}/v1/chat/completions"
-    forward = upstream or _default_upstream
-    try:
-        status_code, payload = forward(
-            url, {"Authorization": f"Bearer {upstream_token}"}, body,
-        )
-    except LLMGatewayError as exc:
-        _record_call(
-            caller=caller, model=model, status="egress_denied",
-            prompt_sha256=prompt_sha, usage=None, now=current,
-        )
-        return 502, {
-            "error": {"message": str(exc), "type": "server_error"}
-        }
-    except Exception:
-        log.warning("llm_gateway: upstream request failed", exc_info=True)
-        _record_call(
-            caller=caller, model=model, status="upstream_error",
-            prompt_sha256=prompt_sha, usage=None, now=current,
-        )
-        return 502, {
-            "error": {
-                "message": "The upstream request failed.",
-                "type": "server_error",
-            }
-        }
-    if status_code >= 400 or not isinstance(payload, Mapping):
-        _record_call(
-            caller=caller, model=model, status=f"upstream_{status_code}",
-            prompt_sha256=prompt_sha, usage=None, now=current,
-        )
-        return 502, {
-            "error": {
-                "message": (
-                    f"The upstream returned status {status_code}; its body is "
-                    "not relayed through the gateway."
-                ),
-                "type": "server_error",
-            }
-        }
-    usage = payload.get("usage") if isinstance(payload.get("usage"), Mapping) else None
-    _record_call(
-        caller=caller, model=model, status="ok",
-        prompt_sha256=prompt_sha, usage=usage, now=current,
+    return _handle_completion(
+        body, caller_token=caller_token, provider="anthropic", upstream=upstream, now=now
     )
-    return 200, dict(payload)
 
 
 def gateway_status() -> dict[str, Any]:
@@ -615,6 +1419,7 @@ def list_callers(*, limit: int = 100) -> list[dict[str, Any]]:
     return [
         {
             "caller_digest": row.get("caller_digest"),
+            "team": row.get("team", "default"),
             "model": row.get("model"),
             "request_count": row.get("request_count"),
             "first_seen": row.get("first_seen"),
@@ -622,6 +1427,7 @@ def list_callers(*, limit: int = 100) -> list[dict[str, Any]]:
             "last_status": row.get("last_status"),
             "prompt_tokens": row.get("prompt_tokens"),
             "completion_tokens": row.get("completion_tokens"),
+            "redaction_count": row.get("redaction_count", 0),
         }
         for row in rows
     ]
@@ -631,9 +1437,12 @@ __all__ = [
     "LLMGatewayConfigError",
     "LLMGatewayError",
     "LEDGER_SCHEMA",
+    "TEAM_BUDGET_SCHEMA",
+    "TeamTokenBudget",
     "enabled",
     "gateway_status",
     "get_llm_gateway_config",
+    "handle_anthropic_message",
     "handle_chat_completion",
     "ingest_otel_spans",
     "list_callers",

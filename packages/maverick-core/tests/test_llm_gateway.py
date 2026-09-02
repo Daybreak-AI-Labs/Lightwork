@@ -266,3 +266,152 @@ def test_ledger_failures_never_break_the_proxied_call(monkeypatch):
     assert status == 200
     assert payload["choices"][0]["message"]["content"] == "hello"
     assert gw.list_callers() == []
+
+
+def test_anthropic_path_redacts_both_sides_and_preserves_native_headers(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("LLM_GATEWAY_ANTHROPIC_TOKEN", "anthropic-up-secret")
+    (tmp_path / "config.toml").write_text(
+        "[llm_gateway]\nenable = true\n"
+        'upstream_url = "https://api.openai.com"\n'
+        'anthropic_upstream_url = "https://api.anthropic.com"\n'
+        "redact_prompts = true\nredact_completions = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    seen = {}
+
+    def upstream(url, headers, body):
+        seen.update({"url": url, "headers": headers, "body": body})
+        return 200, {
+            "id": "msg-1",
+            "type": "message",
+            "content": [{"type": "text", "text": "Email ops@example.com"}],
+            "usage": {"input_tokens": 7, "output_tokens": 3},
+        }
+
+    status, payload = gw.handle_anthropic_message(
+        {
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Email me@example.com"}],
+        },
+        caller_token="gw-secret",
+        upstream=upstream,
+        now=1_000.0,
+    )
+
+    assert status == 200
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"
+    assert seen["headers"] == {
+        "x-api-key": "anthropic-up-secret",
+        "anthropic-version": "2023-06-01",
+    }
+    assert "me@example.com" not in str(seen["body"])
+    assert "ops@example.com" not in str(payload)
+    row = gw.list_callers()[0]
+    assert row["prompt_tokens"] == 7
+    assert row["completion_tokens"] == 3
+    assert row["redaction_count"] >= 2
+
+
+def test_team_budgets_are_bound_to_bearers_and_block_before_egress(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("ENGINEERING_GATEWAY_TOKEN", "engineering-secret")
+    (tmp_path / "config.toml").write_text(
+        "[llm_gateway]\nenable = true\n"
+        'upstream_url = "https://api.openai.com"\n'
+        'team_tokens = { engineering = "ENGINEERING_GATEWAY_TOKEN" }\n'
+        "[llm_gateway.team_budgets.engineering]\n"
+        "max_requests = 1\nmax_prompt_tokens = 100\nmax_completion_tokens = 8\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    calls = []
+
+    def upstream(url, headers, body):
+        calls.append((url, headers, body))
+        return 200, {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        }
+
+    request = _body(max_completion_tokens=4)
+    status, _ = gw.handle_chat_completion(
+        request,
+        caller_token="engineering-secret",
+        upstream=upstream,
+        now=1_000.0,
+    )
+    assert status == 200
+    exhausted, payload = gw.handle_chat_completion(
+        request,
+        caller_token="engineering-secret",
+        upstream=upstream,
+        now=1_001.0,
+    )
+    assert exhausted == 429
+    assert "budget" in payload["error"]["message"].lower()
+    assert len(calls) == 1
+    assert gw.list_callers()[0]["team"] == "engineering"
+
+
+def test_completion_budget_injects_a_reviewed_default_cap(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[llm_gateway]\nenable = true\n"
+        'upstream_url = "https://api.openai.com"\n'
+        "default_max_output_tokens = 7\n"
+        "[llm_gateway.team_budgets.default]\n"
+        "max_completion_tokens = 14\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    forwarded = []
+
+    def upstream(url, headers, body):
+        forwarded.append(body)
+        return 200, {"choices": [], "usage": {}}
+
+    status, _ = gw.handle_chat_completion(
+        _body(), caller_token="gw-secret", upstream=upstream, now=1_000.0,
+    )
+    assert status == 200
+    assert forwarded[0]["max_completion_tokens"] == 7
+
+
+def test_missing_provider_usage_keeps_the_conservative_budget_reservation(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[llm_gateway]\nenable = true\n"
+        'upstream_url = "https://api.openai.com"\n'
+        "default_max_output_tokens = 3\n"
+        "[llm_gateway.team_budgets.default]\n"
+        "max_completion_tokens = 5\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    calls = []
+
+    def upstream(url, headers, body):
+        calls.append(body)
+        return 200, {"choices": [], "usage": {}}
+
+    first, _ = gw.handle_chat_completion(
+        _body(), caller_token="gw-secret", upstream=upstream, now=1_000.0,
+    )
+    second, payload = gw.handle_chat_completion(
+        _body(), caller_token="gw-secret", upstream=upstream, now=1_001.0,
+    )
+    assert first == 200
+    assert second == 429
+    assert "budget" in payload["error"]["message"].lower()
+    assert len(calls) == 1
+
+
+def test_anthropic_endpoint_requires_its_own_fixed_upstream():
+    with pytest.raises(gw.LLMGatewayConfigError, match="anthropic_upstream_url"):
+        gw.handle_anthropic_message(
+            {"model": "claude-test", "max_tokens": 8, "messages": []},
+            caller_token="gw-secret",
+        )

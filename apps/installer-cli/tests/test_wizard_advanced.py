@@ -923,6 +923,42 @@ def test_external_agents_identity_hardening_flags_write_and_are_read(
     assert xa["require_signed"] is True and xa["mint_approval"] is True
 
 
+def test_governed_mcp_sidecar_manifest_writes_a_closed_config(tmp_path, monkeypatch):
+    """Rule-6 loop: the external-client sidecar is wizard-configurable and
+    its emitted manifest passes the runtime's strict parser."""
+    cfg = _write(tmp_path, monkeypatch, {
+        "mcp_sidecar": {
+            "enable": True,
+            "upstream_url": "https://mcp.example.test/mcp",
+            "upstream_token_env": "UPSTREAM_MCP_TOKEN",
+            "require_shield": True,
+            "max_calls_per_window": 25,
+            "budget_window_seconds": 3600,
+            "listen_host": "127.0.0.1",
+            "listen_port": 8787,
+            "tools": {
+                "search": {
+                    "risk": "low",
+                    "description": "Reviewed search",
+                    "obligation_tags": ["inventory-reviewed"],
+                },
+            },
+        },
+    })
+
+    parsed = tomllib.loads(cfg)
+    sidecar = parsed["mcp_sidecar"]
+    assert sidecar["enable"] is True
+    assert sidecar["upstream_url"] == "https://mcp.example.test/mcp"
+    assert sidecar["tools"]["search"]["input_schema"] == {
+        "type": "object", "properties": {},
+    }
+    from maverick_mcp.sidecar import SidecarConfig
+
+    loaded = SidecarConfig.from_mapping(sidecar)
+    assert loaded.tools[0].governed_action == "mcp_sidecar__search"
+
+
 def test_governed_execution_planes_write_and_are_read(tmp_path, monkeypatch):
     """Rule-6 loop: the governed-kernel and self-refinement opt-ins write
     [repl] / [harness_refine] and the kernel's getters read them back."""

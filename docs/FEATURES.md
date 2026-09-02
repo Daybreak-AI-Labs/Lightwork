@@ -973,15 +973,19 @@ here.
   evidence against a governed asset. Attribution for the operator's own
   review — never a fairness certification, causal claim, or legal advice.
 - **Governed LLM gateway** (`llm_gateway.py`, dashboard
-  `/gateway/v1/chat/completions`, opt-in `[llm_gateway]`, `maverick
-  gateway`) — estate coverage for agents that never enroll: point any
-  OpenAI-compatible agent's base URL at Lightwork and every call crosses a
-  governed checkpoint — the gateway's own bearer, an optional model
-  allowlist, bounded bodies, the SSRF-pinned enterprise-egress-guarded
-  upstream path — while unknown callers land in a shadow-caller ledger
-  (digests, models, counts, token usage; bodies are never stored, upstream
-  error bodies never relayed). v1 is one fixed upstream, the chat-completions
-  shape, no streaming.
+  `/gateway/v1/chat/completions` and `/gateway/v1/messages`, opt-in
+  `[llm_gateway]`, `maverick gateway`) — estate coverage for agents that
+  never enroll: point an OpenAI-compatible or native Anthropic-compatible
+  client at Lightwork and every non-streaming call crosses a governed
+  checkpoint — a team-bound gateway bearer, optional model allowlist,
+  optional deterministic prompt screen, secret/PII redaction in both
+  directions, bounded bodies, durable team call/input/output reservations,
+  and the SSRF-pinned enterprise-egress-guarded fixed upstream path. The
+  shadow-caller ledger retains only opaque caller/team digests, models,
+  counts, token usage, redaction counts, and content digests; it never stores
+  bodies or relays upstream error bodies. OpenAI Responses, streaming, live
+  provider-contract acceptance, and traffic that bypasses the gateway remain
+  out of scope.
 - **Agent identity federation** — a trust-registry entry's `jwks_file` may
   now be an `https://` JWKS endpoint (Microsoft Entra ID, Okta, any OIDC
   IdP), fetched with a bounded timeout and cached keys, so platform-issued

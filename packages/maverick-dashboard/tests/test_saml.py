@@ -678,6 +678,62 @@ def test_acs_records_persistent_nameid_for_scim_revocation(_enabled, monkeypatch
     assert name_id in sd.subs_for([name_id])
 
 
+@pytest.mark.parametrize(
+    "object_id_attr",
+    (
+        "oid",
+        "http://schemas.microsoft.com/identity/claims/objectidentifier",
+    ),
+)
+def test_verified_saml_object_id_bridges_nameid_to_scim_group_role(
+    _enabled, monkeypatch, object_id_attr,
+):
+    """A signed immutable SAML object ID can use the existing non-forgeable
+    externalId bridge. Email/UPN remains unavailable to group-role matching."""
+    from maverick_dashboard import scim, scim_groups
+
+    name_id = "_persistent-saml-nameid"
+    object_id = "entra-object-id-1"
+    saml_mod._record_session_subject(
+        saml_mod.SamlIdentity(
+            name_id=name_id,
+            attributes={object_id_attr: [object_id]},
+        )
+    )
+    monkeypatch.setattr(
+        scim,
+        "_load",
+        lambda: {
+            "scim-user-1": {
+                "id": "scim-user-1",
+                "externalId": object_id,
+                "active": True,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        scim,
+        "_load_effective_groups",
+        lambda: {
+            "scim-group-1": {
+                "displayName": "Finance Team",
+                "members": ["scim-user-1"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        scim_groups,
+        "_config_table",
+        lambda key: {"Finance Team": "operator"} if key == "group_roles" else {},
+    )
+
+    principal = f"user:{name_id}"
+    assert scim_groups.group_names_for_principal(principal) == frozenset(
+        {"Finance Team"}
+    )
+    assert scim_groups.role_for_principal(principal) == "operator"
+
+
 def test_record_session_subject_skips_when_no_email_attr(_enabled, monkeypatch, tmp_path):
     """With no email/UPN attribute the NameID is still recorded under itself
     (covers an email-format NameID that IS the SCIM identifier)."""

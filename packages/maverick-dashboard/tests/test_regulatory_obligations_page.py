@@ -41,6 +41,9 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
     assert f'data-api-base="{page.API_BASE}"' in body
     assert page.ASSET_PATH in body
     assert 'id="rob-check-form"' in body and 'id="rob-library"' in body
+    assert 'id="rob-gateway-preview-form"' in body
+    assert 'id="rob-gateway-preview-state"' in body
+    assert "Preview restrictive gateway constraints" in body
     assert "maverick regulatory verify --ci" in body
 
 

@@ -4040,11 +4040,12 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "llm_gateway": _q_confirm(
             "Governed LLM gateway? Agents built anywhere point their "
-            "OpenAI-compatible base URL at Lightwork; every call crosses a "
-            "governed checkpoint (own bearer, model allowlist, bounded "
-            "bodies, egress-guarded upstream) and unknown callers land in a "
-            "shadow-AI ledger. Requires an upstream URL and token after "
-            "setup. OFF by default.",
+            "OpenAI- or Anthropic-compatible base URL at Lightwork; every "
+            "call crosses a governed checkpoint (own bearer, model allowlist, "
+            "prompt/completion redaction, injection screen, bounded bodies, "
+            "team budget, and egress-guarded upstream) and unknown callers "
+            "land in a shadow-AI ledger. Requires reviewed upstream URLs and "
+            "tokens after setup. OFF by default.",
             default=False,
         ),
         "vendor_management": _q_confirm(
@@ -4617,6 +4618,15 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
     }
+    # The governed sidecar is an extension of the external-agent boundary: its
+    # clients authenticate through per-agent MCP credentials and then inherit
+    # the same trust/revocation/control-plane posture. Keep the deployment
+    # prompt behind that explicit higher-level opt-in so a normal wizard run is
+    # unchanged and the operator sees the dependency before enabling egress.
+    if advanced.get("external_agents"):
+        sidecar = pick_governed_mcp_sidecar()
+        if sidecar:
+            advanced["mcp_sidecar"] = sidecar
     # Federated insight exchange rides on dreaming: trusted peer keys are
     # only worth asking for when the loop that produces/consumes insights is
     # on. Imports are fail-closed without them.
@@ -4814,7 +4824,7 @@ def pick_advanced() -> dict[str, Any]:
     profiles = _q_checkbox(
         "  Regulatory obligations to compile into the action gate "
         "(strictest-wins)",
-        ["gdpr", "eu_ai_act", "hipaa"],
+        _regulatory_profile_choices(),
         default=[],
     )
     if profiles:
@@ -4827,6 +4837,114 @@ def pick_advanced() -> dict[str, Any]:
     # offered right after — writes under [dashboard]. Returns {} when declined.
     advanced["department_access"] = pick_department_access(bool(advanced["oidc"].get("enabled")))
     return advanced
+
+
+def _regulatory_profile_choices() -> list[str]:
+    """The installed compiler's released profile registry, not a local copy."""
+    from maverick.regulatory_compiler import shipped_profile_keys
+
+    return list(shipped_profile_keys())
+
+
+def pick_governed_mcp_sidecar() -> dict[str, Any]:
+    """Collect a reviewed, no-secret sidecar manifest for external MCP clients.
+
+    The prompt deliberately asks for environment-variable *names*, never an
+    upstream bearer value.  Tool schemas remain conservative ``object`` roots;
+    operators can add a more restrictive reviewed JSON Schema later instead of
+    the wizard inventing one from a tool name.
+    """
+    console.print(
+        "[dim]A governed MCP sidecar fronts reviewed tools from one upstream "
+        "MCP server for external clients. It needs per-agent MCP credentials, "
+        "the Agent Trust Plane, and a Shield installation; it does not discover "
+        "or proxy arbitrary upstream tools.[/dim]"
+    )
+    if not _q_confirm(
+        "  Configure a governed MCP sidecar for external clients now?",
+        default=False,
+    ):
+        return {}
+    upstream = _q_text(
+        "  Upstream Streamable HTTP MCP URL (https; loopback http allowed for development)",
+        default="",
+    ).strip()
+    if not (
+        upstream.startswith("https://")
+        or upstream.startswith("http://localhost")
+        or upstream.startswith("http://127.0.0.1")
+        or upstream.startswith("http://[::1]")
+    ):
+        console.print(
+            "[yellow]No valid sidecar URL supplied; leaving the sidecar disabled."
+            "[/yellow]"
+        )
+        return {}
+    raw_tools = _q_text(
+        "  Reviewed upstream tools (comma-separated name[:low|medium|high])",
+        default="",
+    )
+    tools: dict[str, dict[str, Any]] = {}
+    for entry in _split_csv(raw_tools):
+        name, separator, risk = entry.partition(":")
+        name = name.strip()
+        risk = risk.strip().lower() if separator else "high"
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name) or "__" in name:
+            console.print(f"[yellow]Skipping invalid MCP tool name: {name!r}[/yellow]")
+            continue
+        if risk not in {"low", "medium", "high"}:
+            console.print(
+                f"[yellow]Skipping {name!r}: risk must be low, medium, or high.[/yellow]"
+            )
+            continue
+        tools.setdefault(
+            name,
+            {
+                "risk": risk,
+                "description": "Reviewed governed MCP tool",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+        )
+    if not tools:
+        console.print(
+            "[yellow]No reviewed tool bindings supplied; leaving the sidecar disabled."
+            "[/yellow]"
+        )
+        return {}
+    token_env = _q_text(
+        "  Upstream bearer environment variable (blank = no static bearer)",
+        default="MAVERICK_MCP_SIDECAR_UPSTREAM_TOKEN",
+    ).strip()
+    if token_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", token_env):
+        console.print("[yellow]Invalid environment variable name; no bearer will be configured.[/yellow]")
+        token_env = ""
+    max_calls = max(
+        0,
+        _safe_int(
+            _q_text("  Per-principal call budget per hour (0 = no count ceiling)", default="1000"),
+            default=1000,
+        ),
+    )
+    port = min(
+        65_535,
+        max(
+            1,
+            _safe_int(_q_text("  Sidecar listen port", default="8787"), default=8787),
+        ),
+    )
+    out: dict[str, Any] = {
+        "enable": True,
+        "upstream_url": upstream,
+        "require_shield": True,
+        "max_calls_per_window": min(max_calls, 1_000_000),
+        "budget_window_seconds": 3_600,
+        "listen_host": "127.0.0.1",
+        "listen_port": port,
+        "tools": tools,
+    }
+    if token_env:
+        out["upstream_token_env"] = token_env
+    return out
 
 
 def _split_csv(text: str) -> list[str]:
@@ -7136,6 +7254,49 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             _emit_kv(lines, "connectors", advanced["external_connectors"])
         if advanced.get("external_mint_approval"):
             lines.append("mint_approval = true")
+    sidecar = advanced.get("mcp_sidecar")
+    if isinstance(sidecar, dict) and sidecar.get("enable") is True:
+        # The wizard only emits a closed reviewed manifest.  It never writes an
+        # upstream bearer value, broad CORS origin, or arbitrary forwarded
+        # header; those are hand-managed deployment controls if needed.
+        lines.append("")
+        lines.append("[mcp_sidecar]")
+        lines.append("enable = true")
+        for key in (
+            "upstream_url",
+            "upstream_token_env",
+            "require_shield",
+            "max_calls_per_window",
+            "budget_window_seconds",
+            "listen_host",
+            "listen_port",
+        ):
+            if key in sidecar:
+                _emit_kv(lines, key, sidecar[key])
+        tool_rows = sidecar.get("tools")
+        if isinstance(tool_rows, dict):
+            for name, spec in sorted(tool_rows.items()):
+                if (
+                    not isinstance(name, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name)
+                    or "__" in name
+                    or not isinstance(spec, dict)
+                ):
+                    continue
+                lines.append("")
+                lines.append(f"[mcp_sidecar.tools.{name}]")
+                _emit_kv(lines, "risk", spec.get("risk", "high"))
+                _emit_kv(
+                    lines,
+                    "description",
+                    spec.get("description", "Reviewed governed MCP tool"),
+                )
+                # Schema authoring is deliberately bounded in the wizard. A
+                # stricter reviewed schema can be edited into config later.
+                lines.append('input_schema = { type = "object", properties = {} }')
+                tags = spec.get("obligation_tags")
+                if isinstance(tags, list) and all(isinstance(tag, str) for tag in tags):
+                    _emit_kv(lines, "obligation_tags", tags)
     if advanced.get("repl"):
         lines.append("")
         lines.append("[repl]")
@@ -7190,6 +7351,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[llm_gateway]")
         lines.append("enable = true")
         lines.append('upstream_url = "https://api.openai.com"')
+        lines.append("screen_prompts = true")
+        lines.append("redact_prompts = true")
+        lines.append("redact_completions = true")
     if advanced.get("vendor_management"):
         lines.append("")
         lines.append("[vendor_management]")

@@ -1028,3 +1028,230 @@ def test_trust_cli_restore_linearizes_before_concurrent_containment(monkeypatch)
     assert current.protected is True
     assert current.generation
     assert agent_trust.load_registry()["vega"].revoked is True
+
+
+# ---- fleet-scale bulk actions / time-boxed containment ----------------------
+
+def _enroll_on_platform(agent_id: str, platform: str = "openai") -> None:
+    from maverick import external_agents as xa
+
+    _enroll(agent_id)
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar[agent_id] = {"platform": platform, "contained": False}
+        xa._save_sidecar(sidecar)
+
+
+def test_bulk_platform_selection_is_snapshot_pinned_before_containment():
+    from maverick.revocation import is_revoked
+
+    _enroll_on_platform("vega")
+    _enroll_on_platform("nova")
+    view = acp.snapshot()
+    selection = acp.select_bulk(platform="OpenAI Agents", source=view)
+    slug_selection = acp.select_bulk(platform="openai", source=view)
+
+    assert selection.principals == ("agent:nova", "agent:vega")
+    assert slug_selection.principals == selection.principals
+    result = acp.bulk_action(selection, verb="contain", reason="incident", actor="soc")
+
+    assert result.ok is True
+    assert [row.principal for row in result.results] == list(selection.principals)
+    assert is_revoked("agent:vega") and is_revoked("agent:nova")
+
+
+def test_bulk_refuses_unscoped_empty_and_stale_selections(monkeypatch):
+    monkeypatch.setattr("maverick.world_model.open_world", lambda *a, **k: _world("user:alice"))
+    view = acp.snapshot()
+
+    with pytest.raises(ValueError, match="explicit tenant or platform"):
+        acp.select_bulk(source=view)
+    with pytest.raises(LookupError, match="matched no"):
+        acp.select_bulk(platform="OpenAI Agents", source=view)
+
+    selection = acp.select_bulk(tenant="", source=view)
+    assert acp.suspend("user:alice", reason="changed after review").ok
+    with pytest.raises(acp.ControlPlaneStaleSelection, match="stale"):
+        acp.bulk_action(selection, verb="contain", reason="incident")
+
+
+def test_bulk_selection_cannot_cross_the_active_tenant(monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+
+    token = set_tenant("acme")
+    try:
+        monkeypatch.setattr(
+            "maverick.world_model.open_world", lambda *a, **k: _world("user:alice"),
+        )
+        view = acp.snapshot()
+        selected = acp.select_bulk(tenant="acme", source=view)
+        assert selected.tenant == "acme"
+        with pytest.raises(ValueError, match="active tenant boundary"):
+            acp.select_bulk(tenant="other-tenant", source=view)
+    finally:
+        reset_tenant(token)
+
+
+def test_timeboxed_containment_releases_only_after_due_time():
+    from maverick.revocation import is_revoked, shared
+
+    scheduled = acp.contain_timeboxed(
+        "user:local",
+        reason="bounded incident",
+        release_after_seconds=60,
+        idempotency_key="case-123",
+        actor="soc",
+    )
+
+    assert scheduled.result.ok is True
+    assert scheduled.status == "scheduled"
+    assert shared().revoked()["user:local"].generation == scheduled.containment_generation
+    assert acp.sweep_timeboxed_releases(now=scheduled.release_at - 0.1) == []
+    assert is_revoked("user:local")
+
+    released = acp.sweep_timeboxed_releases(now=scheduled.release_at + 0.1, actor="timer")
+
+    assert len(released) == 1 and released[0].ok is True
+    assert released[0].verb == "timebox-release"
+    assert not is_revoked("user:local")
+    assert acp.timeboxed_containments()[0]["status"] == "released"
+
+
+def test_timebox_never_releases_a_newer_protected_containment():
+    from maverick.revocation import is_revoked, shared
+
+    scheduled = acp.contain_timeboxed(
+        "user:local",
+        reason="first incident",
+        release_after_seconds=60,
+        idempotency_key="case-123-replaced",
+    )
+    first_generation = scheduled.containment_generation
+    assert acp.contain("user:local", reason="second incident", actor="soc").ok
+    assert shared().revoked()["user:local"].generation != first_generation
+
+    outcomes = acp.sweep_timeboxed_releases(now=scheduled.release_at + 1)
+
+    assert len(outcomes) == 1
+    assert outcomes[0].ok is False and outcomes[0].code == "superseded"
+    assert is_revoked("user:local")
+    assert acp.timeboxed_containments()[0]["status"] == "superseded"
+
+
+def test_manual_release_retires_timebox_and_never_releases_a_newer_state():
+    from maverick.revocation import is_revoked
+
+    scheduled = acp.contain_timeboxed(
+        "user:local",
+        reason="manual recovery",
+        release_after_seconds=60,
+        idempotency_key="case-124",
+    )
+    assert acp.release("user:local", actor="soc").ok
+    assert not is_revoked("user:local")
+    assert acp.sweep_timeboxed_releases(now=scheduled.release_at + 1) == []
+    records = acp.timeboxed_containments()
+    assert records[0]["status"] == "manually_released"
+
+
+def test_timebox_recovers_a_schedule_after_a_post_containment_store_fault(monkeypatch):
+    from maverick.revocation import is_revoked
+
+    real_finish = acp._finish_timebox
+
+    def _lost_schedule(*_args, **_kwargs):
+        raise acp.ControlPlaneDependencyError("timeboxed containment records")
+
+    monkeypatch.setattr(acp, "_finish_timebox", _lost_schedule)
+    first = acp.contain_timeboxed(
+        "user:local",
+        reason="recover schedule",
+        release_after_seconds=60,
+        idempotency_key="case-124-recovery",
+    )
+    assert first.result.ok is False
+    assert first.result.code == "schedule_unavailable"
+    assert is_revoked("user:local")
+
+    monkeypatch.setattr(acp, "_finish_timebox", real_finish)
+    key_sha256 = acp._timebox_idempotency_sha256("", "case-124-recovery")
+    acp._update_timebox(
+        key_sha256,
+        lambda record: record.update(lease_until=0.0, updated_at=acp.time.time()),
+    )
+    recovered = acp.contain_timeboxed(
+        "user:local",
+        reason="recover schedule",
+        release_after_seconds=60,
+        idempotency_key="case-124-recovery",
+    )
+
+    assert recovered.result.ok is True
+    assert recovered.result.code == "recovered"
+    assert recovered.status == "scheduled"
+
+
+def test_timebox_error_is_sanitized_and_does_not_schedule_an_incomplete_containment(monkeypatch):
+    sentinel = "C:/secret/containment-authority"
+
+    def _boom(*_args, **_kwargs):
+        raise OSError(sentinel)
+
+    monkeypatch.setattr("maverick.agent_edr.contain", _boom)
+    result = acp.contain_timeboxed(
+        "user:local",
+        reason="dependency test",
+        release_after_seconds=60,
+        idempotency_key="case-125",
+    )
+
+    assert result.result.ok is False
+    assert result.status == "failed"
+    assert result.result.code == "dependency_unavailable"
+    assert sentinel not in json.dumps(result.to_dict())
+    assert acp.sweep_timeboxed_releases(now=result.release_at + 1) == []
+
+
+def test_bulk_action_uses_existing_cef_audit_and_otel_exports(monkeypatch):
+    from contextlib import contextmanager
+
+    from maverick.audit.export import to_cef
+
+    spans = []
+
+    @contextmanager
+    def _span(name, *, attributes=None):
+        spans.append((name, dict(attributes or {})))
+        yield None
+
+    monkeypatch.setattr("maverick.observability.trace_span", _span)
+    monkeypatch.setattr(
+        "maverick.world_model.open_world", lambda *a, **k: _world("user:alice"),
+    )
+    seen = _capture(monkeypatch)
+    selection = acp.select_bulk(tenant="", source=acp.snapshot())
+
+    result = acp.bulk_action(
+        selection,
+        verb="suspend",
+        reason="automation outage",
+        actor="ops",
+    )
+
+    assert result.ok is True
+    assert ("agent_control_plane.bulk_action", {
+        "control_plane.operation": "bulk_action",
+        "control_plane.verb": "suspend",
+        "control_plane.target_count": 1,
+        "control_plane.platform_selected": False,
+        "control_plane.tenant_bound": False,
+        "control_plane.timeboxed": False,
+    }) in spans
+    summary = next(
+        payload for kind, payload in seen
+        if kind == "control_plane_action" and payload["verb"] == "bulk-suspend"
+    )
+    cef = to_cef({"kind": "control_plane_action", **summary})
+    assert "verb=bulk-suspend" in cef
+    assert "target_count=1" in cef
+    assert "selection_sha256=" in cef

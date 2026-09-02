@@ -31,6 +31,7 @@ Homepage = "https://github.com/Daybreak-AI-Labs/Lightwork"
 
 [project.scripts]
 maverick-mcp = "maverick_mcp.server:main"
+maverick-mcp-sidecar = "maverick_mcp.sidecar:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

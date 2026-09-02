@@ -30,6 +30,14 @@ def test_profiles_are_written_to_the_compliance_table(tmp_path, monkeypatch):
     assert text.count("[compliance]") == 1
 
 
+def test_every_shipped_profile_round_trips_through_the_config_writer(tmp_path, monkeypatch):
+    from maverick.regulatory_compiler import shipped_profile_keys
+
+    profiles = list(shipped_profile_keys())
+    text = _write(tmp_path, monkeypatch, {"compliance_profiles": profiles})
+    assert tomllib.loads(text)["compliance"]["profiles"] == profiles
+
+
 def test_profiles_and_disclosure_share_one_compliance_table(tmp_path, monkeypatch):
     text = _write(tmp_path, monkeypatch, {
         "compliance_profiles": ["hipaa"],
@@ -59,8 +67,10 @@ def test_declining_residency_still_reaches_regulatory_picker(monkeypatch):
     def choose_profile(prompt, choices, *, default=None):
         checkboxes.append(prompt)
         if "Regulatory obligations to compile" in prompt:
-            assert choices == ["gdpr", "eu_ai_act", "hipaa"]
-            return ["eu_ai_act"]
+            from maverick.regulatory_compiler import shipped_profile_keys
+
+            assert choices == list(shipped_profile_keys())
+            return ["nist_ai_rmf"]
         return default or []
 
     monkeypatch.setattr(wizard, "_q_confirm", decline)
@@ -72,6 +82,6 @@ def test_declining_residency_still_reaches_regulatory_picker(monkeypatch):
 
     assert any("Set regulated-deployment knobs" in prompt for prompt in confirms)
     assert any("Regulatory obligations to compile" in prompt for prompt in checkboxes)
-    assert advanced["compliance_profiles"] == ["eu_ai_act"]
+    assert advanced["compliance_profiles"] == ["nist_ai_rmf"]
     assert "residency_region" not in advanced
     assert "compliance_disclosure_text" not in advanced

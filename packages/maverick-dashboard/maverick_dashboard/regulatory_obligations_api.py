@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Request
+from maverick import gateway_constraint_import as gateway_import
 from maverick import regulatory_compiler as rc
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
@@ -38,6 +39,13 @@ class _StrictModel(BaseModel):
 
 class CheckIn(_StrictModel):
     action: ActionName
+    profiles: list[ProfileKey] | None = Field(default=None, max_length=16)
+
+
+class GatewayConstraintPreviewIn(_StrictModel):
+    """A non-persistent, closed gateway restriction document for inspection."""
+
+    document: dict[str, object]
     profiles: list[ProfileKey] | None = Field(default=None, max_length=16)
 
 
@@ -118,6 +126,16 @@ def _check(action: str, profiles: list[str] | None) -> dict:
     }
 
 
+def _gateway_constraint_preview(
+    document: dict[str, object],
+    profiles: list[str] | None,
+) -> dict:
+    keys = _known(list(profiles)) if profiles is not None else rc.active_keys()
+    if not keys:
+        raise LookupError("no active regulatory profiles are configured")
+    return gateway_import.project_gateway_constraints(document, profiles=keys)
+
+
 async def _call(function, *args, **kwargs):
     try:
         return await run_in_threadpool(function, *args, **kwargs)
@@ -152,6 +170,34 @@ def create_regulatory_obligations_router() -> APIRouter:
     async def check(request: Request, body: CheckIn):
         require_permission(request, "view")
         return await _call(_check, body.action, body.profiles)
+
+    @router.post("/gateway-constraints/preview")
+    async def gateway_constraints_preview(
+        request: Request,
+        body: GatewayConstraintPreviewIn,
+    ):
+        """Preview an external gateway's restrictions without changing policy."""
+
+        require_permission(request, "view")
+        try:
+            return await run_in_threadpool(
+                _gateway_constraint_preview,
+                body.document,
+                body.profiles,
+            )
+        except gateway_import.GatewayConstraintImportError as exc:
+            # The closed parser never includes raw provider material in errors.
+            raise HTTPException(
+                status_code=422,
+                detail="gateway constraint import was refused",
+            ) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="gateway constraint preview is unavailable",
+            ) from exc
 
     return router
 
