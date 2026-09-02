@@ -1563,6 +1563,25 @@ here.
   Shield-scanned, provenance-tagged (`vendor:agent_id`), tenant-isolated,
   every read audited. Successes/failures consolidate through the dream
   cycle; `maverick proof --fleet` breaks value out per vendor.
+- **Cortex — the company brain** (`cortex.py`, default-on `[cortex] enable`
+  / `MAVERICK_CORTEX`; CLI `maverick cortex status|recall|deposit`; dashboard
+  page `/cortex`; audit kinds `cortex_recall` / `cortex_deposit`) — ONE
+  governed recall/deposit surface over the five memories the workforce
+  already has: **knowledge** (the tenant's documents, with citations),
+  **skills**, **self-harness lessons**, **the Operating Record** and
+  **fleet memory**. Each source keeps its own store, gates and semantics;
+  Cortex adds what none of them had together: one query, one provenance
+  envelope (source, kind, text, citation, score), one audit row per read
+  across all of them and per write — who asked, which sources answered with
+  how many hits, which were denied and why, a digest of the query and never
+  the text — and the Agent Trust Plane applied uniformly, so an external
+  caller is gated *before* any source is touched instead of only on the
+  fleet path. Tenant-exact by construction (every read is floored to the
+  active tenant and the result carries it); fail-open per source but never
+  silently (a broken or disabled source is reported in `denied` with its
+  reason); `status` reports what each source holds plus the encryption-at-
+  rest and isolation posture an auditor asks about; `recall --context`
+  renders the hits as the cited prompt block an agent receives.
 - **The Operating Record** (`operating_record.py`, `maverick record
   stats|search|export|verify`) — the firm's decisions as a system of
   record: goals (with departments, outcomes, spend) + human approvals

@@ -464,6 +464,14 @@ data_grounding = true      # auto-grant each analyst pack its suite's primary-
 [fleet_memory]             # external agents read/write governed memory
 enable = false             # explicit trust decision; roster-gated
 
+[cortex]                   # Cortex, the company brain (default on)
+enable = true              # one governed recall/deposit surface over knowledge
+                           #   (cited), skills, self-harness lessons, the
+                           #   Operating Record and fleet memory: tenant-exact,
+                           #   one audit row per read and per write. Each
+                           #   source's own toggle still applies. Operator
+                           #   commands: `maverick cortex status|recall|deposit`.
+                           #   Env: MAVERICK_CORTEX.
 [shoring]                  # Autonomous Shoring engagement tooling (dashboard
                            #   /shoring: book of work, measured SLAs, exception
                            #   desk). ON by default — a kill switch, not a gate.

@@ -119,6 +119,9 @@ KNOWN_SECTIONS = frozenset({
     "actions", "domains", "dreaming", "earned_autonomy", "fairness_monitor",
     "external_agents", "fleet_memory", "memory_guard", "rehearsal",
     "self_harness", "self_improvement", "speculative", "tax",
+    # Cortex, the governed company memory over every source (maverick.cortex
+    # reads [cortex] enable; the wizard writes it beside [fleet_memory]).
+    "cortex",
     # Structured rubric verifier + JitRL test-time adaptation: read by
     # load_config (config.get_reasoning_reward / get_jit_rl) and written by the
     # wizard's advanced opt-out steps.

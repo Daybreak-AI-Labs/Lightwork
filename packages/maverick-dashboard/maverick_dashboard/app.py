@@ -925,6 +925,7 @@ from .consent_native_page import create_consent_native_page_router  # noqa: E402
 from .consent_web_publish_settings_page import (  # noqa: E402
     create_consent_web_publish_settings_page_router,
 )
+from .cortex_page import create_cortex_page_router  # noqa: E402
 from .evolution_ledger_page import (  # noqa: E402
     create_evolution_ledger_page_router,
 )
@@ -971,11 +972,13 @@ app.include_router(create_shared_governance_inventory_page_router(templates))
 app.include_router(create_agent_control_plane_page_router(templates))
 app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
+app.include_router(create_cortex_page_router(templates))
 app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
+from .cortex_api import router as cortex_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
 from .evolution_ledger_api import router as evolution_ledger_router  # noqa: E402
 from .regulatory_obligations_api import router as regulatory_obligations_router  # noqa: E402
@@ -992,6 +995,7 @@ app.include_router(shared_governance_inventory_router, prefix="/api/v1")
 app.include_router(agent_control_plane_router, prefix="/api/v1")
 app.include_router(regulatory_obligations_router, prefix="/api/v1")
 app.include_router(trust_receipts_router, prefix="/api/v1")
+app.include_router(cortex_router, prefix="/api/v1")
 app.include_router(shoring_router, prefix="/api/v1")
 app.include_router(evolution_ledger_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
@@ -1263,6 +1267,13 @@ _AUTH_EXEMPT = {
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
     "/static/daybreak-logo.jpg",
+    # The brand mark and the self-hosted fonts are public, non-sensitive
+    # assets the login and share pages need before any session exists.
+    "/static/daybreak-mark.png",
+    "/static/fonts/manrope-200.woff2", "/static/fonts/manrope-300.woff2",
+    "/static/fonts/manrope-400.woff2", "/static/fonts/manrope-500.woff2",
+    "/static/fonts/manrope-600.woff2", "/static/fonts/manrope-700.woff2",
+    "/static/fonts/jbm-400.woff2", "/static/fonts/jbm-500.woff2",
     # The LLM gateway authenticates every call with its OWN bearer inside
     # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
     # agents that hold the gateway credential, never the dashboard bearer.
@@ -3497,7 +3508,7 @@ async def privacy_data_discovery_page(request: Request) -> HTMLResponse:
     response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     response.headers["Content-Security-Policy"] = (
         "default-src 'none'; base-uri 'none'; connect-src 'self'; "
-        "font-src 'none'; form-action 'self'; frame-ancestors 'none'; "
+        "font-src 'self'; form-action 'self'; frame-ancestors 'none'; "
         "img-src 'self'; object-src 'none'; script-src 'self'; "
         f"style-src 'self' 'nonce-{nonce}'; worker-src 'none'"
     )
@@ -9404,6 +9415,17 @@ async def trust_receipts_client() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-cortex.js")
+async def cortex_script() -> FileResponse:
+    """The Cortex page's lattice figure and recall console, served same-origin
+    like every other page script (an explicit route, never a directory mount)."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-cortex.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/static/lightwork-evolution-ledger.js")
 async def evolution_ledger_client() -> FileResponse:
     """Client for the Audit -> Evolution Ledger read-only console."""
@@ -9478,6 +9500,40 @@ async def brand_logo() -> FileResponse:
         _STATIC_DIR / "daybreak-logo.jpg",
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@app.get("/static/daybreak-mark.png")
+async def brand_mark() -> FileResponse:
+    """The Daybreak Labs mark (the circuit-sunrise D) used by the topbar brand.
+    Public by nature, cached a day."""
+    return FileResponse(
+        _STATIC_DIR / "daybreak-mark.png",
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+#: The self-hosted faces the design system declares. An allowlist, not a
+#: directory mount: nothing else under static/fonts/ is ever served.
+_FONT_FILES = frozenset({
+    "manrope-200.woff2", "manrope-300.woff2", "manrope-400.woff2",
+    "manrope-500.woff2", "manrope-600.woff2", "manrope-700.woff2",
+    "jbm-400.woff2", "jbm-500.woff2",
+})
+
+
+@app.get("/static/fonts/{name}")
+async def shell_font(name: str) -> FileResponse:
+    """Manrope and JetBrains Mono, served same-origin so the dashboard stays
+    offline-first (no third-party font request). Immutable: the file name is
+    the version."""
+    if name not in _FONT_FILES:
+        raise HTTPException(status_code=404)
+    return FileResponse(
+        _STATIC_DIR / "fonts" / name,
+        media_type="font/woff2",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 

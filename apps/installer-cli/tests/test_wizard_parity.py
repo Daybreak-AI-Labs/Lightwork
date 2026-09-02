@@ -693,6 +693,26 @@ def test_write_config_persists_consequence_opt_out(tmp_path: Path, monkeypatch):
     assert parsed["consequence"]["enable"] is False
 
 
+def test_write_config_emits_cortex_when_enabled(tmp_path: Path, monkeypatch):
+    # Cortex (the governed company memory) has a kernel knob and a CLI; the
+    # wizard step beside fleet memory is what makes it reachable from the
+    # installer. Pin that accepting it writes the section the kernel reads.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"cortex": True})
+    assert parsed["cortex"]["enable"] is True
+
+
+def test_write_config_persists_cortex_opt_out(tmp_path: Path, monkeypatch):
+    # Default-on in the kernel, so a deliberate "no" must be written rather
+    # than omitted (omitting would silently mean on).
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"cortex": False})
+    assert parsed["cortex"]["enable"] is False
+
+
+def test_write_config_omits_cortex_when_unanswered(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"fleet_memory": True})
+    assert "cortex" not in parsed
+
+
 def test_write_config_emits_routing_energy_aware(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(
         tmp_path, monkeypatch, advanced={"energy_aware": True},
@@ -999,6 +1019,7 @@ def test_pick_advanced_defaults_governed_learning_on_but_dgm_off(monkeypatch):
         "data_engine",
         "operations_scientist",
         "consequence",
+        "cortex",
     }
     assert all(advanced[key] is True for key in governed_learning)
     assert advanced["structured_verifier_off"] is False

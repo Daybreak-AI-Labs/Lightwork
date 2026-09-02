@@ -89,6 +89,7 @@ for false unless noted otherwise.
 | `MAVERICK_EMERGENT_CODEC` | config `[emergent_codec] enable` (off) | Measure the token-aware codec on the live coordination stream (telemetry only; `maverick codec-learn`). |
 | `MAVERICK_DOMAIN_DISCIPLINE` | config `[domains] discipline` (on) | Append suite operating discipline to specialist personas at spawn. |
 | `MAVERICK_FLEET_MEMORY` | config `[fleet_memory] enable` (off) | Allow registered external agents to use the governed memory plane. |
+| `MAVERICK_CORTEX` | config `[cortex] enable` (on) | Override the default-on Cortex surface (`maverick cortex`): one governed recall/deposit over knowledge, skills, lessons, the Operating Record and fleet memory. `0` refuses every recall and deposit (still audited); each source's own toggle applies underneath. |
 | `MAVERICK_SHORING` | config `[shoring] enable` (on) | Autonomous Shoring tooling (dashboard `/shoring`: book of work, measured SLAs, exception desk). Set `0` to hide the surface. |
 | `MAVERICK_PRM` | `null` | Process reward model: `null`, `heuristic`, `remote`, `learned`, or `linear`. A linear backend reconciles durable verifier-promotion authority before serving and falls back to the heuristic for an in-doubt, unrecognized, or out-of-band artifact. |
 | `MAVERICK_PRM_PATH` | unset | Learned-model directory (`learned`) or stable serving artifact (`linear`). Relative linear paths are pinned to an absolute startup path before recovery and serving. |
