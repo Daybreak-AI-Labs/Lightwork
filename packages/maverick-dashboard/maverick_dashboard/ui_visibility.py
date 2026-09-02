@@ -807,6 +807,18 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
         "in_nav": True,
     },
+    # Compliance by construction: what the regulatory compiler turned into
+    # live gates, the anti-vacuity proof, and "what happens to this action".
+    # Read-only (enforcement is chosen in config), so the view floor is right.
+    {
+        "path": "/compliance/obligations",
+        "label": "Regulatory Obligations",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "view",
+        "default": "operate",
+        "in_nav": True,
+    },
     {
         "path": "/compartments",
         "label": "Compartments",
@@ -822,6 +834,17 @@ PAGES: tuple[dict, ...] = (
         "icon": "audit",
         "floor": "audit",
         "default": "audit",
+    },
+    # Bearer-verifiable evidence: mint a signed receipt for one audit row and
+    # verify one offline. Audit floor, like the log it draws from.
+    {
+        "path": "/audit/receipts",
+        "label": "Trust Receipts",
+        "group": "Govern",
+        "icon": "audit",
+        "floor": "audit",
+        "default": "audit",
+        "in_nav": True,
     },
     {
         "path": "/replay",

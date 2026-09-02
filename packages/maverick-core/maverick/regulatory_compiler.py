@@ -280,6 +280,22 @@ def _all_classified_tools() -> list[str]:
         return []
 
 
+def classified_tools() -> list[str]:
+    """Every tool the risk classifier knows, sorted: the compiler's universe.
+
+    The console offers these as the completions for "check an action", so an
+    operator asks about tools that exist rather than guessing names.
+    """
+    return _all_classified_tools()
+
+
+def action_risk(action: str) -> str | None:
+    """The classifier's risk tier for ``action``, or ``None`` when the name is
+    not a classified tool (the classifier's fallback tier for an unknown name
+    is not a classification, and a risk floor never reaches such a name)."""
+    return _tool_risk(action) if _classified(action) else None
+
+
 def _at_least(decision: str, effect: str) -> bool:
     """Whether a verdict is at least as strict as the obligation demands."""
     if effect == EFFECT_DENY:
@@ -418,9 +434,9 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "EFFECT_ATTENUATE", "EFFECT_DENY", "EFFECT_REQUIRE_HUMAN", "REGULATIONS",
-    "CompiledObligations", "Obligation", "active_keys", "attenuate", "audit_tags",
-    "checked_tags", "compile_obligations", "describe", "main",
-    "obligations_checked", "verify",
+    "CompiledObligations", "Obligation", "action_risk", "active_keys", "attenuate",
+    "audit_tags", "checked_tags", "classified_tools", "compile_obligations",
+    "describe", "main", "obligations_checked", "verify",
 ]
 
 
