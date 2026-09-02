@@ -200,7 +200,7 @@ def test_git_and_soc2_normalizers_exclude_raw_source_data(tmp_path) -> None:
     assert private_commit not in repr(snapshot)
     assert private_branch not in repr(snapshot)
 
-    secret = "private-audit-error-and-path"
+    secret = "private-audit-error-and-path"  # pragma: allowlist secret
     posture = audit_retention_posture_from_soc2_snapshot(
         soc2_snapshot={
             "audit_log": {
@@ -237,7 +237,7 @@ def test_trc_collector_is_closed_single_page_and_rejects_unsupported_control() -
 
 
 def test_reader_failure_is_opaque_and_preserves_terminal_technical_collection() -> None:
-    secret = "private-source-error"
+    secret = "private-source-error"  # pragma: allowlist secret
 
     def failed_reader():
         raise RuntimeError(secret)

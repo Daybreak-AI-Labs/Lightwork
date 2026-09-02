@@ -814,7 +814,10 @@ def _validate_timebox_record(key: object, value: object) -> dict[str, Any]:
         not isinstance(error_code, str)
         or len(error_code) > 80
         or not error_code.isascii()
-        or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789_-" for char in error_code)
+        or any(
+            char not in "abcdefghijklmnopqrstuvwxyz0123456789_-"  # pragma: allowlist secret
+            for char in error_code
+        )
     ):
         raise ValueError("timebox error code is invalid")
     return dict(value)
