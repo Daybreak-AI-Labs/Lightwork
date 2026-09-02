@@ -12,6 +12,7 @@ proof/security moments). Every claim is verifiable from this repo.
 | `product.html` | How it works — the chokepoint, seven components, governance, the Operating Record, learning, proof, deploy |
 | `security.html` | Security & deployment — control→mechanism table, deployment models, audit/evidence, compliance status |
 | `company.html` | Company, founder, contact |
+| `autonomous-shoring.html` | Autonomous Shoring & BPO — the offering that moves a whole function to a governed agentic workforce: lineage, what an engagement includes, functions shored first, offshore comparison, how an engagement runs |
 | `styles.css` | The shared design system |
 
 **Brand assets**: `daybreak-logo.png` (full horizontal lockup with tagline, 970×305,
@@ -28,9 +29,14 @@ Hosted on **Cloudflare Pages**, project `daybreak-labs`:
 - Production: https://daybreak-labs.pages.dev
 - Redeploy: `CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npx wrangler pages deploy pitch/site --project-name=daybreak-labs --branch=main`
 
-**Custom domain `daybreakailabs.com`** (+ `www`) is attached to the project and goes
-live automatically once the domain's nameservers point at Cloudflare
-(`aaden.ns.cloudflare.com`, `leia.ns.cloudflare.com`). Email stays on **Google
+**Custom domain `daybreakailabs.com`** (+ `www`) is attached to the project. Two
+things must both be true for it to serve: the domain's nameservers point at
+Cloudflare (`aaden.ns.cloudflare.com`, `leia.ns.cloudflare.com`), **and** the
+zone's DNS records for the apex and `www` are proxied `CNAME`s to
+`daybreak-labs.pages.dev`. Records imported from the previous host (Wix) are
+not replaced automatically; until they are, Pages reports the domain as
+`pending: CNAME record not set` and visitors get a Cloudflare challenge or
+error page instead of the site. Email stays on **Google
 Workspace** — preserve the `MX` (`aspmx.l.google.com`) and the SPF/verification
 `TXT` records through the switch.
 
