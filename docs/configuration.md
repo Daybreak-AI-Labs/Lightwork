@@ -464,6 +464,11 @@ data_grounding = true      # auto-grant each analyst pack its suite's primary-
 [fleet_memory]             # external agents read/write governed memory
 enable = false             # explicit trust decision; roster-gated
 
+[shoring]                  # Autonomous Shoring engagement tooling (dashboard
+                           #   /shoring: book of work, measured SLAs, exception
+                           #   desk). ON by default — a kill switch, not a gate.
+enable = true              # set false to hide the surface. Env: MAVERICK_SHORING.
+
 [suites]                   # disable whole suites (all on by default)
 # healthcare = false
 ```

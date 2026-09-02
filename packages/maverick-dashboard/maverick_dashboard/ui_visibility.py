@@ -232,6 +232,16 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
+    # Autonomous Shoring: a function's book of work, measured SLAs, and the
+    # exception desk — the Shoring P&L (Savings) sits underneath it.
+    {
+        "path": "/shoring",
+        "label": "Autonomous Shoring",
+        "group": "Observe",
+        "icon": "fleets",
+        "floor": "view",
+        "default": "view",
+    },
     # The monthly statement behind Spend's "Billing statement" link.
     {
         "path": "/billing",
