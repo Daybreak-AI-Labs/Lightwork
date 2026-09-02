@@ -38,8 +38,15 @@
   var verbSelect = document.getElementById("acp-verb-select");
   var verbSubmit = document.getElementById("acp-verb-submit");
   var attenuateControls = document.getElementById("acp-attenuate-controls");
+  var fleetControls = document.getElementById("acp-fleet-controls");
+  var fleetForm = document.getElementById("acp-fleet-form");
+  var fleetVerb = document.getElementById("acp-fleet-verb");
+  var fleetReview = document.getElementById("acp-fleet-review");
+  var fleetApply = document.getElementById("acp-fleet-apply");
+  var fleetSelectionState = document.getElementById("acp-fleet-selection-state");
   var haltControls = document.getElementById("acp-halt-controls");
   var clearHalt = document.getElementById("acp-clear-halt");
+  var fleetSelection = null;
 
   var planeRequested = 0;
   var planeApplied = 0;
@@ -255,6 +262,8 @@
       control.disabled = !canHalt || !haltAuthorityReady;
     } else if (control === verbSubmit) {
       updateVerbSubmit();
+    } else if (control === fleetReview || control === fleetApply) {
+      updateFleetControls();
     } else if (control.dataset.requiresControlPlane === "true") {
       control.disabled = !controlPlaneReady;
     } else {
@@ -333,6 +342,17 @@
     }
   }
 
+  function updateFleetControls() {
+    if (!fleetControls || !fleetReview || !fleetApply) { return; }
+    var fleetAllowed = canOperate || canAdmin;
+    if (fleetControls.dataset.roleDisabled !== "true") {
+      fleetControls.disabled = !fleetAllowed || !controlPlaneReady;
+      fleetControls.setAttribute("aria-disabled", String(fleetControls.disabled));
+    }
+    fleetReview.disabled = !fleetAllowed || !controlPlaneReady;
+    fleetApply.disabled = !fleetAllowed || !controlPlaneReady || !fleetSelection;
+  }
+
   function updateRuntimeControls() {
     var options = verbSelect.querySelectorAll("option[data-requires-control-plane]");
     options.forEach(function (option) { option.disabled = !controlPlaneReady; });
@@ -342,12 +362,203 @@
     }
     attenuateControls.disabled = !canOperate || !controlPlaneReady;
     attenuateControls.setAttribute("aria-disabled", String(attenuateControls.disabled));
+    updateFleetControls();
     haltControls.disabled = !canHalt || !haltAuthorityReady;
     haltControls.setAttribute("aria-disabled", String(haltControls.disabled));
     clearHalt.disabled = !canHalt || !haltAuthorityReady;
     var rowMutations = rows.querySelectorAll("button[data-requires-control-plane]");
     rowMutations.forEach(function (button) { button.disabled = !controlPlaneReady; });
     updateVerbSubmit();
+  }
+
+  function checkSelectionText(value, label, required) {
+    var text = String(value || "");
+    if (!text && !required) { return ""; }
+    if (!text || text !== text.trim() || text.length > 160 ||
+        /[\u0000-\u001f\u007f-\u009f]/.test(text)) {
+      throw fail(label + " must be exact printable text (max 160 characters).");
+    }
+    return text;
+  }
+
+  function fleetScopeFromForm() {
+    if (!fleetForm) { throw fail("Fleet controls are unavailable."); }
+    var form = new FormData(fleetForm);
+    var tenant = checkSelectionText(form.get("tenant"), "Tenant", false);
+    var platform = checkSelectionText(form.get("platform"), "Platform", false);
+    if (!tenant && !platform) {
+      throw fail("Provide this console's active tenant ID or a reviewed platform.");
+    }
+    return { tenant: tenant || null, platform: platform || null };
+  }
+
+  function sameFleetScope(first, second) {
+    return Boolean(first && second && first.tenant === second.tenant &&
+      first.platform === second.platform);
+  }
+
+  function validateFleetSelection(payload, requestedScope) {
+    if (!payload || typeof payload !== "object" ||
+        payload.schema !== "lightwork.agent-control-plane-selection.v1" ||
+        typeof payload.tenant !== "string" || payload.tenant !== payload.tenant.trim() ||
+        !/^[0-9a-f]{64}$/.test(String(payload.snapshot_sha256 || "")) ||
+        typeof payload.captured_at !== "number" || !Number.isFinite(payload.captured_at) ||
+        payload.captured_at <= 0 || !Array.isArray(payload.principals) ||
+        !payload.principals.length || payload.principals.length > 500) {
+      throw fail("The server returned an invalid fleet selection contract.");
+    }
+    if (payload.platform !== null && payload.platform !== undefined &&
+        (typeof payload.platform !== "string" || !payload.platform ||
+         payload.platform !== payload.platform.trim() || payload.platform.length > 160)) {
+      throw fail("The server returned an invalid fleet platform selection.");
+    }
+    var principals = payload.principals.map(checkPrincipal);
+    var canonical = principals.slice().sort();
+    if (principals.some(function (principal, index) { return principal !== canonical[index]; }) ||
+        new Set(principals).size !== principals.length) {
+      throw fail("The server returned a non-canonical fleet selection.");
+    }
+    if (requestedScope.tenant && payload.tenant !== requestedScope.tenant) {
+      throw fail("The server returned a selection outside the requested tenant.");
+    }
+    if ((requestedScope.platform || null) !== (payload.platform || null)) {
+      throw fail("The server returned a selection outside the requested platform.");
+    }
+    return {
+      schema: payload.schema,
+      tenant: payload.tenant,
+      platform: payload.platform || null,
+      principals: principals,
+      snapshot_sha256: payload.snapshot_sha256,
+      captured_at: payload.captured_at,
+      requested_scope: requestedScope
+    };
+  }
+
+  function invalidateFleetSelection(message) {
+    fleetSelection = null;
+    if (fleetSelectionState && message) { fleetSelectionState.textContent = message; }
+    updateFleetControls();
+  }
+
+  function fleetActionFromForm() {
+    if (!fleetForm || !fleetVerb) { throw fail("Fleet controls are unavailable."); }
+    var form = new FormData(fleetForm);
+    var verb = String(fleetVerb.value || "");
+    var allowed = (verb === "suspend" || verb === "resume") ? canOperate : canAdmin;
+    if (!allowed || !["suspend", "resume", "contain", "release"].includes(verb)) {
+      throw fail("This fleet action is not available to the current role.");
+    }
+    var reason = String(form.get("reason") || "").trim();
+    if ((verb === "suspend" || verb === "contain") && !reason) {
+      throw fail("A reason is required for fleet " + verb + ".");
+    }
+    if (reason.length > 500) { throw fail("Reason must be at most 500 characters."); }
+    if ((verb === "resume" || verb === "release") && reason) {
+      throw fail("Fleet " + verb + " does not accept a reason.");
+    }
+    var secondsRaw = String(form.get("release_after_seconds") || "").trim();
+    var seconds = null;
+    if (secondsRaw) {
+      seconds = Number(secondsRaw);
+      if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 2678400) {
+        throw fail("Auto-release must be a positive number of seconds, at most 31 days.");
+      }
+    }
+    var idempotencyKey = String(form.get("idempotency_key") || "").trim();
+    if (seconds !== null) {
+      if (verb !== "contain") {
+        throw fail("Auto-release applies only to fleet containment.");
+      }
+      if (!/^[A-Za-z0-9._:-]{1,160}$/.test(idempotencyKey)) {
+        throw fail("Time-box idempotency key is required and must use safe ASCII characters.");
+      }
+    } else if (idempotencyKey) {
+      throw fail("An idempotency key applies only when auto-release is set.");
+    }
+    return {
+      verb: verb,
+      reason: reason || null,
+      release_after_seconds: seconds,
+      idempotency_key: idempotencyKey || null
+    };
+  }
+
+  async function reviewFleetSelection(ticket) {
+    if (!controlPlaneReady) {
+      throw fail("Control-plane state is not verified; no fleet selection was sent.");
+    }
+    var requestedScope = fleetScopeFromForm();
+    var payload = {};
+    if (requestedScope.tenant) { payload.tenant = requestedScope.tenant; }
+    if (requestedScope.platform) { payload.platform = requestedScope.platform; }
+    var returned = await request("/bulk/select", {
+      method: "POST", body: JSON.stringify(payload)
+    });
+    fleetSelection = validateFleetSelection(returned, requestedScope);
+    fleetSelectionState.textContent = "Reviewed " + fleetSelection.principals.length +
+      " principal(s); the action will recheck this exact snapshot.";
+    updateFleetControls();
+    show("Fleet selection reviewed", returned, ticket);
+    return returned;
+  }
+
+  async function applyFleetAction(ticket) {
+    if (!controlPlaneReady || !fleetSelection) {
+      throw fail("Review a current fleet selection before applying an action.");
+    }
+    var requestedScope = fleetScopeFromForm();
+    if (!sameFleetScope(requestedScope, fleetSelection.requested_scope)) {
+      invalidateFleetSelection("Fleet scope changed; review a new exact selection.");
+      throw fail("Fleet scope changed; review a new exact selection.");
+    }
+    var action = fleetActionFromForm();
+    var count = fleetSelection.principals.length;
+    if (!(await confirmAction(
+      "Apply " + action.verb + " to " + count + " reviewed principal(s)? " +
+        "The server will refuse a stale selection and returns per-principal results.",
+      "Apply fleet " + action.verb
+    ))) { return null; }
+    var body = {
+      selection: {
+        schema: fleetSelection.schema,
+        tenant: fleetSelection.tenant,
+        platform: fleetSelection.platform,
+        principals: fleetSelection.principals,
+        snapshot_sha256: fleetSelection.snapshot_sha256,
+        captured_at: fleetSelection.captured_at
+      },
+      verb: action.verb
+    };
+    if (action.reason !== null) { body.reason = action.reason; }
+    if (action.release_after_seconds !== null) {
+      body.release_after_seconds = action.release_after_seconds;
+      body.idempotency_key = action.idempotency_key;
+    }
+    var result = null;
+    var requestError = null;
+    try {
+      result = await request("/bulk/actions", {
+        method: "POST", body: JSON.stringify(body)
+      });
+    } catch (error) {
+      requestError = error;
+    }
+    invalidateFleetSelection("Fleet action completed or needs reconciliation; review a new selection.");
+    var refreshed = await refresh();
+    if (requestError) {
+      if (requestError.payload && typeof requestError.payload === "object") {
+        show("Fleet action was not fully confirmed; enforced state was re-read", requestError.payload, ticket);
+        return requestError.payload;
+      }
+      showError(requestError, refreshed.planeOk
+        ? "Fleet action request failed; enforced state was re-read"
+        : "Fleet action request failed; enforced state could not be re-read", ticket);
+      return null;
+    }
+    show("Fleet " + action.verb + " result" +
+      (refreshed.planeOk ? "" : "; enforced state could not be re-read"), result, ticket);
+    return result;
   }
 
   function isNonNegativeInteger(value) {
@@ -906,6 +1117,28 @@
       return withBusy(event.currentTarget, function () { return refreshRoster(rosterNextOffset); });
     }, false);
   });
+
+  if (fleetForm && fleetReview && fleetApply) {
+    ["input", "change"].forEach(function (eventName) {
+      fleetForm.addEventListener(eventName, function () {
+        if (fleetSelection) {
+          invalidateFleetSelection("Fleet inputs changed; review a new exact selection.");
+        }
+      });
+    });
+    fleetReview.addEventListener("click", function (event) {
+      var button = event.currentTarget;
+      runGuarded(button, false, function (ticket) {
+        return withBusy(button, function () { return reviewFleetSelection(ticket); });
+      }, true);
+    });
+    fleetApply.addEventListener("click", function (event) {
+      var button = event.currentTarget;
+      runGuarded(button, true, function (ticket) {
+        return withBusy(button, function () { return applyFleetAction(ticket); });
+      }, true);
+    });
+  }
 
   document.getElementById("acp-verb-form").addEventListener("submit", function (event) {
     event.preventDefault();

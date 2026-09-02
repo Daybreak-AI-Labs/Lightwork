@@ -205,3 +205,45 @@ def test_otel_ingestion_skips_malformed_spans(tmp_path):
     assert len(callers) == 1
     assert callers[0]["model"] == "gpt-5.2"
     assert callers[0]["prompt_tokens"] == 7
+
+
+def test_anthropic_gateway_endpoint_uses_native_envelope(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_GATEWAY_ANTHROPIC_TOKEN", "anthropic-up-secret")
+    (tmp_path / "config.toml").write_text(
+        '[llm_gateway]\nenable = true\nupstream_url = "https://api.openai.com"\n'
+        'anthropic_upstream_url = "https://api.anthropic.com"\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    from maverick import llm_gateway as gw
+
+    seen = {}
+
+    def upstream(url, headers, body):
+        seen.update({"url": url, "headers": headers, "body": body})
+        return 200, {
+            "id": "msg-1",
+            "type": "message",
+            "content": [{"type": "text", "text": "hi"}],
+            "usage": {"input_tokens": 2, "output_tokens": 1},
+        }
+
+    monkeypatch.setattr(gw, "_default_upstream", upstream)
+    denied = client.post(
+        "/gateway/v1/messages",
+        json={"model": "claude-test", "max_tokens": 8, "messages": []},
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert denied.status_code == 401
+    assert denied.json()["type"] == "error"
+    assert denied.json()["error"]["type"] == "authentication_error"
+
+    accepted = client.post(
+        "/gateway/v1/messages",
+        json={"model": "claude-test", "max_tokens": 8, "messages": []},
+        headers={"Authorization": "Bearer gw-secret"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["type"] == "message"
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"
+    assert seen["headers"]["x-api-key"] == "anthropic-up-secret"

@@ -852,6 +852,17 @@ PAGES: tuple[dict, ...] = (
         "default": "audit",
         "in_nav": True,
     },
+    # Digest-only lifecycle evidence over the durable promotion authority.
+    # It is audit-gated like the source evidence, and has no product mutation.
+    {
+        "path": "/audit/evolution-ledger",
+        "label": "Evolution Ledger",
+        "group": "Govern",
+        "icon": "learned",
+        "floor": "audit",
+        "default": "audit",
+        "in_nav": True,
+    },
     {
         "path": "/replay",
         "label": "Replay",

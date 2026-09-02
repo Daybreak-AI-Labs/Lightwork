@@ -399,6 +399,116 @@ def test_opaque_principal_uses_body_and_query_transport_end_to_end():
     assert not is_revoked(principal)
 
 
+def test_bulk_select_then_resume_uses_a_snapshot_pinned_tenant_roster(monkeypatch):
+    from maverick.revocation import is_revoked
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    suspended = client.post(
+        f"{BASE}/agents/user:fleet-one/suspend",
+        json={"reason": "operator review"},
+    )
+    assert suspended.status_code == 200, suspended.text
+
+    selected = client.post(f"{BASE}/bulk/select", json={"tenant": "tenant-a"})
+    assert selected.status_code == 200, selected.text
+    selection = selected.json()
+    assert selection["schema"] == "lightwork.agent-control-plane-selection.v1"
+    assert selection["tenant"] == "tenant-a"
+    assert selection["principals"] == ["user:fleet-one"]
+
+    resumed = client.post(
+        f"{BASE}/bulk/actions",
+        json={"selection": selection, "verb": "resume"},
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["ok"] is True
+    assert resumed.json()["results"][0]["principal"] == "user:fleet-one"
+    assert not is_revoked("user:fleet-one")
+
+
+def test_bulk_action_refuses_a_stale_snapshot_before_any_action(monkeypatch):
+    from maverick.revocation import is_revoked
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    assert client.post(
+        f"{BASE}/agents/user:fleet-one/suspend",
+        json={"reason": "operator review"},
+    ).status_code == 200
+    selected = client.post(f"{BASE}/bulk/select", json={"tenant": "tenant-a"})
+    assert selected.status_code == 200, selected.text
+    assert client.post(
+        f"{BASE}/agents/user:fleet-two/suspend",
+        json={"reason": "new enrollment"},
+    ).status_code == 200
+
+    refused = client.post(
+        f"{BASE}/bulk/actions",
+        json={"selection": selected.json(), "verb": "resume"},
+    )
+
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"] == "control plane operation was refused"
+    assert is_revoked("user:fleet-one")
+
+
+def test_bulk_containment_requires_administrator_before_core_execution(monkeypatch):
+    from fastapi import HTTPException
+    from maverick_dashboard import agent_control_plane_api as api_mod
+
+    def _only_operate(_request, permission):
+        if permission == "admin":
+            raise HTTPException(status_code=403, detail="insufficient role")
+
+    monkeypatch.setattr(api_mod, "require_permission", _only_operate)
+    selection = {
+        "schema": "lightwork.agent-control-plane-selection.v1",
+        "tenant": "tenant-a",
+        "platform": None,
+        "principals": ["user:fleet-one"],
+        "snapshot_sha256": "a" * 64,
+        "captured_at": 123.0,
+    }
+
+    denied = client.post(
+        f"{BASE}/bulk/actions",
+        json={"selection": selection, "verb": "contain", "reason": "incident"},
+    )
+
+    assert denied.status_code == 403
+
+
+def test_timeboxed_containment_and_schedule_projection_are_operator_safe(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    created = client.post(
+        f"{BASE}/principals/contain-timeboxed",
+        json={
+            "principal": "user:timeboxed",
+            "reason": "temporary investigation",
+            "release_after_seconds": 120,
+            "idempotency_key": "case-124",
+        },
+    )
+
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["status"] == "scheduled"
+    assert body["result"]["ok"] is True
+
+    schedules = client.get(f"{BASE}/timeboxes")
+    assert schedules.status_code == 200, schedules.text
+    assert schedules.json()["count"] == 1
+    record = schedules.json()["items"][0]
+    assert record["principal"] == "user:timeboxed"
+    assert record["status"] == "scheduled"
+    assert "reason_sha256" not in record
+    assert "request_sha256" not in record
+    assert "idempotency_sha256" not in record
+
+    sweep = client.post(f"{BASE}/timeboxes/sweep")
+    assert sweep.status_code == 200, sweep.text
+    assert sweep.json() == {"items": [], "count": 0}
+
+
 @pytest.mark.parametrize(
     "principal",
     [" user:x", "user:x ", "user:x\nadmin", "x" * 513],

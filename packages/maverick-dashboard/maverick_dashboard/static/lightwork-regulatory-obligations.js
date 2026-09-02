@@ -12,6 +12,7 @@
   var rows = document.getElementById("rob-rows");
   var library = document.getElementById("rob-library");
   var problemList = document.getElementById("rob-problem-list");
+  var gatewayPreviewState = document.getElementById("rob-gateway-preview-state");
   var current = null;
 
   function fail(message) {
@@ -211,6 +212,40 @@
     show("Check: " + result.action + " under " + (result.profiles.join(", ") || "no regulation"), result);
   }
 
+  function parseGatewayConstraintDocument(value) {
+    var text = String(value || "").trim();
+    if (!text) { throw fail("A gateway constraint document is required."); }
+    if (text.length > 131072) { throw fail("Gateway constraint document exceeds the console bound."); }
+    var document;
+    try { document = JSON.parse(text); }
+    catch (_error) { throw fail("Gateway constraint document must be valid JSON."); }
+    if (!document || typeof document !== "object" || Array.isArray(document)) {
+      throw fail("Gateway constraint document must be a JSON object.");
+    }
+    return document;
+  }
+
+  async function previewGatewayConstraints(value) {
+    if (!current || !Array.isArray(current.active_profiles) || !current.active_profiles.length) {
+      throw fail("Configure an active regulatory profile before previewing a gateway overlay.");
+    }
+    var result = await request("/gateway-constraints/preview", {
+      method: "POST",
+      body: JSON.stringify({ document: value, profiles: current.active_profiles })
+    });
+    if (!result || result.runtime_enforcement_changed !== false ||
+        result.gateway_source_verified !== false || !Array.isArray(result.coverage)) {
+      throw fail("The server returned an invalid gateway constraint preview.");
+    }
+    if (gatewayPreviewState) {
+      gatewayPreviewState.textContent = result.complete
+        ? "Complete restrictive mapping; runtime enforcement is unchanged."
+        : "Incomplete mapping: reconcile every unmapped gateway selector before relying on it.";
+    }
+    show("Gateway constraint preview (runtime unchanged)", result);
+    return result;
+  }
+
   async function refresh() {
     await loadStatus();
     await loadTools();
@@ -226,6 +261,18 @@
       if (!actionPattern.test(action)) { throw fail("Action must be letters, digits, or _.:- (max 64)."); }
       await check(action, String(form.get("scope") || "active"));
     })().catch(showError);
+  });
+
+  document.getElementById("rob-gateway-preview-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var form = new FormData(event.target);
+    (async function () {
+      var document = parseGatewayConstraintDocument(form.get("document"));
+      await previewGatewayConstraints(document);
+    })().catch(function (error) {
+      if (gatewayPreviewState) { gatewayPreviewState.textContent = "Gateway preview was refused or unavailable."; }
+      showError(error);
+    });
   });
 
   refresh().catch(function (error) {

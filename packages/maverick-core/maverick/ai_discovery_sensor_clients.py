@@ -274,6 +274,44 @@ def normalize_browser_oauth(
     )
 
 
+def normalize_identity_audit(
+    *,
+    source_event_sha256: str,
+    observed_at: float,
+    ai_service_code: str,
+    ai_product_code: str,
+    provider_code: str,
+    environment_code: str,
+    deployment_type: str = "saas",
+    context_codes: Sequence[str] = (),
+) -> NormalizedSensorEvent:
+    """Normalize one reviewed identity-audit observation.
+
+    Identity-provider audit records (Okta System Log, Entra audit/sign-in, and
+    Google Workspace Reports) often contain people, client identifiers, and
+    provider-specific payloads. Their adapters must reduce those records to
+    this closed event before the durable discovery spool sees them. The
+    identity provider is the *source* of the signal, not the reported AI
+    provider; callers therefore supply reviewed AI taxonomy codes only.
+
+    This function deliberately has no raw-event parameter. It cannot retain
+    or accidentally serialize provider payloads, identities, tokens, URLs, or
+    application identifiers.
+    """
+
+    return NormalizedSensorEvent(
+        event_sha256=_digest(source_event_sha256, "source_event_sha256"),
+        observed_at=_timestamp(observed_at),
+        ai_service_code=_token(ai_service_code, "ai_service_code"),
+        ai_product_code=_token(ai_product_code, "ai_product_code"),
+        provider_code=_token(provider_code, "provider_code"),
+        domain_category="identity_directory",
+        deployment_type=_deployment_type(deployment_type),
+        environment_code=_token(environment_code, "environment_code"),
+        context_codes=_contexts(context_codes),
+    )
+
+
 class SignedDiscoverySensorClient:
     """Build byte-exact signed requests; sending remains caller-controlled."""
 
@@ -380,6 +418,7 @@ __all__ = [
     "SignedDiscoverySensorClient",
     "SignedObservationRequest",
     "normalize_browser_oauth",
+    "normalize_identity_audit",
     "normalize_network_egress",
     "safe_request_digest",
 ]

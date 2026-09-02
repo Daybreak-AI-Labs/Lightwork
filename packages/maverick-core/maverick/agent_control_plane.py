@@ -34,10 +34,13 @@ revoke anything.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import logging
+import math
 import secrets
 import time
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,6 +60,15 @@ _MAX_PRINCIPAL = 512
 _MAX_REASON = 500
 _MAX_NATIVE_GOALS = 10_000
 _MAX_ROSTER_PAGE = 500
+_MAX_BULK_TARGETS = 500
+_MAX_PLATFORM_SELECTOR = 160
+_MAX_TIMEBOX_IDEMPOTENCY_KEY = 160
+_MAX_TIMEBOX_SECONDS = 31 * 24 * 60 * 60
+_MAX_TIMEBOX_RECORDS = 2_000
+_MAX_TIMEBOX_STATE_BYTES = 2 * 1024 * 1024
+_TIMEBOX_LEASE_SECONDS = 60.0
+_TIMEBOX_SCHEMA = "lightwork.agent-control-plane-timeboxes.v1"
+_SELECTION_SCHEMA = "lightwork.agent-control-plane-selection.v1"
 
 
 class ControlPlaneError(RuntimeError):
@@ -79,6 +91,10 @@ class _ConcurrentHalt(ControlPlaneError):
     """A newer local HALT generation superseded an in-flight clear."""
 
 
+class ControlPlaneStaleSelection(ControlPlaneError):
+    """The roster changed after an operator reviewed a bulk selection."""
+
+
 # ---- model ------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -98,7 +114,10 @@ class AgentPrincipal:
     max_wall_seconds: float | None = None
     allow_tools: tuple[str, ...] = ()
     deny_tools: tuple[str, ...] = ()
+    # ``platform`` remains the roster's human-readable label for existing UI
+    # callers; ``platform_id`` is the stable enrollment slug for bulk APIs.
     platform: str = ""
+    platform_id: str = ""
 
     def to_dict(self) -> dict:
         out = dataclasses.asdict(self)
@@ -143,6 +162,78 @@ class ControlPlaneSnapshot:
             "limit": size,
             "total": len(self.rows),
             "items": [row.to_dict() for row in selected],
+        }
+
+
+@dataclass(frozen=True)
+class BulkSelection:
+    """An operator-reviewed, tenant-bound exact set of principals.
+
+    The digest pins every roster attribute used to make the selection. A bulk
+    mutation always scans again and refuses if this evidence is no longer
+    current; a broad platform label is never treated as a live wildcard.
+    """
+
+    tenant: str
+    platform: str | None
+    principals: tuple[str, ...]
+    snapshot_sha256: str
+    captured_at: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": _SELECTION_SCHEMA,
+            "tenant": self.tenant,
+            "platform": self.platform,
+            "principals": list(self.principals),
+            "snapshot_sha256": self.snapshot_sha256,
+            "captured_at": self.captured_at,
+        }
+
+
+@dataclass
+class BulkControlResult:
+    """Confirmed outcomes for one snapshot-pinned bulk operator action."""
+
+    verb: str
+    selection: BulkSelection
+    results: list[ControlResult]
+    ok: bool
+    audit_written: bool | None = None
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "verb": self.verb,
+            "selection": self.selection.to_dict(),
+            "results": [result.to_dict() for result in self.results],
+            "ok": self.ok,
+            "audit_written": self.audit_written,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True)
+class TimeboxedContainment:
+    """A durable protected containment with an explicit future release time."""
+
+    operation_id: str
+    principal: str
+    tenant: str
+    containment_generation: str
+    release_at: float
+    status: str
+    result: ControlResult
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operation_id": self.operation_id,
+            "principal": self.principal,
+            "tenant": self.tenant,
+            "containment_generation": self.containment_generation,
+            "release_at": self.release_at,
+            "status": self.status,
+            "result": self.result.to_dict(),
         }
 
 
@@ -208,6 +299,89 @@ def _check_reason(reason: object) -> str:
 
 def _check_actor(actor: object) -> str:
     return actor.strip() if isinstance(actor, str) and actor.strip() else "operator"
+
+
+def _active_tenant_scope() -> str:
+    """Return the exact active tenant, never a best-effort diagnostic value."""
+
+    try:
+        from .paths import current_tenant_id_strict
+
+        return current_tenant_id_strict() or ""
+    except Exception as exc:
+        raise ControlPlaneDependencyError("tenant boundary") from exc
+
+
+def _check_tenant_selector(tenant: object, active_tenant: str) -> str:
+    if not isinstance(tenant, str) or tenant != tenant.strip():
+        raise ValueError("tenant selection must be exact printable text")
+    if tenant != active_tenant:
+        raise ValueError("selection crosses the active tenant boundary")
+    return tenant
+
+
+def _check_platform_selector(platform: object) -> str:
+    if (
+        not isinstance(platform, str)
+        or not platform
+        or platform != platform.strip()
+        or len(platform) > _MAX_PLATFORM_SELECTOR
+        or not platform.isprintable()
+    ):
+        raise ValueError("platform selection must be non-empty printable text")
+    return platform
+
+
+def _check_timebox_seconds(seconds: object) -> float:
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        raise ValueError("release_after_seconds must be a positive finite number")
+    selected = float(seconds)
+    if not math.isfinite(selected) or not 0 < selected <= _MAX_TIMEBOX_SECONDS:
+        raise ValueError(
+            "release_after_seconds must be between 0 and "
+            f"{_MAX_TIMEBOX_SECONDS} seconds"
+        )
+    return selected
+
+
+def _check_timebox_idempotency_key(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > _MAX_TIMEBOX_IDEMPOTENCY_KEY
+        or not all(char.isascii() and (char.isalnum() or char in "._:-")
+                   for char in value)
+    ):
+        raise ValueError(
+            "idempotency_key must be 1-160 ASCII letters, digits, '.', '_', ':' or '-'"
+        )
+    return value
+
+
+def _sha256_payload(value: object) -> str:
+    body = json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(body).hexdigest()
+
+
+@contextmanager
+def _trace_control_operation(name: str, attributes: dict[str, Any]):
+    """Use the shared OTel path without allowing telemetry to block control."""
+
+    with ExitStack() as stack:
+        try:
+            from .observability import trace_span
+
+            stack.enter_context(trace_span(name, attributes=attributes))
+        except Exception:
+            log.debug("control_plane: telemetry span unavailable", exc_info=True)
+        yield
 
 
 def is_external(principal: str) -> bool:
@@ -329,6 +503,7 @@ def _external_rows(revoked: dict[str, Any]) -> list[AgentPrincipal]:
     from .agent_trust import load_registry_strict
     contained: dict[str, bool] = {}
     platforms: dict[str, str] = {}
+    platform_ids: dict[str, str] = {}
     try:
         registry = load_registry_strict()
     except Exception as exc:
@@ -340,6 +515,7 @@ def _external_rows(revoked: dict[str, Any]) -> list[AgentPrincipal]:
         for row in xa_roster(registry=registry, strict=True):
             contained[row["id"]] = bool(row.get("contained"))
             platforms[row["id"]] = str(row.get("platform_label") or "")
+            platform_ids[row["id"]] = str(row.get("platform") or "")
     except Exception as exc:
         log.warning("control_plane: external-agent sidecar unavailable",
                     exc_info=True)
@@ -367,6 +543,7 @@ def _external_rows(revoked: dict[str, Any]) -> list[AgentPrincipal]:
             allow_tools=tuple(sorted(agent.allow_tools)),
             deny_tools=tuple(sorted(agent.deny_tools)),
             platform=platforms.get(agent.id, ""),
+            platform_id=platform_ids.get(agent.id, ""),
         ))
     # A revoked external principal that has no (or no longer has a) trust entry
     # must stay visible: it is still denied on every tool call, and the only
@@ -403,6 +580,109 @@ def lookup(principal: str, *, source: ControlPlaneSnapshot | None = None,
         if row.principal == principal:
             return row
     return None
+
+
+# ---- snapshot-pinned fleet selection -----------------------------------------
+
+def _snapshot_sha256(view: ControlPlaneSnapshot, *, tenant: str) -> str:
+    """Digest the complete roster state, excluding the wall-clock scan time.
+
+    Captured-at changes on every read and is useful to show an operator, but
+    would turn an otherwise identical second authority scan into a false stale
+    selection. The set is sorted explicitly because a registry implementation
+    may legitimately change its iteration order without changing authority.
+    """
+
+    return _sha256_payload({
+        "schema": _SELECTION_SCHEMA,
+        "tenant": tenant,
+        "rows": [row.to_dict() for row in sorted(
+            view.rows, key=lambda row: row.principal,
+        )],
+    })
+
+
+def select_bulk(
+    *,
+    tenant: str | None = None,
+    platform: str | None = None,
+    source: ControlPlaneSnapshot | None = None,
+) -> BulkSelection:
+    """Select an exact active-tenant fleet subset from one roster snapshot.
+
+    ``tenant`` must match the process/request's already-bound tenant exactly;
+    this core API never traverses tenant storage itself. A platform matches the
+    roster's stable enrollment slug or its provenance label case-insensitively.
+    Calling without an explicit tenant or platform is refused so a UI bug cannot
+    mean "all tenants" or an accidental deployment-wide action.
+    """
+
+    if tenant is None and platform is None:
+        raise ValueError("selection requires an explicit tenant or platform")
+    active_tenant = _active_tenant_scope()
+    selected_tenant = (
+        active_tenant if tenant is None
+        else _check_tenant_selector(tenant, active_tenant)
+    )
+    selected_platform = (
+        _check_platform_selector(platform) if platform is not None else None
+    )
+    view = source if source is not None else snapshot()
+    rows = list(view.rows)
+    if selected_platform is not None:
+        needle = selected_platform.casefold()
+        rows = [
+            row for row in rows
+            if (
+                row.kind == KIND_EXTERNAL
+                and (
+                    row.platform.casefold() == needle
+                    or row.platform_id.casefold() == needle
+                )
+            )
+        ]
+    principals = tuple(sorted({row.principal for row in rows}))
+    if not principals:
+        raise LookupError("selection matched no governed principals")
+    if len(principals) > _MAX_BULK_TARGETS:
+        raise ControlPlaneError(
+            f"selection exceeds the {_MAX_BULK_TARGETS}-principal safety bound"
+        )
+    return BulkSelection(
+        tenant=selected_tenant,
+        platform=selected_platform,
+        principals=principals,
+        snapshot_sha256=_snapshot_sha256(view, tenant=selected_tenant),
+        captured_at=view.captured_at,
+    )
+
+
+def _refresh_bulk_selection(selection: BulkSelection) -> BulkSelection:
+    if not isinstance(selection, BulkSelection):
+        raise TypeError("selection must be a BulkSelection")
+    active_tenant = _active_tenant_scope()
+    if selection.tenant != active_tenant:
+        raise ControlPlaneStaleSelection(
+            "selection tenant is not the active tenant; re-select in that tenant"
+        )
+    try:
+        fresh = select_bulk(
+            tenant=selection.tenant,
+            platform=selection.platform,
+            source=snapshot(),
+        )
+    except LookupError as exc:
+        raise ControlPlaneStaleSelection(
+            "selection is stale; refresh the roster before acting"
+        ) from exc
+    if (
+        fresh.snapshot_sha256 != selection.snapshot_sha256
+        or fresh.principals != selection.principals
+    ):
+        raise ControlPlaneStaleSelection(
+            "selection is stale; refresh the roster before acting"
+        )
+    return fresh
 
 
 # ---- trust-entry helpers (external agents) -----------------------------------
@@ -444,6 +724,370 @@ def _set_trust_revoked(agent_id: str, revoked: bool, notes: list[str]) -> bool:
         notes.append("trust entry is config-defined; wrote a managed overlay")
     after = _trust_entry(agent_id)
     return after is not None and after.revoked is revoked
+
+
+# ---- durable time-boxed containment -----------------------------------------
+
+_TIMEBOX_STATUSES = frozenset({
+    "arming", "scheduled", "releasing", "released", "manually_released",
+    "superseded", "failed",
+})
+
+
+def _timebox_state_path():
+    """Tenant-scoped durable schedule state, separate from revocation truth."""
+
+    from .paths import data_dir
+
+    return data_dir("control_plane_timeboxes.json")
+
+
+def _empty_timebox_state() -> dict[str, Any]:
+    return {"schema": _TIMEBOX_SCHEMA, "records": {}}
+
+
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _valid_timebox_timestamp(value: object, *, positive: bool) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    selected = float(value)
+    return math.isfinite(selected) and (selected > 0 if positive else selected >= 0)
+
+
+def _validate_timebox_record(key: object, value: object) -> dict[str, Any]:
+    expected = {
+        "idempotency_sha256", "request_sha256", "operation_id", "principal",
+        "tenant", "reason_sha256", "created_at", "updated_at", "release_at",
+        "status", "generation", "lease_until", "attempts", "error_code",
+    }
+    if not isinstance(key, str) or not _valid_sha256(key):
+        raise ValueError("timebox record key is invalid")
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("timebox record shape is invalid")
+    if value.get("idempotency_sha256") != key or not _valid_sha256(
+        value.get("request_sha256")
+    ) or not _valid_sha256(value.get("reason_sha256")):
+        raise ValueError("timebox record digest is invalid")
+    operation_id = value.get("operation_id")
+    if (
+        not isinstance(operation_id, str)
+        or not operation_id.startswith("tb-")
+        or len(operation_id) != 27
+        or not all(char in "0123456789abcdef" for char in operation_id[3:])
+    ):
+        raise ValueError("timebox operation id is invalid")
+    if not valid_principal(value.get("principal")):
+        raise ValueError("timebox principal is invalid")
+    tenant = value.get("tenant")
+    if (
+        not isinstance(tenant, str)
+        or len(tenant) > _MAX_PRINCIPAL
+        or not tenant.isprintable()
+    ):
+        raise ValueError("timebox tenant is invalid")
+    if not all(
+        _valid_timebox_timestamp(value.get(name), positive=True)
+        for name in ("created_at", "updated_at", "release_at")
+    ) or not _valid_timebox_timestamp(value.get("lease_until"), positive=False):
+        raise ValueError("timebox timestamp is invalid")
+    if value.get("status") not in _TIMEBOX_STATUSES:
+        raise ValueError("timebox status is invalid")
+    generation = value.get("generation")
+    if (
+        not isinstance(generation, str)
+        or len(generation) > 128
+        or (generation and not generation.isalnum())
+    ):
+        raise ValueError("timebox containment generation is invalid")
+    attempts = value.get("attempts")
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or not 0 <= attempts <= 1000:
+        raise ValueError("timebox attempt count is invalid")
+    error_code = value.get("error_code")
+    if (
+        not isinstance(error_code, str)
+        or len(error_code) > 80
+        or not error_code.isascii()
+        or any(
+            char not in "abcdefghijklmnopqrstuvwxyz0123456789_-"  # pragma: allowlist secret
+            for char in error_code
+        )
+    ):
+        raise ValueError("timebox error code is invalid")
+    return dict(value)
+
+
+def _load_timebox_state(path) -> dict[str, Any]:
+    from .file_lock import atomic_read_text, ensure_private_file
+
+    try:
+        if not path.exists():
+            return _empty_timebox_state()
+        ensure_private_file(path, 0o600)
+        if path.stat().st_size > _MAX_TIMEBOX_STATE_BYTES:
+            raise ValueError("timebox state exceeds capacity")
+        raw = atomic_read_text(path, encoding="utf-8")
+        if len(raw.encode("utf-8")) > _MAX_TIMEBOX_STATE_BYTES:
+            raise ValueError("timebox state exceeds capacity")
+
+        def _reject_constant(value: str):
+            raise ValueError(f"non-finite number {value!r}")
+
+        def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            out: dict[str, object] = {}
+            for key, value in pairs:
+                if key in out:
+                    raise ValueError("duplicate timebox state key")
+                out[key] = value
+            return out
+
+        loaded = json.loads(
+            raw,
+            parse_constant=_reject_constant,
+            object_pairs_hook=_object,
+        )
+        if not isinstance(loaded, dict) or set(loaded) != {"schema", "records"}:
+            raise ValueError("timebox state shape is invalid")
+        if loaded.get("schema") != _TIMEBOX_SCHEMA:
+            raise ValueError("timebox state schema is invalid")
+        records = loaded.get("records")
+        if not isinstance(records, dict) or len(records) > _MAX_TIMEBOX_RECORDS:
+            raise ValueError("timebox records are invalid")
+        active_tenant = _active_tenant_scope()
+        normalized_records = {
+            str(key): _validate_timebox_record(key, value)
+            for key, value in records.items()
+        }
+        if any(record["tenant"] != active_tenant for record in normalized_records.values()):
+            raise ValueError("timebox record crosses the active tenant boundary")
+        return {
+            "schema": _TIMEBOX_SCHEMA,
+            "records": normalized_records,
+        }
+    except ControlPlaneError:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        log.warning("control_plane: timebox state unavailable", exc_info=True)
+        raise ControlPlaneDependencyError("timeboxed containment records") from exc
+
+
+def _save_timebox_state(path, state: dict[str, Any]) -> None:
+    from .file_lock import atomic_write_text
+
+    try:
+        records = state.get("records") if isinstance(state, dict) else None
+        if (
+            state.get("schema") != _TIMEBOX_SCHEMA
+            or not isinstance(records, dict)
+            or len(records) > _MAX_TIMEBOX_RECORDS
+        ):
+            raise ValueError("timebox state is invalid")
+        normalized = {
+            "schema": _TIMEBOX_SCHEMA,
+            "records": {
+                str(key): _validate_timebox_record(key, value)
+                for key, value in records.items()
+            },
+        }
+        body = json.dumps(
+            normalized,
+            allow_nan=False,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if len(body.encode("utf-8")) > _MAX_TIMEBOX_STATE_BYTES:
+            raise ValueError("timebox state exceeds capacity")
+        atomic_write_text(path, body, mode=0o600, encoding="utf-8")
+    except ControlPlaneError:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        log.warning("control_plane: timebox state could not be saved", exc_info=True)
+        raise ControlPlaneDependencyError("timeboxed containment records") from exc
+
+
+def _mutate_timebox_state(callback):
+    """Atomically mutate one tenant's private schedule state."""
+
+    try:
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        path = _timebox_state_path()
+        ensure_private_directory(path.parent)
+        with cross_process_lock(path, strict=True):
+            state = _load_timebox_state(path)
+            result = callback(state)
+            _save_timebox_state(path, state)
+            return result
+    except (ControlPlaneError, ValueError):
+        raise
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        log.warning("control_plane: timebox mutation unavailable", exc_info=True)
+        raise ControlPlaneDependencyError("timeboxed containment records") from exc
+
+
+def _timebox_idempotency_sha256(tenant: str, key: str) -> str:
+    return hashlib.sha256(
+        f"lightwork.agent-control-plane.timebox-key.v1:{tenant}:{key}".encode()
+    ).hexdigest()
+
+
+def _timebox_request_sha256(
+    *, tenant: str, principal: str, actor: str, reason: str, seconds: float,
+) -> tuple[str, str]:
+    reason_sha256 = hashlib.sha256(reason.encode("utf-8")).hexdigest()
+    return _sha256_payload({
+        "schema": "lightwork.agent-control-plane-timebox-request.v1",
+        "tenant": tenant,
+        "principal": principal,
+        "actor_sha256": hashlib.sha256(actor.encode("utf-8")).hexdigest(),
+        "reason_sha256": reason_sha256,
+        "release_after_seconds": seconds,
+    }), reason_sha256
+
+
+def _timebox_marker(operation_id: str) -> str:
+    return f"[timebox:{operation_id}]"
+
+
+def _reserve_timebox(
+    *, tenant: str, principal: str, request_sha256: str, reason_sha256: str,
+    idempotency_sha256: str, seconds: float, now: float,
+) -> tuple[str, dict[str, Any]]:
+    """Reserve one idempotent arm operation before touching enforcement."""
+
+    def _mutate(state: dict[str, Any]):
+        records = state["records"]
+        existing = records.get(idempotency_sha256)
+        if existing is not None:
+            if existing["request_sha256"] != request_sha256:
+                raise ValueError(
+                    "idempotency_key was already used for a different containment"
+                )
+            if existing["status"] == "arming":
+                if float(existing["lease_until"]) > now:
+                    return "in_progress", dict(existing)
+                existing["lease_until"] = now + _TIMEBOX_LEASE_SECONDS
+                existing["updated_at"] = now
+                existing["attempts"] = int(existing["attempts"]) + 1
+                return "claimed", dict(existing)
+            return "existing", dict(existing)
+        if len(records) >= _MAX_TIMEBOX_RECORDS:
+            raise ControlPlaneError("timeboxed containment record capacity reached")
+        operation_id = f"tb-{idempotency_sha256[:24]}"
+        record = {
+            "idempotency_sha256": idempotency_sha256,
+            "request_sha256": request_sha256,
+            "operation_id": operation_id,
+            "principal": principal,
+            "tenant": tenant,
+            "reason_sha256": reason_sha256,
+            "created_at": now,
+            "updated_at": now,
+            "release_at": now + seconds,
+            "status": "arming",
+            "generation": "",
+            "lease_until": now + _TIMEBOX_LEASE_SECONDS,
+            "attempts": 1,
+            "error_code": "",
+        }
+        records[idempotency_sha256] = record
+        return "claimed", dict(record)
+
+    return _mutate_timebox_state(_mutate)
+
+
+def _update_timebox(
+    idempotency_sha256: str,
+    callback,
+) -> dict[str, Any]:
+    def _mutate(state: dict[str, Any]):
+        record = state["records"].get(idempotency_sha256)
+        if record is None:
+            raise ControlPlaneError("timeboxed containment record is missing")
+        callback(record)
+        return dict(record)
+
+    return _mutate_timebox_state(_mutate)
+
+
+def _finish_timebox(
+    idempotency_sha256: str,
+    *,
+    status: str,
+    now: float,
+    generation: str | None = None,
+    error_code: str = "",
+) -> dict[str, Any]:
+    if status not in _TIMEBOX_STATUSES:
+        raise ValueError("invalid timebox status")
+
+    def _finish(record: dict[str, Any]) -> None:
+        # A concurrent manual release must not be overwritten by an old timer
+        # worker that had already claimed this record.
+        if record["status"] == "manually_released" and status != "manually_released":
+            return
+        record["status"] = status
+        record["updated_at"] = now
+        record["lease_until"] = 0.0
+        record["error_code"] = error_code
+        if generation is not None:
+            record["generation"] = generation
+
+    return _update_timebox(idempotency_sha256, _finish)
+
+
+def _timebox_result(
+    record: dict[str, Any],
+    result: ControlResult,
+) -> TimeboxedContainment:
+    return TimeboxedContainment(
+        operation_id=str(record["operation_id"]),
+        principal=str(record["principal"]),
+        tenant=str(record["tenant"]),
+        containment_generation=str(record["generation"]),
+        release_at=float(record["release_at"]),
+        status=str(record["status"]),
+        result=result,
+    )
+
+
+def _retire_timeboxes_after_manual_release(
+    *, principal: str, generation: str, now: float,
+) -> int:
+    """Mark only the exact released containment; never touch a newer one."""
+
+    if not generation:
+        return 0
+    # A deployment that never uses time-boxes must not gain a new state file
+    # merely because it released an ordinary containment.
+    if not _timebox_state_path().exists():
+        return 0
+
+    def _mutate(state: dict[str, Any]):
+        retired = 0
+        for record in state["records"].values():
+            if (
+                record["principal"] == principal
+                and record["generation"] == generation
+                and record["status"] in {"arming", "scheduled"}
+            ):
+                record["status"] = "manually_released"
+                record["updated_at"] = now
+                record["lease_until"] = 0.0
+                record["error_code"] = ""
+                retired += 1
+        return retired
+
+    return _mutate_timebox_state(_mutate)
 
 
 # ---- verbs ------------------------------------------------------------------
@@ -587,6 +1231,221 @@ def contain(principal: str, *, reason: str, actor: str = "",
     return _audit_result(result, actor, reason)
 
 
+def _audit_timebox_result(
+    timebox: TimeboxedContainment,
+    *,
+    actor: str,
+    verb: str,
+) -> TimeboxedContainment:
+    """Emit only through the established CONTROL_PLANE_ACTION audit stream."""
+
+    written = _audit(
+        verb,
+        timebox.principal,
+        actor,
+        timebox.result.ok,
+        timebox.result.detail,
+        timebox_id=timebox.operation_id,
+        timebox_status=timebox.status,
+        release_at=timebox.release_at,
+    )
+    if not written:
+        timebox.result.notes.append("time-box control audit row was not written")
+    return timebox
+
+
+def contain_timeboxed(
+    principal: str,
+    *,
+    reason: str,
+    release_after_seconds: float,
+    idempotency_key: str,
+    actor: str = "",
+) -> TimeboxedContainment:
+    """Contain one principal and durably schedule a generation-bound release.
+
+    The schedule is deliberately *not* stored in the revocation registry: a
+    revocation remains fail-closed until a timer observes its exact protected
+    generation. A crash after the protected revocation lands but before the
+    schedule write is recoverable by the marker in that revocation; a timer can
+    never release a later, unrelated containment.
+
+    This bounded API has no subtree/edge option. A subtree has multiple
+    protected generations and must be scheduled as separately reviewed rows,
+    rather than pretending one root release clears all descendants.
+    """
+
+    _require_enabled("timeboxed-contain")
+    principal = _check_principal(principal)
+    reason = _check_reason(reason)
+    actor = _check_actor(actor)
+    seconds = _check_timebox_seconds(release_after_seconds)
+    key = _check_timebox_idempotency_key(idempotency_key)
+    tenant = _active_tenant_scope()
+    key_sha256 = _timebox_idempotency_sha256(tenant, key)
+    request_sha256, reason_sha256 = _timebox_request_sha256(
+        tenant=tenant,
+        principal=principal,
+        actor=actor,
+        reason=reason,
+        seconds=seconds,
+    )
+    marker = _timebox_marker(f"tb-{key_sha256[:24]}")
+    if len(reason) + len(marker) + 1 > _MAX_REASON:
+        raise ValueError("reason is too long for a time-boxed containment marker")
+    now = time.time()
+    phase, record = _reserve_timebox(
+        tenant=tenant,
+        principal=principal,
+        request_sha256=request_sha256,
+        reason_sha256=reason_sha256,
+        idempotency_sha256=key_sha256,
+        seconds=seconds,
+        now=now,
+    )
+    if phase == "in_progress":
+        raise ControlPlaneError(
+            "time-boxed containment with this idempotency_key is already in progress"
+        )
+
+    with _trace_control_operation(
+        "agent_control_plane.timeboxed_contain",
+        {
+            "control_plane.operation": "timeboxed_contain",
+            "control_plane.target_count": 1,
+            "control_plane.tenant_bound": bool(tenant),
+            "control_plane.idempotent_replay": phase == "existing",
+        },
+    ):
+        if phase == "existing":
+            status = str(record["status"])
+            ok = status in {"scheduled", "released", "manually_released"}
+            result = ControlResult(
+                "contain",
+                principal,
+                ok=ok,
+                code="idempotent_replay" if ok else status,
+                detail=(
+                    "time-boxed containment already recorded"
+                    if ok else "prior time-boxed containment did not schedule a release"
+                ),
+            )
+            return _audit_timebox_result(
+                _timebox_result(record, result), actor=actor, verb="timebox-replay",
+            )
+
+        try:
+            from .revocation import shared
+
+            observed = shared().revoked().get(principal)
+        except Exception:
+            log.warning("control_plane: revocation authority unavailable", exc_info=True)
+            result = ControlResult(
+                "contain",
+                principal,
+                ok=False,
+                code="dependency_unavailable",
+                detail="revocation registry is unavailable",
+            )
+            return _audit_timebox_result(
+                _timebox_result(record, result), actor=actor, verb="timebox-contain",
+            )
+
+        if (
+            observed is not None
+            and bool(getattr(observed, "protected", False))
+            and marker in str(getattr(observed, "reason", ""))
+        ):
+            try:
+                record = _finish_timebox(
+                    key_sha256,
+                    status="scheduled",
+                    now=time.time(),
+                    generation=str(getattr(observed, "generation", "")),
+                )
+                result = ControlResult(
+                    "contain",
+                    principal,
+                    ok=True,
+                    code="recovered",
+                    detail="protected containment recovered; release is scheduled",
+                )
+            except ControlPlaneError:
+                result = ControlResult(
+                    "contain",
+                    principal,
+                    ok=False,
+                    code="dependency_unavailable",
+                    detail="containment remains protected; release schedule is unavailable",
+                )
+            return _audit_timebox_result(
+                _timebox_result(record, result), actor=actor, verb="timebox-contain",
+            )
+
+        if observed is not None and bool(getattr(observed, "protected", False)):
+            record = _finish_timebox(
+                key_sha256,
+                status="failed",
+                now=time.time(),
+                error_code="protected_containment",
+            )
+            result = ControlResult(
+                "contain",
+                principal,
+                ok=False,
+                code="protected_containment",
+                detail="principal already has a separately protected containment",
+            )
+            return _audit_timebox_result(
+                _timebox_result(record, result), actor=actor, verb="timebox-contain",
+            )
+
+        result = contain(
+            principal,
+            reason=f"{reason} {marker}",
+            actor=actor,
+        )
+        if not result.ok:
+            record = _finish_timebox(
+                key_sha256,
+                status="failed",
+                now=time.time(),
+                error_code="containment_failed",
+            )
+            return _audit_timebox_result(
+                _timebox_result(record, result), actor=actor, verb="timebox-contain",
+            )
+
+        try:
+            from .revocation import shared
+
+            landed = shared().revoked().get(principal)
+            if (
+                landed is None
+                or not bool(getattr(landed, "protected", False))
+                or marker not in str(getattr(landed, "reason", ""))
+                or not str(getattr(landed, "generation", ""))
+            ):
+                raise ControlPlaneError("time-boxed containment could not be verified")
+            record = _finish_timebox(
+                key_sha256,
+                status="scheduled",
+                now=time.time(),
+                generation=str(getattr(landed, "generation", "")),
+            )
+            result.detail = "contained; durable automatic release is scheduled"
+        except Exception:
+            # The protected containment is intentionally left live. Its durable
+            # arming record and marker let the same idempotency key recover a
+            # schedule later instead of re-containing or widening access.
+            result.ok = False
+            result.code = "schedule_unavailable"
+            result.detail = "containment remains protected; release schedule is unavailable"
+        return _audit_timebox_result(
+            _timebox_result(record, result), actor=actor, verb="timebox-contain",
+        )
+
+
 def release(principal: str, *, actor: str = "", registry: Any | None = None,
             ) -> ControlResult:
     """Undo a :func:`contain`: unrevoke, unseal, and (external) lift the
@@ -596,7 +1455,24 @@ def release(principal: str, *, actor: str = "", registry: Any | None = None,
     actor = _check_actor(actor)
     from .agent_edr import release as edr_release
     result = ControlResult("release", principal, ok=False)
+    released_generation = ""
     try:
+        # Remember the protected generation before the EDR's CAS release. If
+        # this succeeds, only its matching timebox may be retired; a timer for
+        # a newer containment must remain armed (and the EDR refuses its
+        # release in the first place).
+        try:
+            from .revocation import shared
+
+            observed = shared().revoked().get(principal)
+            if observed is not None and bool(getattr(observed, "protected", False)):
+                released_generation = str(getattr(observed, "generation", ""))
+        except Exception:
+            # ``edr_release`` is the authoritative operation and will surface
+            # a stable dependency failure itself. Do not turn this bookkeeping
+            # observation into a path that can widen a containment.
+            released_generation = ""
+
         def _clear_external_authorities() -> None:
             if not is_external(principal):
                 return
@@ -663,7 +1539,370 @@ def release(principal: str, *, actor: str = "", registry: Any | None = None,
             result.detail = "release incomplete"
     except Exception as exc:
         _dependency_failure(result, authority="containment authority", exc=exc)
+    if result.ok and released_generation:
+        try:
+            retired = _retire_timeboxes_after_manual_release(
+                principal=principal,
+                generation=released_generation,
+                now=time.time(),
+            )
+            if retired:
+                result.notes.append("retired matching time-boxed release record")
+        except Exception:
+            # The protected revocation has already been safely released. A
+            # later timer sees the absent containment and marks the schedule
+            # manual rather than ever recreating or widening authority.
+            result.notes.append(
+                "time-box record retirement unavailable; timer will verify state"
+            )
     return _audit_result(result, actor, result.detail)
+
+
+def timeboxed_containments() -> list[dict[str, Any]]:
+    """Read the active tenant's durable time-box records, earliest first."""
+
+    _active_tenant_scope()  # resolve storage boundary strictly before reading
+    path = _timebox_state_path()
+    if not path.exists():
+        return []
+    state = _load_timebox_state(path)
+    return [
+        dict(record)
+        for record in sorted(
+            state["records"].values(),
+            key=lambda record: (float(record["release_at"]), record["operation_id"]),
+        )
+    ]
+
+
+def _claim_due_timeboxes(*, now: float, limit: int) -> list[dict[str, Any]]:
+    path = _timebox_state_path()
+    if not path.exists():
+        return []
+
+    def _claim(state: dict[str, Any]):
+        selected: list[dict[str, Any]] = []
+        records = sorted(
+            state["records"].values(),
+            key=lambda record: (float(record["release_at"]), record["operation_id"]),
+        )
+        for record in records:
+            if len(selected) >= limit or float(record["release_at"]) > now:
+                break
+            stale_lease = (
+                record["status"] == "releasing"
+                and float(record["lease_until"]) <= now
+            )
+            if record["status"] != "scheduled" and not stale_lease:
+                continue
+            record["status"] = "releasing"
+            record["lease_until"] = now + _TIMEBOX_LEASE_SECONDS
+            record["updated_at"] = now
+            record["attempts"] = int(record["attempts"]) + 1
+            selected.append(dict(record))
+        return selected
+
+    return _mutate_timebox_state(_claim)
+
+
+def _retry_timebox_release(
+    idempotency_sha256: str,
+    *, now: float, error_code: str,
+) -> dict[str, Any]:
+    def _retry(record: dict[str, Any]) -> None:
+        if record["status"] == "releasing":
+            record["status"] = "scheduled"
+            record["lease_until"] = 0.0
+            record["updated_at"] = now
+            record["error_code"] = error_code
+
+    return _update_timebox(idempotency_sha256, _retry)
+
+
+def sweep_timeboxed_releases(
+    *,
+    now: float | None = None,
+    actor: str = "",
+    limit: int = _MAX_BULK_TARGETS,
+) -> list[ControlResult]:
+    """Release due schedules only when their protected generation still wins.
+
+    This is scheduler-safe but intentionally does not create a scheduler. A
+    deployment's existing job runner can invoke it per active tenant. A timer
+    outage is fail-closed: containment remains protected and its durable row is
+    retried after its short worker lease expires.
+    """
+
+    _require_enabled("timeboxed-release-sweep")
+    actor = _check_actor(actor)
+    selected_now = time.time() if now is None else now
+    if not _valid_timebox_timestamp(selected_now, positive=True):
+        raise ValueError("now must be a positive finite timestamp")
+    selected_now = float(selected_now)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= _MAX_BULK_TARGETS:
+        raise ValueError(f"limit must be an integer between 1 and {_MAX_BULK_TARGETS}")
+    _active_tenant_scope()
+    claimed = _claim_due_timeboxes(now=selected_now, limit=limit)
+    results: list[ControlResult] = []
+    with _trace_control_operation(
+        "agent_control_plane.timeboxed_release_sweep",
+        {
+            "control_plane.operation": "timeboxed_release_sweep",
+            "control_plane.due_count": len(claimed),
+            "control_plane.tenant_bound": bool(_active_tenant_scope()),
+        },
+    ):
+        for record in claimed:
+            principal = str(record["principal"])
+            key_sha256 = str(record["idempotency_sha256"])
+            generation = str(record["generation"])
+            try:
+                from .revocation import shared
+
+                observed = shared().revoked().get(principal)
+            except Exception:
+                result = ControlResult(
+                    "timebox-release",
+                    principal,
+                    ok=False,
+                    code="dependency_unavailable",
+                    detail="revocation registry is unavailable",
+                )
+                try:
+                    record = _retry_timebox_release(
+                        key_sha256,
+                        now=selected_now,
+                        error_code="dependency_unavailable",
+                    )
+                except ControlPlaneError:
+                    result.notes.append("release schedule retry record is unavailable")
+                results.append(
+                    _audit_timebox_result(
+                        _timebox_result(record, result),
+                        actor=actor,
+                        verb="timebox-release",
+                    ).result
+                )
+                continue
+
+            if observed is None:
+                record = _finish_timebox(
+                    key_sha256,
+                    status="manually_released",
+                    now=selected_now,
+                )
+                result = ControlResult(
+                    "timebox-release",
+                    principal,
+                    ok=True,
+                    code="already_released",
+                    detail="containment was already manually released",
+                )
+            elif (
+                not bool(getattr(observed, "protected", False))
+                or str(getattr(observed, "generation", "")) != generation
+            ):
+                record = _finish_timebox(
+                    key_sha256,
+                    status="superseded",
+                    now=selected_now,
+                    error_code="superseded",
+                )
+                result = ControlResult(
+                    "timebox-release",
+                    principal,
+                    ok=False,
+                    code="superseded",
+                    detail="time-boxed release retained a newer or nonmatching containment",
+                )
+            else:
+                result = release(principal, actor=actor)
+                result.verb = "timebox-release"
+                if result.ok:
+                    record = _finish_timebox(
+                        key_sha256,
+                        status="released",
+                        now=selected_now,
+                    )
+                elif result.code == "concurrent_containment":
+                    record = _finish_timebox(
+                        key_sha256,
+                        status="superseded",
+                        now=selected_now,
+                        error_code="superseded",
+                    )
+                else:
+                    try:
+                        record = _retry_timebox_release(
+                            key_sha256,
+                            now=selected_now,
+                            error_code="release_failed",
+                        )
+                    except ControlPlaneError:
+                        result.notes.append("release schedule retry record is unavailable")
+            results.append(
+                _audit_timebox_result(
+                    _timebox_result(record, result),
+                    actor=actor,
+                    verb="timebox-release",
+                ).result
+            )
+    return results
+
+
+# ---- snapshot-pinned fleet actions -------------------------------------------
+
+_BULK_VERBS = frozenset({"suspend", "resume", "contain", "release"})
+
+
+def _derived_bulk_timebox_key(root_key: str, principal: str) -> str:
+    """Derive a stable per-principal key without persisting the caller key."""
+
+    digest = hashlib.sha256(
+        f"lightwork.agent-control-plane.bulk-timebox.v1:{root_key}:{principal}".encode()
+    ).hexdigest()
+    return f"bulk-{digest}"
+
+
+def _bulk_failure_result(
+    *, verb: str, principal: str, actor: str, code: str,
+) -> ControlResult:
+    result = ControlResult(
+        verb,
+        principal,
+        ok=False,
+        code=code,
+        detail="bulk action could not be applied",
+    )
+    return _audit_result(result, actor, result.detail)
+
+
+def bulk_action(
+    selection: BulkSelection,
+    *,
+    verb: str,
+    actor: str = "",
+    reason: str | None = None,
+    release_after_seconds: float | None = None,
+    idempotency_key: str | None = None,
+) -> BulkControlResult:
+    """Apply one safe verb to an exact, freshly revalidated fleet selection.
+
+    Results are intentionally per-principal rather than a synthetic all-good
+    response. An interruption or dependency error leaves restrictive state in
+    place and exposes precisely which rows require a new reviewed selection.
+    Timed containment requires an idempotency key and stores one durable,
+    recoverable release record per target.
+    """
+
+    if not isinstance(verb, str) or verb not in _BULK_VERBS:
+        raise ValueError(
+            "bulk verb must be one of " + ", ".join(sorted(_BULK_VERBS))
+        )
+    _require_enabled(f"bulk-{verb}")
+    actor = _check_actor(actor)
+    requires_reason = verb in {"suspend", "contain"}
+    selected_reason = _check_reason(reason) if requires_reason else None
+    if not requires_reason and reason is not None:
+        raise ValueError(f"bulk {verb} does not accept a reason")
+    if release_after_seconds is not None and verb != "contain":
+        raise ValueError("release_after_seconds applies only to bulk contain")
+    selected_seconds: float | None = None
+    root_key: str | None = None
+    if release_after_seconds is not None:
+        selected_seconds = _check_timebox_seconds(release_after_seconds)
+        if idempotency_key is None:
+            raise ValueError("time-boxed bulk containment requires idempotency_key")
+        root_key = _check_timebox_idempotency_key(idempotency_key)
+    elif idempotency_key is not None:
+        raise ValueError("idempotency_key applies only to time-boxed bulk containment")
+
+    # Never use the supplied object as a live wildcard. This fresh scan checks
+    # both the complete state digest and the exact membership before any row
+    # reaches the existing containment/revocation authority.
+    _refresh_bulk_selection(selection)
+    results: list[ControlResult] = []
+    with _trace_control_operation(
+        "agent_control_plane.bulk_action",
+        {
+            "control_plane.operation": "bulk_action",
+            "control_plane.verb": verb,
+            "control_plane.target_count": len(selection.principals),
+            "control_plane.platform_selected": bool(selection.platform),
+            "control_plane.tenant_bound": bool(selection.tenant),
+            "control_plane.timeboxed": selected_seconds is not None,
+        },
+    ):
+        for principal in selection.principals:
+            try:
+                if verb == "suspend":
+                    result = suspend(
+                        principal,
+                        reason=selected_reason or "",
+                        actor=actor,
+                    )
+                elif verb == "resume":
+                    result = resume(principal, actor=actor)
+                elif verb == "release":
+                    result = release(principal, actor=actor)
+                elif selected_seconds is not None:
+                    timebox = contain_timeboxed(
+                        principal,
+                        reason=selected_reason or "",
+                        release_after_seconds=selected_seconds,
+                        idempotency_key=_derived_bulk_timebox_key(
+                            root_key or "", principal,
+                        ),
+                        actor=actor,
+                    )
+                    result = timebox.result
+                else:
+                    result = contain(
+                        principal,
+                        reason=selected_reason or "",
+                        actor=actor,
+                    )
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except ControlPlaneDisabled:
+                raise
+            except Exception as exc:
+                from .audit import AuditRefused
+
+                if isinstance(exc, AuditRefused):
+                    raise
+                log.warning(
+                    "control_plane: bulk %s failed for one principal",
+                    verb,
+                    exc_info=True,
+                )
+                result = _bulk_failure_result(
+                    verb=verb,
+                    principal=principal,
+                    actor=actor,
+                    code="action_error",
+                )
+            results.append(result)
+    summary = BulkControlResult(
+        verb=verb,
+        selection=selection,
+        results=results,
+        ok=bool(results) and all(result.ok for result in results),
+    )
+    summary.audit_written = _audit(
+        f"bulk-{verb}",
+        "*",
+        actor,
+        summary.ok,
+        f"bulk {verb} completed for {len(results)} reviewed principal(s)",
+        selection_sha256=selection.snapshot_sha256,
+        target_count=len(results),
+        platform=selection.platform or "",
+        timeboxed=selected_seconds is not None,
+    )
+    if not summary.audit_written:
+        summary.notes.append("bulk control audit row was not written")
+    return summary
 
 
 def attenuate(principal: str, *, deny_tools: Any = (), max_risk: str | None = None,
@@ -903,16 +2142,21 @@ def status(*, source: ControlPlaneSnapshot | None = None) -> dict:
 
 __all__ = [
     "AgentPrincipal",
+    "BulkControlResult",
+    "BulkSelection",
     "ControlPlaneDisabled",
     "ControlPlaneDependencyError",
     "ControlPlaneError",
     "ControlPlaneSnapshot",
+    "ControlPlaneStaleSelection",
     "ControlResult",
     "KIND_EXTERNAL",
     "KIND_NATIVE",
     "attenuate",
+    "bulk_action",
     "clear_halt",
     "contain",
+    "contain_timeboxed",
     "enabled",
     "halt_all",
     "is_external",
@@ -924,5 +2168,8 @@ __all__ = [
     "snapshot",
     "status",
     "suspend",
+    "sweep_timeboxed_releases",
+    "select_bulk",
+    "timeboxed_containments",
     "valid_principal",
 ]

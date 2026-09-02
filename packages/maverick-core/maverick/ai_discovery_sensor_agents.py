@@ -43,13 +43,16 @@ from .ai_discovery_sensor_clients import (
     SignedDiscoverySensorClient,
     SignedObservationRequest,
     normalize_browser_oauth,
+    normalize_identity_audit,
     normalize_network_egress,
     safe_request_digest,
 )
 from .file_lock import ensure_private_directory, ensure_private_file
 
 AGENT_CONFIG_SCHEMA = "lightwork.ai-discovery-agent.v1"
-_SOURCE_KINDS = frozenset({"network_egress", "browser_extension", "oauth_grant"})
+_SOURCE_KINDS = frozenset(
+    {"network_egress", "browser_extension", "oauth_grant", "identity_directory"}
+)
 _RAW_NETWORK_FIELDS = frozenset(
     {"hostname", "source_event_sha256", "observed_at", "context_codes"}
 )
@@ -974,6 +977,14 @@ class DiscoverySensorAgent:
         return self._spool
 
     def normalize(self, raw_event: object) -> NormalizedSensorEvent | None:
+        if self.config.source_kind == "identity_directory":
+            # Identity-provider records often carry users, client IDs, and
+            # provider payloads. They may only enter through the reviewed
+            # adapters' closed NormalizedSensorEvent shape below, never the
+            # generic JSONL/raw-event path.
+            raise SensorAgentConfigError(
+                "identity-directory records require a reviewed identity audit adapter"
+            )
         fields = (
             _RAW_NETWORK_FIELDS
             if self.config.source_kind == "network_egress"
@@ -1014,6 +1025,74 @@ class DiscoverySensorAgent:
             )
         except DiscoverySensorClientError as exc:
             raise SensorAgentConfigError("raw source event failed privacy normalization") from exc
+
+    def ingest_normalized(self, events: Iterable[NormalizedSensorEvent | None]) -> dict[str, int]:
+        """Queue reviewed identity-audit events without ever retaining raw input.
+
+        Provider adapters normalize their source logs in memory and call this
+        method. The existing private spool, key-rotation signer, and delivery
+        transport are reused unchanged; only the closed event shape can cross
+        this boundary.
+        """
+
+        if self.config.source_kind != "identity_directory":
+            raise SensorAgentConfigError(
+                "normalized identity-audit events require source_kind identity_directory"
+            )
+        counters = {
+            "input": 0,
+            "normalized": 0,
+            "unmatched": 0,
+            "invalid": 0,
+            "duplicate": 0,
+        }
+        for event in events:
+            counters["input"] += 1
+            if event is None:
+                counters["unmatched"] += 1
+                continue
+            try:
+                if not isinstance(event, NormalizedSensorEvent):
+                    raise SensorAgentConfigError("identity adapter did not return a normalized event")
+                if event.domain_category != "identity_directory":
+                    raise SensorAgentConfigError("identity event has an invalid domain category")
+                if event.environment_code != self.config.environment_code:
+                    raise SensorAgentConfigError("identity event environment does not match sensor configuration")
+                if event.deployment_type != self.config.deployment_type:
+                    raise SensorAgentConfigError("identity event deployment does not match sensor configuration")
+                if event.ai_service_code != event.provider_code or (
+                    event.provider_code,
+                    event.ai_product_code,
+                ) not in _SAFE_BROWSER_PRODUCTS:
+                    raise SensorAgentConfigError(
+                        "identity event product is not in the reviewed safe taxonomy"
+                    )
+                contexts = tuple(_context_code(item) for item in event.context_codes)
+                if len(set(contexts)) != len(contexts):
+                    raise SensorAgentConfigError("identity event contexts contain duplicates")
+                if not set(self.config.context_codes).issubset(contexts):
+                    raise SensorAgentConfigError(
+                        "identity event omits required sensor context codes"
+                    )
+                checked = normalize_identity_audit(
+                    source_event_sha256=event.event_sha256,
+                    observed_at=event.observed_at,
+                    ai_service_code=event.ai_service_code,
+                    ai_product_code=event.ai_product_code,
+                    provider_code=event.provider_code,
+                    environment_code=event.environment_code,
+                    deployment_type=event.deployment_type,
+                    context_codes=contexts,
+                )
+                if checked != event:
+                    raise SensorAgentConfigError("identity event failed closed normalization")
+                inserted = self._spool.enqueue(checked, now=self._clock())
+            except (DiscoverySensorClientError, SensorAgentConfigError, TypeError, ValueError):
+                counters["invalid"] += 1
+                continue
+            counters["normalized"] += int(inserted)
+            counters["duplicate"] += int(not inserted)
+        return counters
 
     def ingest(self, raw_events: Iterable[object]) -> dict[str, int]:
         counters = {"input": 0, "normalized": 0, "unmatched": 0, "invalid": 0, "duplicate": 0}

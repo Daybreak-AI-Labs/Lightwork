@@ -309,7 +309,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
     assert package["overrides"] == {
         "@hono/node-server": "2.0.12",
         "body-parser": "2.3.0",
-        "fast-uri": "3.1.5",
+        "fast-uri": "3.1.6",
     }
 
     lock = json.loads((client_root / "package-lock.json").read_text(encoding="utf-8"))

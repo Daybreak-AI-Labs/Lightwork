@@ -10,7 +10,7 @@ from maverick.capability import Capability
 from maverick.governance import Decision, Policy, evaluate
 from maverick.tools import Tool
 
-ALL = ["gdpr", "eu_ai_act", "hipaa"]
+ALL = list(rc.shipped_profile_keys())
 
 
 def _activate(monkeypatch, keys):
@@ -30,6 +30,22 @@ def test_every_bound_tool_is_a_classified_tool():
 
 def test_the_shipped_library_compiles_to_non_vacuous_gates():
     assert rc.verify(ALL) == []
+
+
+@pytest.mark.parametrize("key", rc.SHIPPED_PROFILE_KEYS)
+def test_each_shipped_profile_has_an_individually_non_vacuous_gate(key):
+    """The CI registry is seven independently enforceable compiler profiles."""
+    compiled = rc.compile_obligations([key])
+    assert compiled.obligations
+    assert rc.verify([key]) == []
+
+
+def test_shipped_profile_registry_is_stable_and_matches_the_library():
+    assert rc.SHIPPED_PROFILE_KEYS == (
+        "gdpr", "eu_ai_act", "hipaa", "nist_ai_rmf", "iso_42001", "soc2", "sr_11_7",
+    )
+    assert rc.shipped_profile_keys() == rc.SHIPPED_PROFILE_KEYS
+    assert set(rc.SHIPPED_PROFILE_KEYS) == set(rc.REGULATIONS)
 
 
 def test_gdpr_compiles_into_the_chokepoint_policy():
@@ -228,7 +244,7 @@ def test_verify_flags_an_obligation_with_no_scope(monkeypatch):
 
 
 def test_main_exit_codes(monkeypatch, capsys):
-    assert rc.main(["--ci", "--profiles", "gdpr,eu_ai_act,hipaa"]) == 0
+    assert rc.main(["--ci", "--all"]) == 0
     assert "non-vacuous" in capsys.readouterr().out
     # Nothing active and nothing requested: a gate that inspected nothing.
     _activate(monkeypatch, [])
@@ -247,7 +263,12 @@ def test_main_exit_codes(monkeypatch, capsys):
 # ---- profiles: one activation switch ----------------------------------------
 
 def test_the_profiles_expose_the_compiled_policies():
-    from maverick.compliance_profiles import get_profile
+    from maverick.compliance_profiles import compile_policy, get_profile, list_profiles
+
+    assert set(rc.SHIPPED_PROFILE_KEYS) == {profile.key for profile in list_profiles()}
+    for key in rc.SHIPPED_PROFILE_KEYS:
+        assert get_profile(key) is not None
+        assert compile_policy([key]).compliance_profiles == (key,)
     assert get_profile("gdpr").policy == rc.compile_obligations(["gdpr"]).policy
     assert get_profile("eu_ai_act").policy.require_human_min_risk == "high"
 

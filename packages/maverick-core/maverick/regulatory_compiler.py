@@ -84,6 +84,13 @@ class Obligation:
 _EURLEX = "https://eur-lex.europa.eu/eli/reg/2016/679/oj"
 _AIACT = "https://eur-lex.europa.eu/eli/reg/2024/1689/oj"
 _HIPAA = "https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-164"
+_NIST_AI_RMF = "https://www.nist.gov/itl/ai-risk-management-framework"
+_ISO_42001 = "https://www.iso.org/standard/81230.html"
+_SOC2 = "https://www.aicpa-cima.com/resources/landing/system-and-organization-controls-soc-suite-of-services"
+# SR 26-2 (April 2026) supersedes SR 11-7.  The source itself says generative
+# and agentic AI are outside its scope; the profile below is therefore a
+# bounded control-by-analogy, never a claim of SR 26-2 applicability or approval.
+_SR_26_2 = "https://www.federalreserve.gov/supervisionreg/srletters/SR2602.pdf"
 
 # Raw personal-data stores. A GDPR erasure must go through the governed path
 # (``maverick dsar`` / ``audit.erase``) that leaves a receipt; a direct write
@@ -129,7 +136,51 @@ REGULATIONS: dict[str, tuple[Obligation, ...]] = {
             "communication channel, whatever the agent is otherwise allowed",
             EFFECT_ATTENUATE, deny_tools=_OUTBOUND, source_url=_HIPAA),
     ),
+    # These are deliberately narrow *runtime compatibility* profiles.  They
+    # prove the stated tool-gate behavior, not full framework coverage,
+    # organizational adoption, certification, or legal/regulatory compliance.
+    "nist_ai_rmf": (
+        Obligation(
+            "nist-ai-rmf-manage-2-human-review", "NIST AI RMF", "MANAGE 2",
+            "Bounded runtime risk treatment: every high-risk action pauses for "
+            "a human; this maps one enforceable control, not the full AI RMF",
+            EFFECT_REQUIRE_HUMAN, min_risk="high", source_url=_NIST_AI_RMF),
+    ),
+    "iso_42001": (
+        Obligation(
+            "iso-42001-a9-2-human-oversight", "ISO/IEC 42001:2023", "A.9.2",
+            "Bounded runtime human-oversight control: every high-risk action "
+            "pauses for a human; this is not complete AIMS coverage",
+            EFFECT_REQUIRE_HUMAN, min_risk="high", source_url=_ISO_42001),
+    ),
+    "soc2": (
+        Obligation(
+            "soc2-cc6-1-least-privilege-egress", "SOC 2 TSC", "CC6.1",
+            "Bounded least-privilege runtime control: known outbound side-effect "
+            "tools are removed from every capability; this is not an attestation",
+            EFFECT_ATTENUATE, deny_tools=_OUTBOUND, source_url=_SOC2),
+    ),
+    "sr_11_7": (
+        Obligation(
+            "sr-26-2-model-risk-human-review",
+            "SR 26-2 (successor to SR 11-7)",
+            "Risk-based model risk management",
+            "Bounded control-by-analogy: every high-risk action pauses for a "
+            "human. SR 26-2 supersedes SR 11-7 and excludes generative and "
+            "agentic AI from its stated scope.",
+            EFFECT_REQUIRE_HUMAN, min_risk="high", source_url=_SR_26_2),
+    ),
 }
+
+# One source of truth for selectable, CI-gated runtime profiles.  Do not derive
+# this at call time from REGULATIONS: tests intentionally fault-inject that
+# mutable library, while installer choices and CI must remain the released set.
+SHIPPED_PROFILE_KEYS: tuple[str, ...] = tuple(REGULATIONS)
+
+
+def shipped_profile_keys() -> tuple[str, ...]:
+    """Released profile keys, in stable installer and CI display order."""
+    return SHIPPED_PROFILE_KEYS
 
 
 @dataclass(frozen=True)
@@ -471,13 +522,17 @@ def main(argv: list[str] | None = None) -> int:
                     "prove they are not vacuous.")
     ap.add_argument("--ci", action="store_true",
                     help="exit 1 on any problem, exit 2 if nothing was inspected")
-    ap.add_argument("--profiles", default=None, metavar="K1,K2",
-                    help="regulations to check (default: those active in config)")
+    selection = ap.add_mutually_exclusive_group()
+    selection.add_argument("--profiles", default=None, metavar="K1,K2",
+                           help="regulations to check (default: those active in config)")
+    selection.add_argument("--all", action="store_true", dest="all_shipped",
+                           help="check every profile shipped by this runtime")
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
 
     try:
-        keys = ([p for p in args.profiles.split(",") if p.strip()]
+        keys = (list(shipped_profile_keys()) if args.all_shipped else
+                [p for p in args.profiles.split(",") if p.strip()]
                 if args.profiles is not None else active_keys())
     except Exception as exc:
         print(f"regulatory compiler: invalid compliance activation: {exc}")
@@ -491,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if not keys:
             print("regulatory compiler: no regulation active "
-                  "(set [compliance] profiles or pass --profiles)")
+                  "(set [compliance] profiles or pass --profiles/--all)")
         for ob in report["obligations"]:
             scope = ", ".join(ob["actions"] or ob["deny_tools"]) or f">= {ob['min_risk']} risk"
             print(f"  [{ob['effect']:13}] {ob['id']:36} {ob['regulation']} {ob['article']}: {scope}")
@@ -510,9 +565,10 @@ def main(argv: list[str] | None = None) -> int:
 
 __all__ = [
     "EFFECT_ATTENUATE", "EFFECT_DENY", "EFFECT_REQUIRE_HUMAN", "REGULATIONS",
+    "SHIPPED_PROFILE_KEYS",
     "CompiledObligations", "Obligation", "action_risk", "active_keys", "attenuate",
     "audit_tags", "checked_tags", "classified_tools", "compile_obligations",
-    "describe", "main", "obligations_checked", "verify",
+    "describe", "main", "obligations_checked", "shipped_profile_keys", "verify",
 ]
 
 

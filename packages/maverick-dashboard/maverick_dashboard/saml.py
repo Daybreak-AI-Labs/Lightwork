@@ -386,29 +386,36 @@ def _tx_error(detail: str, *, status_code: int) -> JSONResponse:
     return _clear_saml_tx(JSONResponse({"detail": detail}, status_code=status_code))
 
 
-# Attribute names IdPs commonly carry the stable email / UPN under. SCIM
-# deprovision revokes by externalId/userName/email/id, so recording the SAML
-# NameID against these lets ``subject_directory.subs_for`` reach a session whose
-# sub is a persistent/transient NameID that matches no SCIM attribute.
-_EMAIL_UPN_ATTRS = (
+# Attribute names IdPs commonly carry stable identifiers under. Email/UPN
+# bindings let SCIM deprovision reach a persistent/transient NameID. The
+# immutable-object aliases are separately useful to the SCIM group resolver:
+# it deliberately matches a principal only through a SCIM ``externalId``/``id``
+# or a directory binding to one, never through an email claim. These values are
+# read only after pysaml2 has verified the assertion.
+_DIRECTORY_IDENTIFIER_ATTRS = (
     "email", "mail", "emailaddress", "emailAddress",
     "upn", "userPrincipalName", "userprincipalname",
     "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
     "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn",
+    "oid",
+    "http://schemas.microsoft.com/identity/claims/objectidentifier",
 )
 
 
 def _record_session_subject(identity: SamlIdentity) -> None:
-    """Map the SAML NameID (the session sub) to the user's stable email/UPN
-    identifiers so a later SCIM deprovision can revoke this live session even
-    when the IdP uses a persistent/transient NameID (the recommended format),
-    which appears in no SCIM attribute. Best-effort: never blocks the login."""
+    """Map a SAML NameID to verified stable identifiers for SCIM resolution.
+
+    Email/UPN aliases let deprovisioning find a persistent/transient NameID.
+    A verified immutable object identifier additionally lets the existing SCIM
+    group resolver bridge that NameID to the user's ``externalId`` without
+    granting from a mutable email claim. Best-effort: never blocks login.
+    """
     try:
         from .subject_directory import record_login
 
         ids: list[str] = [identity.name_id]
         attrs = identity.attributes or {}
-        for key in _EMAIL_UPN_ATTRS:
+        for key in _DIRECTORY_IDENTIFIER_ATTRS:
             for val in attrs.get(key) or ():
                 if isinstance(val, str):
                     ids.append(val)

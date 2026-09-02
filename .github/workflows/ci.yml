@@ -239,8 +239,9 @@ jobs:
         # bound tool is a classified tool, the compiled policy denies / pauses
         # it, a risk floor catches at least one real tool, and an attenuation
         # narrows a capability. A stale tool name or a silent overlay fails the
-        # build; inspecting nothing exits 2. See maverick/regulatory_compiler.py.
-        run: python -m maverick.regulatory_compiler --ci --profiles gdpr,eu_ai_act,hipaa
+        # build; inspecting nothing exits 2. --all resolves the released
+        # compiler registry, so a newly shipped profile cannot bypass the gate.
+        run: python -m maverick.regulatory_compiler --ci --all
       - name: Evaluator-anchor governance gate (released anchors are immutable)
         # Pins every evaluator ground-truth anchor's checksum in the committed
         # evaluator_anchors.lock.json: editing a released anchor's labels or
@@ -838,10 +839,13 @@ jobs:
           benchmarks/test_eval_governance_frontier.py
           benchmarks/test_governance_metrics.py
           benchmarks/test_eval_governance.py
+          benchmarks/test_governance_frontier_submissions.py
       - name: Verify checked-in governance-frontier artifacts
         run: >-
           python benchmarks/eval_governance_frontier.py
           --verify-tracked-artifacts
+      - name: Verify third-party Governance Frontier submission artifacts
+        run: python benchmarks/governance_frontier_submissions.py verify
       - name: Measured offline governed-vs-baseline run
         run: >-
           python benchmarks/eval_governance_frontier.py

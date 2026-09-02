@@ -25,3 +25,12 @@
 /benchmarks/results/governance-frontier-v1/trusted-publisher.pub text eol=lf -merge
 /benchmarks/results/governance-frontier-v1/verify_manifest.py text eol=lf
 /benchmarks/GOVERNANCE_FRONTIER_RESULTS.md text eol=lf -merge
+
+# Third-party Governance Frontier inputs and generated public artifacts are
+# byte-compared by the offline no-drift verifier. Keep them LF-only across
+# Windows and POSIX checkouts; take whole files on a concurrent update.
+/benchmarks/results/governance-frontier-v1/suite-contract.json text eol=lf -merge
+/benchmarks/results/governance-frontier-v1/trusted-submitters.json text eol=lf -merge
+/benchmarks/results/governance-frontier-v1/third-party-submissions/*.json text eol=lf -merge
+/benchmarks/results/governance-frontier-v1/leaderboard.json text eol=lf -merge
+/benchmarks/results/governance-frontier-v1/leaderboard.md text eol=lf -merge

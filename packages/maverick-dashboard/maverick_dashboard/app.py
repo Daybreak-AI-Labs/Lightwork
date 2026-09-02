@@ -925,6 +925,9 @@ from .consent_native_page import create_consent_native_page_router  # noqa: E402
 from .consent_web_publish_settings_page import (  # noqa: E402
     create_consent_web_publish_settings_page_router,
 )
+from .evolution_ledger_page import (  # noqa: E402
+    create_evolution_ledger_page_router,
+)
 from .governed_document_vault_page import (  # noqa: E402
     create_governed_document_vault_page_router,
 )
@@ -967,10 +970,12 @@ app.include_router(create_shared_governance_inventory_page_router(templates))
 app.include_router(create_agent_control_plane_page_router(templates))
 app.include_router(create_regulatory_obligations_page_router(templates))
 app.include_router(create_trust_receipts_page_router(templates))
+app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
+from .evolution_ledger_api import router as evolution_ledger_router  # noqa: E402
 from .regulatory_obligations_api import router as regulatory_obligations_router  # noqa: E402
 from .shared_governance_inventory_api import (  # noqa: E402
     router as shared_governance_inventory_router,
@@ -984,6 +989,7 @@ app.include_router(shared_governance_inventory_router, prefix="/api/v1")
 app.include_router(agent_control_plane_router, prefix="/api/v1")
 app.include_router(regulatory_obligations_router, prefix="/api/v1")
 app.include_router(trust_receipts_router, prefix="/api/v1")
+app.include_router(evolution_ledger_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
@@ -1258,6 +1264,7 @@ _AUTH_EXEMPT = {
     # agents that hold the gateway credential, never the dashboard bearer.
     # Self-gates on [llm_gateway] enable and 403s when off.
     "/gateway/v1/chat/completions",
+    "/gateway/v1/messages",
     "/gateway/v1/otel",
     # The consent webhook authenticates every delivery with its OWN HMAC
     # signature inside maverick.consent_registry (external CMPs hold the
@@ -9393,6 +9400,20 @@ async def trust_receipts_client() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-evolution-ledger.js")
+async def evolution_ledger_client() -> FileResponse:
+    """Client for the Audit -> Evolution Ledger read-only console."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-evolution-ledger.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @app.get("/static/lightwork-privacy-data-discovery.css")
 async def privacy_data_discovery_styles() -> FileResponse:
     """Liquid-glass styling for the privacy discovery workbench."""
@@ -9968,6 +9989,61 @@ async def llm_gateway_chat_completions(request: Request) -> JSONResponse:
         body = None
     status_code, payload = await run_in_threadpool(
         llm_gateway.handle_chat_completion, body, caller_token=token,
+    )
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.post("/gateway/v1/messages")
+async def llm_gateway_anthropic_messages(request: Request) -> JSONResponse:
+    """Anthropic-compatible governed runtime firewall endpoint.
+
+    Like the OpenAI route, this is self-authenticated by a scoped gateway
+    bearer rather than a dashboard cookie.  The core module emits the native
+    Anthropic error envelope and performs all policy/redaction/budget checks.
+    """
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "type": "error",
+                "error": {
+                    "type": "permission_error",
+                    "message": (
+                        "The LLM gateway is disabled; enable [llm_gateway] "
+                        "in the Lightwork configuration."
+                    ),
+                },
+            },
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    settings = llm_gateway.get_llm_gateway_config()
+    try:
+        raw = await _read_limited_request_body(
+            request,
+            max_bytes=settings["max_body_bytes"],
+            too_large_detail="The request exceeds the gateway's configured size cap.",
+        )
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": str(exc.detail),
+                },
+            },
+        )
+    import json as _json
+    try:
+        body = _json.loads(raw or b"{}")
+    except ValueError:
+        body = None
+    status_code, payload = await run_in_threadpool(
+        llm_gateway.handle_anthropic_message, body, caller_token=token,
     )
     return JSONResponse(status_code=status_code, content=payload)
 

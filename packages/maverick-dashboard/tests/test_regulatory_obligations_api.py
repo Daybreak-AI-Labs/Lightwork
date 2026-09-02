@@ -124,6 +124,62 @@ def test_check_can_ask_about_the_whole_library_without_enabling_it():
     assert client.post(f"{BASE}/check", json={"action": "email", "profiles": ["sox"]}).status_code == 404
 
 
+def _gateway_constraint_document(*, effect="deny", action="sql_query"):
+    return {
+        "schema": "lightwork.gateway-constraint-import.v1",
+        "gateway": {"id": "airia_gateway", "revision_sha256": "b" * 64},
+        "constraints": [{
+            "id": "gateway-constraint",
+            "effect": effect,
+            "actions": [action],
+            "min_risk": None,
+            "deny_tools": [],
+            "source_sha256": "c" * 64,
+        }],
+    }
+
+
+def test_gateway_constraint_preview_is_read_only_and_never_claims_source_verification(
+    monkeypatch, tmp_path,
+):
+    _activate(monkeypatch, tmp_path, "gdpr")
+    response = authed.post(
+        f"{BASE}/gateway-constraints/preview",
+        json={"document": _gateway_constraint_document()},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["runtime_enforcement_changed"] is False
+    assert body["gateway_source_verified"] is False
+    assert body["complete"] is True
+    row = next(item for item in body["verdicts"] if item["action"] == "sql_query")
+    assert row["compiler_decision"] == "require_human"
+    assert row["effective_decision"] == "deny"
+    assert row["gateway_constraint_ids"] == ["gateway-constraint"]
+
+
+def test_gateway_constraint_preview_refuses_widening_or_unconfigured_scope(monkeypatch, tmp_path):
+    _activate(monkeypatch, tmp_path, "gdpr")
+    invalid = authed.post(
+        f"{BASE}/gateway-constraints/preview",
+        json={"document": _gateway_constraint_document(effect="allow")},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"] == "gateway constraint import was refused"
+
+    monkeypatch.delenv("MAVERICK_CONFIG")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN")
+    from maverick import config
+    config.reset_config_cache()
+    no_active = client.post(
+        f"{BASE}/gateway-constraints/preview",
+        json={"document": _gateway_constraint_document()},
+    )
+    assert no_active.status_code == 409
+    assert no_active.json()["detail"] == "no active regulatory profiles are configured"
+
+
 def test_tools_lists_the_classifiers_universe():
     body = client.get(f"{BASE}/tools").json()
     assert body["count"] == len(body["items"]) > 10
@@ -141,9 +197,16 @@ def test_the_surface_is_read_only():
     """Nothing here may change enforcement: the only POST is a pure query."""
     found = {path: {m.upper() for m in ops} for path, ops in app.openapi()["paths"].items()
              if path.startswith(BASE + "/")}
-    assert set(found) == {f"{BASE}/status", f"{BASE}/tools", f"{BASE}/profiles/{{key}}", f"{BASE}/check"}
+    assert set(found) == {
+        f"{BASE}/status",
+        f"{BASE}/tools",
+        f"{BASE}/profiles/{{key}}",
+        f"{BASE}/check",
+        f"{BASE}/gateway-constraints/preview",
+    }
     assert set().union(*found.values()) <= {"GET", "POST"}
     assert found[f"{BASE}/check"] == {"POST"}
+    assert found[f"{BASE}/gateway-constraints/preview"] == {"POST"}
 
 
 def test_roles_gate_every_read(monkeypatch):
@@ -157,3 +220,7 @@ def test_roles_gate_every_read(monkeypatch):
     assert client.get(f"{BASE}/status").status_code == 403
     assert client.get(f"{BASE}/tools").status_code == 403
     assert client.post(f"{BASE}/check", json={"action": "email"}).status_code == 403
+    assert client.post(
+        f"{BASE}/gateway-constraints/preview",
+        json={"document": _gateway_constraint_document()},
+    ).status_code == 403

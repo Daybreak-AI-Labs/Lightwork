@@ -10,7 +10,7 @@ deployment answers 403 here.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -38,7 +38,7 @@ ToolName = Annotated[
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(allow_inf_nan=False, extra="forbid", strict=True)
 
 
 class ReasonIn(_StrictModel):
@@ -73,6 +73,112 @@ class AttenuateIn(_StrictModel):
 
 class PrincipalAttenuateIn(AttenuateIn):
     principal: OpaquePrincipal
+
+
+SelectionText = Annotated[
+    str,
+    StringConstraints(strict=True, max_length=160),
+]
+SnapshotDigest = Annotated[
+    str,
+    StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$"),
+]
+IdempotencyKey = Annotated[
+    str,
+    StringConstraints(
+        strict=True,
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    ),
+]
+
+
+class BulkSelectIn(_StrictModel):
+    """A bounded, tenant-pinned request for an operator-reviewed fleet set."""
+
+    tenant: SelectionText | None = None
+    platform: SelectionText | None = None
+
+    @model_validator(mode="after")
+    def require_tenant_or_platform(self):
+        if self.tenant is None and self.platform is None:
+            raise ValueError("selection requires an explicit tenant or platform")
+        for field_name, value in (("tenant", self.tenant), ("platform", self.platform)):
+            if value is not None and (value != value.strip() or not value.isprintable()):
+                raise ValueError(f"{field_name} selection must be exact printable text")
+        if self.platform == "":
+            raise ValueError("platform selection must be non-empty printable text")
+        return self
+
+
+class BulkSelectionIn(_StrictModel):
+    """The exact selection returned by ``/bulk/select``; never a wildcard."""
+
+    schema_name: Literal["lightwork.agent-control-plane-selection.v1"] = Field(
+        alias="schema",
+    )
+    tenant: SelectionText
+    platform: SelectionText | None = None
+    principals: list[OpaquePrincipal] = Field(min_length=1, max_length=500)
+    snapshot_sha256: SnapshotDigest
+    captured_at: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def require_canonical_selection(self):
+        if self.tenant != self.tenant.strip() or not self.tenant.isprintable():
+            raise ValueError("tenant selection must be exact printable text")
+        if self.platform is not None and (
+            not self.platform
+            or self.platform != self.platform.strip()
+            or not self.platform.isprintable()
+        ):
+            raise ValueError("platform selection must be non-empty printable text")
+        if self.principals != sorted(set(self.principals)):
+            raise ValueError("bulk selection principals must be unique and sorted")
+        return self
+
+    def to_core(self) -> acp.BulkSelection:
+        return acp.BulkSelection(
+            tenant=self.tenant,
+            platform=self.platform,
+            principals=tuple(self.principals),
+            snapshot_sha256=self.snapshot_sha256,
+            captured_at=self.captured_at,
+        )
+
+
+class BulkActionIn(_StrictModel):
+    selection: BulkSelectionIn
+    verb: Literal["suspend", "resume", "contain", "release"]
+    reason: Reason | None = None
+    release_after_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        le=31 * 24 * 60 * 60,
+    )
+    idempotency_key: IdempotencyKey | None = None
+
+    @model_validator(mode="after")
+    def require_verb_specific_fields(self):
+        needs_reason = self.verb in {"suspend", "contain"}
+        if needs_reason and self.reason is None:
+            raise ValueError(f"bulk {self.verb} requires a reason")
+        if not needs_reason and self.reason is not None:
+            raise ValueError(f"bulk {self.verb} does not accept a reason")
+        if self.release_after_seconds is not None:
+            if self.verb != "contain":
+                raise ValueError("release_after_seconds applies only to bulk contain")
+            if self.idempotency_key is None:
+                raise ValueError("time-boxed bulk containment requires idempotency_key")
+        elif self.idempotency_key is not None:
+            raise ValueError("idempotency_key applies only to time-boxed bulk containment")
+        return self
+
+
+class TimeboxedContainIn(PrincipalReasonIn):
+    release_after_seconds: float = Field(gt=0, le=31 * 24 * 60 * 60)
+    idempotency_key: IdempotencyKey
 
 
 def _actor(request: Request) -> str:
@@ -227,7 +333,82 @@ def _result_response(result: acp.ControlResult):
     return JSONResponse(status_code=status_code, content=payload)
 
 
-def create_agent_control_plane_router() -> APIRouter:
+async def _bulk_mutation_call(
+    operation: str,
+    selection: acp.BulkSelection,
+    function,
+    *args,
+    **kwargs,
+):
+    """Run a fleet verb without laundering an audit refusal into a no-op.
+
+    Bulk operations can have several already-applied rows when their terminal
+    audit is refused.  Re-reading a roster cannot reconstruct every outcome,
+    so the response intentionally says that a reviewed subset may have changed
+    and gives the caller the snapshot digest to reconcile through the ledger.
+    """
+
+    try:
+        return await _call(function, *args, **kwargs)
+    except AuditRefused as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "bulk_control_action_audit_refused",
+                "message": (
+                    "one or more reviewed control actions may have changed state, "
+                    "but the required audit was refused; reconcile from the ledger "
+                    "before retrying"
+                ),
+                "operation": operation,
+                "selection_sha256": selection.snapshot_sha256,
+                "target_count": len(selection.principals),
+                "applied": "unknown",
+            },
+        ) from exc
+
+
+def _bulk_result_response(result: acp.BulkControlResult):
+    """Preserve per-principal outcomes, including a partial fleet failure."""
+
+    payload = result.to_dict()
+    if result.ok:
+        return payload
+    failure_codes = {item.code for item in result.results if not item.ok}
+    # A dependency gap or a per-row exception can leave an earlier restrictive
+    # action applied, so expose the body with a retry-safe non-success status.
+    status_code = 503 if failure_codes & {"action_error", "dependency_unavailable"} else 409
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+def _timeboxed_result_response(result: acp.TimeboxedContainment):
+    payload = result.to_dict()
+    inner = result.result
+    if inner.ok:
+        return payload
+    status_code = 503 if inner.code == "dependency_unavailable" else 409
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+def _timebox_projection(records: list[dict]) -> list[dict]:
+    """Return operator-safe schedule state, not request or reason digests."""
+
+    visible = (
+        "operation_id",
+        "principal",
+        "tenant",
+        "containment_generation",
+        "release_at",
+        "status",
+        "created_at",
+        "updated_at",
+        "attempts",
+        "error_code",
+    )
+    return [{field: record[field] for field in visible if field in record} for record in records]
+
+
+def create_agent_control_plane_router() -> APIRouter:  # noqa: C901 - route-local authority gates
     router = APIRouter(prefix="/agent-control-plane", tags=["agent-control-plane"])
 
     @router.get("/status")
@@ -261,6 +442,74 @@ def create_agent_control_plane_router() -> APIRouter:
             page,
             reveal_incident_reason=has_permission(request, "audit"),
         )
+
+    @router.post("/bulk/select")
+    async def bulk_select(request: Request, body: BulkSelectIn):
+        """Materialize an exact roster snapshot before any fleet mutation."""
+
+        require_permission(request, "operate")
+        selection = await _call(
+            acp.select_bulk,
+            tenant=body.tenant,
+            platform=body.platform,
+        )
+        return selection.to_dict()
+
+    @router.post("/bulk/actions")
+    async def bulk_actions(request: Request, body: BulkActionIn):
+        """Apply one verb only to an exact, still-current reviewed selection."""
+
+        if body.verb in {"contain", "release"}:
+            require_permission(request, "admin")
+        else:
+            require_permission(request, "operate")
+        selection = body.selection.to_core()
+        result = await _bulk_mutation_call(
+            f"bulk-{body.verb}",
+            selection,
+            acp.bulk_action,
+            selection,
+            verb=body.verb,
+            actor=_actor(request),
+            reason=body.reason,
+            release_after_seconds=body.release_after_seconds,
+            idempotency_key=body.idempotency_key,
+        )
+        return _bulk_result_response(result)
+
+    @router.get("/timeboxes")
+    async def timeboxes(request: Request):
+        require_permission(request, "audit")
+        records = await _call(acp.timeboxed_containments)
+        items = _timebox_projection(records)
+        return {"items": items, "count": len(items)}
+
+    @router.post("/timeboxes/sweep")
+    async def sweep_timeboxes(request: Request):
+        """Run due releases using server time; this cannot advance a clock."""
+
+        require_permission(request, "admin")
+        try:
+            results = await _call(
+                acp.sweep_timeboxed_releases,
+                actor=_actor(request),
+            )
+        except AuditRefused as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "timebox_release_audit_refused",
+                    "message": (
+                        "a due containment release may have changed state, but its "
+                        "required audit was refused; reconcile from the ledger"
+                    ),
+                    "applied": "unknown",
+                },
+            ) from exc
+        payload = {"items": [result.to_dict() for result in results], "count": len(results)}
+        if any(not result.ok for result in results):
+            return JSONResponse(status_code=503, content=payload)
+        return payload
 
     # Opaque-principal transport.  Identity-provider subjects can contain
     # slashes, pipes, spaces and Unicode, so new clients keep them out of URL
@@ -313,6 +562,21 @@ def create_agent_control_plane_router() -> APIRouter:
             actor=_actor(request),
         )
         return _result_response(result)
+
+    @router.post("/principals/contain-timeboxed")
+    async def opaque_contain_timeboxed(request: Request, body: TimeboxedContainIn):
+        require_permission(request, "admin")
+        result = await _mutation_call(
+            "timeboxed-contain",
+            body.principal,
+            acp.contain_timeboxed,
+            body.principal,
+            reason=body.reason,
+            release_after_seconds=body.release_after_seconds,
+            idempotency_key=body.idempotency_key,
+            actor=_actor(request),
+        )
+        return _timeboxed_result_response(result)
 
     @router.post("/principals/release")
     async def opaque_release(request: Request, body: PrincipalIn):

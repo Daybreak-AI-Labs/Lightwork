@@ -165,6 +165,15 @@ def test_agent_console_source_uses_bounded_governed_interactions() -> None:
     assert template.count('name="principal" maxlength="512"') == 2
     assert 'request("/principals/" + verb' in source
     assert 'request("/principals/ledger?" + query.toString())' in source
+    assert 'request("/bulk/select"' in source
+    assert 'request("/bulk/actions"' in source
+    assert "validateFleetSelection" in source
+    assert "review a new exact selection" in source
+    assert 'id="acp-fleet-form"' in template
+    assert 'id="acp-fleet-review"' in template
+    assert 'id="acp-fleet-apply"' in template
+    assert 'id="acp-fleet-selection-state"' in template
+    assert "Snapshot-pinned controls" in template
     assert "--text-muted: var(--muted);" in shared_css
 
 
