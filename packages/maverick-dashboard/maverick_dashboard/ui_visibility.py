@@ -310,6 +310,18 @@ PAGES: tuple[dict, ...] = (
         "default": "view",
     },
     # -- Govern ---------------------------------------------------------------
+    # The Autonomous Compliance product landing: the six compliance suites
+    # presented as one product, each module carrying its shipped/preview/
+    # external status. A read-only overview, so the view floor is right; it
+    # heads the Govern group as the front door to the compliance surface.
+    {
+        "path": "/autonomous-compliance",
+        "label": "Autonomous Compliance",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "view",
+        "default": "view",
+    },
     {
         "path": "/approvals",
         "label": "Approvals",
