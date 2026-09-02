@@ -1123,6 +1123,40 @@ def test_write_config_omits_self_modify_when_off(
     assert "self_modify" not in parsed
 
 
+def test_pick_advanced_includes_commerce(monkeypatch):
+    # The Commerce suite tools are a new capability: knob (rule 5) AND wizard
+    # step (rule 6). Off by default, like fleet_memory.
+    _StubQ(monkeypatch)
+    from maverick_installer.wizard import AGENT_SUITES, pick_advanced
+    adv = pick_advanced()
+    assert "commerce" in adv
+    assert adv["commerce"] is False
+    # ...and the suite itself is toggleable under [suites] like every other.
+    assert "commerce" in {key for key, _label in AGENT_SUITES}
+
+
+def test_write_config_emits_commerce(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"commerce": True})
+    assert parsed["commerce"]["enable"] is True
+    assert parsed["commerce"]["backend"] == "demo"
+    # The wizard-written section is exactly what the kernel reads back.
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    resolved = config.get_commerce()
+    assert resolved["enable"] is True
+    assert resolved["backend"] == "demo"
+    assert resolved["max_session_spend"] > 0  # caps default, never "no cap"
+    from maverick import commerce
+    monkeypatch.delenv("MAVERICK_COMMERCE", raising=False)
+    assert commerce.enabled() is True
+
+
+@pytest.mark.parametrize("advanced", [{}, {"commerce": False}])
+def test_write_config_omits_commerce_when_off(tmp_path: Path, monkeypatch, advanced):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced=advanced)
+    assert "commerce" not in parsed
+
+
 def test_pick_advanced_includes_adapter_rung(monkeypatch):
     _StubQ(monkeypatch)
     from maverick_installer.wizard import pick_advanced

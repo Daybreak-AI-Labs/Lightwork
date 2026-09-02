@@ -1482,10 +1482,11 @@ here.
   dashboard overlay. Savings = human cost − actual agent spend, plus ROI
   and hours given back. Read-only over the same episode ledger as Spend;
   zeros (never invented numbers) until goals have run.
-- **2,020-agent specialist portfolio across 53 suites** — the original 8
+- **2,031-agent specialist portfolio across 54 suites** — the original 8
   business suites plus customer experience, marketing, procurement,
   data & analytics, security ops, executive office, facilities/EHS, tax
-  preparation, and 30+ industry verticals (healthcare, insurance, banking,
+  preparation, commerce (shopper + merchant agents), and 30+ industry
+  verticals (healthcare, insurance, banking,
   retail, manufacturing, construction, logistics, professional services,
   government contracting, education/nonprofit), with jurisdiction packs
   (country employment law, GDPR/CCPA/PIPL/EU-AI-Act regimes, indirect-tax
@@ -1524,6 +1525,31 @@ here.
   client-data access — the inverse seal of the rest of the suite)
   monitors IRS/state guidance and alerts the firm; agents never edit
   constants directly.
+- **Commerce suite — governed shopper and merchant agents** (`commerce.py`,
+  `tools/commerce_tools.py`; the `com_` suite: `com_shop_*` search & compare,
+  cart builder, product Q&A, order tracking & returns, preference memory;
+  `com_merch_*` analytics, inventory, pricing, promotions, listing quality,
+  order ops; opt-in `[commerce] enable` / `MAVERICK_COMMERCE`, wizard step)
+  — the design of Anthropic's Apache-2.0 `commerce-agents` reference brought
+  under Lightwork governance. `StorefrontBackend` (search / product / cart
+  add-remove-view / cart link / own orders / return policy) and
+  `MerchantBackend` (catalog / inventory / pricing / orders / analytics /
+  campaigns reads + one `apply_change` for APPROVED changes) are abstract
+  interfaces with an in-memory `DemoBackend`; a real storefront plugs in via
+  `register_backend`. The safety rules live in the module, not the prompts:
+  **per-session caps** (cart subtotal, per-line quantity, cart size — a
+  refused add is final), a **provenance gate** (every product fact carries
+  `source` + `fetched_at` or is rejected), **staged writes** (a price /
+  inventory / listing / campaign / order-resolution / return proposal is
+  recorded in a ledger and applied only with the human-path approval token,
+  never by the proposing agent, and never by an `agent:` principal), and a
+  **checkout handoff** that returns an opaque cart reference plus a
+  scheme-host-path cart link — query strings, fragments, and anything naming
+  the checkout/payment step are stripped or refused, so the agent never sees
+  a card, an address, or the checkout URL. Shopper packs are fenced to the
+  storefront (web search and browser denied); every `com_` pack is STRICT
+  autonomy and carries the commerce refusals (no payment handling, no store
+  writes, no unsourced product claims).
 - **Institutional Memory attestation — is it really compounding, and really
   yours?** (`memory_plane.py`, `maverick memory-plane compounding|export|verify`)
   — the `attest` half of Bet 2's ingest/recall/attest API, riding the **same

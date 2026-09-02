@@ -24,6 +24,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--domain`, `TEXT` or `--file PATH`). Default-on under `[cortex] enable`
   (`MAVERICK_CORTEX` overrides), offered as an advanced installer step beside
   fleet memory and included in the express and governance-profile presets.
+- **Commerce suite** — a governed shopper + merchant agent suite (`com_`
+  packs; `[commerce] enable` / `MAVERICK_COMMERCE`, default off, with a wizard
+  step). Shopper side: search & compare, cart builder, product Q&A, order
+  tracking & returns, and an explicit preference memory; merchant side:
+  analytics, inventory, pricing, promotions, listing quality, and order ops.
+  The kernel module `maverick.commerce` defines the `StorefrontBackend` /
+  `MerchantBackend` interfaces plus an in-memory `DemoBackend`, and encodes the
+  safety rules in code rather than prompts: per-session spend, per-line
+  quantity, and cart-size caps; a provenance gate (every product fact carries
+  its source and `fetched_at`); staged writes that only a human approval token
+  can apply (price, inventory, listing, campaign, order resolution, return
+  request); and a `checkout_handoff()` that returns an opaque cart reference
+  and link — never payment, address, or checkout-page details. Design follows
+  Anthropic's Apache-2.0 `commerce-agents` reference (no code copied).
 - **AI Evidence-Ready Gateway and operator cockpit** — governed evidence intake,
   review queues, readiness/health visibility, and first-run guidance now share
   one operator-facing workflow with durable audit checkpoints.

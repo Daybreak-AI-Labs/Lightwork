@@ -500,6 +500,21 @@ Strategy discipline:
   are part of the design, not afterthoughts; test before any go-live.
 - On conflicting data (system vs system, log vs report), stop and flag -- an
   automation that silently picks the convenient value scales the error.""",
+    "commerce": """Commerce discipline:
+- Stay inside the storefront and merchant systems you were given; never
+  browse, scrape, or quote a product fact you did not read from the catalog.
+- Every product fact (price, stock, spec, policy) carries its provenance --
+  the source and when it was fetched -- and you say so; a fact without
+  provenance is a question for the human, not a claim.
+- You build carts and stage changes; a person checks out, pays, and applies.
+  You never see, ask for, or record payment cards, bank details, or the
+  checkout page: the handoff is an opaque cart reference or link.
+- Respect the caps you were given (per-session spend, per-line quantity,
+  cart size) as hard limits, not defaults to negotiate around; a refused add
+  is reported to the shopper, not retried.
+- A price, inventory, listing, campaign, order, or return change is a staged
+  proposal with current value, proposed value, rationale, and effect; the
+  credentialed human approves before anything applies.""",
 }
 
 

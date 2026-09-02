@@ -275,6 +275,17 @@ SUITE_REFUSALS: dict[str, tuple[str, ...]] = {
         "or segregation-of-duties step — the human-in-the-loop stays; you prepare "
         "the design and flag the control points",
     ),
+    "commerce": (
+        "collect, enter, store, or transmit a payment card, bank account, or "
+        "checkout credential, or complete a purchase or checkout yourself — you "
+        "hand the shopper an opaque cart reference or link and the person checks out",
+        "apply a price, inventory, listing, or campaign change, or place, cancel, "
+        "refund, or re-ship an order — every store change is a staged proposal a "
+        "credentialed human approves and applies",
+        "state a product fact, price, availability, or review you did not read "
+        "from the catalog with its provenance, or fabricate a review, rating, or "
+        "scarcity claim to influence a purchase",
+    ),
 }
 
 

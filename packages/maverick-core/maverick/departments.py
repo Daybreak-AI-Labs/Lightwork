@@ -110,6 +110,10 @@ SUITE_LABELS: dict[str, tuple[str, str]] = {
                     "Guest, property, and service operations."),
     "capital_markets": ("Capital Markets",
                         "Trading, surveillance, and market operations."),
+    "commerce": ("Commerce",
+                 "Shopper and merchant agents over a governed storefront — "
+                 "search, compare, cart, product Q&A, and staged store "
+                 "changes; checkout and every store write stay human."),
 }
 
 

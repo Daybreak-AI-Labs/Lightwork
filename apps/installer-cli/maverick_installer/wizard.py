@@ -3976,6 +3976,17 @@ def pick_advanced() -> dict[str, Any]:
             "`maverick cortex status`. ON by default.",
             default=True,
         ),
+        "commerce": _q_confirm(
+            "Commerce suite tools? Give the com_ shopper and merchant packs "
+            "their storefront/merchant tools: search, compare, cart-building "
+            "under per-session spend and quantity caps, product Q&A with "
+            "provenance, and STAGED store changes a human approves. The agent "
+            "never sees payment details or the checkout page -- it hands off "
+            "an opaque cart link. Ships with the in-memory demo backend; a "
+            "real storefront is plugged in via maverick.commerce. OFF by "
+            "default.",
+            default=False,
+        ),
         "external_agents": _q_confirm(
             "External-agent gateway? Govern agents built on OTHER platforms "
             "(Salesforce Agentforce, AWS Bedrock, custom runtimes): enroll "
@@ -5719,6 +5730,7 @@ AGENT_SUITES: list[tuple[str, str]] = [
     ("knowledge_management", "Knowledge Management"),
     ("trust_safety", "Trust & Safety"),
     ("process_automation", "Process Automation & Workflows"),
+    ("commerce", "Commerce (Shopper & Merchant Agents)"),
 ]
 
 
@@ -7294,6 +7306,15 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# memory -- tenant-exact, one audit row per read and per write. Each")
         lines.append("# source's own toggle still applies. `maverick cortex status` shows it.")
         lines.append("enable = true")
+    if advanced.get("commerce"):
+        lines.append("")
+        lines.append("[commerce]")
+        lines.append("enable = true")
+        lines.append('backend = "demo"          # in-memory reference backend; register a real one')
+        lines.append("#                           # via maverick.commerce.register_backend")
+        lines.append("# max_session_spend = 500.0 # per-session cart cap, store currency")
+        lines.append("# max_line_quantity = 10    # per-line quantity cap")
+        lines.append("# max_cart_lines = 25       # distinct lines per cart")
     if advanced.get("external_agents"):
         lines.append("")
         lines.append("[external_agents]")
