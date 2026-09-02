@@ -731,6 +731,7 @@ def base_registry(
         import logging as _repl_logging
         _repl_logging.getLogger(__name__).warning(
             "repl tool registration skipped: %s", e)
+    _apply_commerce_tools(reg, principal)
 
     from .a11y import a11y
     from .a11y_tree import a11y_tree
@@ -1600,6 +1601,23 @@ def _apply_grpc_plugins(reg: ToolRegistry) -> None:
             reg.register(t)
     except Exception:  # pragma: no cover -- plugin failure never blocks boot
         pass
+
+
+def _apply_commerce_tools(reg: ToolRegistry, principal: str | None) -> None:
+    # Commerce suite (shopper + merchant tools over the governed storefront /
+    # merchant backends). Registered ONLY when [commerce] enable is on, so the
+    # default catalog is unchanged; the caps, provenance gate, staged writes and
+    # opaque checkout handoff live in maverick.commerce, not in the prompts.
+    try:
+        from ..commerce import enabled as _commerce_enabled
+        if _commerce_enabled():
+            from .commerce_tools import commerce_tools
+            for tool in commerce_tools(principal=principal or None):
+                reg.register(tool)
+    except Exception as e:  # pragma: no cover - config read must not break setup
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "commerce tool registration skipped: %s", e)
 
 
 def _apply_generated_tools(reg: ToolRegistry, sandbox: Any = None) -> None:

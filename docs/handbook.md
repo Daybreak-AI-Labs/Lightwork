@@ -268,7 +268,7 @@ Defense in depth, each layer independent:
 6. **Audit** — everything recorded, signed, verifiable after the fact.
 
 These are not just claimed; they are *tested at roster scale*. A governance
-invariant test suite verifies six invariants across all 2,020 packs — (1)
+invariant test suite verifies six invariants across all 2,031 packs — (1)
 tool-reachability (no drafting/non-builder agent can reach a state-mutating
 tool), (2) the autonomy dial (an onboarding agent, or any high-risk action, is
 never autonomous), (3) capability attenuation (a spawned child can never exceed

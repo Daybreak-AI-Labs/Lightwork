@@ -484,6 +484,9 @@ SUITE_PREFIXES: dict[str, str] = {
     "km_": "knowledge_management",
     "tns_": "trust_safety",
     "bpa_": "process_automation",
+    # Commerce suite: shopper-side (com_shop_*) and merchant-side (com_merch_*)
+    # agents over the governed storefront/merchant backends (maverick.commerce).
+    "com_": "commerce",
 }
 
 

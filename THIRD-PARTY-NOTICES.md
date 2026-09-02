@@ -119,6 +119,12 @@ only; not bundled into distributed wheels.
 `agent-shield` — declared as an optional extra; the kernel runs without it
 (fail-open) and it is not bundled. If you ship it, add its license here.
 
+## Design references (no code redistributed)
+
+| Project | License | What was used |
+|---|---|---|
+| `anthropics/commerce-agents` (https://github.com/anthropics/commerce-agents) | Apache-2.0 | Design only, for the Commerce suite (`maverick.commerce`, `com_` packs): the shopper/merchant agent split, the `StorefrontBackend` / `MerchantBackend` interface shape, and the safety posture (storefront fencing, provenance gates, spend/quantity caps, staged writes behind human approval, and a checkout handoff in which the agent never sees payment details or the checkout URL). No source code was copied. |
+
 ---
 
 _To regenerate this inventory authoritatively (including transitive deps and

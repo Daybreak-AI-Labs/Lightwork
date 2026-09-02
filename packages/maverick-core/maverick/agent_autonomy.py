@@ -315,6 +315,9 @@ _STRICT_SUITES: frozenset[str] = frozenset({
     "utilities", "water_utilities", "renewables_cleantech", "semiconductors",
     "maritime", "mining_metals", "nuclear_power", "executive_office",
     "esg_sustainability", "enterprise_risk", "trust_safety",
+    # Commerce moves money and changes a live store: every cart handoff and
+    # store change is staged for a person.
+    "commerce",
 })
 
 

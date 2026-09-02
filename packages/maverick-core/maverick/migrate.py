@@ -122,6 +122,10 @@ KNOWN_SECTIONS = frozenset({
     # Cortex, the governed company memory over every source (maverick.cortex
     # reads [cortex] enable; the wizard writes it beside [fleet_memory]).
     "cortex",
+    # Commerce suite (maverick.commerce): opt-in shopper/merchant tool surface
+    # with per-session caps; read by config.get_commerce and written by the
+    # wizard's advanced step.
+    "commerce",
     # Structured rubric verifier + JitRL test-time adaptation: read by
     # load_config (config.get_reasoning_reward / get_jit_rl) and written by the
     # wizard's advanced opt-out steps.

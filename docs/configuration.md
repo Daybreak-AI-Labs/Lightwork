@@ -472,6 +472,18 @@ enable = true              # one governed recall/deposit surface over knowledge
                            #   source's own toggle still applies. Operator
                            #   commands: `maverick cortex status|recall|deposit`.
                            #   Env: MAVERICK_CORTEX.
+[commerce]                 # Commerce suite tools (com_shop_* / com_merch_* packs)
+enable = false             # explicit opt-in; env: MAVERICK_COMMERCE
+backend = "demo"           # in-memory reference backend; a real storefront/
+                           #   merchant system registers via
+                           #   maverick.commerce.register_backend(name, factory)
+max_session_spend = 500.0  # cart subtotal cap per session (store currency)
+max_line_quantity = 10     # per-line quantity cap
+max_cart_lines = 25        # distinct lines per cart
+# The caps, the provenance gate, staged writes (only a human approval token
+# applies a price/inventory/listing/campaign/order change) and the opaque
+# checkout handoff are enforced in maverick.commerce, not in prompts. The
+# agent never sees payment, address, or checkout-page details.
 [shoring]                  # Autonomous Shoring engagement tooling (dashboard
                            #   /shoring: book of work, measured SLAs, exception
                            #   desk). ON by default — a kill switch, not a gate.

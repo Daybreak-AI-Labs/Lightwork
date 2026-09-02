@@ -1770,6 +1770,36 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_commerce() -> dict:
+    """Return the ``[commerce]`` section (shopper + merchant agent surface over
+    the governed storefront/merchant backends, :mod:`maverick.commerce`).
+    OFF by default: exposing cart-building and store-change proposals is an
+    explicit opt-in, like ``[fleet_memory]``. Also honored via
+    ``MAVERICK_COMMERCE=1``. The caps are read as numbers; a malformed or
+    non-positive cap falls back to its (tighter) default rather than to "no
+    cap"."""
+    cfg = load_config().get("commerce", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    backend = cfg.get("backend", "demo")
+    out: dict = {
+        "enable": _strict_config_bool(cfg, "enable", False),
+        "backend": backend.strip() if isinstance(backend, str) and backend.strip() else "demo",
+    }
+    for key, default, cast in (
+        ("max_session_spend", 500.0, float),
+        ("max_line_quantity", 10, int),
+        ("max_cart_lines", 25, int),
+    ):
+        raw = cfg.get(key, default)
+        try:
+            value = cast(raw) if not isinstance(raw, bool) else default
+        except (TypeError, ValueError):
+            value = default
+        out[key] = value if value > 0 else default
+    return out
+
+
 def get_external_agents() -> dict:
     """Return the ``[external_agents]`` section (bring-your-own-agent gateway:
     enrollment, run ingest onto the Operating Record, pre-action screening).

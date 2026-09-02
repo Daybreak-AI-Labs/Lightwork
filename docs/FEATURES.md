@@ -407,7 +407,7 @@ here.
   maker-checker + SoD, legal privilege, HR PII-minimization, IT/GRC
   chain-of-custody, ops safety interlocks, engineering tests-first, GTM
   no-overpromising, strategy source-grounding). One implementation point
-  upgrades all 2,020 built-in packs AND operator/intake-generated packs;
+  upgrades all 2,031 built-in packs AND operator/intake-generated packs;
   prompts only — hard limits stay with capabilities/governance.
 - **Hard refusals** (`domain_refusals.py`, always on — a prohibited use is not
   an operator preference) — every pack's prompt carries a non-negotiable
@@ -420,7 +420,7 @@ here.
   Packs add their own via a `refuse = [...]` field; the rails (capability /
   governance / Shield) still enforce independently — this makes the agent
   refuse *before* a rail is tested.
-- **Pack consumption surface** — every one of the 2,020 packs now declares an
+- **Pack consumption surface** — every one of the 2,031 packs now declares an
   `[output]` contract (deliverable shape, consumers, cadence, sign-off gate) and
   an editable `[[workflow]]` playbook (the ordered procedure, each step naming
   only the pack's own tools and ending in the human gate). Rendered into the
@@ -441,7 +441,7 @@ here.
   = ALL tools, missing/unknown `max_risk`, invalid `effort` tier), warnings
   for quality gaps (thin persona, allow∩deny overlap, no knowledge sources, a
   read-only pack not explicitly denying the `shell`/`write_file` floor, an
-  `output.gate` lighter than the playbook's final sign-off). All 2,020 built-in
+  `output.gate` lighter than the playbook's final sign-off). All 2,031 built-in
   packs lint clean (0 errors, 0 warnings); every pack carries at least a
   suite-level `knowledge_sources` grounding fallback.
 - **Governance-posture audit** — `maverick domains-audit [--json <path>
@@ -458,7 +458,7 @@ here.
   `/billing` view shows a tenant's accrued charges, period-over-period trend,
   and an itemized CSV invoice.
 - **Per-pack behavioral evals** — `maverick domains-eval [--check]`
-- **Roster-wide governance invariant suite** (verified across ALL 2,020 packs,
+- **Roster-wide governance invariant suite** (verified across ALL 2,031 packs,
   fault-injected with a non-vacuous control) — six invariants proven non-vacuously
   (each carries a fault-injection control that fails when the guarantee is
   removed): (1) **tool-reachability** — no drafting/non-builder agent can reach
@@ -482,7 +482,7 @@ here.
   runner; `--check` lints the suite against the roster (key-free CI gate) while
   `run_eval(cases, runner)` scores live when a provider key is present.
 - **Specialist routing** (`domain_router.py`, wired into `list_specialists
-  query=<task>`) — a pre-filter that ranks the whole 2,020-pack roster for a
+  query=<task>`) — a pre-filter that ranks the whole 2,031-pack roster for a
   task so the orchestrator picks from a shortlist, not a haystack: lexical
   TF-IDF blended with sentence-transformer cosine when `fastembed` is installed
   (paraphrase-aware), graceful lexical-only fallback otherwise. A 25-case
@@ -1482,6 +1482,7 @@ here.
   dashboard overlay. Savings = human cost − actual agent spend, plus ROI
   and hours given back. Read-only over the same episode ledger as Spend;
   zeros (never invented numbers) until goals have run.
+- **2,031-agent specialist portfolio across 54 suites** — the original 8
 - **Autonomous Shoring** (`shoring.py`, dashboard `/shoring` +
   `/api/v1/shoring`; `[shoring] enable`, `MAVERICK_SHORING`) — the engagement
   tooling for moving a whole business function onto the workforce: a tenant-
@@ -1497,13 +1498,14 @@ here.
 - **2,020-agent specialist portfolio across 53 suites** — the original 8
   business suites plus customer experience, marketing, procurement,
   data & analytics, security ops, executive office, facilities/EHS, tax
-  preparation, and 30+ industry verticals (healthcare, insurance, banking,
+  preparation, commerce (shopper + merchant agents), and 30+ industry
+  verticals (healthcare, insurance, banking,
   retail, manufacturing, construction, logistics, professional services,
   government contracting, education/nonprofit), with jurisdiction packs
   (country employment law, GDPR/CCPA/PIPL/EU-AI-Act regimes, indirect-tax
   regimes). Quality gate: `maverick domains-lint [--ci]` — every pack has
   a bounded persona, least-privilege allow list, explicit deny list, and
-  risk ceiling; 0 errors, 0 warnings across all 2,020.
+  risk ceiling; 0 errors, 0 warnings across all 2,031.
 - **Tax preparation pipeline** (`tax_prep.py`, `maverick tax prepare
   <docs-dir>`; the 19-pack `tax_` suite) — a CPA firm's docs-to-draft
   workflow: uploaded client documents are classified and extracted
@@ -1536,6 +1538,31 @@ here.
   client-data access — the inverse seal of the rest of the suite)
   monitors IRS/state guidance and alerts the firm; agents never edit
   constants directly.
+- **Commerce suite — governed shopper and merchant agents** (`commerce.py`,
+  `tools/commerce_tools.py`; the `com_` suite: `com_shop_*` search & compare,
+  cart builder, product Q&A, order tracking & returns, preference memory;
+  `com_merch_*` analytics, inventory, pricing, promotions, listing quality,
+  order ops; opt-in `[commerce] enable` / `MAVERICK_COMMERCE`, wizard step)
+  — the design of Anthropic's Apache-2.0 `commerce-agents` reference brought
+  under Lightwork governance. `StorefrontBackend` (search / product / cart
+  add-remove-view / cart link / own orders / return policy) and
+  `MerchantBackend` (catalog / inventory / pricing / orders / analytics /
+  campaigns reads + one `apply_change` for APPROVED changes) are abstract
+  interfaces with an in-memory `DemoBackend`; a real storefront plugs in via
+  `register_backend`. The safety rules live in the module, not the prompts:
+  **per-session caps** (cart subtotal, per-line quantity, cart size — a
+  refused add is final), a **provenance gate** (every product fact carries
+  `source` + `fetched_at` or is rejected), **staged writes** (a price /
+  inventory / listing / campaign / order-resolution / return proposal is
+  recorded in a ledger and applied only with the human-path approval token,
+  never by the proposing agent, and never by an `agent:` principal), and a
+  **checkout handoff** that returns an opaque cart reference plus a
+  scheme-host-path cart link — query strings, fragments, and anything naming
+  the checkout/payment step are stripped or refused, so the agent never sees
+  a card, an address, or the checkout URL. Shopper packs are fenced to the
+  storefront (web search and browser denied); every `com_` pack is STRICT
+  autonomy and carries the commerce refusals (no payment handling, no store
+  writes, no unsourced product claims).
 - **Institutional Memory attestation — is it really compounding, and really
   yours?** (`memory_plane.py`, `maverick memory-plane compounding|export|verify`)
   — the `attest` half of Bet 2's ingest/recall/attest API, riding the **same

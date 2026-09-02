@@ -34,6 +34,7 @@ _GTM = _by_prefix("gtm_")
 _HR = _by_prefix("hr_")
 _STRAT = _by_prefix("strat_")
 _PE = _by_prefix("pe_")
+_COM = _by_prefix("com_")
 
 # P&E splits into coding *builders* (sandbox shell/code_exec) and read-only seats.
 _PE_BUILDERS = {k: v for k, v in _PE.items()
@@ -54,6 +55,7 @@ def test_suites_present():
     assert len(_STRAT) >= 31, f"expected >=31 Strategy packs, found {len(_STRAT)}"
     assert len(_PE) >= 46, f"expected >=46 Product&Eng packs, found {len(_PE)}"
     assert len(_PE_BUILDERS) >= 20, f"expected >=20 P&E builders, found {len(_PE_BUILDERS)}"
+    assert len(_COM) >= 11, f"expected >=11 Commerce packs, found {len(_COM)}"
 
 
 def test_every_suite_pack_loads_with_persona_and_compartment():
@@ -122,7 +124,7 @@ def test_suite_compartments_match_their_prefix():
     # A pack's compartment shares its suite prefix, so a Rung-2 seal quarantines the
     # whole suite/tower at once (the factory<->safety hinge).
     for pre, packs in (("itgrc_", _ITGRC), ("gtm_", _GTM), ("hr_", _HR),
-                       ("strat_", _STRAT), ("pe_", _PE)):
+                       ("strat_", _STRAT), ("pe_", _PE), ("com_", _COM)):
         for name, p in packs.items():
             assert p.compartment.startswith(pre), f"{name}: compartment={p.compartment!r}"
 

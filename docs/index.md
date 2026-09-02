@@ -3,7 +3,7 @@
 > Enterprise recursive multi-agent swarm. One kernel, every model.
 
 Lightwork is an **agentic enterprise platform**: a governed AI workforce of
-2,020 prebuilt specialists across 53 business suites that provably improves
+2,031 prebuilt specialists across 53 business suites that provably improves
 with use — deployed in your own environment. It drives any
 LLM (Claude, GPT, Kimi, Grok, Gemini, DeepSeek, Ollama, OpenRouter), and
 ships a governed, auditable safety surface built for regulated teams.
@@ -37,7 +37,7 @@ Lightwork is proprietary, commercially licensed software (see
 - **Proven governance**: a roster-wide invariant test suite checks six
   governance invariants (tool-reachability, autonomy dial, capability
   attenuation, compartment isolation, unstrippable hard refusals, budget
-  caps) across all 2,020 packs with a non-vacuous fault-injection control
+  caps) across all 2,031 packs with a non-vacuous fault-injection control
   (property-fuzzed up to 5,000 iterations),
   plus hostile-argument fuzzing of every connector and tool.
   Email, Matrix, WhatsApp, SMS, iMessage — one config, all channels.

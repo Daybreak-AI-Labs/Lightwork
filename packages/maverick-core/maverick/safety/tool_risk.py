@@ -247,6 +247,27 @@ _DEFAULT_RISK: dict[str, str] = {
     "currency": "low",
     "preview_diff": "low",
     "erp_read": "low",  # read-only (GET) ERP access; no writes / host mutation
+    # Commerce suite (tools/commerce_tools.py). Reads are pure lookups over the
+    # storefront/merchant backend. The cart and proposal tools mutate only
+    # session state under module-enforced caps, or stage a change a human
+    # applies -- medium, never high: nothing here spends money or writes to the
+    # store, and the checkout handoff returns an opaque cart reference only.
+    "storefront_search": "low",
+    "storefront_product": "low",
+    "cart_view": "low",
+    "cart_add": "medium",
+    "cart_remove": "medium",
+    "checkout_handoff": "medium",
+    "shopper_orders_read": "low",
+    "shopper_stage_return": "medium",
+    "shopper_preferences": "medium",
+    "catalog_read": "low",
+    "inventory_read": "low",
+    "pricing_read": "low",
+    "orders_read": "low",
+    "analytics_read": "low",
+    "promotions_read": "low",
+    "merchant_stage_change": "medium",
     # Read-only Lightwork MCP queries.  Agent Trust max_risk ceilings use this
     # same table, so a low-risk remote principal sees queries but not mutations.
     "maverick_status": "low",

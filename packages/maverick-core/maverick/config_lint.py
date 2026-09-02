@@ -124,6 +124,15 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # signed-audit config looked like a typo (client-journey finding).
     "audit": {"sign", "worm", "unified"},
     "entity_graph": {"enable"},
+    # Commerce suite caps are money/quantity limits, so the schema is closed: a
+    # misspelled cap must not silently fall back to the default.
+    "commerce": {
+        "enable",
+        "backend",
+        "max_session_spend",
+        "max_line_quantity",
+        "max_cart_lines",
+    },
     "governance_inventory": {
         "enable",
         "retention_seconds",
@@ -532,6 +541,7 @@ _NUMERIC_KEYS: dict[str, set[str]] = {
         "max_output_tokens",
     },
     "sandbox": {"timeout", "pids_limit", "memory_mb", "cpus", "run_as_user"},
+    "commerce": {"max_session_spend", "max_line_quantity", "max_cart_lines"},
     "durable": {"keep_last"},
     "ekko": {
         "retention_days",
