@@ -9,6 +9,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
 <link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#07090D">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Second Shift: turnkey departments of specialist agents">
 <meta property="og:description" content="2,020 governed specialist packs across 53 suites, each with a fixed job, least-privilege tools, a risk ceiling, and a human who signs off. By Daybreak Labs.">
@@ -19,34 +20,67 @@
 </head>
 <body>
 
+<div class="sysbar">
+  <div class="wrap">
+    <span>Daybreak Labs &middot; Second Shift</span>
+    <span>2,020 packs &middot; 53 suites &middot; 21 corporate functions &middot; 32 industries</span>
+    <span class="live">Operating Record: signed, hash-chained</span>
+  </div>
+</div>
+
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="index.html">
-      <span class="brand-mark"><img src="daybreak-logo.png" alt="Daybreak Labs" width="970" height="305"></span>
-      <span class="brand-word">Lightwork</span>
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" aria-label="Primary">
+      <a href="product.html">Platform</a>
       <a href="index.html#products">Products</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
       <a href="autonomous-shoring.html">Autonomous Shoring</a>
       <a href="security.html">Security</a>
       <a href="company.html">Company</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
+      <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
     </div>
   </div>
 </header>
 
 <!-- HERO -->
 <section class="hero">
-  <div class="wrap">
-    <span class="eyebrow">Second Shift</span>
-    <h1 style="margin-top:16px;max-width:18ch">A workforce you switch on, not prompts you engineer.</h1>
-    <p class="lede">Second Shift is a library of turnkey departments: 53 suites spanning Finance, Tax, Legal, and 50 more. Each suite is a team of specialist packs, and each pack has a fixed job, a least-privilege tool set, a risk ceiling, and a human who signs off. You don't prompt them; you turn them on.</p>
-    <div class="hero-cta">
-      <a class="btn btn-primary" href="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
-      <a class="btn btn-ghost" href="product.html">See the platform</a>
+  <div class="wrap hero-grid">
+    <div class="hero-text">
+      <span class="pill"><span class="dot"></span> Second Shift &middot; 2,020 specialist packs</span>
+      <h1>A workforce you switch on, not prompts you engineer.</h1>
+      <div class="dline" role="presentation"></div>
+      <p class="lede">Second Shift is a library of turnkey departments: 53 suites spanning Finance, Tax, Legal, and 50 more. Each suite is a team of specialist packs, and each pack has a fixed job, a least-privilege tool set, a risk ceiling, and a human who signs off. You don't prompt them; you turn them on.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
+        <a class="btn btn-ghost" href="product.html">See the platform</a>
+      </div>
+      <div class="hero-marks">
+        <span><b>2,020</b> governed packs</span>
+        <span><b>53</b> suites</span>
+        <span><b>Least-privilege</b> tools, per pack</span>
+        <span><b>A human</b> signs off</span>
+      </div>
     </div>
+    <aside class="hero-art">
+      <div class="term">
+        <div class="bar"><span class="chip">tax for cpa firms &middot; documents to draft</span><span>operating record</span></div>
+        <div class="body">
+          <div class="row"><span>classify &middot; W-2 &middot; 1099 &middot; K-1 &middot; 1098</span><span class="ok">&#10003; EXTRACTED</span></div>
+          <div class="row"><span>standardized workpaper</span><span class="ok">&#10003; DRAFTED</span></div>
+          <div class="row"><span>first-pass 1040 &middot; every line cites its source</span><span class="ok">&#10003; DRAFTED</span></div>
+          <div class="row"><span>resident-state return</span><span class="ok">&#10003; DRAFTED</span></div>
+          <div class="row"><span>certify and release</span><span class="human">REQUIRE_HUMAN</span></div>
+          <div class="row"><span class="c">&middot; file the return &middot;</span><span class="deny">&#10007; DENY</span></div>
+        </div>
+      </div>
+      <p class="art-cap"><b>Fig. 02</b> &middot; One tax pack, documents to draft. The agents classify, extract and draft; a credentialed reviewer certifies and releases; filing is denied by rule. It never files.</p>
+    </aside>
   </div>
 </section>
 
@@ -54,23 +88,23 @@
 <section>
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Packs &amp; suites</span>
+      <span class="eyebrow"><span class="n">01</span> Packs &amp; suites</span>
       <h2>A turnkey department, under maker-checker discipline.</h2>
       <p>A pack is a single specialist agent with one fixed job; a suite is the department that bundles them. Each pack drafts and recommends; a credentialed human reviews and commits. 2,020 packs across 53 suites, ready to switch on.</p>
     </div>
     <div class="cols cols-3">
       <div class="card">
-        <div class="idx">01</div>
+        <span class="idx">01</span>
         <h3>A fixed job</h3>
         <p>Every agent has one bounded persona and one task: a 13-week cash forecaster, a 1099 extractor, a citation verifier. No open-ended prompt to engineer.</p>
       </div>
       <div class="card">
-        <div class="idx">02</div>
+        <span class="idx">02</span>
         <h3>Least privilege</h3>
         <p>Each agent gets a least-privilege tool set and a risk ceiling it cannot exceed: a narrow allow-list, an explicit deny-list, bound to every action.</p>
       </div>
       <div class="card">
-        <div class="idx">03</div>
+        <span class="idx">03</span>
         <h3>A human signs off</h3>
         <p>Agents draft and recommend; they don't commit. Work routes to a credentialed reviewer who certifies and releases it, maker-checker, built in.</p>
       </div>
@@ -78,28 +112,26 @@
   </div>
 </section>
 
-<hr class="rule">
-
 <!-- FLAGSHIP PACKS -->
-<section>
+<section class="panel">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Flagship packs</span>
+      <span class="eyebrow"><span class="n">02</span> Flagship packs</span>
       <h2>Three departments, deep enough to stand on their own.</h2>
     </div>
     <div class="cols cols-3">
       <div class="card">
-        <div class="idx">finance &middot; 70 packs</div>
+        <span class="idx">Finance &middot; 70 packs</span>
         <h3>Office of the CFO</h3>
         <p>The finance org as agents: controllership, FP&amp;A, treasury, assurance, and reporting. A hard &ldquo;never move money without a human&rdquo; guardrail, amount-aware approval tiers, a segregation-of-duties linter, and OFAC/SDN sanctions screening.</p>
       </div>
       <div class="card">
-        <div class="idx">tax &middot; 31 packs + pipeline</div>
+        <span class="idx">Tax &middot; 31 packs + pipeline</span>
         <h3>Tax for CPA firms</h3>
         <p>A documents-to-draft workflow: classify and extract W-2, the 1099 family, K-1, and 1098 into a standardized workpaper, then a first-pass 1040 plus the resident-state return. Every line cites its source document. It never files.</p>
       </div>
       <div class="card">
-        <div class="idx">legal &middot; 76 packs</div>
+        <span class="idx">Legal &middot; 76 packs</span>
         <h3>Legal &amp; Privacy</h3>
         <p>Contracts, litigation support, privacy regimes (GDPR/CCPA/PIPL/APPI plus US state laws), AI and emerging-tech counsel, antitrust, and board governance, with citation verification that strips any authority it can't confirm.</p>
       </div>
@@ -108,113 +140,114 @@
 </section>
 
 <!-- THE FULL CATALOG -->
-<section style="background:var(--paper-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+<section>
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">The full catalog</span>
+      <span class="eyebrow"><span class="n">03</span> The full catalog</span>
       <h2>53 suites. Twenty-one corporate functions, thirty-two industries.</h2>
       <p>The same discipline, pre-tuned for the buyer. Corporate-function suites cover the org chart; industry suites ship bundled with that industry's regime and jurisdiction content. Each line is a suite, with its specialist-pack count.</p>
     </div>
-
-    <h3 class="kicker-h" style="margin-top:52px">21 corporate-function suites</h3>
-    <div class="cols cols-3" style="margin-top:24px">
-      <div class="card">
-        <p style="margin-top:0">People &amp; HR &middot; 88</p>
-        <p>Sales &amp; GTM (RevOps) &middot; 81</p>
-        <p>IT &amp; GRC &middot; 76</p>
-        <p>Legal &middot; 76</p>
-        <p>Finance &middot; 70</p>
-        <p>Product &amp; Engineering &middot; 67</p>
-        <p>Operations &middot; 53</p>
-      </div>
-      <div class="card">
-        <p style="margin-top:0">Marketing &middot; 52</p>
-        <p>Strategy &amp; Corp Dev &middot; 51</p>
-        <p>Data &amp; Analytics &middot; 43</p>
-        <p>Customer Experience &middot; 41</p>
-        <p>Security Operations &middot; 36</p>
-        <p>Procurement &middot; 34</p>
-        <p>Tax &middot; 31</p>
-      </div>
-      <div class="card">
-        <p style="margin-top:0">Facilities &amp; EHS &middot; 20</p>
-        <p>Trust &amp; Safety &middot; 20</p>
-        <p>Executive Office &middot; 20</p>
-        <p>Enterprise Risk &middot; 20</p>
-        <p>ESG &amp; Sustainability &middot; 20</p>
-        <p>Process Automation &middot; 20</p>
-        <p>Knowledge Management &middot; 16</p>
-      </div>
+    <div class="stats four">
+      <div class="s"><div class="big">2,020</div><div class="lbl">governed specialist packs</div></div>
+      <div class="s"><div class="big">53</div><div class="lbl">suites, ready to switch on</div></div>
+      <div class="s"><div class="big">21</div><div class="lbl">corporate-function suites &middot; the org chart</div></div>
+      <div class="s"><div class="big">32</div><div class="lbl">industry suites &middot; regime and jurisdiction content bundled</div></div>
     </div>
-
-    <h3 class="kicker-h" style="margin-top:48px">32 industry suites</h3>
-    <div class="cols cols-3" style="margin-top:24px">
-      <div class="card">
-        <p style="margin-top:0">Insurance &middot; 53</p>
-        <p>Banking &middot; 51</p>
-        <p>Healthcare &middot; 50</p>
-        <p>Retail &middot; 47</p>
-        <p>Logistics &middot; 47</p>
-        <p>Manufacturing &middot; 47</p>
-        <p>Construction &middot; 45</p>
-        <p>Real Estate &middot; 40</p>
-        <p>Utilities &middot; 40</p>
-        <p>Government Contracting &middot; 40</p>
-        <p>Professional Services &middot; 40</p>
+    <div class="split" style="margin-top:44px">
+      <div class="term">
+        <div class="bar"><span class="chip">21 corporate-function suites</span><span>suite &middot; packs</span></div>
+        <div class="body">
+          <div class="row"><span>People &amp; HR</span><span class="cap">88</span></div>
+          <div class="row"><span>Sales &amp; GTM (RevOps)</span><span class="cap">81</span></div>
+          <div class="row"><span>IT &amp; GRC</span><span class="cap">76</span></div>
+          <div class="row"><span>Legal</span><span class="cap">76</span></div>
+          <div class="row"><span>Finance</span><span class="cap">70</span></div>
+          <div class="row"><span>Product &amp; Engineering</span><span class="cap">67</span></div>
+          <div class="row"><span>Operations</span><span class="cap">53</span></div>
+          <div class="row"><span>Marketing</span><span class="cap">52</span></div>
+          <div class="row"><span>Strategy &amp; Corp Dev</span><span class="cap">51</span></div>
+          <div class="row"><span>Data &amp; Analytics</span><span class="cap">43</span></div>
+          <div class="row"><span>Customer Experience</span><span class="cap">41</span></div>
+          <div class="row"><span>Security Operations</span><span class="cap">36</span></div>
+          <div class="row"><span>Procurement</span><span class="cap">34</span></div>
+          <div class="row"><span>Tax</span><span class="cap">31</span></div>
+          <div class="row"><span>Facilities &amp; EHS</span><span class="cap">20</span></div>
+          <div class="row"><span>Trust &amp; Safety</span><span class="cap">20</span></div>
+          <div class="row"><span>Executive Office</span><span class="cap">20</span></div>
+          <div class="row"><span>Enterprise Risk</span><span class="cap">20</span></div>
+          <div class="row"><span>ESG &amp; Sustainability</span><span class="cap">20</span></div>
+          <div class="row"><span>Process Automation</span><span class="cap">20</span></div>
+          <div class="row"><span>Knowledge Management</span><span class="cap">16</span></div>
+        </div>
       </div>
-      <div class="card">
-        <p style="margin-top:0">Education &amp; Nonprofit &middot; 38</p>
-        <p>Telecom &amp; Media &middot; 37</p>
-        <p>Hospitality &middot; 35</p>
-        <p>Pharma &amp; Life Sciences &middot; 31</p>
-        <p>Private Equity &amp; VC &middot; 30</p>
-        <p>Capital Markets &middot; 30</p>
-        <p>Travel &amp; Aviation &middot; 30</p>
-        <p>Oil &amp; Gas &middot; 27</p>
-        <p>Aerospace &amp; Defense &middot; 25</p>
-        <p>Agriculture &middot; 25</p>
-        <p>Public Sector &middot; 25</p>
-      </div>
-      <div class="card">
-        <p style="margin-top:0">Automotive &middot; 25</p>
-        <p>Chemicals &middot; 24</p>
-        <p>Semiconductors &middot; 24</p>
-        <p>Crypto &amp; Digital Assets &middot; 24</p>
-        <p>Water Utilities &middot; 24</p>
-        <p>Renewables &amp; Cleantech &middot; 24</p>
-        <p>Maritime &middot; 24</p>
-        <p>Medical Devices &middot; 24</p>
-        <p>Mining &amp; Metals &middot; 24</p>
-        <p>Food, Beverage &amp; CPG &middot; 24</p>
+      <div class="term">
+        <div class="bar"><span class="chip">32 industry suites</span><span>suite &middot; packs</span></div>
+        <div class="body">
+          <div class="row"><span>Insurance</span><span class="cap">53</span></div>
+          <div class="row"><span>Banking</span><span class="cap">51</span></div>
+          <div class="row"><span>Healthcare</span><span class="cap">50</span></div>
+          <div class="row"><span>Retail</span><span class="cap">47</span></div>
+          <div class="row"><span>Logistics</span><span class="cap">47</span></div>
+          <div class="row"><span>Manufacturing</span><span class="cap">47</span></div>
+          <div class="row"><span>Construction</span><span class="cap">45</span></div>
+          <div class="row"><span>Real Estate</span><span class="cap">40</span></div>
+          <div class="row"><span>Utilities</span><span class="cap">40</span></div>
+          <div class="row"><span>Government Contracting</span><span class="cap">40</span></div>
+          <div class="row"><span>Professional Services</span><span class="cap">40</span></div>
+          <div class="row"><span>Education &amp; Nonprofit</span><span class="cap">38</span></div>
+          <div class="row"><span>Telecom &amp; Media</span><span class="cap">37</span></div>
+          <div class="row"><span>Hospitality</span><span class="cap">35</span></div>
+          <div class="row"><span>Pharma &amp; Life Sciences</span><span class="cap">31</span></div>
+          <div class="row"><span>Private Equity &amp; VC</span><span class="cap">30</span></div>
+          <div class="row"><span>Capital Markets</span><span class="cap">30</span></div>
+          <div class="row"><span>Travel &amp; Aviation</span><span class="cap">30</span></div>
+          <div class="row"><span>Oil &amp; Gas</span><span class="cap">27</span></div>
+          <div class="row"><span>Aerospace &amp; Defense</span><span class="cap">25</span></div>
+          <div class="row"><span>Agriculture</span><span class="cap">25</span></div>
+          <div class="row"><span>Public Sector</span><span class="cap">25</span></div>
+          <div class="row"><span>Automotive</span><span class="cap">25</span></div>
+          <div class="row"><span>Chemicals</span><span class="cap">24</span></div>
+          <div class="row"><span>Semiconductors</span><span class="cap">24</span></div>
+          <div class="row"><span>Crypto &amp; Digital Assets</span><span class="cap">24</span></div>
+          <div class="row"><span>Water Utilities</span><span class="cap">24</span></div>
+          <div class="row"><span>Renewables &amp; Cleantech</span><span class="cap">24</span></div>
+          <div class="row"><span>Maritime</span><span class="cap">24</span></div>
+          <div class="row"><span>Medical Devices</span><span class="cap">24</span></div>
+          <div class="row"><span>Mining &amp; Metals</span><span class="cap">24</span></div>
+          <div class="row"><span>Food, Beverage &amp; CPG</span><span class="cap">24</span></div>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- THE QUALITY GATE (dark) -->
+<!-- THE QUALITY GATE -->
 <section class="on-navy">
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">The quality gate</span>
+      <span class="eyebrow"><span class="n">04</span> The quality gate</span>
       <h2>Every pack clears the same gate.</h2>
-      <p>Before a pack ships, every agent clears <span style="font-family:var(--mono);font-size:.85em">lightwork domains-lint</span>: a bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk ceiling. The same gate, across all 2,020.</p>
+      <p>Before a pack ships, every agent clears <code>lightwork domains-lint</code>: a bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk ceiling. The same gate, across all 2,020.</p>
     </div>
-    <div class="cols cols-2">
-      <div class="term">
-        <div class="bar"><span class="chip">lightwork domains-lint</span><span style="font-size:12px;color:var(--mint)">&#9679; every agent, every pack</span></div>
-        <div class="body">
-          <div class="c"># every agent checked, every pack</div>
-          <div class="row"><span>bounded persona</span><span class="ok">&#10003; PASS</span></div>
-          <div class="row"><span>least-privilege allow-list</span><span class="ok">&#10003; PASS</span></div>
-          <div class="row"><span>explicit deny-list</span><span class="deny">&#10007; move money</span></div>
-          <div class="row"><span>risk ceiling</span><span class="cap">CAPPED</span></div>
-          <div class="row"><span>2,020 packs &middot; 53 suites</span><span class="ok">&#10003; ENFORCED</span></div>
+    <div class="split" style="margin-top:44px">
+      <div>
+        <div class="term">
+          <div class="bar"><span class="chip">lightwork domains-lint</span><span>every agent, every pack</span></div>
+          <div class="body">
+            <div class="c"># every agent checked, every pack</div>
+            <div class="row"><span>bounded persona</span><span class="ok">&#10003; PASS</span></div>
+            <div class="row"><span>least-privilege allow-list</span><span class="ok">&#10003; PASS</span></div>
+            <div class="row"><span>explicit deny-list</span><span class="deny">&#10007; move money</span></div>
+            <div class="row"><span>risk ceiling</span><span class="cap">CAPPED</span></div>
+            <div class="row"><span>2,020 packs &middot; 53 suites</span><span class="ok">&#10003; ENFORCED</span></div>
+          </div>
         </div>
+        <p class="figcap"><b>Fig. 03</b> &middot; The lint every pack clears before it ships. The deny-list row is an entry doing its job: &ldquo;move money&rdquo; is refused, by rule.</p>
       </div>
-      <div class="qcol">
+      <div>
         <h3>More valuable on Gold and Platinum</h3>
         <p>Packs attach to any platform tier. On Gold and Platinum, the governance and learning layers wrap around them (capability tokens, the policy engine, the signed audit, and provable improvement), so a department doesn't just work, it clears a review and gets better under proof.</p>
-        <p style="margin-top:18px"><a class="btn-link" href="product.html">See how the platform governs every action &rarr;</a></p>
+        <p><a class="btn-link" href="product.html">See how the platform governs every action &rarr;</a></p>
       </div>
     </div>
   </div>
@@ -224,22 +257,31 @@
 <section>
   <div class="wrap">
     <div class="sec-head">
-      <span class="eyebrow">Need one we don't ship?</span>
+      <span class="eyebrow"><span class="n">05</span> Need one we don't ship?</span>
       <h2>When no pack fits, the workforce builds it.</h2>
-      <p>An agent factory synthesizes a new pack &mdash; from a description of the job, or a demonstration of a person doing it &mdash; through the same governed intake: clamped to a least-privilege envelope and cleared by <span style="font-family:var(--mono);font-size:.85em">domains-lint</span> before it ships. It improves with every run, and never widens an existing pack's envelope. <a class="btn-link" href="daybreak-forge.html">See Daybreak Forge &rarr;</a></p>
+      <p>An agent factory synthesizes a new pack, from a description of the job or a demonstration of a person doing it, through the same governed intake: clamped to a least-privilege envelope and cleared by <code>domains-lint</code> before it ships. It improves with every run, and never widens an existing pack's envelope.</p>
     </div>
+    <div class="gate">
+      <div class="stage"><div class="n">01</div><div class="t">Describe or demonstrate</div><div class="d">A description of the job, or a person doing it while the factory watches.</div></div>
+      <div class="stage"><div class="n">02</div><div class="t">Governed intake</div><div class="d">The same intake every built-in pack goes through.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Clamp</div><div class="d">The new pack is clamped to a least-privilege envelope.</div></div>
+      <div class="stage"><div class="n">04</div><div class="t">Lint</div><div class="d">It clears domains-lint before it ships, like the other 2,020.</div></div>
+      <div class="stage final"><div class="n">05</div><div class="t">Ship and learn</div><div class="d">It improves with every run, and never widens an existing pack's envelope.</div></div>
+    </div>
+    <p class="muted" style="margin-top:26px;font-size:16px"><a class="btn-link" href="daybreak-forge.html">See Daybreak Forge &rarr;</a></p>
   </div>
 </section>
 
 <!-- FINAL CTA -->
 <section class="cta-final">
   <div class="wrap">
+    <div class="dline" role="presentation"></div>
     <span class="eyebrow">Get started</span>
-    <h2 style="margin-top:14px">Stand up a department this quarter.</h2>
+    <h2>Stand up a department this quarter.</h2>
     <p class="lede">Pick the pack closest to the work in front of you. We'll scope it on your data, under governance you can prove.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
-      <a class="btn btn-ghost" href="mailto:info@daybreakailabs.com?subject=Lightwork%20access">Request access</a>
+      <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
+      <a class="btn btn-ghost" href="mailto:chris@daybreakailabs.com?subject=Lightwork%20access">Request access</a>
     </div>
   </div>
 </section>
@@ -249,8 +291,9 @@
   <div class="wrap">
     <div class="top">
       <div>
-        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-logo.png" alt="Daybreak Labs" width="970" height="305"></span><span>Lightwork</span></div>
-        <p class="blurb">Daybreak Labs is an AI lab for agentic workforces, built on compliance and governance. Lightwork is its product.</p>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Lightwork is the product.</p>
+        <div class="dline" role="presentation"></div>
       </div>
       <div>
         <h4>Products</h4>
@@ -258,29 +301,31 @@
           <li><a href="product.html">Lightwork Platform</a></li>
           <li><a href="second-shift.html">Second Shift</a></li>
           <li><a href="fleet-governance.html">Fleet Governance</a></li>
-          <li><a href="daybreak-forge.html">Daybreak Forge</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
           <li><a href="autonomous-shoring.html">Autonomous Shoring &amp; BPO</a></li>
+          <li><a href="daybreak-forge.html">Daybreak Forge</a></li>
         </ul>
       </div>
       <div>
         <h4>Company</h4>
         <ul>
-          <li><a href="company.html">About</a></li>
+          <li><a href="company.html">About the lab</a></li>
           <li><a href="security.html">Security</a></li>
           <li><a href="company.html#contact">Contact</a></li>
+          <li><a href="mailto:chris@daybreakailabs.com?subject=Lightwork%20access">Request access</a></li>
         </ul>
       </div>
       <div>
         <h4>Contact</h4>
         <ul>
-          <li><a href="mailto:info@daybreakailabs.com">info@daybreakailabs.com</a></li>
+          <li><a href="mailto:chris@daybreakailabs.com">chris@daybreakailabs.com</a></li>
           <li><a href="tel:+14233229722">(423) 322-9722</a></li>
         </ul>
       </div>
     </div>
     <div class="legal">
       <span>&copy; 2026 Daybreak Labs. Lightwork is a product of Daybreak Labs.</span>
-      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; Private alpha</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; Self-hosted fonts, no trackers &middot; Private alpha</span>
     </div>
   </div>
 </footer>
