@@ -5,23 +5,33 @@ compliance and governance) and its product, **Lightwork**. Plain HTML + CSS + tw
 small scripts — no build step, no framework. Every claim is verifiable from this
 repo.
 
-## Design: "the lab"
+## Design: "neon lab"
 
-Second-edition design system (`styles.css`): a dark graphite ground, hairline
-cell grids, mono section indices, one brand blue, and the sunrise gradient from
-the mark used only as a thin *daybreak line*. Type is **Instrument Sans**
-(display + body) and **JetBrains Mono** (labels, indices, receipts), both
-self-hosted from `fonts/` so the site makes no third-party request except the
-Cloudflare analytics beacon. `lab.js` draws the homepage's "gate instrument"
-figure on a canvas (five gates, a signed record); it draws one static frame under
-`prefers-reduced-motion` and pauses off-screen. `app.js` is the demo-request modal.
+Third-edition design system (`styles.css`): a cinematic dark stage built from
+the mark's own circuit language. The homepage hero is a full-viewport canvas
+(`lab.js`): traces in the blue→violet→sunrise gradient draw themselves in, agent
+"actions" race along them through five gates into the sunrise, the ones that
+pass are signed and the ones that fail stop at a gate. The Cortex lattice (the
+company brain) is a second canvas figure on the homepage and the Cortex page.
+Type is **Manrope** (light weights, with `<b>` inside headings for emphasis) and
+**JetBrains Mono** (labels, indices, receipts), both self-hosted from `fonts/`
+so the site makes no third-party request except the Cloudflare analytics beacon.
+Cards carry a gradient border on hover; `.rv` elements reveal on scroll. Every
+animation draws one static frame under `prefers-reduced-motion` and pauses
+off-screen. `app.js` is the demo-request modal.
+
+Copy rules the owner set: no pack, agent, suite or department counts anywhere;
+no "data never leaves" / "no required egress" claims; deployment is always
+"self-hosted, air-gapped, or hosted by Daybreak Labs" (the hosted option is
+described, not linked).
 
 ## Pages
 | File | What it is |
 |---|---|
-| `index.html` | Home — hero + gate instrument, problem, how it works, why, Autonomous Compliance, Autonomous Shoring, six products, proof, security, who it's for, from the lab, CTA |
+| `index.html` | Home — the stage, problem, how it works, Cortex, why, Autonomous Compliance, Autonomous Shoring, seven products, proof, security, who it's for, from the lab, CTA |
 | `product.html` | Lightwork Platform — how the governed runtime works |
-| `second-shift.html` | Second Shift — the 2,020 specialist packs across 53 suites |
+| `cortex.html` | Cortex — the company brain: what it holds, who writes to it, how it's kept |
+| `second-shift.html` | Second Shift — turnkey departments of specialist agents |
 | `fleet-governance.html` | Fleet Governance & Memory — govern and learn from agents you didn't build |
 | `autonomous-compliance.html` | Autonomous Compliance — the agentic replacement for OneTrust-class platforms: six suites, how it's built, the 149-row capability map, how a migration runs |
 | `autonomous-shoring.html` | Autonomous Shoring & BPO — moving a whole function to a governed agentic workforce |

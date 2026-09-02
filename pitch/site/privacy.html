@@ -10,18 +10,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
 <link rel="apple-touch-icon" href="favicon-180.png">
-<meta name="theme-color" content="#07090D">
+<meta name="theme-color" content="#04050A">
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
 </head>
 <body>
-
-<div class="sysbar">
-  <div class="wrap">
-    <span>Daybreak Labs &middot; AI lab &middot; agentic workforces</span>
-    <span>Lightwork &middot; five gates on every action &middot; self-hosted or air-gapped</span>
-    <span class="live">Operating Record: signed, hash-chained</span>
-  </div>
-</div>
 
 <header class="nav">
   <div class="wrap">
@@ -31,7 +23,7 @@
     </a>
     <nav class="nav-links" aria-label="Primary">
       <a href="product.html">Platform</a>
-      <a href="index.html#products">Products</a>
+      <a href="cortex.html">Cortex</a>
       <a href="autonomous-compliance.html">Autonomous Compliance</a>
       <a href="autonomous-shoring.html">Autonomous Shoring</a>
       <a href="security.html">Security</a>
@@ -44,19 +36,29 @@
 </header>
 
 <!-- HERO -->
-<section class="hero">
-  <div class="wrap">
-    <div class="hero-text">
-      <span class="pill">Legal &middot; this website</span>
-      <h1>Privacy &amp; cookies</h1>
-      <div class="dline" role="presentation"></div>
-      <p class="lede">How this website handles cookies and personal data. The short version: it sets no tracking cookies, runs no analytics, and profiles no one.</p>
-      <div class="hero-marks">
+<section class="hero inner">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="pill rv">Legal &middot; this website</span>
+      <h1 class="rv d1">Privacy <b>&amp; cookies</b></h1>
+      <div class="dline rv d1" role="presentation"></div>
+      <p class="lede rv d2">How this website handles cookies and personal data. The short version: it sets no tracking cookies, runs no analytics, and profiles no one.</p>
+      <div class="hero-marks rv d3">
         <span><b>No</b> cookies set</span>
         <span><b>Cloudflare</b> Web Analytics, cookieless</span>
         <span><b>First-party</b> fonts, images and styles</span>
       </div>
     </div>
+    <aside class="rv d2">
+      <dl class="spec">
+        <dt>Cookies</dt><dd><b>None.</b> No tracking, advertising or analytics cookies</dd>
+        <dt>Analytics</dt><dd>Cloudflare Web Analytics: cookieless, no fingerprinting</dd>
+        <dt>Assets</dt><dd>Fonts, images and styles served first-party from this domain</dd>
+        <dt>Delivery</dt><dd>Cloudflare Pages for hosting and transport security</dd>
+        <dt>Requests</dt><dd><a class="btn-link" href="mailto:chris@daybreakailabs.com?subject=Privacy%20request">chris@daybreakailabs.com</a></dd>
+      </dl>
+      <p class="art-cap"><b>This website</b> &middot; at a glance</p>
+    </aside>
   </div>
 </section>
 
@@ -79,7 +81,7 @@
       <p>If you email us (for example, the <em>Book a demo</em> or <em>Request access</em> links, which open your own mail client) we receive whatever you send (your email address and message) and use it solely to respond to you. We don't sell it, rent it, or share it with anyone outside Daybreak Labs, and we keep it only as long as we need it to handle your request.</p>
 
       <h2>The Lightwork product vs. this website</h2>
-      <p>This policy covers the marketing website only. The Lightwork platform itself is self-hosted on your own infrastructure and runs egress-locked, so operational data processed by the product stays inside your environment. It does not flow back to us.</p>
+      <p>This policy covers the marketing website only. The Lightwork platform itself is a separate deployment, self-hosted, air-gapped, or hosted by Daybreak Labs, and the operational data it processes is not collected through this website and is not covered by this page.</p>
 
       <h2>Your rights</h2>
       <p>Depending on where you live (for example, under the GDPR or CCPA), you may have the right to access, correct, or delete the personal data we hold about you, and to object to its processing. To exercise any of these, email <a class="btn-link" href="mailto:chris@daybreakailabs.com?subject=Privacy%20request">chris@daybreakailabs.com</a> and we'll respond within the timeframe the law requires.</p>
@@ -103,6 +105,7 @@
         <h4>Products</h4>
         <ul>
           <li><a href="product.html">Lightwork Platform</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
           <li><a href="second-shift.html">Second Shift</a></li>
           <li><a href="fleet-governance.html">Fleet Governance</a></li>
           <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
@@ -134,6 +137,7 @@
   </div>
 </footer>
 
+<script src="lab.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
