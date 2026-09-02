@@ -8479,7 +8479,8 @@ _COMPLIANCE_COMMANDS: list[tuple[str, str]] = [
     ("maverick assess", "run a PIA / AIRA / vendor-risk assessment"),
     ("maverick hunt", "hunt the audit trail for agent attacks"),
     ("maverick remediate", "assess security posture + fix low-risk gaps"),
-    ("maverick regulatory verify", "verify active obligations compile into non-vacuous gates"),
+    ("maverick regulatory verify", "verify active obligations compile into non-vacuous gates enforced live"),
+    ("maverick attest receipt mint", "hand an auditor a bearer-verifiable receipt for one decision"),
 ]
 
 

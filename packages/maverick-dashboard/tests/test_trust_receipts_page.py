@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
+from fastapi.testclient import TestClient
+from maverick_dashboard import trust_receipts_page as page
+
+
+def _templates() -> Jinja2Templates:
+    selected = Jinja2Templates(directory=Path(page.__file__).parent / "templates")
+    selected.env.globals.update(
+        theme="dark", font="default", lang="en", density="comfortable",
+        custom_theme_css="", custom_theme_names=[], dir="ltr", nav_groups=[],
+        t=lambda key: key,
+    )
+    return selected
+
+
+def _app(monkeypatch, permitted: bool = True) -> TestClient:
+    def _require(request, permission):
+        assert permission == "audit"
+        if not permitted:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="insufficient role")
+    monkeypatch.setattr(page, "require_permission", _require)
+    app = FastAPI()
+    app.include_router(page.create_trust_receipts_page_router(_templates()))
+    return TestClient(app)
+
+
+def test_page_is_wired_and_hardened(monkeypatch) -> None:
+    response = _app(monkeypatch).get(page.PAGE_PATH)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, private, max-age=0"
+    csp = response.headers["content-security-policy"]
+    assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
+    body = response.text
+    assert "Trust receipts" in body
+    assert f'data-copilot-page="{page.PAGE_PATH}"' in body
+    assert f'data-api-base="{page.API_BASE}"' in body
+    assert page.ASSET_PATH in body
+    assert 'id="rcp-download-verifier"' in body and "/verifier" not in body.split("rcp-root")[1].split("rcp-cli")[0]
+    assert 'id="rcp-verify-form"' in body and 'id="rcp-rows-form"' in body
+    for depth in ("signed", "chained", "anchored"):
+        assert f"<strong>{depth}</strong>" in body
+
+
+def test_page_is_audit_gated(monkeypatch) -> None:
+    assert _app(monkeypatch, permitted=False).get(page.PAGE_PATH).status_code == 403
+
+
+def test_unknown_query_params_are_404(monkeypatch) -> None:
+    assert _app(monkeypatch).get(page.PAGE_PATH + "?debug=1").status_code == 404
+
+
+def test_page_requires_a_template_authority() -> None:
+    with pytest.raises(TypeError):
+        page.create_trust_receipts_page_router(object())  # type: ignore[arg-type]
+
+
+def test_page_is_registered_in_the_nav_registry_at_the_audit_floor() -> None:
+    from maverick_dashboard import ui_visibility
+    entry = next(p for p in ui_visibility.PAGES if p["path"] == page.PAGE_PATH)
+    assert entry["group"] == "Govern" and entry["floor"] == "audit" and entry["default"] == "audit"

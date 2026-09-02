@@ -368,6 +368,18 @@ def _external_rows(revoked: dict[str, Any]) -> list[AgentPrincipal]:
             deny_tools=tuple(sorted(agent.deny_tools)),
             platform=platforms.get(agent.id, ""),
         ))
+    # A revoked external principal that has no (or no longer has a) trust entry
+    # must stay visible: it is still denied on every tool call, and the only
+    # way to lift that is from here. Dropping it would strand the revocation.
+    listed = {row.principal for row in rows}
+    for principal, rev in sorted(revoked.items()):
+        if is_external(principal) and principal not in listed:
+            rows.append(AgentPrincipal(
+                principal=principal, kind=KIND_EXTERNAL, label=_external_id(principal),
+                state="suspended", revoked=True,
+                revoked_reason=getattr(rev, "reason", ""),
+                platform="not in trust registry",
+            ))
     return rows
 
 

@@ -5,6 +5,9 @@
     /* Detail cell: labeled fields instead of a raw JSON dump; the chain
        material (hash/sig) folds away behind the signature badge. */
     .aud-detail { display: flex; flex-direction: column; gap: 2px; max-width: 46rem; }
+    .aud-obligation .aud-k { color: var(--accent); }
+    .aud-obligation .aud-v { font-weight: 600; }
+    .aud-obligation-link { text-decoration: underline dotted; }
     .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }
     .aud-k { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-mono, monospace); }
     .aud-v { font-size: var(--text-sm); word-break: break-word; min-width: 0; }
@@ -250,10 +253,21 @@
               {% if payload or chain %}
                 <div class="aud-detail">
                   {% for k, v in payload.items() %}
+                  {% if k in ['obligation_id', 'regulation', 'article', 'obligations_checked'] %}
+                  {# Compiled regulatory obligations (maverick.regulatory_compiler):
+                     the clause a denial was decided under, or the obligations a
+                     tool call was checked against. Linked to the console that
+                     explains them. #}
+                  <div class="aud-kv aud-obligation">
+                    <span class="aud-k">{{ k }}</span>
+                    <span class="aud-v">{% if k == 'obligation_id' %}<a href="/compliance/obligations" class="aud-obligation-link" title="Open Regulatory Obligations">{{ v }}</a>{% elif v is string or v is number or v is boolean %}{{ v }}{% else %}{{ v | join(', ') if v is iterable and v is not string else v }}{% endif %}</span>
+                  </div>
+                  {% else %}
                   <div class="aud-kv">
                     <span class="aud-k">{{ k }}</span>
                     <span class="aud-v">{% if v is string or v is number or v is boolean %}{{ v }}{% else %}<code>{{ v | tojson(indent=2) }}</code>{% endif %}</span>
                   </div>
+                  {% endif %}
                   {% endfor %}
                   {% if chain %}
                   <details class="aud-sig">

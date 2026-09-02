@@ -932,6 +932,9 @@ from .no_code_grc_studio_page import create_no_code_grc_studio_page_router  # no
 from .privacy_drop_management_page import (  # noqa: E402
     create_privacy_drop_management_page_router,
 )
+from .regulatory_obligations_page import (  # noqa: E402
+    create_regulatory_obligations_page_router,
+)
 from .shared_governance_inventory_page import (  # noqa: E402
     create_shared_governance_inventory_page_router,
 )
@@ -941,6 +944,9 @@ from .third_party_contracts_page import (  # noqa: E402
 )
 from .third_party_executive_reports_page import (  # noqa: E402
     create_third_party_executive_reports_page_router,
+)
+from .trust_receipts_page import (  # noqa: E402
+    create_trust_receipts_page_router,
 )
 
 app.include_router(create_ai_cloud_agent_governance_workbench_router(templates))
@@ -959,19 +965,25 @@ app.include_router(create_no_code_grc_studio_page_router(templates))
 app.include_router(create_privacy_drop_management_page_router(templates))
 app.include_router(create_shared_governance_inventory_page_router(templates))
 app.include_router(create_agent_control_plane_page_router(templates))
+app.include_router(create_regulatory_obligations_page_router(templates))
+app.include_router(create_trust_receipts_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
+from .regulatory_obligations_api import router as regulatory_obligations_router  # noqa: E402
 from .shared_governance_inventory_api import (  # noqa: E402
     router as shared_governance_inventory_router,
 )
+from .trust_receipts_api import router as trust_receipts_router  # noqa: E402
 from .unified_audit_api import router as unified_audit_router  # noqa: E402
 
 app.include_router(customer_sandbox_router, prefix="/api/v1")
 app.include_router(unified_audit_router, prefix="/api/v1")
 app.include_router(shared_governance_inventory_router, prefix="/api/v1")
 app.include_router(agent_control_plane_router, prefix="/api/v1")
+app.include_router(regulatory_obligations_router, prefix="/api/v1")
+app.include_router(trust_receipts_router, prefix="/api/v1")
 # Public consent collection uses a separate opaque client credential and
 # profile capability.  It is mounted directly because its router already owns
 # the complete /api/v1/public/consent prefix and must not inherit /api/v1 twice.
@@ -9345,6 +9357,34 @@ async def agent_control_plane_client() -> FileResponse:
 
     return FileResponse(
         _STATIC_DIR / "lightwork-agent-control-plane.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-regulatory-obligations.js")
+async def regulatory_obligations_client() -> FileResponse:
+    """Client for the Compliance -> Obligations console (regulatory compiler)."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-regulatory-obligations.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, private, max-age=0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/static/lightwork-trust-receipts.js")
+async def trust_receipts_client() -> FileResponse:
+    """Client for the Audit -> Trust Receipts console (mint / verify)."""
+
+    return FileResponse(
+        _STATIC_DIR / "lightwork-trust-receipts.js",
         media_type="application/javascript; charset=utf-8",
         headers={
             "Cache-Control": "no-store, private, max-age=0",

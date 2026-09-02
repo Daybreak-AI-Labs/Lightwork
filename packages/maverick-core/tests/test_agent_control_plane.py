@@ -263,6 +263,21 @@ def test_native_goal_roster_scan_is_bounded(monkeypatch):
     assert seen["limit"] == acp._MAX_NATIVE_GOALS + 1
 
 
+def test_a_revoked_external_principal_without_a_trust_entry_stays_on_the_roster():
+    """Found by driving the console: containing `agent:ghost` (no registry
+    entry) revoked it, then the roster dropped it, so nothing could release
+    it. The revocation is live either way; the roster must say so."""
+    from maverick.revocation import is_revoked
+    assert acp.contain("agent:ghost", reason="honeytoken").ok
+    assert is_revoked("agent:ghost")
+    row = acp.lookup("agent:ghost")
+    assert row is not None and row.kind == acp.KIND_EXTERNAL
+    assert row.state == "suspended" and row.revoked
+    assert row.platform == "not in trust registry"
+    assert acp.release("agent:ghost").ok
+    assert not is_revoked("agent:ghost") and acp.lookup("agent:ghost") is None
+
+
 # ---- suspend / resume ---------------------------------------------------------
 
 def test_suspend_lands_in_the_revocation_registry_and_resume_lifts_it(monkeypatch):
