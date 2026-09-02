@@ -1,7 +1,7 @@
 /* Lightwork site — demo-request modal.
    Opens from every "Book a demo" / "Request access" CTA on every page.
    Delivery: provide a free Web3Forms access key to send submissions straight to
-   info@daybreakailabs.com — set it at DEPLOY TIME without editing this file via
+   chris@daybreakailabs.com — set it at DEPLOY TIME without editing this file via
    either:
      <meta name="web3forms-access-key" content="YOUR-KEY">   (in each page head), or
      window.LIGHTWORK_ACCESS_KEY = "YOUR-KEY";                (e.g. an uncommitted config.js)
@@ -41,7 +41,7 @@
       '</form>' +
       '<div class="modal-done" hidden>' +
         '<h3>Thanks &mdash; we&rsquo;ll be in touch.</h3>' +
-        '<p class="sub">Your request is in. We&rsquo;ll reply from info@daybreakailabs.com.</p>' +
+        '<p class="sub">Your request is in. We&rsquo;ll reply from chris@daybreakailabs.com.</p>' +
         '<button class="btn btn-ghost modal-close2" style="margin-top:18px">Close</button>' +
       '</div>' +
     "</div>";
@@ -79,15 +79,15 @@
 
     // Rewire every demo / access CTA on the page to open the modal.
     var ctas = document.querySelectorAll(
-      'a[href^="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo"],' +
-      'a[href^="mailto:info@daybreakailabs.com?subject=Lightwork%20access"],' +
+      'a[href^="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo"],' +
+      'a[href^="mailto:chris@daybreakailabs.com?subject=Lightwork%20access"],' +
       "[data-demo]"
     );
     Array.prototype.forEach.call(ctas, function (a) { a.addEventListener("click", open); });
 
     function mailtoFallback(d) {
       var body = "Name: " + d.name + "\nWork email: " + d.email + "\nCompany: " + d.company + "\n\n" + (d.message || "");
-      return "mailto:info@daybreakailabs.com?subject=" + encodeURIComponent("Lightwork demo request") + "&body=" + encodeURIComponent(body);
+      return "mailto:chris@daybreakailabs.com?subject=" + encodeURIComponent("Lightwork demo request") + "&body=" + encodeURIComponent(body);
     }
 
     form.addEventListener("submit", function (e) {

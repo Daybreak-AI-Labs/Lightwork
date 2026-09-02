@@ -3,210 +3,231 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lightwork: the governed AI agent workforce for regulated enterprises</title>
-<meta name="description" content="Lightwork puts AI agents to work on real operations in finance, healthcare, insurance, and legal, with governance on every action, a tamper-evident audit trail, and provable improvement. Self-hosted or air-gapped. By Daybreak Labs.">
+<title>Daybreak Labs: agentic workforces an auditor can sign off on</title>
+<meta name="description" content="Daybreak Labs is an AI lab that builds agentic workforces on a foundation of compliance and governance, so regulated operations can trust what the agents do and prove it to an auditor. Lightwork is the product: the governed runtime, Cortex (the company brain), specialist departments, fleet governance, Autonomous Compliance (the compliance platform that does the work) and Autonomous Shoring. Self-hosted, air-gapped, or hosted by Daybreak Labs.">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
 <link rel="apple-touch-icon" href="favicon-180.png">
+<meta name="theme-color" content="#04050A">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Lightwork: the governed AI agent workforce for regulated enterprises">
-<meta property="og:description" content="Lightwork puts AI agents to work on real operations in finance, healthcare, insurance, and legal, with governance on every action, a tamper-evident audit trail, and provable improvement. Self-hosted or air-gapped. By Daybreak Labs.">
+<meta property="og:title" content="Daybreak Labs: agentic workforces an auditor can sign off on">
+<meta property="og:description" content="An AI lab for agentic workforces built on compliance and governance. Lightwork is the product; Cortex is its brain; Autonomous Compliance and Autonomous Shoring are how a whole function moves to it. Self-hosted, air-gapped, or hosted by Daybreak Labs.">
 <meta property="og:image" content="https://daybreakailabs.com/og.png">
 <meta property="og:url" content="https://daybreakailabs.com/">
 <meta name="twitter:card" content="summary_large_image">
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "28d5584c57bd4c699bbc499ed4c37359"}'></script><!-- pragma: allowlist secret -->
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Organization","name":"Daybreak Labs","url":"https://daybreakailabs.com","logo":"https://daybreakailabs.com/favicon-512.png","email":"info@daybreakailabs.com","telephone":"+1-423-322-9722","description":"Daybreak Labs builds Lightwork: the governed AI agent platform for regulated enterprises.","brand":{"@type":"Brand","name":"Lightwork"}}
+{"@context":"https://schema.org","@type":"Organization","name":"Daybreak Labs","url":"https://daybreakailabs.com","logo":"https://daybreakailabs.com/favicon-512.png","email":"chris@daybreakailabs.com","telephone":"+1-423-322-9722","description":"Daybreak Labs is an AI lab that builds agentic workforces on a foundation of compliance and governance. Lightwork is its product: the governed agent runtime, Cortex (the company brain), the Second Shift specialist departments, Fleet Governance, Daybreak Forge, Autonomous Compliance and Autonomous Shoring for business-process outsourcing.","brand":{"@type":"Brand","name":"Lightwork"},"makesOffer":[{"@type":"Offer","itemOffered":{"@type":"Service","name":"Autonomous Shoring","url":"https://daybreakailabs.com/autonomous-shoring"}},{"@type":"Offer","itemOffered":{"@type":"SoftwareApplication","name":"Autonomous Compliance","applicationCategory":"BusinessApplication","url":"https://daybreakailabs.com/autonomous-compliance"}},{"@type":"Offer","itemOffered":{"@type":"SoftwareApplication","name":"Cortex","applicationCategory":"BusinessApplication","url":"https://daybreakailabs.com/cortex"}}]}
 </script>
 </head>
 <body>
 
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="index.html">
-      <span class="brand-mark"><img src="daybreak-logo.png" alt="Daybreak Labs" width="970" height="305"></span>
-      <span class="brand-word">Lightwork</span>
+    <a class="brand" href="index.html" aria-label="Daybreak Labs home">
+      <span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span>
+      <span class="brand-word">Daybreak Labs<small>Lightwork</small></span>
     </a>
-    <nav class="nav-links">
-      <a href="index.html#products">Products</a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="product.html">Platform</a>
+      <a href="cortex.html">Cortex</a>
+      <a href="autonomous-compliance.html">Autonomous Compliance</a>
+      <a href="autonomous-shoring.html">Autonomous Shoring</a>
       <a href="security.html">Security</a>
       <a href="company.html">Company</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-primary" href="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
+      <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
     </div>
   </div>
 </header>
 
-<!-- HERO -->
-<section class="hero">
-  <div class="wrap hero-grid">
-    <div class="hero-text">
-      <span class="pill"><span class="dot"></span> Private alpha · request access</span>
-      <h1 style="margin-top:22px">The agent workforce a regulated enterprise can actually deploy.</h1>
-      <p class="lede">Lightwork puts AI agents to work on real operations (finance, legal, healthcare) with the governance, audit trail, and proof of safety a regulator requires before an agent touches a system that matters.</p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
-        <a class="btn btn-ghost" href="product.html">See how it works</a>
-      </div>
-      <div class="hero-marks">
-        <span><b>Self-hosted</b> or air-gapped</span>
-        <span><b>Signed,</b> tamper-evident audit</span>
-        <span><b>Provably</b> improving</span>
+<!-- HERO: the stage -->
+<section class="hero stage">
+  <canvas class="neon" role="img" aria-label="Schematic: agent actions travel along circuit traces through five gates, capability, policy, shield, budget and audit, toward a sunrise. Actions that pass are signed; actions that fail stop at a gate."></canvas>
+  <div class="veil"></div>
+  <div class="wrap">
+    <div>
+      <span class="pill rv"><span class="dot"></span> Daybreak Labs &middot; an AI lab for agentic workforces</span>
+      <h1 class="rv d1">Agentic workforces an auditor can <span class="grad"><b>sign off on.</b></span></h1>
+      <p class="lede rv d2">Daybreak Labs builds agentic workforces on a foundation of compliance and governance, so the people who run regulated operations can trust what the agents do, prove it to an auditor, and actually put them to work. Lightwork is the product. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.</p>
+      <div class="hero-cta rv d3">
+        <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
+        <a class="btn btn-ghost" href="product.html">How the runtime works</a>
       </div>
     </div>
-    <aside class="hero-art">
-      <div class="term">
-        <div class="bar"><span class="chip">operating record</span><span style="font-size:12px;color:var(--mint)">&#9679; chain verified</span></div>
-        <div class="body">
-          <div class="c"># each entry signs the one before it</div>
-          <div class="row"><span>0xA2 &middot; deny $60k wire</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span>0xA3 &middot; require-human $6k</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span>0xA4 &middot; cap runaway loop</span><span class="ok">&#10003; signed</span></div>
-          <div class="row"><span class="c">· alter 0xA2 after the fact ·</span><span class="deny">&#10007; CAUGHT</span></div>
-        </div>
-      </div>
-      <div class="art-cap">A tamper-evident record you can verify offline.</div>
-    </aside>
+    <div class="hud rv d3"><b id="hud-signed">0</b>signed entries<br><span class="ok">&#9679; chain verified</span><br><span class="deny" id="hud-denied">0 denied at the gate</span><div class="cap">Fig. 01 &middot; live schematic</div></div>
   </div>
 </section>
 
-<!-- TRUST STRIP -->
-<div class="trust">
+<div class="marks">
   <div class="wrap">
-    <span class="label">Built for regulated operations in</span>
-    <div class="verticals"><span>Finance</span><span>Healthcare</span><span>Insurance</span><span>Legal</span><span>GRC</span><span>Privacy</span></div>
+    <span><b>Self-hosted</b>, air-gapped, or <b>hosted by us</b></span>
+    <span><b>Five gates</b> on every action</span>
+    <span><b>Signed</b>, hash-chained record</span>
+    <span><b>Provably</b> improving</span>
+    <span><b>Cortex</b> &middot; the company brain</span>
   </div>
 </div>
 
 <!-- PROBLEM -->
 <section>
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">The problem</span>
-      <h2>Agents pass the demo. They fail the diligence review.</h2>
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">01</span> The problem</span>
+      <h2>Agents pass the demo. <b>They fail the diligence review.</b></h2>
       <p>In regulated work the blocker isn't capability. It's three questions no one can answer, so the project never leaves the pilot.</p>
     </div>
     <div class="cols cols-3">
-      <div class="qcol">
-        <h3>&ldquo;What did it do?&rdquo;</h3>
-        <p>No tamper-evident record of the actions an agent took.</p>
-      </div>
-      <div class="qcol">
-        <h3>&ldquo;Could it exfiltrate our data?&rdquo;</h3>
-        <p>No egress control, a hosted black box, or a framework you secure yourself.</p>
-      </div>
-      <div class="qcol">
-        <h3>&ldquo;Will it get worse?&rdquo;</h3>
-        <p>No proof it's improving instead of quietly drifting.</p>
-      </div>
+      <div class="qcol rv"><span class="idx">Q1</span><h3>&ldquo;What did it do?&rdquo;</h3><p>No tamper-evident record of the actions an agent took.</p></div>
+      <div class="qcol rv d1"><span class="idx">Q2</span><h3>&ldquo;Could it exfiltrate our data?&rdquo;</h3><p>No egress control, a black box, or a framework you secure yourself.</p></div>
+      <div class="qcol rv d2"><span class="idx">Q3</span><h3>&ldquo;Will it get worse?&rdquo;</h3><p>No proof it's improving instead of quietly drifting.</p></div>
     </div>
   </div>
 </section>
 
-<hr class="rule">
-
-<!-- SOLUTION / HOW IT WORKS -->
-<section>
+<!-- HOW IT WORKS -->
+<section class="panel">
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">How it works</span>
-      <h2>Not a chatbot. Not a framework. A governed runtime.</h2>
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">02</span> How it works</span>
+      <h2>Not a chatbot. Not a framework. <b>A governed runtime.</b></h2>
       <p>Every action an agent takes (every tool call, every payment, every write) passes through one gate before it happens. Then it lands where a human signs off.</p>
     </div>
-    <div class="gate">
+    <div class="gate rv">
       <div class="stage"><div class="n">01</div><div class="t">Capability</div><div class="d">Attenuate-only tokens. An agent can narrow its rights, never widen them.</div></div>
       <div class="stage"><div class="n">02</div><div class="t">Policy</div><div class="d">Allow, deny, or require a human, bound to every action.</div></div>
       <div class="stage"><div class="n">03</div><div class="t">Shield</div><div class="d">Scans for the dangerous action and the prompt injection.</div></div>
       <div class="stage"><div class="n">04</div><div class="t">Budget</div><div class="d">Hard caps on tokens, dollars, wall-clock, and tools.</div></div>
       <div class="stage"><div class="n">05</div><div class="t">Audit</div><div class="d">A signed, hash-chained entry you can verify offline.</div></div>
     </div>
-    <p class="muted" style="margin-top:26px;font-size:16.5px">Self-hosted or air-gapped, on your data, no required egress, so even a successful prompt injection can't move data out.</p>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Runs in your VPC, fully air-gapped, or on infrastructure Daybreak Labs hosts for you, with the same gates, the same record, and your own keys either way.</p>
   </div>
 </section>
 
-<!-- PILLARS -->
-<section style="background:var(--paper-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+<!-- CORTEX -->
+<section id="cortex">
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">Why Lightwork</span>
-      <h2>Three things no one else ships.</h2>
+    <div class="split" style="margin-top:0;align-items:center">
+      <div class="rv">
+        <span class="eyebrow"><span class="n">03</span> The company brain</span>
+        <h2 class="sm" style="margin-top:18px">Cortex. <b>Everything your company knows, in one governed mind.</b></h2>
+        <p style="font-size:19px;color:var(--muted)">Cortex is the memory the whole workforce runs on: your documents and data, the decisions people made, the lessons the agents learned, and the Operating Record of everything that happened. Every agent, yours or a vendor's, reads from it and writes to it under audit. It is tenant-exact, encrypted with your keys, and never pooled across customers. Your company gets smarter; nobody else gets your company.</p>
+        <p style="margin-top:22px"><a class="btn btn-ghost" href="cortex.html">Inside Cortex</a></p>
+      </div>
+      <div class="rv d1">
+        <div class="instrument">
+          <div class="bar"><span class="chip">cortex &middot; tenant-exact</span><span>lit as the workforce writes</span></div>
+          <canvas class="lattice" width="640" height="480" role="img" aria-label="A slowly turning lattice of connected nodes in the brand gradient; nodes light up as agents write to it."></canvas>
+        </div>
+        <p class="art-cap"><b>Fig. 02</b> &middot; Cortex. Every node is something your company knows; every flash is an agent adding to it, signed.</p>
+      </div>
     </div>
     <div class="cols cols-3">
-      <div class="card">
-        <div class="idx">01</div>
-        <h3>Governance on every action</h3>
-        <p>Capability tokens, a policy engine, an egress lock, and a signed, hash-chained audit log, verifiable offline. Deep infrastructure, not a prompt over an API.</p>
-      </div>
-      <div class="card">
-        <div class="idx">02</div>
-        <h3>Provable improvement</h3>
-        <p>The workforce mines its own failures into one guidance line, proves it lifts results on held-out work, ships it as a watched canary, and retires it if it stops paying off. Even the evaluator only improves against an immutable anchor. Every change reversible, every change audited.</p>
-      </div>
-      <div class="card">
-        <div class="idx">03</div>
-        <h3>2,020 specialists, built in</h3>
-        <p>Least-privilege specialist packs across 53 regulated suites. Run <span style="font-family:var(--mono);font-size:.85em">domains-lint</span> yourself.</p>
-      </div>
+      <div class="card rv"><span class="idx">Remembers</span><h3>Knowledge with citations</h3><p>Your documents, systems of record and public primary sources, retrieved and cited, so an answer is grounded in what your company actually knows.</p></div>
+      <div class="card rv d1"><span class="idx">Learns</span><h3>Lessons that are proven first</h3><p>The workforce mines its own failures into guidance, proves the lift on held-out work, ships it as a watched canary, and retires it if it stops paying off.</p></div>
+      <div class="card rv d2"><span class="idx">Keeps</span><h3>Yours, and only yours</h3><p>Tenant-exact, encrypted with your own keys, every read audited. Nothing is learned across customers: no hivemind, no telemetry, no pooled data.</p></div>
     </div>
-    <div class="stats">
-      <div class="s"><div class="big">2,020</div><div class="lbl">governed specialist packs</div></div>
-      <div class="s"><div class="big">53</div><div class="lbl">regulated suites, already built</div></div>
-      <div class="s"><div class="big">0</div><div class="lbl">required egress · your data never leaves</div></div>
-    </div>
-    <p class="muted" style="margin-top:30px;font-size:16px">Six governance invariants &mdash; no drafting agent can reach a state-mutating tool, no child can out-scope its parent, hard refusals can't be stripped, budget caps can't be silently exceeded &mdash; machine-checked across all 2,020 packs with a non-vacuous fault-injection control (property-fuzzed up to 5,000 iterations).</p>
   </div>
 </section>
 
-<!-- PRODUCT LINE -->
+<!-- WHY -->
+<section class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">04</span> Why Lightwork</span>
+      <h2>Three things <b>no one else ships.</b></h2>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">01</span><h3>Governance on every action</h3><p>Capability tokens, a policy engine, an egress lock, and a signed, hash-chained audit log, verifiable offline. Deep infrastructure, not a prompt over an API.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>Provable improvement</h3><p>Every change to the workforce is proven on held-out work before it ships, watched as a canary, and reversible. Even the evaluator only improves against an immutable anchor. Every change audited.</p></div>
+      <div class="card rv d2"><span class="idx">03</span><h3>A workforce that arrives built</h3><p>Turnkey departments of specialist agents across finance, tax, legal, privacy, GRC, operations and more, each with a fixed job, least-privilege tools, and a human who signs off. Switch them on; don't prompt-engineer them.</p></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Six governance invariants (no drafting agent can reach a state-mutating tool, no child can out-scope its parent, hard refusals can't be stripped, budget caps can't be silently exceeded) are machine-checked across every specialist pack with a non-vacuous fault-injection control, property-fuzzed thousands of times per build.</p>
+  </div>
+</section>
+
+<!-- AUTONOMOUS COMPLIANCE -->
+<section id="compliance">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">05</span> New &middot; Autonomous Compliance</span>
+      <h2>Autonomous Compliance. <b>The privacy, GRC and AI-governance platform, run by governed agents.</b></h2>
+      <p>Workflow-based compliance platforms give a compliance team forms, workflows and a dashboard, and leave the work to the team. Autonomous Compliance is the same six suites rebuilt as an agentic workforce: the DSARs get fulfilled, the vendor questionnaires get answered, the AI inventory keeps itself current, and every action lands in the Operating Record where a human signs off.</p>
+    </div>
+    <div class="vs rv">
+      <div class="them"><h4>A workflow platform</h4><ul>
+        <li><b>The team does the work.</b> The platform tracks that it was done.</li>
+        <li><b>Evidence is collected</b> by people, on a calendar, before the audit.</li>
+        <li><b>AI governance is a register</b> someone has to remember to update.</li>
+        <li><b>One deployment model.</b> Theirs.</li></ul></div>
+      <div class="us"><h4>Autonomous Compliance</h4><ul>
+        <li><b>Governed agents do the work.</b> A credentialed human reviews and commits.</li>
+        <li><b>Evidence is generated</b> as the work happens, signed, verifiable offline.</li>
+        <li><b>The AI inventory maintains itself</b> from your model registries and agent fleets.</li>
+        <li><b>Self-hosted, air-gapped, or hosted by us.</b> Your choice, same gates.</li></ul></div>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">Suite 01</span><h3>AI Governance</h3><p>AI-system inventory and risk tiering fed by your registries and fleets, EU AI Act and ISO 42001 mappings, serious-incident reporting, review and remediation lifecycle.</p></div>
+      <div class="card rv d1"><span class="idx">Suite 02</span><h3>Privacy Automation</h3><p>DSAR intake to fulfilment across Microsoft 365, Google Workspace, Salesforce and ServiceNow, assessments, notice publication, encrypted document custody.</p></div>
+      <div class="card rv d2"><span class="idx">Suite 03</span><h3>Consent &amp; Preferences</h3><p>Consent records and bulk subject actions, custom indexes and exports, web publish settings, Global Privacy Control opt-out.</p></div>
+      <div class="card rv"><span class="idx">Suite 04</span><h3>Tech Risk &amp; Compliance</h3><p>Control frameworks, governed evidence collection and analysis, a no-code GRC studio for objects, forms, rules, collectors and report views.</p></div>
+      <div class="card rv d1"><span class="idx">Suite 05</span><h3>Third-Party Management</h3><p>Vendor inventory, questionnaires with agent-proposed answers under independent review, contract and engagement lifecycle, executive reporting.</p></div>
+      <div class="card rv d2"><span class="idx">Suite 06</span><h3>Data Use Governance</h3><p>Data inventory and classification, purpose policies, and a recorded decision for every use.</p></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px"><a class="btn-link" href="autonomous-compliance.html">The six suites, how it's built, and how a migration runs &rarr;</a></p>
+  </div>
+</section>
+
+<!-- AUTONOMOUS SHORING -->
+<section id="shoring" class="panel">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">06</span> New offering</span>
+      <h2>Autonomous Shoring. <b>The fifth way to source work.</b></h2>
+      <p>Offshore, nearshore, reshore, onshore. Each one moved work to a place. Autonomous Shoring moves a whole function to a governed agentic workforce, in your environment or ours, with a transition plan, service levels, and a record an auditor can verify. It is the offering for the work you would otherwise send to a BPO, and it replaces that decision instead of relocating it.</p>
+    </div>
+    <div class="cols cols-3">
+      <div class="card rv"><span class="idx">01</span><h3>Cost and control, together</h3><p>Offshoring traded control for cost, which is why reshoring happened. Policy is bound to every action and the record is yours, so the cost case and the control case finally point the same way.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>A transition, not a prompt</h3><p>The knowledge transfer a BPO takes months to run: watch a person do the job, and the agent factory synthesizes the governed pack that does it, clamped to a least-privilege envelope and approved by a human before it runs.</p></div>
+      <div class="card rv d2"><span class="idx">03</span><h3>The number the CFO asks for</h3><p>A Shoring P&amp;L from real completed work: agent cost against your own fully-loaded human rate, throughput per department, every deliverable traceable in the Operating Record.</p></div>
+    </div>
+    <p class="muted rv" style="margin-top:26px;font-size:16px"><a class="btn-link" href="autonomous-shoring.html">The offering, the functions we shore first, and how an engagement runs &rarr;</a></p>
+  </div>
+</section>
+
+<!-- PRODUCTS -->
 <section id="products">
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">The product line</span>
-      <h2>Four ways to put governed agents to work.</h2>
-      <p>The platform itself, the specialist workforce that runs on it, a governance plane for the agents you didn't build, and bespoke builds for your operation.</p>
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">07</span> Everything Lightwork does</span>
+      <h2>One product. <b>Seven ways to put it to work.</b></h2>
+      <p>The platform, the brain it runs on, the specialist workforce, a governance plane for the agents you didn't build, bespoke builds for your operation, and two ways to move a whole function onto all of it.</p>
     </div>
-    <div class="cols cols-2">
-      <a class="card prod" href="product.html">
-        <div class="idx">01 · Platform</div>
-        <h3>Lightwork Platform</h3>
-        <p>The governed runtime. Every agent action passes one gate (capability, policy, shield, budget, signed audit), self-hosted or air-gapped, on your data.</p>
-        <span class="more">How it works &rarr;</span>
-      </a>
-      <a class="card prod" href="second-shift.html">
-        <div class="idx">02 · Specialist packs</div>
-        <h3>Second Shift</h3>
-        <p>Turnkey departments of specialist agents (Finance, Tax, Legal, and 50 more) each with a fixed job, least-privilege tools, and a human who signs off. 2,020 governed packs across 53 suites.</p>
-        <span class="more">See the packs &rarr;</span>
-      </a>
-      <a class="card prod" href="fleet-governance.html">
-        <div class="idx">03 · Govern any fleet</div>
-        <h3>Fleet Governance &amp; Memory</h3>
-        <p>Govern and learn from agents you didn't build, Agentforce, Copilot, in-house, open-source. One audited, tenant-isolated memory they all deposit into and recall from.</p>
-        <span class="more">How it governs &rarr;</span>
-      </a>
-      <a class="card prod" href="daybreak-forge.html">
-        <div class="idx">04 · Custom work</div>
-        <h3>Daybreak Forge</h3>
-        <p>Bespoke departments built by an agent factory that synthesizes a governed pack from a description, or a demonstration of the work, and gets better at building with every run. Custom regime packs, system-of-record connectors, regulated or air-gapped deployment.</p>
-        <span class="more">What we build &rarr;</span>
-      </a>
+    <div class="cols cols-3">
+      <a class="card prod rv" href="product.html"><span class="idx">01 &middot; Platform</span><h3>Lightwork Platform</h3><p>The governed runtime. Every agent action passes one gate: capability, policy, shield, budget, signed audit. Self-hosted, air-gapped, or hosted by Daybreak Labs.</p><span class="more">How it works &rarr;</span></a>
+      <a class="card prod rv d1" href="cortex.html"><span class="idx">02 &middot; The company brain <span class="tagpill new">New</span></span><h3>Cortex</h3><p>The governed, tenant-exact memory the whole workforce reads from and writes to: your knowledge, decisions, lessons and the Operating Record. Never pooled across customers.</p><span class="more">Inside Cortex &rarr;</span></a>
+      <a class="card prod rv d2" href="second-shift.html"><span class="idx">03 &middot; Specialist departments</span><h3>Second Shift</h3><p>Turnkey departments of specialist agents (finance, tax, legal, privacy, GRC and more), each with a fixed job, least-privilege tools, and a human who signs off.</p><span class="more">See the departments &rarr;</span></a>
+      <a class="card prod rv" href="fleet-governance.html"><span class="idx">04 &middot; Govern any fleet</span><h3>Fleet Governance &amp; Memory</h3><p>Govern and learn from agents you didn't build: Agentforce, Copilot, in-house, open-source. They deposit into and recall from Cortex under the same audit.</p><span class="more">How it governs &rarr;</span></a>
+      <a class="card prod rv d1" href="autonomous-compliance.html"><span class="idx">05 &middot; Replace the platform <span class="tagpill new">New</span></span><h3>Autonomous Compliance</h3><p>The compliance platform that does the work: AI governance, privacy automation, consent, tech risk and compliance, third-party management and data use governance.</p><span class="more">See the six suites &rarr;</span></a>
+      <a class="card prod rv d2" href="autonomous-shoring.html"><span class="idx">06 &middot; Move a function <span class="tagpill new">New</span></span><h3>Autonomous Shoring &amp; BPO</h3><p>A whole function moved to a governed agentic workforce, with a book of work, a demonstration-driven transition, enforceable service levels, an exception desk, the Operating Record, and a Shoring P&amp;L.</p><span class="more">Scope a function &rarr;</span></a>
+      <a class="card prod rv" href="daybreak-forge.html"><span class="idx">07 &middot; Custom work</span><h3>Daybreak Forge</h3><p>Bespoke departments built by an agent factory that synthesizes a governed pack from a description, or a demonstration of the work. Custom regime packs, system-of-record connectors, regulated deployment.</p><span class="more">What we build &rarr;</span></a>
     </div>
   </div>
 </section>
 
-<!-- PROOF (dark) -->
+<!-- PROOF -->
 <section class="on-navy">
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">Proof</span>
-      <h2>We don't say it's governed. We show it.</h2>
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">08</span> Proof</span>
+      <h2>We don't say it's governed. <b>We show it.</b></h2>
       <p>One command signs an offline-verifiable evidence bundle. A live golden path refuses the dangerous action and leaves a receipt for every decision.</p>
     </div>
-    <div class="cols cols-2">
+    <div class="split rv" style="margin-top:48px">
       <div class="term">
-        <div class="bar"><span class="chip">lightwork golden-path</span><span style="font-size:12px;color:var(--on-navy-muted)">every row tamper-evident</span></div>
+        <div class="bar"><span class="chip">lightwork golden-path</span><span>every row tamper-evident</span></div>
         <div class="body">
           <div class="row"><span>boot finance specialist</span><span class="seal">SEALED</span></div>
           <div class="row"><span>$60,000 wire</span><span class="deny">DENY</span></div>
@@ -216,9 +237,9 @@
         </div>
       </div>
       <div class="term">
-        <div class="bar"><span class="chip">lightwork proof-pack</span><span style="font-size:12px;color:var(--mint)">&#9679; Ed25519 signed</span></div>
+        <div class="bar"><span class="chip">lightwork proof-pack</span><span style="color:var(--ok)">&#9679; Ed25519 signed</span></div>
         <div class="body">
-          <div class="c"># PROOF.md · verifiable offline</div>
+          <div class="c"># PROOF.md &middot; verifiable offline</div>
           <div class="row"><span>governance</span><span class="ok">&#10003; PASS</span></div>
           <div class="row"><span>reliability</span><span class="ok">&#10003; CERT</span></div>
           <div class="row"><span>performance</span><span class="ok">&#10003; SLA</span></div>
@@ -232,52 +253,70 @@
 <!-- SECURITY -->
 <section>
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">Security &amp; deployment</span>
-      <h2>Built to clear your security review.</h2>
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">09</span> Security &amp; deployment</span>
+      <h2>Built to clear <b>your security review.</b></h2>
       <p>Every control your reviewers ask about maps to a mechanism in the platform, not a promise on a slide.</p>
     </div>
-    <table class="maptbl">
+    <table class="maptbl rv">
       <thead><tr><th>What your reviewers require</th><th>The mechanism</th></tr></thead>
       <tbody>
-        <tr><td class="ctrl">Data never leaves your environment</td><td class="mech"><b>Self-host or air-gap</b>: your VPC or fully offline, on your data.</td></tr>
-        <tr><td class="ctrl">No data exfiltration</td><td class="mech"><b>Egress lock</b>: a successful prompt injection still can't move data out.</td></tr>
+        <tr><td class="ctrl">Your data stays inside your boundary</td><td class="mech"><b>Self-host or air-gap</b> in your VPC or fully offline, or run on <b>Daybreak-hosted</b> infrastructure with tenant isolation and your own keys (KMS / BYOK).</td></tr>
+        <tr><td class="ctrl">No data exfiltration</td><td class="mech"><b>Egress lock</b>: outbound traffic is allow-listed per tenant, so a successful prompt injection still can't move data out.</td></tr>
         <tr><td class="ctrl">Least privilege, per action</td><td class="mech"><b>Capability tokens</b> (attenuate-only): an agent narrows its rights, never widens.</td></tr>
         <tr><td class="ctrl">Bounded blast radius</td><td class="mech"><b>Sandbox, network-off by default</b> &middot; hard budget caps on tokens, dollars, wall-clock, and tools.</td></tr>
         <tr><td class="ctrl">A provable, immutable record</td><td class="mech"><b>Signed, hash-chained audit</b>: tamper-evident and verifiable offline.</td></tr>
       </tbody>
     </table>
-    <p class="muted" style="margin-top:28px;font-size:16px">Security overview and SOC&nbsp;2 status available on request. <a class="btn-link" href="security.html">See the security posture &rarr;</a></p>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Security overview and SOC&nbsp;2 status available on request. <a class="btn-link" href="security.html">See the security posture &rarr;</a></p>
   </div>
 </section>
 
 <!-- INDUSTRIES -->
-<section style="background:var(--paper-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+<section class="panel">
   <div class="wrap">
-    <div class="sec-head">
-      <span class="eyebrow">Who it's for</span>
-      <h2>Where governance is the buying criterion.</h2>
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">10</span> Who it's for</span>
+      <h2>Where governance is <b>the buying criterion.</b></h2>
     </div>
     <div class="inds">
-      <div class="ind"><div class="t">Finance</div><div class="d">Reconciliation, vendor risk, controls, under audit. Highest regulatory pain, clearest ROI.</div></div>
-      <div class="ind"><div class="t">Healthcare</div><div class="d">Operations on PHI, self-hosted, with a record a compliance officer can stand behind.</div></div>
-      <div class="ind"><div class="t">Insurance</div><div class="d">Claims and underwriting work, governed and reversible, with proof of every decision.</div></div>
-      <div class="ind"><div class="t">Legal</div><div class="d">High-stakes document work where accountability and a tamper-evident trail are non-negotiable.</div></div>
-      <div class="ind"><div class="t">GRC</div><div class="d">Every agent action mapped to a control, with audit-ready evidence (SOC&nbsp;2, EU AI Act, model risk) generated as the work happens.</div></div>
-      <div class="ind"><div class="t">Privacy</div><div class="d">DSAR, erasure, and retention under governance, GDPR/CCPA coverage and a defensible record of every decision.</div></div>
+      <div class="ind rv"><div class="t">Finance</div><div class="d">Reconciliation, vendor risk, controls, under audit. Highest regulatory pain, clearest ROI.</div></div>
+      <div class="ind rv d1"><div class="t">Healthcare</div><div class="d">Operations on PHI, with a record a compliance officer can stand behind.</div></div>
+      <div class="ind rv d2"><div class="t">Insurance</div><div class="d">Claims and underwriting work, governed and reversible, with proof of every decision.</div></div>
+      <div class="ind rv"><div class="t">Legal</div><div class="d">High-stakes document work where accountability and a tamper-evident trail are non-negotiable.</div></div>
+      <div class="ind rv d1"><div class="t">GRC</div><div class="d">Every agent action mapped to a control, with audit-ready evidence (SOC&nbsp;2, EU AI Act, model risk) generated as the work happens.</div></div>
+      <div class="ind rv d2"><div class="t">Privacy</div><div class="d">DSAR, erasure, and retention under governance, GDPR/CCPA coverage and a defensible record of every decision.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FROM THE LAB -->
+<section>
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="eyebrow"><span class="n">11</span> From the lab</span>
+      <h2>What we measure, <b>and hold ourselves to.</b></h2>
+      <p>The claims on this site are checked by gates in our own build. A few of the instruments behind them.</p>
+    </div>
+    <div class="notes rv">
+      <a class="note" href="product.html"><span class="kind">Benchmark</span><span><span class="ttl">Governance Frontier</span><span class="sum" style="display:block">A tracked benchmark of what the governance layer costs and what it catches, regenerated on every change to the control tree, and refused if the numbers drift from the code.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="product.html"><span class="kind">Evaluation</span><span><span class="ttl">Harness overhead</span><span class="sum" style="display:block">How much latency and spend the five gates add to an action, measured against an ungoverned control, with the artifact committed beside the code that produced it.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="product.html"><span class="kind">Quality gate</span><span><span class="ttl">Evaluator anchors</span><span class="sum" style="display:block">The evaluator that judges the workforce only improves against immutable ground-truth anchors locked in the build, so a weak or drifting judge can't launder a regression into a lift.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="second-shift.html"><span class="kind">Quality gate</span><span><span class="ttl">domains-lint</span><span class="sum" style="display:block">Every specialist pack has a bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk ceiling: 0 errors, 0 warnings, on every build.</span></span><span class="go">&rarr;</span></a>
     </div>
   </div>
 </section>
 
 <!-- FINAL CTA -->
 <section class="cta-final">
-  <div class="wrap">
+  <div class="wrap rv">
+    <div class="dline" role="presentation"></div>
     <span class="eyebrow">Get started</span>
-    <h2 style="margin-top:14px">Put your agents to work, under governance you can prove.</h2>
-    <p class="lede">We're working with a small number of design partners in regulated industries. If that's you, let's scope one workflow.</p>
+    <h2>Put your agents to work, <b>under governance you can prove.</b></h2>
+    <p class="lede">We're working with a small number of design partners in regulated industries. If that's you, let's scope one workflow, or one whole function.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="mailto:info@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
-      <a class="btn btn-ghost" href="mailto:info@daybreakailabs.com?subject=Lightwork%20access">Request access</a>
+      <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
+      <a class="btn btn-ghost" href="mailto:chris@daybreakailabs.com?subject=Lightwork%20access">Request access</a>
     </div>
   </div>
 </section>
@@ -287,41 +326,47 @@
   <div class="wrap">
     <div class="top">
       <div>
-        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-logo.png" alt="Daybreak Labs" width="970" height="305"></span><span>Lightwork</span></div>
-        <p class="blurb">The governed AI agent workforce for regulated enterprises. A product of Daybreak Labs.</p>
+        <div class="footer-brand"><span class="brand-mark"><img src="daybreak-mark-dark.png" alt="" width="425" height="322"></span><span>Daybreak Labs</span></div>
+        <p class="blurb">An AI lab for agentic workforces, built on compliance and governance. Lightwork is the product.</p>
+        <div class="dline" role="presentation"></div>
       </div>
       <div>
         <h4>Products</h4>
         <ul>
           <li><a href="product.html">Lightwork Platform</a></li>
+          <li><a href="cortex.html">Cortex</a></li>
           <li><a href="second-shift.html">Second Shift</a></li>
           <li><a href="fleet-governance.html">Fleet Governance</a></li>
+          <li><a href="autonomous-compliance.html">Autonomous Compliance</a></li>
+          <li><a href="autonomous-shoring.html">Autonomous Shoring &amp; BPO</a></li>
           <li><a href="daybreak-forge.html">Daybreak Forge</a></li>
         </ul>
       </div>
       <div>
         <h4>Company</h4>
         <ul>
-          <li><a href="company.html">About</a></li>
+          <li><a href="company.html">About the lab</a></li>
+          <li><a href="security.html">Security</a></li>
           <li><a href="company.html#contact">Contact</a></li>
-          <li><a href="mailto:info@daybreakailabs.com?subject=Lightwork%20access">Request access</a></li>
+          <li><a href="mailto:chris@daybreakailabs.com?subject=Lightwork%20access">Request access</a></li>
         </ul>
       </div>
       <div>
         <h4>Contact</h4>
         <ul>
-          <li><a href="mailto:info@daybreakailabs.com">info@daybreakailabs.com</a></li>
+          <li><a href="mailto:chris@daybreakailabs.com">chris@daybreakailabs.com</a></li>
           <li><a href="tel:+14233229722">(423) 322-9722</a></li>
         </ul>
       </div>
     </div>
     <div class="legal">
       <span>&copy; 2026 Daybreak Labs. Lightwork is a product of Daybreak Labs.</span>
-      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; Private alpha</span>
+      <span><a href="privacy.html">Privacy &amp; cookies</a> &middot; Self-hosted fonts, no trackers &middot; Private alpha</span>
     </div>
   </div>
 </footer>
 
+<script src="lab.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
