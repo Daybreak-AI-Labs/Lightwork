@@ -151,6 +151,7 @@ class OpenAIClient:
         default_headers: dict | None = None,
     ):
         try:
+            import openai
             from openai import AsyncOpenAI, OpenAI
         except ImportError as e:
             raise ImportError(_openai_import_error_message(e)) from e
@@ -168,18 +169,21 @@ class OpenAIClient:
                 "OpenAI-compatible provider requires a non-empty API key; "
                 "refusing to fall back to OPENAI_API_KEY for this base_url."
             )
-        from .base import llm_http_timeout
+        from .base import sdk_http_timeout
         kw: dict = {"api_key": key, "base_url": base_url}
         # Data-residency / ZDR control: operator-set `[providers.<name>]
         # default_headers` are attached to every request so a compliance gateway
         # can enforce region pinning / no-retention headers. Empty -> none.
         if default_headers:
             kw["default_headers"] = dict(default_headers)
-        timeout = llm_http_timeout()
+        timeout = sdk_http_timeout(openai)
         if timeout is not None:
             kw["timeout"] = timeout
-        self._sync = OpenAI(**kw)
-        self._async = AsyncOpenAI(**kw)
+        # Lightwork's bounded retry layer is the sole retry authority. Leaving
+        # the SDK default enabled multiplies each governed attempt underneath
+        # budgets, egress denials, and audit accounting.
+        self._sync = OpenAI(max_retries=0, **kw)
+        self._async = AsyncOpenAI(max_retries=0, **kw)
         # Expose the resolved endpoint for introspection (doctor / logs) and so
         # the OpenAI-compatible subclasses (vllm / tgi / bedrock /
         # openai_compatible) and their tests can read where they're actually

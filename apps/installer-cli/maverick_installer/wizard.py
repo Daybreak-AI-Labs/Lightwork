@@ -379,6 +379,24 @@ def _sdk_import_skip_message(name: str, exc: ImportError) -> str:
     )
 
 
+def _arm_validation_egress() -> str | None:
+    """Arm the process egress boundary before importing a provider SDK.
+
+    The installer can be imported before :mod:`maverick`, so relying only on
+    the core package's import side effect leaves credential probes dependent on
+    import order. Return a non-sensitive reason instead of attempting an
+    unguarded validation call when the boundary cannot be armed.
+    """
+    try:
+        from maverick.egress_guard import install
+
+        if install():
+            return None
+        return "guard did not report active"
+    except Exception as exc:
+        return type(exc).__name__
+
+
 def _validate_anthropic_key(key: str) -> tuple[bool, str]:
     """Ping Anthropic with the key. Returns (ok, message).
 
@@ -388,12 +406,16 @@ def _validate_anthropic_key(key: str) -> tuple[bool, str]:
     """
     if not key.strip():
         return False, "empty key"
+    if reason := _arm_validation_egress():
+        return True, f"validation skipped: egress guard unavailable ({reason})"
     try:
         import anthropic
     except ImportError as e:
         return True, _sdk_import_skip_message("anthropic", e)
     try:
-        client = anthropic.Anthropic(api_key=key, timeout=5.0)
+        # Credential validation is intentionally one-shot: a five-second
+        # probe reports auth, while an outage remains a non-fatal skip.
+        client = anthropic.Anthropic(api_key=key, timeout=5.0, max_retries=0)
         # Minimal call -- list available models is enough to verify auth.
         list(client.models.list(limit=1))
         return True, "validated"
@@ -408,12 +430,15 @@ def _validate_openai_key(key: str) -> tuple[bool, str]:
         return False, "empty key"
     # Azure OpenAI keys are 32-char hex with no prefix; OpenAI ships
     # sk-, sk-proj-, sk-svcacct-. Just ping the API and let it tell us.
+    if reason := _arm_validation_egress():
+        return True, f"validation skipped: egress guard unavailable ({reason})"
     try:
         from openai import AuthenticationError, OpenAI
     except ImportError as e:
         return True, _sdk_import_skip_message("openai", e)
     try:
-        client = OpenAI(api_key=key, timeout=5.0)
+        # Keep the interactive five-second credential probe to one attempt.
+        client = OpenAI(api_key=key, timeout=5.0, max_retries=0)
         list(client.models.list().data[:1])
         return True, "validated"
     except AuthenticationError:
@@ -426,12 +451,20 @@ def _validate_openai_compat_key(key: str, base_url: str, label: str) -> tuple[bo
     """For openai-compatible endpoints (Moonshot, DeepSeek, xAI, Gemini)."""
     if not key:
         return False, "empty key"
+    if reason := _arm_validation_egress():
+        return True, f"validation skipped: egress guard unavailable ({reason})"
     try:
         from openai import AuthenticationError, OpenAI
     except ImportError as e:
         return True, _sdk_import_skip_message("openai", e)
     try:
-        client = OpenAI(api_key=key, base_url=base_url, timeout=5.0)
+        # One bounded probe per endpoint keeps setup latency predictable.
+        client = OpenAI(
+            api_key=key,
+            base_url=base_url,
+            timeout=5.0,
+            max_retries=0,
+        )
         list(client.models.list().data[:1])
         return True, f"validated against {label}"
     except AuthenticationError:

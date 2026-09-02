@@ -116,6 +116,51 @@ def test_atomic_write_supports_non_bmp_windows_path(tmp_path):
     assert json.loads(p.read_text())["ok"] is True
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+def test_windows_secure_temp_and_atomic_write_beyond_max_path(tmp_path):
+    """Direct Win32 calls must not regress to the legacy 260-char ceiling."""
+    import maverick.file_lock as file_lock
+
+    parent = tmp_path
+    index = 0
+    while len(os.path.abspath(parent)) < 220:
+        remaining = 220 - len(os.path.abspath(parent)) - 1
+        parent /= f"s{index}-" + ("x" * min(35, remaining - 3))
+        parent.mkdir()
+        index += 1
+    target = parent / "state.json"
+
+    expected_temp_length = len(os.path.abspath(parent / ".state.json-")) + 36
+    assert len(os.path.abspath(target)) < 260
+    assert expected_temp_length > 260
+    assert file_lock._windows_extended_path(target).startswith("\\\\?\\")
+    assert file_lock._windows_extended_path(
+        r"\\server\share\folder\state.json"
+    ) == r"\\?\UNC\server\share\folder\state.json"
+
+    fd, temporary = file_lock._windows_secure_mkstemp(
+        parent,
+        prefix=".state.json-",
+        suffix=".tmp",
+    )
+    try:
+        os.write(fd, b"private")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        assert len(temporary) > 260
+        assert temporary.startswith("\\\\?\\")
+        assert private_path_is_restricted(temporary)
+    finally:
+        os.unlink(temporary)
+
+    atomic_write_text(target, '{"long_path": true}')
+    assert json.loads(atomic_read_text(target))["long_path"] is True
+    assert private_path_is_restricted(target)
+    assert [entry.name for entry in parent.iterdir()] == ["state.json"]
+
+
 def test_atomic_write_bytes_round_trips_privately_without_temp_files(tmp_path):
     p = tmp_path / "payload.bin"
     payload = bytes(range(256)) + b"\x00\xffaudit"

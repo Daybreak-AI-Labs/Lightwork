@@ -24,6 +24,7 @@ def test_anthropic_client_uses_the_sdk_native_timeout(monkeypatch) -> None:
 
     assert len(_CaptureClient.calls) == 2
     for kwargs in _CaptureClient.calls:
+        assert kwargs["max_retries"] == 0
         timeout = kwargs["timeout"]
         assert isinstance(timeout, anthropic.Timeout)
         assert timeout.connect == 7.0
