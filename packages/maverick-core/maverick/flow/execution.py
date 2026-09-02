@@ -629,10 +629,47 @@ def default_action_runner(
 ) -> ActionRunner:
     """Production ``action_runner``: resolve the named tool from the base registry
     and call it with the rendered params. Outcome is success (1.0) unless the tool
-    returns a failed, refused, or indeterminate result (0.0). Never raises into
-    the flow. High-risk nodes turn that 0.0 into the runner's indeterminate
-    quarantine rather than an automatic retry."""
+    returns a failed, refused, or indeterminate result (0.0). Ordinary tool
+    failures are returned to the flow; intentional control-flow stops propagate
+    after one terminal-audit attempt. High-risk nodes turn a 0.0 into the runner's
+    indeterminate quarantine rather than an automatic retry."""
     def run(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
+        import asyncio
+        import secrets
+
+        from ..audit.errors import AuditRefused
+
+        call_id = secrets.token_hex(12)
+        from ..audit import TOOL_CALL_COMMITMENT_ALGORITHM, tool_call_commitment
+
+        call_commitment = tool_call_commitment(
+            call_id=call_id,
+        )
+        authorized = False
+
+        def audit_result(
+            status: str,
+            result: object,
+            *,
+            disposition: str,
+        ) -> bool:
+            from ..audit import EventKind, audit_event
+            from ..tool_authz import _audit_summary
+
+            return audit_event(
+                EventKind.TOOL_RESULT,
+                agent="flow:action",
+                name=tool,
+                origin="flow",
+                principal=user_id,
+                call_id=call_id,
+                call_commitment=call_commitment,
+                call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
+                status=status,
+                disposition=disposition,
+                output_summary=_audit_summary(result),
+            )
+
         try:
             # One authorization gate for every non-agent dispatch. This used to
             # be action_tool_policy_error alone -- no shield scan, no governance
@@ -646,9 +683,11 @@ def default_action_runner(
             # claim unfalsifiable rather than merely incomplete.
             from ..tool_authz import authorize
 
-            if denial := authorize(tool, params, origin="flow",
-                                   principal=user_id):
+            if denial := authorize(
+                tool, params, origin="flow", principal=user_id, call_id=call_id,
+            ):
                 return (denial, 0.0)
+            authorized = True
             from ..sandbox import LocalBackend
             from ..tools import base_registry
             reg = base_registry(
@@ -660,19 +699,97 @@ def default_action_runner(
             )
             t = next((x for x in reg.all() if x.name == tool), None)
             if t is None:
-                return (f"ERROR: no such tool {tool!r}", 0.0)
-            # Go through the registry's authoritative dispatch path: it owns the
-            # ToolFn(args_dict) contract, sync/async/generator normalization,
-            # tracing, cache invalidation and retry-safety policy.
-            from ..workflow import _drive
-            result = _drive(reg.run(tool, params))
+                result = f"ERROR: no such tool {tool!r}"
+            else:
+                # Go through the registry's authoritative dispatch path: it owns the
+                # ToolFn(args_dict) contract, sync/async/generator normalization,
+                # tracing, cache invalidation and retry-safety policy.
+                from ..workflow import _drive
+                result = _drive(reg.run(tool, params))
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit) as e:
+            if authorized:
+                if isinstance(e, asyncio.CancelledError):
+                    disposition = "cancelled"
+                elif isinstance(e, KeyboardInterrupt):
+                    disposition = "interrupted"
+                else:
+                    disposition = "system_exit"
+                try:
+                    audit_result(
+                        "error",
+                        f"ERROR: {type(e).__name__}",
+                        disposition=disposition,
+                    )
+                except BaseException:
+                    # A terminal writer failure must never replace the caller's
+                    # cancellation/process stop.  The audit was attempted once;
+                    # the durable flow boundary marks the escaped run
+                    # indeterminate and prevents automatic replay.
+                    pass
+            raise
         except Exception as e:
             from ..budget import BudgetExceeded
             from ..killswitch import Halted
-            if isinstance(e, (BudgetExceeded, Halted)):
+            if isinstance(e, AuditRefused):
                 raise
-            return (f"ERROR: {type(e).__name__}: {e}", 0.0)
+            if isinstance(e, (BudgetExceeded, Halted)):
+                if authorized:
+                    try:
+                        audit_result(
+                            "error",
+                            f"ERROR: {type(e).__name__}",
+                            disposition=(
+                                "budget_exceeded"
+                                if isinstance(e, BudgetExceeded)
+                                else "halted"
+                            ),
+                        )
+                    except AuditRefused:
+                        # Preserve the control-flow stop.  The tool boundary has
+                        # already raised it, and a terminal evidence refusal must
+                        # not replace that stop with a retryable executor error.
+                        pass
+                raise
+            # Connector exceptions can contain response bodies, credentials, or
+            # tenant data.  The caller and signed audit row need the failure
+            # class, not the exception's attacker-controlled text.
+            result = f"ERROR: tool execution raised {type(e).__name__}"
+        if isinstance(result, str) and result.startswith("ERROR: "):
+            # ToolRegistry converts connector exceptions to
+            # ``ERROR: ExceptionType: raw message`` instead of raising them.
+            # Strip that raw message at this outer trust boundary too.
+            exception_name, separator, _detail = result[7:].partition(": ")
+            if (
+                separator
+                and exception_name.replace("_", "").isalnum()
+                and exception_name.endswith(("Error", "Exception"))
+            ):
+                result = f"ERROR: tool execution raised {exception_name}"
         ok = not tool_result_failed(result)
+        if authorized:
+            # Keep result auditing outside the tool-dispatch try block: a strict
+            # audit refusal must propagate once, not be mistaken for a tool
+            # exception and recursively re-audited.
+            try:
+                result_recorded = audit_result(
+                    "ok" if ok else "error",
+                    result,
+                    disposition="completed" if ok else "tool_error",
+                )
+            except AuditRefused:
+                # Authorization refusals occur inside the dispatch try above
+                # and still propagate before execution.  This refusal is for
+                # the terminal row after the connector returned, so propagating
+                # it would make the flow runner retry a possibly committed
+                # operation.
+                result_recorded = False
+            if not result_recorded:
+                return (
+                    "INDETERMINATE: the tool ran, but its result audit row could "
+                    "not be written; reconcile the external state and do not "
+                    "retry automatically",
+                    0.0,
+                )
         return (result, 1.0 if ok else 0.0)
     return run
 

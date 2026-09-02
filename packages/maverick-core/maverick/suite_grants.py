@@ -248,16 +248,13 @@ def register_grant_resolver(fn) -> None:
         _EXTRA_RESOLVERS.append(fn)
 
 
-def granted_suites(principal: str) -> frozenset[str] | None:
-    """The suites ``principal`` may use, or ``None`` for unrestricted.
+def _fallback_suites(principal: str) -> frozenset[str] | None:
+    """Resolve non-explicit grant sources for ``principal``.
 
-    Resolution order: explicit stored grant, then any registered extra source
-    (SCIM groups), then the configured default (:func:`default_suites`) —
-    which is itself ``None`` unless an operator opted the deployment into
-    deny-by-default."""
-    explicit = get_grant(principal)
-    if explicit is not None:
-        return explicit
+    Kept separate from :func:`granted_suites` so removal can compare the
+    current explicit restriction with the policy that would replace it before
+    changing the store.
+    """
     for fn in _EXTRA_RESOLVERS:
         try:
             derived = fn(principal)
@@ -268,6 +265,19 @@ def granted_suites(principal: str) -> frozenset[str] | None:
         if derived is not None:
             return frozenset(str(s) for s in derived) & known_suites()
     return default_suites()
+
+
+def granted_suites(principal: str) -> frozenset[str] | None:
+    """The suites ``principal`` may use, or ``None`` for unrestricted.
+
+    Resolution order: explicit stored grant, then any registered extra source
+    (SCIM groups), then the configured default (:func:`default_suites`) —
+    which is itself ``None`` unless an operator opted the deployment into
+    deny-by-default."""
+    explicit = get_grant(principal)
+    if explicit is not None:
+        return explicit
+    return _fallback_suites(principal)
 
 
 def _audit_grant_change(actor: str, principal: str, old, new) -> None:
@@ -318,27 +328,44 @@ def set_suites(principal: str, suites: object, *, actor: str = "") -> None:
 
 
 def remove_grant(principal: str, *, actor: str = "") -> None:
-    """Lift scoping for ``principal`` (back to the default: unrestricted)."""
+    """Remove an explicit override only when the fallback is no broader.
+
+    With the historical unrestricted default, deleting ``["finance"]``
+    silently granted every department.  Refuse that privilege expansion and
+    require the administrator to save an explicit replacement (including an
+    empty deny-all grant) instead.
+    """
     principal = (principal or "").strip()
-    removed = None
     with _locked(store_path()):
         data = _load()
+        removed = data.get(principal)
+        if removed is None:
+            return
+        fallback = _fallback_suites(principal)
+        previous = frozenset(removed)
+        if not is_admin_principal(principal) and (
+            fallback is None or not fallback.issubset(previous)
+        ):
+            raise ValueError(
+                "cannot remove this department override because the deployment "
+                "default would broaden access; save an explicit replacement "
+                "(or no departments) instead"
+            )
         prior = dict(data)
-        removed = data.pop(principal, None)
-        if removed is not None:
-            _write(data)
-            from .audit import AuditRefused
+        data.pop(principal)
+        _write(data)
+        from .audit import AuditRefused
 
+        try:
+            _audit_grant_change(actor, principal, removed, None)
+        except AuditRefused:
             try:
-                _audit_grant_change(actor, principal, removed, None)
-            except AuditRefused:
-                try:
-                    _write(prior)
-                except Exception as rollback_exc:
-                    raise SuiteGrantStoreError(
-                        "audit refused suite-grant removal and rollback failed"
-                    ) from rollback_exc
-                raise
+                _write(prior)
+            except Exception as rollback_exc:
+                raise SuiteGrantStoreError(
+                    "audit refused suite-grant removal and rollback failed"
+                ) from rollback_exc
+            raise
 
 
 def suite_allowed_for(principal: str | None, suite: str | None) -> bool:

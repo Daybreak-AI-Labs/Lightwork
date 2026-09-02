@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import has_permission, require_permission
+from .auth import has_global_permission, has_permission, require_permission
 
 PAGE_PATH = "/agent-control-plane"
 API_BASE = "/api/v1/agent-control-plane"
@@ -36,6 +36,25 @@ _HEADERS = {
 }
 
 
+def _shared_halt_backend() -> bool:
+    """Use the same deployment-scope decision as the hardened halt API."""
+
+    from .api import _shared_halt_backend as api_shared_halt_backend
+
+    return api_shared_halt_backend()
+
+
+def _halt_authority(request: Request) -> tuple[bool, str]:
+    """Return the exact halt authority and scope, failing closed on uncertainty."""
+
+    try:
+        if _shared_halt_backend():
+            return has_global_permission(request, "admin"), "cluster"
+        return has_global_permission(request, "operate"), "local"
+    except Exception:
+        return False, "unknown"
+
+
 def create_agent_control_plane_page_router(templates: Jinja2Templates) -> APIRouter:
     if not isinstance(templates, Jinja2Templates):
         raise TypeError("agent control plane page requires a Jinja template authority")
@@ -47,6 +66,7 @@ def create_agent_control_plane_page_router(templates: Jinja2Templates) -> APIRou
         if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
             raise HTTPException(status_code=404, detail="agent control plane unavailable")
         nonce = secrets.token_urlsafe(18)
+        acp_can_halt, acp_halt_scope = _halt_authority(request)
         response = templates.TemplateResponse(
             request,
             "agent_control_plane.html",
@@ -57,6 +77,8 @@ def create_agent_control_plane_page_router(templates: Jinja2Templates) -> APIRou
                 "acp_can_operate": has_permission(request, "operate"),
                 "acp_can_audit": has_permission(request, "audit"),
                 "acp_can_admin": has_permission(request, "admin"),
+                "acp_can_halt": acp_can_halt,
+                "acp_halt_scope": acp_halt_scope,
             },
         )
         for name, value in _HEADERS.items():

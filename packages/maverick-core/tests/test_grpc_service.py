@@ -15,6 +15,7 @@ class _Goal:
     status: str = "pending"
     result: str | None = None
     owner: str = ""
+    execution_principal: str = ""
 
 
 @dataclass
@@ -33,10 +34,21 @@ class _FakeWorld:
     def __init__(self, shared: dict):
         self.s = shared  # shared across the fresh-per-call instances
 
-    def create_goal(self, title, description="", *, owner=""):
+    def create_goal(
+        self,
+        title,
+        description="",
+        *,
+        owner="",
+        execution_principal="",
+    ):
         self.s["seq"] += 1
         gid = self.s["seq"]
-        self.s["goals"][gid] = _Goal(id=gid, owner=owner)
+        self.s["goals"][gid] = _Goal(
+            id=gid,
+            owner=owner,
+            execution_principal=execution_principal,
+        )
         self.s["titles"][gid] = title
         return gid
 
@@ -49,7 +61,17 @@ class _FakeWorld:
             g.status = status
             g.result = result
 
+    def bind_goal_execution_principal(self, goal_id, principal):
+        g = self.s["goals"].get(goal_id)
+        if g is None or (
+            g.execution_principal and g.execution_principal != principal
+        ):
+            return False
+        g.execution_principal = principal
+        return True
+
     def claim_goal_for_run(self, goal_id, *, expected_owner=None):
+        self.s.setdefault("claim_owners", []).append(expected_owner)
         g = self.s["goals"].get(goal_id)
         if g is None or g.status != "pending":
             return False
@@ -85,6 +107,8 @@ def test_start_goal_creates_and_dispatches():
     gid = svc.start_goal("Do the thing", "details", max_dollars=2.0, user_id="u1")
     assert gid == 1
     assert shared["titles"][1] == "Do the thing"
+    assert shared["goals"][1].owner == "user:u1"
+    assert shared["goals"][1].execution_principal == "user:u1"
     assert shared["dispatched"] == [
         (1, {
             "max_dollars": 2.0,
@@ -101,6 +125,23 @@ def test_start_goal_rejects_blank_title():
     svc = _service(_shared())
     with pytest.raises(ValueError):
         svc.start_goal("   ")
+
+
+def test_start_goal_preserves_distinct_owner_and_runtime_principal():
+    from maverick.capability import Capability
+
+    shared = _shared()
+    svc = _service(shared)
+
+    gid = svc.start_goal(
+        "Do the thing",
+        owner="user:alice",
+        capability=Capability(principal="agent:bob"),
+    )
+
+    assert shared["goals"][gid].owner == "user:alice"
+    assert shared["goals"][gid].execution_principal == "agent:bob"
+    assert shared["dispatched"][0][0] == gid
 
 
 def test_stream_episode_yields_events_then_terminal_status():
@@ -225,6 +266,103 @@ def test_run_goal_retry_returns_status_without_duplicate_dispatch():
     assert first is not None and first.status == "done"
     assert retry is not None and retry.status == "done"
     assert retry.result == "finished"
+
+
+def test_run_goal_refuses_execution_principal_mismatch_before_claim():
+    shared = _shared()
+    shared["goals"][8] = _Goal(
+        id=8,
+        status="pending",
+        owner="user:human-owner",
+        execution_principal="user:alice",
+    )
+    svc = _service(shared)
+
+    result = svc.run_goal(8, user_id="bob")
+
+    assert result is None
+    assert shared["goals"][8].status == "pending"
+    assert shared["goals"][8].owner == "user:human-owner"
+    assert shared["goals"][8].execution_principal == "user:alice"
+    assert "dispatched" not in shared
+
+
+def test_run_goal_preserves_human_owner_for_bound_agent_execution():
+    from maverick.capability import Capability
+
+    shared = _shared()
+    shared["goals"][8] = _Goal(
+        id=8,
+        status="pending",
+        owner="user:human-owner",
+        execution_principal="agent:worker",
+    )
+
+    def dispatch(gid, **_kwargs):
+        shared["goals"][gid].status = "done"
+        shared["goals"][gid].result = "finished"
+
+    svc = GoalService(
+        world_factory=lambda: _FakeWorld(shared),
+        dispatch=dispatch,
+    )
+    result = svc.run_goal(
+        8,
+        capability=Capability(principal="agent:worker"),
+        expected_execution_principal="agent:worker",
+    )
+
+    assert result is not None and result.status == "done"
+    assert result.owner == "user:human-owner"
+    assert shared["goals"][8].owner == "user:human-owner"
+    assert shared["goals"][8].execution_principal == "agent:worker"
+    assert shared["claim_owners"] == ["user:human-owner"]
+
+
+def test_per_agent_cannot_adopt_unbound_human_goal():
+    from maverick.capability import Capability
+
+    shared = _shared()
+    shared["goals"][8] = _Goal(
+        id=8,
+        status="pending",
+        owner="user:human-owner",
+    )
+    svc = _service(shared)
+
+    result = svc.run_goal(
+        8,
+        capability=Capability(principal="agent:worker"),
+        expected_execution_principal="agent:worker",
+    )
+
+    assert result is None
+    assert shared["goals"][8].status == "pending"
+    assert shared["goals"][8].execution_principal == ""
+    assert "claim_owners" not in shared
+
+
+def test_run_goal_fails_closed_when_execution_principal_binding_is_unavailable():
+    shared = _shared()
+    shared["goals"][8] = _Goal(id=8, status="pending")
+
+    class _BrokenBindingWorld(_FakeWorld):
+        def bind_goal_execution_principal(self, goal_id, principal):
+            raise OSError("database unavailable")
+
+    svc = GoalService(
+        world_factory=lambda: _BrokenBindingWorld(shared),
+        dispatch=lambda gid, **kwargs: shared.setdefault(
+            "dispatched", [],
+        ).append((gid, kwargs)),
+    )
+
+    result = svc.run_goal(8, user_id="alice")
+
+    assert result is None
+    assert shared["goals"][8].status == "pending"
+    assert shared["goals"][8].execution_principal == ""
+    assert "dispatched" not in shared
 
 
 @pytest.mark.parametrize("status", ["active", "done", "blocked", "failed", "cancelled"])

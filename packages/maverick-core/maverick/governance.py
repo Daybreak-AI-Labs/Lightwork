@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 
 from .safety.tool_risk import risk_rank, tool_risk
@@ -73,6 +73,12 @@ class Verdict:
     decision: Decision
     reason: str
     rule: str
+    #: Exact compliance-profile snapshot used to produce this decision. Audit
+    #: call sites pass it back to regulatory_compiler instead of re-reading a
+    #: concurrently changing config/tenant overlay after enforcement. ``None``
+    #: means policy provenance was unavailable (for example a fail-closed policy
+    #: outage); it is intentionally distinct from a trusted empty snapshot.
+    compliance_profiles: tuple[str, ...] | None = None
 
     @property
     def allowed(self) -> bool:
@@ -255,6 +261,9 @@ class Policy:
     deny_above: dict[str, float] = field(default_factory=dict)
     require_human_above: dict[str, float] = field(default_factory=dict)
     require_fresh_human_approval: bool = False
+    #: Provenance only; deliberately excluded from ``is_empty`` because a
+    #: profile may enforce solely through capability attenuation.
+    compliance_profiles: tuple[str, ...] = ()
 
     def is_empty(self) -> bool:
         return not (
@@ -300,7 +309,7 @@ class Policy:
         # but never calls Policy.from_config, avoiding recursive compilation.
         try:
             from . import compliance_profiles
-            profiles = compliance_profiles.configured_profiles()
+            profiles = compliance_profiles.configured_profiles(snapshot)
         except Exception as exc:
             raise GovernancePolicyError(
                 "compliance governance policy is unavailable"
@@ -321,7 +330,8 @@ class Policy:
                 policies.append(compliance_profiles.compile_policy(profiles))
             if regime_keys:
                 policies.append(finance_regimes.compile_policy(regime_keys))
-            return finance_regimes.union_policies(policies)
+            combined = finance_regimes.union_policies(policies)
+            return replace(combined, compliance_profiles=tuple(profiles))
         except Exception as exc:
             raise GovernancePolicyError(
                 "configured governance overlays could not be compiled"
@@ -388,40 +398,45 @@ def evaluate(
     # 1. Least privilege: the capability is the ceiling; deny below it wins.
     if capability is not None and not capability.permits(action):
         return Verdict(Decision.DENY, f"capability does not permit {action!r}",
-                       "capability")
+                       "capability", policy.compliance_profiles)
 
     # 2. Org hard-deny.
     if action in policy.deny_actions:
         return Verdict(Decision.DENY, f"{action!r} is denied by org policy",
-                       "deny_actions")
+                       "deny_actions", policy.compliance_profiles)
     if policy.deny_min_risk and risk_rank(eff_risk) >= risk_rank(policy.deny_min_risk):
         return Verdict(Decision.DENY,
                        f"{eff_risk}-risk {action!r} denied by org policy",
-                       "deny_min_risk")
+                       "deny_min_risk", policy.compliance_profiles)
     deny_thresh = _threshold_for(policy.deny_above, action)
     if amount is not None and deny_thresh is not None and amount > deny_thresh:
         return Verdict(Decision.DENY,
                        f"{action!r} amount {_money(amount, currency)} exceeds the "
-                       f"deny ceiling {_money(deny_thresh, currency)}", "deny_above")
+                       f"deny ceiling {_money(deny_thresh, currency)}", "deny_above",
+                       policy.compliance_profiles)
 
     # 3. Human-oversight gate (EU AI Act Art 14).
     if action in policy.require_human_actions:
         return Verdict(Decision.REQUIRE_HUMAN,
-                       f"{action!r} requires human approval", "require_human_actions")
+                       f"{action!r} requires human approval", "require_human_actions",
+                       policy.compliance_profiles)
     if (policy.require_human_min_risk
             and risk_rank(eff_risk) >= risk_rank(policy.require_human_min_risk)):
         return Verdict(Decision.REQUIRE_HUMAN,
                        f"{eff_risk}-risk {action!r} requires human approval",
-                       "require_human_min_risk")
+                       "require_human_min_risk", policy.compliance_profiles)
     hitl_thresh = _threshold_for(policy.require_human_above, action)
     if amount is not None and hitl_thresh is not None and amount > hitl_thresh:
         return Verdict(Decision.REQUIRE_HUMAN,
                        f"{action!r} amount {_money(amount, currency)} exceeds the "
                        f"approval threshold {_money(hitl_thresh, currency)}, "
-                       "requires human approval", "require_human_above")
+                       "requires human approval", "require_human_above",
+                       policy.compliance_profiles)
 
     # 4. Default-allow.
-    return Verdict(Decision.ALLOW, "permitted", "default")
+    return Verdict(
+        Decision.ALLOW, "permitted", "default", policy.compliance_profiles
+    )
 
 
 __all__ = [

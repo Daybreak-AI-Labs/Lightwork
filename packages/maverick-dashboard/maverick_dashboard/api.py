@@ -13,8 +13,11 @@ import hmac
 import json
 import logging
 import os
+import secrets
+import stat
 import threading
 import time
+from typing import NoReturn
 
 from fastapi import (
     APIRouter,
@@ -224,26 +227,47 @@ _IDEMPOTENCY_CHANNEL = "idempotency:api:goals"
 
 
 def _shared_halt_backend() -> bool:
-    """Whether the cluster-wide (shared-store) halt is in play. Only on a shared
-    backend (Postgres); on single-host SQLite the local HALT file is the whole
-    mechanism and the killswitch never consults the shared row, so the dashboard
-    leaves it untouched (keeps single-host behavior unchanged)."""
+    """Resolve whether the shared-store halt is authoritative.
+
+    This is a security decision, so an unreadable backend configuration must
+    propagate to callers rather than silently becoming the less-privileged
+    local path.
+    """
+
+    from maverick.config import config_source_errors, load_config
+    from maverick.world_model_backends import is_postgres_configured
+
+    load_config()
+    if config_source_errors():
+        raise RuntimeError("halt backend configuration is unavailable")
+    return bool(is_postgres_configured())
+
+
+def _halt_backend_or_503() -> bool:
     try:
-        from maverick.world_model_backends import is_postgres_configured
+        return _shared_halt_backend()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="halt authority is unavailable",
+        ) from exc
 
-        return bool(is_postgres_configured())
-    except Exception:
-        return False
 
-
-def _require_halt_permission(request: Request) -> None:
+def _require_halt_permission(request: Request) -> bool:
     """Gate dashboard halt toggles at the correct blast radius.
 
     In local/SQLite mode the halt is process-local and remains an operator action.
     In shared Postgres mode the halt row is fleet-wide and untenanted, so toggling
     it is a global control-plane action reserved for dashboard admins.
     """
-    require_permission(request, "admin" if _shared_halt_backend() else "operate")
+    shared = _halt_backend_or_503()
+    if shared:
+        require_global_permission(request, "admin")
+    else:
+        # The local HALT file is tenant=None and stops every tenant in this
+        # process. A tenant-local role must not gain deployment-wide authority.
+        require_global_permission(request, "operate")
+    return shared
 
 
 _PERF_SLA_CACHE_TTL_SECONDS = 60.0
@@ -252,7 +276,19 @@ _PERF_SLA_CACHE: tuple[float, list[dict], str | None] | None = None
 _PERF_HISTORY_MAX_FILES = 128
 _COMPLIANCE_PACKET_CACHE_TTL_SECONDS = 60.0
 _COMPLIANCE_PACKET_LOCK = asyncio.Lock()
-_COMPLIANCE_PACKET_CACHE: tuple[float, str] | None = None
+_COMPLIANCE_PACKET_CACHE: dict[tuple[str, str], tuple[float, str]] = {}
+
+
+def _active_cache_context() -> tuple[str, str]:
+    """Stable process-cache namespace for the active tenant and data root.
+
+    The data-root component prevents a process whose ``MAVERICK_HOME`` changes
+    (notably an embedded server or test worker) from reusing evidence generated
+    against the previous storage context.
+    """
+    from maverick.paths import current_tenant_id_strict, data_dir
+
+    return current_tenant_id_strict() or "__shared__", os.fspath(data_dir())
 
 
 def _to_goal_out(g) -> GoalOut:
@@ -314,18 +350,30 @@ async def list_tenants(request: Request) -> list[TenantOut]:
 
 @router.get("/workspace/active-tenant")
 async def get_active_tenant(request: Request) -> dict:
-    """The tenant this dashboard currently works in, and where the binding
-    came from -- the environment pin outranks the in-app selection."""
+    """Return the caller's workspace tenant and the binding that selected it.
+
+    The environment pin outranks both the authenticated principal's selection
+    and the persisted local-operator selection introduced by the self-service
+    workspace picker.
+    """
     require_permission(request, "view")
     import os
 
-    from maverick_dashboard import settings_store
+    from maverick_dashboard import settings_store, workspace_tenants
 
-    selected = await run_in_threadpool(settings_store.active_tenant)
+    principal = caller_principal(request)
+    if principal:
+        selected = await run_in_threadpool(
+            workspace_tenants.get_selection, principal
+        )
+        selection_source = "principal_selection"
+    else:
+        selected = await run_in_threadpool(settings_store.active_tenant)
+        selection_source = "local_selection"
     env_tenant = os.environ.get("MAVERICK_TENANT", "").strip() or None
     return {
         "tenant_id": env_tenant or selected,
-        "source": "env" if env_tenant else ("selection" if selected else None),
+        "source": "env" if env_tenant else (selection_source if selected else None),
         "selected": selected,
         "env_tenant": env_tenant,
     }
@@ -333,22 +381,93 @@ async def get_active_tenant(request: Request) -> dict:
 
 @router.put("/workspace/active-tenant")
 async def set_active_tenant(request: Request, body: ActiveTenantIn) -> dict:
-    """Select (or clear, with ``tenant_id: null``) the workspace tenant every
-    tenant-scoped workbench runs as. Persists through the same settings
-    overlay as the rest of the in-app configuration -- no server files, no
-    restart. The store validates the id against the tenant registry."""
-    require_global_permission(request, "admin")
-    from maverick import config as _cfg
+    """Select or clear this caller's tenant-scoped workspace.
 
-    from maverick_dashboard import settings_store
+    Authenticated users may select only tenants where they hold a membership;
+    global tenant administrators may select any active tenant. Genuine local
+    mode and the static operator token retain the single-operator persisted
+    selection introduced by the self-service picker. Both stores validate the
+    selected tenant, and a preference never grants access by itself.
+    """
+    require_permission(request, "view")
+    from maverick import config as _cfg
+    from maverick.tenant import registry as tenant_registry
+
+    from maverick_dashboard import settings_store, workspace_tenants
+
+    principal = caller_principal(request)
+    tenant_id = body.tenant_id
+    previous_tenant: str | None
+    if principal:
+        previous_tenant = await run_in_threadpool(
+            workspace_tenants.get_selection, principal
+        )
+        if tenant_id is not None:
+            rec = await run_in_threadpool(tenant_registry.get_tenant, tenant_id)
+            if (
+                rec is None
+                or not rec.active
+                or not await run_in_threadpool(
+                    workspace_tenants.principal_can_select, principal, tenant_id
+                )
+            ):
+                # Keep tenant existence confidential from principals without a
+                # membership while still giving a useful picker failure.
+                raise HTTPException(
+                    status_code=404, detail="no such accessible active tenant"
+                )
+        await run_in_threadpool(
+            workspace_tenants.set_selection, principal, tenant_id
+        )
+        source = "principal_selection"
+    else:
+        require_global_permission(request, "admin")
+        previous_tenant = await run_in_threadpool(settings_store.active_tenant)
+        try:
+            await run_in_threadpool(settings_store.set_active_tenant, tenant_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _cfg.reset_config_cache()
+        source = "local_selection"
+
+    # Workspace selection changes the confidentiality boundary for every
+    # tenant-scoped page and mutation that follows. Anchor the human decision
+    # in the deployment-global chain; on an explicit custody/policy refusal,
+    # restore the previous selection so the state cannot change unaudited.
+    from maverick.audit import AuditRefused, EventKind, audit_event
 
     try:
-        await run_in_threadpool(settings_store.set_active_tenant, body.tenant_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    _cfg.reset_config_cache()
-    selected = await run_in_threadpool(settings_store.active_tenant)
-    return {"tenant_id": selected, "source": "selection" if selected else None}
+        await run_in_threadpool(
+            audit_event,
+            EventKind.WORKSPACE_SELECTED,
+            agent=principal or "local",
+            _global=True,
+            actor=principal or "local",
+            previous_tenant=previous_tenant,
+            tenant=tenant_id,
+            source=source,
+        )
+    except AuditRefused as exc:
+        try:
+            if principal:
+                await run_in_threadpool(
+                    workspace_tenants.set_selection, principal, previous_tenant
+                )
+            else:
+                await run_in_threadpool(
+                    settings_store.set_active_tenant, previous_tenant
+                )
+                _cfg.reset_config_cache()
+        except Exception as rollback_exc:
+            raise HTTPException(
+                status_code=500,
+                detail="audit refused workspace selection and rollback failed",
+            ) from rollback_exc
+        raise HTTPException(
+            status_code=503,
+            detail="audit custody refused workspace selection; previous workspace restored",
+        ) from exc
+    return {"tenant_id": tenant_id, "source": source if tenant_id else None}
 
 
 @router.get("/workforce/posture")
@@ -893,6 +1012,38 @@ async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     except ValueError as e:
         # Already exists, or an invalid/over-long id.
         raise HTTPException(status_code=409, detail=str(e)) from e
+
+    # Provisioning creates a new confidentiality boundary. Record it in the
+    # deployment-global audit chain and undo the roster publication on a strict
+    # custody refusal. The empty workspace directory may remain as a harmless
+    # private reservation; it is not selectable without the roster entry.
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
+    try:
+        await run_in_threadpool(
+            audit_event,
+            EventKind.TENANT_CREATED,
+            agent=caller_principal(request) or "local",
+            _global=True,
+            actor=caller_principal(request) or "local",
+            tenant=rec.id,
+            plan=rec.plan,
+            max_daily_dollars=rec.max_daily_dollars,
+        )
+    except AuditRefused as exc:
+        try:
+            await run_in_threadpool(
+                tenant_registry.delete_tenant, rec.id, purge=False
+            )
+        except Exception as rollback_exc:
+            raise HTTPException(
+                status_code=500,
+                detail="audit refused tenant creation and rollback failed",
+            ) from rollback_exc
+        raise HTTPException(
+            status_code=503,
+            detail="audit custody refused tenant creation; tenant was not published",
+        ) from exc
     return _to_tenant_out(rec)
 
 
@@ -1075,11 +1226,16 @@ async def set_user_suites(
 
 @router.delete("/users/{principal}/suites", status_code=204)
 async def remove_user_suites(request: Request, principal: str) -> Response:
-    """Lift a user's department scoping (back to unrestricted/default)."""
+    """Remove an override only when the deployment fallback is no broader."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
 
-    suite_grants.remove_grant(principal, actor=caller_principal(request) or "local")
+    try:
+        suite_grants.remove_grant(
+            principal, actor=caller_principal(request) or "local"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
@@ -1920,6 +2076,25 @@ def _safe_filename(name: str) -> str:
     return cleaned.strip(" .-")[:120] or "document"
 
 
+def _attachment_content_disposition(name: str) -> str:
+    """RFC 6266/5987 attachment header with an ASCII fallback.
+
+    Starlette encodes response headers as latin-1.  Putting a Unicode filename
+    directly inside ``filename=`` therefore raises before the response can be
+    sent.  ``filename*`` carries the exact UTF-8 name while old clients retain a
+    conservative ASCII fallback.
+    """
+    from urllib.parse import quote
+
+    safe_name = _safe_filename(name)
+    fallback = safe_name.encode("ascii", "ignore").decode("ascii").strip(" .-")
+    fallback = fallback or "document"
+    disposition = f'attachment; filename="{fallback}"'
+    if fallback != safe_name:
+        disposition += f"; filename*=UTF-8''{quote(safe_name, safe='')}"
+    return disposition
+
+
 @router.get("/privacy/paper-reviews")
 async def list_paper_reviews(request: Request) -> dict:
     require_permission(request, "operate")
@@ -2034,7 +2209,7 @@ async def download_paper_redline(request: Request, review_id: str) -> Response:
     return Response(
         content=body,
         media_type=_PAPER_DOCX_MIME,
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(name)}"'},
+        headers={"Content-Disposition": _attachment_content_disposition(name)},
     )
 
 
@@ -2073,7 +2248,11 @@ async def draft_our_paper_docx(
     return Response(
         content=draft.content,
         media_type=_PAPER_DOCX_MIME,
-        headers={"Content-Disposition": f'attachment; filename="{stem}-{inst}-our-paper.docx"'},
+        headers={
+            "Content-Disposition": _attachment_content_disposition(
+                f"{stem}-{inst}-our-paper.docx"
+            )
+        },
     )
 
 
@@ -3450,14 +3629,74 @@ async def license_evidence(request: Request, license_id: str, body: LicenseNoteI
 # ---- partner fleet (multi-tenant console) ----------------------------------
 
 
+def _partner_test_estate_loopback_enabled() -> bool:
+    """Whether an operator explicitly enabled the narrow loopback exception.
+
+    This policy is intentionally resolved only from deployment-authority
+    sources (the process environment or base/operator config), never from the
+    active tenant overlay or a request body.  A corrupt authority source fails
+    closed.
+    """
+    raw = os.environ.get(
+        "MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", ""
+    ).strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    try:
+        from maverick import config
+
+        policy = config.load_governed_records_config().get("partner") or {}
+        if config.governed_records_config_source_errors():
+            return False
+        return isinstance(policy, dict) and policy.get(
+            "allow_test_estate_loopback"
+        ) is True
+    except Exception:
+        return False
+
+
+def _require_partner_test_estate_loopback(
+    request: Request, rows: list[dict] | tuple[dict, ...]
+) -> None:
+    """Authorize a loopback enrollment/probe before consulting operator policy."""
+    if not any(bool(row.get("trusted_test_estate_loopback")) for row in rows):
+        return
+    # Authorize first so a tenant-local admin cannot use this endpoint to learn
+    # whether the deployment operator enabled a sensitive test-estate escape.
+    require_global_permission(request, "admin")
+    if not _partner_test_estate_loopback_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "partner test-estate loopback access is disabled by operator policy"
+            ),
+        )
+
+
 def _probe_tenant(t: dict) -> dict:
     """One synchronous probe of a client deployment: /health for liveness
     and latency, /value.json (best-effort) for the agent's own counted value
     ledger. Never raises -- the fleet view shows the error instead."""
-    import httpx
+    from urllib.parse import urlsplit
+
+    from maverick.tools import _ssrf
 
     base = t["base_url"].rstrip("/")
     headers = {"Authorization": f"Bearer {t['token']}"} if t.get("token") else {}
+
+    def governed_get(url: str):
+        if not t.get("trusted_test_estate_loopback"):
+            return _ssrf.safe_get(url, headers=headers, timeout=4)
+        # Defense in depth for request-less/background callers and legacy rows:
+        # persisted row data is never sufficient to reactivate the exception.
+        if not _partner_test_estate_loopback_enabled():
+            raise RuntimeError(
+                "partner test-estate loopback access is disabled by operator policy"
+            )
+        host = urlsplit(base).hostname or ""
+        with _ssrf.allow_private_hosts([host]):
+            return _ssrf.safe_get(url, headers=headers, timeout=4)
+
     out: dict = {
         "checked_at": time.time(),
         "ok": False,
@@ -3469,7 +3708,7 @@ def _probe_tenant(t: dict) -> dict:
     }
     t0 = time.monotonic()
     try:
-        r = httpx.get(f"{base}/health", headers=headers, timeout=4)
+        r = governed_get(f"{base}/health")
         out["latency_ms"] = round((time.monotonic() - t0) * 1000, 1)
         out["ok"] = r.status_code == 200
         if not out["ok"]:
@@ -3479,7 +3718,7 @@ def _probe_tenant(t: dict) -> dict:
         out["error"] = str(exc)[:200]
         return out
     try:
-        v = httpx.get(f"{base}/value.json", headers=headers, timeout=4)
+        v = governed_get(f"{base}/value.json")
         if v.status_code == 200:
             d = v.json()
             out["agent"] = str(d.get("agent", ""))[:60]
@@ -3492,7 +3731,7 @@ def _probe_tenant(t: dict) -> dict:
     except Exception:  # value ledger is optional on older agents
         pass
     try:
-        x = httpx.get(f"{base}/api/v1/external-agents", headers=headers, timeout=4)
+        x = governed_get(f"{base}/api/v1/external-agents")
         if x.status_code == 200:
             st = (x.json() or {}).get("status") or {}
             out["external"] = {
@@ -3523,15 +3762,29 @@ async def partner_add_tenant(request: Request, body: PartnerTenantIn) -> dict:
     require_permission(request, "admin")
     from . import partner_store
 
-    row = await run_in_threadpool(
-        lambda: partner_store.upsert_tenant(
-            name=body.name,
-            base_url=body.base_url,
-            token=body.token,
-            theme=body.theme,
-            notes=body.notes,
-        )
+    _require_partner_test_estate_loopback(
+        request,
+        [
+            {
+                "trusted_test_estate_loopback": (
+                    body.trusted_test_estate_loopback
+                )
+            }
+        ],
     )
+    try:
+        row = await run_in_threadpool(
+            lambda: partner_store.upsert_tenant(
+                name=body.name,
+                base_url=body.base_url,
+                token=body.token,
+                theme=body.theme,
+                notes=body.notes,
+                trusted_test_estate_loopback=body.trusted_test_estate_loopback,
+            )
+        )
+    except partner_store.PartnerEndpointRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return partner_store.public_row(row)
 
 
@@ -3561,6 +3814,7 @@ async def partner_check_tenant(request: Request, tenant_id: str) -> dict:
     )
     if row is None:
         raise HTTPException(status_code=404, detail="no such tenant")
+    _require_partner_test_estate_loopback(request, [row])
     result = await run_in_threadpool(_probe_tenant, row)
     await run_in_threadpool(partner_store.record_check, row["id"], result)
     return {"tenant": partner_store.public_row({**row, "last_check": result})}
@@ -3576,6 +3830,7 @@ async def partner_fleet(request: Request, check: int = 0) -> dict:
 
     rows = await run_in_threadpool(partner_store.list_tenants)
     if check:
+        _require_partner_test_estate_loopback(request, rows)
         for row in rows:
             result = await run_in_threadpool(_probe_tenant, row)
             await run_in_threadpool(partner_store.record_check, row["id"], result)
@@ -3606,7 +3861,62 @@ def _binder_finance_section() -> dict:
     structural SoD lint, and the license renewal runway."""
     from maverick.license_registry import runway
 
-    return {"posture": _finance_posture(), "sod": _finance_sod(), "licenses": runway()}
+    return {
+        "scope": "current_snapshot",
+        "posture": _finance_posture(),
+        "sod": _finance_sod(),
+        "licenses": runway(),
+    }
+
+
+_BINDER_UNVERIFIABLE_REASONS = frozenset({"unsigned", "no_crypto", "no_pubkey"})
+
+
+def _binder_break(break_item) -> dict[str, object]:
+    return {
+        "line": int(getattr(break_item, "line_no", 0) or 0),
+        "reason": str(getattr(break_item, "reason", "unknown")),
+        "detail": str(getattr(break_item, "detail", ""))[:2000],
+    }
+
+
+def _binder_verdict(breaks: list[dict], *, has_records: bool) -> str:
+    reasons = {str(item.get("reason") or "unknown") for item in breaks}
+    if reasons - _BINDER_UNVERIFIABLE_REASONS:
+        return "broken"
+    if reasons & {"no_crypto", "no_pubkey"}:
+        return "unverifiable"
+    if "unsigned" in reasons:
+        return "unsigned"
+    return "verified" if has_records else "empty"
+
+
+def _binder_artifact(payload: dict, *, signing_enabled: bool) -> dict[str, object]:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    artifact: dict[str, object] = {
+        "binder_id": digest[:32],
+        "canonicalization": "Lightwork sorted compact JSON v1 (UTF-8, sorted keys)",
+        "digest_algorithm": "SHA-256",
+        "digest": digest,
+        "signature_state": "unsigned",
+        "independent_key_custody_verified": False,
+    }
+    if signing_enabled:
+        try:
+            from maverick.audit.signing import sign_detached_digest
+
+            artifact.update(sign_detached_digest(digest))
+            artifact["signature_state"] = "signed"
+        except (ImportError, OSError, RuntimeError, ValueError):
+            artifact["signature_state"] = "unavailable"
+    return artifact
 
 
 def _binder_payload(days: int = 90) -> dict:
@@ -3617,7 +3927,9 @@ def _binder_payload(days: int = 90) -> dict:
     Nothing here is narrative -- every number has a record behind it."""
     from maverick.assessment import acceptance_metrics, list_saved
     from maverick.audit import default_audit_log
-    from maverick.audit.signing import verify_chain
+    from maverick.audit.reader import day_files
+    from maverick.audit.sealing import segment_text
+    from maverick.audit.signing import ChainBreak, verify_anchors, verify_chain
 
     now = time.time()
     cutoff = now - days * 86400
@@ -3627,80 +3939,134 @@ def _binder_payload(days: int = 90) -> dict:
     first_ts: float | None = None
     last_ts: float | None = None
     events_seen = 0
-    for path in sorted(log.audit_dir.glob("*.ndjson")):
-        try:
-            day_ts = (
-                _dt.datetime.strptime(path.stem, "%Y-%m-%d")
-                .replace(tzinfo=_dt.timezone.utc)
-                .timestamp()
-            )
-        except ValueError:
+    start_day = time.strftime("%Y-%m-%d", time.gmtime(cutoff))
+    end_day = time.strftime("%Y-%m-%d", time.gmtime(now))
+    for path in day_files(log.audit_dir):
+        if not (start_day <= path.stem <= end_day):
             continue
-        if day_ts < cutoff - 86400:
-            continue
-        breaks = [
-            {"line": b.line_no, "reason": b.reason, "detail": str(getattr(b, "detail", ""))[:200]}
-            for b in verify_chain(path)
-        ]
-        rows = 0
+        physical_rows = 0
+        valid_rows = 0
+        scoped_rows = 0
         try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                rows += 1
-                try:
-                    e = json.loads(line)
-                except ValueError:
-                    continue
-                events_seen += 1
-                kinds[str(e.get("kind", "?"))] = kinds.get(str(e.get("kind", "?")), 0) + 1
-                ts = float(e.get("ts") or 0)
-                if ts:
-                    first_ts = ts if first_ts is None else min(first_ts, ts)
-                    last_ts = ts if last_ts is None else max(last_ts, ts)
-        except OSError:
-            pass
+            plaintext = segment_text(path, fail_soft=False)
+            raw_breaks = verify_chain(path, segment=plaintext)
+        except Exception as exc:  # fail closed: an unreadable segment is evidence state
+            plaintext = ""
+            raw_breaks = [ChainBreak(0, "unreadable_segment", str(exc))]
+        breaks = [_binder_break(item) for item in raw_breaks]
+        for line_number, line in enumerate(plaintext.splitlines(), start=1):
+            if not line.strip():
+                continue
+            physical_rows += 1
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            valid_rows += 1
+            try:
+                ts = float(event.get("ts"))
+            except (TypeError, ValueError):
+                breaks.append(
+                    {
+                        "line": line_number,
+                        "reason": "unscoped_timestamp",
+                        "detail": "event cannot be placed in the requested evidence window",
+                    }
+                )
+                continue
+            if not (cutoff <= ts <= now):
+                continue
+            scoped_rows += 1
+            events_seen += 1
+            kind = str(event.get("kind") or "?")
+            kinds[kind] = kinds.get(kind, 0) + 1
+            first_ts = ts if first_ts is None else min(first_ts, ts)
+            last_ts = ts if last_ts is None else max(last_ts, ts)
+        verdict = _binder_verdict(breaks, has_records=bool(valid_rows))
         chain.append(
-            {"day": path.stem, "events": rows, "intact": not breaks, "breaks": breaks[:20]}
+            {
+                "day": path.stem,
+                "events": scoped_rows,
+                "records_in_file": valid_rows,
+                "physical_rows": physical_rows,
+                "verdict": verdict,
+                "intact": True if verdict == "verified" else False if verdict == "broken" else None,
+                "breaks": breaks,
+            }
         )
 
-    w = _world()
-    approvals = [
-        {
-            "id": a.id,
-            "action": a.action,
-            "risk": a.risk,
-            "status": a.status,
-            "requested_by": a.requested_by,
-            "requested_at": a.requested_at,
-            "decided_by": a.decided_by,
-            "decided_at": a.decided_at,
-            "approvals_required": a.approvals_required,
-        }
-        for a in w.list_approvals(limit=300)
-        if float(a.requested_at or 0) >= cutoff
-    ]
+    try:
+        anchor_breaks = [_binder_break(item) for item in verify_anchors(log.audit_dir)]
+    except (OSError, RuntimeError, ValueError) as exc:
+        anchor_breaks = [
+            {
+                "line": 0,
+                "reason": "anchor_verification_unavailable",
+                "detail": str(exc)[:2000],
+            }
+        ]
+    all_breaks = [item for file_row in chain for item in file_row["breaks"]]
+    all_breaks.extend(anchor_breaks)
+    chain_verdict = _binder_verdict(all_breaks, has_records=bool(chain))
 
-    assessments = [
-        {
-            "id": s["id"],
-            "type": s["type"],
-            "subject": s["subject"],
-            "inherent": s["inherent_risk"],
-            "residual": s["residual_risk"],
-            "status": s["status"],
-            "revision": s["revision"],
-            "template_digest": (s.get("template_digest") or "")[:16],
-            "created_at": s["created_at"],
-            "decided_at": s.get("decided_at"),
-            "review_due": s.get("review_due"),
-        }
-        for s in list_saved()[:300]
-    ]
+    w = _world()
+    approvals = []
+    # A regulator-facing export must disclose every record in its exact window;
+    # it must not silently inherit the UI feed's default limit.
+    for approval in w.list_approvals(limit=2_147_483_647):
+        if not (cutoff <= float(approval.requested_at or 0) <= now):
+            continue
+        state = w.approval_state(approval.id) or {}
+        approvals.append(
+            {
+                "id": approval.id,
+                "action": approval.action,
+                "risk": approval.risk,
+                "status": approval.status,
+                "requested_by": approval.requested_by,
+                "requested_at": approval.requested_at,
+                "decided_by": approval.decided_by,
+                "decided_at": approval.decided_at,
+                "approvals_required": approval.approvals_required,
+                "approved_count": int(state.get("approved_count") or 0),
+                "approvers": list(state.get("approvers") or []),
+                "audit_pending_count": int(state.get("audit_pending_count") or 0),
+                "effective": bool(state.get("effective")),
+            }
+        )
+
+    assessments = []
+    for saved in list_saved():
+        activity_at = max(
+            float(saved.get("created_at") or 0),
+            float(saved.get("decided_at") or 0),
+        )
+        if not (cutoff <= activity_at <= now):
+            continue
+        assessments.append(
+            {
+                "id": saved["id"],
+                "type": saved["type"],
+                "subject": saved["subject"],
+                "inherent": saved["inherent_risk"],
+                "residual": saved["residual_risk"],
+                "status": saved["status"],
+                "revision": saved["revision"],
+                "template_digest": saved.get("template_digest") or "",
+                "created_at": saved["created_at"],
+                "decided_at": saved.get("decided_at"),
+                "review_due": saved.get("review_due"),
+            }
+        )
 
     from maverick import privacy_ops
 
-    registers: dict = {"enabled": privacy_ops.enabled()}
+    registers: dict = {
+        "enabled": privacy_ops.enabled(),
+        "scope": "current_snapshot",
+    }
     if registers["enabled"]:
         dsar_rows = privacy_ops.list_dsars()
         registers.update(
@@ -3714,34 +4080,69 @@ def _binder_payload(days: int = 90) -> dict:
             }
         )
 
-    return {
+    payload = {
+        "schema_version": 2,
         "window_days": days,
+        "window": {
+            "since": cutoff,
+            "until": now,
+            "event_scope": "exact_timestamp_window",
+            "snapshot_sections": ["privacy_registers", "finance"],
+        },
         "generated_at": now,
         "chain": {
             "files": chain,
-            "intact": all(c["intact"] for c in chain) if chain else None,
+            "verdict": chain_verdict,
+            "intact": (
+                True
+                if chain_verdict == "verified"
+                else False
+                if chain_verdict == "broken"
+                else None
+            ),
             "events": events_seen,
             "first_ts": first_ts,
             "last_ts": last_ts,
             "kinds": dict(sorted(kinds.items(), key=lambda kv: -kv[1])),
+            "anchor_breaks": anchor_breaks,
+            "independent_custody_verified": False,
         },
         "approvals": approvals,
+        "approvals_total": len(approvals),
+        "approvals_truncated": False,
         "assessments": assessments,
+        "assessments_total": len(assessments),
+        "assessments_truncated": False,
         "registers": registers,
-        "learning": acceptance_metrics(),
-        # Finance evidence: control coverage, not an audit opinion — the
-        # disclaimer travels with the numbers. Plus the SoD lint and the
-        # regulatory-license renewal runway.
+        "learning": {
+            "scope": "exact_decision_window",
+            **acceptance_metrics(since=cutoff, until=now),
+        },
         "finance": _binder_finance_section(),
     }
+    payload["artifact"] = _binder_artifact(
+        payload,
+        signing_enabled=bool(log.signing_enabled),
+    )
+    return payload
 
 
 @router.get("/audit/binder")
-async def audit_binder(request: Request, days: int = 90) -> dict:
+async def audit_binder(request: Request, days: int = 90) -> JSONResponse:
     """The evidence pack as JSON -- the machine-readable twin of the
     /audit/binder page. Audit-gated like the log it summarizes."""
     require_permission(request, "audit")
-    return await run_in_threadpool(_binder_payload, max(1, min(days, 730)))
+    payload = await run_in_threadpool(_binder_payload, max(1, min(days, 730)))
+    binder_id = str(payload.get("artifact", {}).get("binder_id") or "snapshot")
+    return JSONResponse(
+        payload,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f'attachment; filename="lightwork-audit-binder-{binder_id}.json"'
+            ),
+        },
+    )
 
 
 @router.get("/assess/question-roi")
@@ -4446,18 +4847,33 @@ async def assessment_risk_trend(
     type: str = "",
 ) -> dict:
     """A subject's residual-risk history across successive assessments -- the
-    re-review delta (risk moving up or down over time), oldest first."""
+    re-review delta (risk moving up or down over time), oldest first. Equal
+    timestamps keep a stable display order but report unknown direction."""
     require_permission(request, "view")
     from maverick.assessment import risk_trend
 
     rows = await run_in_threadpool(risk_trend, subject[:300], type[:40])
     direction = ""
+    direction_reason = ""
     if len(rows) >= 2:
-        rank = {"minimal": 0, "low": 1, "medium": 2, "high": 3}
-        a = rank.get(rows[-2]["residual_risk"], 0)
-        b = rank.get(rows[-1]["residual_risk"], 0)
-        direction = "up" if b > a else "down" if b < a else "flat"
-    return {"subject": subject, "type": type, "trend": rows, "direction": direction}
+        if rows[-2]["created_at"] == rows[-1]["created_at"]:
+            # The persisted id gives tied records a stable display order, not
+            # a causal order.  Never turn that random identifier order into a
+            # claimed risk movement.
+            direction = "unknown"
+            direction_reason = "the latest assessments share a timestamp; their order is not provable"
+        else:
+            rank = {"minimal": 0, "low": 1, "medium": 2, "high": 3}
+            a = rank.get(rows[-2]["residual_risk"], 0)
+            b = rank.get(rows[-1]["residual_risk"], 0)
+            direction = "up" if b > a else "down" if b < a else "flat"
+    return {
+        "subject": subject,
+        "type": type,
+        "trend": rows,
+        "direction": direction,
+        "direction_reason": direction_reason,
+    }
 
 
 _BULK_IMPORT_MAX_ROWS = 500
@@ -4617,12 +5033,11 @@ async def download_goal_attachment(
         if fetched is None:
             raise HTTPException(status_code=410, detail="attachment bytes not on this host")
         path = fetched
-    safe_name = match.filename.replace('"', "_")
     return FileResponse(
         path,
         media_type=match.mime or "application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Content-Disposition": _attachment_content_disposition(match.filename),
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -4883,7 +5298,13 @@ async def list_connections_endpoint(request: Request) -> dict:
     _require_connections()
     from maverick import connections
 
-    return {"connections": connections.list_connections(owner=_request_identity(request))}
+    try:
+        rows = connections.list_connections(owner=_request_identity(request))
+    except connections.ConnectionStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from exc
+    return {"connections": rows}
 
 
 @router.post("/connections", status_code=201)
@@ -4910,7 +5331,15 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
             expected_owner=owner,
             access=payload.access,
             allowed_principals=payload.allowed_principals,
+            expected_revision=payload.expected_revision,
+            require_revision=True,
         )
+    except connections.ConnectionStoreUnavailable as e:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from e
+    except connections.ConnectionVersionConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -4928,7 +5357,12 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     _require_connections()
     from maverick import connections
 
-    rec = connections.get_connection(name)
+    try:
+        rec = connections.get_connection(name)
+    except connections.ConnectionStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from exc
     # Owner-scope like list/delete/create: a non-admin can only test their own
     # connection (else a name-guess is a cross-owner reachability oracle AND
     # sends another owner's token). A 404 (not 403) so it can't confirm the name.
@@ -4951,6 +5385,11 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             raise HTTPException(
                 status_code=409,
                 detail="connection changed while its readiness probe was running",
+            ) from exc
+        except connections.ConnectionStoreUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="connection credential registry is unavailable",
             ) from exc
 
     base = str(rec.get("base_url") or "").rstrip("/")
@@ -5066,7 +5505,15 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
     _require_connections()
     from maverick import connections
 
-    if not connections.delete_connection(name, owner=_request_identity(request)):
+    try:
+        deleted = connections.delete_connection(
+            name, owner=_request_identity(request)
+        )
+    except connections.ConnectionStoreUnavailable as exc:
+        raise HTTPException(
+            status_code=503, detail="connection credential registry is unavailable"
+        ) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail="no connection with that name")
     return {"deleted": connections.normalize_name(name)}
 
@@ -5163,7 +5610,15 @@ async def refresh_assessment_endpoint(
     require_permission(request, "admin")
     from maverick import assessments
 
-    a = assessments.refresh(_assess_kind(kind), name, template=payload.template)
+    try:
+        a = assessments.refresh(
+            _assess_kind(kind),
+            name,
+            template=payload.template,
+            expected_revision=payload.expected_revision,
+        )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if a is None:
         raise HTTPException(status_code=404, detail=f"unknown {kind}: {name!r}")
     return a
@@ -5186,7 +5641,10 @@ async def review_assessment_endpoint(
             reviewer=caller_principal(request) or "",
             note=payload.note or "",
             cadence_days=payload.cadence_days,
+            expected_revision=payload.expected_revision,
         )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if a is None:
@@ -5201,20 +5659,38 @@ async def add_assessment_evidence_endpoint(
     require_permission(request, "admin")
     from maverick import assessments
 
-    a = assessments.add_evidence(
-        _assess_kind(kind), name, payload.lens, payload.control, payload.evidence
-    )
+    try:
+        a = assessments.add_evidence(
+            _assess_kind(kind),
+            name,
+            payload.lens,
+            payload.control,
+            payload.evidence,
+            expected_revision=payload.expected_revision,
+        )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if a is None:
         raise HTTPException(status_code=404, detail="no such finding")
     return a
 
 
 @router.delete("/assessments/{kind}/{name}", status_code=204)
-async def delete_assessment_endpoint(request: Request, kind: str, name: str) -> Response:
+async def delete_assessment_endpoint(
+    request: Request,
+    kind: str,
+    name: str,
+    expected_revision: int = Query(..., ge=1),
+) -> Response:
     require_permission(request, "admin")
     from maverick import assessments
 
-    assessments.delete_assessment(_assess_kind(kind), name)
+    try:
+        assessments.delete_assessment(
+            _assess_kind(kind), name, expected_revision=expected_revision,
+        )
+    except assessments.AssessmentVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
@@ -7339,7 +7815,9 @@ def _resolve_generated_tool(name: str):
 @router.get("/learned")
 async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
-    return _learned_snapshot(include_pending_items=has_permission(request, "admin"))
+    return _learned_snapshot(
+        include_pending_items=has_global_permission(request, "admin")
+    )
 
 
 @router.delete("/generated-tools/{name}", status_code=204)
@@ -7400,7 +7878,7 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
     loop's ground truth is an ``admin`` action (same rung as pulling a
     generated tool); bearer/same-origin is enforced centrally by the
     middleware (POST is a mutating method)."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick import self_harness_eval as ev
     from maverick.self_harness import settings
 
@@ -7475,20 +7953,66 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     """
     require_permission(request, "view")
     from maverick import savings as savings_mod
-    from maverick.config import get_value
 
     days = max(1, min(int(days), 730))
-    cfg = get_value()
+    resolution = _value_assumptions_resolution()
+    cfg = resolution["effective_assumptions"]
     report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg)
     return {
         "enabled": cfg["enable"],
         "report": savings_mod.to_dict(report),
-        "assumptions": {
-            "hourly_rate": cfg["hourly_rate"],
-            "hours_per_task": cfg["hours_per_task"],
-            "currency": cfg["currency"],
-            "departments": cfg["departments"],
-        },
+        # Keep ``assumptions`` as the backwards-compatible effective value.
+        # The additional fields make precedence explicit when a tenant config
+        # wins over the dashboard-managed global default.
+        "assumptions": cfg,
+        **resolution,
+    }
+
+
+def _value_assumptions_resolution() -> dict:
+    """Report global defaults and the active tenant's effective assumptions.
+
+    Savings assumptions are stored in the deployment-global dashboard overlay,
+    while an active tenant config has higher precedence.  Returning only the
+    post-merge value made a successful global save look as though it changed a
+    tenant-owned override.  Keep both values and identify the exact tenant
+    fields that participate in the effective result.
+    """
+    from maverick.config import (
+        get_value,
+        load_config,
+        load_global_config,
+        tenant_config_path,
+    )
+
+    global_assumptions = get_value(config=load_global_config())
+    effective_assumptions = get_value()
+    tenant_override_fields: list[str] = []
+    tenant_path = tenant_config_path()
+    if tenant_path is not None and tenant_path.exists():
+        tenant_value = (load_config(tenant_path).get("value") or {})
+        if isinstance(tenant_value, dict):
+            for name in ("enable", "hourly_rate", "hours_per_task", "currency"):
+                if name in tenant_value:
+                    tenant_override_fields.append(name)
+            departments = tenant_value.get("departments") or {}
+            if isinstance(departments, dict):
+                for department, override in sorted(departments.items()):
+                    if not isinstance(override, dict):
+                        continue
+                    for name in ("hourly_rate", "hours_per_task"):
+                        if name in override:
+                            tenant_override_fields.append(
+                                f"departments.{department}.{name}"
+                            )
+
+    return {
+        "global_assumptions": global_assumptions,
+        "effective_assumptions": effective_assumptions,
+        "effective_source": (
+            "tenant_override" if tenant_override_fields else "global"
+        ),
+        "tenant_override_fields": tenant_override_fields,
     }
 
 
@@ -7497,10 +8021,10 @@ async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) ->
     """Persist the client's cost/value inputs (their hourly rate and human
     hours per task, plus per-department overrides) to the dashboard overlay --
     the same [value] section config.toml carries, so the wizard and the UI
-    stay one source of truth. Operate-gated: these numbers become the ROI
-    story a client repeats to their CFO."""
-    require_permission(request, "operate")
-    from maverick.config import get_value, reset_config_cache
+    stay one source of truth. Global-operate-gated: a tenant-local role cannot
+    alter the assumptions used by other tenants."""
+    require_global_permission(request, "operate")
+    from maverick.config import reset_config_cache
 
     from . import settings_store
 
@@ -7526,21 +8050,18 @@ async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) ->
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     reset_config_cache()
-    cfg = get_value()
+    resolution = _value_assumptions_resolution()
+    cfg = resolution["effective_assumptions"]
     return {
         "saved": True,
-        "assumptions": {
-            "hourly_rate": cfg["hourly_rate"],
-            "hours_per_task": cfg["hours_per_task"],
-            "currency": cfg["currency"],
-            "departments": cfg["departments"],
-        },
+        "assumptions": cfg,
+        **resolution,
     }
 
 
 _SECURITY_REGISTER_CACHE_TTL_SECONDS = 60.0
 _SECURITY_REGISTER_HUNT_DAYS = 7
-_security_register_cache: tuple[float, dict] | None = None
+_security_register_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 _security_register_cache_lock = threading.Lock()
 
 
@@ -7618,16 +8139,17 @@ def _security_register_snapshot_uncached() -> dict:
 
 
 def _security_register_snapshot() -> dict:
-    global _security_register_cache
+    cache_key = _active_cache_context()
     with _security_register_cache_lock:
         now = time.monotonic()
-        if (
-            _security_register_cache is not None
-            and now - _security_register_cache[0] < _SECURITY_REGISTER_CACHE_TTL_SECONDS
-        ):
-            return _security_register_cache[1]
+        cached = _security_register_cache.get(cache_key)
+        if cached is not None and now - cached[0] < _SECURITY_REGISTER_CACHE_TTL_SECONDS:
+            return cached[1]
         snapshot = _security_register_snapshot_uncached()
-        _security_register_cache = (time.monotonic(), snapshot)
+        _security_register_cache[cache_key] = (time.monotonic(), snapshot)
+        for key, (created_at, _value) in list(_security_register_cache.items()):
+            if time.monotonic() - created_at >= _SECURITY_REGISTER_CACHE_TTL_SECONDS:
+                _security_register_cache.pop(key, None)
         return snapshot
 
 
@@ -7645,101 +8167,792 @@ async def security_register() -> dict:
 # ---------- council pass: control surface ----------
 
 
-@router.get("/halt")
-async def halt_status() -> dict:
-    """Is the killswitch armed?
+_HALT_DETAIL_MAX_BYTES = 8 * 1024
+_HALT_REASON_MAX_CHARS = 200
+_HALT_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_HALT_AUDIT_HEADER = "X-Lightwork-Audit-Written"
 
-    Council round-2 capabilities-seat fix: round-1 only surfaced the
-    file path. Now also returns the reason string (from the file body
-    when the halt was set via POST) and the file's mtime as ``armed_at``
-    so the UI can show "halted 3m ago for: <reason>".
+
+class _ConcurrentHalt(RuntimeError):
+    """A newer local or shared HALT superseded an in-flight clear."""
+
+
+def _bounded_halt_reason(reason: object, *, fallback: str) -> str:
+    value = reason.strip() if isinstance(reason, str) else ""
+    return (value or fallback)[:_HALT_REASON_MAX_CHARS]
+
+
+def _publish_local_halt(
+    path,
+    *,
+    actor: str,
+    reason: str,
+    scope: str,
+    source: str,
+) -> str:
+    """Publish one private local stop without taking over a shared parent."""
+
+    from maverick.file_lock import (
+        atomic_write_text,
+        cross_process_lock,
+        prepare_private_directory,
+    )
+    from maverick.killswitch import (
+        _file_halt_active,
+        _halt_authority_lock_path,
+        _halt_file_generation,
+    )
+
+    # ``MAVERICK_HALT_FILE`` is caller-selected.  Tightening an existing
+    # parent can revoke unrelated services' access, so only create a missing
+    # dedicated directory or require the existing parent to already be private.
+    prepare_private_directory(path.parent)
+    generation = secrets.token_urlsafe(24)
+    with cross_process_lock(_halt_authority_lock_path(path), strict=True):
+        local_detail = json.dumps(
+            {
+                "actor": actor,
+                "created_at": time.time(),
+                "generation": generation,
+                "reason": _bounded_halt_reason(
+                    reason,
+                    fallback="manual via dashboard",
+                ),
+                "scope": scope,
+                "source": source,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        atomic_write_text(path, local_detail + "\n", mode=0o600)
+        if (
+            _halt_file_generation(path) is None
+            or not _file_halt_active(min_interval=0.0, fail_closed=True)
+        ):
+            raise RuntimeError("local HALT publication could not be verified")
+    return generation
+
+
+def _ensure_local_halt_fail_safe(
+    path,
+    *,
+    actor: str,
+    reason: str,
+) -> str:
+    """Preserve a concurrent local stop or publish compensation if absent."""
+
+    from maverick.file_lock import cross_process_lock, prepare_private_directory
+    from maverick.killswitch import (
+        _halt_authority_lock_path,
+        _halt_file_generation,
+    )
+
+    prepare_private_directory(path.parent)
+    with cross_process_lock(_halt_authority_lock_path(path), strict=True):
+        if _halt_file_generation(path) is not None:
+            return "retained"
+        _publish_local_halt(
+            path,
+            actor=actor,
+            reason=reason,
+            scope="local-compensation",
+            source="dashboard-clear-compensation",
+        )
+        return "re-armed"
+
+
+def _halt_control_audit(
+    *,
+    operation: str,
+    actor: str,
+    scope: str,
+    result: str,
+    reason: str,
+) -> bool:
+    """Record one deployment-global, bounded HALT control-plane result.
+
+    The shared audit helper propagates a configured ``AuditRefused`` posture
+    and returns ``False`` for an ordinary fail-soft outage. Callers expose the
+    latter in a response header and translate the former after describing the
+    already-observed HALT state.
     """
-    from maverick.killswitch import _halt_file_path, is_active
 
-    p = _halt_file_path()
-    out: dict = {
-        "active": is_active(),
-        "file": str(p),
-        "file_present": p.exists(),
-        "reason": None,
-        "armed_at": None,
+    from maverick.audit import EventKind, audit_event
+
+    bounded_reason = _bounded_halt_reason(
+        reason,
+        fallback="operator requested HALT state change",
+    )
+    return audit_event(
+        EventKind.CONTROL_PLANE_ACTION,
+        agent="control_plane",
+        _global=True,
+        verb=operation,
+        operation=operation,
+        principal="*",
+        actor=actor,
+        scope=scope,
+        ok=result == "succeeded",
+        result=result,
+        reason=bounded_reason,
+        detail=bounded_reason,
+    )
+
+
+def _halt_audit_headers(
+    *,
+    operation: str,
+    actor: str,
+    scope: str,
+    result: str,
+    reason: str,
+    refusal_detail: str,
+) -> dict[str, str]:
+    from maverick.audit import AuditRefused
+
+    try:
+        written = _halt_control_audit(
+            operation=operation,
+            actor=actor,
+            scope=scope,
+            result=result,
+            reason=reason,
+        )
+    except AuditRefused as exc:
+        raise HTTPException(status_code=503, detail=refusal_detail) from exc
+    return {_HALT_AUDIT_HEADER: str(bool(written)).lower()}
+
+
+def _halt_failure(
+    *,
+    operation: str,
+    actor: str,
+    scope: str,
+    result: str,
+    reason: str,
+    detail: str,
+    refusal_detail: str,
+    cause: BaseException,
+    status_code: int = 503,
+) -> NoReturn:
+    headers = _halt_audit_headers(
+        operation=operation,
+        actor=actor,
+        scope=scope,
+        result=result,
+        reason=reason,
+        refusal_detail=refusal_detail,
+    )
+    raise HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers=headers,
+    ) from cause
+
+
+def _halt_path_is_alias(info) -> bool:
+    return bool(
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & _HALT_REPARSE_ATTRIBUTE
+    )
+
+
+def _halt_file_identity(info) -> tuple[int, int]:
+    return int(info.st_dev), int(info.st_ino)
+
+
+def _stable_local_halt_read(path) -> tuple[bytes | None, object | None]:
+    """Read bounded HALT detail from the regular file verified by its handle.
+
+    ``None`` bytes with a stat result means the file is deliberately too large
+    to disclose.  ``(None, None)`` is a stable absent file.  Aliases, hard links
+    and identity-changing reads fail closed.
+    """
+
+    last_error: Exception | None = None
+    for _attempt in range(3):
+        try:
+            before = path.lstat()
+        except FileNotFoundError:
+            return None, None
+        except OSError as exc:
+            last_error = exc
+            continue
+        if (
+            _halt_path_is_alias(before)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_ino == 0
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            )
+        if before.st_size > _HALT_DETAIL_MAX_BYTES:
+            return None, before
+        try:
+            with open(path, "rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or _halt_file_identity(before) != _halt_file_identity(opened)
+                ):
+                    continue
+                raw = stream.read(_HALT_DETAIL_MAX_BYTES + 1)
+                after_handle = os.fstat(stream.fileno())
+        except OSError as exc:
+            last_error = exc
+            continue
+        if len(raw) > _HALT_DETAIL_MAX_BYTES:
+            return None, after_handle
+        try:
+            after_path = path.lstat()
+        except OSError as exc:
+            last_error = exc
+            continue
+        stable = (
+            not _halt_path_is_alias(after_path)
+            and stat.S_ISREG(after_path.st_mode)
+            and after_path.st_nlink == 1
+            and _halt_file_identity(before) == _halt_file_identity(after_handle)
+            and _halt_file_identity(after_handle) == _halt_file_identity(after_path)
+            and before.st_size == after_handle.st_size == after_path.st_size == len(raw)
+            and before.st_mtime_ns
+            == after_handle.st_mtime_ns
+            == after_path.st_mtime_ns
+        )
+        if stable:
+            return raw, after_handle
+    raise HTTPException(
+        status_code=503,
+        detail="halt authority is unavailable",
+    ) from last_error
+
+
+def _local_halt_details(path) -> dict:
+    """Read bounded local HALT metadata without returning its raw payload."""
+
+    raw, info = _stable_local_halt_read(path)
+    if info is None:
+        return {"file_present": False, "reason": None, "armed_at": None,
+                "armed_by": None}
+
+    reason = None
+    armed_by = None
+    if raw is not None:
+        body = raw.decode("utf-8", errors="replace").strip()
+        if body:
+            try:
+                parsed = json.loads(body)
+            except (TypeError, ValueError):
+                parsed = None
+            if isinstance(parsed, dict):
+                value = parsed.get("reason")
+                reason = str(value)[:500] if value else None
+                actor = parsed.get("actor") or parsed.get("source")
+                armed_by = str(actor)[:256] if actor else None
+            else:
+                reason = body[:500]
+    return {
+        "file_present": True,
+        "reason": reason,
+        "armed_at": info.st_mtime,
+        "armed_by": armed_by,
     }
-    if p.exists():
+
+
+@router.get("/halt")
+async def halt_status(request: Request) -> dict:
+    """Return a verified halt state; sensitive incident detail is audit-only."""
+
+    require_global_permission(request, "view")
+    shared_backend = _halt_backend_or_503()
+
+    from maverick.killswitch import Halted, _halt_file_path, check
+
+    try:
+        check(force_refresh=True, fail_closed=True)
+    except Halted as exc:
+        if exc.source in {"file-error", "shared-error"}:
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            ) from exc
+        active = True
+    else:
+        active = False
+
+    path = _halt_file_path()
+    local = _local_halt_details(path)
+    shared_state = None
+    if shared_backend:
         try:
-            body = p.read_text(errors="replace").strip()
-            out["reason"] = body or None
-        except OSError:
-            pass
-        try:
-            out["armed_at"] = p.stat().st_mtime
-        except OSError:
-            pass
-    # Reflect the cluster-wide halt too: on a shared backend it may be armed by
-    # another replica with no local file here. Postgres only; best-effort.
-    shared = None
-    if _shared_halt_backend():
-        try:
-            shared = _world().active_halt()
-        except Exception:
-            shared = None
-    if shared:
-        out["active"] = True
-        out["cluster_halt"] = True
-        out["reason"] = out["reason"] or (shared.get("reason") or None)
-        out["armed_at"] = out["armed_at"] or shared.get("armed_at")
-        out["armed_by"] = shared.get("armed_by") or None
+            shared_state = _world().active_halt()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            ) from exc
+        if shared_state is not None and not isinstance(shared_state, dict):
+            raise HTTPException(
+                status_code=503,
+                detail="halt authority is unavailable",
+            )
+        active = bool(active or shared_state)
+
+    out: dict = {
+        "active": active,
+        "scope": "cluster" if shared_backend else "local",
+    }
+    if shared_backend:
+        out["cluster_halt"] = bool(shared_state)
+
+    if has_global_permission(request, "audit"):
+        if shared_state:
+            # An old local file can survive a prior partial clear.  While the
+            # shared halt is active, its row is the cluster authority and must
+            # own the incident attribution instead of being shadowed by stale
+            # local metadata.
+            shared_reason = shared_state.get("reason")
+            shared_actor = shared_state.get("armed_by")
+            reason = str(shared_reason)[:500] if shared_reason else None
+            armed_at = shared_state.get("armed_at")
+            armed_by = str(shared_actor)[:256] if shared_actor else None
+        else:
+            reason = local["reason"]
+            armed_at = local["armed_at"]
+            armed_by = local["armed_by"]
+        out.update({
+            "file_present": local["file_present"],
+            "reason": reason,
+            "armed_at": armed_at,
+            "armed_by": armed_by,
+        })
+    if has_global_permission(request, "admin"):
+        out["file"] = str(path)
     return out
 
 
 @router.post("/halt", status_code=204)
-async def halt_set(request: Request, payload: HaltIn) -> None:
-    """Arm the killswitch by touching ~/.maverick/HALT.
+async def halt_set(request: Request, payload: HaltIn, response: Response) -> None:
+    """Arm the verified local HALT authority and any configured shared one.
 
-    Honoured by every agent at the next tool-call boundary. Use the
-    DELETE endpoint or ``rm ~/.maverick/HALT`` to clear.
+    The mutation always attempts a deployment-global control-plane audit row.
+    A configured audit refusal is returned after reporting the observed HALT
+    state; an ordinary fail-soft audit outage is exposed by
+    ``X-Lightwork-Audit-Written: false``.
     """
-    _require_halt_permission(request)
+    shared_backend = _require_halt_permission(request)
     from maverick.killswitch import _halt_file_path
 
-    reason = payload.reason or "manual via dashboard"
+    actor = _request_actor(request)
+    scope = "cluster" if shared_backend else "local"
+    reason = _bounded_halt_reason(
+        payload.reason,
+        fallback="manual via dashboard",
+    )
     p = _halt_file_path()
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(reason + "\n")
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"cannot write halt file: {e}") from e
+        _publish_local_halt(
+            p,
+            actor=actor,
+            reason=reason,
+            scope=scope,
+            source="dashboard",
+        )
+    except Exception as exc:
+        _halt_failure(
+            operation="halt",
+            actor=actor,
+            scope=scope,
+            result="failed",
+            reason=reason,
+            detail="halt authority is unavailable",
+            refusal_detail=(
+                "halt was not confirmed and the required control-plane audit "
+                "was refused"
+            ),
+            cause=exc,
+        )
     # Also arm the cluster-wide halt in the shared store so the stop propagates
     # to every replica (the file only halts this one). Only on a shared backend
     # (Postgres): on single-host SQLite the file halt is the whole mechanism and
     # the killswitch doesn't consult the shared row. Best-effort -- a shared-store
-    # error must not fail the local arm, which already took effect above.
-    if _shared_halt_backend():
+    # error keeps the local stop armed but MUST be reported: a 204 would tell
+    # the operator that every replica stopped when propagation actually failed.
+    if shared_backend:
         try:
-            _world().arm_halt(reason, source="dashboard", armed_by=caller_principal(request) or "")
-        except Exception:
+            _world().arm_halt(reason, source="dashboard", armed_by=actor)
+        except Exception as exc:
             log.warning("cluster-wide halt arm failed (local file halt still set)", exc_info=True)
+            _halt_failure(
+                operation="halt",
+                actor=actor,
+                scope=scope,
+                result="partial",
+                reason=reason,
+                detail=(
+                    "local halt is armed, but cluster-wide propagation failed; "
+                    "other replicas may still be running"
+                ),
+                refusal_detail=(
+                    "local halt is armed, cluster propagation failed, and the "
+                    "required control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+    headers = _halt_audit_headers(
+        operation="halt",
+        actor=actor,
+        scope=scope,
+        result="succeeded",
+        reason=reason,
+        refusal_detail=(
+            "halt is armed, but the required control-plane audit was refused"
+        ),
+    )
+    response.headers.update(headers)
 
 
 @router.delete("/halt", status_code=204)
-async def halt_clear(request: Request) -> None:
-    """Clear the killswitch (delete ~/.maverick/HALT)."""
-    _require_halt_permission(request)
-    from maverick.killswitch import _halt_file_path, clear
+async def halt_clear(  # noqa: C901 - explicit fail-safe cross-authority transaction
+    request: Request,
+    response: Response,
+) -> None:
+    """Clear the verified local HALT authority and any configured shared one."""
+    shared = _require_halt_permission(request)
+    from maverick import killswitch
+    from maverick.file_lock import cross_process_lock, require_private_directory
+    from maverick.killswitch import (
+        _begin_clear_transition_hold,
+        _end_clear_transition_hold,
+        _halt_authority_lock_path,
+        _halt_file_generation,
+        _halt_file_path,
+    )
 
+    actor = _request_actor(request)
+    scope = "cluster" if shared else "local"
+    reason = "operator requested halt clear"
     p = _halt_file_path()
-    if p.exists():
+    try:
+        require_private_directory(p.parent)
+        local_before = _halt_file_generation(p)
+        process_before = killswitch._in_process_halt_generation()
+    except Exception as exc:
+        _halt_failure(
+            operation="clear-halt",
+            actor=actor,
+            scope=scope,
+            result="failed",
+            reason=reason,
+            detail="halt clear was not attempted because its local authority is unavailable",
+            refusal_detail=(
+                "halt clear was not attempted and the required control-plane "
+                "audit was refused"
+            ),
+            cause=exc,
+        )
+
+    world = None
+    shared_before = None
+    shared_generation = None
+    if shared:
+        # Resolve and read the shared authority while the durable local stop is
+        # still present.  A connection/read failure must not begin a clear.
         try:
-            p.unlink()
-        except OSError as e:
-            raise HTTPException(status_code=500, detail=f"cannot remove halt file: {e}") from e
-    clear()
-    # Clear the cluster-wide halt too (Postgres only; see halt_set). Best-effort
-    # so a shared-store error doesn't block clearing the local halt.
-    if _shared_halt_backend():
+            world = _world()
+            shared_before = world.active_halt()
+            if shared_before is not None and not isinstance(shared_before, dict):
+                raise RuntimeError("invalid shared halt state")
+            if shared_before is not None:
+                shared_generation = shared_before.get("generation")
+                if not isinstance(shared_generation, str):
+                    raise RuntimeError("shared halt generation is unavailable")
+        except Exception as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="failed",
+                reason=reason,
+                detail=(
+                    "halt clear was not attempted because the cluster halt "
+                    "authority is unavailable"
+                ),
+                refusal_detail=(
+                    "halt clear was not attempted and the required "
+                    "control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+    def _delete_exact_local_generation() -> None:
+        """Remove only the local generation observed before this clear."""
+
+        with cross_process_lock(_halt_authority_lock_path(p), strict=True):
+            if _halt_file_generation(p) != local_before:
+                raise _ConcurrentHalt("newer local HALT generation observed")
+            if local_before is not None:
+                p.unlink()
+
+    if not shared:
+        # A local clear can bind the exact file deletion and in-process CAS in
+        # one strict control barrier.  An overlapping arm changes either token
+        # and is retained.
         try:
-            _world().disarm_halt()
-        except Exception:
-            log.warning("cluster-wide halt clear failed", exc_info=True)
+            killswitch.clear(
+                durable_clear=_delete_exact_local_generation,
+                expected_in_process_generation=process_before,
+            )
+        except (killswitch.HaltGenerationChanged, _ConcurrentHalt) as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="superseded",
+                reason=reason,
+                detail=(
+                    "halt clear was not applied because a newer local halt is armed"
+                ),
+                refusal_detail=(
+                    "a newer local halt remains armed and the required "
+                    "control-plane audit was refused"
+                ),
+                cause=exc,
+                status_code=409,
+            )
+        except Exception as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="failed",
+                reason=reason,
+                detail="halt remains armed because the local clear barrier failed",
+                refusal_detail=(
+                    "halt remains armed and the required control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+    else:
+        # The shared transaction locks the exact database generation before it
+        # invokes the local unlink.  The temporary process hold covers this
+        # server until commit/rollback and is released only by its own token.
+        try:
+            transition_hold = _begin_clear_transition_hold()
+        except Exception as exc:
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="failed",
+                reason=reason,
+                detail="halt remains armed because its clear barrier is unavailable",
+                refusal_detail=(
+                    "halt remains armed and the required control-plane audit was refused"
+                ),
+                cause=exc,
+            )
+
+        try:
+            assert world is not None
+            if shared_before is None:
+                _delete_exact_local_generation()
+            else:
+                removed = world.disarm_halt(
+                    expected_generation=shared_generation,
+                    durable_clear=_delete_exact_local_generation,
+                )
+                if not removed:
+                    current = world.active_halt()
+                    if current is not None and not isinstance(current, dict):
+                        raise RuntimeError("invalid shared halt state")
+                    current_generation = (
+                        current.get("generation") if current is not None else None
+                    )
+                    if current is not None and not isinstance(
+                        current_generation, str,
+                    ):
+                        raise RuntimeError("shared halt generation is unavailable")
+                    if current_generation != shared_generation:
+                        raise _ConcurrentHalt(
+                            "newer shared HALT generation observed"
+                        )
+                    raise RuntimeError("shared halt compare-and-delete was refused")
+
+            shared_after = world.active_halt()
+            if shared_after is not None and not isinstance(shared_after, dict):
+                raise RuntimeError("invalid shared halt state")
+            if shared_after is not None:
+                after_generation = shared_after.get("generation")
+                if not isinstance(after_generation, str):
+                    raise RuntimeError("shared halt generation is unavailable")
+                if shared_before is None or after_generation != shared_generation:
+                    raise _ConcurrentHalt("newer shared HALT generation observed")
+                raise RuntimeError("shared halt remained active after clear")
+
+            if _halt_file_generation(p) is not None:
+                raise _ConcurrentHalt("newer local HALT generation observed")
+            killswitch.clear(
+                expected_in_process_generation=process_before,
+            )
+            _end_clear_transition_hold(transition_hold)
+        except (killswitch.HaltGenerationChanged, _ConcurrentHalt) as exc:
+            try:
+                compensation = _ensure_local_halt_fail_safe(
+                    p,
+                    actor=actor,
+                    reason=(
+                        "newer halt superseded an in-flight clear; "
+                        "local fail-safe retained"
+                    ),
+                )
+            except Exception as compensation_exc:
+                log.critical(
+                    "local HALT compensation failed after concurrent halt",
+                    exc_info=True,
+                )
+                detail = (
+                    "a newer halt remains armed, but its local fail-safe could "
+                    "not be confirmed; verify this replica immediately"
+                )
+                refusal_detail = (
+                    "a newer halt remains armed, local compensation is unconfirmed, "
+                    "and the required control-plane audit was refused"
+                )
+                cause = compensation_exc
+            else:
+                try:
+                    _end_clear_transition_hold(transition_hold)
+                except Exception:
+                    log.critical(
+                        "HALT clear transition hold could not be released safely",
+                        exc_info=True,
+                    )
+                detail = (
+                    "halt clear was superseded by a newer cluster halt; the local "
+                    f"fail-safe was {compensation}"
+                )
+                refusal_detail = (
+                    "a newer cluster halt and its local fail-safe remain armed, "
+                    "and the required control-plane audit was refused"
+                )
+                cause = exc
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="superseded",
+                reason=reason,
+                detail=detail,
+                refusal_detail=refusal_detail,
+                cause=cause,
+                status_code=409,
+            )
+        except Exception as exc:
+            # A transaction/commit failure can have an indeterminate external
+            # result.  Restore a durable local stop before releasing this
+            # process's temporary hold.
+            log.warning(
+                "cluster-wide halt clear could not be confirmed",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            try:
+                compensation = _ensure_local_halt_fail_safe(
+                    p,
+                    actor=actor,
+                    reason=(
+                        "cluster halt clear could not be confirmed; "
+                        "local fail-safe re-armed"
+                    ),
+                )
+            except Exception as compensation_exc:
+                log.critical(
+                    "local HALT compensation failed after cluster clear uncertainty",
+                    exc_info=True,
+                )
+                detail = (
+                    "cluster halt clear is indeterminate and the local fail-safe "
+                    "could not be re-armed; verify every replica immediately"
+                )
+                refusal_detail = (
+                    "halt clear and local compensation are indeterminate, and the "
+                    "required control-plane audit was refused"
+                )
+                cause = compensation_exc
+            else:
+                try:
+                    _end_clear_transition_hold(transition_hold)
+                except Exception:
+                    log.critical(
+                        "HALT clear transition hold could not be released safely",
+                        exc_info=True,
+                    )
+                detail = (
+                    "cluster halt clear is indeterminate; the local fail-safe was "
+                    f"{compensation}, but other replicas may be running"
+                )
+                refusal_detail = (
+                    "the local fail-safe was restored after an indeterminate "
+                    "cluster clear, and the required control-plane audit was refused"
+                )
+                cause = exc
+            _halt_failure(
+                operation="clear-halt",
+                actor=actor,
+                scope=scope,
+                result="partial",
+                reason=reason,
+                detail=detail,
+                refusal_detail=refusal_detail,
+                cause=cause,
+            )
+
+    # Never claim success while a newer local generation is visible.  This is
+    # also the final guard for local-only clears.
+    try:
+        local_after = _halt_file_generation(p)
+    except Exception as exc:
+        _halt_failure(
+            operation="clear-halt",
+            actor=actor,
+            scope=scope,
+            result="indeterminate",
+            reason=reason,
+            detail="halt clear completed, but the local authority cannot be verified",
+            refusal_detail=(
+                "local halt state is unverified and the required control-plane "
+                "audit was refused"
+            ),
+            cause=exc,
+        )
+    if local_after is not None:
+        _halt_failure(
+            operation="clear-halt",
+            actor=actor,
+            scope=scope,
+            result="superseded",
+            reason=reason,
+            detail="halt clear was superseded by a newer local halt",
+            refusal_detail=(
+                "a newer local halt remains armed and the required control-plane "
+                "audit was refused"
+            ),
+            cause=_ConcurrentHalt("newer local HALT generation observed"),
+            status_code=409,
+        )
+    headers = _halt_audit_headers(
+        operation="clear-halt",
+        actor=actor,
+        scope=scope,
+        result="succeeded",
+        reason=reason,
+        refusal_detail=(
+            "halt was cleared, but the required control-plane audit was refused"
+        ),
+    )
+    response.headers.update(headers)
 
 
 @router.post("/goals/{goal_id}/cancel", status_code=204)
@@ -8143,54 +9356,35 @@ async def revoke_goal_share(request: Request, goal_id: int, link_id: int) -> dic
 
 
 @router.get("/plugins")
-async def list_plugins() -> dict:
-    """Discovered + allow-listed plugins, broken out by kind."""
+async def list_plugins(request: Request) -> dict:
+    """Return discovery, configuration, trust-gate, and import status."""
+    require_global_permission(request, "admin")
     try:
-        from maverick.plugins import _allowed_plugin_names, _entry_points
+        from maverick.plugins import plugin_status_snapshot
+
+        from maverick_dashboard.integration_readiness import plugin_readiness
+
+        snapshot = plugin_status_snapshot()
+        for items in snapshot["plugins"].values():
+            for item in items:
+                item["readiness"] = plugin_readiness(item)
+        return snapshot
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"plugin discovery failed: {e}") from e
-    allow = _allowed_plugin_names()
-    out: dict[str, list[dict]] = {
-        "tools": [],
-        "channels": [],
-        "skills": [],
-        "personas": [],
-    }
-    for kind, group in (
-        ("tools", "maverick.tools"),
-        ("channels", "maverick.channels"),
-        ("skills", "maverick.skills"),
-        ("personas", "maverick.personas"),
-    ):
-        try:
-            for ep in _entry_points(group):
-                out[kind].append(
-                    {
-                        "name": ep.name,
-                        "module": getattr(ep, "value", str(ep)),
-                        "enabled": allow is None or ep.name in allow,
-                    }
-                )
-        except Exception:
-            continue
-    return {"plugins": out, "allowlist_active": allow is not None}
+        detail = f"plugin discovery failed ({type(e).__name__})"
+        raise HTTPException(status_code=500, detail=detail) from e
 
 
 @router.get("/mcp")
-async def list_mcp_servers() -> dict:
-    """Configured MCP servers from ~/.maverick/config.toml."""
+async def list_mcp_servers(request: Request) -> dict:
+    """Effective MCP inventory with typed readiness evidence."""
+    require_global_permission(request, "admin")
     try:
-        from maverick.config import load_config
+        from maverick_dashboard.integration_readiness import mcp_inventory
 
-        cfg = (load_config() or {}).get("mcp_servers") or {}
+        return {"servers": mcp_inventory()}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"config read failed: {e}") from e
-    return {
-        "servers": [
-            {"name": name, "command": s.get("command"), "args": s.get("args", [])}
-            for name, s in cfg.items()
-        ],
-    }
+        detail = f"MCP inventory failed ({type(e).__name__})"
+        raise HTTPException(status_code=500, detail=detail) from e
 
 
 @router.get("/tools")
@@ -8594,6 +9788,27 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
     )
 
 
+def _govern_event_source_config(request: Request, source: str, config: dict) -> dict:
+    """Authorize shared host resources and confine file watches.
+
+    Tenant-local OAuth providers remain tenant-admin capabilities. Sources
+    which consume process credentials or local filesystem access are instead
+    deployment control-plane capabilities and require a global admin.
+    """
+    from maverick_dashboard import event_poll
+
+    authority = event_poll.event_source_authority(source, config)
+    if authority == "global_admin":
+        require_global_permission(request, "admin")
+    elif authority == "tenant_admin":
+        require_permission(request, "admin")
+
+    try:
+        return event_poll.admit_event_source_config(source, config)
+    except event_poll.EventSourceAdmissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _owned_event_triggers(request: Request) -> list[dict]:
     """Event triggers visible to the caller: their own when auth is on, all of
     them for auth-off/admin (``goal_owner_filter`` returns None)."""
@@ -8628,14 +9843,7 @@ async def list_event_triggers_endpoint(request: Request) -> dict:
 async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     require_permission(request, "operate")
     _require_event_triggers()
-    # Sources that read shared credentials and then connect to caller-supplied
-    # endpoints must be ADMIN-only. Otherwise a low-priv operator could name a
-    # shared secret (OAuth provider or process env var) and exfiltrate it to
-    # their own host during polling.
-    cfg = payload.config or {}
-    reads_env_secret = payload.source == "imap_email" and cfg.get("password_env")
-    if cfg.get("provider") or reads_env_secret:
-        require_permission(request, "admin")
+    cfg = _govern_event_source_config(request, payload.source, payload.config)
     from maverick.automation_events import EventSourceError, get_source
 
     try:
@@ -8708,7 +9916,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             default_name,
             template,
             payload.source,
-            config=payload.config or {},
+            config=cfg,
             params=payload.params or {},
             owner=durable_automation_owner(request),
             flow=flow,
@@ -8768,6 +9976,15 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
+    triggers = [
+        {
+            **trigger,
+            "config": _govern_event_source_config(
+                request, str(trigger.get("source") or ""), trigger.get("config") or {}
+            ),
+        }
+        for trigger in triggers
+    ]
 
     def _fire(goal_id: int) -> None:
         goal = _world().get_goal(goal_id)
@@ -9257,7 +10474,7 @@ async def list_model_cost_tiers(request: Request) -> dict:
 async def set_model_cost_tier_endpoint(request: Request, body: ModelCostTierIn) -> dict:
     """Set (or clear, with band=null) a model's cost band. Admin-gated: it
     shapes routing economics deployment-wide."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
 
     await run_in_threadpool(settings_store.set_model_cost_tier, body.model, body.band)
@@ -9310,6 +10527,40 @@ _FEATURE_SWITCHES: dict = {
 }
 
 
+def _live_feature_switch_states() -> dict[str, bool]:
+    """Resolve switch state through each subsystem's production predicate.
+
+    Config-table presence is not authority: governed learning defaults on,
+    flows/hunters default off, environment flags can pin a value, and fleet
+    memory also applies entitlement policy. This map is the read-after-write
+    truth used by both list and mutation responses.
+    """
+    from maverick import (
+        dreaming,
+        entity_graph,
+        env_hunt,
+        fleet_memory,
+        platform_hunt,
+        rehearsal,
+        self_harness,
+        self_improvement,
+    )
+    from maverick import flow as flows
+
+    predicates = {
+        "dreaming": dreaming.enabled,
+        "self_improvement": self_improvement.enabled,
+        "self_harness": self_harness.enabled,
+        "fleet_memory": fleet_memory.enabled,
+        "rehearsal": rehearsal.enabled,
+        "flows": flows.enabled,
+        "threat_hunt": platform_hunt.enabled,
+        "env_hunt": env_hunt.enabled,
+        "entity_graph": entity_graph.enabled,
+    }
+    return {section: bool(predicates[section]()) for section in _FEATURE_SWITCHES}
+
+
 @router.get("/features/switches")
 async def list_feature_switches(request: Request) -> dict:
     """Every in-app switchable system with its label, plain-language
@@ -9318,12 +10569,18 @@ async def list_feature_switches(request: Request) -> dict:
     from maverick import config as _cfg
 
     def _read() -> list[dict]:
-        loaded = _cfg.load_config() or {}
+        # Load first so wizard-managed env is present before live predicates.
+        _cfg.load_config()
+        live = _live_feature_switch_states()
         out = []
         for section, (label, description) in _FEATURE_SWITCHES.items():
-            enabled = bool((loaded.get(section) or {}).get("enable", False))
             out.append(
-                {"section": section, "label": label, "description": description, "enabled": enabled}
+                {
+                    "section": section,
+                    "label": label,
+                    "description": description,
+                    "enabled": live[section],
+                }
             )
         return out
 
@@ -9353,14 +10610,34 @@ async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
             expected_revision=current["revision"],
         )
         await security_api.update_security_config(request, update)
-        return {"section": body.section, "enabled": bool(body.enabled)}
+        actual = await run_in_threadpool(_live_feature_switch_states)
+        return {"section": body.section, "enabled": actual[body.section]}
     from maverick_dashboard import settings_store
 
     await run_in_threadpool(settings_store.set_section_enable, body.section, bool(body.enabled))
     from maverick import config as _cfg
 
     _cfg.reset_config_cache()
-    return {"section": body.section, "enabled": bool(body.enabled)}
+    actual = await run_in_threadpool(_live_feature_switch_states)
+    effective = actual[body.section]
+    if effective != bool(body.enabled):
+        # Do not leave an ineffective dashboard value that looks like a pending
+        # change. Match the controlling live state and tell the operator why
+        # their requested transition was not accepted.
+        await run_in_threadpool(
+            settings_store.set_section_enable,
+            body.section,
+            effective,
+        )
+        _cfg.reset_config_cache()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{body.section} is controlled by a higher-precedence environment, "
+                "entitlement, or policy source; change that source instead"
+            ),
+        )
+    return {"section": body.section, "enabled": effective}
 
 
 # In-app governance-module switches. Each key is the dotted config path of a
@@ -9398,6 +10675,14 @@ _MODULE_SWITCHES: dict[str, dict] = {
     "consent_preferences.public_api": {
         "label": "Consent public clients",
         "requires": ("consent_preferences", "consent_preferences.publishing"),
+    },
+    "consent_preferences.native_sdk": {
+        "label": "Native consent SDK",
+        "requires": (
+            "consent_preferences",
+            "consent_preferences.publishing",
+            "consent_preferences.public_api",
+        ),
     },
     "consent_preferences.scanner": {
         "label": "Consent application scanning",
@@ -9454,6 +10739,18 @@ _MODULE_SWITCHES: dict[str, dict] = {
     "finance_operations": {
         "label": "Finance operations",
         "requires": (),
+    },
+    "external_agents": {
+        "label": "External-agent governance",
+        "requires": (),
+    },
+    "ai_evidence_analysis": {
+        "label": "AI evidence analysis",
+        "requires": (),
+    },
+    "assessment_evidence_autopopulation": {
+        "label": "Assessment evidence proposals",
+        "requires": ("ai_evidence_analysis",),
     },
     "governance_agents": {
         "label": "Governance agents",
@@ -9522,6 +10819,10 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Third-party intelligence",
         "requires": ("third_party_management",),
     },
+    "third_party_management.executive_reports": {
+        "label": "Executive vendor reports",
+        "requires": ("third_party_management",),
+    },
     "vendor_management": {
         "label": "Vendor management",
         "requires": (),
@@ -9529,13 +10830,35 @@ _MODULE_SWITCHES: dict[str, dict] = {
 }
 
 
-def _module_path_enabled(loaded: dict, path: str) -> bool:
+# Readiness receipts are process-local and bound to an HMAC of the exact
+# effective configuration roots for the module.  The random key means the
+# public fingerprint cannot be used to test guesses about stored secrets, and
+# a restart intentionally returns to ``unverified`` until a fresh probe runs.
+_MODULE_FINGERPRINT_KEY = os.urandom(32)
+
+
+class _ModuleConfigurationUnavailable(RuntimeError):
+    """Module state cannot be read without inventing a safe-looking default."""
+
+
+def _module_path_enable_state(loaded: dict, path: str) -> str:
     node: object = loaded
     for part in path.split("."):
         if not isinstance(node, dict):
-            return False
-        node = node.get(part)
-    return isinstance(node, dict) and bool(node.get("enable", False))
+            return "invalid"
+        if part not in node:
+            return "disabled"
+        node = node[part]
+    if not isinstance(node, dict):
+        return "invalid"
+    enabled = node.get("enable", False)
+    if type(enabled) is not bool:
+        return "invalid"
+    return "enabled" if enabled else "disabled"
+
+
+def _module_path_enabled(loaded: dict, path: str) -> bool:
+    return _module_path_enable_state(loaded, path) == "enabled"
 
 
 def _module_switch_enabled(loaded: dict, section: str) -> bool:
@@ -9543,25 +10866,263 @@ def _module_switch_enabled(loaded: dict, section: str) -> bool:
     return all(_module_path_enabled(loaded, p) for p in chain)
 
 
+def _module_config_fingerprint(loaded: dict, section: str) -> str:
+    chain = (*_MODULE_SWITCHES[section]["requires"], section)
+    roots = sorted({path.split(".", 1)[0] for path in chain})
+    material = {root: loaded.get(root) for root in roots}
+    encoded = json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hmac.new(_MODULE_FINGERPRINT_KEY, encoded, hashlib.sha256).hexdigest()
+
+
+def _module_activation_state(loaded: dict, section: str) -> dict:
+    requirements = tuple(_MODULE_SWITCHES[section]["requires"])
+    chain = (*requirements, section)
+    path_states = {path: _module_path_enable_state(loaded, path) for path in chain}
+    invalid = [path for path, state in path_states.items() if state == "invalid"]
+    missing = [path for path in requirements if path_states[path] != "enabled"]
+    target_enabled = path_states[section] == "enabled"
+    if invalid:
+        status = "failed"
+        detail = "One or more enable gates have an invalid configuration shape."
+    elif not target_enabled:
+        status = "disabled"
+        detail = "The module's own enable gate is off."
+    elif missing:
+        status = "incomplete"
+        detail = "The module is on, but one or more required parent gates are off."
+    else:
+        status = "enabled"
+        detail = (
+            "The complete enable-gate chain is on. This does not prove runtime "
+            "readiness."
+        )
+    return {
+        "status": status,
+        "enabled": status == "enabled",
+        "target_enabled": target_enabled,
+        "requirements": list(requirements),
+        "missing_requirements": missing,
+        "invalid_paths": invalid,
+        "detail": detail,
+        "fingerprint": _module_config_fingerprint(loaded, section),
+    }
+
+
+def _module_configuration_state(loaded: dict, section: str) -> dict:
+    """Validate known closed config contracts without opening a runtime store."""
+
+    try:
+        if section == "ai_evidence_analysis":
+            from .ai_evidence_analysis_composition import ai_evidence_analysis_settings
+
+            configured = ai_evidence_analysis_settings(loaded) is not None
+        elif section == "assessment_evidence_autopopulation":
+            from .ai_evidence_analysis_composition import ai_evidence_analysis_settings
+            from .assessment_evidence_autopopulation_composition import (
+                assessment_evidence_autopopulation_settings,
+            )
+
+            configured = (
+                ai_evidence_analysis_settings(loaded) is not None
+                and assessment_evidence_autopopulation_settings(loaded) is not None
+            )
+        elif section == "consent_preferences.native_sdk":
+            from .consent_native_composition import native_consent_settings
+
+            configured = native_consent_settings(loaded) is not None
+        elif section == "third_party_management.executive_reports":
+            from maverick.third_party_executive_reports import (
+                ThirdPartyExecutiveReportConfig,
+            )
+
+            configured = ThirdPartyExecutiveReportConfig.from_mapping(loaded).enable is True
+        elif section == "external_agents":
+            configured = True
+        else:
+            return {
+                "status": "unverified",
+                "configured": None,
+                "ready": None,
+                "detail": (
+                    "The gate is on; this module has no bounded readiness receipt "
+                    "in this endpoint."
+                ),
+                "evidence": {
+                    "kind": "enable_gate_only",
+                    "runtime_verified": False,
+                },
+            }
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        return {
+            "status": "incomplete",
+            "configured": False,
+            "ready": False,
+            "detail": "The module's closed configuration contract is incomplete.",
+            "evidence": {
+                "kind": "configuration_contract",
+                "error_type": type(exc).__name__,
+                "runtime_verified": False,
+            },
+        }
+    if not configured:
+        return {
+            "status": "incomplete",
+            "configured": False,
+            "ready": False,
+            "detail": "The module's closed configuration contract is incomplete.",
+            "evidence": {
+                "kind": "configuration_contract",
+                "runtime_verified": False,
+            },
+        }
+    return {
+        "status": "configured",
+        "configured": True,
+        "ready": None,
+        "detail": (
+            "The closed configuration contract is valid. Runtime operation has "
+            "not been inferred."
+        ),
+        "evidence": {
+            "kind": "configuration_contract",
+            "runtime_verified": False,
+        },
+    }
+
+
+def _module_readiness_state(
+    request: Request,
+    loaded: dict,
+    section: str,
+    activation: dict,
+) -> dict:
+    activation_status = activation["status"]
+    if activation_status == "failed":
+        return {
+            "status": "failed",
+            "configured": False,
+            "ready": False,
+            "detail": "Readiness cannot be evaluated from invalid enable gates.",
+            "evidence": {"kind": "activation_contract", "runtime_verified": False},
+        }
+    if activation_status != "enabled":
+        return {
+            "status": "blocked",
+            "configured": False,
+            "ready": False,
+            "detail": "Complete the module's enable-gate chain before readiness.",
+            "evidence": {"kind": "activation_contract", "runtime_verified": False},
+        }
+
+    configured = _module_configuration_state(loaded, section)
+    if configured["status"] == "incomplete":
+        return configured
+
+    receipts = getattr(request.app.state, "module_readiness_evidence", None)
+    receipt = receipts.get(section) if isinstance(receipts, dict) else None
+    if isinstance(receipt, dict):
+        status = receipt.get("status")
+        checked_at = receipt.get("checked_at")
+        detail = receipt.get("detail")
+        now = time.time()
+        receipt_valid = (
+            receipt.get("activation_fingerprint") == activation["fingerprint"]
+            and status in {"ready", "incomplete", "failed"}
+            and not isinstance(checked_at, bool)
+            and isinstance(checked_at, (int, float))
+            and 0 < float(checked_at) <= now + 300
+            and isinstance(detail, str)
+            and bool(detail.strip())
+        )
+        if receipt_valid:
+            return {
+                "status": status,
+                "configured": configured["configured"],
+                "ready": status == "ready",
+                "detail": detail.strip()[:240],
+                "evidence": {
+                    "kind": "runtime_receipt",
+                    "checked_at": float(checked_at),
+                    "runtime_verified": status == "ready",
+                },
+            }
+    return configured
+
+
+def _module_state(request: Request, loaded: dict, section: str, meta: dict) -> dict:
+    activation = _module_activation_state(loaded, section)
+    return {
+        "section": section,
+        "label": meta["label"],
+        # Compatibility field: its narrow meaning is effective gate state.
+        "enabled": activation["enabled"],
+        "activation": activation,
+        "readiness": _module_readiness_state(
+            request,
+            loaded,
+            section,
+            activation,
+        ),
+    }
+
+
+def _load_module_config() -> dict:
+    from maverick import config as config_module
+
+    try:
+        loaded = config_module.load_config()
+        source_errors = config_module.config_source_errors(include_tenant=True)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise _ModuleConfigurationUnavailable from exc
+    if source_errors or not isinstance(loaded, dict):
+        raise _ModuleConfigurationUnavailable
+    return loaded
+
+
+def module_activation_enabled(section: str) -> bool:
+    """Fail-closed effective gate state for server-rendered module banners."""
+
+    if section not in _MODULE_SWITCHES:
+        return False
+    try:
+        loaded = _load_module_config()
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except _ModuleConfigurationUnavailable:
+        return False
+    return _module_activation_state(loaded, section)["enabled"] is True
+
+
 @router.get("/features/modules")
 async def list_module_switches(request: Request) -> dict:
     """Every in-app switchable governance module with its effective state
     (a module reads as ON only when its whole requirement chain is on)."""
     require_permission(request, "view")
-    from maverick import config as _cfg
 
     def _read() -> list[dict]:
-        loaded = _cfg.load_config() or {}
+        loaded = _load_module_config()
         return [
-            {
-                "section": section,
-                "label": meta["label"],
-                "enabled": _module_switch_enabled(loaded, section),
-            }
+            _module_state(request, loaded, section, meta)
             for section, meta in _MODULE_SWITCHES.items()
         ]
 
-    return {"modules": await run_in_threadpool(_read)}
+    try:
+        modules = await run_in_threadpool(_read)
+    except _ModuleConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="module configuration is unavailable; no state was inferred",
+        ) from exc
+    return {"modules": modules}
 
 
 @router.post("/features/modules")
@@ -9574,6 +11135,13 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
     meta = _MODULE_SWITCHES.get(body.section)
     if meta is None:
         raise HTTPException(status_code=400, detail=f"unknown module {body.section!r}")
+    try:
+        await run_in_threadpool(_load_module_config)
+    except _ModuleConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="module configuration is unavailable; settings were not changed",
+        ) from exc
     from maverick_dashboard import settings_store
 
     paths = (
@@ -9583,14 +11151,32 @@ async def set_module_switch(request: Request, body: FeatureSwitchIn) -> dict:
         await run_in_threadpool(settings_store.set_module_enables, paths, bool(body.enabled))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except (
+        OSError,
+        TypeError,
+        settings_store.SecuritySuiteConfigUnavailable,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="module settings are unavailable; no state was overwritten",
+        ) from exc
     from maverick import config as _cfg
 
     _cfg.reset_config_cache()
-    loaded = _cfg.load_config() or {}
-    return {
-        "section": body.section,
-        "enabled": _module_switch_enabled(loaded, body.section),
-    }
+    try:
+        loaded = await run_in_threadpool(_load_module_config)
+    except _ModuleConfigurationUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="the saved module state could not be verified",
+        ) from exc
+    state = _module_state(request, loaded, body.section, meta)
+    if state["enabled"] is not bool(body.enabled):
+        raise HTTPException(
+            status_code=409,
+            detail="the requested module gate state did not become effective",
+        )
+    return state
 
 
 def _probe_container_daemon(binary: str) -> dict:
@@ -9709,7 +11295,12 @@ async def copilot_context_endpoint(request: Request, page: str = "") -> dict[str
     from .copilot_context import context_for_page, public_context
 
     permissions = _copilot_permissions(request)
-    return public_context(context_for_page(page), permissions)
+    result = public_context(context_for_page(page), permissions)
+    configured = bool(_any_provider_key_set())
+    result["model_provider_configured"] = configured
+    if not configured:
+        result["provider_setup"] = _copilot_provider_setup(permissions)
+    return result
 
 
 def _copilot_permissions(request: Request) -> frozenset[str]:
@@ -9723,6 +11314,20 @@ def _copilot_permissions(request: Request) -> frozenset[str]:
     if has_global_permission(request, "admin"):
         permissions.add("admin")
     return frozenset(permissions)
+
+
+def _copilot_provider_setup(permissions: frozenset[str]) -> dict[str, str]:
+    """Return only an in-app recovery destination, qualified by authority."""
+
+    if "admin" in permissions:
+        return {
+            "href": "/settings#settings-integrations",
+            "label": "Configure a model provider in Settings",
+        }
+    return {
+        "href": "/start",
+        "label": "Open the in-app setup guide",
+    }
 
 
 @router.post("/copilot")
@@ -9760,6 +11365,7 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
             "reply": built_in_reply(context, msg, permissions),
             "mode": "built_in",
             "page_context": public_context(context, permissions),
+            "provider_setup": _copilot_provider_setup(permissions),
         }
 
     require_provider_or_400(role="orchestrator")
@@ -10108,19 +11714,33 @@ async def delete_role_override(role: str, request: Request) -> dict:
 
 
 @router.get("/channels")
-async def list_channels() -> dict:
-    """Enabled channels from ~/.maverick/config.toml."""
+async def list_channels(request: Request) -> dict:
+    """Configured channel inventory with typed local/live readiness."""
+    require_global_permission(request, "admin")
     try:
-        from maverick.config import load_config
+        from maverick_dashboard.integration_readiness import require_readable_config
 
-        cfg = (load_config() or {}).get("channels") or {}
+        cfg = require_readable_config().get("channels") or {}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"config read failed: {e}") from e
-    return {
-        "channels": [
-            {"name": name, "enabled": bool(c.get("enabled", True))} for name, c in cfg.items()
-        ],
-    }
+        raise HTTPException(
+            status_code=500,
+            detail=f"channel inventory failed ({type(e).__name__})",
+        ) from e
+    from maverick_dashboard.integration_readiness import channel_readiness
+
+    channels = []
+    for name, value in cfg.items():
+        channel = value if isinstance(value, dict) else {"enabled": bool(value)}
+        configured = bool(channel.get("enabled", False))
+        channels.append(
+            {
+                "name": name,
+                "configured": configured,
+                "enabled": configured,
+                "readiness": channel_readiness(name, channel),
+            }
+        )
+    return {"channels": channels}
 
 
 @router.get("/audit/tail")
@@ -10138,32 +11758,66 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
     from maverick_dashboard.app import safe_audit_day
 
     n = max(1, min(int(n or 100), 1000))
-    return {"events": default_audit_log().tail(n, day=safe_audit_day(day))}
+    safe_day = safe_audit_day(day)
+    if day not in (None, "") and safe_day is None:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid audit day; expected a real date in YYYY-MM-DD format",
+        )
+    return {"events": default_audit_log().tail(n, day=safe_day)}
 
 
 @router.get("/audit/grep")
 async def audit_grep(request: Request, pattern: str, day: str | None = None) -> dict:
-    """Search recent audit events for the given literal pattern.
+    """Search every readable event in one audit day for a literal pattern.
 
     Audit-gated (see :func:`audit_tail`). Intentionally uses bounded, literal
     (case-insensitive) matching rather than a user-supplied regex: a regex over
-    the HTTP surface invites catastrophic-backtracking ReDoS that blocks the
-    dashboard event loop. Bounds the scan to the most recent 1000 events and
-    caps results at 200.
+    the HTTP surface invites catastrophic-backtracking ReDoS. The selected day
+    is scanned completely in a worker thread; at most 200 matching rows are
+    returned, with explicit scan/match/truncation counts so a capped response
+    can never be mistaken for a complete result set.
     """
     require_permission(request, "audit")
     if not pattern:
         raise HTTPException(status_code=400, detail="pattern is required")
     if len(pattern) > 200:
         raise HTTPException(status_code=400, detail="pattern too long")
-    from maverick.audit import default_audit_log
+    from maverick.audit import default_audit_log, iter_events
 
     from maverick_dashboard.app import safe_audit_day
 
-    events = default_audit_log().tail(1000, day=safe_audit_day(day))
-    needle = pattern.lower()
-    matches = [e for e in events if needle in json.dumps(e, ensure_ascii=False).lower()]
-    return {"events": matches[:200]}
+    safe_day = safe_audit_day(day)
+    if day not in (None, "") and safe_day is None:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid audit day; expected a real date in YYYY-MM-DD format",
+        )
+    effective_day = safe_day or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+    needle = pattern.casefold()
+    audit_dir = default_audit_log().audit_dir
+
+    def _scan() -> dict:
+        matches: list[dict] = []
+        scanned = 0
+        total_matches = 0
+        for event in iter_events(day=effective_day, audit_dir=audit_dir):
+            scanned += 1
+            if needle in json.dumps(event, ensure_ascii=False, default=str).casefold():
+                total_matches += 1
+                if len(matches) < 200:
+                    matches.append(event)
+        return {
+            "events": matches,
+            "scanned": scanned,
+            "total_matches": total_matches,
+            "returned": len(matches),
+            "truncated": total_matches > len(matches),
+            "scan_complete": True,
+            "scope": {"day": effective_day},
+        }
+
+    return await run_in_threadpool(_scan)
 
 
 @router.get("/replay/{goal_id}")
@@ -10239,8 +11893,29 @@ async def trust_agent_revoke(request: Request, agent_id: str, payload: TrustRevo
     from the app first to take it under management."""
     require_permission(request, "admin")
     from maverick.agent_trust import set_revoked
+    from maverick.revocation import ProtectedRevocationError, shared
 
-    if not set_revoked(agent_id, payload.revoked):
+    try:
+        changed = (
+            set_revoked(agent_id, True)
+            if payload.revoked
+            else shared().run_if_unprotected(
+                f"agent:{agent_id}",
+                lambda: set_revoked(agent_id, False),
+            )
+        )
+    except ProtectedRevocationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="agent is security-contained; use the control-plane release",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="containment authority is unavailable; restore refused",
+        ) from exc
+
+    if not changed:
         raise HTTPException(
             status_code=404,
             detail="this agent is defined in the server's config file, not in "
@@ -10314,8 +11989,28 @@ async def external_agent_release(request: Request, agent_id: str) -> dict:
     """Lift an auto-containment and clear the denial window (admin)."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
+    from maverick.revocation import ProtectedRevocationError, shared
 
-    if not xa.release(agent_id, released_by=caller_principal(request) or "admin"):
+    try:
+        released = shared().run_if_unprotected(
+            f"agent:{agent_id}",
+            lambda: xa.release(
+                agent_id,
+                released_by=caller_principal(request) or "admin",
+            ),
+        )
+    except ProtectedRevocationError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="agent is security-contained; use the control-plane release",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="containment authority is unavailable; gateway release refused",
+        ) from exc
+
+    if not released:
         raise HTTPException(status_code=404, detail=f"agent {agent_id!r} is not enrolled")
     return {"ok": True, "id": agent_id}
 
@@ -10415,24 +12110,23 @@ async def compliance_packet_download(request: Request) -> Response:
     """Download a one-click compliance evidence bundle (SOC 2 control snapshot +
     GDPR/EU-AI-Act control report + audit-chain verdict) as a JSON artifact."""
     require_permission(request, "audit")
-    global _COMPLIANCE_PACKET_CACHE
+    cache_key = _active_cache_context()
     now = time.monotonic()
-    if (
-        _COMPLIANCE_PACKET_CACHE is not None
-        and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
-    ):
-        body = _COMPLIANCE_PACKET_CACHE[1]
+    cached = _COMPLIANCE_PACKET_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS:
+        body = cached[1]
     else:
         async with _COMPLIANCE_PACKET_LOCK:
             now = time.monotonic()
-            if (
-                _COMPLIANCE_PACKET_CACHE is not None
-                and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
-            ):
-                body = _COMPLIANCE_PACKET_CACHE[1]
+            cached = _COMPLIANCE_PACKET_CACHE.get(cache_key)
+            if cached is not None and now - cached[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS:
+                body = cached[1]
             else:
                 body = await run_in_threadpool(_build_compliance_packet_body)
-                _COMPLIANCE_PACKET_CACHE = (time.monotonic(), body)
+                _COMPLIANCE_PACKET_CACHE[cache_key] = (time.monotonic(), body)
+                for key, (created_at, _value) in list(_COMPLIANCE_PACKET_CACHE.items()):
+                    if time.monotonic() - created_at >= _COMPLIANCE_PACKET_CACHE_TTL_SECONDS:
+                        _COMPLIANCE_PACKET_CACHE.pop(key, None)
     return Response(
         content=body,
         media_type="application/json",
@@ -10443,11 +12137,22 @@ async def compliance_packet_download(request: Request) -> Response:
 
 
 @router.get("/permissions")
-async def permissions() -> dict:
-    """Everything the agent is currently allowed to do (read-only)."""
-    from maverick_dashboard.app import _permissions_snapshot
+async def permissions(
+    q: str = Query(default="", max_length=128),
+    state: str = Query(default="all"),
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=100, ge=1, le=100),
+) -> dict:
+    """Bounded, filterable view of what the agent may currently attempt."""
+    from maverick_dashboard.app import _permissions_snapshot, _permissions_tool_page
 
-    return _permissions_snapshot()
+    return _permissions_tool_page(
+        _permissions_snapshot(),
+        q=q,
+        state=state,
+        page=page,
+        per_page=per_page,
+    )
 
 
 @router.post("/permissions/tools/{name}/disable", status_code=204)
@@ -10467,13 +12172,13 @@ async def disable_tool(request: Request, name: str) -> None:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/permissions/tools/{name}/enable", status_code=204)
-async def enable_tool(request: Request, name: str) -> None:
+@router.post("/permissions/tools/{name}/enable")
+async def enable_tool(request: Request, name: str) -> dict:
     """Clear a dashboard-set tool override.
 
-    Only clears overrides set here; a tool denied in config.toml itself
-    stays denied (the response is still 204 — the overlay no longer
-    denies it, config does).
+    Only clears overrides set here. The response returns the freshly resolved
+    effective state so a config ACL that still denies the tool cannot be
+    optimistically shown as enabled.
     """
     require_permission(request, "operate")
     from maverick.runtime_overrides import enable_tool as _enable
@@ -10482,6 +12187,24 @@ async def enable_tool(request: Request, name: str) -> None:
         _enable(name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick_dashboard.app import _permissions_snapshot, _tool_permission_row
+
+    tool = next(
+        (row for row in _permissions_snapshot()["tools"] if row["name"] == name),
+        None,
+    )
+    return {
+        "tool": tool
+        or _tool_permission_row(
+            name,
+            catalog_present=False,
+            base_acl_allowed=False,
+            effective_acl_allowed=False,
+            base_acl_detail=(
+                "the override was cleared, but this tool is not in the current catalog"
+            ),
+        )
+    }
 
 
 @router.get("/approvals")
@@ -11055,7 +12778,12 @@ async def run_fleet_agent(
     )
 
     w = _world()
-    goal_id = w.create_goal(prompt[:200], prompt, owner=fleet.owner)
+    goal_id = w.create_goal(
+        prompt[:200],
+        prompt,
+        owner=fleet.owner,
+        execution_principal=agent_principal,
+    )
     record_run(fleet_name, agent.name, goal_id)
     # Schedule against the authenticated caller (or the shared anonymous lane
     # when auth is off), not the fleet-agent audit principal.  Agent names are

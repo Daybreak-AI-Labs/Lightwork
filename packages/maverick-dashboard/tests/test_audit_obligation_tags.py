@@ -12,6 +12,8 @@ def _prep(monkeypatch, tmp_path, events):
     dash_app._world_cache.clear()
 
     class _Log:
+        signing_enabled = False
+
         def tail(self, n, day=None):
             return list(events)
 

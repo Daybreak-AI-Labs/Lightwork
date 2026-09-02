@@ -47,7 +47,10 @@ PAGES: tuple[dict, ...] = (
         "group": "Operate",
         "icon": "check",
         "floor": "view",
-        "default": "operate",
+        # The root route sends every unconfigured installation here.  Keep
+        # the guide visible to read-only users; the page projects their
+        # authority and never turns its setup links into mutation grants.
+        "default": "view",
     },
     {
         "path": "/chat",
@@ -315,16 +318,18 @@ PAGES: tuple[dict, ...] = (
         "floor": "operate",
         "default": "operate",
     },
-    # The Agent Control Plane: suspend / contain / attenuate / halt over every
-    # governed principal. Operate floor -- the page renders the verbs, and a
-    # viewer's read-only needs are met by the roster inside Fleet/Agents.
+    # The Agent Control Plane: a read-side roster and forensic ledger plus
+    # separately authorized operator/admin verbs.  Its route requires view;
+    # each API mutation rechecks its stronger permission.  Keep it discoverable
+    # to auditors and viewers rather than making the nav imply one permission
+    # governs the mixed-authority surface.
     {
         "path": "/agent-control-plane",
         "label": "Agent Control Plane",
         "group": "Govern",
         "icon": "agents",
-        "floor": "operate",
-        "default": "operate",
+        "floor": "view",
+        "default": "view",
     },
     # The Privacy workspace: the module view over assessment records (PIA /
     # AIRA / vendor risk / framework readiness). Operate floor — records carry
@@ -765,6 +770,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/compliance/grc-studio",
         "label": "No-code GRC Studio",
+        "aliases": "workflow builder governance risk compliance studio",
         "group": "Govern",
         "icon": "compliance",
         "floor": "view",
@@ -1241,7 +1247,14 @@ def nav_groups(role: str | None) -> list[dict]:
         else:
             g = {"label": page["group"], "links": []}
             groups.append(g)
-        g["links"].append({"href": page["path"], "label": page["label"], "icon": page["icon"]})
+        g["links"].append(
+            {
+                "href": page["path"],
+                "label": page["label"],
+                "icon": page["icon"],
+                "aliases": page.get("aliases", ""),
+            }
+        )
     return groups
 
 

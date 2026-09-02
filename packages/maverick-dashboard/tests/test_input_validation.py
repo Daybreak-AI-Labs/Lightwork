@@ -45,22 +45,26 @@ def test_audit_page_survives_non_numeric_n(monkeypatch, tmp_path):
     assert r.status_code == 200  # was an unguarded int() -> 500
 
 
-def test_audit_page_neutralizes_day_traversal(monkeypatch, tmp_path):
+def test_audit_page_rejects_invalid_day_with_actionable_error(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     r = _client().get("/audit?day=../../../etc/passwd")
-    assert r.status_code == 200
-    assert "../../../etc/passwd" not in r.text  # rejected, not used as a path
+    assert r.status_code == 400
+    assert "YYYY-MM-DD" in r.text
+    assert "../../../etc/passwd" not in r.text
 
 
-def test_audit_grep_api_neutralizes_day_traversal(monkeypatch, tmp_path):
+def test_audit_apis_reject_invalid_day_instead_of_silently_using_today(
+    monkeypatch, tmp_path
+):
     _env(monkeypatch, tmp_path)
     c = _client()
-    today = c.get("/api/v1/audit/grep?pattern=x")
-    traversed = c.get("/api/v1/audit/grep?pattern=x&day=../../../etc/passwd")
-    assert today.status_code == 200 and traversed.status_code == 200
-    # A bad day collapses to today's log; a raw traversal would have read a
-    # different (escaped) path and returned a different result.
-    assert traversed.json()["events"] == today.json()["events"]
+    for path in (
+        "/api/v1/audit/grep?pattern=x&day=../../../etc/passwd",
+        "/api/v1/audit/tail?day=2026-02-31",
+    ):
+        response = c.get(path)
+        assert response.status_code == 400
+        assert "YYYY-MM-DD" in response.json()["detail"]
 
 
 def test_goal_events_endpoint_caps_limit(monkeypatch, tmp_path):

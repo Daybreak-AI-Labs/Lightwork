@@ -155,9 +155,9 @@ def test_verify_fails_closed_without_a_trusted_key_and_catches_drift():
     pasted = client.post(f"{BASE}/verify", json={
         "receipt": text, "use_local_keys": False, "keys": [receipt["signature"]["pubkey"]]}).json()
     assert pasted["ok"] is True
-    # A stated claim that drifts from the row is rejected (the row says the
-    # tool ran; the forged claim says it was denied).
-    assert receipt["claim"]["decision"] == "executed"
+    # A stated claim that drifts from the row is rejected. A tool_call records
+    # an attempt; only a paired successful tool_result proves execution.
+    assert receipt["claim"]["decision"] == "attempted"
     drifted = json.loads(text)
     drifted["claim"]["decision"] = "denied"
     verdict = client.post(f"{BASE}/verify", json={"receipt": json.dumps(drifted)}).json()

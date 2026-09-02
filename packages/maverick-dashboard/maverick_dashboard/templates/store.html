@@ -65,11 +65,19 @@
       const msg = document.getElementById('store-msg');
       document.querySelectorAll('button.store__btn.install').forEach(function(btn) {
         btn.addEventListener('click', async function() {
+          if (btn.dataset.inFlight === 'true') return;
+          btn.dataset.inFlight = 'true';
           const name = btn.dataset.name;
+          if (!(await mvConfirm(
+            'Install skill “' + name + '” into this deployment? Its reviewed package code becomes available to the workforce.',
+            {okText: 'Install skill'}
+          ))) { delete btn.dataset.inFlight; return; }
           btn.disabled = true;
+          btn.setAttribute('aria-busy', 'true');
           btn.textContent = 'Installing…';
           msg.style.color = 'var(--muted)';
           msg.textContent = '';
+          let installed = false;
           try {
             const r = await fetch('/api/v1/catalog/skills/install', {
               method: 'POST',
@@ -77,6 +85,7 @@
               body: JSON.stringify({name: name}),
             });
             if (r.ok) {
+              installed = true;
               btn.textContent = 'Installed';
               btn.classList.remove('install', 'btn--primary');
               btn.classList.add('btn--ghost');
@@ -84,16 +93,19 @@
               msg.textContent = 'Installed ' + name + '.';
             } else {
               const j = await r.json().catch(function() { return {}; });
-              btn.disabled = false;
-              btn.textContent = 'Install';
               msg.style.color = 'var(--danger)';
-              msg.textContent = (j.detail || ('HTTP ' + r.status));
+              msg.textContent = j.detail || ('Skill installation failed (HTTP ' + r.status + '). Try again.');
             }
           } catch (e) {
-            btn.disabled = false;
-            btn.textContent = 'Install';
             msg.style.color = 'var(--danger)';
-            msg.textContent = String(e);
+            msg.textContent = 'Could not reach the server — check your connection and try again.';
+          } finally {
+            delete btn.dataset.inFlight;
+            btn.removeAttribute('aria-busy');
+            if (!installed) {
+              btn.disabled = false;
+              btn.textContent = 'Install';
+            }
           }
         });
       });

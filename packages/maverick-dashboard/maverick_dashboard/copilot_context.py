@@ -198,6 +198,35 @@ _CONTEXTS = tuple(
             ),
         ),
         CopilotPageContext(
+            path="/agent-control-plane",
+            title="Agent Control Plane",
+            summary=(
+                "Inspect and operate bounded controls over native principals and registered "
+                "external agents, with a separately scoped deployment emergency halt."
+            ),
+            capabilities=(
+                "Inspect status and one bounded, paginated roster page without accumulating an unbounded browser inventory.",
+                "Suspend or resume a named principal, durably contain or release a named principal, and narrow an external agent's capability ceiling when the current role and runtime permit.",
+                "Read a named principal's bounded ledger and request or clear the hardened local or shared-cluster halt under its exact authority gate.",
+            ),
+            boundaries=(
+                "Roster completeness is refused when a required authority is unreadable; an unavailable response is not an empty estate.",
+                "Containment from this page durably protects the named principal but does not claim a live-swarm seal or subtree revocation.",
+                "Ordinary audit outages are fail-soft, while a configured audit-guarantee refusal can be reported after a control change has already landed.",
+                "A local result does not prove complete estate discovery, live external-agent acceptance, or production recovery and scale.",
+            ),
+            next_steps=(
+                "Refresh status and confirm the control-plane runtime and exact halt scope are available before selecting a mutation.",
+                "Use the bounded roster page to select the exact principal and read the returned enforced state after an operation.",
+                "Inspect the principal ledger separately when durable audit evidence is required, especially after an audit-related refusal.",
+            ),
+            suggested_questions=(
+                "Which controls are available to my role right now?",
+                "What does containment from this page actually protect?",
+                "How should I verify state and audit evidence after a control attempt?",
+            ),
+        ),
+        CopilotPageContext(
             path="/consent",
             title="Consent and Preferences",
             summary=(
@@ -1382,6 +1411,57 @@ def _canonical_context_path(path: str) -> str:
     return path
 
 
+def _registered_page_context(path: str) -> CopilotPageContext | None:
+    """Build closed, page-specific help for registry pages without bespoke copy.
+
+    Rich hand-authored contexts continue to win.  This fallback keeps every
+    newly registered dashboard module from silently inheriting the unrelated
+    generic home-page guide while preserving the closed-registry boundary.
+    """
+
+    from .ui_visibility import PAGES
+
+    page = next((item for item in PAGES if item.get("path") == path), None)
+    if page is None:
+        return None
+    title = str(page.get("label") or "Lightwork page")
+    group = str(page.get("group") or "workspace")
+    floor = str(page.get("floor") or "view")
+    authority = {
+        "view": "This page is viewable with read access; its mutation endpoints may require more authority.",
+        "operate": "Using this page's operations requires current operator authority.",
+        "audit": "This page is limited to authorized audit review.",
+        "admin": "This page is a deployment administration surface and requires global administrator authority.",
+    }.get(floor, "The server rechecks current authority for every operation.")
+    return _ensure_read_only(
+        CopilotPageContext(
+            path=path,
+            title=title,
+            summary=(
+                f"{title} is part of Lightwork's {group} workspace. It presents "
+                "the records, status, and bounded controls for this module."
+            ),
+            capabilities=(
+                f"Inspect the {title} records and status available to your current role.",
+                "Use the page's labeled controls when the server confirms both authority and readiness.",
+            ),
+            boundaries=(
+                authority,
+                "A rendered control or local status does not prove an external action, complete coverage, or customer acceptance.",
+            ),
+            next_steps=(
+                "Read the page status and evidence boundary before selecting an operation.",
+                "After any permitted operation, verify the returned result and retained evidence before relying on it.",
+            ),
+            suggested_questions=(
+                f"What can I inspect on {title}?",
+                "What authority and readiness does this page require?",
+                "What should I verify after an operation?",
+            ),
+        )
+    )
+
+
 def context_for_page(page: object) -> CopilotPageContext:
     """Resolve a browser-proposed path to a closed server-owned context."""
 
@@ -1396,7 +1476,8 @@ def context_for_page(page: object) -> CopilotPageContext:
         or "\\" in path
     ):
         return _GENERIC
-    return _CONTEXT_BY_PATH.get(_canonical_context_path(path), _GENERIC)
+    canonical = _canonical_context_path(path)
+    return _CONTEXT_BY_PATH.get(canonical) or _registered_page_context(canonical) or _GENERIC
 
 
 def public_context(

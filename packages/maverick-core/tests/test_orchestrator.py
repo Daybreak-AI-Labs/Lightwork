@@ -162,3 +162,67 @@ async def test_unknown_goal_returns_error_message(tmp_path: Path, fake_llm):
         sandbox=LocalBackend(workdir=tmp_path),
     )
     assert "no such goal" in out
+
+
+@pytest.mark.asyncio
+async def test_goal_execution_principal_mismatch_refuses_before_side_effects(
+    tmp_path: Path, fake_llm,
+):
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal(
+        "owned work",
+        owner="user:human-owner",
+        execution_principal="user:alice",
+    )
+
+    out = await run_goal(
+        llm=fake_llm,
+        world=world,
+        budget=Budget(max_dollars=1.0),
+        goal_id=gid,
+        sandbox=LocalBackend(workdir=tmp_path),
+        user_id="bob",
+    )
+
+    assert out == "BLOCKED: goal is bound to a different execution principal"
+    assert world.get_goal(gid).status == "pending"
+    assert world.get_goal(gid).owner == "user:human-owner"
+    assert world.get_goal(gid).execution_principal == "user:alice"
+    assert world.list_episodes() == []
+    assert world.goal_events(gid) == []
+    assert fake_llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_opaque_capability_principal_binds_owner_and_runs(
+    tmp_path: Path, fake_llm, make_llm_response,
+):
+    from maverick.capability import Capability
+
+    principal = "user:auth0|tenant/María 李"
+    fake_llm.scripted = [
+        make_llm_response(text="FINAL: bound"),
+        make_llm_response(
+            text='{"confidence": 0.95, "accepts": true, "critique": "ok", "issues": []}',
+        ),
+        make_llm_response(text="FINAL: (no skill)"),
+    ]
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("bind opaque principal", owner="user:human-owner")
+
+    out = await run_goal(
+        llm=fake_llm,
+        world=world,
+        budget=Budget(max_dollars=1.0),
+        goal_id=gid,
+        sandbox=LocalBackend(workdir=tmp_path),
+        user_id="different-context-only",
+        capability=Capability(principal=principal),
+        max_depth=1,
+    )
+
+    assert "DONE." in out
+    goal = world.get_goal(gid)
+    assert goal.owner == "user:human-owner"
+    assert goal.execution_principal == principal
+    assert goal.status == "done"

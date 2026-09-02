@@ -375,8 +375,11 @@ class JobQueue:
         ever looks at 'pending' rows, so no worker re-claims it and the job
         is silently orphaned. Run this on worker start to recover them.
 
-        A job whose ``updated_at`` is older than ``now - lease_seconds`` is
-        considered abandoned. Pick a ``lease_seconds`` larger than the
+        A job whose ``updated_at`` is at or before ``now - lease_seconds`` is
+        considered abandoned. Inclusive expiry matters for a zero-second lease
+        and for clocks whose resolution makes claim and reclaim timestamps
+        equal: once the lease deadline is reached, the work is reclaimable.
+        Pick a ``lease_seconds`` larger than the
         longest expected job runtime so a still-running job in a live worker
         is not stolen. Abandoned jobs already at/over ``max_attempts`` are
         marked 'failed' (poison-pill guard, mirroring ``fail()``'s terminal
@@ -390,12 +393,12 @@ class JobQueue:
         with self._lock, self._conn() as c:
             failed = c.execute(
                 "UPDATE jobs SET status='failed', last_error=?, updated_at=? "
-                "WHERE status='running' AND updated_at < ? AND attempts >= ?",
+                "WHERE status='running' AND updated_at <= ? AND attempts >= ?",
                 ("lease expired (worker presumed crashed)", n, cutoff, max_attempts),
             ).rowcount
             requeued = c.execute(
                 "UPDATE jobs SET status='pending', run_at=?, updated_at=? "
-                "WHERE status='running' AND updated_at < ? AND attempts < ?",
+                "WHERE status='running' AND updated_at <= ? AND attempts < ?",
                 (n, n, cutoff, max_attempts),
             ).rowcount
         return int(failed) + int(requeued)

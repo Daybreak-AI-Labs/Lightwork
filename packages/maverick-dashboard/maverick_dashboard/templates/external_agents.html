@@ -1,13 +1,22 @@
 {% extends "base.html" %}
 {% block title %}External Agents · Lightwork{% endblock %}
 {% block content %}
+  {% from "_module_gate.html" import module_gate %}
+  {% if not enabled %}
+  {{ module_gate('external_agents', 'External-agent governance',
+                 detail='Activates the external-agent gateway; entitlements, enrolled identities, credentials, ceilings and live calls remain separately checked.',
+                 can_activate=external_agents_can_activate) }}
+  {% endif %}
+  {% if enabled and not external_agents_entitled %}
+  <div class="boundary" role="status"><strong>External-agent enrollment is unavailable.</strong> This deployment does not currently have the required external-agent entitlement. Existing roster and operating-record history remain readable.</div>
+  {% endif %}
   <h1 class="page-title">External agents</h1>
   <p class="page-subtitle">Agents built on other platforms — Salesforce Agentforce, AWS Bedrock, Copilot Studio, your own runtime — enrolled here run on <em>their</em> infrastructure under <em>this</em> deployment's governance: credentials, ceilings, pre-action screening, and every run accounted on the Operating Record.</p>
 
   <div class="panel">
     <p style="margin: 0;">
       {% if enabled %}<span class="badge active">gateway on</span>
-      {% else %}<span class="badge">gateway off — enable [external_agents] in Settings or the installer</span>{% endif %}
+      {% else %}<span class="badge">gateway off</span>{% endif %}
       <span class="badge">{{ status.enrolled }} enrolled</span>
       <span class="badge">{{ status.runs }} runs ingested</span>
       <span class="badge">${{ '%.2f' | format(status.reported_dollars) }} reported spend</span>
@@ -22,7 +31,12 @@
     <ol style="margin:0 0 var(--space-3); padding-left:1.2rem;">
       <li>Enroll the agent below (its ceilings are the contract).</li>
       <li>Mint its <strong>rest</strong> credential — shown once, store it in your platform's secret manager (Salesforce Named Credential, AWS Secrets Manager).</li>
+      {% if enabled %}
       <li>Point your platform at the gateway: import <a href="/api/v1/external/openapi.json">the gateway description</a> as an Agentforce External Service or a Bedrock action group, and have the agent call <code>screen</code> before consequential actions and <code>runs</code> when work completes.</li>
+      {% else %}
+      <li>The gateway description is unavailable while the gateway is off.
+        Ask a global administrator to turn it on here, then return to import it.</li>
+      {% endif %}
     </ol>
     <p class="muted" style="margin:0; font-size: var(--text-sm);">Full per-platform walkthroughs live in <code>docs/external-agents.md</code>.</p>
   </div>
@@ -58,14 +72,14 @@
           </td>
           <td class="mv-row__actions">
             {% if a.contained %}
-            <button type="button" class="btn btn--icon" data-xa-release="{{ a.id }}">Release</button>
+            <button type="button" class="btn btn--icon" data-xa-release="{{ a.id }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Release</button>
             {% endif %}
-            <button type="button" class="btn btn--icon" data-xa-mint="{{ a.id }}">Mint credential</button>
+            <button type="button" class="btn btn--icon" data-xa-mint="{{ a.id }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Mint credential</button>
             {% if a.over_budget %}
-            <button type="button" class="btn btn--icon" data-xa-reset-budget="{{ a.id }}">Reset budget</button>
+            <button type="button" class="btn btn--icon" data-xa-reset-budget="{{ a.id }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Reset budget</button>
             {% endif %}
-            <button type="button" class="btn btn--icon" data-xa-revoke="{{ a.id }}">Revoke</button>
-            <button type="button" class="btn btn--icon btn--ghost" data-xa-remove="{{ a.id }}">Unenroll</button>
+            <button type="button" class="btn btn--icon" data-xa-revoke="{{ a.id }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Revoke</button>
+            <button type="button" class="btn btn--icon btn--ghost" data-xa-remove="{{ a.id }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %}>Unenroll</button>
           </td>
         </tr>
         {% endfor %}
@@ -88,7 +102,9 @@
 
   <div class="section-head"><h2>Enroll an external agent</h2></div>
   <div class="panel">
-    <form id="xa-add" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-3);">
+    <form id="xa-add">
+      <fieldset id="xa-add-controls" data-feature-enabled="{{ 'true' if external_agents_can_manage else 'false' }}"{% if not external_agents_can_manage %} disabled aria-disabled="true"{% endif %} style="display:grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-3); border:0; margin:0; padding:0; min-width:0;">
+      <legend class="sr-only">External-agent enrollment controls</legend>
       <label>Agent id (letters, numbers, dots, dashes)
         <input class="input" name="id" required maxlength="64" pattern="[a-z0-9][a-z0-9._-]*" placeholder="sf-quotebot">
       </label>
@@ -137,6 +153,7 @@
       <div style="align-self: end;">
         <button type="submit" class="btn btn--primary">Enroll agent</button>
       </div>
+      </fieldset>
     </form>
     <p class="muted" style="font-size: var(--text-sm); margin: var(--space-3) 0 0;">
       One enrollment writes the trust entry (identity + ceilings), the

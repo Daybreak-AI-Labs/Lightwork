@@ -48,6 +48,18 @@ def test_registry_icons_exist_in_base_template():
         assert f'id="i-{page["icon"]}"' in base, page["path"]
 
 
+def test_agent_control_plane_read_surface_is_discoverable_to_auditors():
+    from maverick_dashboard import ui_visibility
+
+    page = next(
+        item for item in ui_visibility.PAGES
+        if item["path"] == "/agent-control-plane"
+    )
+    assert page["floor"] == "view"
+    assert page["default"] == "view"
+    assert ui_visibility.is_visible(page, "auditor") is True
+
+
 def test_page_for_prefix_matching():
     from maverick_dashboard import ui_visibility
     assert ui_visibility.page_for("/goals")["path"] == "/goals"
@@ -156,7 +168,7 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # auditor: the audit read surfaces, nothing operational. (/replay is folded
     # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")
-    assert {"/audit", "/compliance", "/overview"} <= a
+    assert {"/audit", "/compliance", "/overview", "/agent-control-plane"} <= a
     assert a.isdisjoint({"/chat", "/settings", "/automations", "/replay"})
     # operator: operate surfaces but no admin plumbing.
     o = hrefs("operator")

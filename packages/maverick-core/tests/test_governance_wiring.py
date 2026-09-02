@@ -157,6 +157,11 @@ async def test_policy_source_loss_fails_closed(monkeypatch, tmp_path):
         "maverick.config.config_source_errors",
         lambda: {"config.toml": "invalid TOML"},
     )
+    # An unavailable compliance source intentionally activates every required
+    # safety floor, including off-host audit custody. Supply a test-scoped key
+    # so this case isolates governance fail-closure instead of correctly
+    # stopping earlier at the independent custody boundary.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", "11" * 32)
 
     out = await agent._run_tool("ping", {})
 

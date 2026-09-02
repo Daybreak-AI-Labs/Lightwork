@@ -26,16 +26,18 @@
   {% from "_hero.html" import hero, state %}
   {% call hero('Governance', 'Audit',
                subtitle='The operating record',
-               lede='A complete, tamper-resistant record of everything that
-                     has happened here — filter or search any event.
+               lede='The tenant-scoped operating record captured by instrumented
+                     workflows. Filter the loaded tail or search a complete day.
                      <a href="/audit/binder">Audit binder (evidence pack)
                      →</a>') %}
-    {{ state('Current state', 'Ed25519-signed chain',
-             badge='tamper-evident', badge_class='ok',
-             copy='Showing the last ' ~ n ~ ' events. Every agent action and
-                   every human decision lands here, each entry signed and
-                   linked to the one before — any tampering breaks the
-                   chain.') }}
+    {{ state('Current state',
+             'Ed25519 signing enabled' if audit_signing_enabled else 'Unsigned local log',
+             badge='signing enabled' if audit_signing_enabled else 'signing disabled',
+             badge_class='ok' if audit_signing_enabled else 'warn',
+             copy='Showing at most the last ' ~ n ~ ' events. The Audit Binder
+                   verifies available day files, cross-day anchors, signature
+                   state, and export identity; local signing alone does not
+                   prove complete instrumentation or independent custody.') }}
   {% endcall %}
 
   <section class="panel" aria-labelledby="audit-custody-title">
@@ -192,7 +194,12 @@
           }
           const data = await r.json();
           const events = data.events || [];
-          msg.textContent = events.length + ' match(es).';
+          const total = Number.isFinite(data.total_matches) ? data.total_matches : events.length;
+          const scanned = Number.isFinite(data.scanned) ? data.scanned : null;
+          const scopeDay = data.scope && data.scope.day ? data.scope.day : (day.value.trim() || 'today');
+          msg.textContent = total + ' match(es) across ' +
+            (scanned === null ? 'the selected audit day' : scanned + ' scanned event(s)') +
+            ' for ' + scopeDay + (data.truncated ? '; showing the first ' + events.length : '') + '.';
           // Chain material (hash/sig/key ids) stays out of the on-screen
           // dump — the signed chain is verified server-side, not by eye.
           const CHAIN_KEYS = ['hash', 'prev_hash', 'sig', 'key_id'];
@@ -284,8 +291,9 @@
       </table>
     {% else %}
       <p class="muted">
-        No activity recorded for this day yet. Every action is logged here
-        automatically as soon as work runs.
+        No instrumented activity was recorded for this day. An empty view does
+        not prove that no action occurred; verify instrumentation coverage and
+        custody in the Audit Binder before relying on completeness.
       </p>
     {% endif %}
   </div>

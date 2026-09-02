@@ -299,7 +299,7 @@ def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
     path = path if path is not None else learned_path()
     if not path.exists():
         return []
-    out: list[Learned] = []
+    out: list[tuple[int, Learned]] = []
     try:
         ensure_private_directory(path.parent)
         with cross_process_lock(path):
@@ -307,7 +307,7 @@ def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
             if path.stat().st_size > _MAX_LEARNED_LEDGER_BYTES:
                 return []
             rows = atomic_read_text(path).splitlines()
-        for raw in rows:
+        for append_index, raw in enumerate(rows):
             try:
                 def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
                     result: dict[str, object] = {}
@@ -326,13 +326,15 @@ def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
                     outcome=d.get("outcome"),
                 )
                 if entry is not None:
-                    out.append(entry)
+                    out.append((append_index, entry))
             except (json.JSONDecodeError, TypeError, ValueError):
                 continue
     except (OSError, RuntimeError):
         return []
-    out.sort(key=lambda e: e.ts, reverse=True)
-    return out[: max(1, limit)]
+    # The locked writer serializes publication, so physical append order is the
+    # authoritative tie-breaker when the wall clock returns the same timestamp.
+    out.sort(key=lambda item: (item[1].ts, item[0]), reverse=True)
+    return [entry for _, entry in out[: max(1, limit)]]
 
 
 # --------------------------------------------------------------------------

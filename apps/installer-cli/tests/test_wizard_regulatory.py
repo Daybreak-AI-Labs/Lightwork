@@ -43,3 +43,35 @@ def test_profiles_and_disclosure_share_one_compliance_table(tmp_path, monkeypatc
 def test_no_profiles_means_no_compliance_table(tmp_path, monkeypatch):
     text = _write(tmp_path, monkeypatch, {})
     assert "[compliance]" not in text
+
+
+def test_declining_residency_still_reaches_regulatory_picker(monkeypatch):
+    """Declining unrelated deployment metadata must not hide enforcement."""
+    from maverick_installer import wizard
+
+    confirms: list[str] = []
+    checkboxes: list[str] = []
+
+    def decline(prompt, *, default=False):
+        confirms.append(prompt)
+        return False
+
+    def choose_profile(prompt, choices, *, default=None):
+        checkboxes.append(prompt)
+        if "Regulatory obligations to compile" in prompt:
+            assert choices == ["gdpr", "eu_ai_act", "hipaa"]
+            return ["eu_ai_act"]
+        return default or []
+
+    monkeypatch.setattr(wizard, "_q_confirm", decline)
+    monkeypatch.setattr(wizard, "_q_checkbox", choose_profile)
+    monkeypatch.setattr(wizard, "_q_select", lambda *args, default=None, **kwargs: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, default="", **kwargs: default)
+
+    advanced = wizard.pick_advanced()
+
+    assert any("Set regulated-deployment knobs" in prompt for prompt in confirms)
+    assert any("Regulatory obligations to compile" in prompt for prompt in checkboxes)
+    assert advanced["compliance_profiles"] == ["eu_ai_act"]
+    assert "residency_region" not in advanced
+    assert "compliance_disclosure_text" not in advanced

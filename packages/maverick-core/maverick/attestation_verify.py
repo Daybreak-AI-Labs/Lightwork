@@ -269,7 +269,7 @@ def _risk_rank(level: object) -> int:
 
 
 def _check_envelope(bundle: dict, observed: list[str] | None) -> ClaimResult:
-    """Did every recorded action stay inside the declared policy envelope?"""
+    """Did every recorded dispatch attempt stay inside the policy envelope?"""
     env = _as_dict(bundle.get("envelope"))
     if not env:
         return ClaimResult("policy_envelope", INDETERMINATE,
@@ -291,18 +291,18 @@ def _check_envelope(bundle: dict, observed: list[str] | None) -> ClaimResult:
     calls = observed if observed is not None else claimed.get("tool_calls")
     if not isinstance(calls, list):
         return ClaimResult("policy_envelope", INDETERMINATE,
-                           "no record of which actions ran")
+                           "no record of which actions reached dispatch")
     if observed is None:
         notes.append("action list as recorded by the issuer, not re-derived "
                      "(re-run with --evidence to check it against the chain)")
     if not calls:
         return ClaimResult("policy_envelope", NOT_APPLICABLE,
-                           "no actions were recorded in the attested window")
+                           "no dispatch attempts were recorded in the attested window")
 
     violations: list[str] = []
     for name in {str(c) for c in calls}:
         if name in deny:
-            violations.append(f"{name} ran but is in deny_actions")
+            violations.append(f"{name} reached dispatch but is in deny_actions")
         elif _risk_rank(floor) >= 0:
             rank = _risk_rank(risks.get(name))
             if rank < 0:
@@ -310,7 +310,7 @@ def _check_envelope(bundle: dict, observed: list[str] | None) -> ClaimResult:
                              "cannot check it against deny_min_risk")
             elif rank >= _risk_rank(floor):
                 violations.append(
-                    f"{name} ran at declared risk {risks.get(name)!r}, "
+                    f"{name} reached dispatch at declared risk {risks.get(name)!r}, "
                     f"at or above the deny floor {floor!r}")
     if risks:
         notes.append("risk levels are the issuer's declared classification, "
@@ -334,11 +334,12 @@ def _check_envelope(bundle: dict, observed: list[str] | None) -> ClaimResult:
             "covers only the deny rules and does not check those")
     if violations:
         return ClaimResult("policy_envelope", FAILS,
-                           f"{len(violations)} action(s) outside the envelope",
+                           f"{len(violations)} dispatch attempt(s) outside the envelope",
                            sorted(violations) + notes)
     return ClaimResult(
         "policy_envelope", HOLDS,
-        f"{len(set(map(str, calls)))} distinct action(s) recorded, none forbidden",
+        f"{len(set(map(str, calls)))} distinct dispatch attempt(s) recorded, "
+        "none forbidden",
         notes)
 
 

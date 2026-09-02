@@ -2,7 +2,9 @@
 {% block title %}Channels · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% set enabled_count = managed | selectattr('enabled') | list | length %}
+  {% from "_integration_readiness.html" import integration_readiness %}
+  {% set configured_count = managed | selectattr('configured') | list | length %}
+  {% set verified_count = managed | selectattr('readiness.live.status', 'equalto', 'verified') | list | length %}
   {% call hero('Meet people where they work', 'Channels',
                subtitle='Slack, email and more',
                lede='Connect the places your team already works — Slack,
@@ -10,11 +12,12 @@
                      results where they are. Connected and managed right on
                      this page.') %}
     {{ state('Current state',
-             enabled_count ~ ' of ' ~ (managed | length) ~ ' channels enabled',
-             badge='connected' if enabled_count else 'none yet',
-             badge_class='ok' if enabled_count else 'idle',
-             copy='Secrets are stored securely and never shown again. Changes
-                   take effect the next time the channel service starts.') }}
+             configured_count ~ ' configured; ' ~ verified_count ~ ' live verified',
+             badge='live verified' if verified_count else 'verification unknown',
+             badge_class='ok' if verified_count else 'idle',
+             copy='Saved credentials and a passing local adapter preflight do
+                   not prove external delivery. Live verification stays unknown
+                   until representative delivery evidence is recorded.') }}
   {% endcall %}
 
   {% if saved %}
@@ -82,6 +85,7 @@
         <button type="submit" class="btn btn--primary">Save {{ c.label }}</button>
       </div>
     </form>
+    <div style="margin-top: var(--space-3);">{{ integration_readiness(c.readiness) }}</div>
     {% if c.dashboard_set %}
     <form method="post" action="/channels/clear" style="margin-top: var(--space-3);">
       <input type="hidden" name="channel" value="{{ c.name }}" />
@@ -93,22 +97,23 @@
 
   <div class="section-head"><h2>All configured channels</h2></div>
   <div class="panel">
-    {% if channels %}
+    {% if channel_inventory %}
       <table>
-        <thead><tr><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Detail</th></tr></thead>
+        <thead><tr><th scope="col">Name</th><th scope="col">Configuration</th><th scope="col">Readiness</th><th scope="col">Detail</th></tr></thead>
         <tbody>
-        {% for name, cfg in channels.items() %}
+        {% for channel in channel_inventory %}
           <tr>
-            <td><code>{{ name }}</code></td>
+            <td><code>{{ channel.name }}</code></td>
             <td>
-              {% if cfg.enabled is not defined or cfg.enabled %}
-                <span class="badge active">enabled</span>
+              {% if channel.configured %}
+                <span class="badge active">configured</span>
               {% else %}
-                <span class="badge blocked">disabled</span>
+                <span class="badge blocked">not configured</span>
               {% endif %}
             </td>
+            <td>{{ integration_readiness(channel.readiness) }}</td>
             <td class="muted" style="font-size: 0.85rem;">
-              {% for k, v in cfg.items() if k != 'enabled' %}
+              {% for k, v in channel.detail.items() if k != 'enabled' %}
                 {{ k }}={% if v is string and v.startswith('${') %}<code>{{ v }}</code>{% else %}{{ v }}{% endif %}{% if not loop.last %}, {% endif %}
               {% endfor %}
             </td>

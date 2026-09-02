@@ -224,7 +224,22 @@ def xa_revoke_cmd(agent_id: str) -> None:
 def xa_restore_cmd(agent_id: str) -> None:
     """Lift a revocation on AGENT_ID (managed entries only)."""
     from .. import agent_trust
-    if agent_trust.set_revoked(agent_id, False):
+    from ..revocation import ProtectedRevocationError, shared
+
+    try:
+        restored = shared().run_if_unprotected(
+            f"agent:{agent_id}",
+            lambda: agent_trust.set_revoked(agent_id, False),
+        )
+    except ProtectedRevocationError as exc:
+        raise click.ClickException(
+            "agent is security-contained; use `maverick control-plane release`"
+        ) from exc
+    except Exception as exc:
+        raise click.ClickException(
+            "containment authority is unavailable; restore refused"
+        ) from exc
+    if restored:
         click.echo(click.style(f"restored {agent_id!r}", fg="green"))
     else:
         raise click.ClickException(
@@ -238,7 +253,22 @@ def xa_restore_cmd(agent_id: str) -> None:
 def xa_release_cmd(agent_id: str) -> None:
     """Lift AGENT_ID's auto-containment and clear its denial window."""
     from .. import external_agents as xa
-    if not xa.release(agent_id, released_by="cli"):
+    from ..revocation import ProtectedRevocationError, shared
+
+    try:
+        released = shared().run_if_unprotected(
+            f"agent:{agent_id}",
+            lambda: xa.release(agent_id, released_by="cli"),
+        )
+    except ProtectedRevocationError as exc:
+        raise click.ClickException(
+            "agent is security-contained; use `maverick control-plane release`"
+        ) from exc
+    except Exception as exc:
+        raise click.ClickException(
+            "containment authority is unavailable; gateway release refused"
+        ) from exc
+    if not released:
         raise click.ClickException(f"agent {agent_id!r} is not enrolled")
     click.echo(click.style(f"released {agent_id!r}", fg="green")
                + " — containment lifted, denial window cleared")

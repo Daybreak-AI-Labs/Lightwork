@@ -18,9 +18,19 @@ class _FakeWorld:
     def get_goal(self, gid):
         return self._goals.get(gid)
 
+    def bind_goal_execution_principal(self, gid, principal):
+        goal = self._goals.get(gid)
+        bound = getattr(goal, "execution_principal", "") if goal else ""
+        if goal is None or (bound and bound != principal):
+            return False
+        goal.execution_principal = principal
+        return True
+
     def claim_goal_for_run(self, gid, *, expected_owner=None):
         goal = self._goals.get(gid)
         if goal is None or goal.status != "pending":
+            return False
+        if expected_owner is not None and goal.owner != expected_owner:
             return False
         goal.status = "active"
         return True
@@ -29,8 +39,14 @@ class _FakeWorld:
         pass
 
 
-def _goal(status="done", result="all good"):
-    return types.SimpleNamespace(status=status, result=result)
+def _goal(status="done", result="all good", *, owner="", execution_principal=""):
+    return types.SimpleNamespace(
+        id=7,
+        status=status,
+        result=result,
+        owner=owner,
+        execution_principal=execution_principal,
+    )
 
 
 # ---- service half: RunGoal ----

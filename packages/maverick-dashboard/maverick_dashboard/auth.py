@@ -372,27 +372,48 @@ def durable_automation_owner(request: Request) -> str:
 
 
 def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -> None:
-    """Pin per-user tenant state once the verified principal is known.
+    """Pin per-user isolation or an authorized workspace selection.
 
     HTTP middleware runs before FastAPI dependencies populate
     ``request.state.principal``, so tenant pinning must happen here, in the
     authentication dependency, immediately after a principal is established and
     before route handlers choose tenant-scoped world state. The reset token is
     stored on request state for the outer middleware to clean up after the
-    response. If an opted-in isolation policy cannot be resolved, authentication
-    is refused instead of silently serving the caller from the shared root.
+    response. Workspace selection is a preference, never a grant: inactive
+    tenants and tenants without an effective membership remain unbound.
     """
     try:
-        from maverick.paths import set_tenant, tenant_by_user_enabled
+        from maverick.paths import current_tenant_id, set_tenant, tenant_by_user_enabled
 
-        if not tenant_by_user_enabled():
-            return
         name = getattr(principal, "principal", "")
         if not isinstance(name, str):
             name = ""
         if not name or getattr(request.state, "tenant_pin_token", None) is not None:
             return
-        request.state.tenant_pin_token = set_tenant(f"api:{name}")
+        # A process/env/client binding is an operator floor and always outranks
+        # an in-app preference.
+        if current_tenant_id() is not None:
+            return
+        if tenant_by_user_enabled():
+            request.state.tenant_pin_token = set_tenant(f"api:{name}")
+            request.state.workspace_tenant_source = "principal_isolation"
+            return
+
+        from maverick.tenant.registry import is_active
+
+        from . import workspace_tenants
+
+        selected = workspace_tenants.get_selection(name)
+        if not selected:
+            return
+        if not is_active(selected) or not workspace_tenants.principal_can_select(
+            name, selected
+        ):
+            request.state.workspace_tenant_denied = selected
+            return
+        request.state.tenant_pin_token = set_tenant(selected)
+        request.state.workspace_tenant_source = "principal_selection"
+        request.state.workspace_expected_tenant = selected
     except HTTPException:
         raise
     except Exception as exc:

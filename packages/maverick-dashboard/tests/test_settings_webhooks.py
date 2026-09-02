@@ -35,6 +35,11 @@ def test_save_secret_roundtrip_and_clear():
     from maverick.webhooks import inbound_secret
     assert inbound_secret() == "s3cret-value-123"  # pragma: allowlist secret
 
+    from maverick import config
+    persisted = config.dashboard_overrides_path().read_text(encoding="utf-8")
+    assert "s3cret-value-123" not in persisted  # pragma: allowlist secret
+    assert "MVKAR1:" in persisted
+
     page = client.get("/settings").text
     assert "configured" in page
     assert "s3cret-value-123" not in page  # pragma: allowlist secret -- never echoed back

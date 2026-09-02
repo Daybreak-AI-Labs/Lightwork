@@ -1135,7 +1135,12 @@
     return `${fallback} (HTTP ${response.status}).`;
   };
   const request = async (path, options = {}) => {
-    const response = await fetch(prefix + path, {credentials: "same-origin", ...options});
+    let response;
+    try {
+      response = await fetch(prefix + path, {credentials: "same-origin", ...options});
+    } catch (_error) {
+      throw new Error("Could not reach the server — check your connection and try again.");
+    }
     if (!response.ok) throw new Error(await safeDetail(response, "Capability unavailable"));
     if (response.status === 204) return null;
     return response.json();
@@ -1181,12 +1186,17 @@
     return new Date(seconds * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC");
   };
   const withButton = async (form, statusId, message, action) => {
+    if (form.dataset.inFlight === "true") return null;
+    form.dataset.inFlight = "true";
     const button = form.querySelector("button[type=submit]");
     if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
     setStatus(statusId, message);
     try { return await action(); }
     catch (error) { setStatus(statusId, error instanceof Error ? error.message : "Governed action failed safely."); return null; }
-    finally { if (button) { button.disabled = false; button.removeAttribute("aria-busy"); } }
+    finally {
+      delete form.dataset.inFlight;
+      if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
+    }
   };
 
   const loadLiteracyRequirements = async () => {
@@ -1598,18 +1608,31 @@
     });
   });
   const policyActivate = byId("ai-policy-activate");
-  if (policyActivate) policyActivate.addEventListener("submit", event => {
+  if (policyActivate) policyActivate.addEventListener("submit", async event => {
     event.preventDefault();
-    withButton(policyActivate, "ai-policy-activate-status", "Activating the exact version with revision control…", async () => {
-      const fields = formBody(policyActivate); const policyId = String(fields.get("policy_id") || "").trim();
-      const result = await sendJson(`/ai-policy-management/policies/${encodeURIComponent(policyId)}/activate`, "POST", {
-        version: Number(fields.get("version")),
-        expected_revision: Number(fields.get("expected_revision"))
+    if (policyActivate.dataset.confirmationPending === "true" ||
+        policyActivate.dataset.inFlight === "true") return;
+    policyActivate.dataset.confirmationPending = "true";
+    try {
+      const fields = formBody(policyActivate);
+      const policyId = String(fields.get("policy_id") || "").trim();
+      const version = Number(fields.get("version"));
+      if (!(await mvConfirm(
+        `Activate policy “${policyId}” version ${version} for this tenant? Existing evaluations may require revalidation.`,
+        {okText: "Activate policy"}
+      ))) return;
+      await withButton(policyActivate, "ai-policy-activate-status", "Activating the exact version with revision control…", async () => {
+        const result = await sendJson(`/ai-policy-management/policies/${encodeURIComponent(policyId)}/activate`, "POST", {
+          version,
+          expected_revision: Number(fields.get("expected_revision"))
+        });
+        showProjection("ai-policy-record-result", result);
+        setStatus("ai-policy-activate-status", "Version activated by the authenticated human. Existing evaluations may require revalidation.");
+        await loadPolicyManagement();
       });
-      showProjection("ai-policy-record-result", result);
-      setStatus("ai-policy-activate-status", "Version activated by the authenticated human. Existing evaluations may require revalidation.");
-      await loadPolicyManagement();
-    });
+    } finally {
+      delete policyActivate.dataset.confirmationPending;
+    }
   });
   const policyExceptionRequest = byId("ai-policy-exception-request");
   if (policyExceptionRequest) policyExceptionRequest.addEventListener("submit", event => {

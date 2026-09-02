@@ -31,6 +31,39 @@ def test_store_roundtrip_and_validation(monkeypatch, tmp_path):
         rbac.set_role("", "viewer")
 
 
+def test_final_global_admin_cannot_self_demote_or_remove(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:last-admin", "admin", actor="local")
+
+    with pytest.raises(ValueError, match="final global administrator"):
+        rbac.set_role(
+            "user:last-admin", "viewer", actor="user:last-admin"
+        )
+    assert rbac.get_stored_role("user:last-admin") == "admin"
+
+    with pytest.raises(ValueError, match="final global administrator"):
+        rbac.remove_user("user:last-admin", actor="user:last-admin")
+    assert rbac.get_stored_role("user:last-admin") == "admin"
+
+
+def test_admin_can_demote_when_another_recovery_admin_remains(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:first", "admin")
+    rbac.set_role("user:second", "admin")
+    rbac.set_role("user:first", "viewer", actor="user:first")
+
+    assert rbac.get_stored_role("user:first") == "viewer"
+    assert rbac.get_stored_role("user:second") == "admin"
+
+
 def test_corrupt_roster_denies_and_mutator_refuses_overwrite(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
@@ -193,6 +226,23 @@ def test_admin_manages_users_and_cannot_be_locked_out(monkeypatch, tmp_path):
     # the bootstrap admin stays admin no matter what the store says
     rbac.set_role("user:boss", "viewer")
     assert auth.role_for_principal("user:boss") == "admin"
+
+
+def test_users_page_refuses_last_admin_self_demotion(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:last-admin", "admin")
+    _as(monkeypatch, "user:last-admin")
+    response = c.post(
+        "/users/set",
+        data={"principal": "user:last-admin", "role": "viewer"},
+    )
+
+    assert response.status_code == 409
+    assert "final global administrator" in response.json()["detail"]
+    assert rbac.get_stored_role("user:last-admin") == "admin"
 
 
 def test_users_link_in_nav(monkeypatch, tmp_path):
@@ -373,6 +423,89 @@ def test_imap_password_env_trigger_requires_admin(monkeypatch, tmp_path):
     assert r2.status_code != 403
 
 
+@pytest.mark.parametrize(
+    ("source", "config"),
+    [
+        (
+            "imap_email",
+            {
+                "host": "mail.example",
+                "username": "u",
+                "password_env": "IMAP_PASSWORD",
+            },
+        ),
+        ("github_issues", {"owner": "acme", "repo": "private"}),
+        ("file_dir", {"path": "incoming"}),
+    ],
+)
+def test_host_resource_event_sources_reject_tenant_local_admin(
+    monkeypatch, tmp_path, source, config
+):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+
+    principal = "user:tenant-admin"
+    rbac.set_role(principal, "viewer")
+    rbac.set_tenant_role("acme", principal, "admin")
+    _as(monkeypatch, principal)
+
+    response = c.post(
+        "/api/v1/event-triggers",
+        json={"template": "triage", "source": source, "config": config},
+    )
+
+    assert response.status_code == 403
+
+
+def test_file_dir_trigger_rejects_paths_outside_tenant_event_input(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    _as(monkeypatch, "user:root")
+
+    outside = tmp_path / "outside"
+    response = c.post(
+        "/api/v1/event-triggers",
+        json={
+            "template": "triage",
+            "source": "file_dir",
+            "config": {"path": str(outside)},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "event-input root" in response.json()["detail"]
+
+
+def test_file_dir_trigger_rejects_parent_traversal_glob(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    c = _client(monkeypatch, tmp_path)
+    _as(monkeypatch, "user:root")
+
+    response = c.post(
+        "/api/v1/event-triggers",
+        json={
+            "template": "triage",
+            "source": "file_dir",
+            "config": {"path": "incoming", "glob": "../*"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "cannot traverse" in response.json()["detail"]
+
+
 def test_shared_halt_requires_admin(monkeypatch, tmp_path):
     # The shared Postgres halt is a global, untenanted fleet control. A tenant
     # operator may operate local goals, but must not arm the cluster-wide halt.
@@ -402,15 +535,34 @@ def test_shared_halt_allows_admin(monkeypatch, tmp_path):
     class FakeWorld:
         def __init__(self):
             self.armed = False
+            self.generation = None
 
         def arm_halt(self, reason="", source="manual", armed_by=""):
             self.armed = True
+            self.generation = "shared-generation-admin"
             self.reason = reason
             self.source = source
             self.armed_by = armed_by
+            return self.generation
 
-        def disarm_halt(self):
+        def active_halt(self):
+            if not self.armed:
+                return None
+            return {
+                "reason": self.reason,
+                "source": self.source,
+                "armed_by": self.armed_by,
+                "armed_at": 123.0,
+                "generation": self.generation,
+            }
+
+        def disarm_halt(self, *, expected_generation, durable_clear=None):
+            assert expected_generation == self.generation
+            assert durable_clear is not None
+            durable_clear()
             self.armed = False
+            self.generation = None
+            return True
 
     fake_world = FakeWorld()
     monkeypatch.setenv("MAVERICK_HALT_FILE", str(tmp_path / "HALT"))

@@ -85,6 +85,7 @@
        inherit these and still get correct surfaces + brand automatically. */
     body {
       --brand: var(--accent); --brand-hi: var(--accent); --brand-fg: #ffffff; --info: var(--accent);
+      --text-muted: var(--muted);
       --surface-1: var(--panel);
       --surface-2: color-mix(in srgb, var(--panel) 86%, var(--text) 14%);
       --surface-sunken: color-mix(in srgb, var(--panel) 78%, var(--bg) 22%);
@@ -289,6 +290,110 @@
     [dir="rtl"] .navgrp__toggle[aria-expanded="false"] .navgrp__caret { transform: rotate(90deg); }
     .navgrp__toggle[aria-expanded="false"] + .navgrp__items { display: none; }
     .navgrp__items { list-style: none; margin: 0; padding: 0; }
+
+    /* Registry-backed page finder / command palette. The trigger belongs to
+       the sidebar, while the dialog lives at shell level so it remains usable
+       when the mobile drawer is made inert. */
+    .navfinder__open {
+      display: flex; align-items: center; gap: var(--space-3);
+      width: calc(100% - var(--space-4)); margin: 0 var(--space-2) var(--space-3);
+      padding: 0.48rem var(--space-3); cursor: pointer;
+      color: var(--muted); background: var(--surface-sunken);
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      font: inherit; font-size: var(--text-sm); text-align: start;
+      transition: color 0.13s ease, border-color 0.13s ease, background 0.13s ease;
+    }
+    .navfinder__open:hover {
+      color: var(--text); border-color: var(--border-strong, var(--border));
+      background: var(--surface-2);
+    }
+    .navfinder__open .nav-label { flex: 1; }
+    .navfinder__open kbd,
+    .navfinder__search kbd {
+      flex: none; color: var(--muted); background: var(--surface-1);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 0.08rem 0.34rem; font: 500 var(--text-xs)/1.45 var(--font-mono);
+      white-space: nowrap;
+    }
+    .navfinder {
+      position: fixed; inset: 0; width: min(42rem, calc(100vw - var(--space-6)));
+      max-width: none; max-height: min(44rem, calc(100dvh - var(--space-6)));
+      margin: auto; padding: 0; overflow: hidden;
+      color: var(--text); background: var(--panel);
+      border: 1px solid var(--border-strong, var(--border));
+      border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+    }
+    .navfinder[open] { display: flex; flex-direction: column; }
+    .navfinder::backdrop { background: var(--scrim); }
+    .navfinder__head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-3);
+    }
+    .navfinder__head h2 {
+      margin: 0; font-family: var(--font-serif); font-size: var(--text-xl);
+      font-weight: var(--font-normal); letter-spacing: -0.02em;
+    }
+    .navfinder__close { flex: none; }
+    .navfinder__search {
+      display: flex; align-items: center; gap: var(--space-3);
+      margin: 0 var(--space-4); padding: 0 var(--space-3);
+      color: var(--muted); background: var(--surface-sunken);
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+    }
+    .navfinder__search:focus-within {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 22%, transparent);
+    }
+    .navfinder__search input {
+      flex: 1; min-width: 0; padding: 0.72rem 0;
+      color: var(--text); background: transparent; border: 0; outline: 0;
+      box-shadow: none; font: inherit; font-size: var(--text-md);
+    }
+    .navfinder__search input::-webkit-search-cancel-button { cursor: pointer; }
+    .navfinder__count {
+      min-height: 1.2em; margin: var(--space-2) var(--space-5);
+      color: var(--muted); font-size: var(--text-xs);
+    }
+    .navfinder__results {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto;
+      list-style: none; margin: 0; padding: 0 var(--space-3) var(--space-3);
+    }
+    .navfinder__results li { margin: 2px 0; }
+    .navfinder__results li[hidden],
+    .navfinder__results a[hidden] { display: none; }
+    .navfinder__results a {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: var(--space-4); padding: 0.62rem var(--space-3);
+      color: var(--text); border: 1px solid transparent;
+      border-radius: var(--radius-md); text-decoration: none;
+    }
+    .navfinder__results a:hover,
+    .navfinder__results a.is-active,
+    .navfinder__results a[aria-selected="true"] {
+      color: var(--brand); background: var(--brand-subtle);
+      border-color: color-mix(in srgb, var(--brand) 26%, transparent);
+    }
+    .navfinder__label { font-weight: var(--font-medium); }
+    .navfinder__group {
+      flex: none; color: var(--muted); font-size: var(--text-xs);
+      white-space: nowrap;
+    }
+    .navfinder__empty {
+      margin: 0; padding: var(--space-6) var(--space-4) var(--space-7);
+      color: var(--muted); text-align: center;
+    }
+    @media (max-width: 520px) {
+      .navfinder {
+        width: calc(100vw - var(--space-4));
+        max-height: calc(100dvh - var(--space-4));
+      }
+      .navfinder__group { max-width: 42%; overflow: hidden; text-overflow: ellipsis; }
+    }
+    @media (forced-colors: active) {
+      .navfinder__open, .navfinder, .navfinder__search,
+      .navfinder__results a.is-active { border: 1px solid CanvasText; }
+      .navfinder__results a.is-active { outline: 2px solid Highlight; }
+    }
 
     /* mobile drawer backdrop (hidden on desktop) */
     .nav-backdrop { display: none; }
@@ -737,6 +842,7 @@
       }
       body:not(.theme-hicontrast) .prefs__panel,
       body:not(.theme-hicontrast) .mv-confirm,
+      body:not(.theme-hicontrast) .navfinder,
       body:not(.theme-hicontrast) .arv {
         background: var(--glass-sheen), var(--glass-soft);
         -webkit-backdrop-filter: blur(28px) saturate(170%);
@@ -745,6 +851,7 @@
         box-shadow: var(--shadow-lg), var(--glass-edge);
       }
       body:not(.theme-hicontrast) .mv-confirm::backdrop,
+      body:not(.theme-hicontrast) .navfinder::backdrop,
       body:not(.theme-hicontrast) .arv::backdrop {
         background: var(--scrim);
         -webkit-backdrop-filter: blur(3px);
@@ -769,7 +876,8 @@
         body:not(.theme-hicontrast) .status-card,
         body:not(.theme-hicontrast) .boundary,
         body:not(.theme-hicontrast) .prefs__panel,
-        body:not(.theme-hicontrast) .mv-confirm {
+        body:not(.theme-hicontrast) .mv-confirm,
+        body:not(.theme-hicontrast) .navfinder {
           background: var(--surface-1);
           -webkit-backdrop-filter: none;
           backdrop-filter: none;

@@ -20,7 +20,22 @@ def _isolate(monkeypatch, tmp_path):
 
 def _provision(tenant_id="acme"):
     from maverick.tenant import registry as tr
-    tr.create_tenant(tenant_id, plan="pro")
+    tr.create_tenant(tenant_id, plan="pro", max_daily_dollars=0)
+
+
+def test_tenant_create_is_bounded_unless_zero_is_explicit():
+    from maverick.tenant.registry import get_tenant
+
+    bounded = CliRunner().invoke(main, ["tenant", "create", "bounded"])
+    unlimited = CliRunner().invoke(
+        main,
+        ["tenant", "create", "unlimited", "--max-daily-dollars", "0"],
+    )
+
+    assert bounded.exit_code == 0, bounded.output
+    assert unlimited.exit_code == 0, unlimited.output
+    assert get_tenant("bounded").max_daily_dollars == 5.0
+    assert get_tenant("unlimited").max_daily_dollars == 0.0
 
 
 def test_quota_rejects_negative_instead_of_silently_unlimiting():
@@ -60,7 +75,9 @@ def test_tenant_list_flags_over_quota():
     from maverick.tenant import registry as tr
     tr.create_tenant("acme", plan="pro")
     tr.set_quota("acme", 1.0)
-    tr.create_tenant("beta", plan="free")  # unlimited -> never flagged
+    tr.create_tenant(
+        "beta", plan="free", max_daily_dollars=0
+    )  # explicit unlimited -> never flagged
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     ledger_for_tenant("acme").record("user:x", 5.0, 1000, 200, day=today)
 

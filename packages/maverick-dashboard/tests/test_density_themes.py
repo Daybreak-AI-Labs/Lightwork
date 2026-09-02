@@ -32,13 +32,15 @@ def test_resolve_density_config_fallback(monkeypatch):
 
 
 def test_density_param_sets_body_class_and_cookie():
-    r = client.get("/", params={"density": "compact"})
+    # ``/`` may redirect an unconfigured deployment through onboarding; use
+    # a stable page when asserting the final response's Set-Cookie header.
+    r = client.get("/overview", params={"density": "compact"})
     assert r.status_code == 200
     assert "density-compact" in r.text
     assert "mvk_density=compact" in r.headers.get("set-cookie", "")
     # Bogus values: no cookie, default class.
     fresh = TestClient(app)
-    r2 = fresh.get("/", params={"density": "supertight"})
+    r2 = fresh.get("/overview", params={"density": "supertight"})
     assert "mvk_density" not in r2.headers.get("set-cookie", "")
     assert "density-comfortable" in r2.text
 
@@ -86,7 +88,7 @@ def test_theme_css_renders_validated_variables():
 
 def test_custom_theme_selectable_like_builtins(monkeypatch):
     _with_themes(monkeypatch, {"midnight": _GOOD})
-    r = client.get("/", params={"theme": "midnight"})
+    r = client.get("/overview", params={"theme": "midnight"})
     assert r.status_code == 200
     assert "theme-midnight" in r.text                       # body class
     assert "--bg: #101020" in r.text                        # CSS vars block

@@ -13,29 +13,45 @@ def _iso(monkeypatch, tmp_path):
 
 
 def test_add_then_read_stdio_server():
+    import maverick.runtime_overrides as ro
     from maverick.runtime_overrides import add_mcp_server, mcp_overlay
+
     stored = add_mcp_server("filesystem", {
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        "env": {"API_BASE": "https://example.com"},
+        "env": {"API_TOKEN": "stdio-secret-value"},
     })
     assert stored["command"] == "npx"
+    persisted = ro.OVERRIDES_PATH.read_text(encoding="utf-8")
+    assert "stdio-secret-value" not in persisted
+    assert "MVKAR1:" in persisted
     overlay = mcp_overlay()
     assert "filesystem" in overlay
     assert overlay["filesystem"]["args"][0] == "-y"
-    assert overlay["filesystem"]["env"]["API_BASE"] == "https://example.com"
+    assert overlay["filesystem"]["env"]["API_TOKEN"] == "stdio-secret-value"
 
 
 def test_add_http_server_roundtrips_via_toml():
+    import maverick.runtime_overrides as ro
     from maverick.runtime_overrides import add_mcp_server, mcp_overlay
     add_mcp_server("remote", {
         "url": "https://host.example/mcp",
         "auth_token": "t0ken",
         "headers": {"X-Org": "acme"},
+        "oauth": {
+            "token_url": "https://host.example/token",
+            "client_id": "client-one",
+            "client_secret": "oauth-secret",  # pragma: allowlist secret
+        },
     })
+    persisted = ro.OVERRIDES_PATH.read_text(encoding="utf-8")
+    for plaintext in ("t0ken", "acme", "client-one", "oauth-secret"):
+        assert plaintext not in persisted
+    assert persisted.count("MVKAR1:") >= 4
     overlay = mcp_overlay()
     assert overlay["remote"]["url"] == "https://host.example/mcp"
     assert overlay["remote"]["headers"]["X-Org"] == "acme"
+    assert overlay["remote"]["oauth"]["client_secret"] == "oauth-secret"  # pragma: allowlist secret
     # the inline-table / list rendering must parse back cleanly
     assert overlay["remote"]["auth_token"] == "t0ken"
 

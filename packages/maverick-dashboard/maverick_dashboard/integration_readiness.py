@@ -1,0 +1,839 @@
+"""Bounded readiness receipts for dashboard-managed integrations.
+
+Configuration and readiness are deliberately separate states.  Saving a key,
+server, or channel proves only that Lightwork retained the operator's input; it
+does not prove that the remote system accepted it.  This module keeps short,
+process-local receipts tied to an exact configuration fingerprint.  A restart,
+worker hop, or configuration change therefore falls back to ``untested`` rather
+than carrying a stale green badge forward.
+
+The fingerprint never leaves the process and receipts contain no response
+bodies, headers, credentials, or URLs.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import importlib
+import json
+import os
+import shutil
+import subprocess
+import threading
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+_LOCK = threading.RLock()
+_RECEIPTS: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+class IntegrationConfigurationUnavailable(RuntimeError):
+    """An active integration configuration source cannot be trusted."""
+
+
+def require_readable_config() -> dict[str, Any]:
+    """Load the effective config and reject any fail-soft source error.
+
+    ``maverick.config.load_config`` deliberately returns defaults for malformed
+    TOML so ordinary model selection can remain available.  An integration
+    inventory must not turn that fallback into a false "nothing configured"
+    result, so inventory surfaces admit the snapshot only after the canonical
+    source-error check passes.
+    """
+    from maverick.config import config_source_errors, load_config
+
+    config = load_config() or {}
+    if not isinstance(config, dict) or config_source_errors():
+        raise IntegrationConfigurationUnavailable(
+            "active integration configuration is unreadable"
+        )
+    return config
+
+
+def fingerprint(material: object) -> str:
+    """Return an internal identity for an exact effective configuration."""
+    encoded = json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def record(
+    kind: str,
+    name: str,
+    material: object,
+    *,
+    verified: bool | None,
+    detail: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Record one bounded result for exactly ``material``.
+
+    ``detail`` and ``evidence`` are caller-authored summaries.  Callers must not
+    pass provider or server response bodies because those can echo secrets.
+    """
+    receipt = {
+        "status": "verified" if verified is True else "failed" if verified is False else "unknown",
+        "checked": True,
+        "verified": verified,
+        "detail": str(detail)[:240],
+        "tested_at": time.time(),
+        "evidence": dict(evidence or {}),
+        "fingerprint": fingerprint(material),
+    }
+    with _LOCK:
+        _RECEIPTS[(str(kind), str(name))] = receipt
+    return public_receipt(receipt)
+
+
+def get(kind: str, name: str, material: object) -> dict[str, Any]:
+    """Return a receipt only when it still matches the effective config."""
+    expected = fingerprint(material)
+    with _LOCK:
+        receipt = _RECEIPTS.get((str(kind), str(name)))
+        if receipt is None or receipt.get("fingerprint") != expected:
+            return {
+                "status": "unknown",
+                "checked": False,
+                "verified": None,
+                "detail": "saved configuration has not passed a readiness check",
+                "tested_at": None,
+                "evidence": {},
+            }
+        return public_receipt(receipt)
+
+
+def public_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in receipt.items()
+        if key != "fingerprint"
+    }
+
+
+def clear(kind: str, name: str) -> None:
+    with _LOCK:
+        _RECEIPTS.pop((str(kind), str(name)), None)
+
+
+def check(
+    status: str,
+    detail: str,
+    *,
+    kind: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build one closed dependency/runtime check result."""
+    if status not in {"passed", "failed", "unknown", "not_applicable"}:
+        raise ValueError(f"invalid readiness check status {status!r}")
+    passed = True if status == "passed" else False if status == "failed" else None
+    return {
+        "status": status,
+        "checked": status in {"passed", "failed"},
+        "passed": passed,
+        "detail": str(detail)[:240],
+        "evidence": {"kind": kind, **dict(evidence or {})},
+    }
+
+
+def contract(
+    *,
+    configured: bool,
+    policy_allowed: bool | None,
+    policy_detail: str,
+    dependency: dict[str, Any],
+    runtime: dict[str, Any],
+    live: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the common typed readiness contract used by every inventory."""
+    if not configured:
+        state = "not_configured"
+    elif policy_allowed is False:
+        state = "policy_denied"
+    elif dependency.get("status") == "failed":
+        state = "dependency_failed"
+    elif runtime.get("status") == "failed":
+        state = "runtime_failed"
+    elif live.get("status") == "verified":
+        state = "live_verified"
+    elif live.get("status") == "failed":
+        state = "live_failed"
+    elif policy_allowed is None:
+        state = "policy_unknown"
+    elif runtime.get("status") == "passed":
+        state = "runtime_passed_live_unknown"
+    elif dependency.get("status") == "passed":
+        state = "dependency_passed_runtime_unknown"
+    else:
+        state = "unverified"
+    return {
+        "configured": bool(configured),
+        "policy_allowed": policy_allowed,
+        "policy_detail": str(policy_detail)[:240],
+        "dependency": dependency,
+        "runtime": runtime,
+        "live": live,
+        "state": state,
+    }
+
+
+def _provider_key(provider: str, provider_config: dict[str, Any]) -> str:
+    value = provider_config.get("api_key")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    from maverick.config import PROVIDER_KEY_ENV_MAP
+
+    for env_name in PROVIDER_KEY_ENV_MAP.get(provider, ()):
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+_PROVIDER_DEFAULT_ENDPOINTS = {
+    "anthropic": "https://api.anthropic.com/v1/models",
+    "openai": "https://api.openai.com/v1/models",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/models",
+    "openrouter": "https://openrouter.ai/api/v1/models",
+    "moonshot": "https://api.moonshot.ai/v1/models",
+    "deepseek": "https://api.deepseek.com/v1/models",
+    "xai": "https://api.x.ai/v1/models",
+}
+
+
+def _append_endpoint(base_url: str, suffix: str) -> str:
+    parsed = urlsplit(base_url.strip())
+    path = parsed.path.rstrip("/") + "/" + suffix.lstrip("/")
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def probe_provider(provider: str, provider_config: dict[str, Any]) -> dict[str, Any]:
+    """Perform a bounded live authentication/readiness probe.
+
+    Only status code evidence is retained.  Provider bodies and headers are
+    intentionally discarded because they can contain account metadata or echo
+    request material.
+    """
+    from maverick.tools import _ssrf
+
+    name = str(provider).strip().lower()
+    key = _provider_key(name, provider_config)
+    base_url = str(provider_config.get("base_url") or "").strip()
+    if name == "codex_cli":
+        binary = str(provider_config.get("binary") or "codex").strip()
+        resolved = shutil.which(binary)
+        if not resolved:
+            return {
+                "verified": False,
+                "detail": "configured Codex CLI binary was not found",
+                "evidence": {"kind": "local_runtime_probe"},
+            }
+        try:
+            result = subprocess.run(
+                [resolved, "--version"],
+                capture_output=True,
+                check=False,
+                timeout=8.0,
+            )
+        except Exception as exc:
+            return {
+                "verified": False,
+                "detail": f"Codex CLI runtime probe failed ({type(exc).__name__})",
+                "evidence": {"kind": "local_runtime_probe"},
+            }
+        passed = result.returncode == 0
+        return {
+            # Local process availability is runtime evidence, not external-live
+            # provider acceptance, so live verification deliberately stays unknown.
+            "verified": None if passed else False,
+            "detail": (
+                "Codex CLI binary passed a bounded local version probe"
+                if passed
+                else "Codex CLI binary returned a non-zero version result"
+            ),
+            "evidence": {
+                "kind": "local_runtime_probe",
+                "runtime_verified": passed,
+                "external_live_verified": False,
+            },
+        }
+    if name == "ollama":
+        endpoint = _append_endpoint(base_url or "http://127.0.0.1:11434", "api/tags")
+        headers: dict[str, str] = {}
+    elif name in {"vllm", "tgi", "openai_compatible"}:
+        if not base_url:
+            env_names = {
+                "vllm": ("VLLM_BASE_URL", "OPENAI_COMPATIBLE_BASE_URL"),
+                "tgi": ("TGI_BASE_URL",),
+                "openai_compatible": ("OPENAI_COMPATIBLE_BASE_URL",),
+            }[name]
+            for env_name in env_names:
+                base_url = os.environ.get(env_name, "").strip()
+                if base_url:
+                    break
+        if not base_url:
+            return {
+                "verified": False,
+                "detail": f"no effective {name} base URL is configured",
+                "evidence": {"kind": "live_status_probe"},
+            }
+        endpoint = _append_endpoint(base_url, "models")
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+    else:
+        endpoint = (
+            _append_endpoint(base_url, "models")
+            if base_url
+            else _PROVIDER_DEFAULT_ENDPOINTS.get(name, "")
+        )
+        if not endpoint:
+            return {
+                "verified": None,
+                "detail": "this provider has no bounded dashboard probe",
+                "evidence": {
+                    "kind": "unsupported",
+                    "external_live_verified": False,
+                },
+            }
+        if not key:
+            return {
+                "verified": False,
+                "detail": "no effective provider key is configured",
+                "evidence": {"kind": "live_status_probe"},
+            }
+        if name == "anthropic":
+            headers = {
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+            }
+        elif name == "gemini":
+            headers = {"x-goog-api-key": key}
+        else:
+            headers = {"Authorization": f"Bearer {key}"}
+    try:
+        parsed_host = (urlsplit(endpoint).hostname or "").strip()
+        if name == "ollama" and parsed_host in {"127.0.0.1", "::1"}:
+            # Exact loopback literals only: no hostname, RFC1918, link-local,
+            # or process-global private-host exception is introduced.
+            with _ssrf.allow_private_hosts((parsed_host,)):
+                response = _ssrf.safe_get(endpoint, headers=headers, timeout=8.0)
+        else:
+            response = _ssrf.safe_get(endpoint, headers=headers, timeout=8.0)
+    except _ssrf.BlockedHost:
+        return {
+            "verified": False,
+            "detail": "provider endpoint is blocked by the egress policy",
+            "evidence": {"kind": "live_status_probe"},
+        }
+    except Exception as exc:
+        return {
+            "verified": False,
+            "detail": f"provider probe failed ({type(exc).__name__})",
+            "evidence": {"kind": "live_status_probe"},
+        }
+    status = int(response.status_code)
+    verified = 200 <= status < 300
+    return {
+        "verified": verified,
+        "detail": (
+            "provider accepted the bounded models request"
+            if verified
+            else f"provider readiness request returned HTTP {status}"
+        ),
+        "evidence": {"kind": "live_status_probe", "http_status": status},
+    }
+
+
+def provider_readiness(provider: str, *, configured: bool) -> dict[str, Any]:
+    """Typed provider state without performing network I/O."""
+    from maverick.config import get_provider_config
+
+    name = str(provider).strip().lower()
+    try:
+        material = get_provider_config(name) or {}
+    except Exception as exc:
+        unavailable = check(
+            "failed",
+            f"provider configuration is unavailable ({type(exc).__name__})",
+            kind="provider_configuration",
+        )
+        return contract(
+            configured=configured,
+            policy_allowed=None,
+            policy_detail="provider policy could not be evaluated",
+            dependency=unavailable,
+            runtime=check(
+                "unknown",
+                "runtime probe cannot run without readable configuration",
+                kind="provider_runtime_probe",
+            ),
+            live=get("provider", name, {"configuration_unavailable": True}),
+        )
+    policy_allowed: bool | None = None
+    policy_detail = "provider policy is not evaluated until it is configured"
+    if configured:
+        try:
+            from maverick.enterprise import enterprise_enabled, is_local_provider
+
+            policy_allowed = not enterprise_enabled() or is_local_provider(name)
+            policy_detail = (
+                "provider is admitted by the effective egress policy"
+                if policy_allowed
+                else "provider is blocked by the enterprise egress policy"
+            )
+        except Exception as exc:
+            policy_allowed = None
+            policy_detail = f"provider policy is unavailable ({type(exc).__name__})"
+    if not configured:
+        dependency = check(
+            "unknown",
+            "dependency check is deferred until configuration exists",
+            kind="provider_sdk",
+        )
+    else:
+        from maverick.providers import missing_sdks
+
+        missing = missing_sdks((f"{name}:readiness-probe",))
+        dependency = check(
+            "failed" if missing else "passed",
+            missing[0] if missing else "provider SDK dependency is importable",
+            kind="provider_sdk",
+        )
+    live = get("provider", name, material)
+    runtime_verified = live.get("evidence", {}).get("runtime_verified") is True
+    runtime = check(
+        (
+            "passed"
+            if live["status"] == "verified" or runtime_verified
+            else "failed"
+            if live["status"] == "failed"
+            else "unknown"
+        ),
+        live["detail"],
+        kind="provider_runtime_probe",
+        evidence=live.get("evidence"),
+    )
+    return contract(
+        configured=configured,
+        policy_allowed=policy_allowed,
+        policy_detail=policy_detail,
+        dependency=dependency,
+        runtime=runtime,
+        live=live,
+    )
+
+
+def test_provider(provider: str) -> dict[str, Any]:
+    """Run and retain a fingerprint-bound bounded provider probe."""
+    from maverick.config import get_provider_config
+
+    name = str(provider).strip().lower()
+    material = get_provider_config(name) or {}
+    readiness = provider_readiness(name, configured=True)
+    if readiness["policy_allowed"] is not True:
+        result = {
+            "verified": False,
+            "detail": readiness["policy_detail"],
+            "evidence": {"kind": "policy_preflight"},
+        }
+    elif readiness["dependency"]["status"] != "passed":
+        result = {
+            "verified": False,
+            "detail": readiness["dependency"]["detail"],
+            "evidence": {"kind": "dependency_preflight"},
+        }
+    else:
+        result = probe_provider(name, material)
+    return record(
+        "provider",
+        name,
+        material,
+        verified=result["verified"],
+        detail=result["detail"],
+        evidence=result.get("evidence"),
+    )
+
+
+_CHANNEL_REQUIRED_FIELDS = {
+    "telegram": ("bot_token",),
+    "discord": ("bot_token",),
+    "slack": ("app_token", "bot_token"),
+    "whatsapp_cloud": (
+        "access_token",
+        "phone_number_id",
+        "verify_token",
+        "app_secret",
+    ),
+    "sms": ("account_sid", "auth_token", "from_number"),
+    "email": (
+        "imap_host",
+        "imap_user",
+        "imap_password",
+        "smtp_host",
+        "smtp_user",
+        "smtp_password",
+    ),
+}
+
+_CHANNEL_MODULES = {
+    "telegram": "maverick_channels.telegram",
+    "discord": "maverick_channels.discord",
+    "slack": "maverick_channels.slack",
+    "whatsapp_cloud": "maverick_channels.whatsapp_cloud",
+    "sms": "maverick_channels.sms",
+    "email": "maverick_channels.email",
+}
+
+
+def probe_channel(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
+    """Verify local adapter/config readiness without sending a message.
+
+    A green result proves that the configured adapter can be imported and its
+    required fields are present.  It is not presented as external delivery or
+    webhook acceptance.
+    """
+    channel = str(name).strip().lower()
+    missing = [
+        field
+        for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
+        if not str(channel_config.get(field) or "").strip()
+    ]
+    if missing:
+        return {
+            "verified": False,
+            "detail": "missing required field(s): " + ", ".join(missing),
+            "evidence": {"kind": "local_adapter_preflight"},
+        }
+    module = _CHANNEL_MODULES.get(channel)
+    if not module:
+        return {
+            "verified": False,
+            "detail": "this channel has no bounded dashboard preflight",
+            "evidence": {"kind": "unsupported"},
+        }
+    try:
+        importlib.import_module(module)
+    except Exception as exc:
+        return {
+            "verified": False,
+            "detail": f"channel adapter could not load ({type(exc).__name__})",
+            "evidence": {"kind": "local_adapter_preflight"},
+        }
+    return {
+        "verified": True,
+        "detail": "local adapter and required configuration passed preflight",
+        "evidence": {
+            "kind": "local_adapter_preflight",
+            "external_delivery_verified": False,
+        },
+    }
+
+
+def channel_readiness(name: str, channel_config: dict[str, Any]) -> dict[str, Any]:
+    """Local channel preflight; external delivery remains explicitly unknown."""
+    channel = str(name).strip().lower()
+    configured = bool(channel_config.get("enabled", False))
+    if not configured:
+        dependency = check(
+            "unknown",
+            "adapter dependency is not checked for a disabled channel",
+            kind="channel_adapter",
+        )
+        runtime = check(
+            "unknown",
+            "channel runtime preflight has not run",
+            kind="channel_local_preflight",
+        )
+    else:
+        module = _CHANNEL_MODULES.get(channel)
+        if not module:
+            dependency = check(
+                "unknown",
+                "this channel has no bounded adapter dependency check",
+                kind="channel_adapter",
+            )
+        else:
+            try:
+                importlib.import_module(module)
+            except Exception as exc:
+                dependency = check(
+                    "failed",
+                    f"channel adapter could not load ({type(exc).__name__})",
+                    kind="channel_adapter",
+                )
+            else:
+                dependency = check(
+                    "passed",
+                    "channel adapter dependency is importable",
+                    kind="channel_adapter",
+                )
+        missing = [
+            field
+            for field in _CHANNEL_REQUIRED_FIELDS.get(channel, ())
+            if not str(channel_config.get(field) or "").strip()
+        ]
+        runtime = check(
+            "failed" if missing else "passed",
+            (
+                "missing required field(s): " + ", ".join(missing)
+                if missing
+                else "required channel configuration passed local preflight"
+            ),
+            kind="channel_local_preflight",
+        )
+    live = get("channel", channel, channel_config)
+    return contract(
+        configured=configured,
+        policy_allowed=True if configured else None,
+        policy_detail=(
+            "no separate channel policy denied this configuration"
+            if configured
+            else "channel policy is not evaluated until it is configured"
+        ),
+        dependency=dependency,
+        runtime=runtime,
+        live=live,
+    )
+
+
+def mcp_readiness(name: str, server_config: dict[str, Any]) -> dict[str, Any]:
+    """Validate an MCP spec/dependency without starting it on inventory reads."""
+    server = str(name).strip()
+    material = dict(server_config)
+    policy_allowed: bool | None = None
+    policy_detail = "MCP policy could not be evaluated"
+    try:
+        from maverick.mcp_client import MCPServerSpec
+
+        spec = MCPServerSpec.from_config(server, material)
+    except Exception as exc:
+        dependency = check(
+            "failed",
+            f"MCP configuration is invalid ({type(exc).__name__})",
+            kind="mcp_dependency",
+        )
+    else:
+        policy_allowed = True
+        policy_detail = "MCP server is admitted by the effective runtime policy"
+        if spec.is_http:
+            from maverick.enterprise import enterprise_egress_denial
+
+            denial = enterprise_egress_denial(spec.url or "", tool=f"mcp:{server}")
+            if denial:
+                policy_allowed = False
+                policy_detail = denial
+            try:
+                http_dependency = importlib.util.find_spec("httpx") is not None
+            except Exception:
+                http_dependency = False
+            dependency = check(
+                "passed" if http_dependency else "failed",
+                "HTTP MCP client dependency is importable"
+                if http_dependency
+                else "HTTP MCP client dependency is missing",
+                kind="mcp_http_client",
+            )
+        else:
+            command = spec.command
+            resolved = (
+                str(Path(command).resolve())
+                if Path(command).is_absolute() and Path(command).is_file()
+                else shutil.which(command)
+            )
+            dependency = check(
+                "passed" if resolved else "failed",
+                "MCP command dependency is resolvable"
+                if resolved
+                else "MCP command dependency was not found",
+                kind="mcp_stdio_command",
+            )
+    live = get("mcp", server, material)
+    runtime = check(
+        "passed" if live["status"] == "verified" else (
+            "failed" if live["status"] == "failed" else "unknown"
+        ),
+        live["detail"],
+        kind="mcp_handshake",
+        evidence=live.get("evidence"),
+    )
+    return contract(
+        configured=True,
+        policy_allowed=policy_allowed,
+        policy_detail=policy_detail,
+        dependency=dependency,
+        runtime=runtime,
+        live=live,
+    )
+
+
+def mcp_inventory() -> list[dict[str, Any]]:
+    """Effective MCP inventory with secrets retained only in fingerprints."""
+    from maverick.runtime_overrides import mcp_overlay
+
+    configured = require_readable_config().get("mcp_servers") or {}
+    overlay = mcp_overlay()
+    rows: list[dict[str, Any]] = []
+    for name, spec in configured.items():
+        if isinstance(spec, dict):
+            rows.append(_mcp_row(name, spec, "config"))
+    for name, spec in overlay.items():
+        if name not in configured and isinstance(spec, dict):
+            rows.append(_mcp_row(name, spec, "dashboard"))
+    return rows
+
+
+def mcp_server_config(name: str) -> dict[str, Any] | None:
+    """Return one effective raw MCP spec for an authorized readiness action."""
+    from maverick.runtime_overrides import mcp_overlay
+
+    configured = require_readable_config().get("mcp_servers") or {}
+    value = configured.get(name)
+    if isinstance(value, dict):
+        return dict(value)
+    value = mcp_overlay().get(name)
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _mcp_row(name: str, spec: dict[str, Any], source: str) -> dict[str, Any]:
+    return {
+        "name": name,
+        "transport": "http" if spec.get("url") else "stdio",
+        "command": spec.get("command") or "",
+        "args": spec.get("args") or [],
+        "url": spec.get("url") or "",
+        "source": source,
+        "removable": source == "dashboard",
+        "configured": True,
+        "readiness": mcp_readiness(name, spec),
+    }
+
+
+async def test_mcp(name: str, server_config: dict[str, Any]) -> dict[str, Any]:
+    """Start, initialize, list tools, and stop one MCP server within a bound."""
+    from maverick.mcp_client import MCPClient, MCPServerSpec, StreamableHttpMCPClient
+
+    server = str(name).strip()
+    material = dict(server_config)
+    client: Any = None
+    try:
+        spec = MCPServerSpec.from_config(server, material)
+        client = StreamableHttpMCPClient(spec, timeout=8.0) if spec.is_http else MCPClient(
+            spec, timeout=8.0
+        )
+        await asyncio.wait_for(client.start(), timeout=12.0)
+        result = {
+            "verified": True,
+            "detail": f"MCP initialize and tools/list passed ({len(client.tools)} tool(s))",
+            "evidence": {"kind": "mcp_handshake", "tool_count": len(client.tools)},
+        }
+    except Exception as exc:
+        result = {
+            "verified": False,
+            "detail": f"MCP readiness handshake failed ({type(exc).__name__})",
+            "evidence": {"kind": "mcp_handshake"},
+        }
+    finally:
+        if client is not None:
+            try:
+                await client.stop()
+            except Exception:
+                pass
+    return record(
+        "mcp",
+        server,
+        material,
+        verified=result["verified"],
+        detail=result["detail"],
+        evidence=result["evidence"],
+    )
+
+
+def plugin_readiness(row: dict[str, Any]) -> dict[str, Any]:
+    """Map QA-024 import truth into the common integration contract."""
+    configured = bool(row.get("configured"))
+    allowed = bool(row.get("allowed")) if configured else None
+    state = str(row.get("state") or "")
+    if not configured or allowed is False:
+        dependency = check(
+            "unknown",
+            "plugin dependencies were not imported",
+            kind="plugin_import",
+        )
+        runtime = check(
+            "unknown",
+            "plugin registration was not attempted",
+            kind="plugin_registration",
+        )
+    elif row.get("loaded"):
+        dependency = check(
+            "passed",
+            "plugin entry-point dependency imported",
+            kind="plugin_import",
+        )
+        runtime = check(
+            "passed",
+            "plugin entry point passed its registration contract",
+            kind="plugin_registration",
+        )
+    else:
+        dependency = check(
+            "failed" if state == "import_failed" else "passed",
+            str(row.get("load_error") or "plugin import state is unavailable"),
+            kind="plugin_import",
+        )
+        runtime = check(
+            "failed",
+            str(row.get("load_error") or "plugin registration failed"),
+            kind="plugin_registration",
+        )
+    live = {
+        "status": "unknown",
+        "checked": False,
+        "verified": None,
+        "detail": "plugin import does not verify an external integration",
+        "tested_at": None,
+        "evidence": {"kind": "not_available"},
+    }
+    return contract(
+        configured=configured,
+        policy_allowed=allowed,
+        policy_detail=(
+            "plugin passed the effective trust policy"
+            if allowed
+            else str(row.get("load_error") or "plugin policy was not evaluated")
+        ),
+        dependency=dependency,
+        runtime=runtime,
+        live=live,
+    )
+
+
+def _clear_for_testing() -> None:
+    with _LOCK:
+        _RECEIPTS.clear()
+
+
+__all__ = [
+    "IntegrationConfigurationUnavailable",
+    "channel_readiness",
+    "check",
+    "clear",
+    "contract",
+    "fingerprint",
+    "get",
+    "mcp_readiness",
+    "mcp_inventory",
+    "mcp_server_config",
+    "plugin_readiness",
+    "probe_channel",
+    "probe_provider",
+    "provider_readiness",
+    "record",
+    "require_readable_config",
+    "test_mcp",
+    "test_provider",
+]

@@ -9,7 +9,7 @@
   .cp-stat,.cp-card{background:linear-gradient(145deg,color-mix(in srgb,var(--panel) 86%,transparent),color-mix(in srgb,var(--panel) 64%,transparent));border:1px solid color-mix(in srgb,var(--border) 76%,white 24%);border-radius:18px;padding:1rem;box-shadow:0 18px 45px color-mix(in srgb,#07111f 18%,transparent),inset 0 1px 0 color-mix(in srgb,white 20%,transparent);backdrop-filter:blur(22px) saturate(145%);-webkit-backdrop-filter:blur(22px) saturate(145%)}
   .cp-stat strong{display:block;font-size:1.7rem}.cp-stat span{color:var(--muted);font-size:.83rem}
   .cp-layout{display:grid;grid-template-columns:1.1fr .9fr;gap:1rem}.cp-card{margin-bottom:1rem}
-  .cp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
+  .cp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;border:0;margin:0;padding:0;min-width:0}
   .cp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}
   .cp-form .wide{grid-column:1/-1}.cp-actions{display:flex;gap:.5rem;align-items:center;grid-column:1/-1}
   .cp-table{width:100%;border-collapse:collapse;font-size:.82rem}.cp-table th,.cp-table td{text-align:left;border-bottom:1px solid var(--border);padding:.5rem .35rem;vertical-align:top}
@@ -44,18 +44,20 @@
   <div class="cp-layout">
     <div>
       <section class="cp-card"><h2>Policy and notice version</h2>
-        <form class="cp-form" id="cp-policy-form">
+        <form id="cp-policy-form"><fieldset class="cp-form" id="cp-policy-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Consent policy controls</legend>
           <label>Policy ID<input class="input" name="policy_id" required value="global-consent"></label>
           <label>Version<input class="input" name="version" type="number" min="1" step="1" required value="1"></label>
           <label>Effective timestamp<input class="input" name="effective_at" type="number" step="any" required></label>
           <label>Notice SHA-256<input class="input" name="notice_sha256" pattern="[0-9a-f]{64}" required></label>
           <label class="wide">Purposes JSON <textarea class="input" name="purposes" rows="3" required>{"analytics":"consent","essential":"contract"}</textarea></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Publish immutable version</button><span class="muted">Admin required</span></div>
-        </form>
+        </fieldset></form>
       </section>
 
       <section class="cp-card"><h2>Collect a preference receipt</h2>
-        <form class="cp-form" id="cp-preference-form">
+        <form id="cp-preference-form"><fieldset class="cp-form" id="cp-preference-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Preference receipt controls</legend>
           <label>Profile ID<input class="input" name="profile_id" required></label>
           <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
           <label>Policy ID<input class="input" name="policy_id" value="global-consent" required></label>
@@ -68,7 +70,7 @@
           <label>Country code<input class="input" name="country_code" value="US" minlength="2" maxlength="2" required></label>
           <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Record choice</button></div>
-        </form>
+        </fieldset></form>
       </section>
 
       <section class="cp-card"><h2>Profiles</h2><div id="cp-profile-table" class="cp-empty">No profiles loaded.</div></section>
@@ -76,27 +78,30 @@
         <div class="cp-kicker">Immutable identity lifecycle</div>
         <h2 id="cp-identity-heading">Link, unlink, relink &amp; account transition evidence</h2>
         <p class="muted">Inspect the active association and its hash-chained history. Operators cannot unlink or relink here: those transitions require the public client’s current profile capability, fresh verified OIDC/pairing evidence, exact revisions, and revocation of the redeemed proof.</p>
-        <form class="cp-form" id="cp-identity-form">
+        <form id="cp-identity-form"><fieldset class="cp-form" id="cp-identity-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Identity lifecycle inspection controls</legend>
           <label class="wide">Anonymous profile ID<input class="input" name="profile_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Inspect lifecycle</button><button class="btn" id="cp-identity-integrity" type="button">Verify tenant slice</button></div>
-        </form>
+        </fieldset></form>
         <pre id="cp-identity-current" class="cp-result">No identity lifecycle inspected.</pre>
         <div id="cp-identity-history" class="cp-empty">No immutable lifecycle events loaded.</div>
       </section>
     </div>
     <div>
       <section class="cp-card"><h2>Create pseudonymous profile</h2>
-        <form class="cp-form" id="cp-profile-form">
+        <form id="cp-profile-form"><fieldset class="cp-form" id="cp-profile-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Consent profile controls</legend>
           <label>Profile ID<input class="input" name="profile_id" required></label>
           <label>Identity kind<select class="input" name="identity_kind"><option>anonymous</option><option>known</option></select></label>
           <label class="wide">Subject SHA-256<input class="input" name="subject_sha256" pattern="[0-9a-f]{64}" required></label>
           <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Create profile</button></div>
-        </form>
+        </fieldset></form>
       </section>
 
       <section class="cp-card"><h2>Fail-closed enforcement check</h2>
-        <form class="cp-form" id="cp-decision-form">
+        <form id="cp-decision-form"><fieldset class="cp-form" id="cp-decision-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Consent decision controls</legend>
           <label>Profile ID<input class="input" name="profile_id" required></label>
           <label>Purpose<input class="input" name="purpose_id" value="analytics" required></label>
           <label>Channel<input class="input" name="channel" value="all" required></label>
@@ -104,12 +109,13 @@
           <label>Policy ID<input class="input" name="policy_id" placeholder="optional exact binding"></label>
           <label>Policy version<input class="input" name="policy_version" type="number" min="1" step="1" placeholder="optional exact binding"></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Evaluate</button></div>
-        </form>
+        </fieldset></form>
         <pre id="cp-decision" class="cp-result">No decision evaluated.</pre>
       </section>
 
       <section class="cp-card"><h2>Tracker governance</h2>
-        <form class="cp-form" id="cp-tracker-form">
+        <form id="cp-tracker-form"><fieldset class="cp-form" id="cp-tracker-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Tracker governance controls</legend>
           <label>Tracker ID<input class="input" name="tracker_id" required></label>
           <label>Kind<select class="input" name="kind"><option value="web_tracker">Web tracker</option><option value="mobile_sdk">Mobile SDK</option></select></label>
           <label>Vendor ID<input class="input" name="vendor_id" required></label>
@@ -118,7 +124,7 @@
           <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
           <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Save tracker</button><span class="muted">Admin required</span></div>
-        </form>
+        </fieldset></form>
       </section>
 
       <section class="cp-card"><h2>Privacy-bounded consent analytics</h2>
@@ -128,14 +134,15 @@
                                over consent receipts. Review your cohort
                                thresholds before turning it on.') }}
         {% endif %}
-        <form class="cp-form" id="cp-analytics-form">
+        <form id="cp-analytics-form"><fieldset class="cp-form" id="cp-analytics-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled and consent_analytics_enabled else 'false' }}"{% if not consent_preferences_enabled or not consent_analytics_enabled %} disabled aria-disabled="true"{% endif %}>
+          <legend class="sr-only">Consent analytics controls</legend>
           <label>Start timestamp<input class="input" name="start_at" type="number" step="any" required></label>
           <label>End timestamp<input class="input" name="end_at" type="number" step="any" required></label>
           <label class="wide">Dimensions (comma separated)<input class="input" name="dimensions" value="purpose_id,action" required></label>
           <label>Minimum unique profiles<input class="input" name="min_cohort_size" type="number" min="2" max="100000" value="10" required></label>
           <label>Maximum receipts<input class="input" name="max_receipts" type="number" min="1" max="100000" value="10000" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Build aggregate snapshot</button><span class="muted">Audit permission required; small cohorts are hidden</span></div>
-        </form>
+        </fieldset></form>
         <pre id="cp-analytics" class="cp-result">No aggregate snapshot generated.</pre>
       </section>
     </div>

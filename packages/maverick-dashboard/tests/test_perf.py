@@ -65,11 +65,10 @@ def test_list_goals_unbounded_still_works(monkeypatch, tmp_path: Path):
     assert len(w.list_goals()) == 7
 
 
-def test_index_handles_thousand_goals_without_loading_them_all(
+def test_overview_payload_handles_thousand_goals_without_loading_them_all(
     monkeypatch, tmp_path: Path,
 ):
-    """Render the overview page against 1000 goals; the bounded slice + count
-    aggregate must mean response payload stays in the kilobytes, not megabytes."""
+    """Build the overview board against 1000 goals without returning them all."""
     from maverick import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
@@ -80,10 +79,12 @@ def test_index_handles_thousand_goals_without_loading_them_all(
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
-    resp = client.get("/")
+    resp = client.get("/api/v1/dashboards/overview?days=30")
     assert resp.status_code == 200
-    # The Recent Goals table renders at most 20 rows.
-    assert resp.text.count("<tr>") <= 25  # 20 rows + a few for thead
+    payload = resp.json()
+    assert payload["totals"]["total"] == 1000
+    assert len(payload["recent"]) == 12
+    assert len(resp.content) < 100_000
 
 
 def test_plan_tree_uses_constant_query_count(monkeypatch, tmp_path: Path):

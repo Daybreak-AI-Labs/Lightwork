@@ -52,6 +52,7 @@
   .composer__send:hover { background: var(--brand-hi); transform: translateY(-1px); }
   .composer__send:active { transform: none; }
   .composer__send:disabled { opacity: 0.5; cursor: default; transform: none; }
+  .composer__controls { border: 0; padding: 0; margin: 0; min-width: 0; }
   .chip-row { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: center; margin-top: var(--space-5); }
   .chip {
     display: inline-flex; align-items: center; gap: var(--space-2);
@@ -106,7 +107,17 @@
 {% endcall %}
 
 <div class="chat-home">
+  {% if not model_route_ready %}
+  <section class="panel" id="model-route-setup" role="status">
+    <h2 style="margin-top:0">Connect the selected model route first</h2>
+    <p class="muted">This workspace is not ready to start AI work yet. Finish
+      the model-provider setup and offline preflight before submitting a goal.</p>
+    <a class="btn btn--primary" href="/start">Continue setup</a>
+  </section>
+  {% endif %}
   <form method="post" action="/chat/send" class="composer chat-anim chat-anim-2" enctype="multipart/form-data">
+    <fieldset class="composer__controls"{% if not model_route_ready %} disabled{% endif %}>
+    <legend class="sr-only">Start governed AI work</legend>
     <input
       type="text"
       name="title"
@@ -127,7 +138,7 @@
         placeholder="Context, constraints, links, or acceptance criteria."
       >{{ prefill_description or '' }}</textarea>
     </details>
-    <input type="file" name="files" id="attach-input" multiple aria-label="Attach files to this goal"
+    <input type="file" name="files" id="attach-input" multiple aria-label="Attach files to this goal" tabindex="-1"
            style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
     <div class="composer__bar">
       <div style="display: flex; align-items: center; gap: var(--space-2); min-width: 0;">
@@ -152,6 +163,7 @@
         </svg>
       </button>
     </div>
+    </fieldset>
   </form>
   <p id="goal-error" role="alert" aria-live="assertive"
      style="display: none; margin: var(--space-3) 0 0; color: var(--danger); font-size: var(--text-sm); text-align: center;"></p>

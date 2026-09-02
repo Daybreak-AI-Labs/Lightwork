@@ -43,6 +43,10 @@ class ConnectionVersionConflict(RuntimeError):
     """The credential changed after a caller began an operation on it."""
 
 
+class ConnectionStoreUnavailable(RuntimeError):
+    """The sealed connection registry could not be authenticated or read safely."""
+
+
 def enabled() -> bool:
     from .config import env_flag
     if env_flag("MAVERICK_CONNECTIONS"):
@@ -65,15 +69,25 @@ def _load() -> dict[str, dict]:
     path = _path()
     try:
         ensure_private_file(path)
-    except OSError:
-        return {}
-    try:
         raw = unseal_text_for_tenant(current_tenant_id(), atomic_read_bytes(path))
         data = json.loads(raw)
-        if not isinstance(data, dict):
-            return {}
-    except (FileNotFoundError, ValueError, OSError):
+        if (
+            not isinstance(data, dict)
+            or any(
+                not isinstance(name, str) or not isinstance(record, dict)
+                for name, record in data.items()
+            )
+        ):
+            raise ValueError("connection registry root must be an object")
+    except FileNotFoundError:
+        # Absence is the sole legitimate empty-store state. Every other read or
+        # authentication failure may conceal live credentials and must prevent
+        # a later load/modify/save from replacing them.
         return {}
+    except Exception as exc:
+        raise ConnectionStoreUnavailable(
+            "connection credential registry is unavailable; no records were changed"
+        ) from exc
     return data
 
 
@@ -150,12 +164,15 @@ def current_principal() -> str | None:
     return _runtime_principal.get()
 
 
-def set_connection(name: str, *, connector: str = "", base_url: str = "",
-                   token: str = "", owner: str = "",
+def set_connection(name: str, *, connector: str | None = None,
+                   base_url: str | None = None,
+                   token: str | None = None, owner: str | None = None,
                    expected_owner: str | None = None,
-                   access: str = "owner",
-                   allowed_principals: Sequence[str] | None = None) -> dict:
-    """Create or replace a named connection (sealed). ``connector`` is the tool
+                   access: str | None = None,
+                   allowed_principals: Sequence[str] | None = None,
+                   expected_revision: str | None = None,
+                   require_revision: bool = False) -> dict:
+    """Create or patch a named connection (sealed). ``connector`` is the tool
     name it credentials (e.g. ``salesforce``); ``name`` may differ so one tool
     can have several accounts. Raises ValueError on an unusable name.
 
@@ -163,37 +180,85 @@ def set_connection(name: str, *, connector: str = "", base_url: str = "",
     STORE LOCK: replacing an existing connection owned by someone else raises
     PermissionError -- the owner check and the write are one atomic step, so an
     API-layer read-then-write can't race a concurrent create (mirrors
-    :func:`delete_connection`'s in-store owner enforcement)."""
+    :func:`delete_connection`'s in-store owner enforcement).
+
+    Omitted optional fields preserve an existing record, so rotating only a
+    token cannot silently erase its connector, URL, owner, access policy, or
+    grants.  API callers set ``require_revision`` and must supply the public
+    ``revision`` returned by the preceding read; the compare and write happen
+    under the same cross-process lock.
+    """
     slug = normalize_name(name)
     if not _NAME_RE.match(slug):
         raise ValueError("connection name must be a slug (a-z, 0-9, -, _)")
-    access = str(access or "owner").strip().lower()
-    if access not in _ACCESS:
+    access_value = None if access is None else str(access).strip().lower()
+    if access_value is not None and access_value not in _ACCESS:
         raise ValueError("connection access must be 'owner' or 'tenant'")
-    grants = _normalize_principals(allowed_principals)
-    if owner is None or owner == "":
-        owner_value = ""
-    else:
-        owner_value = _require_principal(owner)
-    rec = {
-        "name": slug, "connector": normalize_name(connector) or slug,
-        "base_url": str(base_url).strip().rstrip("/"), "token": str(token),
-        "created": time.time(), "owner": owner_value,
-        "access": access, "allowed_principals": list(grants),
-        # Internal CAS token. A slow readiness probe for an old credential must
-        # never mark a concurrently rotated replacement as authenticated.
-        "revision": uuid.uuid4().hex,
-    }
+    grants = (
+        None
+        if allowed_principals is None
+        else _normalize_principals(allowed_principals)
+    )
+    owner_value = None
+    if owner is not None:
+        owner_value = "" if owner == "" else _require_principal(owner)
     with _mutation_lock():
         data = dict(_load())
         existing = data.get(slug)
         if (expected_owner is not None and existing is not None
                 and existing.get("owner", "") != expected_owner):
             raise PermissionError("a connection with that name already exists")
+        if existing is None and expected_revision is not None:
+            raise ConnectionVersionConflict("connection no longer exists")
         if isinstance(existing, dict):
-            rec["created"] = float(existing.get("created") or rec["created"])
-            # Updating credentials invalidates the prior readiness assertion.
-            rec.pop("last_test", None)
+            current_revision = str(existing.get("revision") or "")
+            if require_revision and not expected_revision:
+                raise ConnectionVersionConflict(
+                    "expected_revision is required when updating a connection"
+                )
+            if (
+                expected_revision is not None
+                and current_revision != str(expected_revision)
+            ):
+                raise ConnectionVersionConflict(
+                    "connection changed since it was read"
+                )
+        rec = {
+            "name": slug,
+            "connector": (
+                normalize_name(connector) or slug
+                if connector is not None
+                else str((existing or {}).get("connector") or slug)
+            ),
+            "base_url": (
+                str(base_url).strip().rstrip("/")
+                if base_url is not None
+                else str((existing or {}).get("base_url") or "")
+            ),
+            "token": (
+                str(token)
+                if token is not None
+                else str((existing or {}).get("token") or "")
+            ),
+            "created": float((existing or {}).get("created") or time.time()),
+            "owner": (
+                owner_value
+                if owner_value is not None
+                else str((existing or {}).get("owner") or "")
+            ),
+            "access": (
+                access_value
+                if access_value is not None
+                else str((existing or {}).get("access") or "owner")
+            ),
+            "allowed_principals": (
+                list(grants)
+                if grants is not None
+                else list((existing or {}).get("allowed_principals") or [])
+            ),
+            # A new generation invalidates every prior readiness assertion.
+            "revision": uuid.uuid4().hex,
+        }
         data[slug] = rec
         _save(data)
     return _public(rec)
@@ -230,6 +295,7 @@ def _public(rec: dict) -> dict:
         "created": float(rec.get("created") or 0.0), "owner": rec.get("owner", ""),
         "access": access,
         "allowed_principals": list(rec.get("allowed_principals") or []),
+        "revision": str(rec.get("revision") or ""),
         "last_test": dict(last_test) if last_test is not None else None,
     }
 
@@ -346,5 +412,5 @@ __all__ = [
     "enabled", "set_connection", "get_connection", "delete_connection",
     "list_connections", "resolve", "normalize_name", "bind_principal",
     "current_principal",
-    "record_test_result", "ConnectionVersionConflict",
+    "record_test_result", "ConnectionVersionConflict", "ConnectionStoreUnavailable",
 ]

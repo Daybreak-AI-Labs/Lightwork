@@ -103,12 +103,12 @@ def test_readiness_deep_check_errors_fail_closed(
     assert checks[check_name] == "unknown: RuntimeError"
 
 
-def test_index_renders(tmp_path, monkeypatch):
+def test_overview_renders(tmp_path, monkeypatch):
     # Point the WorldModel at a fresh tmp DB so we don't depend on
     # ~/.maverick/world.db existing on the runner.
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    resp = client.get("/")
+    resp = client.get("/overview")
     assert resp.status_code == 200
     assert "Lightwork" in resp.text
     assert "overview" in resp.text or "goals" in resp.text

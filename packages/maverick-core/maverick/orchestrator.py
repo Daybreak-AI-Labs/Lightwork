@@ -1042,6 +1042,44 @@ class _QuotaUsageSettlement:
                 pass
 
 
+def _execution_principal(*, user_id: str | None, capability: Any | None) -> str:
+    """Return the principal whose authority the root agent actually uses.
+
+    An explicit capability is the execution authority and therefore wins over
+    the contextual ``user_id``.  Without one, this mirrors
+    :meth:`Agent._resolve_capability` exactly.  The value is an opaque identity
+    subject; validation must not impose a URL- or filename-safe alphabet.
+    """
+    explicit = getattr(capability, "principal", None) if capability is not None else None
+    principal = explicit if explicit is not None else f"user:{user_id or 'local'}"
+    from .agent_control_plane import valid_principal
+
+    if not valid_principal(principal):
+        raise ValueError("invalid runtime principal")
+    return principal
+
+
+def _bind_goal_execution_principal(
+    world: Any,
+    goal: Any,
+    principal: str,
+) -> bool:
+    """Durably bind an unbound goal or verify its exact runtime principal.
+
+    ``False`` means another principal is bound to execute the goal. An unavailable binding
+    primitive raises: execution must not continue from a read-only comparison
+    because another dispatcher could win the unbound race after that read.
+    Resource authorization remains independently scoped by ``goal.owner``.
+    """
+    bound_principal = getattr(goal, "execution_principal", "") or ""
+    if bound_principal:
+        return bound_principal == principal
+    binder = getattr(world, "bind_goal_execution_principal", None)
+    if not callable(binder):
+        raise RuntimeError("goal execution-principal binding is unavailable")
+    return bool(binder(int(goal.id), principal))
+
+
 def _evidence_ready_goal_output(
     generated_text: str,
     *,
@@ -1105,6 +1143,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     resume_episode_id: int | None = None,
     domain: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    execution_principal: str = "user:local",
     *,
     _quota_settlement: _QuotaUsageSettlement,
 ) -> str:
@@ -1116,6 +1155,42 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     if not goal:
         _record_quota_usage()
         return f"no such goal: {goal_id}"
+
+    # Bind the persisted execution identity to the authority the root agent
+    # will actually exercise. This happens before status, audit, episode,
+    # model or tool side effects. Resource owner remains a separate dashboard
+    # authorization identity, so delegated runs do not disappear from their
+    # human owner's view.
+    was_unbound = not bool(getattr(goal, "execution_principal", "") or "")
+    try:
+        execution_principal_matches = _bind_goal_execution_principal(
+            world, goal, execution_principal,
+        )
+    except Exception:
+        log.exception("goal #%s execution-principal binding is unavailable", goal_id)
+        _record_quota_usage()
+        return "BLOCKED: goal execution-principal binding is unavailable"
+    if not execution_principal_matches:
+        log.warning("goal #%s execution principal does not match its binding", goal_id)
+        _record_quota_usage()
+        return "BLOCKED: goal is bound to a different execution principal"
+    if was_unbound:
+        try:
+            rebound_goal = world.get_goal(goal_id)
+        except Exception:
+            rebound_goal = None
+        if (
+            rebound_goal is None
+            or (getattr(rebound_goal, "execution_principal", "") or "")
+            != execution_principal
+        ):
+            log.error("goal #%s execution-principal binding was not observable", goal_id)
+            _record_quota_usage()
+            return "BLOCKED: goal execution-principal binding is unavailable"
+        # Downstream execution attribution must use the durable value, not the
+        # stale pre-binding dataclass returned by the first read.
+        goal = rebound_goal
+        _quota_settlement.goal = goal
 
     # Department attribution: persist the domain this run executes as so
     # success-side learning (dreaming, budget priors) attributes exactly
@@ -1918,8 +1993,11 @@ async def run_goal(
     allowed_suites: frozenset[str] | None = None,
 ) -> str:
     """Run a goal and settle its quota reservation on every exit path."""
+    execution_principal = _execution_principal(
+        user_id=user_id, capability=capability,
+    )
     settlement = _QuotaUsageSettlement(
-        principal=f"user:{user_id or 'local'}", budget=budget, domain=domain,
+        principal=execution_principal, budget=budget, domain=domain,
     )
     try:
         return await _run_goal_impl(
@@ -1938,6 +2016,7 @@ async def run_goal(
             resume_episode_id=resume_episode_id,
             domain=domain,
             allowed_suites=allowed_suites,
+            execution_principal=execution_principal,
             _quota_settlement=settlement,
         )
     finally:

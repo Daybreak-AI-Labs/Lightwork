@@ -84,7 +84,7 @@ Key durations: **Time to detect:** ___  **Time to contain:** ___
 | | e.g. cluster halt armed | world.arm_halt(...) | | |
 | | e.g. capability revoked | capability revocation | | |
 | | e.g. breaker left OPEN | circuit_breaker.py | | |
-| | Killswitch cleared (recovery) | rm HALT + clear() + disarm_halt() | | |
+| | Killswitch cleared (recovery) | coordinated transactional HALT recovery + generation CAS | | |
 
 ---
 

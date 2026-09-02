@@ -193,7 +193,8 @@ class TestGating:
 
 
 class TestLedger:
-    def test_record_then_history(self, tmp_path):
+    def test_record_then_history(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(self_learning.time, "time", lambda: 1_700_000_000.0)
         path = tmp_path / "learned.ndjson"
         self_learning.record("send sms", "skill", "twilio-sms",
                              source="gh:x/y", path=path)

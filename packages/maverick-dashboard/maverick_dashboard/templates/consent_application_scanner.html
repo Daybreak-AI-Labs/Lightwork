@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="/static/lightwork-consent-application-scanner.css">
 {% endblock %}
 {% block content %}
-<main class="cas-shell" id="consent-application-scanner-shell"
+<div class="cas-shell" id="consent-application-scanner-shell"
       data-api-base="{{ api_base }}" data-copilot-page="/consent/application-scans">
   <header class="cas-hero glass-surface">
     <div>
@@ -141,7 +141,7 @@
   </fieldset>
 
   <noscript><p class="cas-boundary glass-surface">JavaScript is required for this bounded administrative workbench.</p></noscript>
-</main>
+</div>
 {% endblock %}
 {% block scripts_extra %}
 <script src="/static/lightwork-consent-application-scanner.js" defer></script>

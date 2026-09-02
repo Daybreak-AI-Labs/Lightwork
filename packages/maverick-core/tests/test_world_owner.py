@@ -13,14 +13,19 @@ from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_schema_version_is_current(tmp_path):
-    assert SCHEMA_VERSION == 31  # bump when adding a migration
+    assert SCHEMA_VERSION == 33  # bump when adding a migration
     assert WorldModel(tmp_path / "w.db").schema_version == SCHEMA_VERSION
 
 
 def test_create_goal_stores_owner(tmp_path):
     w = WorldModel(tmp_path / "w.db")
-    gid = w.create_goal("t", owner="user:alice")
+    gid = w.create_goal(
+        "t",
+        owner="user:alice",
+        execution_principal="agent:worker",
+    )
     assert w.get_goal(gid).owner == "user:alice"
+    assert w.get_goal(gid).execution_principal == "agent:worker"
 
 
 def test_goal_domain_roundtrip(tmp_path):
@@ -38,6 +43,86 @@ def test_goal_domain_roundtrip(tmp_path):
 def test_default_owner_is_empty(tmp_path):
     w = WorldModel(tmp_path / "w.db")
     assert w.get_goal(w.create_goal("t")).owner == ""
+
+
+def test_goal_execution_binding_is_durable_idempotent_and_mismatch_safe(tmp_path):
+    w = WorldModel(tmp_path / "w.db")
+    gid = w.create_goal("t", owner="user:human-owner")
+    principal = "user:auth0|tenant/María 李"
+
+    assert w.bind_goal_execution_principal(gid, principal) is True
+    assert w.bind_goal_execution_principal(gid, principal) is True
+    assert w.bind_goal_execution_principal(gid, "user:different") is False
+    assert w.get_goal(gid).execution_principal == principal
+    assert w.get_goal(gid).owner == "user:human-owner"
+
+
+@pytest.mark.parametrize("principal", [" padded", "line\nbreak", "x" * 513, 7])
+def test_goal_execution_principal_validation_is_at_the_store_boundary(
+    tmp_path,
+    principal,
+):
+    world = WorldModel(tmp_path / "w.db")
+    goal_id = world.create_goal("unbound")
+
+    with pytest.raises(ValueError, match="invalid execution principal"):
+        world.bind_goal_execution_principal(goal_id, principal)
+    with pytest.raises(ValueError, match="invalid execution principal"):
+        world.create_goal("invalid", execution_principal=principal)
+
+    assert world.get_goal(goal_id).execution_principal == ""
+
+
+def test_blank_execution_principal_remains_the_legacy_unbound_default(tmp_path):
+    world = WorldModel(tmp_path / "w.db")
+    goal_id = world.create_goal("unbound", execution_principal="")
+
+    assert world.get_goal(goal_id).execution_principal == ""
+    with pytest.raises(ValueError, match="invalid execution principal"):
+        world.bind_goal_execution_principal(goal_id, "")
+
+
+def test_concurrent_goal_execution_binding_has_one_winner(tmp_path):
+    db = tmp_path / "w.db"
+    first = WorldModel(db)
+    second = WorldModel(db)
+    gid = first.create_goal("t")
+    barrier = threading.Barrier(2)
+
+    def bind(world, principal):
+        barrier.wait(timeout=5)
+        return principal, world.bind_goal_execution_principal(gid, principal)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(
+            lambda pair: bind(*pair),
+            ((first, "user:first"), (second, "user:second")),
+        ))
+
+    assert sum(int(ok) for _principal, ok in outcomes) == 1
+    winner = next(principal for principal, ok in outcomes if ok)
+    assert first.get_goal(gid).execution_principal == winner
+
+
+def test_explicit_goal_selectors_preserve_both_principal_fields(tmp_path):
+    world = WorldModel(tmp_path / "w.db")
+    root = world.create_goal("root")
+    child = world.create_goal(
+        "needle child",
+        parent_id=root,
+        owner="user:human-owner",
+        execution_principal="agent:worker",
+    )
+    world.set_goal_status(child, "done", result="needle result")
+
+    selected = [
+        world.search_goals("needle")[0],
+        next(goal for goal in world.candidate_goals(False) if goal.id == child),
+        world.subgoals(root)[0],
+    ]
+
+    assert all(goal.owner == "user:human-owner" for goal in selected)
+    assert all(goal.execution_principal == "agent:worker" for goal in selected)
 
 
 def test_list_goals_owner_filter(tmp_path):
@@ -228,5 +313,6 @@ def test_migration_adds_owner_to_a_v10_db(tmp_path):
     assert w.schema_version == SCHEMA_VERSION
     legacy = w.get_goal(1)
     assert legacy is not None and legacy.owner == ""   # migrated default
+    assert legacy.execution_principal == ""
     gid = w.create_goal("new", owner="user:x")
     assert w.get_goal(gid).owner == "user:x"

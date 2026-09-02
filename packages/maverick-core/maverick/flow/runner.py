@@ -622,6 +622,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     result: Any = None
     outcome: float | None = None
     last_exc: Exception | None = None
+    explicit_indeterminate = False
     retries = min(max(0, node.retries), max_node_retries())
     high_risk_action = False
     ambiguous_agent = node.kind == NODE_AGENT
@@ -651,6 +652,17 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
             continue
+        if node.kind == NODE_ACTION and outcome == 0.0:
+            from ..tool_results import ToolResultState, classify_tool_result
+
+            explicit_indeterminate = (
+                classify_tool_result(result) is ToolResultState.INDETERMINATE
+            )
+            if explicit_indeterminate:
+                # The executor says an effect may already have happened. Retrying
+                # because its evidence/acknowledgement was lost duplicates that
+                # effect even when the tool is normally classified retry-safe.
+                break
         if outcome != 0.0:
             break
     # A hard exception that survived every retry stays terminal (records WHERE it
@@ -668,8 +680,13 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             ToolResultState.PREVIEW,
             ToolResultState.REFUSED,
         }
-    if (high_risk_action or ambiguous_agent) and not definitive_no_effect and (
-        last_exc is not None or outcome == 0.0
+    if (
+        explicit_indeterminate
+        or (
+            (high_risk_action or ambiguous_agent)
+            and not definitive_no_effect
+            and (last_exc is not None or outcome == 0.0)
+        )
     ):
         detail = _safe_error_text(
             f"{type(last_exc).__name__}: {last_exc}"
@@ -681,7 +698,13 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         raise _Indeterminate(
             node.id,
             detail[:500],
-            boundary="agent trajectory" if ambiguous_agent else "high-risk action",
+            boundary=(
+                "agent trajectory"
+                if ambiguous_agent
+                else "action evidence"
+                if explicit_indeterminate
+                else "high-risk action"
+            ),
         )
     if last_exc is not None:
         raise last_exc

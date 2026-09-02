@@ -2232,7 +2232,11 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
         sys.exit(2)
     world = open_world(ctx.obj["db"])
     try:
-        goal_id = world.create_goal(prompt)
+        goal_id = world.create_goal(
+            prompt,
+            owner=f.owner,
+            execution_principal=principal,
+        )
     finally:
         world.close()
     record_run(fleet_name, agent.name, goal_id)
@@ -2784,8 +2788,13 @@ def tenant() -> None:
 @click.argument("tenant_id")
 @click.option("--plan", default="free", help="Plan name (free/pro/enterprise/...).")
 @click.option("--name", "display_name", default="", help="Human display name.")
-@click.option("--max-daily-dollars", type=float, default=0.0,
-              help="Per-tenant daily spend cap (USD); 0 = unlimited.")
+@click.option(
+    "--max-daily-dollars",
+    type=float,
+    default=5.0,
+    show_default=True,
+    help="Per-tenant daily spend cap (USD); explicitly pass 0 for unlimited.",
+)
 def tenant_create(tenant_id: str, plan: str, display_name: str,
                   max_daily_dollars: float) -> None:
     """Provision a tenant + its isolated workspace."""

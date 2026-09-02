@@ -44,6 +44,28 @@ def test_upload_list_download_roundtrip(monkeypatch, tmp_path):
     assert dl.headers["x-content-type-options"] == "nosniff"
 
 
+def test_download_unicode_filename_uses_rfc5987_header(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    from maverick_dashboard import app as app_mod
+
+    gid = app_mod._world().create_goal("unicode file", "")
+    uploaded = c.post(
+        f"/api/v1/goals/{gid}/attachments",
+        files={"file": ("資料.txt", io.BytesIO(b"evidence"), "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    downloaded = c.get(
+        f"/api/v1/goals/{gid}/attachments/{uploaded.json()['id']}/download"
+    )
+
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"evidence"
+    disposition = downloaded.headers["content-disposition"]
+    assert "filename*=UTF-8''%E8%B3%87%E6%96%99.txt" in disposition
+
+
 def test_download_streams_file_without_reading_all_bytes(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()

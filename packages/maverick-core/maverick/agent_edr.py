@@ -2,7 +2,7 @@
 
 Lightwork already carries most of an agent-runtime defense stack -- the shield's
 chokepoints, capability attenuation and revocation, honeytokens and canaries,
-compartment seals, the SSRF guards, `threat_hunt` over the signed audit trail.
+compartment seals, the SSRF guards, `threat_hunt` over the audit trail.
 What it does not carry is a *plane*: one surface where a security operator sees
 every detection in one shape, contains a compromised agent in one act, and gets
 a forensic record they can hand to an insurer. Today those live in six modules
@@ -10,8 +10,8 @@ with six vocabularies, which is fine for the kernel and useless for an analyst.
 
 This module is that surface, and it is deliberately thin -- it composes the
 existing enforcement rather than re-implementing any of it. Detection reads the
-signed audit chain, so a detection is only ever a claim about a row somebody
-already signed.
+audit chain and reports signed versus unsigned evidence explicitly, so a row is
+never called tamper-evident merely because the signing library is installed.
 
 Three rules, all the same rule from a different angle:
 
@@ -46,6 +46,7 @@ import logging
 import math
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -114,7 +115,11 @@ _MAX_DETAIL = 300
 
 @dataclass(frozen=True)
 class Detection:
-    """One security event, normalized. Always backed by a signed audit row."""
+    """One normalized security event backed by an audit row.
+
+    Signature completeness belongs to :class:`Scan`; an individual detection
+    does not imply that its source row was signed.
+    """
 
     ts: float
     kind: str
@@ -179,6 +184,8 @@ class Containment:
     revoked: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    audit_written: bool | None = None
+    superseded: bool = False
 
     @property
     def contained(self) -> bool:
@@ -190,7 +197,8 @@ class Containment:
             "contained": self.contained, "sealed": self.sealed,
             "seal_is_durable": self.seal_is_durable,
             "revoked": list(self.revoked), "failed": list(self.failed),
-            "notes": list(self.notes),
+            "notes": list(self.notes), "audit_written": self.audit_written,
+            "superseded": self.superseded,
         }
 
 
@@ -345,7 +353,7 @@ class Scan:
 def scan(*, since: float | None = None, subject: str = "",
          min_severity: str = LOW, limit: int = _MAX_DETECTIONS,
          audit_dir: Path | str | None = None) -> Scan:
-    """Sweep the signed chain for security detections, newest first.
+    """Sweep the audit chain for security detections, newest first.
 
     Reads only; this never re-runs enforcement. A row that cannot be parsed is
     skipped rather than guessed at -- an unreadable row is not evidence of an
@@ -447,9 +455,17 @@ def summary(found: list[Detection]) -> dict:
 
 # ---- respond ----------------------------------------------------------------
 
-def contain(subject: str, *, reason: str, registry: Any | None = None,
-            edges: dict[str, Any] | None = None, seal: bool = True,
-            revoke: bool = True, now: float | None = None) -> Containment:
+def contain(
+    subject: str,
+    *,
+    reason: str,
+    registry: Any | None = None,
+    edges: dict[str, Any] | None = None,
+    seal: bool = True,
+    revoke: bool = True,
+    now: float | None = None,
+    durable_apply: Callable[[], bool | None] | None = None,
+) -> Containment:
     """Contain ``subject``: seal it mid-run and revoke its capability subtree.
 
     ``registry`` is a :class:`maverick.quarantine.QuarantineRegistry` -- the
@@ -474,38 +490,54 @@ def contain(subject: str, *, reason: str, registry: Any | None = None,
         result.failed.append("no containment action requested")
         return result
 
-    if seal:
-        if registry is None:
-            # Not a failure of containment, but not containment either. Said
-            # plainly so nobody reads "revoked" as "this agent stopped running".
-            result.notes.append(
-                "no live quarantine registry supplied: the running swarm was "
-                "not sealed, only future authority was revoked")
-        else:
-            try:
-                registry.seal(subject, reason)
-                result.sealed = bool(registry.is_sealed(subject))
-                if not result.sealed:
-                    result.failed.append("seal did not take effect")
-                # Run-scoped by design: QuarantineRegistry keeps seals in
-                # memory for the swarm that owns it.
-                result.seal_is_durable = False
+    def _apply_dependents() -> None:
+        if seal:
+            if registry is None:
+                # Not a failure of containment, but not containment either. Said
+                # plainly so nobody reads "revoked" as "this agent stopped running".
                 result.notes.append(
-                    "the compartment seal is run-scoped and ends with the "
-                    "process; the revocation below is what persists")
+                    "no live quarantine registry supplied: the running swarm was "
+                    "not sealed, only future authority was revoked")
+            else:
+                try:
+                    registry.seal(subject, reason)
+                    result.sealed = bool(registry.is_sealed(subject))
+                    if not result.sealed:
+                        result.failed.append("seal did not take effect")
+                    # Run-scoped by design: QuarantineRegistry keeps seals in
+                    # memory for the swarm that owns it.
+                    result.seal_is_durable = False
+                    result.notes.append(
+                        "the compartment seal is run-scoped and ends with the "
+                        "process; the durable revocation remains the enforcement floor")
+                except Exception as e:
+                    result.failed.append(f"seal failed: {e}")
+        if not result.failed and durable_apply is not None:
+            try:
+                if durable_apply() is False:
+                    result.failed.append("dependent containment did not take effect")
             except Exception as e:
-                result.failed.append(f"seal failed: {e}")
+                result.failed.append(f"dependent containment failed: {e}")
 
+    # Publish the durable generation before touching dependent run-scoped
+    # state, then apply every dependent projection before releasing the same
+    # strict writer authority. Release therefore cannot delete the generation
+    # between publication and the live/trust/gateway containment writes.
     if revoke:
         try:
             from .revocation import shared
             registry_r = shared()
             if edges:
                 order = registry_r.revoke_subtree(
-                    subject, edges, reason=reason, now=now)
+                    subject, edges, reason=reason, now=now, protected=True,
+                    durable_apply=_apply_dependents,
+                )
                 result.revoked = list(order)
             else:
-                registry_r.revoke(subject, reason=reason, now=now)
+                registry_r.revoke(
+                    subject, reason=reason, now=now, protected=True,
+                    durable_apply=_apply_dependents,
+                )
                 result.revoked = [subject]
             # Confirm rather than assume: a write that silently did not land
             # would otherwise be reported as containment.
@@ -515,43 +547,122 @@ def contain(subject: str, *, reason: str, registry: Any | None = None,
                     f"revocation did not take effect for {', '.join(missed)}")
         except Exception as e:
             result.failed.append(f"revoke failed: {e}")
+    else:
+        _apply_dependents()
 
     _audit_containment(result, now=now)
     return result
 
 
 def _audit_containment(result: Containment, *, now: float | None = None) -> None:
-    """Write the response to the signed chain. Best-effort; never blocks."""
+    """Attempt an audit row and report whether it was written.
+
+    Audit signing depends on deployment policy; this helper deliberately makes
+    no claim that a successful write was signed.
+    """
+    from .audit.errors import AuditRefused
+
     try:
-        from .audit import record
-        record("agent_edr_containment", agent="agent_edr",
-               subject=result.subject, reason=result.reason[:200],
-               contained=result.contained, sealed=result.sealed,
-               seal_is_durable=result.seal_is_durable,
-               revoked=len(result.revoked), failed=len(result.failed))
-    except Exception:  # pragma: no cover -- audit is best-effort
+        from .audit import audit_event
+        result.audit_written = audit_event(
+            "agent_edr_containment", agent="agent_edr",
+            subject=result.subject, reason=result.reason[:200],
+            contained=result.contained, sealed=result.sealed,
+            seal_is_durable=result.seal_is_durable,
+            revoked=len(result.revoked), failed=len(result.failed),
+        )
+        if not result.audit_written:
+            result.notes.append("containment audit row was not written")
+    except AuditRefused:
+        result.audit_written = False
+        raise
+    except Exception:  # pragma: no cover -- defensive helper boundary
+        result.audit_written = False
         log.debug("agent_edr: containment audit failed", exc_info=True)
 
 
-def release(subject: str, *, registry: Any | None = None,
-            unrevoke: bool = True) -> Containment:
-    """Undo a containment. Reports what it actually managed to reverse."""
+def release(
+    subject: str,
+    *,
+    registry: Any | None = None,
+    unrevoke: bool = True,
+    durable_clear: Callable[[], None] | None = None,
+) -> Containment:
+    """Undo one observed containment generation.
+
+    The live seal and any caller-supplied dependent-store clear run while the
+    durable revocation authority still holds its strict writer lock. A newer
+    containment generation therefore wins without any stale release callback
+    reopening its dependent authority.
+    """
     result = Containment(subject=subject, reason="released")
-    if registry is None and not unrevoke:
+    if registry is None and durable_clear is None and not unrevoke:
         result.failed.append("no release action requested")
         return result
-    if registry is not None:
-        try:
+
+    def _clear_dependents() -> None:
+        was_sealed = False
+        if registry is not None:
+            was_sealed = bool(registry.is_sealed(subject))
             registry.unseal_agent(subject)
-        except Exception as e:
-            result.failed.append(f"unseal failed: {e}")
+        try:
+            if durable_clear is not None:
+                durable_clear()
+        except Exception:
+            # The durable generation will be retained by ``unrevoke``. Restore
+            # a live seal that this callback removed so a dependent trust or
+            # gateway failure cannot reopen the running compartment.
+            if registry is not None and was_sealed:
+                try:
+                    registry.seal(
+                        subject,
+                        "release failed; durable security containment retained",
+                    )
+                    if not registry.is_sealed(subject):
+                        result.notes.append(
+                            "failed to restore the restrictive live compartment seal"
+                        )
+                except Exception:
+                    result.notes.append(
+                        "live compartment seal restoration was unavailable; durable "
+                        "capability containment remains in place"
+                    )
+            raise
+
     if unrevoke:
         try:
-            from .revocation import shared
-            if not shared().unrevoke(subject):
+            from .revocation import RevocationGenerationMismatch, shared
+
+            registry_r = shared()
+            observed = registry_r.revoked().get(subject)
+            if observed is None:
                 result.notes.append("principal was not revoked")
+                if registry is not None or durable_clear is not None:
+                    result.failed.append(
+                        "no protected containment generation; dependent authorities retained"
+                    )
+            else:
+                # This function is the explicit security release authority.
+                # Ordinary resume/capability-unrevoke calls do not receive this
+                # override or the observed generation.
+                registry_r.unrevoke(
+                    subject,
+                    allow_protected=True,
+                    expected_generation=observed.generation,
+                    durable_clear=_clear_dependents,
+                )
+        except RevocationGenerationMismatch:
+            result.superseded = True
+            result.failed.append(
+                "a newer security containment superseded this release and was retained"
+            )
         except Exception as e:
             result.failed.append(f"unrevoke failed: {e}")
+    else:
+        try:
+            _clear_dependents()
+        except Exception as e:
+            result.failed.append(f"dependent release failed: {e}")
     _audit_containment(result)
     return result
 
@@ -635,7 +746,7 @@ def render_report(report: dict) -> str:
         lines.append(f"  {when}  [{d.get('severity', '?'):8}] "
                      f"{d.get('kind', '?'):18} {d.get('detail', '')}")
     if not report.get("detections"):
-        lines.append("  (no detections in the attested window)")
+        lines.append("  (no detections in the reviewed window)")
     lines.append("=" * width)
     return "\n".join(lines)
 

@@ -54,6 +54,7 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     assert 'id="nca-device-rotate-form"' in body
     assert 'id="nca-device-revoke-form"' in body
     assert 'id="nca-integrity" type="button"' in body
+    assert f'id="nca-public-key-link" href="{page.PUBLIC_KEYS_BASE}"' in body
     assert '<fieldset disabled>' in body
     assert "tenant_id" not in body
     assert "principal_ref" not in body

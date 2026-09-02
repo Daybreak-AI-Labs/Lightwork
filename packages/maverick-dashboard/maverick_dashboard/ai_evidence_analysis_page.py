@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .auth import has_permission, require_permission
+from .auth import has_global_permission, has_permission, require_permission
 
 _HEADERS = {
     "Cache-Control": "no-store, private, max-age=0",
@@ -65,6 +65,8 @@ def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRo
         ):
             raise HTTPException(status_code=404, detail="workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
+        from .api import module_activation_enabled
+
         response = templates.TemplateResponse(
             request,
             "ai_evidence_analysis.html",
@@ -74,6 +76,10 @@ def create_ai_evidence_analysis_page_router(templates: Jinja2Templates) -> APIRo
                 "evidence_can_operate": has_permission(request, "operate"),
                 "evidence_can_audit": has_permission(request, "audit"),
                 "evidence_can_admin": has_permission(request, "admin"),
+                "evidence_can_activate": has_global_permission(request, "admin"),
+                "evidence_module_enabled": module_activation_enabled(
+                    "ai_evidence_analysis"
+                ),
             },
         )
         for name, value in _HEADERS.items():

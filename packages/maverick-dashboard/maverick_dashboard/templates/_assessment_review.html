@@ -207,11 +207,13 @@
         const t = data.trend || [];
         if (t.length < 2) return;
         const arrow = data.direction === 'up' ? '▲ risk rising'
-          : data.direction === 'down' ? '▼ risk falling' : '▬ risk steady';
+          : data.direction === 'down' ? '▼ risk falling'
+          : data.direction === 'unknown' ? '? review order unknown' : '▬ risk steady';
         const cls = data.direction === 'up' ? 'blocked'
           : data.direction === 'down' ? 'done' : 'warn';
         const p = el('p', null);
         p.appendChild(el('span', 'badge ' + cls, arrow));
+        if (data.direction_reason) p.title = data.direction_reason;
         p.appendChild(el('span', 'muted', ' · ' +
           t.map(function (x) { return x.residual_risk; }).join(' → ') +
           ' (' + t.length + ' reviews)'));

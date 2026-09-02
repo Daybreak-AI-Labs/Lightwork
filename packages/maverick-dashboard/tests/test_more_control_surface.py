@@ -9,6 +9,8 @@ capabilities-seat gaps.
 """
 from __future__ import annotations
 
+import datetime as dt
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -158,6 +160,46 @@ def test_audit_grep_finds_matching_events(monkeypatch, tmp_path):
     events = r.json()["events"]
     assert len(events) == 1
     assert events[0]["name"] == "shell"
+
+
+def test_audit_grep_scans_complete_day_and_reports_result_cap(monkeypatch, tmp_path):
+    """A match outside the old 1,000-row tail remains discoverable, while a
+    capped response says exactly how much evidence was scanned and omitted."""
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    import maverick.audit.writer as writer
+    from maverick.audit.writer import AuditLog
+
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    day = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    rows = []
+    for index in range(1_205):
+        rows.append(
+            {
+                "v": 1,
+                "ts": float(index),
+                "kind": "tool_result",
+                "agent": "qa",
+                "goal_id": None,
+                "detail": "complete-day-needle" if index < 205 else "other",
+            }
+        )
+    (audit_dir / f"{day}.ndjson").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    writer._default = AuditLog(audit_dir=audit_dir, sign=False)
+
+    response = _client().get("/api/v1/audit/grep?pattern=complete-day-needle")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["scanned"] == 1_205
+    # 204 seeded rows plus the instrumented request whose URL carries the
+    # literal query pattern.
+    assert body["total_matches"] == 205
+    assert body["returned"] == 200
+    assert body["truncated"] is True
+    assert body["scan_complete"] is True
+    assert body["scope"] == {"day": day}
 
 
 # ---------- goal resume ----------

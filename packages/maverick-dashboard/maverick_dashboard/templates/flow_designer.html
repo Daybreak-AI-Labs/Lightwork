@@ -64,6 +64,8 @@
   /* node cards (SVG) */
   .fd-node rect.card { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; rx: 10; }
   .fd-node.selected rect.card { stroke: var(--accent); stroke-width: 2.5; }
+  .fd-node:focus { outline: none; }
+  .fd-node:focus-visible rect.card { stroke: var(--ring); stroke-width: 3; }
   .fd-node.start rect.card { stroke: var(--success, #16a34a); }
   .fd-node text { font: 12px var(--font-sans, sans-serif); fill: var(--text); pointer-events: none; }
   .fd-node text.kind { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
@@ -280,7 +282,9 @@
         <button class="btn btn--primary" type="submit">Send</button>
       </form>
     </div>
-    <svg id="fd-canvas" role="application" aria-label="Flow canvas" data-flow-id="{{ flow_id or '' }}">
+    <p class="sr-only" id="fd-canvas-help">Use Tab to reach a flow step, Enter or Space to select it, and the arrow keys to move it. Select the next step in the properties panel to connect steps. When the canvas itself has focus, arrow keys pan and plus or minus zoom.</p>
+    <svg id="fd-canvas" role="application" tabindex="0" aria-label="Flow canvas"
+         aria-describedby="fd-canvas-help" data-flow-id="{{ flow_id or '' }}">
       <defs>
         <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
@@ -297,7 +301,7 @@
   </div>
 
   <div class="fd__props" id="fd-props">
-    <p class="fd__empty">Select a node to edit it, or add a step from the palette. Connect steps by dragging from a node's bottom dot to another node.</p>
+    <p class="fd__empty">Select a node to edit it, or add a step from the palette. Connect steps by dragging from a node's bottom dot or by choosing its next step here.</p>
   </div>
 
   <!-- Friendly "Steps" view: a readable overview of the flow's steps, rendered

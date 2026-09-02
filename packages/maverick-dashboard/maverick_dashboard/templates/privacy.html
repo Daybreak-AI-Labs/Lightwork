@@ -1169,17 +1169,35 @@
 
       var noticeBtn = document.getElementById('pe-notice-publish');
       if (noticeBtn) {
-        noticeBtn.addEventListener('click', function () {
+        noticeBtn.addEventListener('click', async function () {
+          if (noticeBtn.dataset.inFlight === 'true') return;
+          noticeBtn.dataset.inFlight = 'true';
           var msg = document.getElementById('pe-notice-msg');
           var version = (document.getElementById('pe-notice-version').value || '').trim();
           var text = (document.getElementById('pe-notice-text').value || '').trim();
-          if (!version || !text) { msg.textContent = 'Version and text are both needed.'; return; }
-          noticeBtn.disabled = true; msg.textContent = 'Publishing…';
+          if (!version || !text) {
+            msg.textContent = 'Version and text are both needed.';
+            delete noticeBtn.dataset.inFlight;
+            return;
+          }
+          if (!(await mvConfirm(
+            'Publish privacy notice version “' + version + '” for this tenant? It becomes the governed notice shown to consent users.',
+            { okText: 'Publish notice' }
+          ))) { delete noticeBtn.dataset.inFlight; return; }
+          noticeBtn.disabled = true;
+          noticeBtn.setAttribute('aria-busy', 'true');
+          msg.textContent = 'Publishing…';
           post('/api/v1/consent/notices', { version: version, text: text })
             .then(function () { location.reload(); })
             .catch(function (e) {
+              msg.textContent = e && e.name === 'TypeError'
+                ? 'Could not reach the server — check your connection and try again.'
+                : String(e.message || e);
+            })
+            .finally(function () {
+              delete noticeBtn.dataset.inFlight;
+              noticeBtn.removeAttribute('aria-busy');
               noticeBtn.disabled = false;
-              msg.textContent = String(e.message || e);
             });
         });
       }
@@ -1676,8 +1694,14 @@
                                rationale: rat.value.trim() })
       }).then(function (r) {
         if (r.ok) { location.reload(); return; }
+        return r.json().catch(function () { return {}; }).then(function (body) {
+          throw new Error(body.detail || ('Could not record the decision (' + r.status + ').'));
+        });
+      }).catch(function (error) {
+        // Keep the rationale in place so a transient rejection never destroys
+        // the human's Art. 33(5) decision draft.
         btn.disabled = false;
-        window.alert('HTTP ' + r.status);
+        window.alert(error.message || 'Could not record the decision — check your connection.');
       });
     });
   });

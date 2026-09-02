@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+from types import SimpleNamespace
 
 import pytest
 from maverick import regulatory_compiler as rc
@@ -66,9 +67,15 @@ def test_deny_wins_over_require_human_for_the_same_action(monkeypatch):
 
 def test_audit_tags_trace_a_verdict_back_to_its_obligation(monkeypatch):
     _activate(monkeypatch, ["gdpr"])
-    assert rc.audit_tags("email", "require_human_actions") == {
+    tags = rc.audit_tags("email", "require_human_actions")
+    assert {key: tags[key] for key in ("obligation_id", "regulation", "article")} == {
         "obligation_id": "gdpr-art32-outbound-transfer",
         "regulation": "GDPR", "article": "Art. 32"}
+    assert tags["obligations_enforced"] == [{
+        "obligation_id": "gdpr-art32-outbound-transfer",
+        "regulation": "GDPR", "article": "Art. 32"}, {
+        "obligation_id": "gdpr-art22-automated-decision",
+        "regulation": "GDPR", "article": "Art. 22"}]
     # A floor-level obligation tags a floor-level rule.
     assert rc.audit_tags("shell", "require_human_min_risk")["obligation_id"] \
         == "gdpr-art22-automated-decision"
@@ -95,8 +102,62 @@ def test_nothing_active_means_rows_are_untouched(monkeypatch):
 
 def test_tagging_never_raises(monkeypatch):
     monkeypatch.setattr(rc, "_active", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert rc.audit_tags("email", "deny_actions") == {}
-    assert rc.checked_tags("email") == {}
+    assert "obligation_evidence_error" in rc.audit_tags("email", "deny_actions")
+    assert "obligation_evidence_error" in rc.checked_tags("email")
+
+
+def test_explicitly_unavailable_verdict_snapshot_never_reloads_active_profiles(
+    monkeypatch,
+):
+    _activate(monkeypatch, ["gdpr"])
+    assert "obligation_evidence_error" in rc.audit_tags(
+        "email",
+        "require_human_actions",
+        keys=None,
+    )
+    assert "obligation_evidence_error" in rc.checked_tags("email", keys=None)
+
+
+def test_denial_evidence_retains_all_applicable_citations_deterministically(monkeypatch):
+    _activate(monkeypatch, ["eu_ai_act", "gdpr"])
+    tags = rc.audit_tags("shell", "require_human_min_risk")
+    assert [item["obligation_id"] for item in tags["obligations_enforced"]] == [
+        "eu-aia-art14-human-oversight",
+        "gdpr-art22-automated-decision",
+    ]
+    assert tags["obligations_enforced_count"] == 2
+    assert tags["obligation_id"] == "eu-aia-art14-human-oversight"
+
+
+def test_denial_evidence_is_bounded_and_reports_truncation():
+    obligations = tuple(
+        rc.Obligation(
+            f"test-{index:02d}",
+            "Test",
+            str(index),
+            "bounded evidence",
+            rc.EFFECT_DENY,
+            actions=frozenset({"email"}),
+        )
+        for index in range(20)
+    )
+    tags = rc.audit_tags_under("email", "deny_actions", obligations)
+    assert len(tags["obligations_enforced"]) == 16
+    assert tags["obligations_enforced_count"] == 20
+    assert tags["obligations_enforced_truncated"] is True
+    assert [item["obligation_id"] for item in tags["obligations_enforced"]] == [
+        f"test-{index:02d}" for index in range(16)
+    ]
+
+
+def test_evidence_can_use_the_exact_verdict_profile_snapshot(monkeypatch):
+    _activate(monkeypatch, ["gdpr"])
+    tags = rc.audit_tags(
+        "shell", "require_human_min_risk", keys=("eu_ai_act",)
+    )
+    assert [item["obligation_id"] for item in tags["obligations_enforced"]] == [
+        "eu-aia-art14-human-oversight"
+    ]
 
 
 # ---- attenuation: never widens ----------------------------------------------
@@ -172,7 +233,7 @@ def test_main_exit_codes(monkeypatch, capsys):
     # Nothing active and nothing requested: a gate that inspected nothing.
     _activate(monkeypatch, [])
     assert rc.main(["--ci"]) == 2
-    assert rc.main([]) == 0
+    assert rc.main([]) == 2
     bad = rc.Obligation("t-bad", "T", "1", "", rc.EFFECT_DENY,
                         actions=frozenset({"tool_that_does_not_exist"}))
     monkeypatch.setitem(rc.REGULATIONS, "t", (bad,))
@@ -193,7 +254,7 @@ def test_the_profiles_expose_the_compiled_policies():
 
 def test_configured_profiles_reach_the_live_policy(monkeypatch):
     import maverick.compliance_profiles as cpmod
-    monkeypatch.setattr(cpmod, "configured_profiles", lambda: ["gdpr"])
+    monkeypatch.setattr(cpmod, "configured_profiles", lambda *_a, **_k: ["gdpr"])
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr("maverick.config.config_source_errors", dict)
     pol = Policy.from_config()
@@ -201,10 +262,32 @@ def test_configured_profiles_reach_the_live_policy(monkeypatch):
 
 
 def test_active_keys_reads_config_and_env(monkeypatch):
-    import maverick.compliance_profiles as cpmod
-    monkeypatch.setattr(cpmod, "configured_profiles", lambda: ["gdpr", "bogus"])
+    import maverick.config as config_mod
+
+    monkeypatch.setattr(config_mod, "load_config", lambda: {
+        "compliance": {"profiles": ["gdpr"]}
+    })
+    monkeypatch.setattr(config_mod, "config_source_errors", dict)
     monkeypatch.setenv("MAVERICK_COMPLIANCE_PROFILES", "hipaa, eu_ai_act")
     assert rc.active_keys() == ["gdpr", "hipaa", "eu_ai_act"]
+
+
+def test_environment_only_activation_reaches_every_live_enforcement_path(monkeypatch):
+    import maverick.config as config_mod
+    from maverick.capability import capability_from_config
+    from maverick.compliance_profiles import FLOOR_EGRESS_LOCK, requires_floor
+
+    monkeypatch.setattr(config_mod, "load_config", dict)
+    monkeypatch.setattr(config_mod, "config_source_errors", dict)
+    monkeypatch.setenv("MAVERICK_COMPLIANCE_PROFILES", "gdpr,hipaa")
+
+    policy = Policy.from_config()
+    assert policy.compliance_profiles == ("gdpr", "hipaa")
+    assert evaluate("email", policy=policy).decision == Decision.REQUIRE_HUMAN
+    assert not capability_from_config("user:local").permits("email")
+    assert requires_floor(FLOOR_EGRESS_LOCK)
+    assert "gdpr-art32-outbound-transfer" in rc.obligations_checked("email")
+    assert "hipaa-164-502b-minimum-necessary" in rc.obligations_checked("email")
 
 
 # ---- the chokepoint ---------------------------------------------------------
@@ -233,15 +316,22 @@ def _agent(tmp_path):
     return agent
 
 
-def _gov(monkeypatch, policy: dict):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {"governance": policy})
-    monkeypatch.setattr("maverick.config.config_source_errors", dict)
+def _gov(monkeypatch, policy: Policy):
+    monkeypatch.setattr(
+        Policy,
+        "from_config",
+        classmethod(lambda cls: policy),
+    )
 
 
 def _capture(monkeypatch):
     import maverick.audit as audit
     seen: list[tuple[str, dict]] = []
-    monkeypatch.setattr(audit, "record", lambda kind, **kw: seen.append((kind, kw)))
+    monkeypatch.setattr(
+        audit,
+        "record",
+        lambda kind, **kw: seen.append((kind, kw)) or True,
+    )
     return seen
 
 
@@ -250,8 +340,13 @@ async def test_a_denial_at_the_chokepoint_names_the_obligation(monkeypatch, tmp_
     deny = rc.Obligation("t-deny-ping", "Test Reg", "s. 1", "", rc.EFFECT_DENY,
                          actions=frozenset({"ping"}))
     monkeypatch.setitem(rc.REGULATIONS, "t", (deny,))
-    _activate(monkeypatch, ["t"])
-    _gov(monkeypatch, {"deny_actions": ["ping"]})
+    # The active resolver has changed by evidence time. The denial must retain
+    # the profile snapshot that actually produced the verdict.
+    _activate(monkeypatch, [])
+    _gov(monkeypatch, Policy(
+        deny_actions=frozenset({"ping"}),
+        compliance_profiles=("t",),
+    ))
     seen = _capture(monkeypatch)
     out = await _agent(tmp_path)._run_tool("ping", {})
     assert "DENIED" in out
@@ -266,8 +361,10 @@ async def test_a_call_that_ran_records_the_obligations_it_was_checked_against(
     floor = rc.Obligation("t-floor", "Test Reg", "s. 2", "", rc.EFFECT_REQUIRE_HUMAN,
                           min_risk="low")
     monkeypatch.setitem(rc.REGULATIONS, "t", (floor,))
-    _activate(monkeypatch, ["t"])
-    _gov(monkeypatch, {})
+    _activate(monkeypatch, [])
+    # A profile may enforce only through capability attenuation, so provenance
+    # is retained even when its governance Policy is otherwise empty.
+    _gov(monkeypatch, Policy(compliance_profiles=("t",)))
     seen = _capture(monkeypatch)
     out = await _agent(tmp_path)._run_tool("ping", {})
     assert "pong" in out
@@ -277,8 +374,13 @@ async def test_a_call_that_ran_records_the_obligations_it_was_checked_against(
 
 @pytest.mark.asyncio
 async def test_no_obligations_leaves_the_rows_exactly_as_before(monkeypatch, tmp_path):
-    _activate(monkeypatch, [])
-    _gov(monkeypatch, {})
+    floor = rc.Obligation("t-floor", "Test Reg", "s. 2", "", rc.EFFECT_REQUIRE_HUMAN,
+                          min_risk="low")
+    monkeypatch.setitem(rc.REGULATIONS, "t", (floor,))
+    # A later activation must not relabel an already evaluated, trusted-empty
+    # policy snapshot.
+    _activate(monkeypatch, ["t"])
+    _gov(monkeypatch, Policy())
     seen = _capture(monkeypatch)
     await _agent(tmp_path)._run_tool("ping", {})
     row = next(kw for kind, kw in seen if kind == "tool_call")
@@ -289,8 +391,11 @@ def test_flow_dispatch_denials_are_tagged_too(monkeypatch):
     deny = rc.Obligation("t-deny-ping", "Test Reg", "s. 1", "", rc.EFFECT_DENY,
                          actions=frozenset({"ping"}))
     monkeypatch.setitem(rc.REGULATIONS, "t", (deny,))
-    _activate(monkeypatch, ["t"])
-    _gov(monkeypatch, {"deny_actions": ["ping"]})
+    _activate(monkeypatch, [])
+    _gov(monkeypatch, Policy(
+        deny_actions=frozenset({"ping"}),
+        compliance_profiles=("t",),
+    ))
     # The flow gate classifies and shield-scans before governance; clear both
     # so the test isolates the obligation tag on the governance denial.
     monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
@@ -301,3 +406,113 @@ def test_flow_dispatch_denials_are_tagged_too(monkeypatch):
     assert err and "DENIED" in err
     row = next(kw for kind, kw in seen if kind == "governance_denied")
     assert row["obligation_id"] == "t-deny-ping"
+
+
+def test_flow_dispatch_success_uses_the_evaluated_profile_snapshot(monkeypatch):
+    floor = rc.Obligation(
+        "t-floor",
+        "Test Reg",
+        "s. 2",
+        "",
+        rc.EFFECT_REQUIRE_HUMAN,
+        min_risk="low",
+    )
+    monkeypatch.setitem(rc.REGULATIONS, "t", (floor,))
+    _activate(monkeypatch, [])
+    _gov(monkeypatch, Policy(compliance_profiles=("t",)))
+    monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
+    monkeypatch.setattr("maverick.shield_policy.scan_block", lambda text: None)
+    seen = _capture(monkeypatch)
+
+    from maverick.tool_authz import authorize
+
+    assert authorize("ping", {}, origin="flow") is None
+    row = next(kw for kind, kw in seen if kind == "tool_call")
+    assert row["obligations_checked"] == ["t-floor"]
+
+
+@pytest.mark.asyncio
+async def test_autonomy_replacement_preserves_governance_profile_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    marker = rc.Obligation(
+        "t-marker",
+        "Test Reg",
+        "s. 3",
+        "",
+        rc.EFFECT_DENY,
+        actions=frozenset({"ping"}),
+    )
+    monkeypatch.setitem(rc.REGULATIONS, "t", (marker,))
+    _activate(monkeypatch, [])
+    _gov(monkeypatch, Policy(
+        deny_actions=frozenset({"other"}),
+        compliance_profiles=("t",),
+    ))
+    monkeypatch.setattr("maverick.agent_autonomy.levels_enabled", lambda: True)
+    monkeypatch.setattr(
+        "maverick.agent_autonomy.decide",
+        lambda *args, **kwargs: SimpleNamespace(
+            decision="deny",
+            reason="restricted rung",
+            level=SimpleNamespace(value="restricted"),
+        ),
+    )
+    observed = []
+    real_tags = rc.audit_tags
+
+    def _tags(action, rule, *, keys=None):
+        observed.append(keys)
+        return real_tags(action, rule, keys=keys)
+
+    monkeypatch.setattr(rc, "audit_tags", _tags)
+    _capture(monkeypatch)
+
+    refusal, profiles = await _agent(tmp_path)._governance_denial("ping", {}, None)
+
+    assert refusal and "autonomy" in refusal
+    assert profiles == ("t",)
+    assert observed == [("t",)]
+
+
+@pytest.mark.asyncio
+async def test_governance_known_empty_profile_snapshot_returns_empty_tuple(
+    monkeypatch,
+    tmp_path,
+):
+    _gov(monkeypatch, Policy())
+    monkeypatch.setattr("maverick.agent_autonomy.levels_enabled", lambda: False)
+
+    refusal, profiles = await _agent(tmp_path)._governance_denial("ping", {}, None)
+
+    assert refusal is None
+    assert profiles == ()
+
+
+@pytest.mark.asyncio
+async def test_governance_policy_outage_returns_unavailable_profile_provenance(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(
+        Policy,
+        "from_config",
+        classmethod(
+            lambda cls: (_ for _ in ()).throw(RuntimeError("policy unavailable"))
+        ),
+    )
+    monkeypatch.setattr("maverick.agent_autonomy.levels_enabled", lambda: False)
+    observed = []
+    monkeypatch.setattr(
+        rc,
+        "audit_tags",
+        lambda action, rule, *, keys=None: observed.append(keys) or {},
+    )
+    _capture(monkeypatch)
+
+    refusal, profiles = await _agent(tmp_path)._governance_denial("ping", {}, None)
+
+    assert refusal and "DENIED" in refusal
+    assert profiles is None
+    assert observed == [None]

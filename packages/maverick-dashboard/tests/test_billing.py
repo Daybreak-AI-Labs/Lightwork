@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+from maverick.oidc import VerifiedPrincipal
 
 
 @pytest.fixture
@@ -28,8 +29,8 @@ def client(world, monkeypatch):
     return TestClient(app_mod.app, headers={"Origin": "http://testserver"})
 
 
-def _seed(world, cost=0.42):
-    g = world.create_goal("Pay invoices", "seed")
+def _seed(world, cost=0.42, owner=""):
+    g = world.create_goal("Pay invoices", "seed", owner=owner)
     ep = world.start_episode(g)
     world.end_episode(ep, "done", "success", cost_dollars=cost,
                       input_tokens=1000, output_tokens=500, tool_calls=3)
@@ -69,6 +70,41 @@ def test_billing_csv_other_period_is_empty(client, world):
     r = client.get("/billing?format=csv&period=1999-01")
     assert r.status_code == 200
     assert len(r.text.strip().splitlines()) == 1  # header only, no episodes
+
+
+def test_billing_is_owner_scoped_for_authenticated_viewer(client, world, monkeypatch):
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth,
+        "verify_oidc_token",
+        lambda token, **_kw: VerifiedPrincipal(
+            sub=token,
+            issuer="https://issuer.example",
+            audience="maverick",
+            claims={"sub": token},
+        ),
+    )
+    alice_goal = _seed(world, cost=0.42, owner="user:alice")
+    bob_goal = _seed(world, cost=9.99, owner="user:bob")
+    period = datetime.now(timezone.utc).strftime("%Y-%m")
+
+    csv = client.get(
+        f"/billing?format=csv&period={period}",
+        headers={"Authorization": "Bearer alice"},
+    )
+
+    assert csv.status_code == 200
+    assert f",{alice_goal}," in csv.text
+    assert f",{bob_goal}," not in csv.text
+    assert ",0.420000," in csv.text
+    assert ",9.990000," not in csv.text
+
+    statement = client.get("/billing", headers={"Authorization": "Bearer alice"})
+    assert statement.status_code == 200
+    assert "$0.4200" in statement.text
+    assert "$9.9900" not in statement.text
 
 
 def test_billing_linked_from_spend(client):

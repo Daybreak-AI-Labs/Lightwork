@@ -24,13 +24,13 @@
   {% if detail %}
   <div class="tsel__gate" role="alert">
     <strong>This workbench needs a workspace tenant.</strong>
-    <span class="muted">{{ detail }} Pick one below — your selection is saved on this
-      server, and reloading brings you straight back to the page that sent you here.</span>
+    <span class="muted">{{ detail }} Pick one below — your selection is saved for your
+      account, and reloading brings you straight back to the page that sent you here.</span>
   </div>
   {% endif %}
 
   <div class="panel">
-    <h2 style="text-transform:none; letter-spacing:0;">Workspace tenant</h2>
+    <h1 class="page-title" style="text-transform:none; letter-spacing:0;">Workspace tenant</h1>
     <p class="muted" style="max-width: 640px;">
       A tenant is the workspace all tenant-scoped workbenches (consent, privacy
       discovery, third parties, …) read and write — each tenant keeps its own
@@ -59,16 +59,16 @@
           <div class="tsel__row-name">{{ t.name }}</div>
           <div class="tsel__row-meta"><code>{{ t.id }}</code>{% if t.plan %} · {{ t.plan }} plan{% endif %}</div>
         </div>
-        {% if is_admin and t.active and t.id != selected %}
+        {% if can_select and t.active and t.id != selected %}
         <button type="button" class="btn btn--primary tsel-pick" data-tenant="{{ t.id }}">Work in this tenant</button>
-        {% elif is_admin and t.id == selected %}
+        {% elif can_select and t.id == selected %}
         <button type="button" class="btn tsel-clear">Clear selection</button>
         {% endif %}
       </li>
       {% endfor %}
     </ul>
     {% else %}
-    <p class="muted">No tenants exist yet on this server.</p>
+    <p class="muted">{% if membership_filtered %}You do not have access to a workspace tenant yet.{% else %}No tenants exist yet on this server.{% endif %}</p>
     {% if is_admin %}
     <button type="button" class="btn btn--primary" id="tsel-quick">Set up my workspace</button>
     <p class="tsel__note">One click: creates a workspace named <code>local</code> and
@@ -78,9 +78,12 @@
 
     <p class="tsel__err" id="tsel-err" role="alert" aria-live="assertive"></p>
 
-    {% if not is_admin %}
-    <p class="tsel__note">Only an administrator can change the active workspace or create
-      tenants — ask yours to set one here.</p>
+    {% if not can_select %}
+    <p class="tsel__note">Ask a tenant administrator to grant your account access to a
+      workspace. Tenant names and plans stay hidden until you are a member.</p>
+    {% elif not is_admin %}
+    <p class="tsel__note">You can switch among your assigned workspaces. A global tenant
+      administrator creates workspaces and manages membership.</p>
     {% endif %}
   </div>
 
@@ -116,6 +119,12 @@
 (function () {
   'use strict';
   var errBox = document.getElementById('tsel-err');
+  var returnTo = {{ return_to|tojson }};
+
+  function resume() {
+    if (returnTo) location.assign(returnTo);
+    else location.reload();
+  }
 
   function fail(box, e) {
     box.textContent = (e && e.message) || 'Could not reach the server.';
@@ -123,8 +132,8 @@
 
   async function jsonOrDetail(r, fallback) {
     if (r.ok) return r.status === 204 ? {} : r.json().catch(function () { return {}; });
-    if (r.status === 403) {
-      throw new Error('Only an administrator can change the active workspace — ask yours.');
+    if (r.status === 403 || r.status === 404) {
+      throw new Error('You no longer have access to that workspace — ask a tenant administrator.');
     }
     var body = await r.json().catch(function () { return {}; });
     throw new Error(body.detail || (fallback + ' (' + r.status + ').'));
@@ -141,7 +150,7 @@
   document.querySelectorAll('.tsel-pick').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       errBox.textContent = ''; btn.disabled = true;
-      try { await select(btn.getAttribute('data-tenant')); location.reload(); }
+      try { await select(btn.getAttribute('data-tenant')); resume(); }
       catch (e) { fail(errBox, e); btn.disabled = false; }
     });
   });
@@ -163,7 +172,7 @@
       });
       await jsonOrDetail(r, 'Could not create the tenant');
       await select(payload.id);
-      location.reload();
+      resume();
     } catch (e) { fail(box, e); if (btn) btn.disabled = false; }
   }
 

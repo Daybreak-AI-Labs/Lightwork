@@ -4,8 +4,16 @@
 <link rel="stylesheet" href="{{ style_path }}">
 {% endblock %}
 {% block content %}
-<main class="aep-shell" id="assessment-evidence-shell"
-      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}">
+{% from "_module_gate.html" import module_gate %}
+{% if not proposal_module_enabled %}
+{{ module_gate('assessment_evidence_autopopulation', 'Assessment evidence proposals',
+               detail='Activates proposal generation after AI Evidence Analysis is enabled; released evidence, mapping authority and apply controls remain separately checked.',
+               can_activate=proposal_can_admin) }}
+{% endif %}
+<div class="aep-shell" id="assessment-evidence-shell"
+      data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
+      data-module-enabled="{{ 'true' if proposal_module_enabled else 'false' }}"
+      data-can-operate="{{ 'true' if proposal_can_operate else 'false' }}">
   <header class="aep-glass aep-hero">
     <div>
       <p class="eyebrow">Privacy + third-party assessment intelligence</p>
@@ -37,7 +45,7 @@
       <p class="eyebrow">Step 1</p>
       <h2>Generate proposal</h2>
       <form class="aep-form" id="aep-create-form" autocomplete="off" novalidate>
-        <fieldset{% if not proposal_can_operate %} disabled aria-disabled="true"{% endif %}>
+        <fieldset id="aep-create-controls" data-aep-mutation disabled aria-disabled="true">
           <label for="aep-assessment-id">Open assessment ID</label>
           <input class="input" id="aep-assessment-id" name="assessment_id" maxlength="128" required>
           <label for="aep-analysis-ids">Released evidence analysis IDs <span>one per line</span></label>
@@ -53,7 +61,7 @@
       <p class="eyebrow">Step 2</p>
       <h2>Review explicit answer subset</h2>
       <form class="aep-form" id="aep-review-form" autocomplete="off" novalidate>
-        <fieldset{% if not proposal_can_operate %} disabled aria-disabled="true"{% endif %}>
+        <fieldset id="aep-review-controls" data-aep-mutation disabled aria-disabled="true">
           <label for="aep-review-id">Proposal ID</label>
           <input class="input" id="aep-review-id" name="proposal_id" maxlength="128" required>
           <label for="aep-review-revision">Expected proposal revision</label>
@@ -77,7 +85,7 @@
       <p class="eyebrow">Step 3</p>
       <h2>Apply approved answers</h2>
       <form class="aep-form" id="aep-apply-form" autocomplete="off" novalidate>
-        <fieldset{% if not proposal_can_operate %} disabled aria-disabled="true"{% endif %}>
+        <fieldset id="aep-apply-controls" data-aep-mutation disabled aria-disabled="true">
           <label for="aep-apply-id">Approved proposal ID</label>
           <input class="input" id="aep-apply-id" name="proposal_id" maxlength="128" required>
           <div class="aep-row">
@@ -116,6 +124,6 @@
     <div class="aep-panel-head"><div><p class="eyebrow">Review queue</p><h2 id="aep-queue-title">Recent proposals</h2></div><span class="aep-pill" id="aep-queue-count">0</span></div>
     <div class="aep-queue" id="aep-queue"></div>
   </section>
-</main>
+</div>
 <script src="{{ script_path }}" defer></script>
 {% endblock %}

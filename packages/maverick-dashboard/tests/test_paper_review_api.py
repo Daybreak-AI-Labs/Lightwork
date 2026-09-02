@@ -245,6 +245,17 @@ def test_our_paper_draft_downloads_with_red_fills():
                       ).status_code == 400
 
 
+def test_our_paper_unicode_vendor_uses_rfc5987_filename():
+    response = client.get(
+        "/api/v1/privacy/our-paper",
+        params={"vendor": "資料", "instrument": "dpa"},
+    )
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert "filename*=UTF-8''%E8%B3%87%E6%96%99-dpa-our-paper.docx" in disposition
+
+
 def test_renegotiated_draft_reports_which_demands_were_accepted():
     first = _upload().json()
     assert first["gaps"] >= 2

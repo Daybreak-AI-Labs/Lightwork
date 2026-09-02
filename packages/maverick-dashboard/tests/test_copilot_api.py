@@ -43,6 +43,8 @@ def test_provider_free_copilot_returns_bounded_page_guide(
     assert payload["mode"] == "built_in"
     assert payload["page_context"]["path"] == "/privacy/drop"
     assert payload["page_context"]["title"] == "California DROP Requests"
+    assert payload["provider_setup"]["href"] == "/settings#settings-integrations"
+    assert "Settings" in payload["provider_setup"]["label"]
     assert "when role and server composition permit" in payload["reply"].lower()
     assert len(payload["reply"].split()) <= 120
 
@@ -150,6 +152,27 @@ def test_context_endpoint_maps_unregistered_browser_path_to_generic(
     payload = response.json()
     assert payload["path"] == "/"
     assert payload["title"] == "Lightwork"
+
+
+def test_providerless_context_offers_only_an_in_app_setup_route(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: False)
+    response = client.get("/api/v1/copilot/context", params={"page": "/workforce"})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["path"] == "/workforce"
+    assert payload["title"] == "Workforce"
+    assert payload["model_provider_configured"] is False
+    assert payload["provider_setup"] == {
+        "href": "/settings#settings-integrations",
+        "label": "Configure a model provider in Settings",
+    }
+    assert "maverick" not in str(payload["provider_setup"]).lower()
 
 
 def test_context_endpoint_validates_full_path_before_normalizing(

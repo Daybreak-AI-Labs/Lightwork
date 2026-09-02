@@ -35,9 +35,14 @@ def test_status_region_is_an_aria_live_region(monkeypatch, tmp_path, path, msg_i
 
 # ---------- error messages surface the server's detail ----------
 
-@pytest.mark.parametrize("path", ["/permissions", "/cache"])
-def test_action_errors_read_server_detail(monkeypatch, tmp_path, path):
+@pytest.mark.parametrize(
+    ("path", "detail_expression"),
+    [("/permissions", "result.detail"), ("/cache", "j.detail")],
+)
+def test_action_errors_read_server_detail(
+    monkeypatch, tmp_path, path, detail_expression,
+):
     """A failed action shows the server's reason, not a bare status code."""
     _prep(monkeypatch, tmp_path)
     r = _client().get(path)
-    assert "j.detail" in r.text
+    assert detail_expression in r.text

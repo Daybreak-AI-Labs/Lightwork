@@ -3,7 +3,7 @@
 {% block content %}
   <div class="panel" style="text-align: center; padding: 3rem 1.5rem;">
     {% if policy_error %}
-      <h2 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Operator policy unavailable</h2>
+      <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Operator policy unavailable</h1>
       <p class="muted" style="max-width: 520px; margin: 0 auto 1.5rem;">
         Lightwork stopped safely because <code>runtime-overrides.toml</code>
         could not be read or validated. An administrator must restore or repair
@@ -17,7 +17,7 @@
         </p>
       </details>
     {% else %}
-      <h2 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Something went wrong</h2>
+      <h1 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Something went wrong</h1>
       <p class="muted" style="max-width: 480px; margin: 0 auto 1.5rem;">
         The dashboard caught an unexpected error on <code>{{ path or request.url.path }}</code>.
         Try again, and if this keeps happening ask your administrator to check the server logs.

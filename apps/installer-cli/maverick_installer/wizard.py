@@ -7,9 +7,11 @@ Configures Lightwork for a fresh install. Sets up:
   - safety profile
   - sandbox backend
   - budget caps
-  - API keys (stored in ~/.maverick/.env, referenced from config.toml via ${VAR})
+  - API keys (stored beside config.toml, referenced from it via ${VAR})
 
-Writes ~/.maverick/config.toml and ~/.maverick/.env. The agent reads from there.
+Writes ``$MAVERICK_CONFIG`` when explicitly selected, otherwise
+``$MAVERICK_HOME/config.toml`` (default ``~/.maverick/config.toml``), plus a
+sibling ``.env``. The agent reads from the same resolution contract.
 
 v0.1.1 additions (council UX feedback):
   - Preflight: Python version, write perms, optional docker check
@@ -42,9 +44,28 @@ except ImportError:  # pragma: no cover
 
 from . import models as catalog
 
-CONFIG_DIR = Path.home() / ".maverick"
-CONFIG_FILE = CONFIG_DIR / "config.toml"
-ENV_FILE = CONFIG_DIR / ".env"
+
+def _resolve_config_paths() -> tuple[Path, Path, Path]:
+    """Resolve exactly the paths used by :mod:`maverick.config`.
+
+    The previous import-time ``Path.home() / '.maverick'`` ignored the
+    documented ``MAVERICK_HOME``/``MAVERICK_CONFIG`` overrides.  The wizard
+    could therefore overwrite the real user config and then smoke-test a
+    different, still-empty location.  Environment is fixed before a CLI
+    process imports this module, so resolving once here keeps the existing
+    monkeypatchable constants while aligning both sides of the handoff.
+    """
+    explicit = os.environ.get("MAVERICK_CONFIG", "").strip()
+    if explicit:
+        config_file = Path(explicit).expanduser()
+        config_dir = config_file.parent
+    else:
+        config_dir = Path(os.environ.get("MAVERICK_HOME", "~/.maverick")).expanduser()
+        config_file = config_dir / "config.toml"
+    return config_dir, config_file, config_dir / ".env"
+
+
+CONFIG_DIR, CONFIG_FILE, ENV_FILE = _resolve_config_paths()
 
 
 def _prior_consent_salt() -> str:
@@ -4436,12 +4457,17 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "control_plane": _q_confirm(
             "Turn on the Agent Control Plane? One console (dashboard page + "
-            "`maverick control-plane`) over every agent this deployment runs or "
-            "admits: suspend / resume / contain / attenuate a principal, or halt "
-            "the fleet, with each verb landing in the enforcement the runtime "
-            "already consults and recorded on the signed audit chain. Reads work "
-            "regardless; this arms the verbs. Recommended wherever more than one "
-            "person operates agents.",
+            "`maverick control-plane`) over the running/revoked native principals "
+            "and enrolled external agents this deployment can resolve: suspend / "
+            "resume / contain / attenuate a principal, or operate HALT. Principal "
+            "verbs land in enforcement the runtime already consults and attempt a "
+            "control-plane audit row. Ordinary audit outages are marked in the "
+            "result; a configured audit refusal propagates after any already-landed "
+            "change. CLI HALT covers this local deployment; dashboard HALT reaches "
+            "other replicas only with a configured shared authority. Reads remain "
+            "available while the verbs are off and fail closed when a required "
+            "authority is unreadable. Recommended wherever more than one person "
+            "operates agents.",
             default=False,
         ),
         "anonymous_logs": _q_confirm(
@@ -4782,17 +4808,17 @@ def pick_advanced() -> dict[str, Any]:
         ).strip()
         if disclosure:
             advanced["compliance_disclosure_text"] = disclosure
-        # Regulatory obligations compile into the SAME action gate every tool
-        # call already passes (maverick.regulatory_compiler): a regulation is
-        # enforced by construction, and `maverick regulatory verify` proves it.
-        profiles = _q_checkbox(
-            "  Regulatory obligations to compile into the action gate "
-            "(strictest-wins)",
-            ["gdpr", "eu_ai_act", "hipaa"],
-            default=[],
-        )
-        if profiles:
-            advanced["compliance_profiles"] = [str(p) for p in profiles]
+    # Regulatory enforcement is independent of the optional residency and
+    # disclosure fields above. Always expose it so answering "no" to that
+    # unrelated bundle cannot make the controls undiscoverable.
+    profiles = _q_checkbox(
+        "  Regulatory obligations to compile into the action gate "
+        "(strictest-wins)",
+        ["gdpr", "eu_ai_act", "hipaa"],
+        default=[],
+    )
+    if profiles:
+        advanced["compliance_profiles"] = [str(p) for p in profiles]
     # OIDC SSO is a string-bearing toggle (issuer/audience/jwks_uri), so it has
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
@@ -6915,9 +6941,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# ]")
     if advanced.get("control_plane"):
         lines.append("")
-        lines.append("# Agent Control Plane (maverick.agent_control_plane): arms the")
-        lines.append("# suspend/resume/contain/release/attenuate/halt verbs on the console")
-        lines.append("# and `maverick control-plane`; roster/status/ledger reads work anyway.")
+        lines.append("# Agent Control Plane: arms principal verbs on the dashboard and CLI.")
+        lines.append("# CLI HALT is local; dashboard cluster HALT needs a shared authority.")
+        lines.append("# Roster/status/ledger reads work even when mutation verbs are off.")
         lines.append("[control_plane]")
         lines.append("enable = true")
     if advanced.get("anonymous_logs"):
@@ -8445,7 +8471,7 @@ def run_express() -> int:
 # documentation commands they'd otherwise never find. Defined as data so a test
 # can assert the set without rendering the Rich panel.
 _COMPLIANCE_COMMANDS: list[tuple[str, str]] = [
-    ("maverick enterprise verify", "prove the data boundary holds"),
+    ("maverick enterprise verify", "check configured application-layer boundary controls"),
     ("maverick compliance", "GDPR + EU AI Act control coverage"),
     ("maverick ropa", "GDPR Art. 30 record-of-processing scaffold"),
     ("maverick dpia", "GDPR Art. 35 impact-assessment scaffold"),
@@ -8453,7 +8479,7 @@ _COMPLIANCE_COMMANDS: list[tuple[str, str]] = [
     ("maverick assess", "run a PIA / AIRA / vendor-risk assessment"),
     ("maverick hunt", "hunt the audit trail for agent attacks"),
     ("maverick remediate", "assess security posture + fix low-risk gaps"),
-    ("maverick regulatory verify", "prove compiled obligations are live gates"),
+    ("maverick regulatory verify", "verify active obligations compile into non-vacuous gates enforced live"),
     ("maverick attest receipt mint", "hand an auditor a bearer-verifiable receipt for one decision"),
 ]
 
@@ -8464,6 +8490,7 @@ def _regulated_deployment(advanced: dict[str, Any]) -> bool:
     advanced = advanced or {}
     return bool(
         advanced.get("enterprise")
+        or advanced.get("compliance_profiles")
         or advanced.get("encrypt_at_rest")
         or advanced.get("audit_sign")
         or advanced.get("audit_worm")
@@ -8476,7 +8503,8 @@ def _regulated_deployment(advanced: dict[str, Any]) -> bool:
 def show_compliance_commands(advanced: dict[str, Any]) -> None:
     """Print the compliance/documentation command panel after a regulated setup.
 
-    No-op unless the deployment enabled enterprise mode, at-rest encryption, or
+    No-op unless the deployment enabled a compliance profile or another
+    regulated-data control such as enterprise mode, at-rest encryption, or
     audit signing -- otherwise it's just noise for a personal install.
     """
     if not _regulated_deployment(advanced):
@@ -8488,7 +8516,8 @@ def show_compliance_commands(advanced: dict[str, Any]) -> None:
     console.print()
     console.print(
         Panel.fit(
-            "[bold]You enabled a regulated-data posture.[/bold] Prove and document it:\n\n"
+            "[bold]You enabled a regulated-data posture.[/bold] Verify configured "
+            "controls and prepare documentation:\n\n"
             f"{rows}\n\n"
             "[dim]See docs/regulated-deployment.md. Control coverage, not legal advice.[/dim]",
             border_style="cyan",

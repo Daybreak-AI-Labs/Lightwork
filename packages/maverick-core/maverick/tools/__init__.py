@@ -652,6 +652,7 @@ def base_registry(
     user_id: str | None = None,
     budget: Any = None,
     _include_generated_tools: bool = True,
+    _skip_tool_acl: bool = False,
 ) -> ToolRegistry:
     """Build the base tool set (no spawn tools).
 
@@ -1379,7 +1380,17 @@ def base_registry(
     # registration source (core, optional, MCP, Python/TS/gRPC plugins, and
     # generated tools).  Applying them earlier lets later providers bypass a
     # user's allow/deny list simply by registering the same capability class.
-    _apply_tool_acl(reg, channel=channel, user_id=user_id)
+    # Introspection callers may need the catalog before policy filtering so
+    # they can display "present but denied" honestly. Execution callers must
+    # never set this private flag; the default remains fail-closed ACL
+    # enforcement and the permissions snapshot applies the same resolver to
+    # the introspection registry immediately after capturing catalog names.
+    _apply_tool_acl_unless_skipped(
+        reg,
+        skip=_skip_tool_acl,
+        channel=channel,
+        user_id=user_id,
+    )
     _apply_deferred_loading(reg)
 
     # Route external connector WRITES through durable governed transactions.
@@ -1414,7 +1425,10 @@ def base_tool_names() -> set[str] | None:
 
         world = open_world(None)
         reg = base_registry(
-            world, LocalBackend(), _include_generated_tools=False,
+            world,
+            LocalBackend(),
+            _include_generated_tools=False,
+            _skip_tool_acl=True,
         )
         return {t.name for t in reg.all()}
     except Exception as e:  # pragma: no cover -- best-effort introspection
@@ -1474,6 +1488,18 @@ def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | No
     except Exception as e:  # pragma: no cover
         import logging as _logging
         _logging.getLogger(__name__).warning("tool_acl: %s", e)
+
+
+def _apply_tool_acl_unless_skipped(
+    reg: ToolRegistry,
+    *,
+    skip: bool,
+    channel: str | None,
+    user_id: str | None,
+) -> None:
+    """Keep the private catalog-introspection bypass out of registry flow."""
+    if not skip:
+        _apply_tool_acl(reg, channel=channel, user_id=user_id)
 
 
 def _apply_mcp_tools(reg: ToolRegistry, mcp_clients: list | None) -> None:

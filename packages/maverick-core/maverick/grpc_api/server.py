@@ -400,7 +400,13 @@ def _capability_from_json(raw: str):
         raise ValueError(str(exc)) from None
 
 
-def _rpc_capability(capability, *, channel: str | None = None, user_id: str | None = None):
+def _rpc_capability(
+    capability,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    principal: str | None = None,
+):
     """Attenuate an RPC-supplied grant by the worker's local policy.
 
     The bearer token authenticates access to the gRPC API; it is not proof that
@@ -410,13 +416,42 @@ def _rpc_capability(capability, *, channel: str | None = None, user_id: str | No
     This preserves legitimate delegated restrictions while ensuring external
     callers can only narrow, never broaden, the worker's configured policy.
     """
-    from ..capability import capability_enforced, capability_from_config
+    from ..capability import Capability, capability_enforced, capability_from_config
 
     if not capability_enforced():
+        if principal:
+            # A per-agent bearer already established this execution identity.
+            # Carry it on an all-tools root grant even when policy enforcement
+            # is off; intersecting an optional wire grant preserves every
+            # caller restriction while preventing principal spoofing.
+            identity = Capability(principal=principal)
+            return (
+                identity
+                if capability is None
+                else identity.intersect(capability, principal=principal)
+            )
         return capability
 
+    supplied_principal = (
+        getattr(capability, "principal", "") or ""
+        if capability is not None
+        else ""
+    )
+    # The shared operator token has no per-agent identity of its own.  A fleet
+    # dispatch sends the same already-canonical opaque principal in both the
+    # capability and user-id fields (for example ``agent:acme.coder``); preserve
+    # that agreement so the worker can satisfy the goal's durable execution
+    # binding.  A disagreement is still caller-controlled ambiguity and falls
+    # back to the historical ``user:<user_id>`` identity, while an authenticated
+    # per-agent bearer (``principal``) always wins over both wire fields.
+    forwarded_principal = (
+        supplied_principal
+        if supplied_principal and supplied_principal == (user_id or "")
+        else f"user:{user_id or 'local'}"
+    )
+    local_principal = principal or forwarded_principal
     local = capability_from_config(
-        principal=f"user:{user_id or 'local'}",
+        principal=local_principal,
         channel=channel,
         user_id=user_id,
     )
@@ -425,7 +460,7 @@ def _rpc_capability(capability, *, channel: str | None = None, user_id: str | No
         # "bypass the worker's policy".  Always install the worker-owned
         # capability when enforcement is enabled.
         return local
-    return local.intersect(capability, principal=local.principal)
+    return local.intersect(capability, principal=local_principal)
 
 
 def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
@@ -451,7 +486,10 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
             # the trust plane supplies a caller ceiling, local policy
             # intersects it rather than replacing either side.
             capability = _rpc_capability(
-                trust_cap, channel=channel, user_id=user_id,
+                trust_cap,
+                channel=channel,
+                user_id=user_id,
+                principal=_agent_owner(agent),
             )
             try:
                 goal_id = service.start_goal(
@@ -532,6 +570,7 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
                     _capability_from_json(request.capability_json),
                     channel=channel,
                     user_id=user_id,
+                    principal=_agent_owner(agent),
                 )
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                 context.abort(_grpc_code().INVALID_ARGUMENT, str(e))
@@ -552,7 +591,7 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
                 user_id=user_id,
                 max_depth=_execution_depth(request.max_depth or None),
                 capability=capability,
-                expected_owner=_agent_owner(agent),
+                expected_execution_principal=_agent_owner(agent),
             )
             if st is None:
                 return pb2.GoalStatus(goal_id=request.goal_id, found=False)

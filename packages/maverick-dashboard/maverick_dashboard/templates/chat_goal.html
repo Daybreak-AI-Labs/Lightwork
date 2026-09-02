@@ -191,6 +191,7 @@
     <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
       <button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>
       <input type="file" id="attach-add" multiple aria-label="Add files to this goal"
+             tabindex="-1"
              style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
       <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
     </div>
@@ -525,12 +526,18 @@
         if (!(await mvConfirm('Cancel this goal? The agent stops at its next tool-call boundary.', { okText: 'Cancel goal' }))) return;
         cancelBtn.disabled = true;
         actionMsg.textContent = '';
-        const r = await fetch('/api/v1/goals/' + goalId + '/cancel', { method: 'POST' });
-        if (!r.ok && r.status !== 204) {
-          const j = await r.json().catch(function() { return {}; });
+        let accepted = false;
+        try {
+          const r = await fetch('/api/v1/goals/' + goalId + '/cancel', { method: 'POST' });
+          if (r.ok || r.status === 204) { accepted = true; return; }
+          const j = await r.json().catch(function () { return {}; });
           actionMsg.style.color = 'var(--danger)';
           actionMsg.textContent = j.detail || ('Cancel failed: ' + r.status);
-          cancelBtn.disabled = false;
+        } catch (e) {
+          actionMsg.style.color = 'var(--danger)';
+          actionMsg.textContent = 'Cancel failed — check your connection and try again.';
+        } finally {
+          if (!accepted) cancelBtn.disabled = false;
         }
       });
 
@@ -948,7 +955,9 @@
       list.addEventListener('click', async function (ev) {
         const btn = ev.target.closest('.share-revoke');
         if (!btn) return;
+        if (!(await mvConfirm('Revoke this share link? Anyone using it will immediately lose access.', { okText: 'Revoke link' }))) return;
         btn.disabled = true;
+        msg.textContent = '';
         try {
           const r = await fetch('/api/v1/goals/' + encodeURIComponent(goal) +
                                 '/share/' + encodeURIComponent(btn.dataset.id) + '/revoke',
@@ -956,8 +965,15 @@
           if (r.ok) {
             const li = btn.closest('li');
             if (li) li.remove();
-          } else { btn.disabled = false; }
-        } catch (e) { btn.disabled = false; }
+          } else {
+            const detail = await r.json().catch(function () { return {}; });
+            msg.textContent = detail.detail || ('Could not revoke link (' + r.status + ').');
+            btn.disabled = false;
+          }
+        } catch (e) {
+          msg.textContent = 'Could not revoke link — check your connection and try again.';
+          btn.disabled = false;
+        }
       });
     })();
   </script>
@@ -985,7 +1001,13 @@
       function render(items) {
         list.textContent = '';
         count.textContent = items.length;
-        panel.style.display = items.length ? 'block' : 'none';
+        panel.style.display = 'block';
+        if (!items.length) {
+          var empty = document.createElement('li');
+          empty.className = 'muted';
+          empty.textContent = 'No files attached yet.';
+          list.appendChild(empty);
+        }
         items.forEach(function (a) {
           var li = document.createElement('li');
           li.style.cssText = 'display:flex;align-items:center;gap:0.5rem;font-size:var(--text-sm);';
@@ -1004,9 +1026,22 @@
       }
       function refresh() {
         fetch('/api/v1/goals/' + goalId + '/attachments')
-          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (r) {
+            if (r.ok) return r.json();
+            return r.json().catch(function () { return {}; }).then(function (body) {
+              throw new Error(body.detail || ('Could not load attachments (' + r.status + ').'));
+            });
+          })
           .then(render)
-          .catch(function () {});
+          .catch(function (error) {
+            panel.style.display = 'block';
+            list.textContent = '';
+            var failed = document.createElement('li');
+            failed.className = 'muted';
+            failed.textContent = 'Attachments could not be loaded. You can still add a file or retry by reloading.';
+            list.appendChild(failed);
+            msg.textContent = String(error.message || error);
+          });
       }
       if (addBtn && input) {
         addBtn.addEventListener('click', function () { input.click(); });

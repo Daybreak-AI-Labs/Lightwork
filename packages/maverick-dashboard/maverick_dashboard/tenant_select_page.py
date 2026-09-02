@@ -7,8 +7,9 @@ both config-file/environment steps. This page is the in-app path: it lists
 the registry's tenants, lets an admin pick (or create) one, and the
 ``bind_active_tenant`` middleware scopes every later request to it.
 
-Rendering performs registry reads only -- selection and creation go through
-the admin-gated APIs, so a viewer sees the state but cannot change it.
+Rendering filters the roster to the caller's memberships. Global tenant
+administrators may see/create every tenant; ordinary members may switch only
+among their own workspaces.
 """
 from __future__ import annotations
 
@@ -19,14 +20,43 @@ from fastapi.templating import Jinja2Templates
 PAGE_PATH = "/workspace/tenant"
 
 
-def _page_context(request: Request, detail: str = "") -> dict:
+def _safe_return_path(value: str | None) -> str:
+    """Return a same-origin browser destination or an empty fallback.
+
+    A leading backslash can be normalized into a protocol-relative URL by a
+    browser, so the usual single-leading-slash check is not sufficient on its
+    own.  Keep this boundary aligned with the login redirect guards.
+    """
+    if not isinstance(value, str) or not value or len(value) > 2048:
+        return ""
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return ""
+    if not all(ord(char) >= 0x20 and char != "\x7f" for char in value):
+        return ""
+    return value
+
+
+def _page_context(
+    request: Request,
+    detail: str = "",
+    *,
+    return_to: str = "",
+) -> dict:
     import os
 
     from maverick.tenant.registry import list_tenants
 
-    from maverick_dashboard import settings_store
+    from maverick_dashboard import settings_store, workspace_tenants
 
-    from .auth import has_global_permission
+    from .auth import caller_principal, has_global_permission
+
+    principal = caller_principal(request)
+    visible_ids: frozenset[str] | None = None
+    if principal:
+        try:
+            visible_ids = workspace_tenants.accessible_tenant_ids(principal)
+        except workspace_tenants.WorkspaceTenantStoreError:
+            visible_ids = frozenset()
 
     try:
         tenants = [
@@ -37,17 +67,27 @@ def _page_context(request: Request, detail: str = "") -> dict:
                 "active": bool(rec.active),
             }
             for rec in list_tenants()
+            if visible_ids is None or rec.id in visible_ids
         ]
     except Exception:
         # A corrupt roster must not turn the picker into a 500: the page is
         # how an operator digs out of exactly this kind of state.
         tenants = []
+    selected = (
+        workspace_tenants.get_selection(principal)
+        if principal
+        else settings_store.active_tenant()
+    )
+    is_admin = has_global_permission(request, "admin")
     return {
         "detail": detail,
         "tenants": tenants,
-        "selected": settings_store.active_tenant(),
+        "selected": selected,
         "env_tenant": os.environ.get("MAVERICK_TENANT", "").strip(),
-        "is_admin": has_global_permission(request, "admin"),
+        "is_admin": is_admin,
+        "can_select": not principal or is_admin or bool(tenants),
+        "membership_filtered": principal is not None and not is_admin,
+        "return_to": _safe_return_path(return_to),
     }
 
 
@@ -62,7 +102,12 @@ def tenant_select_response(
     return templates.TemplateResponse(
         request,
         "tenant_select.html",
-        _page_context(request, detail),
+        _page_context(
+            request,
+            detail,
+            return_to=request.url.path
+            + (f"?{request.url.query}" if request.url.query else ""),
+        ),
         status_code=409,
     )
 
@@ -80,7 +125,7 @@ def create_tenant_select_page_router(templates: Jinja2Templates) -> APIRouter:
         return templates.TemplateResponse(
             request,
             "tenant_select.html",
-            _page_context(request),
+            _page_context(request, return_to=request.query_params.get("next", "")),
         )
 
     return router

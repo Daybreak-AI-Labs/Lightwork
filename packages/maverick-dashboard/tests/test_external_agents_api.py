@@ -179,6 +179,10 @@ def test_gateway_404s_while_disabled(monkeypatch):
                   json={"tool": "crm_update"})
     assert r.status_code == 404
     assert bare.get("/api/v1/external/openapi.json").status_code == 404
+    page = client.get("/external-agents")
+    assert page.status_code == 200
+    assert 'href="/api/v1/external/openapi.json"' not in page.text
+    assert "gateway description is unavailable while the gateway is off" in page.text
 
 
 def test_openapi_artifact_describes_every_gateway_operation():
@@ -583,6 +587,7 @@ def test_console_page_renders_roster_and_forms():
     assert "data-xa-mint" in page
     assert "Salesforce Agentforce" in page
     assert "Connect your platform" in page
+    assert 'href="/api/v1/external/openapi.json"' in page
 
 
 def test_admin_mutations_are_csrf_gated_but_gateway_is_not():
@@ -719,6 +724,35 @@ def test_admin_release_and_reset_budget_routes():
     assert verdict["rule"] == "allow"
     assert client.post("/api/v1/external-agents/ghost/release",
                        json={}).status_code == 404
+
+
+def test_ordinary_admin_restore_and_release_refuse_security_containment():
+    from maverick import agent_trust
+    from maverick import external_agents as xa
+    from maverick.revocation import shared
+
+    assert _enroll().status_code == 201
+    contained = shared().revoke(
+        "agent:sf-quotebot", reason="soc: incident", protected=True,
+    )
+    assert agent_trust.set_revoked("sf-quotebot", True)
+    assert xa.contain("sf-quotebot", contained_by="soc")
+
+    restored = client.post(
+        "/api/v1/trust/agents/sf-quotebot/revoke",
+        json={"revoked": False},
+    )
+    assert restored.status_code == 409
+    assert "security-contained" in restored.json()["detail"]
+    released = client.post(
+        "/api/v1/external-agents/sf-quotebot/release", json={},
+    )
+    assert released.status_code == 409
+    assert "security-contained" in released.json()["detail"]
+
+    assert shared().revoked()["agent:sf-quotebot"] == contained
+    assert agent_trust.load_registry()["sf-quotebot"].revoked is True
+    assert xa.containment_state("sf-quotebot") is True
 
 
 # -- governed execution over HTTP ---------------------------------------------

@@ -68,6 +68,35 @@ var FDCore = (function () {
     };
   }
 
+  // Commit raw Params JSON without destroying an invalid draft. The visual
+  // editor buffers textarea text in `_paramsRaw`; saving walks the entire
+  // graph (including nested loop/scope bodies and parallel branches). A parse
+  // failure deliberately leaves that buffer in place so navigating away from
+  // the node and back cannot replace the user's text with the last valid
+  // object.
+  function commitRawParams(f) {
+    var errors = [];
+    function walk(current, path) {
+      (current.nodes || []).forEach(function (n) {
+        var nodePath = path ? (path + '/' + n.id) : n.id;
+        if (n._paramsRaw !== undefined) {
+          try {
+            n.params = n._paramsRaw.trim() ? JSON.parse(n._paramsRaw) : {};
+            delete n._paramsRaw;
+          } catch (e) {
+            errors.push(nodePath + '.params');
+          }
+        }
+        if (n.body) walk(n.body, nodePath + '/body');
+        (n.branches || []).forEach(function (branch, index) {
+          walk(branch, nodePath + '/branch-' + (index + 1));
+        });
+      });
+    }
+    walk(f || {}, '');
+    return errors;
+  }
+
   // A deep, independent snapshot of a flow (the undo/redo unit). Serialized
   // form, so restoring goes through normalizeNode like a server load.
   function cloneFlow(f) {
@@ -178,6 +207,7 @@ var FDCore = (function () {
 
   return { normalizeNode: normalizeNode, serializeNode: serializeNode,
            serializeFlow: serializeFlow, cloneFlow: cloneFlow,
+           commitRawParams: commitRawParams,
            upstreamOutputs: upstreamOutputs, fitView: fitView,
            validateFlow: validateFlow,
            COND_OPS: COND_OPS, COND_RE: COND_RE };

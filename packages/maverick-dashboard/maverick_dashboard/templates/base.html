@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0e1320" />
+  {% if workspace_tenant_selection %}
+  <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
+  {% endif %}
   <title>{% block title %}Lightwork{% endblock %}</title>
   <link rel="stylesheet" href="/static/lightwork.css" />
   {% if custom_theme_css %}
@@ -79,10 +82,19 @@
       <span class="brand__name">Lightwork</span>
     </a>
     <span class="topbar__controls">
-      <a href="#" id="halt-pill" class="halt-pill" role="button" aria-label="Emergency stop: stop or resume all work">
+      {% if can_halt %}
+      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: inspect or change the configured halt scope">
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label" aria-live="polite">checking</span>
       </a>
+      {% else %}
+      <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
+            aria-label="Emergency stop status. Halt permission is required to change it."
+            title="Read only: permission for the configured halt scope is required.">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="halt-label" aria-live="polite">checking</span>
+      </span>
+      {% endif %}
       {% if show_settings_link is not defined or show_settings_link %}
       <a class="iconbtn" href="/settings" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
@@ -120,16 +132,18 @@
       </select>
           </label>
           <label class="prefs__row"><span>{{ t('label.language') }}</span>
-      <select class="ctl" id="lang-select" data-ui-preference="lang" aria-label="{{ t('label.language') }}">
+      <select class="ctl" id="lang-select" data-ui-preference="lang"
+              aria-label="{{ t('label.language') }}" aria-describedby="language-preview-note">
         <option value="">{{ t('label.language') }}</option>
-        <option value="en" {% if lang == 'en' %}selected{% endif %}>English</option>
-        <option value="fr" {% if lang == 'fr' %}selected{% endif %}>Français</option>
-        <option value="de" {% if lang == 'de' %}selected{% endif %}>Deutsch</option>
-        <option value="ja" {% if lang == 'ja' %}selected{% endif %}>日本語</option>
-        <option value="zh" {% if lang == 'zh' %}selected{% endif %}>中文</option>
-        <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية</option>
+        <option value="en" {% if lang == 'en' %}selected{% endif %}>English (full content)</option>
+        <option value="fr" {% if lang == 'fr' %}selected{% endif %}>Français (navigation preview)</option>
+        <option value="de" {% if lang == 'de' %}selected{% endif %}>Deutsch (navigation preview)</option>
+        <option value="ja" {% if lang == 'ja' %}selected{% endif %}>日本語 (navigation preview)</option>
+        <option value="zh" {% if lang == 'zh' %}selected{% endif %}>中文 (navigation preview)</option>
+        <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية (partial navigation preview)</option>
       </select>
           </label>
+          <small class="muted" id="language-preview-note">Language previews translate shared navigation and actions only. Most page content remains English.</small>
         </div>
       </details>
     </span>
@@ -137,10 +151,18 @@
   <div class="nav-backdrop" id="nav-backdrop"></div>
   <aside class="sidebar" id="sidebar">
     <nav aria-label="Primary">
+      {% if can_create_goal %}
       <a class="btn btn--primary navquick" href="/chat">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         <span class="nav-label">New goal</span>
       </a>
+      {% endif %}
+      <button type="button" class="navfinder__open" id="navfinder-open"
+              aria-haspopup="dialog" aria-controls="navfinder-dialog" aria-expanded="false">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span class="nav-label">Find a page</span>
+        <kbd aria-hidden="true">Ctrl K</kbd>
+      </button>
       {% set _path = request.url.path if request else '' %}
       {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
       {% set _active_path = '/chat' if _path == '/' else _path %}
@@ -174,6 +196,48 @@
       {% endfor %}
     </nav>
   </aside>
+  {# The finder is rendered from the same role-filtered registry as the
+     sidebar. Keep it outside the sidebar so a modal remains operable while
+     the mobile drawer is inert. JavaScript filters these existing links; it
+     never manufactures a destination. #}
+  <dialog class="navfinder" id="navfinder-dialog"
+          aria-labelledby="navfinder-title" aria-describedby="navfinder-help">
+    <div class="navfinder__head">
+      <div>
+        <h2 id="navfinder-title">Find a page</h2>
+        <p class="sr-only" id="navfinder-help">Type to filter pages. Use the up and down arrow keys to choose a result, Enter to open it, and Escape to close.</p>
+      </div>
+      <button type="button" class="iconbtn navfinder__close" id="navfinder-close" aria-label="Close page finder">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.5 3.5 9 9m0-9-9 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="navfinder__search">
+      <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.25" stroke="currentColor" stroke-width="1.4"/><path d="m10.25 10.25 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <input type="search" id="navfinder-input" autocomplete="off" spellcheck="false"
+             role="combobox" aria-autocomplete="list" aria-controls="navfinder-results"
+             aria-expanded="false" aria-label="Filter navigation pages"
+             placeholder="Search pages and modules…" />
+      <kbd aria-hidden="true">Esc</kbd>
+    </div>
+    <p class="navfinder__count" id="navfinder-count" role="status" aria-live="polite" aria-atomic="true"></p>
+    <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages">
+      {% for _group in nav_groups %}
+        {% set _navfinder_group_index = loop.index0 %}
+        {% for _link in _group.links %}
+          <li role="none">
+            <a id="navfinder-option-{{ _navfinder_group_index }}-{{ loop.index0 }}"
+               href="{{ _link.href }}" role="option" tabindex="-1"
+               aria-selected="false" data-navfinder-target
+               data-search="{{ _link.label }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
+              <span class="navfinder__label">{{ _link.label }}</span>
+              <span class="navfinder__group">{{ _group.label }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      {% endfor %}
+    </ul>
+    <p class="navfinder__empty" id="navfinder-empty" hidden>No matching pages. Try a broader search.</p>
+  </dialog>
   <main id="content" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
@@ -210,6 +274,7 @@
   {% include "_copilot.html" %}
   <script src="/static/lightwork-copilot.js"></script>
   <script src="/static/lightwork-ui.js"></script>
+  <script src="/static/lightwork-navfinder.js" defer></script>
   <script src="/static/lightwork-voice.js" defer></script>
   {% block scripts_extra %}{% endblock %}
 </body>

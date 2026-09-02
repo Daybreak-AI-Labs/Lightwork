@@ -491,7 +491,7 @@ def test_save_endpoint_rejects_bad_name(monkeypatch, tmp_path):
 
 def test_save_endpoint_conflicts_without_overwrite(monkeypatch, tmp_path):
     # A fresh save colliding with an existing template is a 409, not a silent
-    # clobber; overwrite=true (the edit flow) replaces it.
+    # clobber; the edit flow must bind replacement to a reviewed generation.
     _isolate(monkeypatch, tmp_path)
     c = _client()
     base = {"name": "dup", "title": "First", "body": "## Steps\n1. a"}
@@ -500,7 +500,9 @@ def test_save_endpoint_conflicts_without_overwrite(monkeypatch, tmp_path):
     assert r2.status_code == 409
     from maverick.templates import load_template
     assert load_template("dup").title == "First"       # untouched
-    r3 = c.post("/api/v1/workflows", json={**base, "title": "Second", "overwrite": True})
+    r3 = c.post("/api/v1/workflows", json={
+        **base, "title": "Second", "overwrite": True, "expected_generation": 1,
+    })
     assert r3.status_code == 201
     assert load_template("dup").title == "Second"
 
@@ -800,6 +802,7 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/workflow-builder")
     assert r.status_code == 200
+    assert "<title>Workflow builder · Lightwork</title>" in r.text
     assert '<h1 class="page-title">Workflow builder</h1>' in r.text
     assert 'id="wf-draft-btn"' in r.text
     assert "/api/v1/workflows/draft" in r.text

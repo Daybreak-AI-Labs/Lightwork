@@ -1,11 +1,38 @@
 {% extends "base.html" %}
 {% block title %}Providers · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Providers</h1>
-  <p class="page-subtitle">Live provider health — calls, error rates, latency, and spend (in-memory, resets on restart).</p>
+  {% from "_hero.html" import hero, state %}
+  {% from "_integration_readiness.html" import integration_readiness %}
+  {% set configured = inventory | selectattr('configured') | list %}
+  {% set verified = inventory | selectattr('readiness.live.status', 'equalto', 'verified') | list %}
+  {% call hero('Integrations', 'Providers', subtitle='Configuration and measured readiness',
+               lede='Saved credentials, local dependencies, policy admission,
+                     bounded live checks, and observed call health are separate evidence.') %}
+    {{ state('Current state', configured | length ~ ' configured; ' ~ verified | length ~ ' live verified',
+             badge='live verified' if verified else 'verification unknown',
+             badge_class='ok' if verified else 'idle',
+             copy='A configured provider is not called ready until the current
+                   effective configuration passes a bounded live check.') }}
+  {% endcall %}
 <section class="panel">
+  <h2 style="margin-top: 0;">Provider inventory</h2>
+  <table>
+    <thead><tr><th scope="col">provider</th><th scope="col">source</th><th scope="col">readiness</th></tr></thead>
+    <tbody>
+    {% for provider in inventory %}
+      <tr>
+        <td><code>{{ provider.name }}</code></td>
+        <td>{{ provider.via or 'not set' }}</td>
+        <td>{{ integration_readiness(provider.readiness) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+<section class="panel">
+  <h2 style="margin-top: 0;">Observed call health</h2>
   {% if not rows %}
-    <p class="muted">No provider calls recorded yet. Stats are in-memory and reset on restart.</p>
+    <p class="muted">No provider calls recorded yet. This historical health view is not a readiness result and resets on restart.</p>
   {% else %}
     <table>
       <thead>

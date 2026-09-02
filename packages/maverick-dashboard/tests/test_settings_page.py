@@ -31,6 +31,28 @@ def test_settings_page_renders(monkeypatch, tmp_path):
     assert 'href="/settings"' in r.text
 
 
+def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp_path):
+    _prep(monkeypatch, tmp_path)
+    text = _client().get("/settings").text
+
+    assert 'id="settings-search"' in text
+    assert 'role="tablist"' in text
+    assert text.count('role="tab" data-settings-tab=') == 5
+    for group in ("general", "models", "integrations", "controls", "access"):
+        assert f'data-settings-tab="{group}"' in text
+        assert f'data-settings-group="{group}"' in text
+    assert "ArrowRight" in text and "ArrowLeft" in text
+    assert "applySearch" in text
+    assert "data-settings-search-item" in text
+    assert "most page content remains English" in text
+
+
+def test_settings_returns_to_section_that_was_saved(monkeypatch, tmp_path):
+    _prep(monkeypatch, tmp_path)
+    text = _client().get("/settings", params={"saved": "providers"}).text
+    assert 'data-initial-group="integrations"' in text
+
+
 def test_set_and_clear_default_model(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)

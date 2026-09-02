@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}workflow builder · Lightwork{% endblock %}
+{% block title %}Workflow builder · Lightwork{% endblock %}
 {% block content %}
 <style>
   .wf { max-width: 860px; margin-inline: auto; }
@@ -447,6 +447,12 @@
     var pbRefineBtn = document.getElementById('pb-refine-btn');
     var pbGovern = document.getElementById('pb-govern');
     var pbLintEl = document.getElementById('pb-lint');
+    // Track whether each editor has been opened independently of its current
+    // field contents. A user may intentionally clear every identifying field
+    // before comparing the other artifact type; content-based detection would
+    // then strand the first editor even though its preview still exists.
+    var templateWorkspaceStarted = false;
+    var playbookWorkspaceStarted = false;
     var existingNames = null;
     var pbLintTimer = null;
     // shared saved box
@@ -552,6 +558,11 @@
       }
       renderExamples();
       hidePanels();
+      // Switching artifact types must not strand an in-progress draft. Each
+      // editor keeps its own fields; reveal the prior workspace again when the
+      // operator switches back instead of requiring another provider call.
+      if (isTpl && templateWorkspaceStarted) preview.hidden = false;
+      if (!isTpl && playbookWorkspaceStarted) pbPreview.hidden = false;
       setStatus(!isTpl && !PACK_EDITING
         ? 'Draft mode — you can create and refine a first pass; an admin must validate and save it.'
         : '');
@@ -599,7 +610,8 @@
       }
       return 'Save failed: ' + status;
     }
-    function renderDraft(d) {
+    function renderDraft(d, shouldScroll) {
+      templateWorkspaceStarted = true;
       elName.value = d.name || '';
       elTitle.value = d.title || '';
       elSteps.value = d.body || '';
@@ -607,7 +619,9 @@
       elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : 5;
       if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
       preview.hidden = false; pbPreview.hidden = true; savedBox.hidden = true;
-      preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (shouldScroll !== false) {
+        preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
     function stepsFromBody(body) {
       // Recover the ordered steps from the numbered "## Steps" markdown so a
@@ -652,14 +666,21 @@
       try {
         var r = await postTemplate(payload);
         if (r.resp.status === 409) {
-          // Name collision on a fresh save: confirm an explicit overwrite rather
-          // than clobbering someone else's template silently.
-          if (await mvConfirm('A workflow named “' + payload.name + '” already exists. Overwrite it?')) {
-            payload.overwrite = true;
-            r = await postTemplate(payload);
-          } else {
-            setStatus('Not saved — pick a different name.', true); return;
+          if (payload.overwrite) {
+            // This edit carried expected_generation and lost the CAS race.
+            // Never retry it against a newer version the operator has not seen.
+            setStatus('Not saved — this workflow changed after you opened it. Reload the latest version before applying your edits.', true);
+            return;
           }
+          // A fresh name collision has no reviewed generation token. Open the
+          // existing workflow through the edit route, which supplies one,
+          // instead of turning confirmation into a blind overwrite.
+          if (await mvConfirm('A workflow named “' + payload.name + '” already exists. Open its latest version for conflict-safe editing?', { okText: 'Open latest' })) {
+            window.location.assign('/workflow-builder?edit=' + encodeURIComponent(payload.name));
+          } else {
+            setStatus('Not saved — pick a different name.', true);
+          }
+          return;
         }
         if (!r.resp.ok) { setStatus(detailText(r.data, r.resp.status), true); return; }
         var data = r.data;
@@ -955,7 +976,7 @@
         var rm = document.createElement('button');
         rm.type = 'button';
         rm.className = 'btn btn--icon';
-        rm.setAttribute('aria-label', 'Delete this trigger');
+        rm.setAttribute('aria-label', 'Delete trigger ' + t.name);
         rm.title = 'Delete';
         rm.textContent = '✕';
         rm.addEventListener('click', function () { deleteTrigger(t.name, li); });
@@ -967,8 +988,20 @@
       if (!(await mvConfirm('Delete trigger “' + name + '”? Its webhook URL will stop working.'))) return;
       try {
         var resp = await fetch('/api/v1/triggers/' + encodeURIComponent(name), { method: 'DELETE' });
-        if (resp.ok) { if (li) li.remove(); mvToast('Trigger deleted'); } else { mvToast('Could not delete trigger', { error: true }); }
-      } catch (e) { mvToast('Could not delete trigger', { error: true }); }
+        if (resp.ok) {
+          if (li) li.remove();
+          mvToast('Trigger deleted');
+          return;
+        }
+        var body = await resp.json().catch(function () { return {}; });
+        var detail = body.detail || ('Could not delete trigger (' + resp.status + ').');
+        if (trigMsg) trigMsg.textContent = detail;
+        mvToast(detail, { error: true });
+      } catch (e) {
+        var message = 'Could not delete trigger — check your connection and try again.';
+        if (trigMsg) trigMsg.textContent = message;
+        mvToast(message, { error: true });
+      }
     }
     if (trigWrap) {
       trigName.addEventListener('input', updateTrigBtn);
@@ -1053,7 +1086,8 @@
     }
     pbAddBtn.addEventListener('click', function () { addStep(); renumber(); schedulePbLint(); });
 
-    function renderPlaybook(d) {
+    function renderPlaybook(d, shouldScroll) {
+      playbookWorkspaceStarted = true;
       pbName.value = d.name || '';
       pbDesc.value = d.description || '';
       pbPersona.value = d.persona || '';
@@ -1066,7 +1100,9 @@
       renumber();
       pbPreview.hidden = false; preview.hidden = true; savedBox.hidden = true;
       schedulePbLint();
-      pbPreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (shouldScroll !== false) {
+        pbPreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     function collectPlaybook() {
@@ -1216,6 +1252,12 @@
       if (pickerOpener && pickerOpener.isConnected && typeof pickerOpener.focus === 'function') pickerOpener.focus();
       pickerOpener = null;
     }
+    function pickerFocusables() {
+      return Array.prototype.filter.call(
+        tpBackdrop.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'),
+        function (el) { return !el.hidden && el.getAttribute('aria-hidden') !== 'true'; }
+      );
+    }
     function pill(cls, text) {
       var s = document.createElement('span');
       s.className = cls;
@@ -1269,7 +1311,18 @@
     tpSearch.addEventListener('input', renderTools);
     tpDone.addEventListener('click', closePicker);
     tpBackdrop.addEventListener('click', function (e) { if (e.target === tpBackdrop) closePicker(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !tpBackdrop.hidden) closePicker(); });
+    tpBackdrop.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); closePicker(); return; }
+      if (e.key !== 'Tab') return;
+      var focusable = pickerFocusables();
+      if (!focusable.length) { e.preventDefault(); return; }
+      var first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault(); first.focus();
+      }
+    });
     pbPreview.querySelectorAll('[data-browse]').forEach(function (b) {
       b.addEventListener('click', function () {
         if (b.dataset.browse === 'deny') openPicker(pbDeny, null, 'Denied tools');
@@ -1279,34 +1332,50 @@
 
     // ---- shared draft action ----
     async function draft() {
+      var draftMode = mode;
       setBusy(draftBtn, true);
-      // A fresh draft is a NEW template — clear any edit context so Save doesn't
-      // overwrite the previously-edited one or carry its wall-time cap forward.
-      if (mode === 'template') { wfEditingName = null; wfEditWall = null; }
-      setStatus(mode === 'playbook' ? 'Drafting the playbook…' : 'Drafting the workflow…');
+      setStatus(draftMode === 'playbook' ? 'Drafting the playbook…' : 'Drafting the workflow…');
       try {
         var resp;
         if (fileInput.files.length) {
           var fd = new FormData();
           fd.append('file', fileInput.files[0]);
-          fd.append('form', mode);
+          fd.append('form', draftMode);
           resp = await fetch('/api/v1/workflows/draft-from-file', { method: 'POST', body: fd });
         } else {
           if (!brief.value.trim()) { setStatus('Describe it, or upload a document.', true); return; }
           resp = await fetch('/api/v1/workflows/draft', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description: brief.value.trim(), form: mode }),
+            body: JSON.stringify({ description: brief.value.trim(), form: draftMode }),
           });
         }
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) { setStatus(data.detail || ('Draft failed: ' + resp.status), true); return; }
-        if (mode === 'playbook') {
-          renderPlaybook(data);
-          setStatus('Draft ready — review the persona, tools, and gated steps, then save.'
-            + playbookNoteSuffix(data));
+        var completedStatus;
+        var draftStillVisible = mode === draftMode;
+        if (draftMode === 'playbook') {
+          renderPlaybook(data, draftStillVisible);
+          completedStatus = 'Draft ready — review the persona, tools, and gated steps, then save.'
+            + playbookNoteSuffix(data);
         } else {
-          renderDraft(data);
-          setStatus('Draft ready — review and edit below, then save.');
+          // Only a successful fresh draft becomes a new-template workspace.
+          // Empty briefs, provider errors, and network failures leave the edit
+          // name, generation and hidden wall cap intact.
+          wfEditingName = null; wfEditGeneration = null; wfEditWall = null;
+          renderDraft(data, draftStillVisible);
+          completedStatus = 'Draft ready — review and edit below, then save.';
+        }
+        // The request belongs to the form selected when Draft was pressed.
+        // If the operator switched forms while it was in flight, retain the
+        // completed draft in its own workspace without replacing the form now
+        // on screen. Switching back reveals it through setForm's continuity
+        // flags, without another provider request.
+        if (mode !== draftMode) {
+          setForm(mode);
+          setStatus((draftMode === 'playbook' ? 'Agent' : 'Workflow') +
+            ' draft ready. Switch back to review it.');
+        } else {
+          setStatus(completedStatus);
         }
       } catch (e) {
         setStatus('Could not reach the drafting service.', true);

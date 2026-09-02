@@ -45,6 +45,33 @@ def test_create_list_delete_and_token_never_returned(monkeypatch, tmp_path):
     assert c.get("/api/v1/connections").json()["connections"] == []
 
 
+def test_corrupt_connection_registry_returns_503_without_overwrite(
+    monkeypatch, tmp_path
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import connections
+
+    path = connections._path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    corrupt = b"not-a-valid-registry"
+    path.write_bytes(corrupt)
+    c = _client()
+
+    listed = c.get("/api/v1/connections")
+    created = c.post(
+        "/api/v1/connections",
+        json={"name": "replacement", "token": "must-not-persist"},
+    )
+    tested = c.post("/api/v1/connections/replacement/test")
+    deleted = c.delete("/api/v1/connections/replacement")
+
+    assert listed.status_code == 503
+    assert created.status_code == 503
+    assert tested.status_code == 503
+    assert deleted.status_code == 503
+    assert path.read_bytes() == corrupt
+
+
 def test_bad_name_is_400(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().post("/api/v1/connections", json={"name": "!!!", "token": "x"})
@@ -94,6 +121,59 @@ def test_connection_use_policy_roundtrips_without_token(monkeypatch, tmp_path):
     assert body["access"] == "tenant"
     assert body["allowed_principals"] == ["user:alice"]
     assert "token" not in body and "never-return-me" not in r.text
+
+
+def test_token_only_rotation_preserves_metadata_and_requires_fresh_revision(
+    monkeypatch, tmp_path
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import connections
+
+    c = _client()
+    created = c.post(
+        "/api/v1/connections",
+        json={
+            "name": "shared",
+            "connector": "salesforce",
+            "base_url": "https://tenant.example",
+            "token": "old",
+            "access": "tenant",
+            "allowed_principals": ["agent:finance"],
+        },
+    ).json()
+
+    missing = c.post(
+        "/api/v1/connections", json={"name": "shared", "token": "missing"}
+    )
+    assert missing.status_code == 409
+
+    rotated = c.post(
+        "/api/v1/connections",
+        json={
+            "name": "shared",
+            "token": "new",
+            "expected_revision": created["revision"],
+        },
+    )
+    assert rotated.status_code == 201, rotated.text
+    body = rotated.json()
+    assert body["connector"] == "salesforce"
+    assert body["base_url"] == "https://tenant.example"
+    assert body["access"] == "tenant"
+    assert body["allowed_principals"] == ["agent:finance"]
+    assert body["revision"] != created["revision"]
+    assert connections.get_connection("shared")["token"] == "new"
+
+    stale = c.post(
+        "/api/v1/connections",
+        json={
+            "name": "shared",
+            "token": "stale",
+            "expected_revision": created["revision"],
+        },
+    )
+    assert stale.status_code == 409
+    assert connections.get_connection("shared")["token"] == "new"
 
 
 @pytest.mark.parametrize(

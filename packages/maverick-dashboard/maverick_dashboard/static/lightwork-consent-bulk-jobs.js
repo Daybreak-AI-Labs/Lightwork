@@ -346,7 +346,10 @@
     var listCount = document.getElementById("cbj-list-count");
     var controlForm = document.getElementById("cbj-job-control-form");
     var download = document.getElementById("cbj-download");
+    var downloadHint = document.getElementById("cbj-download-hint");
+    var downloadUrl = "";
     var latestStatus = null;
+    var operationInFlight = false;
 
     function formValues(form) { return Object.fromEntries(new FormData(form).entries()); }
 
@@ -389,10 +392,50 @@
       }
     }
 
-    function handle(handler) {
+    function confirmOperation(message, okText) {
+      if (typeof global.mvConfirm === "function") {
+        return global.mvConfirm(message, { okText: okText });
+      }
+      return Promise.resolve(global.confirm(message));
+    }
+
+    function handle(handler, options) {
+      options = options || {};
       return function (event) {
         if (event) { event.preventDefault(); }
-        Promise.resolve(handler(event)).catch(function () {});
+        if (operationInFlight) {
+          operationStatus.textContent = "Another operation is already running. Wait for it to finish.";
+          return;
+        }
+        operationInFlight = true;
+        shell.dataset.operationInFlight = "true";
+        var source = event && event.currentTarget;
+        var controls = [];
+        if (source && source.matches && source.matches("form")) {
+          controls = Array.from(source.querySelectorAll('button[type="submit"], input[type="submit"]'));
+        } else if (source && "disabled" in source) {
+          controls = [source];
+        }
+        var disabledBefore = controls.map(function (control) { return control.disabled; });
+        var controlsDisabled = false;
+        function disableControls() {
+          if (controlsDisabled) { return; }
+          controls.forEach(function (control) { control.disabled = true; });
+          controlsDisabled = true;
+        }
+        // Destructive handlers defer this until their confirmation resolves.
+        // Keeping the invoking control enabled lets mvConfirm capture and
+        // restore the real opener instead of falling back to document.body.
+        if (!options.deferDisable) { disableControls(); }
+        Promise.resolve().then(function () {
+          return handler(event, disableControls);
+        }).catch(function () {}).finally(function () {
+          if (controlsDisabled) {
+            controls.forEach(function (control, index) { control.disabled = disabledBefore[index]; });
+          }
+          operationInFlight = false;
+          delete shell.dataset.operationInFlight;
+        });
       };
     }
 
@@ -461,11 +504,18 @@
       list.appendChild(dd);
     }
 
+    function makeDownloadAvailable(jobId) {
+      downloadUrl = apiBase + "/" + encodeURIComponent(jobId) + "/download";
+      download.disabled = !canAudit;
+      downloadHint.textContent = canAudit
+        ? "Export ready for job " + String(jobId).slice(0, 128) + "."
+        : "Global audit authority is required to download this export.";
+    }
+
     function selectJob(jobId, revision) {
       controlForm.elements.job_id.value = jobId;
       controlForm.elements.expected_revision.value = revision || "";
-      download.href = apiBase + "/" + encodeURIComponent(jobId) + "/download";
-      download.setAttribute("aria-disabled", "false");
+      makeDownloadAvailable(jobId);
     }
 
     function renderJobs(payload) {
@@ -536,14 +586,21 @@
       selectJob(result.job_id, result.revision);
       await refreshJobs();
     }));
-    document.getElementById("cbj-action-form").addEventListener("submit", handle(async function () {
+    document.getElementById("cbj-action-form").addEventListener("submit", handle(async function (_event, disableControls) {
       var payload = buildActionPayload(formValues(document.getElementById("cbj-action-form")));
+      if (!(await confirmOperation(
+        "Create exactly one “" + payload.operation.replace(/_/g, " ") + "” bulk job for " +
+          payload.items.length + (payload.items.length === 1 ? " item" : " items") +
+          "? The queued job may execute automatically when it becomes due.",
+        "Create action job"
+      ))) { return; }
+      disableControls();
       var result = await runOperation("Create action job", function () {
         return request("/actions", { method: "POST", body: payload });
       });
       selectJob(result.job_id, result.revision);
       await refreshJobs();
-    }));
+    }, { deferDisable: true }));
     document.querySelector('#cbj-action-form select[name="operation"]').addEventListener("change", function (event) {
       if (latestStatus) {
         document.getElementById("cbj-action-controls").disabled = !canAdmin
@@ -551,40 +608,60 @@
           || latestStatus.operations[event.target.value] !== true;
       }
     });
-    document.getElementById("cbj-load-detail").addEventListener("click", handle(function () {
+    document.getElementById("cbj-load-detail").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      return runOperation("Load job detail", function () { return request("/" + encodeURIComponent(jobId)); });
+      await runOperation("Load job detail", function () { return request("/" + encodeURIComponent(jobId)); });
+      makeDownloadAvailable(jobId);
     }));
-    document.getElementById("cbj-load-progress").addEventListener("click", handle(function () {
+    document.getElementById("cbj-load-progress").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      return runOperation("Load job progress", function () { return request("/" + encodeURIComponent(jobId) + "/progress"); });
+      await runOperation("Load job progress", function () { return request("/" + encodeURIComponent(jobId) + "/progress"); });
+      makeDownloadAvailable(jobId);
     }));
-    document.getElementById("cbj-load-history").addEventListener("click", handle(function () {
+    document.getElementById("cbj-load-history").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      return runOperation("Load immutable history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
+      await runOperation("Load immutable history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
+      makeDownloadAvailable(jobId);
     }));
-    document.getElementById("cbj-run-job").addEventListener("click", handle(async function () {
+    document.getElementById("cbj-run-job").addEventListener("click", handle(async function (_event, disableControls) {
       var jobId = selectedJobId();
+      if (!(await confirmOperation(
+        "Run the next executable batch for consent bulk job “" + jobId + "” now? Its queued action may change or delete consent records.",
+        "Run this job"
+      ))) { return; }
+      disableControls();
       var result = await runOperation("Run job batch", function () {
         return request("/" + encodeURIComponent(jobId) + "/run", { method: "POST", body: {} });
       });
       selectJob(jobId, result.revision);
       await refreshJobs();
-    }));
-    document.getElementById("cbj-cancel-job").addEventListener("click", handle(async function () {
+    }, { deferDisable: true }));
+    document.getElementById("cbj-cancel-job").addEventListener("click", handle(async function (_event, disableControls) {
       var jobId = selectedJobId();
       var payload = {
         expected_revision: integer(controlForm.elements.expected_revision.value, "Expected revision", 1, 2147483647),
         idempotency_key: idempotencyKey(controlForm.elements.idempotency_key.value)
       };
+      if (!(await confirmOperation(
+        "Cancel consent bulk job “" + jobId + "” at revision " + payload.expected_revision +
+          "? Completed items will not be rolled back.",
+        "Cancel this job"
+      ))) { return; }
+      disableControls();
       var result = await runOperation("Cancel job", function () {
         return request("/" + encodeURIComponent(jobId) + "/cancel", { method: "POST", body: payload });
       });
       selectJob(jobId, result.revision);
       await refreshJobs();
-    }));
-    download.addEventListener("click", function (event) {
-      if (download.getAttribute("aria-disabled") !== "false" || !canAudit) { event.preventDefault(); }
+    }, { deferDisable: true }));
+    controlForm.elements.job_id.addEventListener("input", function () {
+      downloadUrl = "";
+      download.disabled = true;
+      downloadHint.textContent = "Select or load this job before downloading its export.";
+    });
+    download.addEventListener("click", function () {
+      if (download.disabled || !canAudit || !downloadUrl) { return; }
+      global.location.assign(downloadUrl);
     });
     document.getElementById("cbj-load-credits").addEventListener("click", handle(async function () {
       var result = await runOperation("Load credit detail", function () { return request("/credits/detail"); });
@@ -592,33 +669,50 @@
         "Available " + result.available + " · reserved " + result.reserved + " · consumed " + result.consumed + " · revision " + result.revision;
       document.querySelector('#cbj-credit-form input[name="expected_revision"]').value = result.revision;
     }));
-    document.getElementById("cbj-credit-form").addEventListener("submit", handle(async function () {
+    document.getElementById("cbj-credit-form").addEventListener("submit", handle(async function (_event, disableControls) {
       var values = formValues(document.getElementById("cbj-credit-form"));
       var payload = {
         amount: integer(values.amount, "Credit amount", 1, 1000000000),
         expected_revision: integer(values.expected_revision, "Credit revision", 1, 2147483647),
         idempotency_key: idempotencyKey(values.idempotency_key)
       };
+      if (!(await confirmOperation(
+        "Grant exactly " + payload.amount + " bulk-operation credits at ledger revision " +
+          payload.expected_revision + "? This changes the tenant credit balance.",
+        "Grant credits"
+      ))) { return; }
+      disableControls();
       var result = await runOperation("Grant credits", function () {
         return request("/credits/grant", { method: "POST", body: payload });
       });
       document.querySelector('#cbj-credit-form input[name="expected_revision"]').value = result.revision;
-    }));
-    document.getElementById("cbj-run-next").addEventListener("click", handle(async function () {
+    }, { deferDisable: true }));
+    document.getElementById("cbj-run-next").addEventListener("click", handle(async function (_event, disableControls) {
+      if (!(await confirmOperation(
+        "Run exactly the next due consent bulk job now? Its queued action may change or delete consent records.",
+        "Run next due job"
+      ))) { return; }
+      disableControls();
       await runOperation("Run next due job", function () {
         return request("/worker/run-next", { method: "POST", body: {} });
       });
       await refreshJobs();
-    }));
+    }, { deferDisable: true }));
     document.getElementById("cbj-verify-integrity").addEventListener("click", handle(function () {
       return runOperation("Verify immutable event chain", function () { return request("/operations/integrity"); });
     }));
-    document.getElementById("cbj-recover").addEventListener("click", handle(function () {
+    document.getElementById("cbj-recover").addEventListener("click", handle(async function (_event, disableControls) {
       var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Recovery limit", 1, 500);
+      var confirmed = await confirmOperation(
+        "Recover up to " + limit + " expired consent worker leases? Recovered jobs can become runnable again.",
+        "Recover leases"
+      );
+      if (!confirmed) { return null; }
+      disableControls();
       return runOperation("Recover expired worker leases", function () {
         return request("/operations/recover", { method: "POST", body: { limit: limit } });
       });
-    }));
+    }, { deferDisable: true }));
     document.getElementById("cbj-retention-due").addEventListener("click", handle(function () {
       var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Retention limit", 1, 500);
       var before = optionalTimestamp(document.getElementById("cbj-retention-before").value, "Retention cutoff");
@@ -626,16 +720,23 @@
       if (before !== null) { path += "&before=" + encodeURIComponent(String(before)); }
       return runOperation("Review retention-due jobs", function () { return request(path); });
     }));
-    document.getElementById("cbj-purge").addEventListener("click", handle(async function () {
+    document.getElementById("cbj-purge").addEventListener("click", handle(async function (_event, disableControls) {
       var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Purge limit", 1, 500);
       var before = optionalTimestamp(document.getElementById("cbj-retention-before").value, "Retention cutoff");
       var body = { limit: limit };
       if (before !== null) { body.before = before; }
+      var cutoff = before === null ? "the server retention cutoff" : new Date(before * 1000).toISOString();
+      if (!(await confirmOperation(
+        "Permanently purge up to " + limit + " retention-due consent jobs before " + cutoff +
+          "? Purged job records cannot be recovered from this interface.",
+        "Purge these jobs"
+      ))) { return; }
+      disableControls();
       await runOperation("Purge retention-due jobs", function () {
         return request("/operations/retention/purge", { method: "POST", body: body });
       });
       await refreshJobs();
-    }));
+    }, { deferDisable: true }));
 
     refreshStatus().then(function () {
       if (!operations.disabled) {

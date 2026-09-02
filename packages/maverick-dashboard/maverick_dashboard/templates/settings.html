@@ -2,6 +2,7 @@
 {% block title %}Settings · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {% from "_integration_readiness.html" import integration_readiness %}
   {% set configured_providers = providers | selectattr('configured') | list %}
   {% call hero('Control plane', 'Settings',
                subtitle='Everything, managed in-app',
@@ -10,10 +11,10 @@
                      on the next run.') %}
     {{ state('Current state',
              configured_providers | length ~ ' of ' ~ providers | length ~ ' providers configured',
-             badge='ready' if configured_providers else 'add a provider key',
+             badge='configured' if configured_providers else 'add a provider key',
              badge_class='ok' if configured_providers else 'warn',
-             copy='Provider keys are sealed on this server and never shown
-                   again. Set at least one to run goals.') }}
+             copy='Configuration is not a live readiness result. Provider keys
+                   are sealed on this server and never shown again.') }}
   {% endcall %}
 
   {% if saved %}
@@ -23,8 +24,29 @@
   </div>
   {% endif %}
 
-  <div class="section-head"><h2>Appearance</h2></div>
-  <div class="panel">
+  <section class="settings-index" aria-labelledby="settings-index-title"
+           data-initial-group="{{ saved_section or 'general' }}">
+    <div>
+      <h2 id="settings-index-title">Settings sections</h2>
+      <p class="muted">Open one bounded section at a time, or search every setting by name and description.</p>
+    </div>
+    <label for="settings-search">Find a setting
+      <input class="input" id="settings-search" type="search" maxlength="100"
+             placeholder="Provider, budget, visibility…" aria-controls="settings-sections">
+    </label>
+    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button class="btn" type="button" role="tab" data-settings-tab="general">General</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="models">Models</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="integrations">Integrations</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="controls">Controls</button>
+      <button class="btn" type="button" role="tab" data-settings-tab="access">Access</button>
+    </div>
+    <p class="muted" id="settings-filter-status" role="status" aria-live="polite"></p>
+  </section>
+
+  <div id="settings-sections">
+  <div class="section-head" data-settings-group="general"><h2>Appearance</h2></div>
+  <div class="panel" data-settings-group="general">
     <p class="muted" style="margin-top: 0;">
       Theme, density, font and language for this browser. Applies when you save.
     </p>
@@ -60,20 +82,21 @@
       <label style="display: flex; flex-direction: column; gap: var(--space-1);">
         <span>Language</span>
         <select class="ctl" name="lang">
-          <option value="en" {% if lang == 'en' %}selected{% endif %}>English</option>
-          <option value="fr" {% if lang == 'fr' %}selected{% endif %}>Français</option>
-          <option value="de" {% if lang == 'de' %}selected{% endif %}>Deutsch</option>
-          <option value="ja" {% if lang == 'ja' %}selected{% endif %}>日本語</option>
-          <option value="zh" {% if lang == 'zh' %}selected{% endif %}>中文</option>
-          <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية</option>
+          <option value="en" {% if lang == 'en' %}selected{% endif %}>English (full content)</option>
+          <option value="fr" {% if lang == 'fr' %}selected{% endif %}>Français (navigation preview)</option>
+          <option value="de" {% if lang == 'de' %}selected{% endif %}>Deutsch (navigation preview)</option>
+          <option value="ja" {% if lang == 'ja' %}selected{% endif %}>日本語 (navigation preview)</option>
+          <option value="zh" {% if lang == 'zh' %}selected{% endif %}>中文 (navigation preview)</option>
+          <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية (partial navigation preview)</option>
         </select>
+        <small class="muted">Language previews translate shared navigation and actions only; most page content remains English.</small>
       </label>
       <button type="submit" class="btn btn--primary">Apply</button>
     </form>
   </div>
 
-  <div class="section-head"><h2>Models</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="models"><h2>Models</h2></div>
+  <div class="panel" data-settings-group="models">
     <p class="muted" style="margin-top: 0;">
       Pick any configured provider's model (see Provider keys below) or type any model
       id — e.g. <code>openai:gpt-5.4</code>, <code>gemini:gemini-3.5-pro</code>,
@@ -107,8 +130,8 @@
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Per-role models</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="models"><h2>Per-role models</h2></div>
+  <div class="panel" data-settings-group="models">
     <p class="muted" style="margin-top: 0;">
       Override the model for a specific agent role — the platform's strength is
       role-specialised models. "Use default" falls back to the default model
@@ -140,8 +163,8 @@
     </form>
   </div>
 
-  <div class="section-head"><h2>Allowed models</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="models"><h2>Allowed models</h2></div>
+  <div class="panel" data-settings-group="models">
     <p class="muted" style="margin-top: 0;">
       Restrict which models anyone may use. Check the ones you approve and save;
       the default and per-role pickers above are then limited to your selection,
@@ -151,7 +174,7 @@
     </p>
     <form method="post" action="/settings/models/allowed">
       {% for spec, plabel in model_options %}
-      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
+      <label data-settings-search-item style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
         <span><code>{{ spec }}</code> <span class="muted">· {{ plabel }}</span></span>
         <input type="checkbox" name="models" value="{{ spec }}"{% if spec in allowed_models %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand);" />
       </label>
@@ -163,8 +186,8 @@
     </form>
   </div>
 
-  <div class="section-head"><h2>Spend cap</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="general"><h2>Spend cap</h2></div>
+  <div class="panel" data-settings-group="general">
     <p class="muted" style="margin-top: 0;">
       The most a single goal may spend before Lightwork stops it. Changes
       apply on the next run. Default is ${{ '%.2f'|format(default_budget) }}
@@ -187,31 +210,39 @@
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Provider keys</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="integrations"><h2>Provider keys</h2></div>
+  <div class="panel" data-settings-group="integrations">
     <p class="muted" style="margin-top: 0;">
       Set an API key for at least one provider to run goals. Keys are sealed
-      on this server and never shown again; a key saved here is the one
-      Lightwork uses. Leave a field blank to keep the current value.
+      on this server and never shown again. Each row names the effective
+      source; higher-precedence tenant and operator overlays must be rotated at
+      that source. Leave a field blank to keep the current value.
     </p>
     {% for p in providers %}
-    <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
+    <div data-settings-search-item style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
       <div style="min-width: 13rem; flex: 1 1 13rem;">
         <div style="font-weight: var(--font-medium);">{{ p.label }}</div>
         <div class="muted" style="font-size: var(--text-sm);">
           {% if p.configured %}<span class="badge active">configured</span> via {{ p.via }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
           {% else %}not set — paste a key to enable this provider{% endif %}
+          {% if p.source_errors %}<div><span class="badge blocked">configuration source unreadable</span></div>{% endif %}
+          {% if not p.dashboard_can_set_api_key %}<div>API key is controlled by {{ p.api_key_source }}; rotate it there.</div>{% endif %}
+          {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>Base URL is controlled by {{ p.base_url_source }}; edit it there.</div>{% endif %}
         </div>
+        <div style="margin-top: var(--space-2);">{{ integration_readiness(p.readiness) }}</div>
       </div>
       <form method="post" action="/settings/providers" style="display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end;">
         <input type="hidden" name="provider" value="{{ p.name }}" />
         {% if p.base_url_field %}
         <input class="ctl" type="text" name="base_url" value="{{ p.base_url }}"
-               placeholder="Base URL" aria-label="{{ p.label }} base URL" autocomplete="off" />
+               placeholder="Base URL" aria-label="{{ p.label }} base URL" autocomplete="off"
+               {% if not p.dashboard_can_set_base_url %}disabled{% endif %} />
         {% endif %}
         <input class="ctl" type="password" name="api_key"
-               placeholder="Paste API key" aria-label="{{ p.label }} API key" autocomplete="off" />
-        <button type="submit" class="btn btn--primary">Save</button>
+               placeholder="Paste API key" aria-label="{{ p.label }} API key" autocomplete="off"
+               {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
+        <button type="submit" class="btn btn--primary"
+                {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save effective configuration</button>
       </form>
       {% if p.dashboard_set %}
       <form method="post" action="/settings/providers/clear">
@@ -219,12 +250,18 @@
         <button type="submit" class="btn">Clear</button>
       </form>
       {% endif %}
+      {% if p.configured %}
+      <form method="post" action="/settings/providers/test">
+        <input type="hidden" name="provider" value="{{ p.name }}" />
+        <button type="submit" class="btn btn--ghost">Test live readiness</button>
+      </form>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
 
-  <div class="section-head"><h2>Automation webhooks</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="integrations"><h2>Automation webhooks</h2></div>
+  <div class="panel" data-settings-group="integrations">
     <p class="muted" style="margin-top: 0;">
       The signing secret that lets other systems securely start your workflows
       (used by webhook triggers on the <a href="/automations">Automations</a>
@@ -244,12 +281,12 @@
     </p>
   </div>
 
-  <div class="section-head"><h2>Capabilities</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="controls"><h2>Capabilities</h2></div>
+  <div class="panel" data-settings-group="controls">
     <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Changes apply on the next run.</p>
     <form method="post" action="/settings/capabilities">
       {% for c in capabilities %}
-      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
+      <label data-settings-search-item style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
         <span style="flex: 1;">{{ c.name|replace('_', ' ')|capitalize }}
           {% if c.info %}<br><span class="muted" style="font-size: var(--text-sm); font-weight: normal;">{{ c.info }}</span>{% endif %}</span>
         <input type="checkbox" name="{{ c.name }}"{% if c.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0;" />
@@ -259,12 +296,12 @@
     </form>
   </div>
 
-  <div class="section-head"><h2>Features</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="controls"><h2>Features</h2></div>
+  <div class="panel" data-settings-group="controls">
     <p class="muted" style="margin-top: 0;">Agent behaviours that are otherwise on by default.</p>
     <form method="post" action="/settings/features">
       {% for f in features %}
-      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
+      <label data-settings-search-item style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
         <span style="flex: 1;">{{ f.name|replace('_', ' ')|capitalize }}
           {% if f.info %}<br><span class="muted" style="font-size: var(--text-sm); font-weight: normal;">{{ f.info }}</span>{% endif %}</span>
         <input type="checkbox" name="{{ f.name }}"{% if f.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand);" />
@@ -274,8 +311,8 @@
     </form>
   </div>
 
-  <div class="section-head"><h2 id="ui-visibility">Page visibility by role</h2></div>
-  <div class="panel">
+  <div class="section-head" data-settings-group="access"><h2 id="ui-visibility">Page visibility by role</h2></div>
+  <div class="panel" data-settings-group="access">
     <p class="muted" style="margin-top: 0;">
       Choose which pages each role sees. Unchecking a box removes the page from
       that role's navigation <em>and</em> blocks direct access to it. A dash
@@ -296,7 +333,7 @@
           <tr><th colspan="{{ 1 + visibility_roles|length }}" scope="colgroup"
                   style="padding-top: var(--space-4);">{{ grp.label }}</th></tr>
           {% for pg in grp.pages %}
-          <tr>
+          <tr data-settings-search-item>
             <td>{{ pg.label }} <span class="muted mono" style="font-size: var(--text-xs);">{{ pg.path }}</span>{% if not pg.in_nav %} <span class="muted" style="font-size: var(--text-xs);">· linked from other pages, not in the sidebar</span>{% endif %}</td>
             {% for cell in pg.cells %}
             <td>
@@ -332,4 +369,141 @@
       every page still apply regardless.
     </p>
   </div>
+  </div>
+  <style>
+    .settings-index { display: grid; grid-template-columns: minmax(15rem, 1fr) minmax(16rem, .7fr); gap: var(--space-3); align-items: end; margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--border) 72%, white 18%); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 78%, transparent); box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, white 15%, transparent); backdrop-filter: blur(22px) saturate(145%); -webkit-backdrop-filter: blur(22px) saturate(145%); }
+    .settings-index h2, .settings-index p { margin: 0; }
+    .settings-index label { display: grid; gap: var(--space-1); }
+    .settings-tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .settings-tabs [aria-selected="true"] { background: var(--brand); color: var(--on-brand, white); border-color: var(--brand); }
+    #settings-filter-status { grid-column: 1 / -1; min-height: 1.3em; }
+    @media (max-width: 720px) { .settings-index { grid-template-columns: 1fr; } }
+    @media (prefers-reduced-transparency: reduce) { .settings-index { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--panel); } }
+  </style>
+  <script>
+  (function () {
+    'use strict';
+    var index = document.querySelector('.settings-index');
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('[data-settings-tab]'));
+    var grouped = Array.prototype.slice.call(document.querySelectorAll('[data-settings-group]'));
+    var search = document.getElementById('settings-search');
+    var filterStatus = document.getElementById('settings-filter-status');
+    var groups = ['general', 'models', 'integrations', 'controls', 'access'];
+    var aliases = {appearance: 'general', budget: 'general', providers: 'integrations', webhooks: 'integrations', capabilities: 'controls', features: 'controls', visibility: 'access'};
+    var active = (index && index.dataset.initialGroup) || 'general';
+    var hash = String(window.location.hash || '').replace(/^#settings-?/, '').replace(/^#/, '');
+    if (aliases[hash]) hash = aliases[hash];
+    if (groups.indexOf(hash) !== -1) active = hash;
+
+    function sections() {
+      return grouped.filter(function (node) { return node.classList.contains('section-head'); }).map(function (head) {
+        var panel = head.nextElementSibling;
+        return {head: head, panel: panel, group: head.dataset.settingsGroup, title: head.textContent.trim()};
+      });
+    }
+    function selectGroup(group, focus) {
+      active = groups.indexOf(group) === -1 ? 'general' : group;
+      if (search) search.value = '';
+      grouped.forEach(function (node) { node.hidden = node.dataset.settingsGroup !== active; });
+      tabs.forEach(function (tab) {
+        var selected = tab.dataset.settingsTab === active;
+        tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected && focus) tab.focus();
+      });
+      document.querySelectorAll('[data-settings-search-item]').forEach(function (item) { item.hidden = false; });
+      if (filterStatus) filterStatus.textContent = sections().filter(function (section) { return section.group === active; }).length + ' sections shown.';
+      if (window.history && window.history.replaceState) window.history.replaceState(null, '', '#settings-' + active);
+    }
+    function applySearch() {
+      var query = String(search.value || '').trim().toLocaleLowerCase();
+      if (!query) { selectGroup(active, false); return; }
+      var visible = 0;
+      sections().forEach(function (section) {
+        var items = Array.prototype.slice.call(section.panel.querySelectorAll('[data-settings-search-item]'));
+        var titleMatch = section.title.toLocaleLowerCase().indexOf(query) !== -1;
+        var itemMatches = 0;
+        items.forEach(function (item) {
+          var match = item.textContent.toLocaleLowerCase().indexOf(query) !== -1;
+          item.hidden = !titleMatch && !match;
+          if (match) itemMatches += 1;
+        });
+        var genericMatch = !items.length && section.panel.textContent.toLocaleLowerCase().indexOf(query) !== -1;
+        var show = titleMatch || itemMatches > 0 || genericMatch;
+        section.head.hidden = !show;
+        section.panel.hidden = !show;
+        if (show) visible += 1;
+      });
+      if (filterStatus) filterStatus.textContent = visible ? visible + ' matching sections shown.' : 'No settings match “' + search.value.trim() + '”.';
+    }
+    tabs.forEach(function (tab, position) {
+      tab.addEventListener('click', function () { selectGroup(tab.dataset.settingsTab, false); });
+      tab.addEventListener('keydown', function (event) {
+        var direction = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+        if (!direction) return;
+        event.preventDefault();
+        var next = (position + direction + tabs.length) % tabs.length;
+        selectGroup(tabs[next].dataset.settingsTab, true);
+      });
+    });
+    if (search) search.addEventListener('input', applySearch);
+    selectGroup(active, false);
+
+    var forms = Array.prototype.slice.call(document.querySelectorAll('form[action^="/settings"]'));
+    var dirty = new Set();
+
+    function sectionName(form) {
+      var node = form.closest('.panel');
+      while (node && node.previousElementSibling) {
+        node = node.previousElementSibling;
+        var heading = node.querySelector && node.querySelector('.section-head h2, h2');
+        if (heading && heading.textContent.trim()) return heading.textContent.trim();
+      }
+      return form.action || 'another section';
+    }
+    function markDirty(event) { dirty.add(event.currentTarget); }
+
+    forms.forEach(function (form) {
+      form.addEventListener('input', markDirty);
+      form.addEventListener('change', markDirty);
+      form.addEventListener('submit', function (event) {
+        if (form.dataset.settingsSubmitApproved === 'true') {
+          delete form.dataset.settingsSubmitApproved;
+          dirty.clear();
+          return;
+        }
+        var otherDirty = Array.from(dirty).filter(function (candidate) {
+          return candidate !== form;
+        });
+        if (!otherDirty.length) {
+          dirty.delete(form);
+          return;
+        }
+        event.preventDefault();
+        var submitter = event.submitter || null;
+        var sections = otherDirty.map(sectionName).filter(function (name, index, all) {
+          return all.indexOf(name) === index;
+        });
+        var prompt = 'Saving this section reloads Settings and will discard unsaved changes in '
+          + sections.join(', ') + '. Continue?';
+        var confirmation = window.mvConfirm
+          ? window.mvConfirm(prompt, { okText: 'Discard others and save' })
+          : Promise.resolve(window.confirm(prompt));
+        confirmation.then(function (approved) {
+          if (!approved) return;
+          dirty.clear();
+          form.dataset.settingsSubmitApproved = 'true';
+          if (form.requestSubmit) form.requestSubmit(submitter || undefined);
+          else form.submit();
+        });
+      });
+    });
+
+    window.addEventListener('beforeunload', function (event) {
+      if (!dirty.size) return;
+      event.preventDefault();
+      event.returnValue = '';
+    });
+  })();
+  </script>
 {% endblock %}

@@ -291,7 +291,7 @@ def test_compliance_packet_download(monkeypatch):
         calls += 1
         return '{"artifact":"maverick.compliance_packet"}'
 
-    monkeypatch.setattr(api, "_COMPLIANCE_PACKET_CACHE", None)
+    monkeypatch.setattr(api, "_COMPLIANCE_PACKET_CACHE", {})
     monkeypatch.setattr(api, "_build_compliance_packet_body", fake_body)
     r = client.get("/api/v1/compliance/packet")
     assert r.status_code == 200
@@ -302,3 +302,27 @@ def test_compliance_packet_download(monkeypatch):
     cached = client.get("/api/v1/compliance/packet")
     assert cached.status_code == 200
     assert calls == 1
+
+
+def test_compliance_packet_cache_is_isolated_by_tenant(monkeypatch, tmp_path):
+    from maverick.paths import current_tenant_id_strict
+    from maverick_dashboard import api
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(api, "_COMPLIANCE_PACKET_CACHE", {})
+    calls: list[str] = []
+
+    def fake_body() -> str:
+        tenant = current_tenant_id_strict() or "shared"
+        calls.append(tenant)
+        return '{"tenant":"' + tenant + '"}'
+
+    monkeypatch.setattr(api, "_build_compliance_packet_body", fake_body)
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    assert client.get("/api/v1/compliance/packet").json() == {"tenant": "tenant-a"}
+    assert client.get("/api/v1/compliance/packet").json() == {"tenant": "tenant-a"}
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    assert client.get("/api/v1/compliance/packet").json() == {"tenant": "tenant-b"}
+    assert calls == ["tenant-a", "tenant-b"]

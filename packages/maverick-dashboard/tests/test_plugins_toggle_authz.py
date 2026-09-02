@@ -1,8 +1,8 @@
 """Authorization on /plugins/toggle.
 
-Enabling a plugin loads its code on the next goal -- a control-plane change that
-must require admin, like /plugins/install. Regression guard for the gap where
-the route checked only same-origin.
+Enabling a plugin loads its code on the next goal -- a deployment control-plane
+change that must require a global admin, like /plugins/install. Regression guard
+for the gaps where the route checked only same-origin or a tenant-local role.
 """
 from __future__ import annotations
 
@@ -20,15 +20,15 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def test_toggle_is_gated_on_admin(monkeypatch):
-    # Simulate RBAC denying a non-admin caller: the route must consult
-    # require_permission("admin") and propagate its 403 (not silently toggle).
+    # Simulate the global RBAC gate denying a non-admin caller: the route must
+    # propagate its 403 (not silently toggle).
     seen = []
 
     def deny(request, perm):
         seen.append(perm)
         raise HTTPException(status_code=403, detail="forbidden")
 
-    monkeypatch.setattr(appmod, "require_permission", deny)
+    monkeypatch.setattr(appmod, "require_global_permission", deny)
     r = client.post("/plugins/toggle", data={"name": "x", "action": "enable"})
     assert r.status_code == 403
     assert "admin" in seen
@@ -37,7 +37,7 @@ def test_toggle_is_gated_on_admin(monkeypatch):
 def test_toggle_works_when_authorized(monkeypatch):
     # With permission granted (the auth-off local-admin case), the gate doesn't
     # block: same-origin + admin pass and the route proceeds (redirect, not 403).
-    monkeypatch.setattr(appmod, "require_permission", lambda request, perm: None)
+    monkeypatch.setattr(appmod, "require_global_permission", lambda request, perm: None)
     r = client.post(
         "/plugins/toggle", data={"name": "nonexistent-plugin", "action": "reset"},
         follow_redirects=False,

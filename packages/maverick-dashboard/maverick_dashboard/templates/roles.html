@@ -124,27 +124,65 @@
           opts.headers['Content-Type'] = 'application/json';
           opts.body = JSON.stringify(body);
         }
-        const r = await fetch(path, opts);
+        let r;
+        try { r = await fetch(path, opts); }
+        catch (error) { throw new Error('Could not reach the server — check your connection and try again.'); }
         let data = {};
         try { data = await r.json(); } catch (e) { /* 204 etc. */ }
         return { status: r.status, data };
       }
+      function beginMutation(button) {
+        if (button.dataset.inFlight === 'true') return false;
+        button.dataset.inFlight = 'true';
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        return true;
+      }
+      function finishMutation(button) {
+        delete button.dataset.inFlight;
+        button.removeAttribute('aria-busy');
+        button.disabled = false;
+      }
 
-      document.getElementById('btn-save').addEventListener('click', async () => {
+      const saveBtn = document.getElementById('btn-save');
+      saveBtn.addEventListener('click', async () => {
         const body = {
           system_addendum: document.getElementById('f-addendum').value,
           model: document.getElementById('f-model').value,
           effort: document.getElementById('f-effort').value,
         };
-        const { status, data } = await call('POST', `/api/v1/roles/${role}/override`, body);
-        if (status === 200) { show('Saved.', true); window.location.search = '?role=' + encodeURIComponent(role); }
-        else show('Rejected: ' + (data.detail || ('HTTP ' + status)), false);
+        if (!beginMutation(saveBtn)) return;
+        try {
+          if (!(await mvConfirm(
+            'Deploy the authority and model override for role “' + role + '”? It applies the next time this role runs.',
+            {okText: 'Deploy role override'}
+          ))) return;
+          const { status, data } = await call('POST', `/api/v1/roles/${role}/override`, body);
+          if (status === 200) { show('Saved.', true); window.location.search = '?role=' + encodeURIComponent(role); }
+          else show('Rejected: ' + (data.detail || ('HTTP ' + status + '. Try again.')), false);
+        } catch (error) {
+          show(error instanceof Error ? error.message : 'Role deployment failed.', false);
+        } finally {
+          finishMutation(saveBtn);
+        }
       });
 
-      document.getElementById('btn-reset').addEventListener('click', async () => {
-        const { status, data } = await call('DELETE', `/api/v1/roles/${role}/override`);
-        if (status === 200) { show('Reverted to built-in.', true); window.location.search = '?role=' + encodeURIComponent(role); }
-        else show('Failed: ' + (data.detail || ('HTTP ' + status)), false);
+      const resetBtn = document.getElementById('btn-reset');
+      resetBtn.addEventListener('click', async () => {
+        if (!beginMutation(resetBtn)) return;
+        try {
+          if (!(await mvConfirm(
+            'Reset role “' + role + '” to its built-in authority and model? The custom override will be removed.',
+            {okText: 'Reset role'}
+          ))) return;
+          const { status, data } = await call('DELETE', `/api/v1/roles/${role}/override`);
+          if (status === 200) { show('Reverted to built-in.', true); window.location.search = '?role=' + encodeURIComponent(role); }
+          else show('Failed: ' + (data.detail || ('HTTP ' + status + '. Try again.')), false);
+        } catch (error) {
+          show(error instanceof Error ? error.message : 'Role reset failed.', false);
+        } finally {
+          finishMutation(resetBtn);
+        }
       });
     })();
   </script>

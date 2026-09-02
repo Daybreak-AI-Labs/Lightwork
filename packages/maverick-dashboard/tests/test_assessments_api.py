@@ -45,7 +45,10 @@ def test_draft_review_and_export(monkeypatch, tmp_path):
         pytest.skip("no packs discovered")
     c = _client()
     # Draft
-    r = c.post(f"/api/v1/assessments/agent/{name}/refresh", json={})
+    r = c.post(
+        f"/api/v1/assessments/agent/{name}/refresh",
+        json={"expected_revision": 0},
+    )
     assert r.status_code == 200
     a = r.json()
     assert a["kind"] == "agent" and a["subject"] == name
@@ -54,10 +57,13 @@ def test_draft_review_and_export(monkeypatch, tmp_path):
     lst = c.get("/api/v1/assessments").json()["assessments"]
     assert any(x["subject"] == name for x in lst)
     # Review each lens -> reviewed
+    revision = a["revision"]
     for lens in ("privacy", "security", "ai_risk"):
         rr = c.post(f"/api/v1/assessments/agent/{name}/review",
-                    json={"lens": lens, "decision": "accepted", "cadence_days": 90})
+                    json={"expected_revision": revision, "lens": lens,
+                          "decision": "accepted", "cadence_days": 90})
         assert rr.status_code == 200
+        revision = rr.json()["revision"]
     assert c.get(f"/api/v1/assessments/agent/{name}").json()["status"] == "reviewed"
     # CSV export contains the subject
     csv = c.get("/api/v1/assessments/export?format=csv")
@@ -71,10 +77,69 @@ def test_review_rejects_bad_lens(monkeypatch, tmp_path):
         import pytest
         pytest.skip("no packs discovered")
     c = _client()
-    c.post(f"/api/v1/assessments/agent/{name}/refresh", json={})
+    current = c.post(
+        f"/api/v1/assessments/agent/{name}/refresh",
+        json={"expected_revision": 0},
+    ).json()
     r = c.post(f"/api/v1/assessments/agent/{name}/review",
-               json={"lens": "nonsense", "decision": "accepted"})
+               json={"expected_revision": current["revision"],
+                     "lens": "nonsense", "decision": "accepted"})
     assert r.status_code == 422  # schema pattern rejects it
+
+
+def test_stale_assessment_mutations_conflict_without_overwriting(monkeypatch, tmp_path):
+    name = _an_agent(monkeypatch, tmp_path)
+    if not name:
+        import pytest
+
+        pytest.skip("no packs discovered")
+    c = _client()
+    created = c.post(
+        f"/api/v1/assessments/agent/{name}/refresh",
+        json={"expected_revision": 0},
+    ).json()
+    stale_revision = created["revision"]
+    advanced = c.post(
+        f"/api/v1/assessments/agent/{name}/review",
+        json={
+            "expected_revision": stale_revision,
+            "lens": "privacy",
+            "decision": "needs_work",
+        },
+    )
+    assert advanced.status_code == 200
+
+    stale_requests = (
+        c.post(
+            f"/api/v1/assessments/agent/{name}/refresh",
+            json={"expected_revision": stale_revision},
+        ),
+        c.post(
+            f"/api/v1/assessments/agent/{name}/review",
+            json={
+                "expected_revision": stale_revision,
+                "lens": "security",
+                "decision": "accepted",
+            },
+        ),
+        c.post(
+            f"/api/v1/assessments/agent/{name}/evidence",
+            json={
+                "expected_revision": stale_revision,
+                "lens": "privacy",
+                "control": created["lenses"]["privacy"]["findings"][0]["control"],
+                "evidence": "stale reviewer note",
+            },
+        ),
+        c.delete(
+            f"/api/v1/assessments/agent/{name}",
+            params={"expected_revision": stale_revision},
+        ),
+    )
+    assert [response.status_code for response in stale_requests] == [409, 409, 409, 409]
+    latest = c.get(f"/api/v1/assessments/agent/{name}").json()
+    assert latest["revision"] == advanced.json()["revision"]
+    assert latest["lenses"]["security"]["status"] != "accepted"
 
 
 def test_sweep_endpoint(monkeypatch, tmp_path):
@@ -83,7 +148,10 @@ def test_sweep_endpoint(monkeypatch, tmp_path):
         import pytest
         pytest.skip("no packs discovered")
     c = _client()
-    c.post(f"/api/v1/assessments/agent/{name}/refresh", json={})
+    c.post(
+        f"/api/v1/assessments/agent/{name}/refresh",
+        json={"expected_revision": 0},
+    )
     r = c.post("/api/v1/assessments/sweep", json={})
     assert r.status_code == 200
     body = r.json()
@@ -92,11 +160,17 @@ def test_sweep_endpoint(monkeypatch, tmp_path):
 
 def test_refresh_unknown_agent_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    r = _client().post("/api/v1/assessments/agent/____nope____/refresh", json={})
+    r = _client().post(
+        "/api/v1/assessments/agent/____nope____/refresh",
+        json={"expected_revision": 0},
+    )
     assert r.status_code == 404
 
 
 def test_bad_kind_400(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    r = _client().post("/api/v1/assessments/widget/x/refresh", json={})
+    r = _client().post(
+        "/api/v1/assessments/widget/x/refresh",
+        json={"expected_revision": 0},
+    )
     assert r.status_code == 400

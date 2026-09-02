@@ -16,6 +16,7 @@ so tests drive the whole flow with in-memory fakes.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -28,6 +29,8 @@ TERMINAL_STATUSES = frozenset({"done", "blocked", "failed", "cancelled"})
 # Page size for draining goal_events. Matches world_model.goal_events' default
 # LIMIT; a full page signals more backlog to drain before the terminal check.
 _PAGE = 200
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -124,13 +127,28 @@ class GoalService:
 
         ``owner`` is persisted on the goal row so a later status poll can be
         scoped to whoever created it (the federation surface uses this to keep
-        one peer from reading another peer's delegated-goal results)."""
+        one peer from reading another peer's delegated-goal results). Runtime
+        authority is persisted separately, so a delegated worker can execute
+        without replacing the human/resource owner used for retrieval."""
         if not (title or "").strip():
             raise ValueError("title is required")
+        from ..orchestrator import _execution_principal
+
+        runtime_principal = _execution_principal(
+            user_id=user_id,
+            capability=capability,
+        )
+        durable_owner = owner or runtime_principal
         world = self._world_factory()
         try:
-            goal_id = int(world.create_goal(title.strip(), description or "",
-                                            owner=owner or ""))
+            goal_id = int(
+                world.create_goal(
+                    title.strip(),
+                    description or "",
+                    owner=durable_owner,
+                    execution_principal=runtime_principal,
+                )
+            )
         finally:
             _close(world)
 
@@ -209,28 +227,100 @@ class GoalService:
         max_depth: int | None = None,
         capability: Any | None = None,
         expected_owner: str | None = None,
+        expected_execution_principal: str | None = None,
     ) -> GoalStatusDTO | None:
         """Run an EXISTING goal row to completion and return its terminal
         status — the worker half of the cross-host gRPC Dispatcher (caller and
         worker must share the world DB, e.g. the Postgres backend). Returns
-        None when the goal id doesn't exist here (DBs not shared / bad id) or
-        does not belong to ``expected_owner``.  ``None`` owner scope is the
-        shared operator's administrative access."""
+        None when the goal id doesn't exist here (DBs not shared / bad id),
+        does not belong to ``expected_owner``, or is not delegated to
+        ``expected_execution_principal``. ``None`` in either scope is the
+        shared operator's administrative access. Resource ownership and
+        execution authority are intentionally independent: a human-owned fleet
+        goal can be run by its bound agent without transferring dashboard
+        visibility to that agent.
+        """
         world = self._world_factory()
         try:
             goal = self._goal_for_owner(world, goal_id, expected_owner)
             if goal is None:
                 return None
+            bound_execution = (
+                getattr(goal, "execution_principal", "") or ""
+            )
+            if expected_execution_principal is not None:
+                if bound_execution:
+                    if bound_execution != expected_execution_principal:
+                        return None
+                elif (getattr(goal, "owner", "") or "") != (
+                    expected_execution_principal
+                ):
+                    # A per-agent bearer may adopt its own legacy unbound goal,
+                    # but not an arbitrary human-owned legacy row. New
+                    # delegated rows are pre-bound at creation.
+                    return None
+            # The remote claim is itself a durable status side effect, so bind
+            # or verify the exact runtime principal before that compare-and-
+            # swap.  The orchestrator repeats this check at its own boundary;
+            # doing it here ensures a mismatched RPC cannot even repaint the
+            # owner's pending row as active.
+            if getattr(goal, "status", "") == "pending":
+                from ..orchestrator import (
+                    _bind_goal_execution_principal,
+                    _execution_principal,
+                )
+
+                try:
+                    runtime_principal = _execution_principal(
+                        user_id=user_id,
+                        capability=capability,
+                    )
+                    if (
+                        expected_execution_principal is not None
+                        and runtime_principal != expected_execution_principal
+                    ):
+                        return None
+                    if not _bind_goal_execution_principal(
+                        world, goal, runtime_principal,
+                    ):
+                        return None
+                    if not (getattr(goal, "execution_principal", "") or ""):
+                        rebound = world.get_goal(goal_id)
+                        if (
+                            rebound is None
+                            or (
+                                getattr(rebound, "execution_principal", "")
+                                or ""
+                            )
+                            != runtime_principal
+                        ):
+                            return None
+                        goal = rebound
+                except Exception:
+                    log.exception(
+                        "gRPC goal %s runtime-principal binding failed",
+                        goal_id,
+                    )
+                    return None
             # This RPC is the remote worker's at-least-once delivery boundary.
             # Claim in the database, in one pending -> active CAS, before any
             # side effect.  A retry after a timeout/lost response (or a racing
             # second worker) returns the current status without re-running the
             # swarm or spending the budget twice.
+            resource_owner = getattr(goal, "owner", "") or ""
             if not world.claim_goal_for_run(
-                goal_id, expected_owner=expected_owner,
+                goal_id, expected_owner=resource_owner,
             ):
                 current = self._goal_for_owner(world, goal_id, expected_owner)
                 if current is None:
+                    return None
+                if (
+                    expected_execution_principal is not None
+                    and (
+                        getattr(current, "execution_principal", "") or ""
+                    )
+                    != expected_execution_principal
+                ):
                     return None
                 return GoalStatusDTO(
                     goal_id=goal_id,

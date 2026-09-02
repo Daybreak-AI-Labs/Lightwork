@@ -234,15 +234,16 @@ def test_dashboard_invalid_theme_falls_back(dashboard_client):
 
 
 def test_dashboard_theme_cookie_persists(dashboard_client):
-    # First visit with ?theme=light should set the cookie.
-    resp = dashboard_client.get("/?theme=light")
+    # Use a non-redirecting page so the response being inspected is the one
+    # that persists the preference. ``/`` may first redirect to onboarding.
+    resp = dashboard_client.get("/overview?theme=light")
     assert resp.status_code == 200
     cookies = resp.cookies
     assert cookies.get("mvk_theme") == "light"
     # The client cookie jar should carry the server-set value into the next
     # request; passing per-request cookies is deprecated and bypasses that
     # persistence behavior.
-    resp2 = dashboard_client.get("/")
+    resp2 = dashboard_client.get("/overview")
     assert 'class="theme-light' in resp2.text
 
 

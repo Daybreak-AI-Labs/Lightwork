@@ -148,9 +148,10 @@ class GrpcDispatcher:
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
     ) -> str | None:
-        # The remote service derives its scheduling/concurrency identity from
-        # the authenticated bearer principal. Never forward a caller-selected
-        # principal across this trust boundary, but retain the Dispatcher API.
+        # Never forward the caller-selected scheduler lane across this trust
+        # boundary. A per-agent bearer remains authoritative for execution;
+        # the shared operator path instead verifies the matching capability /
+        # user-id identity against the goal's durable execution binding.
         # Conversation ownership is not yet represented in the gRPC contract;
         # forwarding a raw row id would let a per-agent caller select another
         # owner's history. Queue dispatch authenticates this field, while gRPC

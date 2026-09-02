@@ -74,6 +74,7 @@
             {% endif %}
             <button class="pw-assign-btn" data-assessment="{{ s.id }}"
                     data-current="{{ s.assignee or '' }}" type="button"
+                    aria-label="Assign {{ s.subject }} assessment"
                     title="Assign this assessment to a reviewer">assign</button>
           </td>
           <td>{{ s.open_followups or '—' }}</td>
@@ -83,7 +84,8 @@
             {% else %}
               {{ (s.age_days ~ 'd') if s.age_days is not none else '—' }}
             {% endif %}</td>
-          <td><button class="pw-review-btn" data-assessment="{{ s.id }}" type="button">Review</button></td>
+          <td><button class="pw-review-btn" data-assessment="{{ s.id }}" type="button"
+                      aria-label="Review {{ s.subject }} assessment">Review</button></td>
         </tr>
         {% endfor %}
       </tbody>

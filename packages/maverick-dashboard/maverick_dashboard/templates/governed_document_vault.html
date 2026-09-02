@@ -35,7 +35,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<main class="document-vault-shell" id="document-vault-shell"
+<div class="document-vault-shell" id="document-vault-shell"
       data-vault-api-base="{{ vault_api_base }}" data-access-api-base="{{ access_api_base }}"
       data-copilot-page="/administration/document-vault">
   <header class="document-vault-hero">
@@ -146,6 +146,6 @@
     </section>
   </fieldset>
   <noscript><p class="document-vault-boundary">JavaScript is required for this bounded administrative workbench.</p></noscript>
-</main>
+</div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-governed-document-vault.js" defer></script>{% endblock %}

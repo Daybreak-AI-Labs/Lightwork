@@ -82,7 +82,7 @@ def test_page_renders_full_operator_contract(page_client: TestClient) -> None:
     assert 'data-can-admin="false"' in response.text
     assert 'data-requires="admin"' in response.text
     assert response.text.count('data-requires="audit"') == 2
-    assert 'href="/">Back to Overview</a>' in response.text
+    assert 'href="/overview">Back to Overview</a>' in response.text
     template = (
         Path(__file__).resolve().parents[1]
         / "maverick_dashboard"

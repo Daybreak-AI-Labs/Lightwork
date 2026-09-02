@@ -185,15 +185,18 @@ def deployment_enterprise_enabled(
         )
         return True
 
-    # Compliance is evaluated directly from the supplied snapshot.  Calling
-    # requires_floor() here would re-read load_config() and admit a tenant overlay.
+    # Compliance is evaluated from the same admitted global snapshot. The shared
+    # strict resolver validates table/list/key shape and folds in the documented
+    # environment activation without re-reading a tenant overlay.
     try:
-        from .compliance_profiles import FLOOR_EGRESS_LOCK, required_floors
+        from .compliance_profiles import (
+            FLOOR_EGRESS_LOCK,
+            required_floors,
+            resolve_profiles,
+        )
 
-        compliance = config.get("compliance") or {}
-        profiles = compliance.get("profiles") if isinstance(compliance, Mapping) else ()
-        configured_profiles = profiles if isinstance(profiles, (list, tuple)) else ()
-        if FLOOR_EGRESS_LOCK in required_floors(configured_profiles):
+        profiles = resolve_profiles(config, source_errors=source_errors)
+        if FLOOR_EGRESS_LOCK in required_floors(profiles):
             return True
     except Exception:
         log.exception(

@@ -9,31 +9,45 @@
   .bnd-scroll { overflow-x: auto; }
   .bnd-mono { font-family: var(--font-mono, monospace); font-size: var(--text-xs); }
   @media print {
-    .sidebar, .topbar, nav, .bnd-actions, footer, header { display: none !important; }
+    .sidebar, .topbar, nav, .bnd-actions, footer, header,
+    .mv-copilot, .mv-copilot__fab { display: none !important; }
     .panel { break-inside: avoid; border: 1px solid #ccc; }
     body { background: #fff; color: #000; }
   }
 </style>
 
   <h1 class="page-title">Audit binder</h1>
-  <p class="page-subtitle">The evidence pack, assembled from the records themselves:
+  <p class="page-subtitle">A cryptographically identified evidence snapshot assembled from the records themselves:
     signed-chain verification, approvals with identity and quorum, the assessment
     register with revisions, the privacy registers, and the learning KPIs.
-    Window: last {{ days }} days · generated {{ b.generated }}.</p>
+    Event and decision window: last {{ days }} days · generated {{ b.generated }}.
+    Privacy and finance sections are explicitly labeled current snapshots.</p>
   <div class="bnd-actions">
     <button class="btn btn--primary" onclick="window.print()" type="button">Print / save as PDF</button>
-    <a class="btn" href="/api/v1/audit/binder?days={{ days }}">JSON</a>
+    <button class="btn" id="binder-json" type="button">Download signed JSON snapshot</button>
     <a class="btn" href="/audit/binder?days=30">30d</a>
     <a class="btn" href="/audit/binder?days=90">90d</a>
     <a class="btn" href="/audit/binder?days=365">12m</a>
     <a class="btn" href="/audit">← audit log</a>
   </div>
 
+  <div class="section-head"><h2>Artifact identity</h2></div>
+  <div class="panel">
+    <div class="bnd-grid">
+      <div class="bnd-stat"><div class="v bnd-mono">{{ b.artifact.binder_id }}</div><div class="l">binder id</div></div>
+      <div class="bnd-stat"><div class="v">{{ b.artifact.signature_state | upper }}</div><div class="l">artifact signature</div></div>
+      <div class="bnd-stat"><div class="v bnd-mono">{{ b.artifact.key_id or '—' }}</div><div class="l">signing key id</div></div>
+    </div>
+    <p class="bnd-mono" style="overflow-wrap:anywhere;">SHA-256 {{ b.artifact.digest }}</p>
+    <p class="muted">The digest covers the exact downloadable JSON snapshot. A signed state binds it to the active audit Ed25519 identity. Independent/off-host key custody is
+      {% if b.artifact.independent_key_custody_verified %}<strong>verified</strong>{% else %}<strong>not verified</strong>{% endif %}; local signature validity alone is not external custody proof.</p>
+  </div>
+
   <div class="section-head"><h2>Signed audit chain</h2></div>
   <div class="panel">
     <div class="bnd-grid">
       <div class="bnd-stat"><div class="v">
-        {% if b.chain.intact is none %}—{% elif b.chain.intact %}INTACT{% else %}BROKEN{% endif %}
+        {{ b.chain.verdict | upper }}
       </div><div class="l">chain verdict</div></div>
       <div class="bnd-stat"><div class="v">{{ b.chain.files | length }}</div><div class="l">day files verified</div></div>
       <div class="bnd-stat"><div class="v">{{ b.chain.events }}</div><div class="l">events in window</div></div>
@@ -49,7 +63,7 @@
         <tr>
           <td class="bnd-mono">{{ f.day }}</td>
           <td>{{ f.events }}</td>
-          <td><span class="badge {{ 'done' if f.intact else 'blocked' }}">{{ 'intact' if f.intact else 'BREAKS FOUND' }}</span></td>
+          <td><span class="badge {{ 'done' if f.verdict == 'verified' else 'blocked' if f.verdict == 'broken' else 'warn' }}">{{ f.verdict }}</span></td>
           <td class="bnd-mono">{% for br in f.breaks %}line {{ br.line }}: {{ br.reason }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}</td>
         </tr>
         {% endfor %}
@@ -61,6 +75,13 @@
     {% else %}
     <p class="muted">No audit day files in this window.</p>
     {% endif %}
+    {% if b.chain.anchor_breaks %}
+    <p class="badge blocked">Cross-day anchor verification requires attention</p>
+    <ul class="bnd-mono">
+      {% for br in b.chain.anchor_breaks %}<li>{{ br.reason }}{% if br.detail %}: {{ br.detail }}{% endif %}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    <p class="muted">Independent custody proof: {{ 'verified' if b.chain.independent_custody_verified else 'not verified' }}.</p>
   </div>
 
   <div class="section-head"><h2>Approvals — identity &amp; quorum</h2></div>
@@ -70,7 +91,7 @@
     <table>
       <thead><tr><th scope="col">#</th><th scope="col">action</th><th scope="col">risk</th>
         <th scope="col">status</th><th scope="col">requested by</th>
-        <th scope="col">decided by</th><th scope="col">quorum</th></tr></thead>
+        <th scope="col">decided by</th><th scope="col">quorum</th><th scope="col">approvers</th><th scope="col">audit delivery</th></tr></thead>
       <tbody>
         {% for a in b.approvals[:60] %}
         <tr>
@@ -80,12 +101,15 @@
           <td><span class="badge {{ 'done' if a.status == 'approved' else 'blocked' if a.status == 'denied' else 'info' }}">{{ a.status }}</span></td>
           <td>{{ a.requested_by or '—' }}</td>
           <td>{{ a.decided_by or '—' }}</td>
-          <td>{{ a.approvals_required }}</td>
+          <td>{{ a.approved_count }}/{{ a.approvals_required }}</td>
+          <td>{{ a.approvers | join(', ') if a.approvers else '—' }}</td>
+          <td>{{ 'pending (' ~ a.audit_pending_count ~ ')' if a.audit_pending_count else 'delivered' }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     </div>
+    <p class="muted">Showing {{ [b.approvals | length, 60] | min }} of {{ b.approvals_total }} approval records in print. The signed JSON snapshot contains all {{ b.approvals_total }} records in the exact window.</p>
     {% else %}
     <p class="muted">No approvals in this window.</p>
     {% endif %}
@@ -115,13 +139,13 @@
     </table>
     </div>
     <p class="muted" style="font-size: var(--text-xs); margin-top: var(--space-2);">
-      {{ b.assessments | length }} record(s) shown (capped at 300); each revision is CAS-guarded and every mutation carries an audit receipt.</p>
+      Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} record(s) in print. The signed JSON snapshot contains all records in the exact window; each revision is CAS-guarded and includes its full template digest.</p>
     {% else %}
     <p class="muted">No assessment records yet.</p>
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Privacy registers</h2></div>
+  <div class="section-head"><h2>Privacy registers <span class="badge info">current snapshot</span></h2></div>
   <div class="panel">
     {% if b.registers.enabled %}
     <div class="bnd-grid">
@@ -137,7 +161,7 @@
     {% endif %}
   </div>
 
-  <div class="section-head"><h2>Learning — reviewer acceptance</h2></div>
+  <div class="section-head"><h2>Learning — reviewer acceptance <span class="badge info">exact decision window</span></h2></div>
   <div class="panel">
     {% if b.learning.decided %}
     <div class="bnd-grid">
@@ -152,4 +176,36 @@
     <p class="muted">No decided assessments yet — the acceptance record starts with the first approval.</p>
     {% endif %}
   </div>
+
+  <div class="section-head"><h2>Finance controls <span class="badge info">current snapshot</span></h2></div>
+  <div class="panel">
+    <p>{{ b.finance.posture.disclaimer }}</p>
+    <div class="bnd-grid">
+      <div class="bnd-stat"><div class="v">{{ b.finance.sod.conflicts if b.finance.sod.conflicts is not none else '—' }}</div><div class="l">SoD conflicts</div></div>
+      <div class="bnd-stat"><div class="v">{{ b.finance.licenses.total or 0 }}</div><div class="l">active licenses</div></div>
+      <div class="bnd-stat"><div class="v">{{ b.finance.licenses.due_90d or 0 }}</div><div class="l">renewals within 90 days</div></div>
+      <div class="bnd-stat"><div class="v">{{ b.finance.licenses.overdue or 0 }}</div><div class="l">overdue</div></div>
+    </div>
+  </div>
+
+  <script id="binder-payload" type="application/json">{{ b | tojson }}</script>
+  <script>
+    (function () {
+      const button = document.getElementById('binder-json');
+      const source = document.getElementById('binder-payload');
+      if (!button || !source) return;
+      button.addEventListener('click', function () {
+        const payload = JSON.parse(source.textContent || '{}');
+        const blob = new Blob([JSON.stringify(payload, null, 2) + '\n'], {type: 'application/json'});
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = 'lightwork-audit-binder-' + String(payload.artifact && payload.artifact.binder_id || 'snapshot') + '.json';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(href);
+      });
+    })();
+  </script>
 {% endblock %}

@@ -25,22 +25,31 @@ def test_by_agent_withholds_sealed_agent():
     assert len(bb.by_agent("good")) == 1       # other agents unaffected
 
 
-def test_by_agent_safe_under_concurrent_seal_and_post():
-    # Hammer by_agent while another thread posts + seals/unseals; a sealed agent
-    # must NEVER leak, and no "list changed size during iteration" may occur.
+def test_by_agent_withholds_during_concurrent_posts_after_seal():
+    # Establish that seal() completed before any read, then hammer by_agent
+    # while another thread keeps posting. A read that overlaps the initial seal
+    # may legally linearize before it; comparing that result with a later,
+    # separate is_sealed() call is a TOCTOU test bug rather than evidence of a
+    # leak.
     bb = Blackboard()
     reg = QuarantineRegistry()
     bb.attach_quarantine(reg)
     stop = threading.Event()
+    sealed = threading.Event()
     errors: list[Exception] = []
 
     def churn():
         i = 0
+        try:
+            bb.post("rogue", "observation", f"f{i}")
+            reg.seal("rogue", "r")
+            sealed.set()
+            i += 1
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
         while not stop.is_set():
             try:
                 bb.post("rogue", "observation", f"f{i}")
-                if i % 2 == 0:
-                    reg.seal("rogue", "r")
                 i += 1
             except Exception as e:  # pragma: no cover
                 errors.append(e)
@@ -48,12 +57,31 @@ def test_by_agent_safe_under_concurrent_seal_and_post():
     writer = threading.Thread(target=churn, daemon=True)
     writer.start()
     try:
+        assert sealed.wait(timeout=5), errors
         for _ in range(3000):
-            rows = bb.by_agent("rogue")
-            # Whenever the agent is currently sealed, the read must be empty.
-            if reg.is_sealed("rogue"):
-                assert rows == [], "sealed agent's posts leaked"
+            assert bb.by_agent("rogue") == [], "sealed agent's posts leaked"
     finally:
         stop.set()
         writer.join(timeout=5)
+    assert not writer.is_alive(), "concurrent poster did not stop"
     assert not errors, errors
+
+
+def test_by_agent_checks_quarantine_while_holding_entry_lock():
+    """Keep the seal check and entry snapshot in one blackboard critical section."""
+    bb = Blackboard()
+    lock_observations: list[bool] = []
+
+    class ProbeRegistry:
+        def is_sealed(self, _agent: str) -> bool:
+            acquired = bb._lock.acquire(blocking=False)
+            if acquired:
+                bb._lock.release()
+            lock_observations.append(not acquired)
+            return False
+
+    bb.attach_quarantine(ProbeRegistry())
+    bb.post("rogue", "observation", "visible")
+
+    assert len(bb.by_agent("rogue")) == 1
+    assert lock_observations == [True]

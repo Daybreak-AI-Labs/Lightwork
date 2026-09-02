@@ -119,6 +119,7 @@ def test_page_renders_exact_role_controls_and_rejects_query_material(monkeypatch
         if isinstance(attrs.get("id"), str)
     }
     assert "disabled" in by_id["tper-create-controls"]
+    assert by_id["tper-create-controls"]["data-authorized"] == "false"
     assert "disabled" in by_id["tper-revoke-controls"]
     assert "disabled" in by_id["tper-purge-controls"]
     assert "disabled" in by_id["tper-integrity"]
@@ -143,7 +144,13 @@ def test_static_bearer_page_exposes_operator_controls_only(monkeypatch) -> None:
         for _tag, attrs in parser.tags
         if isinstance(attrs.get("id"), str)
     }
-    assert "disabled" not in by_id["tper-create-controls"]
+    # Mutation controls start disabled in server-rendered markup. The bounded
+    # client may enable only this authorized control after both the module gate
+    # and the store-free runtime readiness response are true.
+    assert "disabled" in by_id["tper-create-controls"]
+    assert by_id["tper-create-controls"]["data-authorized"] == "true"
+    assert "disabled" in by_id["tper-download-controls"]
+    assert by_id["tper-download-controls"]["data-authorized"] == "true"
     assert "disabled" in by_id["tper-revoke-controls"]
     assert "disabled" in by_id["tper-purge-controls"]
     assert "disabled" in by_id["tper-integrity"]

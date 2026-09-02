@@ -9,6 +9,7 @@ from maverick_installer import wizard
 
 def test_regulated_deployment_detects_each_sensitive_control():
     assert wizard._regulated_deployment({"enterprise": True})
+    assert wizard._regulated_deployment({"compliance_profiles": ["gdpr"]})
     assert wizard._regulated_deployment({"encrypt_at_rest": True})
     assert wizard._regulated_deployment({"audit_sign": True})
     assert wizard._regulated_deployment({"security_autofix": True})
@@ -33,6 +34,13 @@ def test_compliance_command_set_is_the_full_surface():
     ]
 
 
+def test_compliance_guidance_does_not_overclaim_runtime_proof():
+    descriptions = " ".join(description for _, description in wizard._COMPLIANCE_COMMANDS)
+    assert "prove" not in descriptions.lower()
+    assert "configured application-layer boundary controls" in descriptions
+    assert "non-vacuous gates" in descriptions
+
+
 def test_panel_prints_only_for_a_regulated_deployment(capsys):
     # Not regulated -> silent (no noise for a personal install).
     wizard.show_compliance_commands({})
@@ -44,3 +52,9 @@ def test_panel_prints_only_for_a_regulated_deployment(capsys):
     assert "maverick ropa" in out
     assert "maverick ai-act" in out
     assert "Compliance" in out
+    assert "Verify" in out
+    assert "prepare" in out
+    assert "Prove" not in out
+
+    wizard.show_compliance_commands({"compliance_profiles": ["eu_ai_act"]})
+    assert "maverick regulatory verify" in capsys.readouterr().out

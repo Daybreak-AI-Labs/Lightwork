@@ -65,6 +65,26 @@ def test_goal_execution_claim_is_atomic(world):
     assert world.claim_goal_for_run(gid) is False
 
 
+def test_goal_execution_claim_honors_expected_owner(world):
+    gid = world.create_goal("owner-scoped claim", owner="agent:alice")
+
+    assert world.claim_goal_for_run(gid, expected_owner="agent:bob") is False
+    assert world.get_goal(gid).status == "pending"
+    assert world.claim_goal_for_run(gid, expected_owner="agent:alice") is True
+    assert world.get_goal(gid).status == "active"
+
+
+def test_goal_execution_principal_binding_is_mismatch_safe(world):
+    gid = world.create_goal("bind execution principal", owner="user:human-owner")
+    principal = "user:auth0|tenant/María 李"
+
+    assert world.bind_goal_execution_principal(gid, principal) is True
+    assert world.bind_goal_execution_principal(gid, principal) is True
+    assert world.bind_goal_execution_principal(gid, "user:different") is False
+    assert world.get_goal(gid).owner == "user:human-owner"
+    assert world.get_goal(gid).execution_principal == principal
+
+
 def test_get_missing_goal_returns_none(world):
     assert world.get_goal(999_999_999) is None
 
@@ -782,6 +802,34 @@ def test_set_goal_domain_and_v14_schema(world):
     assert _PG_SCHEMA_VERSION >= 14
     gid = world.create_goal("domain-tagged goal")
     world.set_goal_domain(gid, "finance")  # v14 goals.domain column
+
+
+def test_halt_durable_clear_failure_rolls_back_locked_generation(world):
+    prior = world.active_halt()
+    if prior is not None:
+        world.disarm_halt(expected_generation=prior["generation"])
+
+    try:
+        world.arm_halt("incident", source="postgres-test")
+        observed = world.active_halt()
+        callbacks = []
+
+        def _local_clear_failure():
+            callbacks.append("attempted")
+            raise OSError("local clear failed")
+
+        with pytest.raises(OSError, match="local clear failed"):
+            world.disarm_halt(
+                expected_generation=observed["generation"],
+                durable_clear=_local_clear_failure,
+            )
+
+        assert callbacks == ["attempted"]
+        assert world.active_halt() == observed
+    finally:
+        current = world.active_halt()
+        if current is not None:
+            world.disarm_halt(expected_generation=current["generation"])
 
 
 def test_search_goals_matches_title_desc_result_case_insensitive(world):

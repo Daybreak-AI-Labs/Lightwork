@@ -104,6 +104,10 @@ class ExternalAgentsError(Exception):
     """Operator-facing failure (bad input, unknown agent, plane disabled)."""
 
 
+class ExternalAgentsDependencyError(ExternalAgentsError):
+    """The enrollment sidecar exists but cannot be used as an authority."""
+
+
 class MintApprovalPending(ExternalAgentsError):
     """A gated credential mint parked a world approval and stopped.
 
@@ -189,7 +193,7 @@ def registry_path():
     return data_dir("external_agents.json")
 
 
-def _load_sidecar() -> dict[str, dict]:
+def _load_sidecar(*, strict: bool = False) -> dict[str, dict]:
     path = registry_path()
     try:
         if not path.exists():
@@ -197,10 +201,16 @@ def _load_sidecar() -> dict[str, dict]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("sidecar root must be an object")
+        if strict and any(not isinstance(value, dict) for value in data.values()):
+            raise ValueError("sidecar contains a non-object enrollment")
         return {str(k): v for k, v in data.items() if isinstance(v, dict)}
     except (OSError, UnicodeError, ValueError) as e:
         # Metadata loss must not widen trust (identity still gates), but it
         # must not pass silently either -- the spend meters live here.
+        if strict:
+            raise ExternalAgentsDependencyError(
+                "external-agent enrollment authority is unavailable"
+            ) from e
         log.warning("external_agents: sidecar unreadable (%s); treating as "
                     "empty", e)
         return {}
@@ -1141,16 +1151,59 @@ def _deny_and_count(agent_id: str, tool: str, rule: str, reason: str) -> dict:
     return _screen_verdict(agent_id, tool, False, rule, reason)
 
 
-def release(agent_id: str, *, released_by: str = "") -> bool:
-    """Admin action: lift a containment and clear the denial window."""
+def containment_state(agent_id: str) -> bool | None:
+    """Return gateway containment, or ``None`` when the id is not enrolled.
+
+    This is an authority read: corruption/outage raises a sanitized dependency
+    error instead of being laundered into an unenrolled/healthy answer.
+    """
+    meta = _load_sidecar(strict=True).get(agent_id)
+    return None if meta is None else bool(meta.get("contained"))
+
+
+def contain(agent_id: str, *, contained_by: str = "") -> bool:
+    """Admin action: contain an enrolled agent at the external gateway.
+
+    Returns false only for an unenrolled id. A successful return is verified
+    against the persisted post-state while the cross-process lock is held.
+    """
     with _sidecar_locked():
-        sidecar = _load_sidecar()
+        sidecar = _load_sidecar(strict=True)
+        meta = sidecar.get(agent_id)
+        if meta is None:
+            return False
+        meta["contained"] = True
+        _save_sidecar(sidecar)
+        after = _load_sidecar(strict=True).get(agent_id)
+        landed = after is not None and bool(after.get("contained"))
+    if not landed:
+        return False
+    from .audit import EventKind, audit_event
+    audit_event(EventKind.EXTERNAL_AGENT_CONTAINED, agent="external_agents",
+                external_agent=agent_id, contained_by=contained_by,
+                trigger="control_plane")
+    return True
+
+
+def release(agent_id: str, *, released_by: str = "") -> bool:
+    """Admin action: lift gateway containment and clear the denial window.
+
+    Returns false for an unenrolled id or when the persisted post-state still
+    says contained. Dependency failures raise rather than masquerading as an
+    unenrolled agent.
+    """
+    with _sidecar_locked():
+        sidecar = _load_sidecar(strict=True)
         meta = sidecar.get(agent_id)
         if meta is None:
             return False
         meta["contained"] = False
         meta["denials"] = []
         _save_sidecar(sidecar)
+        after = _load_sidecar(strict=True).get(agent_id)
+        landed = after is not None and not bool(after.get("contained"))
+    if not landed:
+        return False
     from .audit import EventKind, audit_event
     audit_event(EventKind.EXTERNAL_AGENT_RELEASED, agent="external_agents",
                 external_agent=agent_id, released_by=released_by)
@@ -1993,13 +2046,18 @@ def _audit_execution(agent_id: str, connector: str, op: str, outcome: str,
 
 # -- roster / detail (the dashboard's data) -----------------------------------
 
-def roster() -> list[dict]:
+def roster(*, registry: dict[str, Any] | None = None,
+           strict: bool = True) -> list[dict]:
     """Enrolled agents joined across the trust plane and the sidecar (never
-    including token values — only which surfaces hold one)."""
+    including token values — only which surfaces hold one).
+
+    The roster is an operator authority, so its default is strict: an unreadable
+    sidecar raises instead of returning a reassuring empty enrollment list.
+    """
     from .agent_trust import load_registry
-    registry = load_registry()
+    registry = load_registry(strict=strict) if registry is None else registry
     out = []
-    for agent_id, meta in sorted(_load_sidecar().items()):
+    for agent_id, meta in sorted(_load_sidecar(strict=strict).items()):
         agent = registry.get(agent_id)
         active, rule = agent.is_active() if agent else (False, "missing_trust")
         out.append({

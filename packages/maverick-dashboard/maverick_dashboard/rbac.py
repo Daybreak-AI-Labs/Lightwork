@@ -44,6 +44,11 @@ class RbacStoreError(RuntimeError):
     or broadening it.
     """
 
+
+class RecoveryAuthorityError(ValueError):
+    """A role mutation would remove the final durable global administrator."""
+
+
 # Serializes a roster load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit roles).
 _RBAC_LOCK = threading.Lock()
@@ -411,6 +416,34 @@ def get_stored_role(principal: str) -> str | None:
     return _load().get((principal or "").strip())
 
 
+def _durable_recovery_principals(data: dict[str, str]) -> frozenset[str]:
+    """Principals that can recover the global dashboard control plane.
+
+    Config-pinned bootstrap admins are immutable through this store.  Explicit
+    assignments to the built-in ``admin`` role are the other durable recovery
+    path: custom roles and SCIM-derived roles are intentionally not counted,
+    because their mutable definitions/group memberships can disappear outside
+    this roster mutation.
+    """
+    from maverick.suite_grants import admin_principals
+
+    return admin_principals() | frozenset(
+        principal for principal, role in data.items() if role == "admin"
+    )
+
+
+def _refuse_final_recovery_removal(
+    before: dict[str, str],
+    after: dict[str, str],
+) -> None:
+    """Refuse a transition that removes the final durable global admin."""
+    if _durable_recovery_principals(before) and not _durable_recovery_principals(after):
+        raise RecoveryAuthorityError(
+            "cannot remove the final global administrator; assign another "
+            "built-in admin or configure a bootstrap admin first"
+        )
+
+
 def _audit_role_change(actor: str, principal: str, field: str, tenant: str,
                        old, new) -> None:
     """One tamper-evident audit row per role change, so who-granted-whom-what
@@ -467,6 +500,7 @@ def set_role(principal: str, role: str, *, actor: str = "") -> None:
             return
         prior = dict(data)
         data[principal] = role
+        _refuse_final_recovery_removal(prior, data)
         _write(data)
         _audit_role_change_with_rollback(
             actor,
@@ -486,6 +520,7 @@ def remove_user(principal: str, *, actor: str = "") -> None:
         prior = dict(data)
         removed = data.pop(principal, None)
         if removed is not None:
+            _refuse_final_recovery_removal(prior, data)
             _write(data)
             _audit_role_change_with_rollback(
                 actor,
@@ -625,7 +660,8 @@ def list_tenant_roles(tenant: str) -> dict[str, str]:
 
 
 __all__ = [
-    "ROLES", "PERMISSION_ATOMS", "RbacStoreError", "store_path", "default_role",
+    "ROLES", "PERMISSION_ATOMS", "RbacStoreError", "RecoveryAuthorityError",
+    "store_path", "default_role",
     "permissions_for", "list_users", "get_stored_role", "set_role", "remove_user",
     "tenant_store_path", "get_tenant_role", "set_tenant_role",
     "remove_tenant_role", "list_tenant_roles",

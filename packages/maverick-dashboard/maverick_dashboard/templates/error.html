@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} · Lightwork{% endblock %}
+{% block content %}
+  <section class="panel" style="text-align: center; padding: 3rem 1.5rem;" aria-labelledby="request-error-title">
+    <div class="badge warn" style="margin-bottom: var(--space-3);">{{ status }}</div>
+    <h1 id="request-error-title" style="font-size: 1.4rem; margin-bottom: .75rem;">{{ title }}</h1>
+    <p class="muted" style="max-width: 36rem; margin: 0 auto 1.5rem;">{{ message }}</p>
+    <p class="muted" style="font-size: var(--text-sm);">Page: <code>{{ path }}</code></p>
+    <div style="display: flex; justify-content: center; gap: var(--space-3); flex-wrap: wrap; margin-top: 1.5rem;">
+      <a class="btn primary" href="{{ path }}">Reload this page</a>
+      <a class="btn" href="/workspace/tenant">Choose workspace</a>
+      <a class="btn" href="/">Back to overview</a>
+    </div>
+  </section>
+{% endblock %}

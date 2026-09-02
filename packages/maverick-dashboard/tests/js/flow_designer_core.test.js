@@ -94,6 +94,32 @@ test('cloneFlow is a deep, independent snapshot', () => {
   assert.equal(snap.nodes[0].brief, 'one');
 });
 
+test('commitRawParams walks nested drafts and commits valid JSON', () => {
+  const nested = FDCore.normalizeNode({ id: 'inner', kind: 'action', tool: 'send' }, 0);
+  nested._paramsRaw = '{"channel":"ops"}';
+  const flow = { id: 'f', name: 'F', start: 'loop', nodes: [
+    FDCore.normalizeNode({ id: 'loop', kind: 'foreach', items: 'rows',
+      body: { id: '', name: 'body', start: 'inner', nodes: [nested] } }, 0),
+  ] };
+  assert.deepEqual(FDCore.commitRawParams(flow), []);
+  assert.deepEqual(nested.params, { channel: 'ops' });
+  assert.ok(!Object.prototype.hasOwnProperty.call(nested, '_paramsRaw'));
+});
+
+test('commitRawParams reports but preserves invalid nested JSON', () => {
+  const nested = FDCore.normalizeNode({ id: 'inner', kind: 'action', tool: 'send',
+    params: { channel: 'old' } }, 0);
+  nested._paramsRaw = '{"channel":';
+  const flow = { id: 'f', name: 'F', start: 'parallel', nodes: [
+    FDCore.normalizeNode({ id: 'parallel', kind: 'parallel', branches: [
+      { id: '', name: 'branch', start: 'inner', nodes: [nested] },
+    ] }, 0),
+  ] };
+  assert.deepEqual(FDCore.commitRawParams(flow), ['parallel/branch-1/inner.params']);
+  assert.equal(nested._paramsRaw, '{"channel":');
+  assert.deepEqual(nested.params, { channel: 'old' });
+});
+
 test('upstreamOutputs returns only keys from nodes that reach the target', () => {
   const flow = { id: 'f', name: 'F', start: 'a', nodes: [
     FDCore.normalizeNode({ id: 'a', kind: 'agent', brief: 'x', output: 'summary', next: 'b' }, 0),

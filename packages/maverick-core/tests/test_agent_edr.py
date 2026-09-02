@@ -194,6 +194,8 @@ def test_containment_seals_the_live_swarm_and_revokes_authority(audit_dir):
     assert result.contained
     assert result.sealed and reg.is_sealed("worker-1")
     assert result.revoked == ["worker-1"]
+    from maverick.revocation import shared
+    assert shared().revoked()["worker-1"].protected is True
 
 
 def test_a_run_scoped_seal_is_never_reported_as_durable():
@@ -224,9 +226,19 @@ def test_revocation_is_confirmed_rather_than_assumed(monkeypatch):
     import maverick.revocation as rev
 
     class _Fake:
-        def revoke(self, principal, *, reason="", now=None):
+        def revoke(
+            self, principal, *, reason="", now=None, protected=False,
+            durable_apply=None,
+        ):
+            if durable_apply is not None:
+                durable_apply()
             return None
-        def revoke_subtree(self, principal, edges, *, reason="", now=None):
+        def revoke_subtree(
+            self, principal, edges, *, reason="", now=None, protected=False,
+            durable_apply=None,
+        ):
+            if durable_apply is not None:
+                durable_apply()
             return [principal]
         def is_revoked(self, principal):
             return False
@@ -271,7 +283,7 @@ def test_releasing_something_never_contained_says_so():
     assert any("was not revoked" in n for n in result.notes)
 
 
-def test_containment_lands_on_the_signed_chain(tmp_path, monkeypatch):
+def test_containment_submits_an_audit_row(tmp_path, monkeypatch):
     seen = {}
     import maverick.audit as audit
     monkeypatch.setattr(audit, "record",
@@ -289,7 +301,23 @@ def test_an_audit_failure_never_blocks_containment(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("audit sink down")
     monkeypatch.setattr(audit, "record", _boom)
-    assert edr.contain("worker-1", reason="x", registry=_Registry()).contained
+    result = edr.contain("worker-1", reason="x", registry=_Registry())
+    assert result.contained
+    assert result.audit_written is False
+
+
+def test_strict_audit_refusal_propagates_after_containment(monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import AuditRefused
+    from maverick.revocation import is_revoked
+
+    def _refuse(*args, **kwargs):
+        raise AuditRefused("strict audit guarantee")
+
+    monkeypatch.setattr(audit, "record", _refuse)
+    with pytest.raises(AuditRefused, match="strict audit"):
+        edr.contain("worker-strict", reason="incident", registry=_Registry())
+    assert is_revoked("worker-strict")
 
 
 # ---- prove ------------------------------------------------------------------
@@ -308,7 +336,7 @@ def test_the_incident_report_carries_posture_timeline_and_state(audit_dir):
 
 def test_the_report_renders_without_detections(audit_dir):
     text = edr.render_report(edr.incident_report("nobody", audit_dir=audit_dir))
-    assert "no detections in the attested window" in text
+    assert "no detections in the reviewed window" in text
 
 
 def test_detection_serializes_round_trip(audit_dir):

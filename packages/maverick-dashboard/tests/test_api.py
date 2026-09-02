@@ -465,7 +465,7 @@ class TestSecurityRegister:
     @pytest.fixture(autouse=True)
     def _clear_security_cache(self):
         from maverick_dashboard import api
-        api._security_register_cache = None
+        api._security_register_cache.clear()
 
     def test_returns_posture_hunt_and_remediation(self):
         resp = client.get("/api/v1/security")
@@ -504,6 +504,30 @@ class TestSecurityRegister:
         assert hunt_calls[0]["all_days"] is False
         assert hunt_calls[0]["since"] <= hunt_calls[0]["until"]
         assert plan_calls == [{"include_breaches": False}]
+
+    def test_security_register_cache_is_isolated_by_tenant(
+        self, monkeypatch, tmp_path
+    ):
+        from maverick.paths import current_tenant_id_strict
+        from maverick_dashboard import api
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        calls: list[str] = []
+
+        def snapshot() -> dict:
+            tenant = current_tenant_id_strict() or "shared"
+            calls.append(tenant)
+            return {"tenant": tenant}
+
+        monkeypatch.setattr(api, "_security_register_snapshot_uncached", snapshot)
+
+        monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+        assert client.get("/api/v1/security").json() == {"tenant": "tenant-a"}
+        assert client.get("/api/v1/security").json() == {"tenant": "tenant-a"}
+
+        monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+        assert client.get("/api/v1/security").json() == {"tenant": "tenant-b"}
+        assert calls == ["tenant-a", "tenant-b"]
 
 
 class TestOpenAPI:

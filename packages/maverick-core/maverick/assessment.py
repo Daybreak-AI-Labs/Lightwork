@@ -4972,7 +4972,16 @@ def list_saved() -> list[dict]:
                 "acceptance_expired": acc_expired,
             }
         )
-    return sorted(out, key=lambda r: r["created_at"], reverse=True)
+    # Filesystem enumeration order is undefined.  A timestamp can legitimately
+    # tie (notably on Windows), so use the persisted record identity as a
+    # canonical secondary key.  This cannot reconstruct unknowable causal
+    # order for legacy ties, but it keeps trend direction and limit membership
+    # stable across processes and filesystems.
+    return sorted(
+        out,
+        key=lambda r: (r["created_at"], r["id"]),
+        reverse=True,
+    )
 
 
 def risk_trend(subject: str, assessment_type: str = "", *, limit: int = 12) -> list[dict]:
@@ -4988,7 +4997,7 @@ def risk_trend(subject: str, assessment_type: str = "", *, limit: int = 12) -> l
         if str(r["subject"]).strip().lower() == subj
         and (not assessment_type or r["type"] == assessment_type)
     ]
-    rows.sort(key=lambda r: r["created_at"])
+    rows.sort(key=lambda r: (r["created_at"], r["id"]))
     return [
         {
             "id": r["id"],
@@ -5012,8 +5021,13 @@ def _iter_saved_raw():
             yield data
 
 
-def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
-                       months: int = 12) -> dict:
+def acceptance_metrics(
+    *,
+    types: frozenset[str] | set[str] | None = None,
+    months: int = 12,
+    since: float | None = None,
+    until: float | None = None,
+) -> dict:
     """Reviewer-acceptance KPIs over decided assessments -- the measurable
     learning loop. FIRST-PASS means approved with no follow-up thread: the
     reviewer accepted the agent's draft as-is. QUALIFIED is approved after
@@ -5039,6 +5053,11 @@ def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
         if status not in ("approved", "rejected") \
                 or not data.get("decided_at"):
             continue
+        at = float(data["decided_at"])
+        if since is not None and at < float(since):
+            continue
+        if until is not None and at > float(until):
+            continue
         decided += 1
         fups = data.get("followups") or []
         if status == "rejected":
@@ -5048,7 +5067,6 @@ def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
         else:
             first_pass += 1
         created = float(data.get("created_at") or 0)
-        at = float(data["decided_at"])
         if created and at >= created:
             latencies.append((at - created) / 86400.0)
         row = trend.get(time.strftime("%Y-%m", time.gmtime(at)))

@@ -102,6 +102,8 @@ def create_assessment_evidence_autopopulation_page_router(
         ):
             raise HTTPException(status_code=404, detail="workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
+        from .api import module_activation_enabled
+
         response = templates.TemplateResponse(
             request,
             "assessment_evidence_autopopulation.html",
@@ -114,6 +116,9 @@ def create_assessment_evidence_autopopulation_page_router(
                 "proposal_can_operate": has_permission(request, "operate"),
                 "proposal_can_audit": has_global_permission(request, "audit"),
                 "proposal_can_admin": has_global_permission(request, "admin"),
+                "proposal_module_enabled": module_activation_enabled(
+                    "assessment_evidence_autopopulation"
+                ),
             },
         )
         for name, value in _HEADERS.items():

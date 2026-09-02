@@ -128,11 +128,13 @@ def test_audit_binder_payload_and_page():
 
 
 # --- partner fleet ----------------------------------------------------------
-def test_partner_registry_check_and_rollup():
+def test_partner_registry_check_and_rollup(monkeypatch):
+    monkeypatch.setenv("MAVERICK_PARTNER_ALLOW_TEST_ESTATE_LOOPBACK", "true")
     r = client.post("/api/v1/partner/tenants",
                     json={"name": "Acme Hospitality",
                           "base_url": "http://127.0.0.1:9",   # closed port
-                          "token": "sekret", "theme": "acme-light"})
+                          "token": "sekret", "theme": "acme-light",
+                          "trusted_test_estate_loopback": True})
     assert r.status_code == 201, r.text
     row = r.json()
     assert row["has_token"] is True and "token" not in row
@@ -160,3 +162,53 @@ def test_partner_tenant_rejects_non_http_urls():
     r = client.post("/api/v1/partner/tenants",
                     json={"name": "Bad", "base_url": "file:///etc/passwd"})
     assert r.status_code == 422
+
+
+def test_partner_probe_blocks_private_network_targets(monkeypatch):
+    from maverick_dashboard.api import _probe_tenant
+
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    result = _probe_tenant(
+        {"base_url": "http://127.0.0.1:9", "token": "never-sent"}
+    )
+
+    assert result["ok"] is False
+    assert "non-public address" in result["error"]
+
+
+def test_partner_probe_preserves_bearer_header_on_governed_requests(monkeypatch):
+    from maverick.tools import _ssrf
+    from maverick_dashboard.api import _probe_tenant
+
+    calls: list[tuple[str, dict, float]] = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, body):
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    def safe_get(url, *, headers, timeout):
+        calls.append((url, headers, timeout))
+        if url.endswith("/value.json"):
+            return Response({"agent": "worker", "version": "1", "cases": 1})
+        if url.endswith("/external-agents"):
+            return Response({"status": {"enrolled": 2, "active": 1}})
+        return Response({})
+
+    monkeypatch.setattr(_ssrf, "safe_get", safe_get)
+    result = _probe_tenant(
+        {"base_url": "https://tenant.example", "token": "fleet-token"}
+    )
+
+    assert result["ok"] is True
+    assert [url for url, _headers, _timeout in calls] == [
+        "https://tenant.example/health",
+        "https://tenant.example/value.json",
+        "https://tenant.example/api/v1/external-agents",
+    ]
+    assert all(headers == {"Authorization": "Bearer fleet-token"} for _, headers, _ in calls)
+    assert all(timeout == 4 for _, _, timeout in calls)

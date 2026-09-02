@@ -32,7 +32,7 @@ def test_tenant_quota_rejects_non_finite(bad):
     res = CliRunner().invoke(main, ["tenant", "quota", "acme", "--", bad])
     assert res.exit_code == 2, res.output
     assert "finite" in res.output
-    assert tr.get_tenant("acme").max_daily_dollars == 0.0  # unchanged
+    assert tr.get_tenant("acme").max_daily_dollars == 5.0  # bounded default unchanged
 
 
 # ---- audit redaction: depth-64 guard ---------------------------------------

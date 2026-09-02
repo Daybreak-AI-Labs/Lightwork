@@ -89,7 +89,8 @@
           <td>
             <form method="post" action="/users/roles/delete" style="display:inline;">
               <input type="hidden" name="name" value="{{ name }}" />
-              <button type="submit" class="btn btn--ghost">Delete</button>
+              <button type="submit" class="btn btn--ghost"
+                      aria-label="Delete {{ name }} role">Delete</button>
             </form>
           </td>
         </tr>
@@ -231,11 +232,13 @@
         <select class="ctl" name="role" aria-label="Role for {{ principal }}">
           {% for r in roles %}<option value="{{ r }}"{% if r == role %} selected{% endif %}>{{ r }}</option>{% endfor %}
         </select>
-        <button type="submit" class="btn btn--primary">Save</button>
+        <button type="submit" class="btn btn--primary"
+                aria-label="Save role for {{ principal }}">Save</button>
       </form>
       <form method="post" action="/users/remove">
         <input type="hidden" name="principal" value="{{ principal }}" />
-        <button type="submit" class="btn">Remove</button>
+        <button type="submit" class="btn"
+                aria-label="Remove {{ principal }} user assignment">Remove</button>
       </form>
     </div>
     {% endfor %}
@@ -253,7 +256,9 @@
       <code>{{ default_suites|join(", ") or "none" }}</code>{% endif %}.
       Permanent administrators are never scoped. This limits <em>which</em>
       departments a user works with; their role above still decides <em>what</em>
-      they may do.</p>
+      they may do. Removing an override is refused if the deployment default
+      would grant additional departments; save an explicit replacement (or no
+      departments) instead.</p>
 
     {% for principal, suites in suite_grants %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
@@ -263,11 +268,14 @@
         <select class="ctl" name="suites" aria-label="Departments for {{ principal }}" multiple size="4">
           {% for key, title in all_suites %}<option value="{{ key }}"{% if key in suites %} selected{% endif %}>{{ title }}</option>{% endfor %}
         </select>
-        <button type="submit" class="btn btn--primary">Save</button>
+        <button type="submit" class="btn btn--primary"
+                aria-label="Save department access for {{ principal }}">Save</button>
       </form>
       <form method="post" action="/users/suites/remove">
         <input type="hidden" name="principal" value="{{ principal }}" />
-        <button type="submit" class="btn">Remove</button>
+        <button type="submit" class="btn"
+                aria-label="Remove department override for {{ principal }}"
+                title="Use the deployment default only when it is no broader">Remove override</button>
       </form>
     </div>
     {% endfor %}

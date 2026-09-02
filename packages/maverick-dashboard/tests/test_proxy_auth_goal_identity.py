@@ -91,4 +91,7 @@ def test_proxy_mode_without_require_auth_never_falls_back_to_local_admin(
     monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
     assert client.get(
         "/api/v1/providers", headers={"X-Forwarded-User": "alice"}
+    ).status_code == 403
+    assert client.get(
+        "/providers", headers={"X-Forwarded-User": "alice"}
     ).status_code == 200

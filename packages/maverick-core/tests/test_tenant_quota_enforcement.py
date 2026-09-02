@@ -66,7 +66,9 @@ async def test_tenant_without_a_cap_runs(
     tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
 ):
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
-    registry.create_tenant("acme", plan="free")        # provisioned, no quota set
+    registry.create_tenant(
+        "acme", plan="free", max_daily_dollars=0
+    )  # explicitly provisioned without a quota
     record_usage("user:local", 10.0, 0, 0)
 
     fake_llm.scripted = _final_script(make_llm_response)
@@ -82,7 +84,9 @@ async def test_tenant_without_a_cap_runs(
 
 
 def test_plan_cap_fallback_is_opt_in(monkeypatch):
-    registry.create_tenant("beta", plan="free")        # free plan cap = $5, no registry cap
+    registry.create_tenant(
+        "beta", plan="free", max_daily_dollars=0
+    )  # free plan cap = $5, explicit no registry cap
     monkeypatch.setenv("MAVERICK_TENANT", "beta")
     record_usage("user:local", 9.0, 0, 0)              # beta's ledger -> $9
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)

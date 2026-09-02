@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from maverick.oidc import VerifiedPrincipal
 from maverick_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
@@ -23,6 +24,7 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 # The user-reported dead end: a tenant-gated workbench page. Its only gates
 # are "view" and the tenant binding, so it isolates exactly this feature.
 GATED_PAGE = "/consent/publish-settings"
+MEMBER_GATED_PAGE = "/privacy/data-discovery"
 
 
 @pytest.fixture(autouse=True)
@@ -38,8 +40,13 @@ def _isolated(tmp_path, monkeypatch):
     config.reset_config_cache()
 
 
-def _select(tenant_id):
-    return client.put("/api/v1/workspace/active-tenant", json={"tenant_id": tenant_id})
+def _select(tenant_id, *, expected: str = ""):
+    headers = {"X-Lightwork-Expected-Tenant": expected} if expected else None
+    return client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": tenant_id},
+        headers=headers,
+    )
 
 
 def test_store_rejects_unknown_and_suspended_tenants():
@@ -64,13 +71,58 @@ def test_selection_roundtrip_via_api():
     assert client.get("/api/v1/workspace/active-tenant").json()["tenant_id"] is None
     r = _select("acme")
     assert r.status_code == 200, r.text
-    assert r.json() == {"tenant_id": "acme", "source": "selection"}
+    assert r.json() == {"tenant_id": "acme", "source": "local_selection"}
 
     got = client.get("/api/v1/workspace/active-tenant").json()
     assert got["tenant_id"] == "acme"
-    assert got["source"] == "selection"
+    assert got["source"] == "local_selection"
 
-    assert _select(None).json()["tenant_id"] is None
+    assert _select(None, expected="acme").json()["tenant_id"] is None
+    assert client.get("/api/v1/workspace/active-tenant").json()["tenant_id"] is None
+
+
+def test_selection_is_anchored_in_global_audit(monkeypatch):
+    import maverick.audit as audit
+
+    client.post("/api/v1/admin/tenants", json={"id": "acme"})
+    calls = []
+    monkeypatch.setattr(
+        audit,
+        "record_global",
+        lambda kind, **payload: calls.append((kind, payload)) or True,
+    )
+
+    response = _select("acme")
+
+    assert response.status_code == 200, response.text
+    assert calls == [
+        (
+            audit.EventKind.WORKSPACE_SELECTED,
+            {
+                "agent": "local",
+                "goal_id": None,
+                "actor": "local",
+                "previous_tenant": None,
+                "tenant": "acme",
+                "source": "local_selection",
+            },
+        )
+    ]
+
+
+def test_selection_audit_refusal_restores_previous_workspace(monkeypatch):
+    import maverick.audit as audit
+
+    client.post("/api/v1/admin/tenants", json={"id": "acme"})
+
+    def refuse(*_args, **_kwargs):
+        raise audit.AuditRefused("custody unavailable")
+
+    monkeypatch.setattr(audit, "record_global", refuse)
+    response = _select("acme")
+
+    assert response.status_code == 503
+    assert "previous workspace restored" in response.json()["detail"]
     assert client.get("/api/v1/workspace/active-tenant").json()["tenant_id"] is None
 
 
@@ -78,17 +130,6 @@ def test_selecting_unknown_tenant_is_400_not_silent():
     r = _select("ghost")
     assert r.status_code == 400
     assert "unknown tenant" in r.json()["detail"]
-
-
-def test_selection_requires_global_admin(monkeypatch):
-    import maverick_dashboard.auth as auth
-
-    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:viewer")
-    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "viewer")
-    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "viewer")
-    assert _select("anything").status_code == 403
-    # Reading which workspace is active stays open to any signed-in user.
-    assert client.get("/api/v1/workspace/active-tenant").status_code == 200
 
 
 def test_stored_selection_unlocks_tenant_gated_workbench():
@@ -113,7 +154,11 @@ def test_suspended_selection_is_not_bound():
     _select("acme")
     assert client.get(GATED_PAGE).status_code == 200
 
-    client.post("/api/v1/admin/tenants/acme/suspend")
+    suspended = client.post(
+        "/api/v1/admin/tenants/acme/suspend",
+        headers={"X-Lightwork-Expected-Tenant": "acme"},
+    )
+    assert suspended.status_code == 200, suspended.text
     assert client.get(GATED_PAGE).status_code == 409
 
     client.post("/api/v1/admin/tenants/acme/resume")
@@ -140,6 +185,8 @@ def test_browser_409_renders_the_picker_api_keeps_json():
     assert r.status_code == 409
     assert r.headers["content-type"].startswith("text/html")
     assert "Workspace tenant" in r.text
+    assert '<h1 class="page-title"' in r.text
+    assert 'var returnTo = "/consent/publish-settings";' in r.text
     assert "select an active tenant" in r.text  # the gate's own message
 
     r = client.get(
@@ -164,10 +211,50 @@ def test_picker_page_lists_tenants_and_marks_selection():
     assert "/api/v1/admin/tenants" in t
 
 
-def test_picker_page_empty_state_offers_one_click_workspace():
-    t = client.get("/workspace/tenant").text
-    assert "No tenants exist yet" in t
-    assert 'id="tsel-quick"' in t  # creates + selects a "local" workspace
+def test_picker_honors_only_safe_local_return_targets():
+    safe = client.get("/workspace/tenant?next=%2Fsettings%3Ftab%3Daccess")
+    assert safe.status_code == 200
+    assert '<h1 class="page-title"' in safe.text
+    assert 'var returnTo = "/settings?tab=access";' in safe.text
+    assert "if (returnTo) location.assign(returnTo);" in safe.text
+
+    for unsafe in (
+        "https://attacker.invalid/path",
+        "//attacker.invalid/path",
+        "/\\attacker.invalid/path",
+    ):
+        denied = client.get("/workspace/tenant", params={"next": unsafe})
+        assert denied.status_code == 200
+        assert 'var returnTo = "";' in denied.text
+        assert "attacker.invalid" not in denied.text
+
+
+def test_picker_quick_workspace_creates_selects_and_recovers_original_url():
+    blocked = client.get(GATED_PAGE, headers={"Accept": "text/html"})
+    assert blocked.status_code == 409
+    assert blocked.url.path == GATED_PAGE
+    assert "No tenants exist yet" in blocked.text
+    assert 'id="tsel-quick"' in blocked.text
+    assert "createAndSwitch({ id: 'local', display_name: 'My workspace', plan: 'free' }" in blocked.text
+
+    # Execute the exact create-then-select sequence wired to the quick action.
+    created = client.post(
+        "/api/v1/admin/tenants",
+        json={"id": "local", "display_name": "My workspace", "plan": "free"},
+    )
+    assert created.status_code == 201, created.text
+
+    selected = _select("local")
+    assert selected.status_code == 200, selected.text
+    assert selected.json() == {"tenant_id": "local", "source": "local_selection"}
+    active = client.get("/api/v1/workspace/active-tenant").json()
+    assert active["tenant_id"] == "local"
+    assert active["source"] == "local_selection"
+
+    recovered = client.get(blocked.url.path, headers={"Accept": "text/html"})
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.url.path == GATED_PAGE
+    assert "select an active tenant" not in recovered.text
 
 
 def test_overlay_key_lints_clean():
@@ -178,3 +265,103 @@ def test_overlay_key_lints_clean():
     findings = lint_config({"dashboard": {"active_tenant": "acme"}})
     problems = [f for f in findings if "active_tenant" in str(f)]
     assert problems == [], problems
+
+
+def _enable_oidc(monkeypatch) -> None:
+    import maverick_dashboard.auth as auth
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth,
+        "verify_oidc_token",
+        lambda token, **_kw: VerifiedPrincipal(
+            sub=token,
+            issuer="https://issuer.example",
+            audience="lightwork",
+            claims={"sub": token},
+        ),
+    )
+
+
+def _as(user: str, *, expected: str = "") -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {user}"}
+    if expected:
+        headers["X-Lightwork-Expected-Tenant"] = expected
+    return headers
+
+
+def test_authenticated_selection_is_principal_and_membership_scoped(monkeypatch):
+    """One operator's selection must never become another user's authority."""
+    from maverick_dashboard import rbac
+
+    client.post("/api/v1/admin/tenants", json={"id": "acme"})
+    client.post("/api/v1/admin/tenants", json={"id": "globex"})
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "operator")
+    rbac.set_role("user:outsider", "operator")
+    _enable_oidc(monkeypatch)
+
+    selected = client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": "acme"},
+        headers=_as("alice"),
+    )
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["source"] == "principal_selection"
+    assert client.get(MEMBER_GATED_PAGE, headers=_as("alice")).status_code == 200
+
+    # No membership: no inherited tenant binding, no roster disclosure, and no
+    # ability to select a tenant merely by guessing its id.
+    assert client.get(MEMBER_GATED_PAGE, headers=_as("outsider")).status_code == 409
+    picker = client.get("/workspace/tenant", headers=_as("outsider"))
+    assert picker.status_code == 200
+    assert "acme" not in picker.text and "globex" not in picker.text
+    denied = client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": "acme"},
+        headers=_as("outsider"),
+    )
+    assert denied.status_code == 404
+
+
+def test_stale_tab_mutation_is_rejected_after_principal_switch(monkeypatch):
+    from maverick_dashboard import rbac
+
+    client.post("/api/v1/admin/tenants", json={"id": "acme"})
+    client.post("/api/v1/admin/tenants", json={"id": "globex"})
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "operator")
+    rbac.set_tenant_role("globex", "user:alice", "operator")
+    _enable_oidc(monkeypatch)
+
+    assert client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": "acme"},
+        headers=_as("alice"),
+    ).status_code == 200
+    page = client.get(MEMBER_GATED_PAGE, headers=_as("alice"))
+    assert 'name="lightwork-workspace-tenant" content="acme"' in page.text
+
+    # A current Acme tab may intentionally switch to Globex.
+    switched = client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": "globex"},
+        headers=_as("alice", expected="acme"),
+    )
+    assert switched.status_code == 200, switched.text
+
+    # Another still-open Acme tab cannot mutate under the now-current Globex
+    # binding. A freshly rendered Globex page carries the matching guard.
+    stale = client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": "acme"},
+        headers=_as("alice", expected="acme"),
+    )
+    assert stale.status_code == 409
+    assert "workspace changed" in stale.json()["detail"]
+    fresh = client.put(
+        "/api/v1/workspace/active-tenant",
+        json={"tenant_id": "acme"},
+        headers=_as("alice", expected="globex"),
+    )
+    assert fresh.status_code == 200, fresh.text

@@ -22,7 +22,7 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 33
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -602,6 +602,19 @@ MIGRATIONS: dict[int, list[str]] = {
     # write clock and advances on every upsert, so its matching migration is a
     # no-op that keeps the governed backend ladders at the same release head.
     31: [],
+    # v32 separates human/resource ownership from execution authority. This
+    # lets delegated fleet work remain owner-visible while the exact runtime
+    # capability principal is still durably bound before execution.
+    32: [
+        "ALTER TABLE goals ADD COLUMN execution_principal "
+        "TEXT NOT NULL DEFAULT ''",
+    ],
+    # v33 HALT generation: a clear is a compare-and-delete against the exact
+    # shared stop it observed.  A concurrent arm publishes a fresh random token
+    # and therefore cannot be erased by an older clear request.
+    33: [
+        "ALTER TABLE halt ADD COLUMN generation TEXT NOT NULL DEFAULT ''",
+    ],
 }
 
 
@@ -617,6 +630,7 @@ class Goal:
     deadline: float | None
     result: str | None
     owner: str = ""
+    execution_principal: str = ""
     domain: str = ""
     project_id: int | None = None
 
@@ -1470,15 +1484,25 @@ class WorldModel:
 
     # ----- goals -----
     def create_goal(self, title: str, description: str = "", parent_id: int | None = None,
-                    *, owner: str = "", domain: str = "", project_id: int | None = None) -> int:
+                    *, owner: str = "", execution_principal: str = "",
+                    domain: str = "", project_id: int | None = None) -> int:
+        if execution_principal is None:
+            execution_principal = ""
+        if not isinstance(execution_principal, str):
+            raise ValueError("invalid execution principal")
+        if execution_principal:
+            from .agent_control_plane import valid_principal
+
+            if not valid_principal(execution_principal):
+                raise ValueError("invalid execution principal")
         now = time.time()
         with self._writing() as conn:
             cur = conn.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, owner, domain, project_id) "
-                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+                "created_at, updated_at, owner, execution_principal, domain, project_id) "
+                "VALUES(?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)",
                 (parent_id, _enc_field(title), _enc_field(description), now, now,
-                 owner, domain or "", project_id),
+                 owner, execution_principal, domain or "", project_id),
             )
             return cur.lastrowid
 
@@ -1854,6 +1878,45 @@ class WorldModel:
             if cur.rowcount == 1 and (status != "done" or result is not None):
                 conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
 
+    def bind_goal_execution_principal(self, goal_id: int, principal: str) -> bool:
+        """Atomically bind an unbound goal to its execution principal.
+
+        The operation is idempotent for the same principal and refuses a
+        non-empty different principal. Keeping the comparison in the write avoids
+        a read-then-write race where two dispatchers could each believe an
+        unbound goal ran under their authority. ``owner`` remains the separate
+        dashboard/resource authorization identity.
+        """
+        from .agent_control_plane import valid_principal
+
+        if not valid_principal(principal):
+            raise ValueError("invalid execution principal")
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET execution_principal = ? "
+                "WHERE id = ? AND (execution_principal = '' "
+                "OR execution_principal = ?)",
+                (principal, int(goal_id), principal),
+            )
+            return cur.rowcount == 1
+
+    def bind_goal_owner(self, goal_id: int, principal: str) -> bool:
+        """Backward-compatible binder for the resource owner field.
+
+        Runtime authorization uses :meth:`bind_goal_execution_principal`.
+        This method retains the historical owner-assignment behavior for
+        embedders that explicitly claim a previously ownerless resource.
+        """
+        if not isinstance(principal, str) or not principal:
+            raise ValueError("principal is required")
+        with self._writing() as conn:
+            cur = conn.execute(
+                "UPDATE goals SET owner = ? "
+                "WHERE id = ? AND (owner = '' OR owner = ?)",
+                (principal, int(goal_id), principal),
+            )
+            return cur.rowcount == 1
+
     def claim_goal_for_run(
         self, goal_id: int, *, expected_owner: str | None = None,
     ) -> bool:
@@ -1976,7 +2039,7 @@ class WorldModel:
             return []
         sql = (
             "SELECT id, parent_id, title, description, status, created_at, "
-            "updated_at, deadline, result, owner FROM goals"
+            "updated_at, deadline, result, owner, execution_principal FROM goals"
         )
         params: tuple[Any, ...] = ()
         if owner is not None:
@@ -2035,7 +2098,8 @@ class WorldModel:
             where = f"WHERE status IN ('done', 'blocked', 'cancelled') AND {text_clause}"
         rows = self._read_all(
             "SELECT id, parent_id, title, description, status, created_at, "
-            f"updated_at, deadline, result FROM goals {where} "
+            f"updated_at, deadline, result, owner, execution_principal "
+            f"FROM goals {where} "
             "ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         )
@@ -2045,7 +2109,8 @@ class WorldModel:
         """Immediate children of a goal, oldest first. Locked read."""
         rows = self._read_all(
             "SELECT id, parent_id, title, description, status, created_at, "
-            "updated_at, deadline, result FROM goals WHERE parent_id = ? "
+            "updated_at, deadline, result, owner, execution_principal "
+            "FROM goals WHERE parent_id = ? "
             "ORDER BY created_at ASC LIMIT ?",
             (parent_id, limit),
         )
@@ -3762,31 +3827,72 @@ class WorldModel:
     # armed via the dashboard stops the whole fleet rather than just the replica
     # that served the request.
     def arm_halt(self, reason: str = "", source: str = "manual",
-                 armed_by: str = "") -> None:
+                 armed_by: str = "") -> str:
+        generation = secrets.token_urlsafe(24)
         with self._writing() as conn:
             conn.execute(
-                "INSERT INTO halt(scope, reason, source, armed_by, armed_at) "
-                "VALUES('', ?, ?, ?, ?) "
+                "INSERT INTO halt(scope, reason, source, armed_by, armed_at, generation) "
+                "VALUES('', ?, ?, ?, ?, ?) "
                 "ON CONFLICT(scope) DO UPDATE SET reason=excluded.reason, "
                 "source=excluded.source, armed_by=excluded.armed_by, "
-                "armed_at=excluded.armed_at",
-                (reason or "", source or "manual", armed_by or "", time.time()),
+                "armed_at=excluded.armed_at, generation=excluded.generation",
+                (
+                    reason or "",
+                    source or "manual",
+                    armed_by or "",
+                    time.time(),
+                    generation,
+                ),
             )
+        return generation
 
-    def disarm_halt(self) -> None:
+    def disarm_halt(
+        self,
+        *,
+        expected_generation: str,
+        durable_clear: Callable[[], None] | None = None,
+    ) -> bool:
+        """Atomically bind a durable local clear to the observed shared HALT.
+
+        The write transaction is acquired before ``durable_clear`` runs.  A
+        callback failure rolls the shared mutation back; a concurrent arm must
+        wait and therefore lands after this generation-bound delete instead of
+        being erased by it.
+        """
+        if not isinstance(expected_generation, str):
+            raise TypeError("expected_generation must be a string")
         with self._writing() as conn:
-            conn.execute("DELETE FROM halt WHERE scope = ''")
+            # ``_writing`` serializes this object; BEGIN IMMEDIATE also claims
+            # the SQLite database writer slot before the filesystem callback,
+            # covering other WorldModel connections/processes.
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT generation FROM halt WHERE scope = ''",
+            ).fetchone()
+            if row is None or (row[0] or "") != expected_generation:
+                return False
+            if durable_clear is not None:
+                durable_clear()
+            cursor = conn.execute(
+                "DELETE FROM halt WHERE scope = '' AND generation = ?",
+                (expected_generation,),
+            )
+            deleted = cursor.rowcount
+        return bool(deleted and deleted > 0)
 
     def active_halt(self) -> dict | None:
         """The shared global halt state, or ``None`` when not armed."""
         row = self._read_one(
-            "SELECT reason, source, armed_by, armed_at FROM halt WHERE scope = ''",
+            "SELECT reason, source, armed_by, armed_at, generation "
+            "FROM halt WHERE scope = ''",
             (),
         )
         if row is None:
             return None
         return {"reason": row[0] or "", "source": row[1] or "",
-                "armed_by": row[2] or "", "armed_at": row[3]}
+                "armed_by": row[2] or "", "armed_at": row[3],
+                "generation": row[4] or ""}
 
     # ----- cluster-wide provider spend ledger (v23) -----
     def add_provider_spend(self, period_key: str, provider: str,

@@ -159,9 +159,22 @@
   var candidates = document.getElementById("aep-candidates");
   var selection = document.getElementById("aep-candidate-selection");
   var queue = document.getElementById("aep-queue");
+  var mutationControls = Array.prototype.slice.call(
+    document.querySelectorAll("[data-aep-mutation]")
+  );
+  var mutationAuthorized = shell.dataset.moduleEnabled === "true" &&
+    shell.dataset.canOperate === "true";
 
   function setText(node, value) { if (node) node.textContent = String(value == null ? "" : value); }
   function clear(node) { while (node && node.firstChild) node.removeChild(node.firstChild); }
+  function setMutationReady(ready) {
+    mutationControls.forEach(function (controls) {
+      var disabled = !mutationAuthorized || ready !== true;
+      controls.disabled = disabled;
+      controls.toggleAttribute("disabled", disabled);
+      controls.setAttribute("aria-disabled", disabled ? "true" : "false");
+    });
+  }
   function field(form, name) {
     var element = form.elements.namedItem(name);
     if (!element || typeof element.value !== "string") throw new Error("The form is incomplete.");
@@ -264,10 +277,11 @@
     setText(pill, "Checking"); if (pill) pill.dataset.state = "checking";
     return request("/status").then(function (payload) {
       var ready = payload.ready === true;
+      setMutationReady(ready);
       setText(pill, ready ? "Ready" : "Not ready"); if (pill) pill.dataset.state = ready ? "ready" : "failed";
       setText(document.getElementById("aep-status-detail"), ready ? "Server-owned proposal dependencies are configured for an operation attempt." : "Review readiness details before creating a proposal.");
       show(payload, "Readiness refreshed. No live provider or customer acceptance is implied.");
-    }).catch(function (error) { if (pill) pill.dataset.state = "failed"; setText(pill, "Failed"); showError(error); });
+    }).catch(function (error) { setMutationReady(false); if (pill) pill.dataset.state = "failed"; setText(pill, "Failed"); showError(error); });
   }
 
   document.getElementById("aep-refresh-status").addEventListener("click", refreshStatus);

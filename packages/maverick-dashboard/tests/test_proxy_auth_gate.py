@@ -32,6 +32,7 @@ def _ws(headers=None, host="127.0.0.1"):
         headers=Headers(values),
         cookies={},
         client=SimpleNamespace(host=host),
+        state=SimpleNamespace(),
     )
 
 

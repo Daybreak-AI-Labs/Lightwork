@@ -67,7 +67,7 @@
       <tbody>
         {% for e in a.episodes %}
         <tr>
-          <td><a href="/goals/{{ e.goal_id }}">#{{ e.goal_id }}</a></td>
+          <td><a href="/chat/goal/{{ e.goal_id }}">#{{ e.goal_id }}</a></td>
           <td>{% if e.outcome == 'success' %}<span class="badge active">success</span>
               {% elif e.outcome %}<span class="badge failure">{{ e.outcome }}</span>
               {% else %}<span class="badge">running</span>{% endif %}</td>

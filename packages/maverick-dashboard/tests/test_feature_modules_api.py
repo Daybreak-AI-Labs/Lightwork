@@ -10,6 +10,8 @@ parent); turning it OFF disables only the module itself.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
@@ -25,7 +27,9 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     config.reset_config_cache()
+    app.state.module_readiness_evidence = {}
     yield
+    app.state.module_readiness_evidence = {}
     config.reset_config_cache()
 
 
@@ -43,6 +47,9 @@ def test_modules_list_defaults_off_with_labels():
     for m in rows:
         assert m["label"]
         assert m["enabled"] is False  # fail-closed defaults
+        assert m["activation"]["status"] == "disabled"
+        assert m["readiness"]["status"] == "blocked"
+        assert m["readiness"]["ready"] is False
 
 
 def test_enable_applies_the_full_requirement_chain_atomically():
@@ -51,7 +58,10 @@ def test_enable_applies_the_full_requirement_chain_atomically():
         json={"section": "consent_preferences.analytics", "enabled": True},
     )
     assert r.status_code == 200, r.text
-    assert r.json() == {"section": "consent_preferences.analytics", "enabled": True}
+    assert r.json()["section"] == "consent_preferences.analytics"
+    assert r.json()["enabled"] is True
+    assert r.json()["activation"]["status"] == "enabled"
+    assert r.json()["readiness"]["status"] == "unverified"
     # The parent gate came on with it -- the one click opened a working module.
     assert _module("consent_preferences")["enabled"] is True
     assert _module("consent_preferences.analytics")["enabled"] is True
@@ -95,10 +105,16 @@ def test_unknown_module_is_400():
 
 def test_switching_requires_global_admin(monkeypatch):
     import maverick_dashboard.auth as auth
+    from maverick_dashboard import settings_store
 
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:viewer")
     monkeypatch.setattr(auth, "role_for_principal", lambda principal: "viewer")
     monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "viewer")
+    monkeypatch.setattr(
+        settings_store,
+        "set_module_enables",
+        lambda *_args, **_kwargs: pytest.fail("viewer reached module mutation"),
+    )
     r = client.post(
         "/api/v1/features/modules",
         json={"section": "consent_preferences", "enabled": True},
@@ -106,6 +122,34 @@ def test_switching_requires_global_admin(monkeypatch):
     assert r.status_code == 403
     # Reading module state stays open to any signed-in user.
     assert client.get("/api/v1/features/modules").status_code == 200
+
+
+def test_viewer_sees_module_recovery_without_an_activation_button(monkeypatch):
+    from maverick import external_agents
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:module-reader", "viewer")
+    monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:module-reader")
+    monkeypatch.setattr(external_agents, "enabled", lambda: False)
+    monkeypatch.setattr(
+        external_agents,
+        "status",
+        lambda: {
+            "enrolled": 0,
+            "runs": 0,
+            "reported_dollars": 0,
+            "memory_contributions": 0,
+            "over_budget": 0,
+            "contained": 0,
+        },
+    )
+    monkeypatch.setattr(external_agents, "roster", list)
+
+    response = client.get("/external-agents")
+    assert response.status_code == 200
+    assert 'data-module-gate="external_agents"' in response.text
+    assert "A global administrator must turn this on." in response.text
+    assert "mg-on" not in response.text
 
 
 def test_switch_survives_other_overlay_writes():
@@ -151,3 +195,108 @@ def test_registry_matches_store_allowlist():
         for req in meta["requires"]:
             assert req in api._MODULE_SWITCHES
     assert used == set(settings_store.MODULE_ENABLE_PATHS)
+
+
+def test_new_workbench_gates_are_registered_and_configuration_is_separate(
+    monkeypatch,
+):
+    from maverick import config
+
+    expected = {
+        "ai_evidence_analysis",
+        "assessment_evidence_autopopulation",
+        "consent_preferences.native_sdk",
+        "external_agents",
+        "third_party_management.executive_reports",
+    }
+    rows = client.get("/api/v1/features/modules").json()["modules"]
+    assert expected <= {row["section"] for row in rows}
+
+    # Both gates can be on while the closed configuration contract is still
+    # incomplete. A flag transition must not be promoted to runtime readiness.
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {
+            "ai_evidence_analysis": {"enable": True},
+            "assessment_evidence_autopopulation": {"enable": True},
+        },
+    )
+    monkeypatch.setattr(config, "config_source_errors", lambda **_kwargs: {})
+    state = _module("assessment_evidence_autopopulation")
+    assert state["activation"]["status"] == "enabled"
+    assert state["readiness"]["status"] == "incomplete"
+    assert state["readiness"]["configured"] is False
+    assert state["readiness"]["ready"] is False
+
+
+def test_runtime_failure_receipt_requires_exact_activation_fingerprint():
+    enabled = client.post(
+        "/api/v1/features/modules",
+        json={"section": "external_agents", "enabled": True},
+    ).json()
+    fingerprint = enabled["activation"]["fingerprint"]
+    assert enabled["readiness"]["status"] == "configured"
+    assert enabled["readiness"]["ready"] is None
+
+    app.state.module_readiness_evidence = {
+        "external_agents": {
+            "activation_fingerprint": fingerprint,
+            "checked_at": time.time(),
+            "status": "failed",
+            "detail": "The consenting sandbox gateway rejected its bounded probe.",
+        }
+    }
+    failed = _module("external_agents")
+    assert failed["readiness"]["status"] == "failed"
+    assert failed["readiness"]["ready"] is False
+    assert failed["readiness"]["evidence"]["kind"] == "runtime_receipt"
+
+    # A changed effective configuration invalidates the receipt rather than
+    # carrying a stale failure or success badge forward.
+    client.post(
+        "/api/v1/features/modules",
+        json={"section": "external_agents", "enabled": False},
+    )
+    blocked = _module("external_agents")
+    assert blocked["readiness"]["status"] == "blocked"
+
+
+def test_module_state_and_mutation_fail_closed_on_unreadable_sources(
+    monkeypatch,
+):
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "module-state-test-token")
+    authorization = {"Authorization": "Bearer module-state-test-token"}
+    original_source_errors = config.config_source_errors
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda **_kwargs: {"base": "invalid"},
+    )
+    response = client.get("/api/v1/features/modules", headers=authorization)
+    assert response.status_code == 503
+    assert "no state was inferred" in response.json()["detail"]
+
+    overlay = config.dashboard_overrides_path()
+    assert not overlay.exists()
+    response = client.post(
+        "/api/v1/features/modules",
+        json={"section": "external_agents", "enabled": True},
+        headers=authorization,
+    )
+    assert response.status_code == 503
+    assert not overlay.exists()
+
+    monkeypatch.setattr(config, "config_source_errors", original_source_errors)
+    overlay.parent.mkdir(parents=True, exist_ok=True)
+    overlay.write_text("this is not = valid = toml", encoding="utf-8")
+    original = overlay.read_text(encoding="utf-8")
+    response = client.post(
+        "/api/v1/features/modules",
+        json={"section": "external_agents", "enabled": True},
+        headers=authorization,
+    )
+    assert response.status_code == 503
+    assert overlay.read_text(encoding="utf-8") == original

@@ -15,6 +15,7 @@ than none, because a hostile auditor has nothing to attack.
 from __future__ import annotations
 
 import ast
+import asyncio
 
 import pytest
 from maverick import dispatch_contract, tool_authz
@@ -121,6 +122,335 @@ def test_an_allowed_dispatch_is_recorded_on_the_chain(monkeypatch) -> None:
     payload = next(kw for k, kw in seen if "tool_call" in str(k))
     assert payload["name"] == "http_get"
     assert payload["origin"] == "flow"
+    assert len(payload["call_id"]) == 24
+
+
+def test_missing_dispatch_audit_refuses_flow_before_tool_effect(monkeypatch) -> None:
+    from maverick.flow.execution import default_action_runner
+    from maverick.tools import Tool, ToolRegistry
+
+    _allow_flow_action(monkeypatch)
+    calls: list[object] = []
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search",
+        description="test",
+        input_schema={"type": "object"},
+        fn=lambda _args: calls.append(object()) or "should not run",
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    monkeypatch.setattr(
+        "maverick.tools._ambient_credential_denial", lambda *_args: None,
+    )
+    monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: False)
+
+    result, outcome = default_action_runner(world=None)("web_search", {}, {})
+
+    assert calls == []
+    assert outcome == 0.0
+    assert "audit evidence" in result
+
+
+def test_strict_dispatch_audit_refusal_propagates_before_flow_effect(
+        monkeypatch) -> None:
+    from maverick.audit.errors import AuditRefused
+    from maverick.flow.execution import default_action_runner
+
+    _allow_flow_action(monkeypatch)
+    calls: list[object] = []
+
+    def _registry(*_args, **_kwargs):
+        calls.append(object())
+        raise AssertionError("registry must not be built before call evidence")
+
+    def _refuse(*_args, **_kwargs):
+        raise AuditRefused("strict dispatch evidence unavailable")
+
+    monkeypatch.setattr("maverick.tools.base_registry", _registry)
+    monkeypatch.setattr("maverick.audit.audit_event", _refuse)
+
+    with pytest.raises(AuditRefused):
+        default_action_runner(world=None)("web_search", {}, {})
+    assert calls == []
+
+
+def _allow_flow_action(monkeypatch) -> None:
+    from maverick import governance
+
+    monkeypatch.setattr("maverick.flow.ir.action_tool_policy_error", lambda t: "")
+    monkeypatch.setattr("maverick.shield_policy.scan_block", lambda text: None)
+    monkeypatch.setattr(
+        governance, "evaluate",
+        lambda action, **kw: governance.Verdict(
+            decision=governance.Decision.ALLOW,
+            reason="",
+            rule="",
+            compliance_profiles=(),
+        ),
+    )
+
+
+def test_missing_result_audit_withholds_flow_outcome(monkeypatch) -> None:
+    from maverick.flow.execution import default_action_runner
+    from maverick.tools import Tool, ToolRegistry
+
+    _allow_flow_action(monkeypatch)
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search",
+        description="test",
+        input_schema={"type": "object"},
+        fn=lambda _args: "completed output",
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    outcomes = iter((True, False))
+    monkeypatch.setattr(
+        "maverick.audit.audit_event", lambda *a, **k: next(outcomes),
+    )
+
+    result, outcome = default_action_runner(world=None)("web_search", {}, {})
+
+    assert outcome == 0.0
+    assert result.startswith("INDETERMINATE:")
+    assert "do not retry" in result
+    assert "completed output" not in result
+
+
+@pytest.mark.parametrize("outage", ["false", "refused"])
+def test_result_audit_outage_is_indeterminate_and_never_retries(
+        monkeypatch, outage) -> None:
+    from types import SimpleNamespace
+
+    from maverick.audit.errors import AuditRefused
+    from maverick.flow.execution import default_action_runner
+    from maverick.flow.ir import NODE_ACTION, Flow, FlowNode
+    from maverick.flow.runner import STATUS_INDETERMINATE, run_flow
+
+    _allow_flow_action(monkeypatch)
+    calls: list[object] = []
+
+    class _Registry:
+        def all(self):
+            return [SimpleNamespace(name="web_search")]
+
+        def run(self, _tool, _params):
+            return object()
+
+    def _drive(_pending):
+        calls.append(object())
+        return "completed output"
+
+    def _audit(kind, **_payload):
+        if getattr(kind, "value", str(kind)) == "tool_call":
+            return True
+        if outage == "refused":
+            raise AuditRefused("strict terminal evidence unavailable")
+        return False
+
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: _Registry())
+    monkeypatch.setattr("maverick.workflow._drive", _drive)
+    monkeypatch.setattr("maverick.tool_reliability.is_retry_safe", lambda _t: True)
+    monkeypatch.setattr("maverick.audit.audit_event", _audit)
+    flow = Flow(id="audit-gap", name="audit-gap", start="a", nodes={
+        "a": FlowNode(
+            id="a", kind=NODE_ACTION, tool="web_search", retries=3,
+        ),
+    })
+
+    action_runner = default_action_runner(world=None)
+    result = run_flow(
+        flow,
+        agent_fn=lambda *_args: ("unused", 1.0),
+        action_fn=lambda node, params, data: action_runner(
+            node.tool,
+            params,
+            data,
+        ),
+    )
+
+    assert result.status == STATUS_INDETERMINATE
+    assert len(calls) == 1, result
+
+
+@pytest.mark.parametrize(
+    ("stop_type", "disposition"),
+    [
+        pytest.param(asyncio.CancelledError, "cancelled", id="cancel"),
+        pytest.param(KeyboardInterrupt, "interrupted", id="keyboard-interrupt"),
+        pytest.param(SystemExit, "system_exit", id="system-exit"),
+    ],
+)
+def test_flow_control_stop_records_one_correlated_terminal_then_propagates(
+        monkeypatch, stop_type, disposition) -> None:
+    from types import SimpleNamespace
+
+    from maverick.flow.execution import default_action_runner
+
+    _allow_flow_action(monkeypatch)
+    stop = stop_type("tenant-secret-stop-detail")
+
+    class _Registry:
+        def all(self):
+            return [SimpleNamespace(name="web_search")]
+
+        def run(self, _tool, _params):
+            return object()
+
+    def _drive(_pending):
+        raise stop
+
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: _Registry())
+    monkeypatch.setattr("maverick.workflow._drive", _drive)
+    seen = _records(monkeypatch)
+
+    with pytest.raises(stop_type) as caught:
+        default_action_runner(world=None)("web_search", {}, {})
+
+    assert caught.value is stop
+    rows = [(str(kind), payload) for kind, payload in seen
+            if "tool_call" in str(kind) or "tool_result" in str(kind)]
+    assert len(rows) == 2
+    assert rows[0][1]["call_id"] == rows[1][1]["call_id"]
+    assert rows[0][1]["call_commitment"] == rows[1][1]["call_commitment"]
+    assert rows[1][1]["status"] == "error"
+    assert rows[1][1]["disposition"] == disposition
+    assert rows[1][1]["output_summary"] == f"ERROR: {stop_type.__name__}"
+
+
+def test_flow_control_stop_survives_terminal_audit_refusal(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from maverick.audit.errors import AuditRefused
+    from maverick.flow.execution import default_action_runner
+
+    _allow_flow_action(monkeypatch)
+    stop = SystemExit("original process stop")
+    rows: list[tuple[object, dict]] = []
+
+    class _Registry:
+        def all(self):
+            return [SimpleNamespace(name="web_search")]
+
+        def run(self, _tool, _params):
+            return object()
+
+    def _drive(_pending):
+        raise stop
+
+    def _audit(kind, **payload):
+        rows.append((kind, payload))
+        if "tool_result" in str(kind):
+            raise AuditRefused("strict terminal evidence unavailable")
+        return True
+
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: _Registry())
+    monkeypatch.setattr("maverick.workflow._drive", _drive)
+    monkeypatch.setattr("maverick.audit.audit_event", _audit)
+
+    with pytest.raises(SystemExit) as caught:
+        default_action_runner(world=None)("web_search", {}, {})
+
+    assert caught.value is stop
+    terminal = [payload for kind, payload in rows if "tool_result" in str(kind)]
+    assert len(terminal) == 1
+    assert terminal[0]["status"] == "error"
+    assert terminal[0]["disposition"] == "system_exit"
+
+
+def test_flow_success_pairs_attempt_with_executed_result(monkeypatch) -> None:
+    from maverick import trust_receipt_verify as tv
+    from maverick.flow.execution import default_action_runner
+    from maverick.tools import Tool, ToolRegistry
+
+    _allow_flow_action(monkeypatch)
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search", description="test", input_schema={"type": "object"},
+        fn=lambda _args: "ok",
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    seen = _records(monkeypatch)
+
+    assert default_action_runner(world=None)("web_search", {}, {}) == ("ok", 1.0)
+    rows = [(str(kind), payload) for kind, payload in seen
+            if "tool_call" in str(kind) or "tool_result" in str(kind)]
+    assert len(rows) == 2
+    assert rows[0][1]["call_id"] == rows[1][1]["call_id"]
+    assert rows[0][1]["call_commitment"] == rows[1][1]["call_commitment"]
+    assert tv.derive_claim({"kind": "tool_call", **rows[0][1]})["decision"] \
+        == "attempted"
+    pair = {"call_row": {"kind": "tool_call", **rows[0][1]}}
+    assert tv.derive_claim(
+        {"kind": "tool_result", **rows[1][1]}, pair,
+    )["decision"] == "executed"
+
+
+@pytest.mark.parametrize("failure", ["missing", "raised", "error_result"])
+def test_flow_failures_pair_attempt_with_failed_result(monkeypatch, failure) -> None:
+    from maverick import trust_receipt_verify as tv
+    from maverick.flow.execution import default_action_runner
+    from maverick.tools import Tool, ToolRegistry
+
+    _allow_flow_action(monkeypatch)
+    registry = ToolRegistry()
+    if failure == "raised":
+        def run(_args):
+            raise RuntimeError("boom")
+        registry.register(Tool(
+            name="web_search", description="test",
+            input_schema={"type": "object"}, fn=run,
+        ))
+    elif failure == "error_result":
+        registry.register(Tool(
+            name="web_search", description="test",
+            input_schema={"type": "object"}, fn=lambda _args: "ERROR: boom",
+        ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    seen = _records(monkeypatch)
+
+    result, outcome = default_action_runner(world=None)("web_search", {}, {})
+    assert outcome == 0.0 and "ERROR" in result
+    rows = [(str(kind), payload) for kind, payload in seen
+            if "tool_call" in str(kind) or "tool_result" in str(kind)]
+    assert len(rows) == 2
+    assert rows[0][1]["call_id"] == rows[1][1]["call_id"]
+    assert rows[0][1]["call_commitment"] == rows[1][1]["call_commitment"]
+    pair = {"call_row": {"kind": "tool_call", **rows[0][1]}}
+    assert tv.derive_claim(
+        {"kind": "tool_result", **rows[1][1]}, pair,
+    )["decision"] == "failed"
+
+
+def test_flow_connector_exception_text_is_not_returned_or_audited(
+        monkeypatch) -> None:
+    from maverick.flow.execution import default_action_runner
+    from maverick.tools import Tool, ToolRegistry
+
+    _allow_flow_action(monkeypatch)
+    secret = "Bearer tenant-secret-value"  # pragma: allowlist secret
+
+    def _raises(_args):
+        raise RuntimeError(secret)
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="web_search",
+        description="test",
+        input_schema={"type": "object"},
+        fn=_raises,
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+    seen = _records(monkeypatch)
+
+    result, outcome = default_action_runner(world=None)("web_search", {}, {})
+
+    assert outcome == 0.0
+    assert result == "ERROR: tool execution raised RuntimeError"
+    assert secret not in result
+    terminal = next(
+        payload for kind, payload in seen if "tool_result" in str(kind)
+    )
+    assert secret not in terminal["output_summary"]
 
 
 def test_params_are_truncated_in_the_audit_summary(monkeypatch) -> None:
@@ -147,6 +477,9 @@ def test_gate_summary_publishes_what_it_does_not_check() -> None:
     missing = " ".join(s["not_enforced_needs_an_agent"])
     for expected in ("capability", "autonomy", "quarantine", "hooks"):
         assert expected in missing, expected
+    enforced = " ".join(s["enforced"])
+    assert "required signed audit row" not in enforced
+    assert "signed when audit signing is enabled" in enforced
 
 
 # -- the CI gate -----------------------------------------------------------

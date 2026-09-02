@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from maverick import killswitch
 from maverick.agent import Agent, AgentResult
 from maverick.blackboard import Blackboard
 from maverick.budget import Budget, BudgetExceeded
@@ -632,6 +633,345 @@ class TestToolOutputCap:
         out = await a._run_tool("shell", {"cmd": "cat huge"})
         assert "truncated" in out
         assert len(out) < 5000   # framed + capped, far smaller than the raw 5000
+
+
+class TestToolLifecycleAudit:
+    @staticmethod
+    def _assert_correlated_lifecycle(
+        rows: list[tuple[str, dict]],
+        *,
+        status: str,
+        disposition: str,
+    ) -> None:
+        calls = [payload for kind, payload in rows if kind == "tool_call"]
+        results = [payload for kind, payload in rows if kind == "tool_result"]
+
+        assert len(calls) == 1
+        assert len(results) == 1
+        call, result = calls[0], results[0]
+        assert result["status"] == status
+        assert result["disposition"] == disposition
+        assert result["call_id"] == call["call_id"]
+        assert result["call_commitment"] == call["call_commitment"]
+
+    @pytest.mark.asyncio
+    async def test_success_records_one_correlated_completed_result(
+        self, ctx, monkeypatch,
+    ):
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _succeed(_name, _args):
+            return "completed output"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _succeed)
+
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        assert "completed output" in output
+        self._assert_correlated_lifecycle(
+            rows,
+            status="ok",
+            disposition="completed",
+        )
+
+    @pytest.mark.asyncio
+    async def test_tool_error_records_one_correlated_error_result(
+        self, ctx, monkeypatch,
+    ):
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _fail(_name, _args):
+            return "ERROR: connector rejected the operation"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _fail)
+
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        assert "ERROR: connector rejected the operation" in output
+        self._assert_correlated_lifecycle(
+            rows,
+            status="error",
+            disposition="tool_error",
+        )
+
+    @pytest.mark.asyncio
+    async def test_runtime_exception_records_one_correlated_result_then_propagates(
+        self, ctx, monkeypatch,
+    ):
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _raise(_name, _args):
+            raise RuntimeError("connector crashed")
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _raise)
+
+        with pytest.raises(RuntimeError, match="connector crashed"):
+            await agent._run_tool("shell", {"cmd": "echo test"})
+
+        self._assert_correlated_lifecycle(
+            rows,
+            status="error",
+            disposition="exception",
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancellation_records_one_correlated_result_then_propagates(
+        self, ctx, monkeypatch,
+    ):
+        import asyncio
+
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _cancel(_name, _args):
+            raise asyncio.CancelledError
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _cancel)
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent._run_tool("shell", {"cmd": "echo test"})
+
+        self._assert_correlated_lifecycle(
+            rows,
+            status="error",
+            disposition="cancelled",
+        )
+
+    @pytest.mark.asyncio
+    async def test_output_withheld_still_records_one_terminal_result(
+        self, ctx, monkeypatch,
+    ):
+        from types import SimpleNamespace
+
+        from maverick import trust_receipt_verify as tv
+
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        class _OutputBlockingShield:
+            def scan_tool_call(self, _name, _args):
+                return SimpleNamespace(allowed=True)
+
+            def scan_output(self, _output):
+                return SimpleNamespace(
+                    allowed=False,
+                    reasons=["unsafe output"],
+                    severity="high",
+                )
+
+        async def _sensitive(_name, _args):
+            return "SENSITIVE-TOOL-OUTPUT"
+
+        ctx.shield = _OutputBlockingShield()
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _sensitive)
+
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        lifecycle = [row for row in rows if row[0] in {"tool_call", "tool_result"}]
+        assert [kind for kind, _ in lifecycle] == ["tool_call", "tool_result"]
+        call, result = lifecycle[0][1], lifecycle[1][1]
+        assert call["call_id"] == result["call_id"]
+        assert call["call_commitment"] == result["call_commitment"]
+        assert result["status"] == "ok"
+        assert result["disposition"] == "output_withheld"
+        assert "SENSITIVE-TOOL-OUTPUT" not in result["output_summary"]
+        pair = {"call_row": {"kind": "tool_call", **call}}
+        assert tv.derive_claim(
+            {"kind": "tool_result", **result}, pair,
+        )["decision"] == "executed"
+        assert "Tool executed" in output
+        assert "Result withheld" in output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error_factory", "disposition"),
+        [
+            (lambda: BudgetExceeded("cap reached"), "budget_exceeded"),
+            (lambda: killswitch.Halted("test halt", "test"), "halted"),
+        ],
+    )
+    async def test_control_flow_stop_records_terminal_then_propagates(
+        self, ctx, monkeypatch, error_factory, disposition,
+    ):
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+        error = error_factory()
+
+        async def _stop(_name, _args):
+            raise error
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _stop)
+
+        with pytest.raises(type(error)):
+            await agent._run_tool("shell", {"cmd": "echo test"})
+
+        results = [payload for kind, payload in rows if kind == "tool_result"]
+        assert len(results) == 1
+        assert results[0]["status"] == "error"
+        assert results[0]["disposition"] == disposition
+
+    @pytest.mark.asyncio
+    async def test_missing_call_audit_refuses_dispatch(self, ctx, monkeypatch):
+        calls: list[object] = []
+        monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: False)
+
+        async def _run(_name, _args):
+            calls.append(object())
+            return "should not run"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _run)
+
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        assert calls == []
+        assert "dispatch refused" in output
+
+    @pytest.mark.asyncio
+    async def test_missing_result_audit_withholds_completed_outcome(
+        self, ctx, monkeypatch,
+    ):
+        outcomes = iter((True, False))
+        monkeypatch.setattr(
+            "maverick.audit.audit_event", lambda *a, **k: next(outcomes),
+        )
+        calls: list[object] = []
+
+        async def _run(_name, _args):
+            calls.append(object())
+            return "completed output"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _run)
+
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        assert len(calls) == 1
+        assert output.startswith("INDETERMINATE:")
+        assert "do not retry" in output
+        assert "completed output" not in output
+
+    @pytest.mark.asyncio
+    async def test_terminal_audit_refusal_after_effect_is_indeterminate(
+        self, ctx, monkeypatch,
+    ):
+        from maverick.audit.errors import AuditRefused
+
+        rows: list[str] = []
+
+        def _audit(kind, **_payload):
+            rows.append(str(kind))
+            if str(kind) == "tool_result":
+                raise AuditRefused("strict terminal evidence unavailable")
+            return True
+
+        monkeypatch.setattr("maverick.audit.audit_event", _audit)
+        calls: list[object] = []
+
+        async def _run(_name, _args):
+            calls.append(object())
+            return "completed output"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _run)
+
+        output = await agent._run_tool("shell", {"cmd": "echo test"})
+
+        assert len(calls) == 1
+        assert rows.count("tool_result") == 1
+        assert output.startswith("INDETERMINATE:")
+        assert "do not retry" in output
+        assert "completed output" not in output
+
+    @pytest.mark.asyncio
+    async def test_call_audit_refusal_propagates_before_effect(
+        self, ctx, monkeypatch,
+    ):
+        from maverick.audit.errors import AuditRefused
+
+        calls: list[object] = []
+
+        def _refuse(*_args, **_kwargs):
+            raise AuditRefused("strict dispatch evidence unavailable")
+
+        monkeypatch.setattr("maverick.audit.audit_event", _refuse)
+
+        async def _run(_name, _args):
+            calls.append(object())
+            return "should not run"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _run)
+
+        with pytest.raises(AuditRefused):
+            await agent._run_tool("shell", {"cmd": "echo test"})
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_post_tool_hook_failure_preserves_completed_effect_status(
+        self, ctx, monkeypatch,
+    ):
+        from maverick.hooks import HookEvent
+
+        rows: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: rows.append((str(kind), payload)) or True,
+        )
+
+        async def _hooks(hook_ctx):
+            if hook_ctx.event is HookEvent.PRE_TOOL_USE:
+                return True
+            raise RuntimeError("post-hook failed with SECRET-OUTPUT")
+
+        monkeypatch.setattr("maverick.hooks.dispatch", _hooks)
+        calls: list[object] = []
+
+        async def _mutating(_name, _args):
+            calls.append(object())
+            return "SECRET-OUTPUT"
+
+        agent = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(agent.tools, "run", _mutating)
+
+        output = await agent._run_tool("shell", {"cmd": "mutate"})
+
+        assert len(calls) == 1
+        results = [payload for kind, payload in rows if kind == "tool_result"]
+        assert len(results) == 1
+        assert results[0]["status"] == "ok"
+        assert results[0]["disposition"] == "post_effect_failure"
+        assert "SECRET-OUTPUT" not in results[0]["output_summary"]
+        assert output.startswith("INDETERMINATE:")
+        assert "do not retry" in output
+        assert "SECRET-OUTPUT" not in output
 
 
 class TestStepBudgetWarning:

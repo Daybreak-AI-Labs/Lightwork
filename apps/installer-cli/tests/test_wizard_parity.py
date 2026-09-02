@@ -977,6 +977,11 @@ def test_pick_advanced_defaults_governed_learning_on_but_dgm_off(monkeypatch):
         "_q_text",
         lambda *a, default="", **kw: default,
     )
+    monkeypatch.setattr(
+        wizard,
+        "_q_checkbox",
+        lambda *a, default=None, **kw: default or [],
+    )
 
     advanced = wizard.pick_advanced()
 

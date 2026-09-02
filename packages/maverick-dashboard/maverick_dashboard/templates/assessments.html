@@ -83,6 +83,8 @@
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">⬇ Export CSV</a>
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=json" target="_blank" rel="noopener">⬇ JSON</a>
   </div>
+  <p class="muted" id="as-page-msg" role="status" aria-live="polite" aria-atomic="true"
+     style="min-height:1.25rem; margin:calc(-1 * var(--space-2)) 0 var(--space-3);"></p>
 
   <div class="as-grid">
     <!-- LEFT: the register + detail -->
@@ -141,6 +143,7 @@
   var detailEl = document.getElementById('as-detail');
   var tplSel = document.getElementById('as-template');
   var draftMsg = document.getElementById('as-draft-msg');
+  var pageMsg = document.getElementById('as-page-msg');
   var current = null;   // {kind, subject}
 
   // Escape for both element-content and quoted-attribute contexts: the old
@@ -156,6 +159,48 @@
     opts = opts || {}; opts.headers = opts.headers || {};
     if (opts.body) opts.headers['Content-Type'] = 'application/json';
     return fetch(url, opts);
+  }
+  function responseData(response) {
+    return response.json().catch(function () { return {}; }).then(function (data) {
+      return { ok: response.ok, status: response.status, data: data };
+    });
+  }
+  function responseDetail(result, fallback) {
+    var detail = result && result.data && result.data.detail;
+    if (typeof detail === 'string') return detail;
+    return fallback || ('Request failed (' + ((result && result.status) || 'network') + ').');
+  }
+  function pageMessage(text, error) {
+    pageMsg.textContent = text || '';
+    pageMsg.style.color = error ? 'var(--danger)' : 'var(--muted)';
+  }
+  function detailMessage(text, error) {
+    var target = document.getElementById('as-detail-msg') || pageMsg;
+    target.textContent = text || '';
+    target.style.color = error ? 'var(--danger)' : 'var(--muted)';
+  }
+  function mutationFailure(result, assessment, fallback) {
+    if (!result || result.status !== 409) {
+      detailMessage(responseDetail(result, fallback), true);
+      return;
+    }
+    var target = document.getElementById('as-detail-msg');
+    if (!target) return;
+    target.textContent = '';
+    target.style.color = 'var(--danger)';
+    var explanation = document.createElement('span');
+    explanation.textContent = 'This assessment changed in another tab. Reload the latest revision before retrying. ';
+    target.appendChild(explanation);
+    var reloadButton = document.createElement('button');
+    reloadButton.type = 'button';
+    reloadButton.className = 'btn btn--ghost';
+    reloadButton.id = 'as-reload-current';
+    reloadButton.textContent = 'Reload latest assessment';
+    reloadButton.addEventListener('click', function () {
+      reloadButton.disabled = true;
+      open(assessment.kind, assessment.subject, reloadButton);
+    });
+    target.appendChild(reloadButton);
   }
 
   function statusPill(a) {
@@ -210,6 +255,7 @@
   }
 
   function renderDetail(a) {
+    pageMessage('', false);
     current = { kind: a.kind, subject: a.subject };
     detailCard.hidden = false;
     var drift = a.drift_note ? '<div class="drift">⚠ ' + esc(a.drift_note) + '</div>' : '';
@@ -217,7 +263,8 @@
       + '<div class="as-card__title" style="margin:0;">' + esc(a.subject) + '</div>' + statusPill(a)
       + '<button type="button" class="btn btn--ghost" id="as-rerun" style="margin-inline-start:auto; font-size:var(--text-sm);">↻ Re-assess</button>'
       + '<button type="button" class="btn btn--ghost" id="as-del" style="font-size:var(--text-sm);">Delete</button></div>'
-      + '<p class="muted" style="margin:0 0 var(--space-3); font-size:var(--text-sm);">' + esc(a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>';
+      + '<p class="muted" style="margin:0 0 var(--space-2); font-size:var(--text-sm);">' + esc(a.kind) + (a.description ? ' · ' + esc(a.description) : '') + '</p>'
+      + '<p class="muted" id="as-detail-msg" role="status" aria-live="polite" style="margin:0 0 var(--space-3); font-size:var(--text-sm);"></p>';
     var lenses = Object.keys(a.lenses || {}).map(function (lens) {
       var lv = a.lenses[lens];
       var accepted = lv.status === 'accepted';
@@ -241,25 +288,44 @@
 
   function wireDetail(a) {
     document.getElementById('as-rerun').addEventListener('click', function () {
-      jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/refresh', { method: 'POST', body: '{}' })
-        .then(function (r) { return r.json(); }).then(function (x) { renderDetail(x); reload(); });
+      var button = this; button.disabled = true;
+      jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/refresh', {
+        method: 'POST', body: JSON.stringify({ expected_revision: a.revision })
+      }).then(responseData).then(function (result) {
+        if (!result.ok) { mutationFailure(result, a, 'Re-assessment failed.'); return; }
+        renderDetail(result.data); reload();
+      }).catch(function () { detailMessage('Re-assessment failed.', true); })
+        .finally(function () { if (button.isConnected) button.disabled = false; });
     });
     document.getElementById('as-del').addEventListener('click', async function () {
       if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete' }))) return;
-      jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject), { method: 'DELETE' })
-        .then(function () { detailCard.hidden = true; current = null; reload(); });
+      var button = this; button.disabled = true;
+      jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject)
+        + '?expected_revision=' + encodeURIComponent(a.revision), { method: 'DELETE' })
+        .then(function (response) {
+          if (response.ok) { detailCard.hidden = true; current = null; reload(); return null; }
+          return responseData(response).then(function (result) {
+            mutationFailure(result, a, 'Delete failed.');
+          });
+        }).catch(function () { detailMessage('Delete failed.', true); })
+        .finally(function () { if (button.isConnected) button.disabled = false; });
     });
-    function decide(lens, decision) {
+    function decide(lens, decision, button) {
       var cad = parseInt(document.getElementById('as-cadence').value, 10);
+      button.disabled = true;
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/review',
-        { method: 'POST', body: JSON.stringify({ lens: lens, decision: decision, cadence_days: isNaN(cad) ? 0 : cad }) })
-        .then(function (r) { return r.json(); }).then(function (x) { renderDetail(x); reload(); });
+        { method: 'POST', body: JSON.stringify({ expected_revision: a.revision, lens: lens, decision: decision, cadence_days: isNaN(cad) ? 0 : cad }) })
+        .then(responseData).then(function (result) {
+          if (!result.ok) { mutationFailure(result, a, 'Review was not saved.'); return; }
+          renderDetail(result.data); reload();
+        }).catch(function () { detailMessage('Review was not saved.', true); })
+        .finally(function () { if (button.isConnected) button.disabled = false; });
     }
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-accept'), function (el) {
-      el.addEventListener('click', function () { decide(el.dataset.lens, 'accepted'); });
+      el.addEventListener('click', function () { decide(el.dataset.lens, 'accepted', el); });
     });
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-needs'), function (el) {
-      el.addEventListener('click', function () { decide(el.dataset.lens, 'needs_work'); });
+      el.addEventListener('click', function () { decide(el.dataset.lens, 'needs_work', el); });
     });
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-ev'), function (el) {
       el.addEventListener('click', async function () {
@@ -268,17 +334,37 @@
             type: 'text', required: true },
         ], { okText: 'Add' });
         if (vals === null) return;
+        el.disabled = true;
         jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/evidence',
-          { method: 'POST', body: JSON.stringify({ lens: el.dataset.lens, control: el.dataset.control, evidence: vals.note }) })
-          .then(function (r) { return r.json(); }).then(function (x) { renderDetail(x); });
+          { method: 'POST', body: JSON.stringify({ expected_revision: a.revision, lens: el.dataset.lens, control: el.dataset.control, evidence: vals.note }) })
+          .then(responseData).then(function (result) {
+            if (!result.ok) { mutationFailure(result, a, 'Evidence was not saved.'); return; }
+            renderDetail(result.data); reload();
+          }).catch(function () { detailMessage('Evidence was not saved.', true); })
+          .finally(function () { if (el.isConnected) el.disabled = false; });
       });
     });
   }
 
-  function open(kind, subject) {
+  function open(kind, subject, retryButton) {
+    pageMessage('Loading assessment “' + subject + '”…', false);
     jfetch('/api/v1/assessments/' + kind + '/' + encodeURIComponent(subject))
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (a) { if (a) { renderDetail(a); reloadListSelection(); detailCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } });
+      .then(responseData)
+      .then(function (result) {
+        if (!result.ok) {
+          pageMessage('', false);
+          detailMessage(responseDetail(result, 'Could not reload the latest assessment.'), true);
+          return;
+        }
+        renderDetail(result.data);
+        reloadListSelection();
+        detailCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }).catch(function () {
+        pageMessage('', false);
+        detailMessage('Could not reload the latest assessment — check your connection and try again.', true);
+      }).finally(function () {
+        if (retryButton && retryButton.isConnected) retryButton.disabled = false;
+      });
   }
 
   var lastItems = [];
@@ -287,9 +373,14 @@
   function reload() {
     return jfetch('/api/v1/assessments').then(function (r) {
       if (r.status === 403) { listEl.innerHTML = '<div class="as-empty">Assessments are audit-level — sign in with an audit or admin role to view.</div>'; return null; }
-      return r.ok ? r.json() : null;
+      if (!r.ok) {
+        pageMessage('Could not load the assessment register (HTTP ' + r.status + '). Reload to try again.', true);
+        return null;
+      }
+      return r.json();
     }).then(function (j) {
       if (!j) return;
+      pageMessage('', false);
       lastItems = j.assessments || [];
       renderList(lastItems);
       renderDue(j.due || []);
@@ -300,6 +391,12 @@
           tplSel.appendChild(o);
         });
       }
+    }).catch(function () {
+      pageMessage('Could not load the assessment register — check your connection and reload to try again.', true);
+      if (!lastItems.length) {
+        listEl.innerHTML = '<div class="as-empty">The assessment register is temporarily unavailable.</div>';
+      }
+      return null;
     });
   }
 
@@ -312,7 +409,7 @@
     if (!name) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Pick an agent or a flow first.'; return; }
     draftMsg.style.color = 'var(--muted)'; draftMsg.textContent = 'Assessing…';
     jfetch('/api/v1/assessments/' + kind + '/' + encodeURIComponent(name) + '/refresh',
-      { method: 'POST', body: JSON.stringify({ template: tplSel.value || null }) })
+      { method: 'POST', body: JSON.stringify({ template: tplSel.value || null, expected_revision: 0 }) })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = res.j.detail || 'Failed.'; return; }

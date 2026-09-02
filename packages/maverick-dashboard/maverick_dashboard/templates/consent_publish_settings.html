@@ -83,7 +83,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<main class="publish-settings-shell" id="publish-settings-shell"
+<div class="publish-settings-shell" id="publish-settings-shell"
       data-api-base="{{ api_base }}" data-copilot-page="/consent/publish-settings">
   <header class="publish-settings-hero">
     <p class="eyebrow">Consent publishing governance</p>
@@ -210,7 +210,7 @@
     </section>
   </fieldset>
   <noscript><p class="publish-settings-boundary">JavaScript is required for this bounded administrative workbench.</p></noscript>
-</main>
+</div>
 {% endblock %}
 {% block scripts_extra %}
 <script src="/static/lightwork-consent-publish-settings.js" defer></script>

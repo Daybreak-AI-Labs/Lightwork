@@ -43,3 +43,12 @@ def test_the_wizard_asks_the_question():
     source = inspect.getsource(wizard.pick_advanced)
     assert '"control_plane": _q_confirm(' in source
     assert "Agent Control Plane" in source
+    assert "over every agent" not in source
+    assert "halt the fleet" not in source
+    assert "attempt a " in source
+    assert "control-plane audit row" in source
+    assert "Ordinary audit outages are marked in the " in source
+    assert "CLI HALT covers this local deployment" in source
+    assert "configured shared authority" in source
+    assert "reports whether that row was written" not in source
+    assert "recorded in the audit trail" not in source

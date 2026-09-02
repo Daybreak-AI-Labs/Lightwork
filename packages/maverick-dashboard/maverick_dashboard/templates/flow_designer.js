@@ -42,6 +42,61 @@
   var msg = document.getElementById('fd-msg');
   var nameInput = document.getElementById('fd-name');
   var idInput = document.getElementById('fd-id');
+  var saveButton = document.getElementById('fd-save');
+  var publishButton = document.getElementById('fd-publish');
+  var cleanDraft = null;
+  var saveInFlight = false;
+  var publishInFlight = false;
+
+  function draftSnapshot() {
+    // Keep the editable object rather than the wire serialization: buffered
+    // invalid Params JSON and nested sub-flow drafts are user work too. Runtime
+    // version/publication metadata is excluded so a successful save can update
+    // CAS tokens without making an otherwise unchanged canvas look dirty.
+    var editableFlow = JSON.parse(JSON.stringify(rootFlow));
+    delete editableFlow.version;
+    delete editableFlow.revision;
+    delete editableFlow.published;
+    delete editableFlow.published_version;
+    delete editableFlow.published_revision;
+    return JSON.stringify({
+      flow: editableFlow,
+      id: idInput.value,
+      name: nameInput.value,
+      inputs: flowInputs,
+      notify: !!((document.getElementById('fd-notify') || {}).checked),
+      max_seconds: ((document.getElementById('fd-maxsec') || {}).value || ''),
+      max_dollars: ((document.getElementById('fd-maxdollars') || {}).value || ''),
+      schedule: ((document.getElementById('fd-schedule') || {}).value || ''),
+      timezone: ((document.getElementById('fd-tz') || {}).value || ''),
+      max_concurrent: ((document.getElementById('fd-maxconc') || {}).value || '')
+    });
+  }
+  function markClean(snapshot) { cleanDraft = snapshot || draftSnapshot(); }
+  function draftIsDirty() { return cleanDraft !== null && cleanDraft !== draftSnapshot(); }
+  function syncSaveButtons() {
+    saveButton.disabled = saveInFlight || publishInFlight;
+    publishButton.disabled = saveInFlight || publishInFlight;
+  }
+  function canonicalizeSavedFlow(id) {
+    var path = '/flows/designer/' + encodeURIComponent(id);
+    if (window.location.pathname !== path || window.location.search) {
+      window.history.replaceState(window.history.state, '', path);
+    }
+    canvas.setAttribute('data-flow-id', id);
+    var box = document.querySelector('.fd-hero .hero-statebox');
+    if (box) {
+      var stateName = box.querySelector('.hero-statebox__row strong');
+      var badge = box.querySelector('.badge');
+      if (stateName) stateName.textContent = 'Editing ' + id;
+      if (badge) { badge.textContent = 'saved flow'; badge.className = 'badge ok'; }
+    }
+  }
+  window.addEventListener('beforeunload', function (event) {
+    if (!draftIsDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 
   function el(tag, attrs, text) {
     var e = document.createElementNS(SVG, tag);
@@ -142,6 +197,8 @@
   }
 
   function render() {
+    var focusedNode = document.activeElement && document.activeElement.getAttribute
+      ? document.activeElement.getAttribute('data-node') : null;
     vp.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')');
     gEdges.textContent = ''; gNodes.textContent = '';
     // edges
@@ -166,6 +223,12 @@
       var g = el('g', { class: 'fd-node' + ((n.id === selected || multiSel[n.id]) ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
                         transform: 'translate(' + n.x + ',' + n.y + ')' });
       g.setAttribute('data-node', n.id);
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', (n.label || summary(n) || n.id) + ', ' + n.kind
+        + ' step' + (n.id === flow.start ? ', start step' : '')
+        + '. Press Enter to edit; use arrow keys to move.');
+      g.setAttribute('aria-pressed', n.id === selected ? 'true' : 'false');
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
       g.appendChild(el('rect', { class: 'swatch k-' + n.kind, x: 0, y: 0, width: 8, height: H, rx: 4 }));
       g.appendChild(el('text', { class: 'kind', x: 16, y: 20 }, (KIND_ICON[n.kind] || '') + ' ' + n.kind));
@@ -185,6 +248,12 @@
       });
       gNodes.appendChild(g);
     });
+    if (focusedNode) {
+      Array.prototype.some.call(gNodes.querySelectorAll('[data-node]'), function (node) {
+        if (node.getAttribute('data-node') !== focusedNode) return false;
+        node.focus(); return true;
+      });
+    }
     // Skip the minimap rebuild mid-drag (render() fires every mousemove frame);
     // the mouseup handler refreshes it once the drag settles.
     if (!drag || drag.kind === 'connect' || drag.kind === 'marquee') renderMinimap();
@@ -278,6 +347,40 @@
     canvas.classList.add('panning');
     multiSel = {};
     selectNode(null);
+  });
+  gNodes.addEventListener('keydown', function (evt) {
+    var nodeEl = evt.target.closest('[data-node]');
+    if (!nodeEl) return;
+    var id = nodeEl.getAttribute('data-node');
+    var n = nodeById(id); if (!n) return;
+    if (evt.key === 'Enter' || evt.key === ' ') {
+      evt.preventDefault(); evt.stopPropagation(); selectNode(id); return;
+    }
+    var dx = 0, dy = 0;
+    var step = evt.shiftKey ? 48 : 16;
+    if (evt.key === 'ArrowLeft') dx = -step;
+    else if (evt.key === 'ArrowRight') dx = step;
+    else if (evt.key === 'ArrowUp') dy = -step;
+    else if (evt.key === 'ArrowDown') dy = step;
+    else return;
+    evt.preventDefault(); evt.stopPropagation();
+    pushHistory(); selected = id; multiSel = {};
+    n.x += dx; n.y += dy;
+    renderProps(); render();
+    say('Moved ' + (n.label || id) + '.');
+  });
+  canvas.addEventListener('keydown', function (evt) {
+    if (evt.target !== canvas) return;
+    var handled = true;
+    if (evt.key === 'ArrowLeft') view.x += 32;
+    else if (evt.key === 'ArrowRight') view.x -= 32;
+    else if (evt.key === 'ArrowUp') view.y += 32;
+    else if (evt.key === 'ArrowDown') view.y -= 32;
+    else if (evt.key === '+' || evt.key === '=') view.k = Math.min(2.2, view.k * 1.1);
+    else if (evt.key === '-' || evt.key === '_') view.k = Math.max(0.35, view.k * 0.9);
+    else if (evt.key === '0' || evt.key === 'Home') { zoomToFit(); evt.preventDefault(); return; }
+    else handled = false;
+    if (handled) { evt.preventDefault(); render(); }
   });
   function deleteEdge(edge) {
     var n = nodeById(edge.from);
@@ -474,10 +577,9 @@
     if (!f.start && f.nodes.length) f.start = f.nodes[0].id;
   }
   function commitFlowRaw(f) {
-    // flush any buffered JSON textareas for the nodes of ONE flow (current view)
-    (f.nodes || []).forEach(function (n) {
-      if (n._paramsRaw !== undefined) { try { n.params = n._paramsRaw.trim() ? JSON.parse(n._paramsRaw) : {}; } catch (e) { /* reported on save */ } delete n._paramsRaw; }
-    });
+    // Invalid text remains buffered so drilling into another canvas cannot
+    // erase it. Save reports the path and leaves the textarea intact.
+    return FDCore.commitRawParams(f);
   }
   function enterSub(node, kind, index) {
     commitFlowRaw(flow);
@@ -520,13 +622,25 @@
   }
 
   // ---- property panel ----
+  var fieldSeq = 0;
   function field(label, inputEl) {
     var wrap = document.createElement('div'); wrap.className = 'field';
-    var l = document.createElement('label'); l.textContent = label; wrap.appendChild(l); wrap.appendChild(inputEl); return wrap;
+    var l = document.createElement('label'); l.textContent = label;
+    var labelId = 'fd-field-label-' + (++fieldSeq);
+    if (inputEl && /^(INPUT|SELECT|TEXTAREA)$/.test(inputEl.tagName)) {
+      if (!inputEl.id) inputEl.id = 'fd-field-' + fieldSeq;
+      l.htmlFor = inputEl.id;
+    } else if (inputEl) {
+      l.id = labelId;
+      if (!inputEl.getAttribute('aria-label') && !inputEl.getAttribute('aria-labelledby')) {
+        inputEl.setAttribute('aria-labelledby', labelId);
+      }
+    }
+    wrap.appendChild(l); wrap.appendChild(inputEl); return wrap;
   }
   function input(val, oninput, ph) {
     var i = document.createElement('input'); i.className = 'input'; i.value = val || ''; if (ph) i.placeholder = ph;
-    i.addEventListener('input', function () { oninput(i.value); });
+    if (oninput) i.addEventListener('input', function () { oninput(i.value); });
     i.addEventListener('focus', histFocus); i.addEventListener('blur', histBlur);
     return i;
   }
@@ -573,9 +687,11 @@
       flowInputs.forEach(function (spec, ii) {
         var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = '4px'; row.style.marginBottom = '4px'; row.style.flexWrap = 'wrap';
         var keyIn = input(spec.key || '', function (v) { spec.key = v; }, 'key'); keyIn.style.flex = '2';
+        keyIn.setAttribute('aria-label', 'Manual input ' + (ii + 1) + ' key');
         var typeSel = select(spec.type || 'text',
           ['text', 'number', 'bool', 'date'].map(function (t) { return { v: t, t: t }; }),
           function (v) { spec.type = v; }); typeSel.style.flex = '1';
+        typeSel.setAttribute('aria-label', 'Manual input ' + (ii + 1) + ' type');
         var reqWrap = document.createElement('label'); reqWrap.style.display = 'flex'; reqWrap.style.alignItems = 'center'; reqWrap.style.gap = '2px'; reqWrap.style.fontSize = '11px';
         var reqCb = document.createElement('input'); reqCb.type = 'checkbox'; reqCb.checked = !!spec.required;
         reqCb.addEventListener('change', function () { spec.required = reqCb.checked; });
@@ -637,7 +753,7 @@
         });
         props.appendChild(hint('Use {{key}} to insert an earlier step’s result.'));
       } else {
-        var pta = textarea(jsonOr(n.params), function (v) { n._paramsRaw = v; });
+        var pta = textarea(n._paramsRaw !== undefined ? n._paramsRaw : jsonOr(n.params), function (v) { n._paramsRaw = v; });
         props.appendChild(withPills(n.id, field('Params (JSON)', pta), pta));
       }
     }
@@ -657,8 +773,10 @@
         var rowc = document.createElement('div'); rowc.style.display = 'flex'; rowc.style.gap = '4px'; rowc.style.marginBottom = '4px';
         var vi = input(c.value != null ? String(c.value) : '', function (v) { c.value = v; render(); }, 'value');
         vi.style.flex = '1';
+        vi.setAttribute('aria-label', 'Case ' + (ci + 1) + ' value');
         var ts = select(c.to || '', targets, function (v) { c.to = v || null; render(); });
         ts.style.flex = '1';
+        ts.setAttribute('aria-label', 'Case ' + (ci + 1) + ' destination step');
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
         rm.setAttribute('aria-label', 'Remove case');
         rm.title = 'Remove case';
@@ -755,7 +873,9 @@
       (n.form = n.form || []).forEach(function (fld, fi) {
         var frow = document.createElement('div'); frow.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
         var nm = input(fld.name || '', function (v) { fld.name = v; }, 'key'); nm.style.flex = '1';
+        nm.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' key');
         var lb = input(fld.label || '', function (v) { fld.label = v; }, 'prompt shown'); lb.style.flex = '1';
+        lb.setAttribute('aria-label', 'Approval field ' + (fi + 1) + ' prompt');
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
         rm.setAttribute('aria-label', 'Remove field');
         rm.addEventListener('click', function () { n.form.splice(fi, 1); renderProps(); });
@@ -775,8 +895,10 @@
       Object.keys(n.subflow_inputs).forEach(function (k) {
         var rowi = document.createElement('div'); rowi.style.display = 'flex'; rowi.style.gap = '4px'; rowi.style.marginBottom = '4px';
         var keyIn = input(k, null, 'child key'); keyIn.style.flex = '1';
+        keyIn.setAttribute('aria-label', 'Child input key ' + k);
         keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.subflow_inputs[nv] = n.subflow_inputs[k]; delete n.subflow_inputs[k]; renderProps(); } });
         var valIn = input(n.subflow_inputs[k], function (v) { n.subflow_inputs[k] = v; }, '{{order_id}}'); valIn.style.flex = '2';
+        valIn.setAttribute('aria-label', 'Value passed to child input ' + k);
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
         rm.setAttribute('aria-label', 'Remove input');
         rm.addEventListener('click', function () { delete n.subflow_inputs[k]; renderProps(); render(); });
@@ -797,8 +919,10 @@
       Object.keys(n.assignments).forEach(function (k) {
         var rowv = document.createElement('div'); rowv.style.display = 'flex'; rowv.style.gap = '4px'; rowv.style.marginBottom = '4px';
         var keyIn = input(k, null, 'key'); keyIn.style.flex = '1';
+        keyIn.setAttribute('aria-label', 'Assignment key ' + k);
         keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.assignments[nv] = n.assignments[k]; delete n.assignments[k]; renderProps(); } });
         var valIn = input(n.assignments[k], function (v) { n.assignments[k] = v; }, '{{add(count,1)}}'); valIn.style.flex = '2';
+        valIn.setAttribute('aria-label', 'Value assigned to ' + k);
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
         rm.setAttribute('aria-label', 'Remove assignment');
         rm.addEventListener('click', function () { delete n.assignments[k]; renderProps(); render(); });
@@ -822,6 +946,19 @@
       var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
       props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
     }
+    // Every canvas edge also has a keyboard-operable equivalent. This makes
+    // creating, changing, and clearing the normal/yes/no routes possible
+    // without dragging a six-pixel SVG port.
+    var connectionTargets = [{ v: '', t: '(no next step)' }].concat(
+      flow.nodes.filter(function (m) { return m.id !== n.id; })
+        .map(function (m) { return { v: m.id, t: (m.label || m.id) + ' · ' + m.kind }; }));
+    ports(n).forEach(function (port) {
+      var connectionLabel = port.key === 'if_true' ? 'Yes path — next step'
+        : (port.key === 'if_false' ? 'No path — next step' : 'Next step');
+      props.appendChild(field(connectionLabel, select(n[port.key] || '', connectionTargets, function (v) {
+        pushHistory(); n[port.key] = v || null; render();
+      })));
+    });
     // last run outcome for this node (from the live/last run overlay)
     var rs = runState[n.id];
     if (rs || n.id === runCursor) {
@@ -946,7 +1083,9 @@
   function conditionField(n, label, placeholder) {
     var wrap = document.createElement('div'); wrap.className = 'field';
     var head = document.createElement('div'); head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;';
-    var l = document.createElement('label'); l.textContent = label; head.appendChild(l);
+    var l = document.createElement('label'); l.textContent = label;
+    var conditionLabelId = 'fd-condition-label-' + (++fieldSeq);
+    l.id = conditionLabelId; head.appendChild(l);
     var isAdvanced = n._condAdvanced || / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
     var toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'fd__pill';
     toggle.textContent = isAdvanced ? 'simple' : 'advanced';
@@ -955,6 +1094,7 @@
     head.appendChild(toggle); wrap.appendChild(head);
     if (isAdvanced) {
       var ta = input(n.condition, function (v) { n.condition = v; render(); }, (placeholder || 'a > 1') + ' and b == x');
+      ta.setAttribute('aria-labelledby', conditionLabelId);
       wrap.appendChild(ta);
       var pills = pillsRow(n.id, ta, true); if (pills) wrap.appendChild(pills);
       return wrap;
@@ -964,10 +1104,13 @@
     function commit() { n.condition = (cur.key + ' ' + cur.op + ' ' + cur.value).trim(); render(); }
     var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;';
     var keyIn = input(cur.key, function (v) { cur.key = v; commit(); }, 'data key');
+    keyIn.setAttribute('aria-label', label + ' data key');
     keyIn.setAttribute('list', 'fd-condkeys'); keyIn.style.flex = '1';
     var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: o }; }), function (v) { cur.op = v; commit(); });
+    opSel.setAttribute('aria-label', label + ' operator');
     opSel.style.flex = '0 0 88px';
     var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'value');
+    valIn.setAttribute('aria-label', label + ' comparison value');
     valIn.style.flex = '1';
     row.appendChild(keyIn); row.appendChild(opSel); row.appendChild(valIn);
     wrap.appendChild(row);
@@ -980,23 +1123,8 @@
   }
 
   // ---- serialize / api ----
-  function walkFlows(f, fn) {
-    // depth-first over a flow and every nested body/branch sub-flow
-    fn(f);
-    (f.nodes || []).forEach(function (n) {
-      if (n.body) walkFlows(n.body, fn);
-      (n.branches || []).forEach(function (b) { walkFlows(b, fn); });
-    });
-  }
   function commitRawFields() {
-    // parse the buffered params JSON across the root AND every nested sub-flow
-    var bad = [];
-    walkFlows(rootFlow, function (f) {
-      (f.nodes || []).forEach(function (n) {
-        if (n._paramsRaw !== undefined) { try { n.params = n._paramsRaw.trim() ? JSON.parse(n._paramsRaw) : {}; } catch (e) { bad.push(n.id + '.params'); } delete n._paramsRaw; }
-      });
-    });
-    return bad;
+    return FDCore.commitRawParams(rootFlow);
   }
   var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
@@ -1014,7 +1142,7 @@
     out.revision = String(rootFlow.revision || '');
     return out;
   }
-  function fromApiFlow(f) {
+  function fromApiFlow(f, savedSnapshot) {
     runState = {}; runCursor = null; impacts = {};
     stack = []; crumbs = ['Main flow']; renderCrumbs();
     signals = { nodes: {}, trigger: null };
@@ -1037,6 +1165,7 @@
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
     selected = null; selectedEdge = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
+    if (savedSnapshot) markClean();
   }
   function autoLayout() {
     var need = flow.nodes.some(function (n) { return !n.x && !n.y; });
@@ -1063,49 +1192,64 @@
   function slugify(s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
-  function save(cb) {
+  async function save() {
+    if (saveInFlight) return false;
     var bad = commitRawFields();
-    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
+    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return false; }
     var body = toApiFlow();
     if (!body.id) { body.id = slugify(body.name); idInput.value = body.id; }   // auto-id from the name
-    if (!body.id) { say('Give the flow a name (top-left).', true); return; }
-    if (!body.nodes.length) { say('Add at least one step.', true); return; }
+    if (!body.id) { say('Give the flow a name (top-left).', true); return false; }
+    if (!body.nodes.length) { say('Add at least one step.', true); return false; }
     var verrs = FDCore.validateFlow(body);
-    if (verrs.length) { say('Fix first: ' + verrs.slice(0, 3).join(' · '), true); return; }
+    if (verrs.length) { say('Fix first: ' + verrs.slice(0, 3).join(' · '), true); return false; }
+    rootFlow.id = body.id;
+    var savedDraftSnapshot = draftSnapshot();
+    saveInFlight = true; syncSaveButtons();
     say('Saving…');
-    apiFetch('/api/v1/flows', { method: 'POST', body: JSON.stringify({ flow: body }) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
-        if (!res.ok) { say(res.j.detail || 'Save failed', true); return; }
-        rootFlow.id = body.id;
-        rootFlow.version = parseInt(res.j.version, 10) || rootFlow.version || 1;
-        rootFlow.revision = String(res.j.revision || rootFlow.revision || '');
-        rootFlow.published = !!res.j.published;
-        rootFlow.published_version = parseInt(res.j.published_version, 10) || 0;
-        rootFlow.published_revision = String(res.j.published_revision || '');
-        say('Saved ✓'); if (cb) cb();
-      }).catch(function () { say('Save failed', true); });
+    try {
+      var response = await apiFetch('/api/v1/flows', {
+        method: 'POST', body: JSON.stringify({ flow: body })
+      });
+      var result = await response.json().catch(function () { return {}; });
+      if (!response.ok) { say(result.detail || 'Save failed', true); return false; }
+      rootFlow.version = parseInt(result.version, 10) || rootFlow.version || 1;
+      rootFlow.revision = String(result.revision || rootFlow.revision || '');
+      rootFlow.published = !!result.published;
+      rootFlow.published_version = parseInt(result.published_version, 10) || 0;
+      rootFlow.published_revision = String(result.published_revision || '');
+      markClean(savedDraftSnapshot);
+      canonicalizeSavedFlow(rootFlow.id);
+      say('Saved ✓');
+      return true;
+    } catch (e) {
+      say('Save failed', true); return false;
+    } finally {
+      saveInFlight = false; syncSaveButtons();
+    }
   }
-  function publishFlow() {
+  async function publishFlow() {
+    if (publishInFlight || saveInFlight) return;
+    publishInFlight = true; syncSaveButtons();
     // Publish is the explicit activation authority. Save the reviewed canvas as
     // a draft, then bind activation to the exact CAS tokens the save returned.
-    save(function () {
-      apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/publish', {
+    try {
+      if (!(await save())) return;
+      var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/publish', {
         method: 'POST', body: JSON.stringify({
           version: rootFlow.version, revision: rootFlow.revision
         })
-      }).then(function (r) {
-        return r.json().catch(function () { return {}; }).then(function (j) {
-          return { ok: r.ok, j: j };
-        });
-      }).then(function (res) {
-        if (!res.ok) { say(res.j.detail || 'Publish failed', true); return; }
-        rootFlow.published = true;
-        rootFlow.published_version = parseInt(res.j.published_version, 10) || 0;
-        rootFlow.published_revision = String(res.j.published_revision || '');
-        say('Published v' + rootFlow.published_version);
-      }).catch(function () { say('Publish failed', true); });
-    });
+      });
+      var result = await response.json().catch(function () { return {}; });
+      if (!response.ok) { say(result.detail || 'Publish failed', true); return; }
+      rootFlow.published = true;
+      rootFlow.published_version = parseInt(result.published_version, 10) || 0;
+      rootFlow.published_revision = String(result.published_revision || '');
+      say('Published v' + rootFlow.published_version);
+    } catch (e) {
+      say('Publish failed', true);
+    } finally {
+      publishInFlight = false; syncSaveButtons();
+    }
   }
   function inputFields() {
     // The declared manual-run inputs as an mvForm field spec.
@@ -1279,7 +1423,7 @@
   function load(id) {
     apiFetch('/api/v1/flows/' + encodeURIComponent(id)).then(function (r) {
       if (!r.ok) { say('Could not load flow', true); return; }
-      return r.json().then(fromApiFlow);
+      return r.json().then(function (saved) { fromApiFlow(saved, true); });
     }).catch(function () { say('Could not load flow', true); });
     loadSuggestions(id);
     loadSchema(id);
@@ -1699,6 +1843,10 @@
   var seedEl = document.getElementById('fd-seed');
   var seed = null;
   if (seedEl) { try { seed = JSON.parse(seedEl.textContent); } catch (e) { seed = null; } }
+  // Baseline the untouched blank canvas immediately. Loading an existing flow
+  // replaces this with its server snapshot; gallery/import/AI drafts remain
+  // dirty and therefore receive the unload warning until saved.
+  markClean();
   if (editId) load(editId);
   else if (handoff) {
     render(); renderProps();

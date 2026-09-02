@@ -10,6 +10,7 @@ CANONICAL_CONTEXTS = {
     "/administration/document-vault": "Governed Document Vault",
     "/ai-entity-tasks": "AI Entity Tasks",
     "/governance-agents": "Governance Agents",
+    "/agent-control-plane": "Agent Control Plane",
     "/governance/inventory": "Governance Inventory",
     "/consent": "Consent and Preferences",
     "/consent/publishing": "Consent Publishing",
@@ -81,6 +82,22 @@ def test_registry_paths_are_unique_and_match_expected_pages() -> None:
 
     assert len(registered) == len(set(registered))
     assert set(registered) == set(CANONICAL_CONTEXTS)
+
+
+def test_every_registered_dashboard_page_gets_page_specific_copilot_help() -> None:
+    from maverick_dashboard.ui_visibility import PAGES
+
+    explicit = {context.path for context in copilot_context._CONTEXTS}
+    for page in PAGES:
+        context = copilot_context.context_for_page(page["path"])
+        assert context.path == page["path"]
+        assert context.summary
+        assert context.capabilities
+        assert context.next_steps
+        assert copilot_context._READ_ONLY_BOUNDARY in context.boundaries
+        if page["path"] not in explicit:
+            assert context.title == page["label"]
+            assert page["group"] in context.summary
 
 
 @pytest.mark.parametrize(
@@ -199,6 +216,25 @@ def test_evidence_context_names_every_supported_media_family() -> None:
 
     for media_name in ("pdf", "jpeg", "png", "xls", "xlsx", "plain-text"):
         assert media_name in capabilities
+
+
+def test_agent_control_plane_context_names_runtime_and_audit_boundaries() -> None:
+    context = copilot_context.context_for_page("/agent-control-plane")
+    guidance = " ".join(
+        (*context.capabilities, *context.boundaries, *context.next_steps)
+    ).casefold()
+
+    for concept in (
+        "bounded, paginated roster",
+        "hardened local or shared-cluster halt",
+        "refused",
+        "named principal",
+        "does not claim a live-swarm seal",
+        "fail-soft",
+        "already landed",
+        "inspect the principal ledger separately",
+    ):
+        assert concept in guidance
 
 
 def test_third_party_context_names_closed_feeds_and_live_acceptance_boundary() -> None:

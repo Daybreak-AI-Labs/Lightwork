@@ -316,6 +316,33 @@ def create_consent_native_public_metadata_router() -> APIRouter:
         tags=["native-consent"],
     )
 
+    @public.get("/receipt-keys")
+    async def receipt_key_discovery(
+        request: Request,
+        response: Response,
+    ) -> dict[str, Any]:
+        """Describe the application-bound public-key discovery contract.
+
+        The native-consent page links here before JavaScript has an
+        application reference.  Keep the unparameterized GET useful without
+        returning any tenant or key material; JavaScript replaces the link
+        with the exact application URL after the operator supplies a reference.
+        """
+
+        if request.query_params:
+            raise HTTPException(status_code=404, detail="not found")
+        response.headers["Cache-Control"] = "public, max-age=300"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return {
+            "schema": "lightwork.native-consent-receipt-key-discovery.v1",
+            "method": "GET",
+            "application_ref_required": True,
+            "endpoint_template": (
+                "/api/v1/public/consent/native/receipt-keys/{application_ref}"
+            ),
+        }
+
     @public.get("/receipt-keys/{application_ref}")
     async def receipt_keys(
         application_ref: Annotated[

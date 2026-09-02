@@ -75,11 +75,14 @@
           </td>
           <td class="mv-row__actions">
             {% if a.revoked %}
-            <button type="button" class="btn btn--icon" data-trust-restore="{{ a.id }}">Restore</button>
+            <button type="button" class="btn btn--icon" data-trust-restore="{{ a.id }}"
+                    aria-label="Restore {{ a.id }} external agent">Restore</button>
             {% else %}
-            <button type="button" class="btn btn--icon" data-trust-revoke="{{ a.id }}">Revoke</button>
+            <button type="button" class="btn btn--icon" data-trust-revoke="{{ a.id }}"
+                    aria-label="Revoke {{ a.id }} external agent">Revoke</button>
             {% endif %}
-            <button type="button" class="btn btn--icon btn--ghost" data-trust-remove="{{ a.id }}">Remove</button>
+            <button type="button" class="btn btn--icon btn--ghost" data-trust-remove="{{ a.id }}"
+                    aria-label="Remove {{ a.id }} external agent">Remove</button>
           </td>
         </tr>
         {% endfor %}

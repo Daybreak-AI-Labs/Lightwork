@@ -2303,7 +2303,12 @@ class Agent:
             "findings) or get human approval via ask_user before retrying."
         )
 
-    async def _governance_denial(self, name: str, args: dict, cap) -> str | None:
+    async def _governance_denial(
+        self,
+        name: str,
+        args: dict,
+        cap,
+    ) -> tuple[str | None, tuple[str, ...] | None]:
         # Org oversight control plane (enterprise): on top of the per-principal
         # capability above, an org-level policy can DENY an action outright or
         # REQUIRE_HUMAN sign-off (EU AI Act Art 14). Default-open -- an empty
@@ -2312,6 +2317,11 @@ class Agent:
         # missing enforcement module, or evaluation error fails CLOSED: true
         # absence is represented by a successfully loaded empty Policy, so
         # policy uncertainty must never masquerade as the default-open posture.
+        # A trusted empty tuple means governance evaluated a policy snapshot
+        # with no compliance profiles. ``None`` means provenance was
+        # unavailable, so evidence helpers may surface the policy outage rather
+        # than mislabelling it as a known-empty posture.
+        _profile_keys: tuple[str, ...] | None = None
         _gov = None
         try:
             from .governance import Decision as _GovDecision
@@ -2332,11 +2342,13 @@ class Agent:
             return (
                 "⚠ DENIED by governance policy (policy_unavailable): "
                 "the enforcement module was unavailable, so the tool was not "
-                "executed."
+                "executed.",
+                None,
             )
         else:
             try:
                 _gov_policy = _GovPolicy.from_config()
+                _profile_keys = _gov_policy.compliance_profiles
             except Exception:
                 # The module is available but its active policy is not. This is
                 # distinguishable from the intentional no-policy posture because
@@ -2374,8 +2386,12 @@ class Agent:
                 )
                 _gov = _GovVerdict(
                     _GovDecision.DENY,
-                    "governance evaluation error (failed closed)", "error",
+                    "governance evaluation error (failed closed)",
+                    "error",
+                    compliance_profiles=_profile_keys,
                 )
+        if _gov is not None:
+            _profile_keys = _gov.compliance_profiles
         # Per-agent autonomy level (the agent-as-employee authority dial):
         # compose strictest-wins with the org governance verdict. Only
         # consequential (non-low-risk) tools are gated -- reading/searching is
@@ -2409,7 +2425,8 @@ class Agent:
                     _rank = {_GD.ALLOW: 0, _GD.REQUIRE_HUMAN: 1, _GD.DENY: 2}
                     if _gov is None or _rank[_adec] > _rank[_gov.decision]:
                         _gov = _GV(_adec, f"autonomy level: {_al.reason}",
-                                   f"autonomy:{_al.level.value}")
+                                   f"autonomy:{_al.level.value}",
+                                   compliance_profiles=_profile_keys)
         except Exception:
             if _autonomy_levels_enabled:
                 log.warning(
@@ -2439,7 +2456,8 @@ class Agent:
                 return (
                     "⚠ DENIED by autonomy policy (autonomy:error): "
                     "authority evaluation was unavailable, so the tool was not "
-                    "executed."
+                    "executed.",
+                    _profile_keys,
                 )
             log.warning(
                 "autonomy: level evaluation unavailable while disabled for %r; "
@@ -2448,8 +2466,7 @@ class Agent:
                 exc_info=True,
             )
         if _gov is None or _gov.decision is _GovDecision.ALLOW:
-            return None
-        from .audit import EventKind
+            return None, _profile_keys
         _principal = getattr(cap, "principal", None) if cap is not None else None
         if _gov.decision is _GovDecision.DENY:
             self.ctx.blackboard.post(
@@ -2463,10 +2480,15 @@ class Agent:
                         goal_id=self.ctx.goal_id, tool=name,
                         principal=_principal, rule=_gov.rule,
                         reason=_gov.reason,
-                        **_obligation_tags(name, _gov.rule))
+                        **_obligation_tags(
+                            name,
+                            _gov.rule,
+                            keys=_gov.compliance_profiles,
+                        ))
             return (
                 f"⚠ DENIED by org policy ({_gov.rule}): {_gov.reason}. "
-                "The tool was not executed."
+                "The tool was not executed.",
+                _gov.compliance_profiles,
             )
         # REQUIRE_HUMAN: the action runs only with a real human's approval
         # (Art 14). allow_auto_approve=False means a silent auto-approve mode
@@ -2494,7 +2516,7 @@ class Agent:
         except Exception:  # pragma: no cover -- consent unavailable -> fail closed
             granted = False
         if granted:
-            return None
+            return None, _gov.compliance_profiles
         self.ctx.blackboard.post(
             self.name, "error",
             f"tool={name} BLOCKED: governance requires human approval",
@@ -2505,7 +2527,11 @@ class Agent:
                goal_id=self.ctx.goal_id, tool=name,
                principal=_principal, rule=_gov.rule,
                reason="human approval not granted",
-               **_obligation_tags(name, _gov.rule))
+               **_obligation_tags(
+                   name,
+                   _gov.rule,
+                   keys=_gov.compliance_profiles,
+               ))
         # Human-override ingestion: the operator's "no" is itself a
         # learning signal — recallable on the next similar goal and
         # consolidated by dreaming. No-op unless [reflexion] is on.
@@ -2521,34 +2547,214 @@ class Agent:
             pass
         return (
             f"⚠ {name!r} requires human approval (EU AI Act Art 14): "
-            f"{_gov.reason}. Not granted, so the tool was not executed."
+            f"{_gov.reason}. Not granted, so the tool was not executed.",
+            _gov.compliance_profiles,
         )
 
-    def _audit_tool_event(self, kind: str, **payload: Any) -> None:
+    def _audit_tool_event(self, kind: str, **payload: Any) -> bool:
         """Record a tool-lifecycle audit event on the signed chain.
 
-        Kept off ``_run_tool`` so the audit path adds no control-flow branches to
-        that hot method. Best-effort with one deliberate exception:
+        ``AuditRefused`` propagates. Ordinary writer failures return ``False`` so
+        the governed dispatch boundary can refuse an unrecorded effect instead
+        of silently treating best-effort logging as execution evidence.
 
-        ``AuditRefused`` propagates. It is raised only when the audit subsystem
-        declined to write because writing would have broken a guarantee the
-        deployment asserts, and swallowing it turned that refusal into "write
-        nothing and run the tool anyway" -- worse than either outcome the writer
-        was choosing between, and a silent falsification of the profile's
-        central claim that every action is recorded.
-
-        Catching the BASE matters. This site previously caught only
-        ``AuditWriteRefused``, so the sibling ``OffHostSigningRequiredError`` --
-        the refusal that fires under the strictest posture we sell -- fell
-        through to the ``except Exception`` below and was swallowed. The one
-        hardened call site in the tree was hardened against the wrong half.
-
-        Everything else is still swallowed, but no longer silently: a bare
-        ``pass`` here meant a permanently broken audit path looked identical to
-        a healthy one.
         """
         from .audit import audit_event
-        audit_event(kind, agent=self.name, goal_id=self.ctx.goal_id, **payload)
+        return audit_event(
+            kind,
+            agent=self.name,
+            goal_id=self.ctx.goal_id,
+            **payload,
+        )
+
+    async def _run_dispatched_tool(
+        self,
+        name: str,
+        args: dict,
+        *,
+        shield,
+        quarantine,
+        call_id: str,
+        call_commitment: str,
+        principal: str | None,
+    ) -> str:
+        """Run one already-authorized, already-audited dispatch to termination."""
+        from .audit import TOOL_CALL_COMMITMENT_ALGORITHM
+        from .hooks import HookContext, HookEvent
+        from .hooks import dispatch as _dispatch_hooks
+
+        terminal_attempted = False
+
+        def record_terminal(
+            *,
+            status: str,
+            output_summary: str,
+            disposition: str,
+        ) -> bool:
+            nonlocal terminal_attempted
+            terminal_attempted = True
+            try:
+                return self._audit_tool_event(
+                    "tool_result",
+                    name=name,
+                    call_id=call_id,
+                    call_commitment=call_commitment,
+                    call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
+                    origin="agent",
+                    principal=principal,
+                    status=status,
+                    disposition=disposition,
+                    output_summary=output_summary,
+                )
+            except Exception as exc:
+                # A strict refusal before dispatch must propagate. At this
+                # boundary the tool has already run, so replacing its outcome
+                # with AuditRefused invites a replay. Convert only the terminal
+                # write refusal to the same explicit indeterminate state as a
+                # False return; the outer exception path still re-raises an
+                # original BudgetExceeded/Halted/CancelledError unchanged.
+                from .audit.errors import AuditRefused
+
+                if isinstance(exc, AuditRefused):
+                    log.warning(
+                        "terminal audit refused after tool=%s execution",
+                        name,
+                        exc_info=True,
+                    )
+                    return False
+                raise
+
+        effect_completed = False
+        execution_status = "error"
+        try:
+            output = await self.tools.run(name, args)
+            # From this point onward the connector returned normally and may
+            # already have committed an external mutation.  Keep that fact
+            # separate from failures in hooks, screening, framing, or other
+            # post-effect processing so none of those failures can recast the
+            # completed call as replay-safe.
+            effect_completed = True
+            execution_status = _tool_status(output)
+            await _dispatch_hooks(HookContext(
+                event=HookEvent.POST_TOOL_USE,
+                tool_name=name,
+                tool_args=args,
+                tool_result=output,
+                goal_id=self.ctx.goal_id,
+                agent_role=self.role,
+            ))
+            if shield is not None:
+                try:
+                    out_verdict = shield.scan_output(output)
+                except Exception as exc:  # scanner bugs are observable fail-open
+                    log.warning(
+                        "shield.scan_output raised on tool=%s output "
+                        "(fail-open): %s: %s",
+                        name,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    self.ctx.blackboard.post(
+                        self.name,
+                        "warning",
+                        f"tool={name} shield output-scan errored (fail-open): "
+                        f"{type(exc).__name__}",
+                    )
+                else:
+                    if not out_verdict.allowed:
+                        reason = "; ".join(out_verdict.reasons)
+                        self.ctx.blackboard.post(
+                            self.name,
+                            "error",
+                            f"tool={name} OUTPUT BLOCKED by Shield: {reason}",
+                        )
+                        self._maybe_seal(quarantine, out_verdict)
+                        if not record_terminal(
+                            # The effect completed before its output was screened.
+                            # Withholding delivery must not recast a mutating call
+                            # as failed/replay-safe in a trust receipt.
+                            status=execution_status,
+                            disposition="output_withheld",
+                            output_summary=_audit_summary(reason),
+                        ):
+                            return (
+                                "INDETERMINATE: the tool executed and its output "
+                                "was withheld, but terminal audit evidence could "
+                                "not be written; reconcile state and do not retry"
+                            )
+                        return (
+                            "⚠ Tool executed, but its output was BLOCKED by Shield "
+                            f"({out_verdict.severity}): {reason}. Result withheld; "
+                            "do not retry solely to recover the output."
+                        )
+            try:
+                from .safety.secret_detector import redact as _redact_secrets
+                output, _redacted = _redact_secrets(output)
+            except Exception:  # pragma: no cover - detector errors are fail-open
+                pass
+            output = _cap_tool_output(output, limit=_tool_result_limit(self.model))
+            nonce = _secrets.token_hex(8)
+            framed = (
+                f"<tool_output tool={name!r} id={nonce}>\n"
+                f"{output}\n"
+                f"</tool_output {nonce}>"
+            )
+            # Build every potentially fallible delivery artifact before writing
+            # the one terminal row.  A later delivery failure can then be
+            # recorded honestly as post-effect rather than leaving a misleading
+            # already-finalized "completed" disposition.
+            guard_note = self._loop_guard_note(name, args, output)
+            if not record_terminal(
+                status=execution_status,
+                disposition=(
+                    "completed" if execution_status == "ok" else "tool_error"
+                ),
+                output_summary=_audit_summary(output),
+            ):
+                return (
+                    "INDETERMINATE: the tool ran, but its terminal audit evidence "
+                    "could not be written; reconcile state and do not retry"
+                )
+            return framed + guard_note
+        except BaseException as exc:
+            if not terminal_attempted:
+                if effect_completed:
+                    record_terminal(
+                        status=execution_status,
+                        disposition="post_effect_failure",
+                        output_summary=_audit_summary(
+                            f"post-effect processing failed: {type(exc).__name__}"
+                        ),
+                    )
+                else:
+                    disposition = {
+                        "BudgetExceeded": "budget_exceeded",
+                        "Halted": "halted",
+                        "CancelledError": "cancelled",
+                    }.get(type(exc).__name__, "exception")
+                    record_terminal(
+                        status="error",
+                        disposition=disposition,
+                        output_summary=_audit_summary(type(exc).__name__),
+                    )
+            if effect_completed:
+                # Preserve process/agent stop signals; their callers already
+                # treat them as non-retryable control flow.  Ordinary failures
+                # after a returned effect become an explicit reconciliation
+                # state and never expose the unprocessed tool output.
+                if type(exc).__name__ in {
+                    "BudgetExceeded",
+                    "CancelledError",
+                    "Halted",
+                    "KeyboardInterrupt",
+                    "SystemExit",
+                }:
+                    raise
+                return (
+                    "INDETERMINATE: the tool completed, but post-effect "
+                    "processing failed; reconcile state and do not retry"
+                )
+            raise
 
     async def _run_tool(self, name: str, args: dict) -> str:
         # Record the tool name on this agent's action sequence so a parent can
@@ -2642,8 +2848,13 @@ class Agent:
 
         # Org oversight control plane (enterprise): policy DENY or REQUIRE_HUMAN
         # sign-off (EU AI Act Art 14). Default-open for non-enterprise installs.
-        if (d := await self._governance_denial(name, args, cap)) is not None:
-            return d
+        _governance_refusal, _compliance_profiles = await self._governance_denial(
+            name,
+            args,
+            cap,
+        )
+        if _governance_refusal is not None:
+            return _governance_refusal
 
         # PreToolUse hooks: any registered hook can BLOCK the call by
         # returning a non-zero exit code (shell hook) or a falsy value
@@ -2662,90 +2873,51 @@ class Agent:
             )
             return "⚠ BLOCKED by hook. The tool was not executed."
 
-        # Success-path audit (who-did-what-when): a tamper-evident record that
-        # this tool call executed, on the same signed chain as the denial events.
+        # Dispatch audit: TOOL_CALL proves the request reached the governed
+        # execution boundary; TOOL_RESULT below proves whether it completed.
+        # The shared call_id prevents a failed attempt from being mistaken for
+        # a successful execution in a portable trust receipt.
         # Proof the compiled obligations were checked on this call: the row names
         # every active obligation whose scope covered the tool (empty -> omitted).
+        from .audit import (
+            TOOL_CALL_COMMITMENT_ALGORITHM,
+            tool_call_commitment,
+        )
         from .regulatory_compiler import checked_tags as _checked_tags
-        self._audit_tool_event("tool_call", name=name,
-                               input_summary=_audit_summary(args),
-                               **_checked_tags(name))
 
-        output = await self.tools.run(name, args)
-
-        post_ctx = HookContext(
-            event=HookEvent.POST_TOOL_USE,
-            tool_name=name, tool_args=args, tool_result=output,
-            goal_id=self.ctx.goal_id, agent_role=self.role,
-        )
-        await _dispatch_hooks(post_ctx)
-        # Council finding: tool output flowed back to the LLM unscanned,
-        # so a malicious file contents / shell stdout containing
-        # `FINAL: <exfil>` or jailbreak instructions hit the next turn.
-        # Wrap the output in a clearly-delimited block so the agent
-        # treats it as data, and scan it through the shield.
-        if shield is not None:
-            try:
-                out_verdict = shield.scan_output(output)
-                if not out_verdict.allowed:
-                    self.ctx.blackboard.post(
-                        self.name, "error",
-                        f"tool={name} OUTPUT BLOCKED by Shield: "
-                        f"{'; '.join(out_verdict.reasons)}",
-                    )
-                    self._maybe_seal(q, out_verdict)
-                    return (
-                        f"⚠ Tool output BLOCKED by Shield ({out_verdict.severity}): "
-                        f"{'; '.join(out_verdict.reasons)}. Result withheld."
-                    )
-            except Exception as e:  # shield must never block tools on its own bug
-                # Fail-open, but NOT silently: a scanner that reliably throws
-                # on a crafted output would otherwise disable output gating for
-                # that call with zero trace. Surface it so the bypass is
-                # observable (warn + blackboard), per the "warn, don't fail
-                # silent" contract.
-                log.warning(
-                    "shield.scan_output raised on tool=%s output (fail-open): %s: %s",
-                    name, type(e).__name__, e,
-                )
-                self.ctx.blackboard.post(
-                    self.name, "warning",
-                    f"tool={name} shield output-scan errored (fail-open): "
-                    f"{type(e).__name__}",
-                )
-        # Defense-in-depth: redact secrets in tool output BEFORE it returns to
-        # the model / blackboard / channel. `cat .env`, a DB row, or an API
-        # response can carry a key the shield's scan_output doesn't classify
-        # as a policy violation; the env-scrub only covers the shell child's
-        # own env, not secrets the tool reads from files/services. Fail-open.
+        call_id = _secrets.token_hex(12)
+        principal = getattr(cap, "principal", None) if cap is not None else None
         try:
-            from .safety.secret_detector import redact as _redact_secrets
-            output, _redacted = _redact_secrets(output)
-        except Exception:  # pragma: no cover
-            pass
-        # Bound a single runaway result before it enters the context window
-        # (compaction only trims results behind the recent window).
-        output = _cap_tool_output(output, limit=_tool_result_limit(self.model))
-        # Council-of-20 security finding: a literal `</tool_output>` in
-        # `output` (attacker-controlled file contents, shell stdout, MCP
-        # response) escapes the framing and lets following text read as
-        # authoritative LLM context. Use a random per-call nonce so the
-        # close tag is unforgeable. `secrets.token_hex(8)` = 16 hex chars.
-        nonce = _secrets.token_hex(8)
-        framed = (
-            f"<tool_output tool={name!r} id={nonce}>\n"
-            f"{output}\n"
-            f"</tool_output {nonce}>"
+            call_commitment = tool_call_commitment(
+                call_id=call_id,
+            )
+        except ValueError:
+            return "ERROR: invalid tool-call evidence identity; dispatch refused"
+        if not self._audit_tool_event(
+            "tool_call",
+            name=name,
+            call_id=call_id,
+            call_commitment=call_commitment,
+            call_commitment_algorithm=TOOL_CALL_COMMITMENT_ALGORITHM,
+            origin="agent",
+            principal=principal,
+            input_summary=_audit_summary(args),
+            **_checked_tags(name, keys=_compliance_profiles),
+        ):
+            return (
+                "ERROR: tool dispatch refused because its required audit "
+                "evidence could not be written"
+            )
+
+        return await self._run_dispatched_tool(
+            name,
+            args,
+            shield=shield,
+            quarantine=q,
+            call_id=call_id,
+            call_commitment=call_commitment,
+            principal=principal,
         )
-        # Success-path audit: the tool's outcome (ok/error) + a bounded output
-        # summary, completing the TOOL_CALL/TOOL_RESULT pair on the signed chain.
-        self._audit_tool_event("tool_result", name=name,
-                               status=_tool_status(output),
-                               output_summary=_audit_summary(output))
-        # Loop guard: detect a repeated identical FAILURE from the raw result
-        # (before framing) and, past threshold, append a nudge OUTSIDE the data
-        # block -- it's trusted loop-control guidance, not tool output.
-        return framed + self._loop_guard_note(name, args, output)
 
     @staticmethod
     def _tool_call_key(name: str, args: dict) -> str:
