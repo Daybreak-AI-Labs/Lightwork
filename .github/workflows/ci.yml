@@ -576,14 +576,15 @@ jobs:
   test-window:
     # The rest of the supported window. A pull request already proves the
     # floor (`test`, above) and 3.12 (`posture` runs the whole suite there),
-    # so these legs are skipped on pull_request -- a job skipped by `if`
-    # reports success, so the required `test (3.11|3.12, n)` contexts stay
-    # satisfied -- and run for real on the merge queue's commit and on pushes
-    # to main, where a version-specific break still blocks the merge or goes
-    # red on main. The explicit name keeps the check contexts identical to
-    # the single-job matrix they replace.
+    # so on pull_request these legs start, skip every step and report
+    # success within seconds. The gate is on the steps, not the job: a job
+    # skipped by `if` never expands its matrix and reports one check named
+    # with the raw template, so the required `test (3.11|3.12, n)` contexts
+    # would never appear. On the merge queue's commit and on pushes to main
+    # they run for real, where a version-specific break still blocks the
+    # merge or goes red on main. The explicit name keeps the check contexts
+    # identical to the single-job matrix they replace.
     name: test (${{ matrix.python-version }}, ${{ matrix.shard }})
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -592,10 +593,17 @@ jobs:
         python-version: ["3.11", "3.12"]
         shard: [1, 2, 3]
     steps:
+      - name: Not run on pull requests
+        if: github.event_name == 'pull_request'
+        run: >-
+          echo "test (${{ matrix.python-version }}, ${{ matrix.shard }}) runs on
+          the merge queue's commit and on main, not on pull requests."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'pull_request'
         with:
           persist-credentials: false
       - uses: ./.github/actions/test-shard
+        if: github.event_name != 'pull_request'
         with:
           python-version: ${{ matrix.python-version }}
           shard: ${{ matrix.shard }}
@@ -629,11 +637,12 @@ jobs:
           packages/maverick-core/tests/test_local_backend_process_reaping.py
 
   windows-process-containment-window:
-    # Same check names as the single-job matrix they replace; skipped on
-    # pull_request (a skipped job reports success), run for real on the
-    # merge queue's commit and on pushes to main.
+    # Same check names as the single-job matrix they replace. Gated at the
+    # step level like test-window (a job-level `if` would collapse the
+    # matrix into one raw-named check): on pull_request the legs start, skip
+    # every step and report success; on the merge queue's commit and on
+    # pushes to main they run for real.
     name: Windows process containment (Python ${{ matrix.python-version }})
-    if: github.event_name != 'pull_request'
     runs-on: windows-2022
     timeout-minutes: 10
     permissions:
@@ -643,15 +652,24 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
+      - name: Not run on pull requests
+        if: github.event_name == 'pull_request'
+        run: >-
+          echo "Windows process containment (Python ${{ matrix.python-version }})
+          runs on the merge queue's commit and on main, not on pull requests."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'pull_request'
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: github.event_name != 'pull_request'
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the focused test dependency
+        if: github.event_name != 'pull_request'
         run: python -m pip install "pytest==9.1.1"
       - name: Test Windows Job Object process-tree containment
+        if: github.event_name != 'pull_request'
         env:
           PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
         run: >-

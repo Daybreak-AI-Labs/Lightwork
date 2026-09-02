@@ -113,10 +113,10 @@ Follow these steps in order. Paths cited are the actual controls in this repo.
     - `audit` — dependency/security audit + SBOM.
     - `test` — the full `pytest` suite in three file-level slices
       (pytest-xdist, one worker per core) on **Python 3.10 for every pull
-      request**; `test-window` — the same slices on **3.11 and 3.12**, skipped
-      on the pull request itself (GitHub counts a skipped required job as
-      passing) and run on the merge queue's commit and on `main`, so the
-      whole supported window is proven on the commit that lands;
+      request**; `test-window` — the same slices on **3.11 and 3.12**: on a
+      pull request the legs start, skip every step and report success within
+      seconds; on the merge queue's commit and on `main` they run for real,
+      so the whole supported window is proven on the commit that lands;
       `posture` — the same suite under the production security posture on
       3.12, in the same three slices, on every event.
     - `harness-overhead`, `governance-frontier-offline` — the tracked benchmark
