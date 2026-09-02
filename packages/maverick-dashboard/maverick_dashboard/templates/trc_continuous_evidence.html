@@ -77,7 +77,8 @@
                  detail='Read-only, digest-only provider evidence feeds. Stock
                          feeds still collect nothing until a tenant source
                          manifest, an approved definition, an active enrollment,
-                         and deployment-held credential custody are in place.') }}
+                         and deployment-held credential custody are in place.',
+                 status=acm_module_status) }}
   {% else %}
   <section class="trc-status-grid" aria-label="Continuous evidence status">
     <article class="trc-stat trc-glass"><span class="trc-stat__label">Composition</span><span class="trc-stat__value" id="trc-composition">unknown</span><span class="trc-stat__detail" id="trc-composition-detail">Refresh to inspect configured sources.</span></article>
