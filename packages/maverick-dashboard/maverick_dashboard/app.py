@@ -9404,6 +9404,17 @@ async def trust_receipts_client() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-cortex.js")
+async def cortex_script() -> FileResponse:
+    """The Cortex page's lattice figure and recall console, served same-origin
+    like every other page script (an explicit route, never a directory mount)."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-cortex.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/static/lightwork-evolution-ledger.js")
 async def evolution_ledger_client() -> FileResponse:
     """Client for the Audit -> Evolution Ledger read-only console."""

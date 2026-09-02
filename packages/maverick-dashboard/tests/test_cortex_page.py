@@ -248,3 +248,17 @@ def test_mounted_page_renders_through_the_dashboard_shell(monkeypatch, tmp_path)
         audit_writer._default = None
         audit_writer._defaults.clear()
         dash_app._world_cache.clear()
+
+
+def test_cortex_script_is_served_same_origin(monkeypatch) -> None:
+    """The page's script is an explicit route on the real app (the dashboard
+    serves no static directory), so a missing route would leave the lattice
+    and the recall console silently blank."""
+    from maverick_dashboard.app import app as real_app
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "secret-token")  # pragma: allowlist secret
+    client = TestClient(real_app, headers={"Origin": "http://testserver",
+                                           "Authorization": "Bearer secret-token"})
+    r = client.get("/static/lightwork-cortex.js")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/javascript")
+    assert b"cortex-lattice" in r.content
