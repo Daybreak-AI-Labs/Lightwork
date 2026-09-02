@@ -52,7 +52,7 @@ def test_overview_goal_input_has_accessible_name(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    r = _client().get("/")
+    r = _client().get("/overview")
     assert 'aria-label="Describe a goal for Lightwork to run"' in r.text
 
 
