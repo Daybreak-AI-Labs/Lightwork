@@ -14,7 +14,6 @@ Registered into the base registry only when ``[commerce] enable`` is on
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..commerce import (
@@ -23,13 +22,14 @@ from ..commerce import (
     ShopperSession,
     StagedChange,
 )
+from ..fastjson import dumps_compact
 from . import Tool
 
 _REFUSABLE = (CommerceError, ValueError)
 
 
 def _dump(value: Any) -> str:
-    return json.dumps(value, indent=2, sort_keys=True, default=str)
+    return dumps_compact(value, sort_keys=True)
 
 
 def _arg(args: dict, key: str) -> str:
