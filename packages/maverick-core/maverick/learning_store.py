@@ -129,6 +129,15 @@ def _pg_conn():
         with conn.cursor() as cur:
             for ddl in _SQLITE_DDL:  # DDL is portable: TEXT/REAL map fine
                 cur.execute(ddl.replace(" REAL ", " DOUBLE PRECISION "))
+            # A single Postgres DSN is shared by every tenant, so each row must
+            # carry the tenant it belongs to -- otherwise one tenant's learning
+            # would surface in another's recall. Idempotent additive column; the
+            # SQLite store needs none (data_dir already scopes world.db per
+            # tenant, so two tenants never share a file).
+            for table in _TENANT_SCOPED_TABLES:
+                cur.execute(
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS tenant_id TEXT"
+                )
         yield conn
         conn.commit()
     except BaseException:
@@ -187,34 +196,99 @@ def _ph(n: int) -> str:
     return ", ".join([mark] * n)
 
 
+# Tables the shared world store keeps. On Postgres each carries a ``tenant_id``
+# so a single shared DSN can never pool one tenant's learning into another's
+# recall (the same boundary the world model enforces on its own tables). The
+# SQLite store needs no column: ``data_dir`` already scopes ``world.db`` per
+# tenant, so two tenants never share a file.
+_TENANT_SCOPED_TABLES = (
+    "harness_addenda",
+    "harness_line_meta",
+    "harness_transfer_tried",
+    "harness_corpus",
+)
+
+
+def _active_tenant() -> str | None:
+    """The tenant scoping this call, or ``None`` for the unbound single-tenant
+    store. Lazy import keeps this module free of a hard ``paths`` dependency."""
+    try:
+        from .paths import current_tenant_id
+        return current_tenant_id()
+    except Exception:  # pragma: no cover -- no tenant context resolves to unbound
+        return None
+
+
+def _tenant_predicate() -> tuple[str, tuple]:
+    """Exact tenant scope for the SHARED Postgres store, else no predicate.
+
+    On Postgres a single DSN backs every tenant, so reads, whole-map DELETEs and
+    the tenant column stamped on writes all pin the active tenant EXACTLY
+    (``tenant_id IS NULL`` for an unbound single-tenant deployment). On SQLite the
+    file is already tenant-scoped, so the predicate is empty and the emitted SQL
+    is byte-for-byte unchanged."""
+    if not _postgres():
+        return "", ()
+    tenant = _active_tenant()
+    if tenant is None:
+        return "tenant_id IS NULL", ()
+    return "tenant_id = %s", (tenant,)
+
+
+def _tenant_column() -> tuple[str, str, tuple]:
+    """``(", tenant_id", ", %s", (value,))`` to splice onto an INSERT on Postgres;
+    all empty on SQLite. The stamped value is the active tenant (``NULL`` when
+    unbound), so it matches the exact read predicate above."""
+    if not _postgres():
+        return "", "", ()
+    return ", tenant_id", ", %s", (_active_tenant(),)
+
+
+def _where(predicate: str) -> str:
+    return f" WHERE {predicate}" if predicate else ""
+
+
+def _and(predicate: str) -> str:
+    return f" AND {predicate}" if predicate else ""
+
+
 def load_addenda_db() -> dict[str, str]:
     """``{key: block}`` -- the world-store addenda map ({} on any error)."""
+    pred, params = _tenant_predicate()
     try:
         with _conn() as c:
             return {str(k): str(b) for k, b in
-                    _rows(c, "SELECT key, block FROM harness_addenda")}
+                    _rows(c, f"SELECT key, block FROM harness_addenda{_where(pred)}",
+                          params)}
     except Exception:
         log.debug("learning_store: addenda read failed", exc_info=True)
         return {}
 
 
 def write_addenda_db(data: dict[str, str]) -> None:
-    """Whole-map replace, mirroring the file store's atomic rewrite."""
+    """Whole-map replace, mirroring the file store's atomic rewrite.
+
+    The DELETE is scoped to the active tenant so replacing one tenant's map never
+    touches another's rows on the shared Postgres store."""
     now = time.time()
+    pred, params = _tenant_predicate()
+    tcol, tph, tparam = _tenant_column()
     with _conn() as c:
-        _exec(c, "DELETE FROM harness_addenda")
+        _exec(c, f"DELETE FROM harness_addenda{_where(pred)}", params)
         for k, block in (data or {}).items():
-            _exec(c, f"INSERT INTO harness_addenda (key, block, updated_at) "
-                     f"VALUES ({_ph(3)})", (str(k), str(block), now))
+            _exec(c, f"INSERT INTO harness_addenda (key, block, updated_at{tcol}) "
+                     f"VALUES ({_ph(3)}{tph})", (str(k), str(block), now, *tparam))
 
 
 def load_line_meta_db() -> dict[str, dict]:
     """``{line_id: record}`` provenance sidecar ({} on any error)."""
     out: dict[str, dict] = {}
+    pred, params = _tenant_predicate()
     try:
         with _conn() as c:
             for lid, rec in _rows(
-                    c, "SELECT line_id, record FROM harness_line_meta"):
+                    c, f"SELECT line_id, record FROM harness_line_meta{_where(pred)}",
+                    params):
                 try:
                     parsed = json.loads(rec)
                     if isinstance(parsed, dict):
@@ -228,31 +302,38 @@ def load_line_meta_db() -> dict[str, dict]:
 
 def write_line_meta_db(meta: dict[str, dict]) -> None:
     now = time.time()
+    pred, params = _tenant_predicate()
+    tcol, tph, tparam = _tenant_column()
     with _conn() as c:
-        _exec(c, "DELETE FROM harness_line_meta")
+        _exec(c, f"DELETE FROM harness_line_meta{_where(pred)}", params)
         for lid, rec in (meta or {}).items():
             _exec(c, f"INSERT INTO harness_line_meta (line_id, record, "
-                     f"updated_at) VALUES ({_ph(3)})",
-                  (str(lid), json.dumps(rec, sort_keys=True), now))
+                     f"updated_at{tcol}) VALUES ({_ph(3)}{tph})",
+                  (str(lid), json.dumps(rec, sort_keys=True), now, *tparam))
 
 
 def load_transfer_tried_db() -> dict[str, float]:
     """``{line_id: ts}`` transfer tried-memory ({} on any error)."""
+    pred, params = _tenant_predicate()
     try:
         with _conn() as c:
             return {str(k): float(ts) for k, ts in
-                    _rows(c, "SELECT line_id, ts FROM harness_transfer_tried")}
+                    _rows(c,
+                          f"SELECT line_id, ts FROM harness_transfer_tried{_where(pred)}",
+                          params)}
     except Exception:
         log.debug("learning_store: tried read failed", exc_info=True)
         return {}
 
 
 def write_transfer_tried_db(tried: dict[str, float]) -> None:
+    pred, params = _tenant_predicate()
+    tcol, tph, tparam = _tenant_column()
     with _conn() as c:
-        _exec(c, "DELETE FROM harness_transfer_tried")
+        _exec(c, f"DELETE FROM harness_transfer_tried{_where(pred)}", params)
         for lid, ts in (tried or {}).items():
-            _exec(c, f"INSERT INTO harness_transfer_tried (line_id, ts) "
-                     f"VALUES ({_ph(2)})", (str(lid), float(ts)))
+            _exec(c, f"INSERT INTO harness_transfer_tried (line_id, ts{tcol}) "
+                     f"VALUES ({_ph(2)}{tph})", (str(lid), float(ts), *tparam))
 
 
 def _corpus_row_sensitive(kind: str) -> bool:
@@ -298,11 +379,12 @@ def load_corpus_db(kind: str) -> dict:
     returns ``{key: [row-dicts]}``; ``"rejected"`` returns ``{key: [goals]}``.
     ``{}`` on any error, like the tolerant file loaders."""
     out: dict = {}
+    pred, tp = _tenant_predicate()
     try:
         with _conn() as c:
             for key, row in _rows(
                     c, f"SELECT key, row FROM harness_corpus WHERE kind = {_ph(1)}"
-                       " ORDER BY key, seq", (str(kind),)):
+                       f"{_and(pred)} ORDER BY key, seq", (str(kind), *tp)):
                 try:
                     out.setdefault(str(key), []).append(_decode_corpus_row(str(kind), row))
                 except ValueError:
@@ -310,8 +392,8 @@ def load_corpus_db(kind: str) -> dict:
             if kind == "live":
                 for key, row in _rows(
                         c, f"SELECT key, row FROM harness_corpus "
-                           f"WHERE kind = {_ph(1)} ORDER BY key, seq",
-                        ("extra",)):
+                           f"WHERE kind = {_ph(1)}{_and(pred)} ORDER BY key, seq",
+                        ("extra", *tp)):
                     try:
                         out[str(key)] = _decode_corpus_row("extra", row)
                     except ValueError:
@@ -326,22 +408,24 @@ def write_corpus_db(kind: str, data: dict) -> None:
     """Whole-family replace for ``kind``, mirroring the file store's atomic
     rewrite. For ``"live"``, non-list top-level values are preserved under the
     ``extra`` kind so operator annotations survive the round-trip."""
+    pred, tp = _tenant_predicate()
+    tcol, tph, tparam = _tenant_column()
     with _conn() as c:
-        _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}",
-              (str(kind),))
+        _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}{_and(pred)}",
+              (str(kind), *tp))
         if kind == "live":
-            _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}",
-                  ("extra",))
+            _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}{_and(pred)}",
+                  ("extra", *tp))
         for key, val in (data or {}).items():
             if kind == "live" and not isinstance(val, list):
-                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row) "
-                         f"VALUES ({_ph(4)})",
-                      ("extra", str(key), 0, _encode_corpus_row("extra", val)))
+                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row{tcol}) "
+                         f"VALUES ({_ph(4)}{tph})",
+                      ("extra", str(key), 0, _encode_corpus_row("extra", val), *tparam))
                 continue
             for i, row in enumerate(val if isinstance(val, list) else []):
-                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row) "
-                         f"VALUES ({_ph(4)})",
-                      (str(kind), str(key), i, _encode_corpus_row(str(kind), row)))
+                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row{tcol}) "
+                         f"VALUES ({_ph(4)}{tph})",
+                      (str(kind), str(key), i, _encode_corpus_row(str(kind), row), *tparam))
 
 
 __all__ = [

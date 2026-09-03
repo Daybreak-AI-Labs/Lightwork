@@ -1608,7 +1608,18 @@ here.
   silently (a broken or disabled source is reported in `denied` with its
   reason); `status` reports what each source holds plus the encryption-at-
   rest and isolation posture an auditor asks about; `recall --context`
-  renders the hits as the cited prompt block an agent receives.
+  renders the hits as the cited prompt block an agent receives. The tenant
+  floor is enforced differently per store and is test-backed
+  (`test_cortex_tenant_isolation.py`): the **Operating Record** rides the world
+  model, so it is row-level-security-enforced on shared Postgres and a distinct
+  per-tenant `world.db` on SQLite; **knowledge**, **skills** and the
+  **self-harness lessons** file store scope by their `data_dir` directory (a
+  different path per tenant); the opt-in shared-Postgres learning store
+  (`[self_harness] store = "world"`) now carries a `tenant_id` on every
+  `harness_*` row and scopes every read/write to the active tenant, so a fleet
+  of hosts can still learn as one *within* a tenant without pooling learning
+  across tenants (`learning_store.py`, `test_learning_store_tenant_isolation.py`);
+  **fleet memory** answers only enrolled external agents and is roster-gated.
 - **The Operating Record** (`operating_record.py`, `maverick record
   stats|search|export|verify`) — the firm's decisions as a system of
   record: goals (with departments, outcomes, spend) + human approvals
