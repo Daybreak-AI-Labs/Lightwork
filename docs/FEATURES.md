@@ -2584,6 +2584,22 @@ never routing somewhere v2 rejected, falling back to v2 on a cold context. The
 learned table persists atomically (`router_bandit.json`, 0600); opt-in via
 `[routing] bandit` and default-OFF.
 
+**Per-tenant BYOK provider keys** (`config.tenant_provider_api_key`, threaded
+through `llm._provider_api_key` where the provider client is built; opt-in
+`[providers] per_tenant_keys` / `MAVERICK_PER_TENANT_KEYS`, **default OFF**): an
+active tenant that opted in (the tenant record's `byok` flag,
+`tenant.registry.set_byok`) runs on ITS OWN provider API key instead of the
+deployment-global one — resolved through the secret provider under a
+tenant-scoped name (`MAVERICK_TENANT_<digest>_<PROVIDER>_API_KEY`, the digest
+derived from the tenant's collision-safe namespace key so two tenants never
+alias one name; `config.tenant_provider_key_env` reports the exact name). The
+key bytes never touch config, the repo, the tenant record, or logs (the name
+ends in `_API_KEY` so the GitHub Action sanitizer redacts it). Fail-safe: no
+tenant, the knob off, the flag off, or a missing key all fall back to the
+deployment-global key byte-for-byte — a BYOK misconfiguration never takes an
+agent offline. BYOK only: no resale, metering, or markup lives here. Distinct
+from per-tenant `[kms]` BYOK (envelope-encryption key custody).
+
 **Public perf dashboard** (`GET /perf` + `GET /api/v1/perf` on the
 dashboard): one page/JSON face for the perf story — the perf-SLA checks
 measured live on the host (in a worker thread, against the published

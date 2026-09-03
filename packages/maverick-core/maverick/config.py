@@ -29,6 +29,7 @@ Schema overview::
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import os
@@ -692,6 +693,99 @@ PROVIDER_BASE_URL_ENV_MAP: dict[str, tuple[str, ...]] = {
 PROVIDER_BASE_URL_ENV_VARS = tuple(
     dict.fromkeys(value for values in PROVIDER_BASE_URL_ENV_MAP.values() for value in values)
 )
+
+
+# --- Per-tenant provider keys (BYOK) --------------------------------------
+#
+# When enabled, an active tenant may run on its OWN provider API key instead of
+# the deployment-global one -- "bring your own key" for LLM/provider credentials
+# (distinct from per-tenant [kms] BYOK, which is envelope-encryption key custody).
+# Default OFF: with the knob off, or when no tenant is active, provider-key
+# resolution is byte-for-byte the historical global-key behavior. This is BYOK
+# only -- no resale, metering, or markup lives here.
+
+
+def providers_per_tenant_keys() -> bool:
+    """Whether a tenant may override the deployment-global provider key with its
+    own (``[providers] per_tenant_keys``; ``MAVERICK_PER_TENANT_KEYS`` wins).
+
+    Read from the GLOBAL config (not a per-tenant overlay) so a tenant cannot
+    flip its own master switch -- this is a deployment-owner policy. **Default
+    off.** Never raises."""
+    flag = env_flag("MAVERICK_PER_TENANT_KEYS")
+    if flag is not None:
+        return flag
+    try:
+        providers = load_global_config().get("providers") or {}
+    except Exception:  # pragma: no cover -- config never blocks a run
+        return False
+    if not isinstance(providers, dict):
+        return False
+    return _strict_config_bool(providers, "per_tenant_keys", False)
+
+
+def tenant_provider_key_env(tenant_id: str, provider: str) -> str:
+    """The secret-provider name that holds ``tenant_id``'s own API key for
+    ``provider``.
+
+    Convention: ``MAVERICK_TENANT_<digest>_<PROVIDER>_API_KEY`` where ``digest``
+    is derived from the tenant's canonical namespace key -- the same
+    collision-safe identity the filesystem isolation uses -- so two distinct
+    tenants can never resolve to the same secret name (a plain uppercased slug
+    would alias ``acme-1`` and ``acme_1`` onto one name and leak a key across
+    tenants). ``provider`` is canonicalized through the provider registry so an
+    alias (``claude`` -> ``anthropic``) maps to one name.
+
+    The value is resolved through :mod:`maverick.secret_provider` (process env
+    or a mounted vault / secret file); the key bytes are NEVER written to config,
+    the repo, the tenant record, or logs. The name ends in ``_API_KEY`` so the
+    GitHub Action output sanitizer redacts it by pattern. Raises for an invalid
+    tenant id (callers on the runtime path use :func:`tenant_provider_api_key`,
+    which is fail-soft)."""
+    from .paths import _tenant_namespace_key
+    from .providers import _canonical
+
+    namespace_key = _tenant_namespace_key(tenant_id)
+    digest = hashlib.sha256(namespace_key.encode("utf-8")).hexdigest()[:16]
+    return f"MAVERICK_TENANT_{digest}_{_canonical(provider).upper()}_API_KEY"
+
+
+def tenant_provider_api_key(provider: str) -> str | None:
+    """The ACTIVE tenant's own provider key, or ``None`` to defer to the global
+    key.
+
+    Returns a key only when ALL hold: the deployment enabled per-tenant keys
+    (:func:`providers_per_tenant_keys`), a tenant is active, that tenant's record
+    opted in (``byok``), and the tenant secret is present. Otherwise ``None`` --
+    and the caller falls back to the deployment-global key, byte-for-byte the
+    historical path.
+
+    Fail-safe: any resolution problem (unknown tenant, unreadable registry,
+    invalid id) returns ``None`` and never raises, so a BYOK misconfiguration
+    can never take an agent offline -- it degrades to the global key."""
+    if not provider:
+        return None
+    try:
+        if not providers_per_tenant_keys():
+            return None
+        from .paths import current_tenant_id
+
+        tenant_id = current_tenant_id()
+        if not tenant_id:
+            return None
+        from .tenant import registry
+
+        record = registry.get_tenant(tenant_id)
+        if record is None or not getattr(record, "byok", False):
+            return None
+        from .secret_provider import get_secret
+
+        key = get_secret(tenant_provider_key_env(tenant_id, provider))
+    except Exception:  # pragma: no cover -- BYOK must never break the call path
+        return None
+    if isinstance(key, str) and key.strip():
+        return key.strip()
+    return None
 
 
 def azure_provider_configuration_missing(

@@ -692,6 +692,21 @@ def pick_providers() -> list[str]:
     return [p.split()[0] for p in picks]
 
 
+def pick_per_tenant_keys() -> bool:
+    """Offer per-tenant BYOK provider keys (multi-tenant deployments only).
+
+    Off by default -- the whole install shares the deployment-global provider
+    key. When on, an active tenant that opted in (``maverick`` sets the tenant's
+    ``byok`` flag) runs on ITS OWN key, resolved from the secret provider under a
+    tenant-scoped name; a tenant with no key configured falls back to the global
+    key. The key bytes are never stored in config."""
+    return _q_confirm(
+        "Let individual tenants bring their own provider API key (BYOK)? "
+        "Off = every tenant shares the deployment key.",
+        default=False,
+    )
+
+
 _LOCAL_FIRST_PROVIDERS = frozenset({"ollama", "tgi"})
 
 
@@ -5871,8 +5886,17 @@ def _cfg_governance(
     return ["[governance]", *values, ""]
 
 
-def _cfg_providers(providers: list[str]) -> list[str]:
+def _cfg_providers(providers: list[str], per_tenant_keys: bool = False) -> list[str]:
     lines: list[str] = []
+    if per_tenant_keys:
+        # Bring-your-own-key: let an active tenant override the deployment-global
+        # provider key with its own (resolved from the secret provider under a
+        # tenant-scoped name; never stored in config). Bare [providers] scalars
+        # MUST precede the [providers.<name>] subtables -- TOML rejects a scalar
+        # added to a table after a subtable has opened it.
+        lines.append("[providers]")
+        lines.append("per_tenant_keys = true")
+        lines.append("")
     for prov in providers:
         info = catalog.PROVIDERS.get(prov, {})
         lines.append(f"[providers.{prov}]")
@@ -7877,6 +7901,7 @@ def write_config(
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
     governance_profile: str | None = None,
+    per_tenant_keys: bool = False,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -7962,7 +7987,7 @@ def write_config(
     ]
     lines += _cfg_deployment(deployment)
     lines += _cfg_governance(governance_profile, finance)
-    lines += _cfg_providers(providers)
+    lines += _cfg_providers(providers, per_tenant_keys=per_tenant_keys)
     lines += _cfg_role_models(role_models)
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
@@ -9097,6 +9122,12 @@ def run(fast: bool = False, resume: bool = False) -> int:
     state["providers"] = providers
     _save_partial(state)
 
+    per_tenant_keys = state.get("per_tenant_keys")
+    if per_tenant_keys is None:
+        per_tenant_keys = pick_per_tenant_keys()
+        state["per_tenant_keys"] = per_tenant_keys
+        _save_partial(state)
+
     _announce()
     role_models = state.get("role_models")
     if role_models is None:
@@ -9273,6 +9304,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         # advanced-configured tenants, the most governance-sensitive ones,
         # as tier-less) or borrowing a level name the knobs may not match.
         governance_profile="custom",
+        per_tenant_keys=per_tenant_keys,
     )
     _clear_partial()
     ok = smoke_test()

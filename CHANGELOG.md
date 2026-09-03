@@ -7,6 +7,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Per-tenant BYOK provider keys** — a config-gated, default-off layer
+  (`[providers] per_tenant_keys` / `MAVERICK_PER_TENANT_KEYS`) that lets an
+  active tenant run on ITS OWN LLM/provider API key instead of the
+  deployment-global one. Opt-in is per tenant (a `byok` flag on the tenant
+  record via `tenant.registry.set_byok` — a flag only, never the key bytes); the
+  key is resolved through the existing secret provider under a tenant-scoped name
+  (`MAVERICK_TENANT_<digest>_<PROVIDER>_API_KEY`, the digest derived from the
+  tenant's collision-safe namespace key so two tenants can never alias one name;
+  `config.tenant_provider_key_env` reports the exact name). Threaded into
+  `llm._provider_api_key` where the provider client is constructed, so an agent
+  running under a tenant uses that tenant's key. **Fail-safe:** no active tenant,
+  the knob off, the tenant flag off, or a missing key all fall back to the
+  deployment-global key byte-for-byte — a BYOK misconfiguration never takes an
+  agent offline — and the key bytes never reach config, the repo, the tenant
+  record, or logs (the name ends in `_API_KEY` so the GitHub Action output
+  sanitizer redacts it). Installer wizard step + docs. BYOK only — no Bedrock
+  resale, usage metering, or markup (that waits on a separate pricing decision).
+  Distinct from per-tenant `[kms]` BYOK (envelope-encryption key custody).
 - **Stripe billing collection** — a config-gated, default-off integration
   (`maverick.billing_stripe`; `[billing.stripe] enable` / `MAVERICK_STRIPE_ENABLE`)
   that turns the metered-usage invoices from `maverick.billing` into real charges
