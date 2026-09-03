@@ -23,8 +23,13 @@ on:
       - 'scripts/verify_constraint_closure.py'
       - '.github/workflows/mcp-clients.yml'
   pull_request:
+    # The client-parity contract is the MCP wire protocol, which lives in
+    # maverick-mcp; a blanket 'packages/maverick-core/**' filter fired these
+    # foreign-toolchain jobs on essentially every Python PR. This is not a
+    # required check, so a core change that alters the exposed surface is still
+    # caught by the push:main run above (kept broad on purpose) without paying
+    # for a Node/Go toolchain on every unrelated core PR.
     paths:
-      - 'packages/maverick-core/**'
       - 'packages/maverick-mcp/**'
       - 'examples/clients/typescript/**'
       - 'examples/clients/go/**'

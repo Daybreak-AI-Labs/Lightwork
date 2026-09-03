@@ -128,8 +128,8 @@ pins that):
 | `lint-pr-title`                    | Conventional-Commit PR title (see below)                              |
 | `no-ai-attribution`                | `scripts/check_attribution.py` over the PR's commits + title/body, the merge-queue commit, and pushes to `main`: no AI co-author trailers, generator footers or assistant session links (CLAUDE.md) |
 | `test (3.10, 1/2/3)`               | the full `pytest` suite on the floor interpreter, three file-level slices, on every pull request |
-| `test (3.11, 1/2/3)`, `test (3.12, 1/2/3)` | the same slices on the rest of the supported window (`test-window` in ci.yml): on a pull request the legs start, skip every step and report success within seconds; on the merge queue's commit and on `main` they run for real. A PR still proves 3.12 through `posture` |
-| `posture (1/2/3)`                  | the full suite again under the production security posture on 3.12, three slices |
+| `test (3.11, 1/2/3)`, `test (3.12, 1/2/3)` | the same slices on the rest of the supported window (`test-window` in ci.yml): on a pull request the legs start, skip every step and report success within seconds; on the merge queue's commit and on `main` they run for real |
+| `posture (1/2/3)`                  | the full suite again under the production security posture on 3.12, three slices. Gated the same way as `test-window`: it starts, skips and reports success on a pull request, and runs for real on the merge queue's commit and on `main` -- so the whole 3.12 + secure-defaults suite is proven at merge, not on every PR push |
 | `harness-overhead`, `governance-frontier-offline` | the tracked benchmark manifests verify against the current sources (regenerate them when a control-tree source changes) |
 | `audit`                            | OSV/pip-audit/bandit/SBOM across every dependency surface             |
 | `release-cohort`, `redteam`, `eval-smoke`, `postgres`, `docker` | packaging cohort, shield red-team corpus, eval harness, Postgres backend, deploy image |

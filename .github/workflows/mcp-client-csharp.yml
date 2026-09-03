@@ -24,8 +24,13 @@ on:
       - 'scripts/verify_constraint_closure.py'
       - '.github/workflows/mcp-client-csharp.yml'
   pull_request:
+    # The client-parity contract is the MCP wire protocol, which lives in
+    # maverick-mcp; a blanket 'packages/maverick-core/**' filter fired this
+    # .NET-toolchain job on essentially every Python PR. This is not a required
+    # check, so a core change that alters the exposed surface is still caught by
+    # the push:main run above without paying for a .NET build on every unrelated
+    # core PR.
     paths:
-      - 'packages/maverick-core/**'
       - 'packages/maverick-mcp/**'
       - 'examples/clients/csharp/**'
       - 'docs/clients/csharp-quickstart.md'
