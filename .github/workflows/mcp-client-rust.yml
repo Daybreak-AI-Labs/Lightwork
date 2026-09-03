@@ -23,8 +23,13 @@ on:
       - 'rust-toolchain.toml'
       - '.github/workflows/mcp-client-rust.yml'
   pull_request:
+    # The client-parity contract is the MCP wire protocol, which lives in
+    # maverick-mcp; a blanket 'packages/maverick-core/**' filter fired this
+    # Rust-toolchain job (a full cargo build) on essentially every Python PR.
+    # This is not a required check, so a core change that alters the exposed
+    # surface is still caught by the push:main run above without paying for a
+    # cargo build on every unrelated core PR.
     paths:
-      - 'packages/maverick-core/**'
       - 'packages/maverick-mcp/**'
       - 'examples/clients/rust/**'
       - 'docs/clients/rust-quickstart.md'

@@ -20,8 +20,13 @@ on:
       - 'scripts/verify_constraint_closure.py'
       - '.github/workflows/mcp-client-java.yml'
   pull_request:
+    # The client-parity contract is the MCP wire protocol, which lives in
+    # maverick-mcp; a blanket 'packages/maverick-core/**' filter fired this
+    # JVM-toolchain job on essentially every Python PR. This is not a required
+    # check, so a core change that alters the exposed surface is still caught by
+    # the push:main run above without paying for a JDK build on every unrelated
+    # core PR.
     paths:
-      - 'packages/maverick-core/**'
       - 'packages/maverick-mcp/**'
       - 'examples/clients/java/**'
       - 'docs/clients/java-quickstart.md'

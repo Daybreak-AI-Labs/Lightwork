@@ -574,10 +574,13 @@ jobs:
           shard: ${{ matrix.shard }}
 
   test-window:
-    # The rest of the supported window. A pull request already proves the
-    # floor (`test`, above) and 3.12 (`posture` runs the whole suite there),
-    # so on pull_request these legs start, skip every step and report
-    # success within seconds. The gate is on the steps, not the job: a job
+    # The rest of the supported window. A pull request proves the floor
+    # (`test`, above) on 3.10; the rest of the window -- 3.11 and 3.12, and
+    # the 3.12 production-posture run (`posture`, gated the same way) -- moves
+    # to the merge queue and pushes to main, where a version- or posture-
+    # specific break still blocks the merge or goes red on main. So on
+    # pull_request these legs start, skip every step and report success within
+    # seconds. The gate is on the steps, not the job: a job
     # skipped by `if` never expands its matrix and reports one check named
     # with the raw template, so the required `test (3.11|3.12, n)` contexts
     # would never appear. On the merge queue's commit and on pushes to main
@@ -699,13 +702,30 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     steps:
+      # Gated off pull requests at the step level (like test-window): on a
+      # pull_request these legs start, skip every step and report success in
+      # seconds, so the required posture (1|2|3) contexts still appear; on the
+      # merge queue's commit and on pushes to main they run the whole suite for
+      # real. A pull request is already gated on the 3.10 `test` matrix and
+      # lint; the production-posture run (3.12, secure defaults) moves to the
+      # queue, which blocks the merge if it fails. A job-level `if` would
+      # collapse the matrix into one raw-named check, so the guard is on the
+      # steps, not the job -- see the note above the `test-window` job.
+      - name: Not run on pull requests
+        if: github.event_name == 'pull_request'
+        run: >-
+          echo "posture (${{ matrix.shard }}) runs on the merge queue's commit
+          and on main, not on pull requests."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'pull_request'
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: github.event_name != 'pull_request'
         with:
           python-version: "3.12.13"
       - name: Install packages
+        if: github.event_name != 'pull_request'
         run: |
           set -x
           python -m pip install --upgrade \
@@ -724,6 +744,7 @@ jobs:
           python -m pip check
           python scripts/verify_constraint_closure.py
       - name: Test and gate the production security posture
+        if: github.event_name != 'pull_request'
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"
           PYTHONFAULTHANDLER: "1"
@@ -769,7 +790,7 @@ jobs:
           python -m maverick.posture_gate --ci --report "posture-report-${{ matrix.shard }}.txt"
       - name: Upload the posture report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         with:
           name: posture-report-${{ matrix.shard }}
           path: posture-report-${{ matrix.shard }}.txt
