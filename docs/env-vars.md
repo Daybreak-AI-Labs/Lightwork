@@ -138,6 +138,21 @@ for false unless noted otherwise.
 | `GLASSES_ALLOWED_USER_IDS` | — | Allowlist for the glasses/wearable channel. |
 | `IRC_SERVER` / `IRC_PASSWORD` | config `[channels.irc]` | IRC server host / password. |
 
+### Platform billing (Stripe)
+
+Turn the metered-usage invoices (`maverick.billing`) into real charges
+(`maverick.billing_stripe`). Off by default; the `stripe` SDK is an optional
+extra (`pip install 'maverick-core[stripe]'`). Distinct from the agent-facing
+`stripe` **tool** (which uses `STRIPE_SECRET_KEY` to read a customer's account) —
+these drive the *platform's own* Stripe account to bill tenants.
+
+| Env var | Default | Description |
+| --- | --- | --- |
+| `MAVERICK_STRIPE_ENABLE` | config `[billing.stripe] enable` (off) | Master switch for platform billing collection. Even on, nothing charges until a secret key is present. |
+| `MAVERICK_STRIPE_SECRET_KEY` | — | The platform Stripe secret key (`sk_...`). Resolved through the secret provider; NEVER read from config or logged. Required to create customers/subscriptions and push usage. |
+| `MAVERICK_STRIPE_WEBHOOK_SECRET` | — | Webhook signing secret (`whsec_...`) used to verify inbound Stripe events (stdlib HMAC; no SDK needed). A verified `invoice.payment_failed` / past-due subscription downgrades the tenant to the base entitlement tier; a recovered payment restores it. |
+| `MAVERICK_STRIPE_BILL_METERED` | config `[billing.stripe] bill_metered_usage` (off) | **Pricing decision pending.** Off bills only the recurring platform-fee subscription; on also pushes the metered model-usage line items. No markup is set here — amounts come from whatever `RateCard` rated the invoice. |
+
 ### Fleet queue
 
 `[queue] backend = "arq"` selects authenticated out-of-process goal execution.

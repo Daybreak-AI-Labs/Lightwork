@@ -7,6 +7,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Stripe billing collection** — a config-gated, default-off integration
+  (`maverick.billing_stripe`; `[billing.stripe] enable` / `MAVERICK_STRIPE_ENABLE`)
+  that turns the metered-usage invoices from `maverick.billing` into real charges
+  on the platform's own Stripe account. One Stripe **customer per tenant**
+  (create-or-lookup, idempotent; the `cus_...` id is stored on the tenant record),
+  a **subscription** matching the tenant's plan (the recurring platform fee, priced
+  from `[billing.stripe.prices]`), and the metered invoice pushed as Stripe invoice
+  items behind the `bill_metered_usage` **pricing-decision flag** — off by default,
+  so only the platform fee is billed until the model-usage markup is decided (no
+  markup is hardcoded; amounts come from the `RateCard` that rated the invoice). A
+  signature-verified **webhook** (`MAVERICK_STRIPE_WEBHOOK_SECRET`, stdlib HMAC —
+  no SDK needed) maps `invoice.payment_failed` / a past-due subscription to a
+  downgrade to the base entitlement tier (via a new `billing_status` on the tenant
+  record, honored by `billing.tenant_entitled`/`feature_allowed`) and
+  `payment_succeeded` / an active subscription back to a restore — the subscribed
+  plan is never lost, so restore is exact. New operator commands `maverick billing
+  stripe-status`, `stripe-preview <tenant>` (offline dry-run) and `stripe-sync
+  <tenant>`, plus an installer wizard step. The secret key
+  (`MAVERICK_STRIPE_SECRET_KEY`) and webhook secret come from the environment via
+  the secret provider, never config or logs. The Stripe SDK is an **optional
+  extra** (`maverick-core[stripe]`), lazily imported; the module imports and the
+  gate reports "disabled" cleanly without it. (Separate from the agent-facing
+  `stripe` tool, which reads a customer's own account.)
 - **Cortex, the company brain** — one governed recall/deposit surface
   (`maverick.cortex`) over the five memories the workforce already has:
   knowledge with citations, skills, self-harness lessons, the Operating Record

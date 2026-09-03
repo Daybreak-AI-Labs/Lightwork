@@ -64,6 +64,17 @@ ACTIVE = "active"
 SUSPENDED = "suspended"
 _STATUSES = frozenset({ACTIVE, SUSPENDED})
 
+# Billing (payment) status, distinct from the lifecycle ``status`` above: this
+# tracks whether the tenant's Stripe subscription/invoices are being paid. It is
+# flipped by :mod:`maverick.billing_stripe`'s webhook handler and consulted by
+# :func:`maverick.billing.tenant_entitled` -- a ``past_due`` tenant is served the
+# base ("free") entitlement tier without losing its subscribed ``plan`` (so a
+# ``payment_succeeded`` webhook can restore it). ``current`` is the default and
+# the state of every tenant provisioned before Stripe billing exists.
+BILLING_CURRENT = "current"
+BILLING_PAST_DUE = "past_due"
+_BILLING_STATUSES = frozenset({BILLING_CURRENT, BILLING_PAST_DUE})
+
 # A newly provisioned tenant must start with a real spend boundary.  ``0``
 # remains the explicit representation of unlimited for backwards compatibility,
 # but callers now have to choose it rather than receiving it by omission.
@@ -109,14 +120,28 @@ class TenantRecord:
     max_daily_dollars: float = 0.0
     created_at: float = 0.0
     updated_at: float = 0.0
+    # Stripe customer id for platform billing (maverick.billing_stripe), stored
+    # once created so the customer is looked up, not re-created. Empty = the
+    # tenant has never been synced to Stripe. Not a secret (a ``cus_...`` handle).
+    stripe_customer_id: str = ""
+    # Payment state (see BILLING_CURRENT / BILLING_PAST_DUE). Never a secret.
+    billing_status: str = BILLING_CURRENT
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "id": self.id, "status": self.status, "plan": self.plan,
             "display_name": self.display_name,
             "max_daily_dollars": self.max_daily_dollars,
             "created_at": self.created_at, "updated_at": self.updated_at,
         }
+        # Only serialize the Stripe fields when they carry non-default state, so
+        # a registry written before this feature stays byte-identical and the
+        # on-disk file does not grow a column for tenants that never touch Stripe.
+        if self.stripe_customer_id:
+            out["stripe_customer_id"] = self.stripe_customer_id
+        if self.billing_status != BILLING_CURRENT:
+            out["billing_status"] = self.billing_status
+        return out
 
     @classmethod
     def from_dict(cls, d: dict) -> TenantRecord:
@@ -143,10 +168,20 @@ class TenantRecord:
         display_name = d.get("display_name", "") or ""
         if not isinstance(plan, str) or not isinstance(display_name, str):
             raise ValueError("tenant plan and display_name must be strings")
+        stripe_customer_id = d.get("stripe_customer_id", "") or ""
+        if not isinstance(stripe_customer_id, str):
+            raise ValueError("tenant stripe_customer_id must be a string")
+        billing_status = d.get("billing_status", BILLING_CURRENT) or BILLING_CURRENT
+        if not isinstance(billing_status, str):
+            raise ValueError("tenant billing_status must be a string")
+        if billing_status not in _BILLING_STATUSES:
+            raise ValueError(f"unknown tenant billing_status: {billing_status!r}")
         return cls(
             id=tenant_id, status=status, plan=plan,
             display_name=display_name, max_daily_dollars=cap,
             created_at=created, updated_at=updated,
+            stripe_customer_id=stripe_customer_id.strip(),
+            billing_status=billing_status,
         )
 
     @property
@@ -353,6 +388,50 @@ def suspend_tenant(tenant_id: str) -> TenantRecord:
 
 def resume_tenant(tenant_id: str) -> TenantRecord:
     return _mutate(tenant_id, status=ACTIVE)
+
+
+def set_stripe_customer_id(tenant_id: str, customer_id: str) -> TenantRecord:
+    """Record the tenant's Stripe customer id so it is looked up, not re-created.
+
+    Called once by :func:`maverick.billing_stripe.ensure_customer` after the
+    first create. Idempotent: writing the same id again is a harmless no-op-shaped
+    mutate (updated_at moves). A blank id is refused so we never clear a real
+    handle by accident."""
+    cid = (customer_id or "").strip()
+    if not cid:
+        raise ValueError("stripe customer id must be non-blank")
+    return _mutate(tenant_id, stripe_customer_id=cid)
+
+
+def set_billing_status(tenant_id: str, billing_status: str) -> TenantRecord:
+    """Set the tenant's payment state (BILLING_CURRENT / BILLING_PAST_DUE).
+
+    The seam the Stripe webhook handler flips: ``past_due`` on a failed payment
+    (which downgrades the tenant to base entitlements via
+    :func:`maverick.billing.tenant_entitled`) and back to ``current`` on a
+    recovered payment. The subscribed ``plan`` is never touched, so restoring is
+    exact. Refuses an unknown status rather than silently persisting garbage."""
+    status = (billing_status or "").strip()
+    if status not in _BILLING_STATUSES:
+        raise ValueError(
+            f"unknown billing_status {billing_status!r}; "
+            f"expected one of {sorted(_BILLING_STATUSES)}"
+        )
+    return _mutate(tenant_id, billing_status=status)
+
+
+def get_tenant_by_stripe_customer(customer_id: str) -> TenantRecord | None:
+    """Reverse-lookup the tenant that owns a Stripe customer id, or None.
+
+    The webhook handler receives Stripe's ``customer`` (``cus_...``) and needs to
+    find which tenant it maps to. A blank id never matches."""
+    cid = (customer_id or "").strip()
+    if not cid:
+        return None
+    for rec in _load().values():
+        if rec.stripe_customer_id == cid:
+            return rec
+    return None
 
 
 def _audit_billing_change(field: str, tenant_id: str, *, old, new) -> None:
@@ -827,10 +906,13 @@ def tenant_remaining_today(tenant_id: str | None) -> float | None:
 
 __all__ = [
     "ACTIVE", "SUSPENDED", "DEFAULT_TENANT_DAILY_DOLLARS", "TenantRecord",
+    "BILLING_CURRENT", "BILLING_PAST_DUE",
     "TenantSuspended", "UnknownTenant",
     "TenantRegistryError",
     "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
+    "set_stripe_customer_id", "set_billing_status",
+    "get_tenant_by_stripe_customer",
     "is_active", "assert_tenant_active", "tenant_spend_today",
     "tenant_over_quota", "tenant_remaining_today",
     "reserve_tenant_dollars", "reserve_tenant_budget",

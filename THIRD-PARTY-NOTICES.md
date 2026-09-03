@@ -108,6 +108,7 @@ installed version:
 | modal | Apache-2.0 |
 | zstandard | BSD-3-Clause |
 | tomli | MIT |
+| stripe | MIT |
 
 ## Build / dev / test tooling (not redistributed in runtime artifacts)
 

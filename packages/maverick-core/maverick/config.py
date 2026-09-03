@@ -1800,6 +1800,48 @@ def get_commerce() -> dict:
     return out
 
 
+def get_billing_stripe() -> dict:
+    """Return the ``[billing.stripe]`` section (platform billing collection via
+    Stripe, :mod:`maverick.billing_stripe`).
+
+    OFF by default: turning real charges on is an explicit operator decision,
+    like ``[commerce]``. Also honored via ``MAVERICK_STRIPE_ENABLE=1``. The
+    Stripe secret + webhook signing key are NEVER read from config -- they come
+    from ``MAVERICK_STRIPE_SECRET_KEY`` / ``MAVERICK_STRIPE_WEBHOOK_SECRET`` via
+    the secret provider -- so this section holds only the enable flag, the
+    metered-usage pricing flag (a pricing decision is pending; default off bills
+    the platform fee only), the currency, and the per-plan ``prices`` map of
+    Stripe recurring price ids for the platform subscription fee."""
+    billing = load_config().get("billing", {})
+    if not isinstance(billing, dict):
+        billing = {}
+    cfg = billing.get("stripe", {})
+    if not isinstance(cfg, dict):
+        cfg = {}
+    prices = cfg.get("prices", {})
+    if not isinstance(prices, dict):
+        prices = {}
+    currency = cfg.get("currency", "usd")
+    return {
+        "enable": _strict_config_bool(cfg, "enable", False),
+        # The pricing-decision flag: when off (default) only the recurring
+        # platform fee is billed; the metered model-usage line items are computed
+        # but NOT pushed to Stripe. No markup is hardcoded here -- the rate is
+        # whatever RateCard the operator supplies when generating the invoice.
+        "bill_metered_usage": _strict_config_bool(cfg, "bill_metered_usage", False),
+        "currency": (
+            currency.strip().lower()
+            if isinstance(currency, str) and currency.strip() else "usd"
+        ),
+        # plan id -> Stripe recurring price id (e.g. "pro" -> "price_...").
+        "prices": {
+            str(k): v.strip()
+            for k, v in prices.items()
+            if isinstance(v, str) and v.strip()
+        },
+    }
+
+
 def get_external_agents() -> dict:
     """Return the ``[external_agents]`` section (bring-your-own-agent gateway:
     enrollment, run ingest onto the Operating Record, pre-action screening).

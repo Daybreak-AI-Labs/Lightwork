@@ -256,9 +256,30 @@ def entitlements_for(plan: str) -> Entitlements:
     return DEFAULT_PLANS.get(plan, DEFAULT_PLANS["free"])
 
 
+# The base ("free") billing plan: the entitlement floor. ``entitlements_for``
+# falls back to it for any unknown plan, and a tenant whose Stripe subscription
+# is unpaid is served this tier (see :func:`_effective_plan`).
+BASE_PLAN = "free"
+
+
 def entitled(plan: str, feature: str) -> bool:
     """Whether ``plan`` includes ``feature``."""
     return feature in entitlements_for(plan).features
+
+
+def _effective_plan(rec) -> str:
+    """The plan whose entitlements a tenant record is actually served.
+
+    Normally the tenant's subscribed ``plan``. But when payment has lapsed --
+    ``billing_status`` is not ``current``, the state
+    :mod:`maverick.billing_stripe`'s webhook flips on ``invoice.payment_failed``
+    / a past-due subscription -- the tenant is downgraded to :data:`BASE_PLAN`
+    WITHOUT losing its subscribed plan, so a later ``payment_succeeded`` restores
+    it exactly. A record written before Stripe billing has no ``billing_status``
+    and reads as ``current``, so nothing changes for existing deployments."""
+    if getattr(rec, "billing_status", "current") != "current":
+        return BASE_PLAN
+    return rec.plan
 
 
 def known_plan_names() -> set[str]:
@@ -280,11 +301,12 @@ def known_plan_names() -> set[str]:
 
 
 def tenant_entitled(tenant_id: str, feature: str) -> bool:
-    """Whether the tenant's registered plan includes ``feature``. Unknown
-    tenants get the ``free`` entitlements."""
+    """Whether the tenant's *effective* plan includes ``feature``. Unknown
+    tenants get the ``free`` entitlements; a tenant whose Stripe subscription is
+    past-due is served the base tier (see :func:`_effective_plan`)."""
     from .tenant.registry import get_tenant
     rec = get_tenant(tenant_id)
-    return entitled(rec.plan if rec else "free", feature)
+    return entitled(_effective_plan(rec) if rec else BASE_PLAN, feature)
 
 
 def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
@@ -299,7 +321,9 @@ def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
       * no active tenant (single-tenant / self-host) -> allowed;
       * a tenant that is not in the registry (e.g. the per-user tenant id used
         by ``MAVERICK_TENANT_BY_USER`` with no roster) -> allowed;
-      * a registered tenant -> allowed iff its plan includes ``feature``.
+      * a registered tenant -> allowed iff its *effective* plan includes
+        ``feature`` (a past-due Stripe subscription downgrades the effective
+        plan to the base tier -- see :func:`_effective_plan`).
 
     Policy lookup errors propagate so a communication surface can refuse rather
     than silently restoring a feature removed by tenant policy.
@@ -311,7 +335,7 @@ def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
     rec = get_tenant(tid)
     if rec is None:
         return True
-    return entitled(rec.plan, feature)
+    return entitled(_effective_plan(rec), feature)
 
 
 def _active_tenant_id() -> str | None:
@@ -323,5 +347,5 @@ __all__ = [
     "RateCard", "LineItem", "Invoice",
     "rate_ledger", "generate_invoice", "ledger_for_tenant",
     "Entitlements", "DEFAULT_PLANS", "entitlements_for", "entitled",
-    "BillingPolicyError", "tenant_entitled", "feature_allowed",
+    "BASE_PLAN", "BillingPolicyError", "tenant_entitled", "feature_allowed",
 ]
