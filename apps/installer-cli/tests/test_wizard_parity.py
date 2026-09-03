@@ -1184,6 +1184,32 @@ def test_pick_advanced_includes_adapter_rung(monkeypatch):
     assert "adapter_rung" in pick_advanced()
 
 
+def test_pick_per_tenant_keys_defaults_off(monkeypatch):
+    _StubQ(monkeypatch)
+    from maverick_installer.wizard import pick_per_tenant_keys
+    assert pick_per_tenant_keys() is False
+
+
+def test_write_config_emits_per_tenant_keys(tmp_path: Path, monkeypatch):
+    # BYOK opt-in writes the [providers] scalar BEFORE the [providers.<name>]
+    # subtables (else TOML rejects the whole file), and the kernel reads it back.
+    parsed = _write_full_config(tmp_path, monkeypatch, per_tenant_keys=True)
+    assert parsed["providers"]["per_tenant_keys"] is True
+    # The subtable still round-trips alongside the scalar.
+    assert parsed["providers"]["anthropic"]["api_key"] == "${ANTHROPIC_API_KEY}"
+
+    from maverick import config
+    monkeypatch.setattr(config, "load_global_config", lambda *a, **k: parsed)
+    monkeypatch.delenv("MAVERICK_PER_TENANT_KEYS", raising=False)
+    assert config.providers_per_tenant_keys() is True
+
+
+def test_write_config_omits_per_tenant_keys_by_default(tmp_path: Path, monkeypatch):
+    # Off by default: no bare [providers] scalar, only the provider subtable.
+    parsed = _write_full_config(tmp_path, monkeypatch)
+    assert "per_tenant_keys" not in parsed["providers"]
+
+
 def test_write_config_emits_adapter_rung(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={"adapter_rung": True})
     assert parsed["adapter_rung"]["enable"] is True

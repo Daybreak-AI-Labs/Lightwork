@@ -858,6 +858,15 @@ def _provider_api_key(
     """Return the explicit API key override for provider-client creation."""
     if provider == "anthropic" and anthropic_api_key:
         return anthropic_api_key.strip() or None
+    # Per-tenant BYOK: the active tenant's own key wins over the deployment-
+    # global config/env key. Fail-soft and a no-op unless per-tenant keys are
+    # enabled AND a tenant opted in AND its secret is present, so the global
+    # resolution below is byte-for-byte unchanged when BYOK is off / unbound.
+    from .config import tenant_provider_api_key
+
+    tenant_key = tenant_provider_api_key(provider)
+    if tenant_key:
+        return tenant_key
     if provider_config is None:
         key = _configured_provider_api_key(provider)
     else:

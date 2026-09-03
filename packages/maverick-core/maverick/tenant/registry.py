@@ -126,6 +126,12 @@ class TenantRecord:
     stripe_customer_id: str = ""
     # Payment state (see BILLING_CURRENT / BILLING_PAST_DUE). Never a secret.
     billing_status: str = BILLING_CURRENT
+    # Bring-your-own-key opt-in: when true (and the deployment enabled
+    # [providers] per_tenant_keys), this tenant runs on its OWN provider API key,
+    # resolved from the secret provider under a tenant-scoped name -- NOT stored
+    # here. Just a flag; the key bytes never touch the registry. Off => the
+    # tenant uses the deployment-global provider key (unchanged behavior).
+    byok: bool = False
 
     def to_dict(self) -> dict:
         out = {
@@ -134,13 +140,15 @@ class TenantRecord:
             "max_daily_dollars": self.max_daily_dollars,
             "created_at": self.created_at, "updated_at": self.updated_at,
         }
-        # Only serialize the Stripe fields when they carry non-default state, so
+        # Only serialize the optional fields when they carry non-default state, so
         # a registry written before this feature stays byte-identical and the
-        # on-disk file does not grow a column for tenants that never touch Stripe.
+        # on-disk file does not grow a column for tenants that never use it.
         if self.stripe_customer_id:
             out["stripe_customer_id"] = self.stripe_customer_id
         if self.billing_status != BILLING_CURRENT:
             out["billing_status"] = self.billing_status
+        if self.byok:
+            out["byok"] = self.byok
         return out
 
     @classmethod
@@ -176,12 +184,16 @@ class TenantRecord:
             raise ValueError("tenant billing_status must be a string")
         if billing_status not in _BILLING_STATUSES:
             raise ValueError(f"unknown tenant billing_status: {billing_status!r}")
+        byok = d.get("byok", False)
+        if not isinstance(byok, bool):
+            raise ValueError("tenant byok must be a boolean")
         return cls(
             id=tenant_id, status=status, plan=plan,
             display_name=display_name, max_daily_dollars=cap,
             created_at=created, updated_at=updated,
             stripe_customer_id=stripe_customer_id.strip(),
             billing_status=billing_status,
+            byok=byok,
         )
 
     @property
@@ -418,6 +430,18 @@ def set_billing_status(tenant_id: str, billing_status: str) -> TenantRecord:
             f"expected one of {sorted(_BILLING_STATUSES)}"
         )
     return _mutate(tenant_id, billing_status=status)
+
+
+def set_byok(tenant_id: str, enabled: bool) -> TenantRecord:
+    """Opt a tenant into (or out of) bring-your-own-key provider credentials.
+
+    A pure flag: the provider key itself is set in the secret provider under the
+    name :func:`maverick.config.tenant_provider_key_env` reports, never here. On
+    ``True``, the tenant runs on its own key when the deployment enabled
+    ``[providers] per_tenant_keys`` AND that secret is present; if the flag is on
+    but no secret is configured, resolution falls back to the deployment-global
+    key (never crashes). Off restores the global-key behavior."""
+    return _mutate(tenant_id, byok=bool(enabled))
 
 
 def get_tenant_by_stripe_customer(customer_id: str) -> TenantRecord | None:
@@ -911,7 +935,7 @@ __all__ = [
     "TenantRegistryError",
     "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
-    "set_stripe_customer_id", "set_billing_status",
+    "set_stripe_customer_id", "set_billing_status", "set_byok",
     "get_tenant_by_stripe_customer",
     "is_active", "assert_tenant_active", "tenant_spend_today",
     "tenant_over_quota", "tenant_remaining_today",

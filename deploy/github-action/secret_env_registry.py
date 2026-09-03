@@ -259,6 +259,11 @@ REVIEWED_NON_SECRET_ENV_NAMES = frozenset(
         "MAVERICK_OIDC_JWKS_URI",
         "MAVERICK_OIDC_REDIRECT_URI",
         "MAVERICK_OIDC_TOKEN_ENDPOINT",
+        # Boolean policy switch for per-tenant BYOK provider keys ([providers]
+        # per_tenant_keys). Trips the "KEYS" segment heuristic but carries no
+        # credential -- the tenant key itself lives under a distinct, pattern-
+        # redacted MAVERICK_TENANT_<digest>_<PROVIDER>_API_KEY name.
+        "MAVERICK_PER_TENANT_KEYS",
         "MAVERICK_PROXY_AUTH",
         "MAVERICK_PROXY_AUTH_HEADER",
         "MAVERICK_PROXY_AUTH_STYLE",

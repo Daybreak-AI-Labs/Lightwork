@@ -31,6 +31,19 @@ type = "desktop"       # desktop | docker | vps | phone
 # "custom": the operator hand-picked every knob, no preset applies.
 profile = "essentials"   # essentials | standard | regulated | custom
 
+[providers]
+# Per-tenant BYOK (bring-your-own-key). Default OFF: the whole install shares
+# the deployment-global provider key below. When true, an active tenant that
+# opted in (its `byok` flag, e.g. via `maverick`) runs on ITS OWN provider key,
+# resolved from the secret provider under a tenant-scoped name
+# (`MAVERICK_TENANT_<digest>_<PROVIDER>_API_KEY`); a tenant with no key falls
+# back to the global key. The key bytes are NEVER stored here or on the tenant
+# record. `MAVERICK_PER_TENANT_KEYS` overrides this. (Distinct from per-tenant
+# [kms] BYOK, which is envelope-encryption key custody, not the LLM API key.)
+# NOTE: a bare [providers] scalar must appear BEFORE the [providers.<name>]
+# subtables — TOML rejects a scalar added to a table after a subtable opened it.
+per_tenant_keys = false
+
 [providers.anthropic]
 api_key = "${ANTHROPIC_API_KEY}"   # env var interpolation
 
