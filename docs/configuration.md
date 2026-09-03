@@ -508,6 +508,26 @@ max_cart_lines = 25        # distinct lines per cart
                            #   desk). ON by default — a kill switch, not a gate.
 enable = true              # set false to hide the surface. Env: MAVERICK_SHORING.
 
+[billing.stripe]           # Platform billing collection (maverick.billing_stripe):
+                           #   turn metered-usage invoices into real Stripe charges.
+enable = false             # explicit opt-in; env: MAVERICK_STRIPE_ENABLE
+bill_metered_usage = false # PRICING DECISION PENDING: false bills only the
+                           #   recurring platform fee; true also pushes the metered
+                           #   model-usage line items (no markup is set here — the
+                           #   amounts come from whatever RateCard rated the invoice).
+                           #   Env: MAVERICK_STRIPE_BILL_METERED
+currency = "usd"
+# The secret key and webhook signing secret are NEVER read from config — they
+# come from the environment (via the secret provider):
+#   MAVERICK_STRIPE_SECRET_KEY, MAVERICK_STRIPE_WEBHOOK_SECRET
+[billing.stripe.prices]    # plan id -> Stripe recurring price id (the platform fee)
+# pro = "price_..."        # a plan with no price here is billed no platform fee
+# enterprise = "price_..."
+# Operator surface: `maverick billing stripe-status`, `stripe-preview <tenant>`
+# (dry-run), `stripe-sync <tenant>`. A failed-payment webhook downgrades a tenant
+# to the base entitlement tier; a recovered payment restores it. The `stripe` SDK
+# is an OPTIONAL extra: `pip install 'maverick-core[stripe]'`.
+
 [suites]                   # disable whole suites (all on by default)
 # healthcare = false
 ```

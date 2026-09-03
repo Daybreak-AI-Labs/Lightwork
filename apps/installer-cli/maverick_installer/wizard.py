@@ -3995,6 +3995,15 @@ def pick_advanced() -> dict[str, Any]:
             "default; a deliberate no is written as an explicit opt-out.",
             default=True,
         ),
+        "stripe_billing": _q_confirm(
+            "Collect money via Stripe? Turn the metered usage invoices into REAL "
+            "charges: one Stripe customer + platform-fee subscription per tenant, "
+            "with a webhook that downgrades a tenant to the base plan on a failed "
+            "payment and restores it when paid. The secret key stays in the env "
+            "(MAVERICK_STRIPE_SECRET_KEY), never in this file; metered model-usage "
+            "billing stays OFF until you set the markup. OFF by default.",
+            default=False,
+        ),
         "external_agents": _q_confirm(
             "External-agent gateway? Govern agents built on OTHER platforms "
             "(Salesforce Agentforce, AWS Bedrock, custom runtimes): enroll "
@@ -7331,6 +7340,23 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# measured from the Operating Record, and the exception desk at /shoring.")
         lines.append("# On by default; this section only lets an operator turn the surface off.")
         lines.append("enable = true")
+    if advanced.get("stripe_billing"):
+        lines.append("")
+        lines.append("[billing.stripe]")
+        lines.append("# Platform billing collection (maverick.billing_stripe): turn the metered")
+        lines.append("# usage invoices into real Stripe charges. The secret key and webhook")
+        lines.append("# signing secret live in the ENV, never here:")
+        lines.append("#   MAVERICK_STRIPE_SECRET_KEY, MAVERICK_STRIPE_WEBHOOK_SECRET")
+        lines.append("enable = true")
+        lines.append("# Pricing decision pending: bill only the platform fee until the model-")
+        lines.append("# usage markup is set. Flip on (or MAVERICK_STRIPE_BILL_METERED=1) once decided.")
+        lines.append("bill_metered_usage = false")
+        lines.append('currency = "usd"')
+        lines.append("# Recurring price id per plan (the platform fee). Fill in from your Stripe")
+        lines.append("# dashboard; a plan with no price here is billed no platform fee.")
+        lines.append("[billing.stripe.prices]")
+        lines.append('# pro = "price_..."')
+        lines.append('# enterprise = "price_..."')
     if advanced.get("external_agents"):
         lines.append("")
         lines.append("[external_agents]")

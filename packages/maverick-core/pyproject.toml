@@ -125,6 +125,12 @@ observability   = [
     "prometheus-client>=0.20",
 ]
 sentry          = ["sentry-sdk>=2.0"]
+# Platform billing collection (maverick.billing_stripe): the OFFICIAL Stripe SDK,
+# used only when [billing.stripe] enable is on. Lazily imported inside the
+# functions that touch Stripe, so the module imports and reports "disabled"
+# cleanly without it; webhook signature verification is stdlib HMAC and needs
+# no SDK. Kept OPTIONAL (kernel rule 5) so a fresh install pulls nothing extra.
+stripe          = ["stripe>=9.0"]
 shield          = ["maverick-shield>=0.1.7"]
 installer  = ["maverick-installer>=0.1.7"]
 channels   = ["maverick-channels>=0.1.7"]

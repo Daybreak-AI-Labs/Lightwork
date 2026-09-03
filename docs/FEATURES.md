@@ -4018,6 +4018,18 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   invoice/entitlements`: rate the usage ledger (pass-through+markup or
   token-priced) into per-period invoices; plan → feature/limit entitlements
   (`tenant_entitled`).
+- **Stripe billing collection (turn invoices into charges)** —
+  `billing_stripe.py` + `maverick billing stripe-status/stripe-preview/stripe-sync`:
+  a config-gated (`[billing.stripe] enable` / `MAVERICK_STRIPE_ENABLE`), default-off
+  integration over the platform's own Stripe account. One customer + platform-fee
+  subscription per tenant (create-or-lookup, idempotent; the `cus_...` id is stored
+  on the tenant record), the metered invoice pushed as Stripe invoice items behind
+  the `bill_metered_usage` pricing-decision flag (off = platform fee only; no
+  markup hardcoded), and a signature-verified webhook (`MAVERICK_STRIPE_WEBHOOK_SECRET`,
+  stdlib HMAC) that downgrades a past-due tenant to the base entitlement tier and
+  restores it on payment. The `stripe` SDK is an optional extra
+  (`maverick-core[stripe]`), lazily imported; the module and its gate report
+  "disabled" cleanly without it. (Distinct from the agent-facing `stripe` tool.)
 - **Signed-license feature control** — `entitlements.py` + `maverick license
   issue|set|show|keygen`: sign a deployment license declaring its tier
   (basic/gold/platinum) and enabled add-on suites, resolve the installed one,

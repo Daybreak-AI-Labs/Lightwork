@@ -3384,6 +3384,121 @@ def billing_entitlements(tenant_id: str) -> None:
     click.echo(f"  max spend/day: {cap}   max concurrent goals: {goals}")
 
 
+@billing.command("stripe-status")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def billing_stripe_status(as_json: bool) -> None:
+    """Show whether Stripe platform billing is enabled and why (never charges)."""
+    import json as _json
+
+    from ..billing_stripe import status
+    st = status()
+    if as_json:
+        click.echo(_json.dumps(st.to_dict(), indent=2))
+        return
+    click.echo(f"Stripe platform billing: {'ENABLED' if st.enabled else 'disabled'}")
+    click.echo(f"  reason: {st.reason}")
+    click.echo(f"  secret key present: {st.has_secret_key}   "
+               f"webhook secret present: {st.has_webhook_secret}")
+    click.echo(f"  stripe SDK installed: {st.sdk_available}")
+    click.echo(f"  bill metered usage: {st.bill_metered_usage}"
+               f"   (pricing-decision flag; off = platform fee only)")
+    click.echo(f"  plans priced: {', '.join(st.plans_priced) or '(none)'}   "
+               f"currency: {st.currency}")
+
+
+@billing.command("stripe-preview")
+@click.argument("tenant_id")
+@click.option("--since", default=None, help="Start day (YYYY-MM-DD, inclusive).")
+@click.option("--until", default=None, help="End day (YYYY-MM-DD, inclusive).")
+@click.option("--markup-pct", type=float, default=0.0, help="Markup on provider cost.")
+@click.option("--min-charge", type=float, default=0.0, help="Minimum invoice total.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def billing_stripe_preview(tenant_id: str, since: str | None, until: str | None,
+                           markup_pct: float, min_charge: float,
+                           as_json: bool) -> None:
+    """Dry-run what a Stripe sync WOULD charge a tenant (no network calls)."""
+    import json as _json
+
+    from ..audit.events import is_valid_day
+    from ..billing import RateCard
+    from ..billing_stripe import preview_charges
+    for _label, _val in (("--since", since), ("--until", until)):
+        if _val is not None and not is_valid_day(_val):
+            click.echo(f"ERROR: {_label} must be a valid YYYY-MM-DD date (got {_val!r}).",
+                       err=True)
+            sys.exit(2)
+    card = RateCard(markup_pct=markup_pct, minimum_charge=min_charge)
+    prev = preview_charges(tenant_id, card, since=since, until=until)
+    if as_json:
+        click.echo(_json.dumps(prev, indent=2))
+        return
+    click.echo(f"Stripe charge preview for {tenant_id!r}  (plan {prev['plan']})")
+    fee = prev["platform_fee_price"] or "(no price configured for this plan)"
+    click.echo(f"  platform fee (recurring): {fee}")
+    if not prev["billing_enabled"]:
+        click.echo("  NOTE: Stripe billing is currently disabled; this is a preview only.")
+    if prev["metered_billing_enabled"]:
+        click.echo(f"  metered model usage WOULD be billed: "
+                   f"{len(prev['usage_items_that_would_bill'])} item(s), "
+                   f"${prev['metered_total']:.2f} {prev['currency'].upper()}")
+    else:
+        click.echo(f"  metered model usage: computed (${prev['metered_total']:.2f} "
+                   f"{prev['currency'].upper()}) but NOT billed "
+                   "(pricing decision pending; platform fee only)")
+
+
+@billing.command("stripe-sync")
+@click.argument("tenant_id")
+@click.option("--since", default=None, help="Usage start day (YYYY-MM-DD).")
+@click.option("--until", default=None, help="Usage end day (YYYY-MM-DD).")
+@click.option("--markup-pct", type=float, default=0.0, help="Markup on provider cost.")
+@click.option("--min-charge", type=float, default=0.0, help="Minimum invoice total.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def billing_stripe_sync(tenant_id: str, since: str | None, until: str | None,
+                        markup_pct: float, min_charge: float, as_json: bool) -> None:
+    """Sync a tenant to Stripe: ensure customer + platform-fee subscription (and
+    push metered usage only when metered billing is enabled)."""
+    import json as _json
+
+    from ..audit.events import is_valid_day
+    from ..billing import RateCard, generate_invoice
+    from ..billing_stripe import StripeError, bill_metered_usage, sync_tenant
+    from ..tenant.registry import UnknownTenant
+    for _label, _val in (("--since", since), ("--until", until)):
+        if _val is not None and not is_valid_day(_val):
+            click.echo(f"ERROR: {_label} must be a valid YYYY-MM-DD date (got {_val!r}).",
+                       err=True)
+            sys.exit(2)
+    invoice = None
+    if bill_metered_usage():
+        invoice = generate_invoice(
+            tenant_id, RateCard(markup_pct=markup_pct, minimum_charge=min_charge),
+            since=since, until=until,
+        )
+    try:
+        result = sync_tenant(tenant_id, invoice=invoice)
+    except UnknownTenant:
+        click.echo(f"ERROR: no such tenant {tenant_id!r}.", err=True)
+        sys.exit(2)
+    except StripeError as e:
+        click.echo(f"ERROR: {e}", err=True)
+        sys.exit(2)
+    if as_json:
+        click.echo(_json.dumps(result, indent=2, default=str))
+        return
+    sub = result["subscription"]
+    click.echo(f"synced tenant {tenant_id!r} to Stripe")
+    click.echo(f"  customer: {result['customer']}")
+    click.echo(f"  subscription: {sub.get('status')} (plan {sub.get('plan')}"
+               f"{', price ' + sub['price'] if sub.get('price') else ''})")
+    items = result.get("usage_items")
+    if items is not None:
+        click.echo(f"  metered usage items pushed: {len(items)}")
+    else:
+        click.echo("  metered usage: not billed (pricing decision pending; "
+                   "platform fee only)")
+
+
 @main.group()
 def diag() -> None:
     """Diagnostics: circuit breakers, rate-limit predictions, run health, cost-by-tag."""
