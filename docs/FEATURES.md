@@ -1608,7 +1608,18 @@ here.
   silently (a broken or disabled source is reported in `denied` with its
   reason); `status` reports what each source holds plus the encryption-at-
   rest and isolation posture an auditor asks about; `recall --context`
-  renders the hits as the cited prompt block an agent receives.
+  renders the hits as the cited prompt block an agent receives. The tenant
+  floor is enforced differently per store and is test-backed
+  (`test_cortex_tenant_isolation.py`): the **Operating Record** rides the world
+  model, so it is row-level-security-enforced on shared Postgres and a distinct
+  per-tenant `world.db` on SQLite; **knowledge**, **skills** and the
+  **self-harness lessons** file store scope by their `data_dir` directory (a
+  different path per tenant); the opt-in shared-Postgres learning store
+  (`[self_harness] store = "world"`) now carries a `tenant_id` on every
+  `harness_*` row and scopes every read/write to the active tenant, so a fleet
+  of hosts can still learn as one *within* a tenant without pooling learning
+  across tenants (`learning_store.py`, `test_learning_store_tenant_isolation.py`);
+  **fleet memory** answers only enrolled external agents and is roster-gated.
 - **The Operating Record** (`operating_record.py`, `maverick record
   stats|search|export|verify`) — the firm's decisions as a system of
   record: goals (with departments, outcomes, spend) + human approvals
@@ -3981,7 +3992,10 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
 - **Tenant lifecycle / provisioning** — `tenant/registry.py` + `maverick tenant
   create/list/suspend/resume/quota/delete`: a roster of tenants with status,
   plan, and per-tenant daily spend quota; `assert_tenant_active` refuses a
-  suspended tenant.
+  suspended tenant. **One-step onboarding** — `maverick tenant onboard <id>
+  --admin-email <email>` provisions the tenant and mints its first-admin
+  dashboard invite (via `maverick_dashboard.invites`), printing the single-use
+  link once.
 - **Managed customer sandbox workspaces** —
   `customer_sandbox_lifecycle.py`, `customer_sandbox_api.py` and
   `customer_sandbox_composition.py` add a deployment-global, default-off
@@ -4016,6 +4030,18 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   restores it on payment. The `stripe` SDK is an optional extra
   (`maverick-core[stripe]`), lazily imported; the module and its gate report
   "disabled" cleanly without it. (Distinct from the agent-facing `stripe` tool.)
+- **Signed-license feature control** — `entitlements.py` + `maverick license
+  issue|set|show|keygen`: sign a deployment license declaring its tier
+  (basic/gold/platinum) and enabled add-on suites, resolve the installed one,
+  or mint a publisher keypair. The signing key is a secret sourced only from
+  `MAVERICK_LICENSE_PRIVATE_KEY` (never config, never the repo, never printed);
+  paid features activate only against the configured trust anchor
+  (`[license] publisher_pubkeys`).
+- **Go-live readiness gate** — `maverick launch-check` (`health.py:
+  run_launch_check`): PASS/FAIL for each production switch — cost-cap
+  enforcement, per-user tenancy, a license trust anchor, at-rest encryption,
+  and a resolvable provider credential — each reading real config/env, exiting
+  non-zero if any is off so a deploy pipeline can gate on it.
 - **Per-tenant envelope encryption** — `tenant/kms.py` (fleet KEK rotation in
   `tenant/kms_fleet.py`): a DEK per tenant, wrapped by a KMS KEK (LocalKMS
   default; cloud KMS is a drop-in `wrap`/`unwrap`); one tenant's DEK can't open

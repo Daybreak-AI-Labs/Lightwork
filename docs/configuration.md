@@ -123,6 +123,11 @@ bot_token = "${TELEGRAM_BOT_TOKEN}"
 # internet; harmless to leave unset on a desktop install (localhost-only).
 token = "${MAVERICK_DASHBOARD_TOKEN}"
 
+# Externally-reachable base URL. Used to build links a CLI can't derive from a
+# request — the first-admin invite link printed by `maverick tenant onboard`
+# and flow-approval links. MAVERICK_PUBLIC_URL overrides.
+# public_url = "https://dashboard.example.com"
+
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
 # Finance specialists). Unset = unrestricted — scoping is opt-in per user.
@@ -137,6 +142,20 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # "Finance Team" = "operator"
 # [dashboard.group_suites]
 # "Finance Team" = ["finance", "tax"]
+
+[license]
+# Signed-license entitlement enforcement (paid tier + add-on suites). Fail-open
+# by default: the kernel runs everything unless you turn enforcement on. Set the
+# trust anchor to the publisher PUBLIC key(s) so a signed license activates paid
+# features; the matching PRIVATE key is a secret supplied only via
+# MAVERICK_LICENSE_PRIVATE_KEY (never here). Issue/inspect with
+# `maverick license issue|set|show`; `maverick license keygen` mints a keypair.
+enforce           = false                 # or MAVERICK_LICENSE_ENFORCE=1
+# publisher_pubkeys = ["<publisher public key hex>"]  # or MAVERICK_LICENSE_PUBKEYS
+# license_file      = "~/.maverick/license.json"      # where the signed license lives
+# api_url           = "https://api.example/license"   # optional connected refresh
+# api_token         = "${MAVERICK_LICENSE_API_TOKEN}"
+# refresh_interval_seconds = 60
 
 [flows]
 # The visual flow-automation engine (a deterministic graph of agent/action/
@@ -627,6 +646,24 @@ MAVERICK_MAX_CONCURRENT_GOALS=4 maverick dashboard
 
 Default is 16. Raise on a beefy machine; lower on a Raspberry Pi. (A
 separate per-principal cap also limits concurrent goals from any one caller.)
+
+## Go-live check
+
+`maverick launch-check` verifies the deliberate production switches are on and
+exits non-zero if any is off, so a deploy pipeline can gate on it. It is
+distinct from `maverick doctor` (which checks whether the install *works*). Each
+row reads real config/env:
+
+- `[quotas] enforce = true` with at least one non-zero cap (cost governance);
+- `[tenancy] by_user = true` (per-user tenant isolation);
+- a license trust anchor present (`[license] publisher_pubkeys` /
+  `MAVERICK_LICENSE_PUBKEYS`);
+- at-rest encryption on (`[encryption] at_rest` / `MAVERICK_ENCRYPT_AT_REST`);
+- a provider credential resolvable (an API key or a `[providers.<name>]` table).
+
+Onboard a tenant and mint its first admin in one step with
+`maverick tenant onboard <id> --admin-email <email> --plan <plan>`; control a
+deployment's paid features with `maverick license issue|set|show`.
 
 ## Environment variables
 
