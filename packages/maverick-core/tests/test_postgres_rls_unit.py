@@ -325,6 +325,35 @@ def test_rls_sets_fail_closed_sentinel_without_active_tenant(monkeypatch):
     ]
 
 
+def test_rls_binds_the_active_tenant_on_every_transaction(monkeypatch):
+    # The GUC the RLS policy keys on must carry the ACTIVE tenant verbatim, set
+    # transaction-locally (is_local=true), so the database enforces the boundary
+    # even on a query that carries no app-layer predicate.
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    world._rls = True
+    cur = RecordingCursor()
+
+    world._set_tenant_guc(cur)
+
+    assert cur.calls == [
+        ("SELECT set_config('maverick.tenant', %s, true)", ("acme",))
+    ]
+
+
+def test_no_guc_is_written_when_rls_is_off(monkeypatch):
+    # With RLS off the app-layer _tenant_scope predicate is the boundary and the
+    # backend must not touch the GUC (nothing to fail-close against).
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    world._rls = False
+    cur = RecordingCursor()
+
+    world._set_tenant_guc(cur)
+
+    assert cur.calls == []
+
+
 @pytest.mark.parametrize(
     "method,table",
     [
