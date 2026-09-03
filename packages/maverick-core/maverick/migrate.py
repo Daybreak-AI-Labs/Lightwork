@@ -52,7 +52,7 @@ KNOWN_SECTIONS = frozenset({
     "experience", "features", "federation", "finance", "finance_operations", "flows", "github",
     "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "intake",
     "kms", "knowledge",
-    "langchain", "latency", "limits", "local_first", "local_runtime",
+    "langchain", "latency", "license", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "mcp_sidecar", "memory",
     "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
     "paper_review",

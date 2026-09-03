@@ -905,3 +905,141 @@ def diagnose() -> int:
         return len(_FAILURES)
     click.echo(click.style("Done.", fg="bright_black") + "  Re-run any time:  maverick doctor")
     return 0
+
+
+# ---- go-live readiness (maverick launch-check) -----------------------------
+#
+# diagnose() answers "does this install WORK?"; run_launch_check() answers "are
+# the deliberate PRODUCTION switches on?". They are distinct: a box can be
+# perfectly healthy (doctor all-green) yet wide open for go-live -- no cost
+# caps, plaintext at rest, one shared world for every user, no license trust
+# anchor. Each switch reads the same config/env the runtime enforces and NEVER
+# raises: an unreadable policy is itself a FAIL, because a go-live gate that
+# errors out is worse than one that plainly says "not ready".
+
+_PASS = click.style("PASS", fg="green")
+_FAIL = click.style("FAIL", fg="red")
+
+
+def _launch_row(ok: bool, label: str, detail: str = "", fix: str = "") -> bool:
+    line = f"  [{_PASS if ok else _FAIL}] {label}"
+    if detail:
+        line += click.style(f"  ({detail})", fg="bright_black")
+    click.echo(line)
+    if not ok and fix:
+        click.echo(click.style(f"      → {fix}", fg="cyan"))
+    return ok
+
+
+def _launch_check_cost_caps() -> bool:
+    """[quotas] enforce = true with at least one non-zero cap."""
+    try:
+        from .quotas import _quota_config
+        cfg = _quota_config()
+    except Exception as e:  # noqa: BLE001 - a go-live gate never aborts
+        return _launch_row(False, "cost caps", f"quota policy unreadable: {e}",
+                           "fix [quotas] config so enforcement is resolvable")
+    dollars = float(cfg.get("max_dollars_per_day", 0) or 0)
+    tokens = float(cfg.get("max_tokens_per_day", 0) or 0)
+    if not cfg.get("enforce"):
+        return _launch_row(False, "cost caps", "[quotas] enforce is off",
+                           "set [quotas] enforce = true (or MAVERICK_QUOTA_ENFORCE=1)")
+    if dollars <= 0 and tokens <= 0:
+        return _launch_row(False, "cost caps",
+                           "enforcement on but every cap is 0 (unlimited)",
+                           "set [quotas] max_dollars_per_day and/or max_tokens_per_day")
+    return _launch_row(True, "cost caps",
+                       f"enforced (${dollars:g}/day, {int(tokens)} tok/day)")
+
+
+def _launch_check_per_user_tenancy() -> bool:
+    """Per-user tenant isolation is on (paths.tenant_by_user_enabled)."""
+    try:
+        from .paths import tenant_by_user_enabled
+        on = tenant_by_user_enabled()
+    except Exception as e:  # noqa: BLE001
+        return _launch_row(False, "per-user tenancy", f"policy unreadable: {e}",
+                           "fix [tenancy] by_user (must be a boolean)")
+    if on:
+        return _launch_row(True, "per-user tenancy",
+                           "each user isolated into their own tenant")
+    return _launch_row(False, "per-user tenancy",
+                       "[tenancy] by_user is off (one shared world for all users)",
+                       "set [tenancy] by_user = true (or MAVERICK_TENANT_BY_USER=1)")
+
+
+def _launch_check_license_trust_anchor() -> bool:
+    """A license publisher public key is configured (the trust anchor)."""
+    try:
+        from .entitlements import _trusted_pubkeys
+        keys = _trusted_pubkeys()
+    except Exception as e:  # noqa: BLE001
+        return _launch_row(False, "license trust anchor",
+                           f"trust anchor unreadable: {e}",
+                           "fix [license] publisher_pubkeys / MAVERICK_LICENSE_PUBKEYS")
+    if keys:
+        return _launch_row(True, "license trust anchor",
+                           f"{len(keys)} publisher key(s) trusted")
+    return _launch_row(False, "license trust anchor",
+                       "no publisher public key configured",
+                       "publish the license PUBLIC key: [license] publisher_pubkeys "
+                       "or MAVERICK_LICENSE_PUBKEYS")
+
+
+def _launch_check_at_rest() -> bool:
+    """Encryption at rest is on (MAVERICK_ENCRYPT_AT_REST / [encryption] at_rest)."""
+    try:
+        from .crypto_at_rest import at_rest_enabled
+        on = at_rest_enabled()
+    except Exception as e:  # noqa: BLE001
+        return _launch_row(False, "encryption at rest", f"policy unreadable: {e}",
+                           "fix [encryption] at_rest (must be a boolean)")
+    if on:
+        return _launch_row(True, "encryption at rest", "on")
+    return _launch_row(False, "encryption at rest", "disabled",
+                       "unset MAVERICK_ENCRYPT_AT_REST=0 or set [encryption] at_rest = true")
+
+
+def _launch_check_provider() -> bool:
+    """A provider API key / endpoint is resolvable (config.any_provider_configured)."""
+    try:
+        from .config import any_provider_configured
+        ok = any_provider_configured()
+    except Exception as e:  # noqa: BLE001
+        return _launch_row(False, "provider credential", f"probe failed: {e}",
+                           "set a provider key (e.g. ANTHROPIC_API_KEY)")
+    if ok:
+        return _launch_row(True, "provider credential",
+                           "a provider key/endpoint is resolvable")
+    return _launch_row(False, "provider credential",
+                       "no provider credential resolvable",
+                       "set a provider key (e.g. ANTHROPIC_API_KEY) or a "
+                       "[providers.<name>] api_key/base_url")
+
+
+#: The go-live switches, in report order. Each returns True (PASS) / False (FAIL)
+#: and prints its own row; all are self-guarding so one failure can't abort the
+#: gate.
+_LAUNCH_CHECKS = (
+    _launch_check_cost_caps,
+    _launch_check_per_user_tenancy,
+    _launch_check_license_trust_anchor,
+    _launch_check_at_rest,
+    _launch_check_provider,
+)
+
+
+def run_launch_check() -> int:
+    """Print PASS/FAIL for each go-live switch; return the number of FAILs (0 ==
+    ready). The CLI exits nonzero on any FAIL so a deploy gate can block."""
+    click.echo(click.style("Lightwork go-live check\n", bold=True))
+    failed = sum(1 for check in _LAUNCH_CHECKS if not check())
+    click.echo("")
+    if failed:
+        click.echo(click.style(
+            f"{failed} switch(es) not ready for go-live.", fg="red")
+            + "   Re-run after fixing:  maverick launch-check")
+        return failed
+    click.echo(click.style("All go-live switches are on.", fg="green")
+               + "  You're clear for go-live.")
+    return 0
