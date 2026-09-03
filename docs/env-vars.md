@@ -134,6 +134,8 @@ for false unless noted otherwise.
 | `MAVERICK_KMS_KEK` | derived from the at-rest key | The per-tenant-DEK Key Encryption Key (32 bytes, hex/base64) for `tenant/kms.py`. |
 | `MAVERICK_KMS_DEK_CACHE_TTL` | config `[kms] dek_cache_ttl` (`0` = process lifetime) | Seconds a tenant DEK stays cached before it must be re-unwrapped by the KMS. A positive TTL bounds how long a *revoked* cloud-KMS key keeps opening data (the next access re-hits the KMS and fails closed). Per-tenant **BYOK** is configured in each tenant's own `tenants/<id>/config.toml` `[kms]` section (provider/key_id/region), resolved deterministically by `get_kms(tenant_id)`. **Rolling the local KEK** across the fleet: `maverick tenant kms-rotate --old-kek-file /run/secrets/old-kek --new-kek-file /run/secrets/new-kek` (re-wrap only, idempotent/resumable, `--dry-run` to preview; omit file options to use hidden prompts). Avoid passing KEKs in command-line arguments; set `MAVERICK_KMS_KEK` to the new value live only after rotation reports 0 failed. Cloud/BYOK rotation uses `tenant.kms.rotate_kek_fleet` with per-tenant resolvers. |
 | `MAVERICK_MCP_ANALYTICS` | config `[analytics] mcp_client_language` (off) | Opt-in, consent-gated tally of MCP-client language (feeds the language-bindings gate). |
+| `MAVERICK_LICENSE_PRIVATE_KEY` | — (secret) | Publisher Ed25519 signing key hex used by `maverick license issue`/`set` to sign a deployment license. Resolved through the secret provider (env or a mounted vault/secret file); **never** read from `config.toml` and never printed. Mint one with `maverick license keygen`; publish the matching **public** key as the trust anchor (`[license] publisher_pubkeys` / `MAVERICK_LICENSE_PUBKEYS`). |
+| `MAVERICK_PUBLIC_URL` | config `[dashboard] public_url` / `[flows] public_url` | Externally-reachable dashboard base URL. `maverick tenant onboard` uses it to build the printed first-admin invite link (also used for flow-approval links). Unset → the command prints the relative `/auth/invite/<token>` path and tells you to prepend your host. |
 | `IRC_ALLOWED_ACCOUNTS` | — | Comma-separated allowlist of authenticated IRC account names that may drive the agent over the IRC channel. Requires an IRC server that provides the IRCv3 `account-tag` capability. |
 | `GLASSES_ALLOWED_USER_IDS` | — | Allowlist for the glasses/wearable channel. |
 | `IRC_SERVER` / `IRC_PASSWORD` | config `[channels.irc]` | IRC server host / password. |
@@ -177,6 +179,14 @@ logs, and repository configuration.
 Other config-only knobs: `[billing.plans]` (override plan entitlements), `[egress]` /
 `[tenancy.egress.<t>]` (per-tenant egress plane). Tenants are managed with
 `maverick tenant …`; invoices/entitlements with `maverick billing …`.
+
+**Operator lifecycle:** `maverick tenant onboard <id> --admin-email <email>`
+provisions a tenant and mints its first-admin invite in one step;
+`maverick license issue|set|show|keygen` controls the deployment's signed
+feature license (tier + add-on suites); `maverick launch-check` prints PASS/FAIL
+for each go-live switch (cost-cap enforcement, per-user tenancy, a license trust
+anchor, at-rest encryption, and a resolvable provider key) and exits non-zero if
+any is off, so a deploy pipeline can gate on it.
 
 ## LLM cost & latency
 

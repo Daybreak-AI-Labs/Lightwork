@@ -368,6 +368,8 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
             "doctor",
             "gen-stubs",
             "init",
+            "launch-check",
+            "license",
             "preflight",
             "version",
         }:
@@ -511,6 +513,159 @@ def doctor() -> None:
         # At least one ✗ check: exit nonzero so `maverick doctor && ...` and CI
         # health gates can detect a broken install (it always exited 0 before).
         sys.exit(1)
+
+
+@main.command("launch-check")
+def launch_check() -> None:
+    """Verify the platform is configured for go-live (PASS/FAIL, exits nonzero
+    on any FAIL).
+
+    Distinct from ``maverick doctor`` (which diagnoses whether the install
+    *works*): this asserts the deliberate production switches are ON --
+    cost-cap enforcement, per-user tenant isolation, a license trust anchor,
+    at-rest encryption, and a resolvable provider key. Each row reads real
+    config/env, so ``maverick launch-check`` is safe to gate a deploy on."""
+    from ..health import run_launch_check
+    if run_launch_check():
+        sys.exit(1)
+
+
+@main.group("license")
+def license_group() -> None:
+    """Issue and inspect the deployment's signed feature license.
+
+    The signed license is the offline floor that unlocks paid tiers/suites (see
+    ``maverick.entitlements``). ``issue``/``set`` sign a new license, ``show``
+    resolves the installed one, and ``keygen`` mints a publisher keypair. The
+    publisher PRIVATE key is a SECRET: supply it via MAVERICK_LICENSE_PRIVATE_KEY
+    (env or your secret manager); it is never read from config and never
+    printed by ``issue``."""
+
+
+@license_group.command("issue")
+@click.option("--customer", "--tenant", "customer", required=True,
+              help="Customer / tenant the license is issued to (the license subject).")
+@click.option("--tier", type=click.Choice(["basic", "gold", "platinum"]),
+              default="gold", show_default=True, help="Platform tier this license unlocks.")
+@click.option("--edition", default="enterprise", show_default=True,
+              help="Edition label recorded in the license.")
+@click.option("--suite", "suites", multiple=True,
+              help="Add-on suite to enable (repeatable), e.g. --suite fleet.")
+@click.option("--feature", "features", multiple=True,
+              help="Explicit à-la-carte feature grant (repeatable).")
+@click.option("--expires", default=None, help="YYYY-MM-DD (omit = perpetual).")
+@click.option("--grace-days", "grace_days", type=int, default=None,
+              help="Days a just-expired license stays live (default: kernel default).")
+@click.option("--seats", type=int, default=None, help="Optional seat count to record.")
+@click.option("--out", "out", default=None,
+              help="Where to write the signed license (default: the deployment "
+                   "license path, e.g. ~/.maverick/license.json).")
+@click.option("--stdout", "to_stdout", is_flag=True,
+              help="Print the signed license to stdout instead of writing a file.")
+def license_issue(customer: str, tier: str, edition: str, suites: tuple,
+                  features: tuple, expires: str | None, grace_days: int | None,
+                  seats: int | None, out: str | None, to_stdout: bool) -> None:
+    """Sign a license for a customer, declaring its tier + enabled add-on suites.
+
+    Re-issuing with different --suite/--feature/--tier is how you change what a
+    deployment is entitled to (``set`` is an alias). The signing key comes from
+    MAVERICK_LICENSE_PRIVATE_KEY (never config, never the repo) and is never
+    echoed."""
+    import json as _json
+
+    from ..entitlements import (
+        DEFAULT_GRACE_DAYS,
+        _default_license_path,
+        _trusted_pubkeys,
+        build_license_payload,
+        publisher_private_key,
+        sign_license,
+    )
+    key = publisher_private_key()
+    if not key:
+        click.echo(
+            "ERROR: no publisher signing key. Set MAVERICK_LICENSE_PRIVATE_KEY "
+            "(env or your secret manager) to the publisher private key hex, or "
+            "run `maverick license keygen` to mint one.", err=True)
+        sys.exit(2)
+    try:
+        payload = build_license_payload(
+            customer=customer, tier=tier, edition=edition,
+            suites=list(suites), features=list(features), seats=seats,
+            expires=expires,
+            grace_days=DEFAULT_GRACE_DAYS if grace_days is None else grace_days,
+        )
+        doc = sign_license(payload, key)
+    except ValueError as e:
+        click.echo(f"ERROR: {e}", err=True)
+        sys.exit(2)
+    except Exception as e:  # bad key hex, etc. -- never surface the key material
+        click.echo(f"ERROR: could not sign license ({type(e).__name__}); check "
+                   f"that MAVERICK_LICENSE_PRIVATE_KEY is valid Ed25519 hex.",
+                   err=True)
+        sys.exit(2)
+    text = _json.dumps(doc, indent=2) + "\n"
+    if to_stdout:
+        click.echo(text, nl=False)
+    else:
+        path = Path(out).expanduser() if out else _default_license_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        click.echo(f"wrote signed license -> {path}")
+    click.echo(f"  {customer} · tier={tier} · suites={list(suites) or '—'} · "
+               f"key_id={doc['key_id'][:16]}…")
+    # A license signed by a key the deployment doesn't trust grants nothing, so
+    # warn instead of letting the operator think paid features are now on.
+    if doc["key_id"].lower() not in _trusted_pubkeys():
+        click.echo(
+            "  NOTE: this signing key is not in the deployment trust anchor "
+            "(MAVERICK_LICENSE_PUBKEYS / [license] publisher_pubkeys); paid "
+            "features stay OFF until you publish its PUBLIC key there.", err=True)
+
+
+# `set` is an alias of `issue`: re-signing with new tier/suites is how features
+# are changed, so the two are the same operation under different verbs.
+license_group.add_command(license_issue, name="set")
+
+
+@license_group.command("show")
+@click.option("--file", "file", default=None,
+              help="License file to inspect (default: the deployment license path).")
+@click.option("--pubkey", default=None,
+              help="Comma-separated trusted pubkey hex (default: config/env trust anchor).")
+def license_show(file: str | None, pubkey: str | None) -> None:
+    """Show the resolved entitlement of the installed (or a given) license."""
+    from ..entitlements import (
+        GATED_FEATURES,
+        GRACE,
+        LICENSED,
+        load_entitlements,
+    )
+    trust = [k.strip() for k in pubkey.split(",")] if pubkey else None
+    ent = load_entitlements(file, trusted_pubkeys=trust)
+    click.echo(ent.summary())
+    click.echo(f"  paid features active: {ent.paid_active}")
+    click.echo(f"  suites: {list(ent.suites) or '—'}")
+    for feat in sorted(GATED_FEATURES):
+        click.echo(f"    {'✓' if ent.allows(feat) else '·'} {feat}")
+    if ent.status not in (LICENSED, GRACE):
+        sys.exit(1)
+
+
+@license_group.command("keygen")
+def license_keygen() -> None:
+    """Mint an Ed25519 publisher keypair, printed ONCE."""
+    from ..entitlements import new_keypair
+    priv, pub = new_keypair()
+    click.echo("Generated an Ed25519 license keypair — shown ONCE:")
+    click.echo(f"  private key (SECRET):       {priv}")
+    click.echo(f"  public key  (trust anchor): {pub}")
+    click.echo("")
+    click.echo(
+        "Store the PRIVATE key in your secret manager as "
+        "MAVERICK_LICENSE_PRIVATE_KEY (never commit it, never put it in "
+        "config.toml). Publish the PUBLIC key as the deployment trust anchor: "
+        "[license] publisher_pubkeys or MAVERICK_LICENSE_PUBKEYS.")
 
 
 @main.command()
@@ -2817,6 +2972,102 @@ def tenant_create(tenant_id: str, plan: str, display_name: str,
     # budget so each client can use its own credentials (overlays global config).
     from ..workspace import Workspace
     click.echo(f"  per-tenant config: {Workspace(rec.id).root / 'config.toml'}")
+
+
+def _dashboard_public_url() -> str:
+    """The externally-reachable dashboard base URL for a CLI-built invite link.
+
+    A browser flow reads ``request.base_url``; a CLI has no request, so it reads
+    the same operator-configured public URL the flow-approval links use --
+    ``MAVERICK_PUBLIC_URL`` env, else ``[dashboard] public_url`` /
+    ``[flows] public_url`` in config. Empty when unset (the caller then prints
+    the token path and tells the operator to prepend their host)."""
+    url = os.environ.get("MAVERICK_PUBLIC_URL", "").strip()
+    if url:
+        return url
+    try:
+        from ..config import load_config
+        cfg = load_config() or {}
+        return str((cfg.get("dashboard") or {}).get("public_url")
+                   or (cfg.get("flows") or {}).get("public_url") or "").strip()
+    except Exception:
+        return ""
+
+
+@tenant.command("onboard")
+@click.argument("tenant_id")
+@click.option("--admin-email", "admin_email", required=True,
+              help="Email to mint the first-admin dashboard invite for.")
+@click.option("--plan", default="free", help="Plan name (free/pro/enterprise/...).")
+@click.option("--name", "display_name", default="", help="Human display name.")
+@click.option(
+    "--max-daily-dollars", type=float, default=5.0, show_default=True,
+    help="Per-tenant daily spend cap (USD); explicitly pass 0 for unlimited.")
+@click.option("--role", default="admin", show_default=True,
+              help="RBAC role granted by the invite (admin/operator/auditor/viewer).")
+@click.option("--base-url", "base_url", default=None,
+              help="Dashboard base URL for the invite link "
+                   "(default: MAVERICK_PUBLIC_URL / [dashboard] public_url).")
+def tenant_onboard(tenant_id: str, admin_email: str, plan: str, display_name: str,
+                   max_daily_dollars: float, role: str, base_url: str | None) -> None:
+    """Provision a tenant AND mint its first-admin invite in one step.
+
+    Wraps ``tenant create`` + the dashboard invite flow: it creates the tenant
+    (plan, display name, spend cap) and mints a single-use, expiring invite
+    link for ``--admin-email``, printed ONCE. The tenant is created first; a
+    failure to mint the invite leaves the (already provisioned) tenant in place
+    and exits non-zero so the operator can retry ``maverick tenant onboard``.
+    """
+    from ..tenant.registry import create_tenant
+    try:
+        rec = create_tenant(tenant_id, plan=plan, display_name=display_name,
+                             max_daily_dollars=max_daily_dollars)
+    except ValueError as e:
+        click.echo(f"ERROR: {e}", err=True)
+        sys.exit(2)
+    except PermissionError as e:
+        click.echo(f"ERROR: {e}", err=True)
+        sys.exit(2)
+    click.echo(f"created tenant {rec.id!r} (plan {rec.plan}, status {rec.status})")
+    from ..billing import known_plan_names
+    if rec.plan not in known_plan_names():
+        click.echo(
+            f"  WARNING: plan {rec.plan!r} is not a known billing plan; its "
+            f"entitlements fall back to 'free' until defined in [billing.plans]",
+            err=True,
+        )
+    try:
+        from maverick_dashboard import invites
+    except Exception as e:  # pragma: no cover - dashboard extra not installed
+        click.echo(
+            f"ERROR: tenant created, but the dashboard package is unavailable so "
+            f"no invite was minted ({e}). Install maverick-dashboard, then mint "
+            f"one from the /users page or re-run `maverick tenant onboard`.",
+            err=True,
+        )
+        sys.exit(2)
+    try:
+        inv, token = invites.create_invite(admin_email, role, created_by="operator")
+    except ValueError as e:
+        click.echo(f"ERROR: tenant created, but the invite was rejected: {e}",
+                   err=True)
+        sys.exit(2)
+    base = (base_url or _dashboard_public_url()).strip().rstrip("/")
+    link = f"{base}/auth/invite/{token}" if base else f"/auth/invite/{token}"
+    click.echo(f"first-admin invite for {inv.email} (role={inv.role}) — shown ONCE:")
+    click.echo(f"  {link}")
+    if not base:
+        click.echo(
+            "  NOTE: no dashboard public URL configured; prepend your dashboard's "
+            "base URL. Set MAVERICK_PUBLIC_URL or [dashboard] public_url.",
+            err=True,
+        )
+    if not invites.invites_enabled():
+        click.echo(
+            "  NOTE: dashboard invites are disabled; the link 404s until you set "
+            "[dashboard] invites = true (or MAVERICK_DASHBOARD_INVITES=1).",
+            err=True,
+        )
 
 
 @tenant.command("list")

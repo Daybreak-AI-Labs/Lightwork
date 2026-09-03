@@ -7,6 +7,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Operator lifecycle commands** — one-command tenant onboarding, per-tenant
+  feature control, and a go-live readiness gate over the existing primitives.
+  `maverick tenant onboard <id> --admin-email <email>` provisions a tenant
+  (plan, display name, spend cap) *and* mints its first-admin dashboard invite,
+  printing the single-use link once (reuses `tenant.registry.create_tenant` +
+  `maverick_dashboard.invites`). `maverick license issue|set|show|keygen` is a
+  Click surface over `maverick.entitlements`: sign a deployment license
+  declaring its tier + add-on suites, resolve the installed one, or mint a
+  publisher keypair — the signing key is a secret sourced only from
+  `MAVERICK_LICENSE_PRIVATE_KEY` (never config, never the repo, never printed).
+  `maverick launch-check` prints PASS/FAIL for each go-live switch (cost-cap
+  enforcement, per-user tenancy, a license trust anchor, at-rest encryption, a
+  resolvable provider credential) and exits non-zero if any is off, so a deploy
+  pipeline can gate on it. Also completes the config-lint/migrate registry for
+  the wizard-written, kernel-read `[license]` section (no more false "unknown
+  section" warning when pinning the license trust anchor).
 - **Cortex, the company brain** — one governed recall/deposit surface
   (`maverick.cortex`) over the five memories the workforce already has:
   knowledge with citations, skills, self-harness lessons, the Operating Record

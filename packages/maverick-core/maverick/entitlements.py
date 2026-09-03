@@ -549,6 +549,73 @@ def stop_refresher(timeout: float = 2.0) -> None:
     _REFRESHER_STOP = _REFRESHER_THREAD = None
 
 
+# ---- license authoring helpers (shared by the CLIs) ------------------------
+
+def build_license_payload(
+    *,
+    customer: str,
+    tier: str = "gold",
+    edition: str = "enterprise",
+    suites: list[str] | tuple[str, ...] | None = None,
+    features: list[str] | tuple[str, ...] | None = None,
+    seats: int | None = None,
+    expires: str | None = None,
+    grace_days: int = DEFAULT_GRACE_DAYS,
+) -> dict:
+    """Assemble an (unsigned) license payload for :func:`sign_license`.
+
+    One place builds the license-document shape so the ``maverick license``
+    Click group and the ``python -m maverick.entitlements issue`` shell can't
+    drift. ``expires`` is a ``YYYY-MM-DD`` date (or any ISO-8601 datetime);
+    omit for a perpetual license. Raises :class:`ValueError` on an unknown tier
+    or an unparseable expiry so a fat-fingered issue fails loudly instead of
+    minting a license the deployment will later reject as malformed.
+    """
+    import secrets as _secrets
+
+    if tier not in _TIER_RANK:
+        raise ValueError(
+            f"unknown tier {tier!r}; choose one of {', '.join(sorted(_TIER_RANK))}"
+        )
+    exp: str | None = None
+    if expires:
+        try:
+            parsed = datetime.fromisoformat(str(expires))
+        except ValueError as e:
+            raise ValueError(f"invalid expiry {expires!r}: use YYYY-MM-DD") from e
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        exp = parsed.isoformat().replace("+00:00", "Z")
+    return {
+        "customer": customer,
+        "edition": edition,
+        "tier": tier,
+        "suites": [str(s).strip() for s in (suites or []) if str(s).strip()],
+        "features": [str(f).strip() for f in (features or []) if str(f).strip()],
+        "seats": seats,
+        "issued_at": _now().isoformat().replace("+00:00", "Z"),
+        "expires_at": exp,
+        "grace_days": grace_days,
+        "license_id": "lic_" + _secrets.token_hex(8),
+    }
+
+
+def publisher_private_key() -> str | None:
+    """The publisher's Ed25519 signing key hex, resolved as a SECRET.
+
+    Read via :func:`maverick.secret_provider.get_secret` from
+    ``MAVERICK_LICENSE_PRIVATE_KEY`` (the process env, or a mounted vault /
+    secret file — see :mod:`maverick.secret_provider`). Deliberately **never**
+    sourced from ``config.toml`` and never written to the repo: the signing key
+    is the one credential that can forge a platinum license, so it stays in the
+    secret plane. Returns ``None`` when unset so a CLI can print an actionable
+    error rather than a stack trace.
+    """
+    from .secret_provider import get_secret
+    key = get_secret("MAVERICK_LICENSE_PRIVATE_KEY")
+    return key.strip() if key and key.strip() else None
+
+
 # ---- CLI: python -m maverick.entitlements {keygen,issue,verify,show} -------
 # Self-contained so it needs no wiring into the main cli.py. `keygen`/`issue`
 # are Daybreak-side (keep the private key secret); `verify`/`show` run on a
@@ -556,7 +623,6 @@ def stop_refresher(timeout: float = 2.0) -> None:
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     import argparse
-    import secrets
 
     p = argparse.ArgumentParser(prog="maverick.entitlements",
                                 description="Issue/verify Lightwork license files.")
@@ -600,19 +666,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
         key = args.key
         if key.startswith("@"):
             key = Path(key[1:]).expanduser().read_text("utf-8").strip()
-        exp = None
-        if args.expires:
-            exp = datetime.fromisoformat(args.expires).replace(tzinfo=timezone.utc)\
-                .isoformat().replace("+00:00", "Z")
-        payload = {
-            "customer": args.customer, "edition": args.edition, "tier": args.tier,
-            "suites": [s.strip() for s in args.suites.split(",") if s.strip()],
-            "features": [f.strip() for f in args.features.split(",") if f.strip()],
-            "seats": args.seats,
-            "issued_at": _now().isoformat().replace("+00:00", "Z"),
-            "expires_at": exp, "grace_days": args.grace_days,
-            "license_id": "lic_" + secrets.token_hex(8),
-        }
+        payload = build_license_payload(
+            customer=args.customer, edition=args.edition, tier=args.tier,
+            suites=[s.strip() for s in args.suites.split(",") if s.strip()],
+            features=[f.strip() for f in args.features.split(",") if f.strip()],
+            seats=args.seats, expires=args.expires, grace_days=args.grace_days,
+        )
         doc = sign_license(payload, key)
         Path(args.out).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {args.out}  ({args.customer} · {args.tier})  key_id={doc['key_id'][:16]}…")

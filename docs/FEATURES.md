@@ -3981,7 +3981,10 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
 - **Tenant lifecycle / provisioning** — `tenant/registry.py` + `maverick tenant
   create/list/suspend/resume/quota/delete`: a roster of tenants with status,
   plan, and per-tenant daily spend quota; `assert_tenant_active` refuses a
-  suspended tenant.
+  suspended tenant. **One-step onboarding** — `maverick tenant onboard <id>
+  --admin-email <email>` provisions the tenant and mints its first-admin
+  dashboard invite (via `maverick_dashboard.invites`), printing the single-use
+  link once.
 - **Managed customer sandbox workspaces** —
   `customer_sandbox_lifecycle.py`, `customer_sandbox_api.py` and
   `customer_sandbox_composition.py` add a deployment-global, default-off
@@ -4004,6 +4007,18 @@ opt-in; single-tenant/self-hosted deployments are unaffected):
   invoice/entitlements`: rate the usage ledger (pass-through+markup or
   token-priced) into per-period invoices; plan → feature/limit entitlements
   (`tenant_entitled`).
+- **Signed-license feature control** — `entitlements.py` + `maverick license
+  issue|set|show|keygen`: sign a deployment license declaring its tier
+  (basic/gold/platinum) and enabled add-on suites, resolve the installed one,
+  or mint a publisher keypair. The signing key is a secret sourced only from
+  `MAVERICK_LICENSE_PRIVATE_KEY` (never config, never the repo, never printed);
+  paid features activate only against the configured trust anchor
+  (`[license] publisher_pubkeys`).
+- **Go-live readiness gate** — `maverick launch-check` (`health.py:
+  run_launch_check`): PASS/FAIL for each production switch — cost-cap
+  enforcement, per-user tenancy, a license trust anchor, at-rest encryption,
+  and a resolvable provider credential — each reading real config/env, exiting
+  non-zero if any is off so a deploy pipeline can gate on it.
 - **Per-tenant envelope encryption** — `tenant/kms.py` (fleet KEK rotation in
   `tenant/kms_fleet.py`): a DEK per tenant, wrapped by a KMS KEK (LocalKMS
   default; cloud KMS is a drop-in `wrap`/`unwrap`); one tenant's DEK can't open
