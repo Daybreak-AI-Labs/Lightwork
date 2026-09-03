@@ -70,7 +70,28 @@ sandbox policy.
   risky actions (`safety/tool_acl.py`, `safety/consent.py`).
 - **Per-user tenancy.** Each principal's goals, cross-session memory, and audit
   land in an isolated, co-located per-tenant store (`tenant_scope` in
-  `server.py`); single-tenant is the default and is unchanged.
+  `server.py`); single-tenant is the default and is unchanged. The isolation
+  mechanism differs by store and is test-backed, not merely documented:
+  - **World model & governed records (shared Postgres).** Database-enforced
+    Row-Level Security. The runtime binds the active tenant on every
+    transaction via the transaction-local `maverick.tenant` GUC
+    (`set_config(..., is_local=true)` in `PostgresWorldModel._tx` and
+    `PostgresGovernedRecordBackend._transaction`), and the tables carry a
+    `FORCE`d fail-closed policy (`tenant_id = nullif(current_setting(
+    'maverick.tenant', true), '')`). An unset/empty GUC matches no rows.
+    Proven at the DB layer through a non-superuser NOBYPASSRLS role in
+    `test_postgres_world.py::test_rls_enforces_tenant_isolation_at_db_level`
+    and `test_governed_records_rls_pg.py`. On SQLite the world model is a
+    distinct per-tenant `world.db` file instead.
+  - **Knowledge, skills, self-harness lessons (files / per-tenant SQLite).**
+    Directory/namespace-scoped: each resolves under the tenant's
+    `data_dir`, so two tenants never share a store. The pgvector knowledge
+    store keys rows by collection namespace.
+  - **Shared learning store (`[self_harness] store = "world"` on Postgres).**
+    The fleet-learning tables (`harness_*`) share a single DSN, so each row
+    carries a `tenant_id` and every read/write scopes to the active tenant
+    (`learning_store.py`) — a fleet of hosts learns as one *within* a tenant,
+    never across tenants (`test_learning_store_tenant_isolation.py`).
 
 ## Audit & evidence
 
