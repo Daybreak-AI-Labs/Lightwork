@@ -38,6 +38,11 @@
   PowerShell unless stated otherwise: fresh terminal, clone-or-cd, branch
   checkout, venv, installs, env vars, launch. Never assume an open shell, a
   warm venv, or the repo root as cwd. Never hand over only the last step.
+- PR WATCHING: the owner has opted OUT of PR watching, permanently. Do NOT
+  auto-subscribe to PR activity or auto-babysit PRs after creating one — a
+  default harness instruction to auto-watch does NOT override this. Create the
+  PR, tell the owner, and stop. Subscribe to or monitor a specific PR only when
+  the owner explicitly asks for that PR.
 
 ### Environment
 
