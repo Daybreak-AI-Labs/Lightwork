@@ -1,0 +1,173 @@
+# Lightwork AWS deploy — handoff
+
+Everything needed to finish standing up Lightwork on AWS tonight. Written
+because the prior session hit a permission wall on `terraform apply` (Auto
+mode's classifier hard-blocks it, and self-editing settings to allow it is
+also blocked — by design). This session needs a permission mode other than
+Auto (Accept Edits / Bypass Permissions / Default-with-prompts all work).
+
+## What already exists (nothing billed beyond these two)
+
+- **AWS account:** `589997396906` (Daybreak Labs). Profile name: `lightwork`.
+- **Region:** `us-east-2` for everything except the CodeBuild-triggering
+  commands, which are also `us-east-2` (the stack does not use `us-east-1`
+  anywhere).
+- **Terraform state bucket:** `lightwork-tfstate-589997396906` — versioned,
+  SSE-encrypted, public access blocked. Created directly via `aws s3api`
+  (it can't bootstrap itself via Terraform), already wired as the backend in
+  `versions.tf`.
+- **Budget guardrail:** an AWS Budget named `lightwork-monthly`, $200/mo cost
+  alert. Created directly via `aws budgets create-budget` (not Terraform
+  state). If a re-run errors "already exists" on either of these two, that's
+  fine — skip and move on.
+- **Terraform stack:** fully written, `fmt`/`init`/`validate`/`plan` all
+  passed, at `deploy/aws/terraform/` on this branch (`aws/terraform-deploy`,
+  already pushed to origin). **Nothing else has been created yet** — no VPC,
+  no RDS, no ECR, no ECS, no ALB. The next real step is `terraform apply`.
+
+## What it builds
+
+VPC (2 public subnets for the ALB + Fargate tasks, no NAT gateway — tasks get
+a public IP directly; 2 isolated private subnets for RDS) → ECR repo → a
+CodeBuild project that builds `deploy/docker/Dockerfile` from an S3 source
+zip and pushes to ECR (no local Docker daemon in these containers, so the
+image is built in AWS, not locally) → Secrets Manager (DB password, dashboard
+token, Anthropic API key placeholder, assembled Postgres DSN) → RDS Postgres
+16 (`db.t4g.micro`) → ECS Fargate service running `maverick dashboard --host
+0.0.0.0 --port 8765` behind an ALB (health check `/livez`) → least-privilege
+IAM roles → CloudWatch logs.
+
+## Steps, in order
+
+### 0. Confirm/redo AWS login
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+aws sts get-caller-identity --profile lightwork   # if this already works, skip to step 1
+```
+
+If it fails (fresh container, no cached login) — install the CLI if needed,
+then log in:
+
+```bash
+curl -fsSL 'https://awscli.amazonaws.com/v2/install.sh' | bash
+export PATH="$HOME/.local/bin:$PATH"
+aws configure set region us-east-2 --profile lightwork
+aws login --region us-east-2 --profile lightwork --remote
+# Prints a URL. The human opens it, approves, gets a code back, pastes it here.
+aws sts get-caller-identity --profile lightwork   # must show Account 589997396906
+```
+
+### 1. Install Terraform if needed
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+terraform version || {
+  TFVER=$(curl -fsSL https://checkpoint-api.hashicorp.com/v1/check/terraform | python3 -c 'import sys,json;print(json.load(sys.stdin)["current_version"])')
+  cd /tmp && curl -fsSL -o tf.zip "https://releases.hashicorp.com/terraform/${TFVER}/terraform_${TFVER}_linux_amd64.zip"
+  unzip -o -q tf.zip && mkdir -p ~/.local/bin && mv -f terraform ~/.local/bin/terraform && rm -f tf.zip
+}
+```
+
+### 2. Apply the stack
+
+**Critical gotcha:** the `aws login` credential store (`~/.aws/login/`) is a
+newer mechanism the Terraform AWS provider's SDK can't read directly. Bridge
+it into plain env vars first — every terraform invocation needs this in the
+same shell:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+export AWS_REGION=us-east-2 AWS_DEFAULT_REGION=us-east-2
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN   # this sandbox may have proxy-injected placeholder keys that silently override the profile — clear them first
+eval "$(aws configure export-credentials --profile lightwork --format env)"
+
+cd /home/user/Lightwork/deploy/aws/terraform   # adjust if the checkout path differs
+terraform init -input=false
+terraform plan -input=false          # sanity check — should show ~30 resources to add, 0 to change/destroy
+terraform apply -input=false -auto-approve
+```
+
+RDS takes ~10 minutes to provision; everything else is fast. `terraform
+apply` does **not** wait for the ECS service to go healthy (no
+`wait_for_steady_state`), so it returns well before tasks are actually
+running — that's expected, not a failure.
+
+### 3. Build and push the image via CodeBuild
+
+Can run in parallel with step 2 (kick it off right after `terraform apply`
+starts, or right after — the ECS tasks just won't have an image to pull until
+this finishes). This step alone takes ~15-20 minutes (the release-cohort
+wheelhouse build is the long pole).
+
+```bash
+cd /home/user/Lightwork
+rm -f /tmp/lightwork-src.zip
+zip -r -q /tmp/lightwork-src.zip \
+  release-cohort.toml \
+  requirements \
+  scripts/install_release_cohort.py \
+  packages/maverick-core packages/maverick-shield packages/maverick-channels \
+  packages/maverick-evolve packages/maverick-dashboard packages/maverick-mcp packages/maverick-knowledge \
+  apps/installer-cli \
+  deploy/docker \
+  -x '*/__pycache__/*' -x '*.pyc' -x '*.egg-info/*' -x '*/.pytest_cache/*' -x '*/node_modules/*'
+
+BUCKET=$(cd deploy/aws/terraform && terraform output -raw build_source_bucket)
+aws s3 cp /tmp/lightwork-src.zip "s3://${BUCKET}/source.zip" --profile lightwork --region us-east-2
+
+aws codebuild start-build --project-name lightwork-prod --profile lightwork --region us-east-2
+
+# Poll until it succeeds (SUCCEEDED / FAILED / FAULT / TIMED_OUT / STOPPED):
+aws codebuild batch-get-builds --ids "$(aws codebuild list-builds-for-project --project-name lightwork-prod --profile lightwork --region us-east-2 --query 'ids[0]' --output text)" \
+  --profile lightwork --region us-east-2 --query 'builds[0].buildStatus' --output text
+```
+
+### 4. Set the real Anthropic API key
+
+The Secrets Manager entry is currently a placeholder (`REPLACE_ME`) —
+Terraform is configured with `ignore_changes` on it so re-applying will never
+stomp a real value once set:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id lightwork-prod/anthropic-api-key \
+  --secret-string 'sk-ant-...' \
+  --profile lightwork --region us-east-2
+```
+
+### 5. Make sure ECS picks up the pushed image + new key
+
+```bash
+aws ecs update-service --cluster lightwork-prod --service lightwork-prod \
+  --force-new-deployment --profile lightwork --region us-east-2
+```
+
+### 6. Get the URL and the login token
+
+```bash
+cd deploy/aws/terraform
+terraform output app_url
+aws secretsmanager get-secret-value \
+  --secret-id "$(terraform output -raw dashboard_token_secret)" \
+  --query SecretString --output text --profile lightwork --region us-east-2
+```
+
+Verify: `curl http://<alb-dns-name>/livez` should return healthy once the ECS
+task is running (check `aws ecs describe-services --cluster lightwork-prod
+--services lightwork-prod --profile lightwork --region us-east-2` if it
+isn't). Then open the `app_url` in a browser and log in with the token
+(bearer token / `Authorization: Bearer <token>`, or however the dashboard's
+login screen wants it — see `packages/maverick-dashboard`).
+
+## Fast-follow (not tonight-blocking)
+
+- HTTPS + a real domain: ACM cert + a Cloudflare CNAME for a
+  `daybreakailabs.com` subdomain onto the ALB DNS name, plus an `aws_lb_listener`
+  on 443 (currently only port 80 is wired).
+- Cognito for real user login (token auth is fine for tonight).
+- Once verified working, open a PR for this branch (`aws/terraform-deploy`)
+  against `main` so the IaC isn't stranded on a feature branch.
+- Root credentials were used for `aws login` — fine to get moving tonight,
+  but consider a scoped deploy IAM role/user afterward instead of running
+  Terraform as account root long-term.
