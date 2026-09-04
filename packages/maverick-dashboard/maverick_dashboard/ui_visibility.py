@@ -650,6 +650,15 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
     },
     {
+        "path": "/third-party/vendor-onboarding",
+        "label": "AI Vendor Onboarding",
+        "group": "Third parties",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": True,
+    },
+    {
         "path": "/third-party/contracts",
         "label": "Contracts & Engagements",
         "group": "Third parties",

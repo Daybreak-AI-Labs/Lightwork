@@ -1003,6 +1003,13 @@ app.include_router(create_shoring_page_router(templates))
 app.include_router(create_evolution_ledger_page_router(templates))
 app.include_router(create_third_party_contracts_page_router(templates))
 app.include_router(create_third_party_executive_reports_page_router(templates))
+from .vendor_onboarding_api import router as vendor_onboarding_router  # noqa: E402
+from .vendor_onboarding_composition import attach_vendor_onboarding_composition  # noqa: E402
+from .vendor_onboarding_page import create_vendor_onboarding_page_router  # noqa: E402
+
+attach_vendor_onboarding_composition(app)
+app.include_router(vendor_onboarding_router, prefix="/api/v1")
+app.include_router(create_vendor_onboarding_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .cortex_api import router as cortex_router  # noqa: E402
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
@@ -9478,6 +9485,15 @@ async def governed_document_vault_client() -> FileResponse:
 
     return FileResponse(
         _STATIC_DIR / "lightwork-governed-document-vault.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-vendor-onboarding.js")
+async def vendor_onboarding_client() -> FileResponse:
+    return FileResponse(
+        _STATIC_DIR / "lightwork-vendor-onboarding.js",
         media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )

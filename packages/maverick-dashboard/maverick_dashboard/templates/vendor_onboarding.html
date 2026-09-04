@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}AI vendor onboarding - Lightwork{% endblock %}
+{% block head_extra %}
+<style nonce="{{ csp_style_nonce }}">
+  .vo-layout {display:grid; grid-template-columns:minmax(15rem,1fr) minmax(22rem,3fr); gap:1.5rem}
+  .vo-card {padding:1.2rem; border:1px solid var(--border); border-radius:12px; background:var(--panel); margin-bottom:1rem}
+  .vo-card label {display:block; margin-top:.7rem}
+  .vo-card input,.vo-card select,.vo-card textarea {display:block; width:100%; margin:.3rem 0 .7rem}
+  .vo-card input,.vo-card select,.vo-card textarea,.vo-card button {font:inherit; color:inherit; border:1px solid var(--border); border-radius:8px; background:var(--panel); padding:.6rem .8rem; box-sizing:border-box}
+  .vo-card textarea {min-height:5rem; resize:vertical}
+  .vo-card button {cursor:pointer; line-height:1.4}
+  .vo-card button:hover:not(:disabled),.vo-card :focus-visible {border-color:var(--accent); outline:2px solid var(--accent); outline-offset:2px}
+  .vo-card button:disabled {opacity:.45; cursor:default}
+  .vo-actions {display:flex; flex-wrap:wrap; gap:.6rem; margin-top:1rem}
+  .vo-card pre {white-space:pre-wrap; overflow-wrap:anywhere; max-height:28rem; overflow:auto}
+  .vo-question {padding:1rem 0; border-bottom:1px solid var(--border)}
+  .vo-question blockquote {margin:.5rem 0; padding:.6rem; border-left:3px solid var(--accent)}
+  .vo-question small {display:block; color:var(--muted)}
+  .vo-card details {margin-top:1rem}
+  .vo-status {display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0}
+  .vo-status span {padding:.5rem .8rem; border:1px solid var(--border); border-radius:8px}
+  #vo-message {min-height:1.5rem; padding:.6rem 0}
+  #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0}
+  @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block content %}
+<main id="vendor-onboarding" data-api-base="/api/v1/vendor-onboarding">
+  <h1>AI vendor onboarding</h1>
+  {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
+  <p>Bring in evidence, review the assessment, and approve a verified Jira task. Renewals retain the previous evidence and decisions.</p>
+  <p id="vo-message" role="status" aria-live="polite"></p>
+  <div class="vo-layout">
+    <aside>
+      <section class="vo-card" aria-labelledby="vo-list-title">
+        <h2 id="vo-list-title">Vendor requests</h2>
+        <button id="vo-refresh" type="button">Refresh requests</button>
+        <div id="vo-cases"></div>
+      </section>
+      <section class="vo-card" aria-labelledby="vo-intake-title">
+        <h2 id="vo-intake-title">New request</h2>
+        <form id="vo-intake">
+          <label for="vo-vendor">Vendor name</label><input id="vo-vendor" required maxlength="200">
+          <label for="vo-document">Google Drive file ID</label><input id="vo-document" required maxlength="256">
+          <label for="vo-project">Jira project key</label><input id="vo-project" required maxlength="32">
+          <label for="vo-purpose">Intended use</label><textarea id="vo-purpose" required maxlength="2000"></textarea>
+          <label for="vo-freshness">Evidence validity in days</label><input id="vo-freshness" type="number" value="365" min="1" max="730" required>
+          <label for="vo-renewal">Previous case ID (renewal only)</label><input id="vo-renewal" maxlength="128">
+          <button type="submit">Create request</button>
+        </form>
+        <p>Supported evidence: UTF-8 text files in Google Drive. Other file formats require a human-managed assessment.</p>
+      </section>
+    </aside>
+    <div>
+      <section class="vo-card" aria-labelledby="vo-case-title">
+        <h2 id="vo-case-title">Select a request</h2>
+        <div id="vo-status" class="vo-status"></div>
+        <div class="vo-actions">
+          <button id="vo-collect" type="button" disabled>Obtain current evidence</button>
+          <button id="vo-assess" type="button" disabled>Build assessment</button>
+          <button id="vo-renew" type="button" disabled>Start renewal request</button>
+        </div>
+        <h3>Evidence and provenance</h3><pre id="vo-evidence">No request selected.</pre>
+        <h3>Assessment, source references and gaps</h3><div id="vo-assessment"></div>
+      </section>
+      <section class="vo-card" aria-labelledby="vo-review-title">
+        <h2 id="vo-review-title">Human review</h2>
+        <p>Inspect the cited evidence above. Correct answers and add notes here before making your review decision.</p>
+        <div id="vo-corrections"></div>
+        <label for="vo-rationale">Review rationale or exception reason</label><textarea id="vo-rationale" required maxlength="4000"></textarea>
+        <div class="vo-actions">
+          <button id="vo-review-approve" type="button" disabled>Approve assessment with corrections</button>
+          <button id="vo-review-reject" type="button" disabled>Reject assessment</button>
+          <button id="vo-prepare" type="button" disabled>Prepare Jira task for approval</button>
+        </div>
+      </section>
+      <section class="vo-card" aria-labelledby="vo-action-title">
+        <h2 id="vo-action-title">External action</h2>
+        <p>Review the exact ticket payload below. Approval is bound to this version and does not permit a different action.</p>
+        <pre id="vo-operation">No action prepared.</pre>
+        <details><summary>Exact operation and approval record</summary><pre id="vo-operation-record"></pre></details>
+        <div class="vo-actions">
+          <button id="vo-approve" type="button" disabled>Approve this exact Jira task</button>
+          <button id="vo-execute" type="button" disabled>Create and verify ticket</button>
+          <button id="vo-reconcile" type="button" disabled>Reconcile uncertain result</button>
+        </div>
+      </section>
+      <section class="vo-card" aria-labelledby="vo-outcome-title">
+        <h2 id="vo-outcome-title">Customer acceptance and renewal</h2>
+        <label for="vo-acceptance-reason">Acceptance or rejection reason</label><textarea id="vo-acceptance-reason" required maxlength="4000"></textarea>
+        <div class="vo-actions">
+          <button id="vo-accept" type="button" disabled>Accept deliverable</button>
+          <button id="vo-reject" type="button" disabled>Reject deliverable</button>
+        </div>
+        <pre id="vo-outcome"></pre>
+        <button id="vo-check-renewal" type="button" disabled>Check renewal readiness</button>
+        <p id="vo-renewal-status" role="status">A promoted renewal check verifies the current evidence and ticket. Cases that need judgment remain with a human reviewer.</p>
+        <h3>Corrections and exceptions</h3><pre id="vo-history"></pre>
+      </section>
+    </div>
+  </div>
+</main>
+<script src="/static/lightwork-vendor-onboarding.js" defer></script>
+{% endblock %}
