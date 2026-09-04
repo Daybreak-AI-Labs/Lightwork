@@ -47,23 +47,24 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
     assert "most page content remains English" in text
 
 
-def test_hidden_section_heads_do_not_leak_through_flex_display():
+def test_hidden_attribute_beats_author_display_rules():
     """The tab filter sets ``hidden`` on every off-tab ``.section-head``.
 
-    ``.section-head`` is ``display: flex`` in the shared stylesheet, and an
-    author-level display beats the UA ``[hidden]`` rule, so without an
-    explicit override the eight off-tab headings render as a wall of
-    orphaned titles under the General tab (seen live: Models, Per-role
-    models, ... Page visibility by role with no panels).
+    Shared classes (``.section-head`` is ``display: flex``, ``.btn`` is
+    ``inline-flex``) beat the UA ``[hidden]`` rule, so without a reset the
+    eight off-tab headings rendered as a wall of orphaned titles under the
+    General tab, and the Ekko page showed all four hidden control buttons.
+    The shared stylesheet must therefore carry a global ``[hidden]`` reset
+    that wins over any author-level display.
     """
     import re
     from pathlib import Path
     css = (Path(__file__).resolve().parents[1] / "maverick_dashboard"
            / "static" / "lightwork.css").read_text(encoding="utf-8")
     assert re.search(r"\.section-head\s*\{[^}]*display:\s*flex", css)
-    rule = re.search(r"\.section-head\[hidden\]\s*\{([^}]*)\}", css)
-    assert rule is not None, ".section-head[hidden] override missing"
-    assert re.search(r"display:\s*none", rule.group(1))
+    rule = re.search(r"(?<![\w.#-])\[hidden\]\s*\{([^}]*)\}", css)
+    assert rule is not None, "global [hidden] reset missing from lightwork.css"
+    assert re.search(r"display:\s*none\s*!important", rule.group(1))
 
 
 def test_settings_returns_to_section_that_was_saved(monkeypatch, tmp_path):
