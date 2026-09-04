@@ -272,11 +272,25 @@ def _nav_context(request: Request) -> dict:
         can_create_goal = has_permission(request, "operate")
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         can_create_goal = False
+    # Show a logout affordance only when a browser-login session is a thing:
+    # OIDC login or SAML. Static-token / auth-off deployments have no session to
+    # end, so the button would 404 (/auth/logout self-gates on login_enabled).
+    try:
+        from maverick.oidc import login_enabled as _login_enabled
+
+        show_logout = bool(_login_enabled())
+        if not show_logout:
+            from .saml import saml_enabled
+
+            show_logout = bool(saml_enabled())
+    except Exception:  # pragma: no cover -- shell rendering stays fail-soft
+        show_logout = False
     return {
         "nav_groups": groups,
         "show_settings_link": show_settings,
         "can_create_goal": can_create_goal,
         "can_halt": can_halt,
+        "show_logout": show_logout,
     }
 
 
