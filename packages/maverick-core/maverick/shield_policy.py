@@ -29,6 +29,15 @@ log = logging.getLogger(__name__)
 def shield_required() -> bool:
     """Must the safety shield be present + screen external traffic?"""
     import os
+    try:
+        from .config import load_config
+        safety = (load_config() or {}).get("safety") or {}
+    except Exception:
+        safety = {}
+    # Strict is a policy choice, including when the optional package is absent.
+    # A separate presence flag cannot silently relax its required checks.
+    if str(safety.get("profile", "")).strip().lower() == "strict":
+        return True
     env = os.environ.get("MAVERICK_REQUIRE_SHIELD")
     if env is not None and env.strip() != "":
         return is_truthy(env)
@@ -38,11 +47,7 @@ def shield_required() -> bool:
             return True
     except Exception:  # pragma: no cover
         pass
-    try:
-        from .config import load_config
-        return coerce_bool(((load_config() or {}).get("safety") or {}).get("require_shield"))
-    except Exception:
-        return False
+    return coerce_bool(safety.get("require_shield"))
 
 
 def shield_available() -> bool:
@@ -75,6 +80,8 @@ def scan_block(text: str) -> str | None:
         verdict = Shield().scan_input(text)
     except Exception as e:  # pragma: no cover - fail toward the gate
         log.warning("shield scan failed (blocking): %s", e)
+        return "shield scan error"
+    if getattr(verdict, "scan_error", False):
         return "shield scan error"
     if not getattr(verdict, "allowed", True):
         return "; ".join(getattr(verdict, "reasons", []) or ["blocked by shield"])

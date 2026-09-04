@@ -155,33 +155,12 @@ def _count_knowledge_chunks(
     channel: str | None,
     tenant: str | None,
 ) -> int:
-    """Count knowledge chunks without the runtime's fail-soft adapter.
-
-    The normal knowledge helper intentionally degrades to zero when the
-    optional plane is unavailable so a regular agent run keeps working. That
-    is the wrong contract for a proof: when knowledge is configured, an open
-    or query failure must be distinguishable from a verified zero.
-    """
+    """Count through the same tenant-explicit, fail-closed admin boundary."""
     if not channel:
         raise RuntimeError("subject channel is unresolved")
 
-    from .config import get_knowledge
-
-    config = get_knowledge()
-    if not config.get("enable"):
-        return 0
-
-    from .knowledge_admin import open_knowledge_base, subject_key
-
-    base = open_knowledge_base(tenant=tenant)
-    if base is None:
-        raise RuntimeError("configured knowledge store is unavailable")
-    try:
-        return base.count_subject(subject_key(channel, user_id))
-    finally:
-        close = getattr(base, "close", None)
-        if callable(close):
-            close()
+    from .knowledge_admin import count_subject
+    return count_subject(channel, user_id, tenant=tenant)
 
 
 def _export_store_statuses(

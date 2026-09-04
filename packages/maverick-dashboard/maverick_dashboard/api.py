@@ -44,6 +44,7 @@ from starlette.responses import (
     StreamingResponse,
 )
 
+from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -1551,7 +1552,8 @@ async def goal_events(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    events = w.goal_events(goal_id, since_id=since, limit=max(1, min(limit, 500)))
+    since = replay_cursor(since)
+    events, has_more = event_page(w, goal_id, since, limit)
     return GoalEventsResponse(
         status=g.status,
         result=g.result,
@@ -1560,6 +1562,8 @@ async def goal_events(
             GoalEventOut(id=e.id, agent=e.agent, kind=e.kind, content=e.content, ts=e.ts)
             for e in events
         ],
+        has_more=has_more,
+        terminal=g.status in TERMINAL_RUN_STATUSES and not has_more,
     )
 
 
@@ -1572,7 +1576,7 @@ def _sse_event(e) -> str:
     return f"id: {e.id}\nevent: {kind}\ndata: {data}\n\n"
 
 
-_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled", "blocked", "error"})
+_TERMINAL_STATUSES = TERMINAL_RUN_STATUSES
 
 # ----- v1 SSE stream resource limits -----
 # Match the legacy dashboard stream hardening: open SSE streams hold an async
@@ -1614,6 +1618,7 @@ async def goal_events_stream(
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
 
+    since = replay_cursor(since, request.headers.get("last-event-id"))
     sem = _get_sse_semaphore()
     if sem.locked():
         raise HTTPException(
@@ -1645,6 +1650,9 @@ async def goal_events_stream(
                     if limit and sent >= limit:
                         return
                 cur = await run_in_threadpool(w.get_goal, goal_id)
+                if cur is None:
+                    yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
+                    return
                 if events:
                     idle_for = 0.0
                     poll_interval = _SSE_POLL_INTERVAL
@@ -1656,7 +1664,7 @@ async def goal_events_stream(
                     poll_interval = min(_SSE_MAX_POLL_INTERVAL, poll_interval * 1.5)
                 if cur is not None and cur.status in _TERMINAL_STATUSES:
                     if len(events) < _SSE_MAX_BATCH:
-                        yield f"event: end\ndata: {json.dumps({'status': cur.status})}\n\n"
+                        yield f"event: end\ndata: {json.dumps({'status': cur.status, 'next_id': last, 'terminal': True})}\n\n"
                         return
                     # A full batch means more backlog may remain: keep draining
                     # (without sleeping) and end only once a read comes up short.
@@ -1667,7 +1675,8 @@ async def goal_events_stream(
         finally:
             sem.release()
 
-    return StreamingResponse(_gen(), media_type="text/event-stream")
+    return StreamingResponse(_gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/goals/{goal_id}/answer", status_code=204)

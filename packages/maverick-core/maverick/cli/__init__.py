@@ -2630,6 +2630,9 @@ def governance_lineage(goal_id: int, as_json: bool) -> None:
         click.echo(_json.dumps({"links": links, "verify": status}))
         return
     if not links:
+        click.echo(status)
+        if status.startswith(("BROKEN", "UNAVAILABLE")):
+            raise SystemExit(1)
         click.echo(f"no recorded actions for goal {goal_id} "
                    "(governed actions off? set [actions] enable).")
         return

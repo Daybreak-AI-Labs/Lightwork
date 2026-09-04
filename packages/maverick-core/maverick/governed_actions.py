@@ -376,12 +376,13 @@ def record_tool_lineage(goal_id: int | None, action: str, params: object, *,
 
 
 def load_lineage(goal_id: int, store_dir: str | Path | None = None) -> list[dict]:
-    """The persisted lineage links for one goal (oldest first)."""
+    """Best-effort display adapter; use verification for evidence decisions."""
     try:
         f = _lineage_dir(store_dir) / f"{int(goal_id)}.ndjson"
         if not f.exists():
             return []
-        return [json.loads(ln) for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        links = [json.loads(ln) for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return links if all(isinstance(link, dict) for link in links) else []
     except Exception:  # pragma: no cover
         return []
 
@@ -389,6 +390,8 @@ def load_lineage(goal_id: int, store_dir: str | Path | None = None) -> list[dict
 def _verify_links(links: list[dict]) -> str:
     expected = _GENESIS
     for i, link in enumerate(links):
+        if not isinstance(link, dict):
+            return f"BROKEN: link {i} is not an object"
         if link.get("prev_hash") != expected:
             return f"BROKEN: link {i} ({link.get('action')}) prev_hash mismatch"
         if link.get("hash") != _link_hash(link, expected):
@@ -398,6 +401,22 @@ def _verify_links(links: list[dict]) -> str:
 
 
 def verify_lineage_file(goal_id: int, store_dir: str | Path | None = None) -> str:
-    """``VALID`` or ``BROKEN`` over a goal's persisted lineage chain -- the
-    tamper-evidence for "what consequential actions did this run take?"."""
-    return _verify_links(load_lineage(goal_id, store_dir))
+    """Report ``VALID``, ``BROKEN``, ``MISSING`` or ``UNAVAILABLE`` evidence.
+
+    An existing empty file is a valid empty chain. A missing file supplies no
+    chain to verify; read/parse failures must never become an empty chain.
+    """
+    try:
+        path = _lineage_dir(store_dir) / f"{int(goal_id)}.ndjson"
+        body = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "MISSING: no persisted lineage file"
+    except UnicodeError:
+        return "BROKEN: lineage is not UTF-8 text"
+    except (OSError, ValueError, TypeError):
+        return "UNAVAILABLE: lineage file could not be read"
+    try:
+        links = [json.loads(line) for line in body.splitlines() if line.strip()]
+    except (ValueError, RecursionError):
+        return "BROKEN: malformed lineage JSON"
+    return _verify_links(links)

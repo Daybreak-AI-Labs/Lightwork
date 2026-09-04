@@ -329,6 +329,8 @@ class GoalEventsResponse(BaseModel):
     result: str | None
     next_id: int
     events: list[GoalEventOut]
+    has_more: bool = False
+    terminal: bool = False
 
 
 class FactIn(BaseModel):

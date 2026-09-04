@@ -6971,16 +6971,14 @@ async def run_events_firehose(
 
     from fastapi import WebSocketDisconnect
 
+    from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
     from .auth import websocket_authorized
 
     if not websocket_authorized(websocket, principal):
         await websocket.close(code=4401)
         return
     await websocket.accept()
-    try:
-        since = int(websocket.query_params.get("since_id", 0))
-    except (TypeError, ValueError):
-        since = 0
+    since = replay_cursor(websocket.query_params.get("since_id", 0))
     w = _world()
     g = await run_in_threadpool(w.get_goal, goal_id)
     if g is None:
@@ -7002,12 +7000,12 @@ async def run_events_firehose(
     await sem.acquire()
     MAX_STREAM_SECONDS = 300
     started = _asyncio.get_running_loop().time()
-    terminal = {"done", "completed", "failed", "error", "cancelled"}
     try:
         last = since
         while True:
             # Offload the blocking, lock-held SQLite reads off the event loop.
-            for e in await run_in_threadpool(w.goal_events, goal_id, since_id=last, limit=500):
+            events = await run_in_threadpool(w.goal_events, goal_id, since_id=last, limit=500)
+            for e in events:
                 last = e.id
                 await websocket.send_json(
                     {
@@ -7019,10 +7017,12 @@ async def run_events_firehose(
                     }
                 )
             g = await run_in_threadpool(w.get_goal, goal_id)
-            if g is None or g.status in terminal:
+            if g is None or (g.status in TERMINAL_RUN_STATUSES and len(events) < 500):
                 await websocket.send_json(
                     {
-                        "id": last + 1,
+                        "id": last,
+                        "next_id": last,
+                        "terminal": True,
                         "agent": "system",
                         "kind": "status",
                         "content": (g.status if g else "deleted"),
@@ -7033,7 +7033,9 @@ async def run_events_firehose(
             if (_asyncio.get_running_loop().time() - started) >= MAX_STREAM_SECONDS:
                 await websocket.send_json(
                     {
-                        "id": last + 1,
+                        "id": last,
+                        "next_id": last,
+                        "terminal": False,
                         "agent": "system",
                         "kind": "status",
                         "content": "stream lifetime exceeded; reconnect to resume",
@@ -7041,6 +7043,8 @@ async def run_events_firehose(
                     }
                 )
                 break
+            if len(events) == 500:
+                continue
             await _asyncio.sleep(0.5)
     except WebSocketDisconnect:
         return
@@ -9051,17 +9055,21 @@ async def api_goal_events_legacy(
     since: int = 0,
     limit: int = 200,
 ) -> dict:
+    from ._event_stream import TERMINAL_RUN_STATUSES, event_page, replay_cursor
+
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    limit = max(1, min(limit, 500))
-    events = w.goal_events(goal_id, since_id=since, limit=limit)
+    since = replay_cursor(since)
+    events, has_more = event_page(w, goal_id, since, limit)
     return {
         "status": g.status,
         "result": g.result or "",
         "next_id": events[-1].id if events else since,
+        "has_more": has_more,
+        "terminal": g.status in TERMINAL_RUN_STATUSES and not has_more,
         "events": [
             {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
             for e in events
@@ -9093,6 +9101,8 @@ async def api_goal_events_stream(
     import asyncio as _asyncio
     import json as _json
 
+    from ._event_stream import TERMINAL_RUN_STATUSES, replay_cursor
+
     w = _world()
     g = await run_in_threadpool(w.get_goal, goal_id)
     if g is None:
@@ -9111,7 +9121,7 @@ async def api_goal_events_stream(
         )
     await sem.acquire()
 
-    TERMINAL = ("done", "cancelled", "failed")
+    TERMINAL = TERMINAL_RUN_STATUSES
     POLL_INTERVAL = 0.5  # server-side cadence
     MAX_POLL_INTERVAL = 5.0  # cap idle backoff to reduce DB churn
     IDLE_HEARTBEAT_EVERY = 30  # send a comment line so proxies don't time out
@@ -9122,13 +9132,7 @@ async def api_goal_events_stream(
     # or our MAX_STREAM_SECONDS cap). Without resume support it would
     # restart from ``?since=`` and replay the whole log as duplicates;
     # honor Last-Event-ID so a reconnect resumes exactly where it left off.
-    resume_from = since
-    last_event_id = request.headers.get("last-event-id")
-    if last_event_id:
-        try:
-            resume_from = max(resume_from, int(last_event_id))
-        except ValueError:
-            pass
+    resume_from = replay_cursor(since, request.headers.get("last-event-id"))
 
     async def generate():
         started = _asyncio.get_running_loop().time()
@@ -9160,6 +9164,7 @@ async def api_goal_events_stream(
                         "status": g.status,
                         "result": g.result or "",
                         "next_id": sid,
+                        "terminal": False,
                         "events": [
                             {
                                 "id": e.id,

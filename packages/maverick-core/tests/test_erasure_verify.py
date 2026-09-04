@@ -140,7 +140,7 @@ def test_verify_erasure_configured_knowledge_error_is_not_zero(monkeypatch):
     monkeypatch.setattr("maverick.config.get_knowledge", lambda: {"enable": True})
     monkeypatch.setattr(
         "maverick.knowledge_admin.open_knowledge_base",
-        lambda *, tenant=None: None,
+        lambda *, tenant=None, require_existing=False: None,
     )
 
     rep = erasure_verify.verify_erasure("alice", channel="telegram")
@@ -150,7 +150,7 @@ def test_verify_erasure_configured_knowledge_error_is_not_zero(monkeypatch):
     assert rep["stores"]["knowledge_chunks"] == {
         "checked": False,
         "count": None,
-        "error": "RuntimeError: configured knowledge store is unavailable",
+        "error": "KnowledgeUnavailable: configured knowledge store is unavailable",
     }
     assert "knowledge_chunks" not in rep["counts"]
 
