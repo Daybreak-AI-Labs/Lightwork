@@ -82,7 +82,7 @@ resource "aws_secretsmanager_secret" "oidc_client_secret" {
 
 resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
   secret_id     = aws_secretsmanager_secret.oidc_client_secret.id
-  secret_string = "REPLACE_ME"
+  secret_string = "REPLACE_ME" # pragma: allowlist secret -- placeholder, not a real secret
 
   lifecycle {
     ignore_changes = [secret_string]
