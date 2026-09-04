@@ -44,7 +44,7 @@ resource "aws_secretsmanager_secret" "anthropic_api_key" {
 
 resource "aws_secretsmanager_secret_version" "anthropic_api_key" {
   secret_id     = aws_secretsmanager_secret.anthropic_api_key.id
-  secret_string = "REPLACE_ME"
+  secret_string = "REPLACE_ME" # pragma: allowlist secret -- placeholder, not a real key
 
   # The real key is rotated in out-of-band; do not let Terraform revert it.
   lifecycle {
@@ -61,5 +61,5 @@ resource "aws_secretsmanager_secret" "pg_dsn" {
 
 resource "aws_secretsmanager_secret_version" "pg_dsn" {
   secret_id     = aws_secretsmanager_secret.pg_dsn.id
-  secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}"
+  secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}" # pragma: allowlist secret -- Terraform interpolation, no literal secret
 }
