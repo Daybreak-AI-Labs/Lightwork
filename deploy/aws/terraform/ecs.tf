@@ -52,6 +52,11 @@ resource "aws_ecs_task_definition" "app" {
           # The ID-token verifier needs the JWKS endpoint explicitly (it does not
           # derive it from the issuer). Standard OIDC discovery path off the issuer.
           { name = "MAVERICK_OIDC_JWKS_URI", value = "${trimsuffix(var.oidc_issuer, "/")}/.well-known/jwks.json" },
+          # RP-initiated logout: without this the dashboard only clears its own
+          # cookie and the IdP session silently signs the user straight back in.
+          # Auth0's end-session endpoint lives at /oidc/logout on the issuer. The
+          # app origin must also be in the IdP's post-logout allow-list.
+          { name = "MAVERICK_OIDC_END_SESSION_ENDPOINT", value = "${trimsuffix(var.oidc_issuer, "/")}/oidc/logout" },
         ],
         var.dashboard_admins == "" ? [] : [
           { name = "MAVERICK_DASHBOARD_ADMINS", value = var.dashboard_admins },
