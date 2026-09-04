@@ -53,6 +53,7 @@
         <a class="btn btn-ghost" href="product.html">How it works</a>
       </div>
       <div class="hero-marks rv d3">
+        <span><b>Private alpha</b> &middot; design partners only</span>
         <span><b>Self-hosted</b>, air-gapped, or <b>hosted by us</b></span>
         <span><b>Signed,</b> hash-chained audit</span>
         <span><b>6</b> invariants, machine-checked</span>
@@ -64,11 +65,11 @@
         <div class="bar"><span class="chip">security review &middot; control map</span><span>10 controls &middot; 10 mechanisms</span></div>
         <div class="body">
           <div class="row"><span>your data stays inside your boundary</span><span class="ok">SELF-HOST / AIR-GAP / HOSTED</span></div>
-          <div class="row"><span>no data exfiltration</span><span class="ok">EGRESS LOCK</span></div>
+          <div class="row"><span>egress locked by policy</span><span class="ok">EGRESS LOCK</span></div>
           <div class="row"><span>least privilege, per action</span><span class="ok">CAPABILITY TOKENS</span></div>
           <div class="row"><span>separation of duties</span><span class="ok">DUAL CONTROL</span></div>
           <div class="row"><span>a human stays in control</span><span class="human">REQUIRE_HUMAN</span></div>
-          <div class="row"><span>a provable, immutable record</span><span class="seal">SIGNED CHAIN</span></div>
+          <div class="row"><span>a provable, tamper-evident record</span><span class="seal">SIGNED CHAIN</span></div>
           <div class="row"><span>your data trains no one's model</span><span class="ok">TENANT-EXACT</span></div>
         </div>
       </div>
@@ -89,12 +90,12 @@
       <thead><tr><th>What your reviewers require</th><th>The mechanism</th></tr></thead>
       <tbody>
         <tr><td class="ctrl">Your data stays inside your boundary</td><td class="mech"><b>Self-host or air-gap</b> in your VPC or fully offline, or run on <b>Daybreak-hosted</b> infrastructure with tenant isolation and your own keys (KMS / BYOK).</td></tr>
-        <tr><td class="ctrl">No data exfiltration</td><td class="mech"><b>Egress lock</b> (Enterprise mode): outbound traffic is allow-listed per tenant, model calls and HTTP tools alike, so a successful prompt injection still can't move data out. Pair with a network egress firewall to also cover raw-shell paths.</td></tr>
+        <tr><td class="ctrl">Egress locked by policy</td><td class="mech"><b>Egress lock</b> (Enterprise mode): outbound traffic is allow-listed per tenant, model calls and HTTP tools alike, so a successful prompt injection still can't move data out that way. Pair with a network egress firewall to also cover raw-shell paths.</td></tr>
         <tr><td class="ctrl">Least privilege, per action</td><td class="mech"><b>Capability tokens</b> (attenuate-only): an agent narrows its rights, never widens.</td></tr>
         <tr><td class="ctrl">Separation of duties</td><td class="mech"><b>Dual control</b>: the person who initiates an action can never be the one who approves it. N-of-M sign-off, enforced.</td></tr>
         <tr><td class="ctrl">Bounded blast radius</td><td class="mech"><b>Sandbox, network-off by default</b> &middot; hard budget caps on tokens, dollars, wall-clock, and tools.</td></tr>
         <tr><td class="ctrl">A human stays in control</td><td class="mech"><b>Policy on every action</b>: allow, deny, or require a human.</td></tr>
-        <tr><td class="ctrl">A provable, immutable record</td><td class="mech"><b>Signed, hash-chained audit</b> (the Operating Record): tamper-evident, verifiable offline.</td></tr>
+        <tr><td class="ctrl">A provable, tamper-evident record</td><td class="mech"><b>Signed, hash-chained audit</b> (the Operating Record): tamper-evident, verifiable offline.</td></tr>
         <tr><td class="ctrl">Evidence on demand</td><td class="mech"><b>Proof Pack</b>: an Ed25519-signed bundle that verifies offline and refuses to fabricate.</td></tr>
         <tr><td class="ctrl">Provable safety posture in CI</td><td class="mech"><b><code>lightwork safety --json</code></b>: shield, sandbox isolation, and egress policy as a machine-readable assertion your pipeline can gate on.</td></tr>
         <tr><td class="ctrl">Your data trains no one's model</td><td class="mech"><b>Tenant-exact, never pooled</b>: your <a class="btn-link" href="cortex.html">Cortex</a> and your record are encrypted with your own keys and are never read by, trained on, or aggregated with another customer's. No hivemind, no telemetry, no pooled data.</td></tr>

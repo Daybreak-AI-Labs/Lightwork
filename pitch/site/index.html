@@ -56,13 +56,17 @@
         <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
         <a class="btn btn-ghost" href="product.html">How the runtime works</a>
       </div>
+      <div class="hero-marks rv d3">
+        <span><b>Private alpha</b> &middot; design partners only</span>
+      </div>
     </div>
-    <div class="hud rv d3"><b id="hud-signed">0</b>signed entries<br><span class="ok">&#9679; chain verified</span><br><span class="deny" id="hud-denied">0 denied at the gate</span><div class="cap">Fig. 01 &middot; live schematic</div></div>
+    <div class="hud rv d3"><b id="hud-signed">0</b>signed entries<br><span class="ok">&#9679; chain verified</span><br><span class="deny" id="hud-denied">0 denied at the gate</span><div class="cap">Fig. 01 &middot; animated schematic<br>Illustrative simulation, synthetic data &mdash; not production telemetry, customer data, or measured results.</div></div>
   </div>
 </section>
 
 <div class="marks">
   <div class="wrap">
+    <span><b>Private alpha</b> &middot; design partners only</span>
     <span><b>Self-hosted</b>, air-gapped, or <b>hosted by us</b></span>
     <span><b>Five gates</b> on every action</span>
     <span><b>Signed</b>, hash-chained record</span>
@@ -81,7 +85,7 @@
     </div>
     <div class="cols cols-3">
       <div class="qcol rv"><span class="idx">Q1</span><h3>&ldquo;What did it do?&rdquo;</h3><p>No tamper-evident record of the actions an agent took.</p></div>
-      <div class="qcol rv d1"><span class="idx">Q2</span><h3>&ldquo;Could it exfiltrate our data?&rdquo;</h3><p>No egress control, a black box, or a framework you secure yourself.</p></div>
+      <div class="qcol rv d1"><span class="idx">Q2</span><h3>&ldquo;Could it exfiltrate our data?&rdquo;</h3><p>No policy-enforced egress control, a black box, or a framework you secure yourself.</p></div>
       <div class="qcol rv d2"><span class="idx">Q3</span><h3>&ldquo;Will it get worse?&rdquo;</h3><p>No proof it's improving instead of quietly drifting.</p></div>
     </div>
   </div>
@@ -137,11 +141,11 @@
   <div class="wrap">
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">04</span> Why Lightwork</span>
-      <h2>Three things <b>no one else ships.</b></h2>
+      <h2>Three things <b>Lightwork is built on.</b></h2>
     </div>
     <div class="cols cols-3">
       <div class="card rv"><span class="idx">01</span><h3>Governance on every action</h3><p>Capability tokens, a policy engine, an egress lock, and a signed, hash-chained audit log, verifiable offline. Deep infrastructure, not a prompt over an API.</p></div>
-      <div class="card rv d1"><span class="idx">02</span><h3>Provable improvement</h3><p>Every change to the workforce is proven on held-out work before it ships, watched as a canary, and reversible. Even the evaluator only improves against an immutable anchor. Every change audited.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>Provable improvement</h3><p>Every change to the workforce is proven on held-out work before it ships, watched as a canary, and reversible. Even the evaluator only improves against a checksum-locked anchor. Every change audited.</p></div>
       <div class="card rv d2"><span class="idx">03</span><h3>A workforce that arrives built</h3><p>Turnkey departments of specialist agents across finance, tax, legal, privacy, GRC, operations and more, each with a fixed job, least-privilege tools, and a human who signs off. Switch them on; don't prompt-engineer them.</p></div>
     </div>
     <p class="muted rv" style="margin-top:26px;font-size:16px">Six governance invariants (no drafting agent can reach a state-mutating tool, no child can out-scope its parent, hard refusals can't be stripped, budget caps can't be silently exceeded) are machine-checked across every specialist pack with a non-vacuous fault-injection control, property-fuzzed thousands of times per build.</p>
@@ -241,12 +245,13 @@
         <div class="body">
           <div class="c"># PROOF.md &middot; verifiable offline</div>
           <div class="row"><span>governance</span><span class="ok">&#10003; PASS</span></div>
-          <div class="row"><span>reliability</span><span class="ok">&#10003; CERT</span></div>
-          <div class="row"><span>performance</span><span class="ok">&#10003; SLA</span></div>
+          <div class="row"><span>reliability</span><span class="ok">&#10003; GATE</span></div>
+          <div class="row"><span>performance</span><span class="ok">&#10003; BENCH</span></div>
           <div class="row"><span>shield</span><span class="ok">&#10003; PASS</span></div>
         </div>
       </div>
     </div>
+    <p class="muted rv" style="margin-top:20px;font-size:14px">GATE and BENCH are our own internal release-gate results, not third-party certification, and imply no contractual SLA. Methodology: property-fuzzed governance invariants with a non-vacuity control, and held-out-work evaluation with a placebo control &mdash; detail on the <a class="btn-link" href="security.html">Security page</a>.</p>
   </div>
 </section>
 
@@ -262,10 +267,10 @@
       <thead><tr><th>What your reviewers require</th><th>The mechanism</th></tr></thead>
       <tbody>
         <tr><td class="ctrl">Your data stays inside your boundary</td><td class="mech"><b>Self-host or air-gap</b> in your VPC or fully offline, or run on <b>Daybreak-hosted</b> infrastructure with tenant isolation and your own keys (KMS / BYOK).</td></tr>
-        <tr><td class="ctrl">No data exfiltration</td><td class="mech"><b>Egress lock</b>: outbound traffic is allow-listed per tenant, so a successful prompt injection still can't move data out.</td></tr>
+        <tr><td class="ctrl">Egress locked by policy</td><td class="mech"><b>Egress lock</b> (Enterprise mode): outbound traffic is allow-listed per tenant, model calls and HTTP tools alike, so a successful prompt injection still can't move data out that way. Pair with a network egress firewall to also cover raw-shell paths.</td></tr>
         <tr><td class="ctrl">Least privilege, per action</td><td class="mech"><b>Capability tokens</b> (attenuate-only): an agent narrows its rights, never widens.</td></tr>
         <tr><td class="ctrl">Bounded blast radius</td><td class="mech"><b>Sandbox, network-off by default</b> &middot; hard budget caps on tokens, dollars, wall-clock, and tools.</td></tr>
-        <tr><td class="ctrl">A provable, immutable record</td><td class="mech"><b>Signed, hash-chained audit</b>: tamper-evident and verifiable offline.</td></tr>
+        <tr><td class="ctrl">A provable, tamper-evident record</td><td class="mech"><b>Signed, hash-chained audit</b>: tamper-evident and verifiable offline.</td></tr>
       </tbody>
     </table>
     <p class="muted rv" style="margin-top:26px;font-size:16px">Security overview and SOC&nbsp;2 status available on request. <a class="btn-link" href="security.html">See the security posture &rarr;</a></p>
@@ -301,7 +306,7 @@
     <div class="notes rv">
       <a class="note" href="product.html"><span class="kind">Benchmark</span><span><span class="ttl">Governance Frontier</span><span class="sum" style="display:block">A tracked benchmark of what the governance layer costs and what it catches, regenerated on every change to the control tree, and refused if the numbers drift from the code.</span></span><span class="go">&rarr;</span></a>
       <a class="note" href="product.html"><span class="kind">Evaluation</span><span><span class="ttl">Harness overhead</span><span class="sum" style="display:block">How much latency and spend the five gates add to an action, measured against an ungoverned control, with the artifact committed beside the code that produced it.</span></span><span class="go">&rarr;</span></a>
-      <a class="note" href="product.html"><span class="kind">Quality gate</span><span><span class="ttl">Evaluator anchors</span><span class="sum" style="display:block">The evaluator that judges the workforce only improves against immutable ground-truth anchors locked in the build, so a weak or drifting judge can't launder a regression into a lift.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="product.html"><span class="kind">Quality gate</span><span><span class="ttl">Evaluator anchors</span><span class="sum" style="display:block">The evaluator that judges the workforce only improves against checksum-locked ground-truth anchors set in the build, so a weak or drifting judge can't launder a regression into a lift.</span></span><span class="go">&rarr;</span></a>
       <a class="note" href="second-shift.html"><span class="kind">Quality gate</span><span><span class="ttl">domains-lint</span><span class="sum" style="display:block">Every specialist pack has a bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk ceiling: 0 errors, 0 warnings, on every build.</span></span><span class="go">&rarr;</span></a>
     </div>
   </div>
