@@ -68,6 +68,30 @@ variable "dashboard_admins" {
   default     = ""
 }
 
+variable "email_enabled" {
+  description = "Wire the platform mailer (SES SMTP) into the task so invite emails actually send. Requires the SMTP user/password secrets to hold real values. Off until SMTP credentials are provisioned."
+  type        = bool
+  default     = false
+}
+
+variable "email_from" {
+  description = "From address for platform emails (must be on the SES-verified domain)."
+  type        = string
+  default     = "noreply@daybreakailabs.com"
+}
+
+variable "email_smtp_host" {
+  description = "SES SMTP endpoint host."
+  type        = string
+  default     = "email-smtp.us-east-2.amazonaws.com"
+}
+
+variable "email_smtp_port" {
+  description = "SES SMTP port (465 = implicit TLS)."
+  type        = string
+  default     = "465"
+}
+
 variable "dashboard_invites" {
   description = "Enable the dashboard's invite-by-email flow (the /users 'Invite someone by email' form and /auth/invite routes). With OIDC on, accepting an invite signs the invitee in via the IdP and binds their invited role."
   type        = bool

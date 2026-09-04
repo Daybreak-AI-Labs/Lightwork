@@ -89,6 +89,38 @@ resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
   }
 }
 
+# ---- Platform mailer (SES SMTP) ----
+# SES SMTP credentials. The environment guardrail blocks programmatic IAM key
+# creation, so these are provisioned once via the SES console ("Create SMTP
+# credentials") and written out-of-band, like the Anthropic key:
+#   aws secretsmanager put-secret-value --secret-id lightwork-prod/email-smtp-user     --secret-string '<SMTP username>' ...
+#   aws secretsmanager put-secret-value --secret-id lightwork-prod/email-smtp-password --secret-string '<SMTP password>' ...
+resource "aws_secretsmanager_secret" "email_smtp_user" {
+  name                    = "${local.name}/email-smtp-user"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "email_smtp_user" {
+  secret_id     = aws_secretsmanager_secret.email_smtp_user.id
+  secret_string = "REPLACE_ME"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret" "email_smtp_password" {
+  name                    = "${local.name}/email-smtp-password"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "email_smtp_password" {
+  secret_id     = aws_secretsmanager_secret.email_smtp_password.id
+  secret_string = "REPLACE_ME"
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Full Postgres DSN, assembled from the RDS endpoint. Alphanumeric password
 # means no URL-encoding is required.
 resource "aws_secretsmanager_secret" "pg_dsn" {

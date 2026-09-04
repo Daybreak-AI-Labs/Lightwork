@@ -82,9 +82,18 @@ def send(to: str, subject: str, body: str, *, transport=None) -> None:
         if "\r" in val or "\n" in val:
             raise MailerError(f"newline in email `{field}` (header injection blocked)")
 
+    # From: an explicit EMAIL_FROM when set (required for providers like Amazon
+    # SES where the SMTP username is an access-key id, not a mailbox — the From
+    # must be a verified domain address). Falls back to the SMTP user, which is
+    # the address itself for Gmail-style accounts, so existing setups are
+    # unchanged.
+    from_addr = _cfg("from", "EMAIL_FROM") or user
+    if "\r" in from_addr or "\n" in from_addr:
+        raise MailerError("newline in email `from` (header injection blocked)")
+
     from email.message import EmailMessage
     msg = EmailMessage()
-    msg["From"] = user
+    msg["From"] = from_addr
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
