@@ -300,13 +300,62 @@ def known_plan_names() -> set[str]:
     return names
 
 
-def tenant_entitled(tenant_id: str, feature: str) -> bool:
-    """Whether the tenant's *effective* plan includes ``feature``. Unknown
-    tenants get the ``free`` entitlements; a tenant whose Stripe subscription is
-    past-due is served the base tier (see :func:`_effective_plan`)."""
+def _effective_features_for_rec(rec) -> frozenset[str]:
+    """Resolve a registry record's effective feature set: the effective plan's
+    features (past-due downgrade already applied by :func:`_effective_plan`) with
+    the per-tenant overrides layered on. Precedence: ``(plan | add) - remove`` --
+    ``remove`` is applied last so a removed feature stays removed against both
+    the plan and ``add``, and because the base is already the downgraded tier for
+    a past-due tenant, the downgrade also keeps winning for removed features."""
+    base = set(entitlements_for(_effective_plan(rec)).features)
+    overrides = getattr(rec, "feature_overrides", None) or {}
+    add = overrides.get("add") or []
+    remove = overrides.get("remove") or []
+    return frozenset((base | set(add)) - set(remove))
+
+
+def plan_features_for_tenant(tenant_id: str) -> frozenset[str]:
+    """The plan-entitlement baseline a tenant's overrides apply on top of.
+
+    Its *effective* plan's features (downgraded to the base tier when the Stripe
+    subscription is past-due) WITHOUT the per-tenant overrides -- the invariant
+    is ``effective_features == plan_features_for_tenant | add - remove``. This is
+    the correct basis for computing ``add``/``remove`` override diffs in a UI: a
+    diff taken against the *subscribed* plan instead would, for a past-due tenant,
+    silently record a ``remove`` for every downgraded feature. An unknown /
+    unprovisioned tenant gets the base-tier features."""
     from .tenant.registry import get_tenant
     rec = get_tenant(tenant_id)
-    return entitled(_effective_plan(rec) if rec else BASE_PLAN, feature)
+    if rec is None:
+        return entitlements_for(BASE_PLAN).features
+    return entitlements_for(_effective_plan(rec)).features
+
+
+def effective_features(tenant_id: str) -> frozenset[str]:
+    """The features a tenant may actually use: its plan entitlements plus
+    per-tenant overrides.
+
+    Equals ``entitlements_for(effective_plan).features`` UNION
+    ``overrides["add"]`` MINUS ``overrides["remove"]`` -- see
+    :func:`_effective_features_for_rec` for the precedence. A tenant whose Stripe
+    subscription is past-due has its base downgraded to the ``free`` tier first
+    (see :func:`_effective_plan`), then overrides apply on top. An unknown /
+    unprovisioned tenant gets the base-tier features with no overrides."""
+    from .tenant.registry import get_tenant
+    rec = get_tenant(tenant_id)
+    if rec is None:
+        return entitlements_for(BASE_PLAN).features
+    return _effective_features_for_rec(rec)
+
+
+def tenant_entitled(tenant_id: str, feature: str) -> bool:
+    """Whether the tenant's *effective* feature set includes ``feature``.
+
+    The effective set is the tenant's plan features (downgraded to the base tier
+    when the Stripe subscription is past-due) with per-tenant overrides applied
+    on top -- see :func:`effective_features`. Unknown tenants get the base-tier
+    features."""
+    return feature in effective_features(tenant_id)
 
 
 def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
@@ -321,9 +370,10 @@ def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
       * no active tenant (single-tenant / self-host) -> allowed;
       * a tenant that is not in the registry (e.g. the per-user tenant id used
         by ``MAVERICK_TENANT_BY_USER`` with no roster) -> allowed;
-      * a registered tenant -> allowed iff its *effective* plan includes
-        ``feature`` (a past-due Stripe subscription downgrades the effective
-        plan to the base tier -- see :func:`_effective_plan`).
+      * a registered tenant -> allowed iff its *effective* feature set includes
+        ``feature`` (its plan entitlements with per-tenant overrides applied,
+        and a past-due Stripe subscription downgraded to the base tier first --
+        see :func:`effective_features`).
 
     Policy lookup errors propagate so a communication surface can refuse rather
     than silently restoring a feature removed by tenant policy.
@@ -335,7 +385,7 @@ def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
     rec = get_tenant(tid)
     if rec is None:
         return True
-    return entitled(_effective_plan(rec), feature)
+    return feature in _effective_features_for_rec(rec)
 
 
 def _active_tenant_id() -> str | None:
@@ -343,9 +393,34 @@ def _active_tenant_id() -> str | None:
     return current_tenant_id()
 
 
+# Cross-cutting capability flags an operator can toggle per tenant, independent
+# of any one business suite. Departments are added on top as one
+# ``department:<key>`` entry per suite (see :func:`gateable_features`).
+_BASE_GATEABLE_FEATURES = ("core", "channels", "audit_export", "grpc")
+
+
+def gateable_features() -> list[str]:
+    """The catalog of features an operator may toggle per tenant via overrides.
+
+    The cross-cutting capability flags (:data:`_BASE_GATEABLE_FEATURES`) plus one
+    ``department:<key>`` entry per business suite, drawn from the canonical suite
+    map (:data:`maverick.domain.SUITE_PREFIXES`) so the catalog tracks the real
+    department enumeration rather than a hand-kept copy. Import-safe and offline
+    (the suite map is a static table); degrades to the base flags if the domain
+    layer is unavailable rather than raising."""
+    features = list(_BASE_GATEABLE_FEATURES)
+    try:
+        from .domain import SUITE_PREFIXES
+        features += [f"department:{k}" for k in sorted(set(SUITE_PREFIXES.values()))]
+    except Exception:  # pragma: no cover -- catalog degrades to base flags
+        pass
+    return features
+
+
 __all__ = [
     "RateCard", "LineItem", "Invoice",
     "rate_ledger", "generate_invoice", "ledger_for_tenant",
     "Entitlements", "DEFAULT_PLANS", "entitlements_for", "entitled",
     "BASE_PLAN", "BillingPolicyError", "tenant_entitled", "feature_allowed",
+    "effective_features", "plan_features_for_tenant", "gateable_features",
 ]

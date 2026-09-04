@@ -12,6 +12,12 @@ locals {
   # security group). /24 private subnets are isolated and hold only RDS.
   public_subnet_cidrs  = ["10.20.0.0/24", "10.20.1.0/24"]
   private_subnet_cidrs = ["10.20.10.0/24", "10.20.11.0/24"]
+
+  # ALB client ingress: locked to Cloudflare's edge when the domain is proxied
+  # through Cloudflare (so the public can't bypass Cloudflare Access by hitting
+  # the ALB directly), otherwise open to the internet.
+  alb_ingress_cidrs      = var.restrict_ingress_to_cloudflare ? var.cloudflare_ipv4_cidrs : ["0.0.0.0/0"]
+  alb_ingress_ipv6_cidrs = var.restrict_ingress_to_cloudflare ? var.cloudflare_ipv6_cidrs : []
 }
 
 resource "aws_vpc" "main" {
@@ -78,19 +84,21 @@ resource "aws_security_group" "alb" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description      = "HTTP"
+    from_port        = 80
+    to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = local.alb_ingress_cidrs
+    ipv6_cidr_blocks = local.alb_ingress_ipv6_cidrs
   }
 
   ingress {
-    description = "HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description      = "HTTPS"
+    from_port        = 443
+    to_port          = 443
+    protocol         = "tcp"
+    cidr_blocks      = local.alb_ingress_cidrs
+    ipv6_cidr_blocks = local.alb_ingress_ipv6_cidrs
   }
 
   egress {

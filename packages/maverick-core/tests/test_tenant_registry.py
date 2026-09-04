@@ -106,6 +106,74 @@ def test_set_quota_and_plan():
     assert tr.set_plan("acme", "enterprise").plan == "enterprise"
 
 
+# ---- per-tenant feature overrides ----
+
+def test_feature_overrides_roundtrip_and_serialization():
+    tr.create_tenant("acme", plan="pro")
+    # deduped + sorted, canonical shape.
+    rec = tr.set_feature_overrides("acme", ["channels", "channels"], ["grpc"])
+    assert rec.feature_overrides == {"add": ["channels"], "remove": ["grpc"]}
+    # survives a fresh read from disk and serializes only when non-empty.
+    reread = tr.get_tenant("acme")
+    assert reread.feature_overrides == {"add": ["channels"], "remove": ["grpc"]}
+    assert reread.to_dict()["feature_overrides"] == {
+        "add": ["channels"], "remove": ["grpc"]
+    }
+
+
+def test_feature_overrides_default_empty_not_serialized():
+    tr.create_tenant("acme")
+    rec = tr.get_tenant("acme")
+    assert rec.feature_overrides == {}
+    assert "feature_overrides" not in rec.to_dict()
+
+
+def test_feature_overrides_can_be_cleared():
+    tr.create_tenant("acme")
+    tr.set_feature_overrides("acme", ["channels"], [])
+    tr.set_feature_overrides("acme", [], [])
+    assert tr.get_tenant("acme").feature_overrides == {}
+
+
+def test_feature_overrides_reject_overlap():
+    tr.create_tenant("acme")
+    with pytest.raises(ValueError, match="both add and remove"):
+        tr.set_feature_overrides("acme", ["grpc"], ["grpc"])
+
+
+def test_feature_overrides_reject_non_string_and_blank():
+    tr.create_tenant("acme")
+    with pytest.raises(ValueError, match="strings"):
+        tr.set_feature_overrides("acme", [123], [])
+    with pytest.raises(ValueError, match="non-blank"):
+        tr.set_feature_overrides("acme", ["  "], [])
+
+
+def test_feature_overrides_reject_over_cap():
+    tr.create_tenant("acme")
+    too_many = [f"department:x{i}" for i in range(tr.MAX_FEATURE_OVERRIDES + 1)]
+    with pytest.raises(ValueError, match="cap"):
+        tr.set_feature_overrides("acme", too_many, [])
+
+
+def test_feature_overrides_unknown_tenant_raises():
+    with pytest.raises(tr.UnknownTenant):
+        tr.set_feature_overrides("ghost", ["core"], [])
+
+
+def test_overlapping_overrides_on_disk_rejected_on_read(tmp_path):
+    import json
+    import os
+    tr.create_tenant("acme")
+    path = tmp_path / "tenant_registry.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["tenants"][0]["feature_overrides"] = {"add": ["grpc"], "remove": ["grpc"]}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    os.chmod(path, 0o600)
+    with pytest.raises(tr.TenantRegistryError):
+        tr.list_tenants()
+
+
 def test_mutate_unknown_tenant_raises():
     with pytest.raises(tr.UnknownTenant):
         tr.suspend_tenant("ghost")

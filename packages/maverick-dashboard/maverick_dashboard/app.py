@@ -264,11 +264,33 @@ def _nav_context(request: Request) -> dict:
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         can_halt = False
+    # Guarded like caller_role/can_halt above: with a browser login provider
+    # (OIDC) configured, an unauthenticated render raises 401 here, which would
+    # turn every branded error page (and the login redirect) into a 500. The
+    # shell affordance is fail-closed -- no principal means no create button.
+    try:
+        can_create_goal = has_permission(request, "operate")
+    except Exception:  # pragma: no cover -- shell rendering stays fail-closed
+        can_create_goal = False
+    # Show a logout affordance only when a browser-login session is a thing:
+    # OIDC login or SAML. Static-token / auth-off deployments have no session to
+    # end, so the button would 404 (/auth/logout self-gates on login_enabled).
+    try:
+        from maverick.oidc import login_enabled as _login_enabled
+
+        show_logout = bool(_login_enabled())
+        if not show_logout:
+            from .saml import saml_enabled
+
+            show_logout = bool(saml_enabled())
+    except Exception:  # pragma: no cover -- shell rendering stays fail-soft
+        show_logout = False
     return {
         "nav_groups": groups,
         "show_settings_link": show_settings,
-        "can_create_goal": has_permission(request, "operate"),
+        "can_create_goal": can_create_goal,
         "can_halt": can_halt,
+        "show_logout": show_logout,
     }
 
 
@@ -1951,6 +1973,31 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         from .tenant_select_page import tenant_select_response
 
         return tenant_select_response(request, templates, detail=str(exc.detail))
+    if (
+        exc.status_code == 401
+        and _wants_html(request)
+        and request.method == "GET"
+    ):
+        # A browser navigating to a protected page with no valid session should
+        # land on the sign-in flow, not a static "sign in required" page. Only
+        # when a browser login provider is actually configured (OIDC); otherwise
+        # fall through to the branded page below (there is nowhere to send them).
+        try:
+            from maverick.oidc import login_enabled as _login_enabled
+
+            login_on = _login_enabled()
+        except Exception:  # pragma: no cover - never turn an auth error into a 500
+            login_on = False
+        if login_on:
+            from urllib.parse import quote
+
+            return_to = request.url.path
+            if request.url.query:
+                return_to = f"{return_to}?{request.url.query}"
+            return RedirectResponse(
+                f"/auth/login?return_to={quote(return_to, safe='')}",
+                status_code=302,
+            )
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {
@@ -2942,6 +2989,80 @@ async def tenants_overview_api(request: Request) -> JSONResponse:
     except Exception:  # pragma: no cover -- never 500 the console
         rows = []
     return JSONResponse({"tenants": rows})
+
+
+def _feature_label(feature: str) -> str:
+    """A human-facing label for a catalog feature key. Departments read as
+    their business-suite title; the cross-cutting flags get short names."""
+    if feature.startswith("department:"):
+        from maverick.departments import department_title
+        return department_title(feature.split(":", 1)[1]) + " department"
+    return {
+        "core": "Core",
+        "channels": "Channels",
+        "audit_export": "Audit export",
+        "grpc": "gRPC API",
+    }.get(feature, feature)
+
+
+@app.get("/tenants/{tenant_id}/features", response_class=HTMLResponse)
+async def tenant_features_page(request: Request, tenant_id: str) -> HTMLResponse:
+    """Per-tenant feature overrides: toggle individual capabilities on/off on
+    top of the tenant's plan (tier).
+
+    Cross-tenant control-plane data, so admin-only exactly like ``/tenants``.
+    A checked box is a feature the tenant effectively has; each row shows whether
+    it comes from the plan or from an override. Saving posts the derived
+    ``add``/``remove`` overrides to ``PUT /api/v1/admin/tenants/{id}/features``.
+    """
+    require_global_permission(request, "admin")
+    from maverick import billing
+    from maverick.tenant.registry import get_tenant
+
+    rec = get_tenant(tenant_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="no such tenant")
+    # The diff basis MUST be the effective baseline overrides apply on top of
+    # (downgraded when past-due), not the subscribed plan -- otherwise saving a
+    # past-due tenant's page would record a spurious remove for every downgraded
+    # feature (and those persist past payment recovery).
+    plan_features = set(billing.plan_features_for_tenant(tenant_id))
+    effective = set(billing.effective_features(tenant_id))
+    caps: list[dict] = []
+    depts: list[dict] = []
+    on_count = 0
+    for feature in billing.gateable_features():
+        in_plan = feature in plan_features
+        is_on = feature in effective
+        if is_on:
+            on_count += 1
+        if in_plan and is_on:
+            source = "plan"
+        elif in_plan and not is_on:
+            source = "removed"
+        elif is_on:
+            source = "added"
+        else:
+            source = "off"
+        row = {
+            "feature": feature,
+            "label": _feature_label(feature),
+            "in_plan": in_plan,
+            "on": is_on,
+            "source": source,
+        }
+        (depts if feature.startswith("department:") else caps).append(row)
+    return templates.TemplateResponse(
+        request,
+        "tenant_features.html",
+        {
+            "tenant": rec,
+            "caps": caps,
+            "depts": depts,
+            "on_count": on_count,
+            "is_admin": True,
+        },
+    )
 
 
 @app.get("/skills", response_class=HTMLResponse)
