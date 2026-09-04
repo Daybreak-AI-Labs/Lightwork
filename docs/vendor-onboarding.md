@@ -173,6 +173,12 @@ hard loss can lose uncheckpointed provider usage. Crash-atomic provider billing
 is not implemented. See [evidence and transport boundaries](evidence-reliability-boundaries.md)
 for strict scanner failure, explicit tenant erasure and event replay semantics.
 
+Goal signoff also retains its existing public `updated_at` float contract while
+advancing the review version atomically against the stored value. Repeated or
+backward wall-clock readings can no longer reuse a reviewed version after result
+or artifact changes. SQLite behavior and PostgreSQL SQL-path parity are tested;
+actual PostgreSQL locking remains part of live acceptance.
+
 ## Reviewed deterministic renewal step
 
 `EvidenceRenewalEvolution` extends `flow/evolve.py` for one typed step: classify

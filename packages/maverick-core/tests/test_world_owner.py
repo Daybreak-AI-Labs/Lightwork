@@ -7,6 +7,7 @@ from __future__ import annotations
 import concurrent.futures
 import sqlite3
 import threading
+from contextlib import contextmanager
 
 import pytest
 from maverick.world_model import SCHEMA_VERSION, WorldModel
@@ -248,6 +249,108 @@ def test_new_artifact_version_invalidates_signoff(tmp_path):
             "approved",
             expected_updated_at=reviewed.updated_at,
         )
+
+
+@pytest.mark.parametrize("mutation", ["result", "artifact"])
+@pytest.mark.parametrize("clock_delta", [0.0, -60.0])
+def test_stalled_or_backwards_clock_cannot_reapprove_replaced_payload(
+    tmp_path, monkeypatch, mutation, clock_delta,
+):
+    w = WorldModel(tmp_path / "w.db")
+    gid = w.create_goal("forecast", domain="finance_cash13w")
+    w.set_goal_status(gid, "done", result="reviewed version")
+    reviewed = w.get_goal(gid)
+    w.record_signoff(gid, "approved", expected_updated_at=reviewed.updated_at)
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: reviewed.updated_at + clock_delta)
+
+    if mutation == "result":
+        w.set_goal_status(gid, "done", result="replacement version")
+    else:
+        w.add_artifact(gid, "table", "Forecast", "new unreviewed attachment")
+
+    assert w.get_goal(gid).updated_at > reviewed.updated_at
+    assert w.signoff_for(gid) is None
+    # Other metadata writes must not reset the version to the old clock value.
+    w.set_goal_title(gid, "Updated forecast title")
+    w.set_goal_parent(gid, None)
+    w.set_goal_project(gid, None)
+    with pytest.raises(ValueError, match="changed"):
+        w.record_signoff(gid, "approved", expected_updated_at=reviewed.updated_at)
+    current = w.get_goal(gid)
+    assert w.record_signoff(gid, "approved", expected_updated_at=current.updated_at)
+
+
+def test_concurrent_payload_writers_get_distinct_review_versions_on_one_clock_tick(tmp_path, monkeypatch):
+    db = tmp_path / "w.db"
+    first, second = WorldModel(db), WorldModel(db)
+    gid = first.create_goal("forecast", domain="finance_cash13w")
+    first.set_goal_status(gid, "done", result="initial")
+    initial = first.get_goal(gid).updated_at
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: initial)
+    barrier = threading.Barrier(2)
+
+    def change(world):
+        barrier.wait(timeout=5)
+        world.set_goal_status(gid, "done", result="replacement")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(change, (first, second)))
+    # Both DB-authoritative updates must advance the version, not read the
+    # same value then overwrite one another with a duplicate version.
+    assert first.get_goal(gid).updated_at >= initial + 0.0000015
+
+
+@pytest.mark.parametrize("mutation", ["result", "artifact"])
+@pytest.mark.parametrize("clock_delta", [0.0, -60.0])
+def test_postgres_payload_version_contract_on_stalled_clock(tmp_path, monkeypatch, mutation, clock_delta):
+    """Execute Postgres mutator SQL through a local dialect shim, without a DSN.
+
+    This covers UPDATE/version binding compatibility, not live Postgres locking
+    or advisory locks; the real backend suite still requires MAVERICK_PG_DSN.
+    """
+    from maverick.world_model_backends import postgres
+
+    w = WorldModel(tmp_path / "w.db")
+    gid = w.create_goal("forecast", domain="finance_cash13w")
+    w.set_goal_status(gid, "done", result="reviewed version")
+    reviewed = w.get_goal(gid)
+    w.record_signoff(gid, "approved", expected_updated_at=reviewed.updated_at)
+    monkeypatch.setattr(postgres.time, "time", lambda: reviewed.updated_at + clock_delta)
+    monkeypatch.setattr(postgres, "_tenant_scope", lambda: ("", []))
+
+    class Cursor:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def execute(self, sql, params):
+            if "pg_advisory_xact_lock" not in sql:
+                self.cursor.execute(sql.replace("GREATEST(", "MAX(").replace("%s", "?"), params)
+
+        @property
+        def rowcount(self):
+            return self.cursor.rowcount
+
+        def fetchone(self):
+            return self.cursor.fetchone()
+
+    @contextmanager
+    def transaction():
+        with w._writing() as connection:
+            yield Cursor(connection.cursor())
+
+    pg = postgres.PostgresWorldModel.__new__(postgres.PostgresWorldModel)
+    monkeypatch.setattr(pg, "_tx", transaction)
+    if mutation == "result":
+        pg.set_goal_status(gid, "done", result="unreviewed replacement")
+    else:
+        pg.add_artifact(gid, "table", "Forecast", "unreviewed attachment")
+    assert w.get_goal(gid).updated_at > reviewed.updated_at
+    assert w.signoff_for(gid) is None
+    pg.set_goal_title(gid, "Updated forecast")
+    pg.set_goal_parent(gid, None)
+    pg.set_goal_project(gid, None)
+    with pytest.raises(ValueError, match="changed"):
+        w.record_signoff(gid, "approved", expected_updated_at=reviewed.updated_at)
 
 
 def test_artifact_versioning_and_latest(tmp_path):

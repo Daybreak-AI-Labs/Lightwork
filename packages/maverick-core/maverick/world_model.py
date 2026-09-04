@@ -1297,7 +1297,7 @@ class WorldModel:
                 cur = conn.execute(
                     "UPDATE goals SET status = 'blocked', "
                     "result = COALESCE(result, '') || ?, "
-                    "updated_at = ? "
+                    "updated_at = MAX(updated_at + 0.000001, ?) "
                     "WHERE status IN ('active', 'pending') AND updated_at <= ?",
                     (marker, now, cutoff),
                 )
@@ -1335,14 +1335,14 @@ class WorldModel:
                     # stuck goal. Reclaim the status; leave the result intact
                     # rather than corrupting or dropping it.
                     conn.execute(
-                        "UPDATE goals SET status = 'blocked', updated_at = ? "
+                        "UPDATE goals SET status = 'blocked', updated_at = MAX(updated_at + 0.000001, ?) "
                         "WHERE id = ?",
                         (now, row["id"]),
                     )
                     continue
                 conn.execute(
                     "UPDATE goals SET status = 'blocked', result = ?, "
-                    "updated_at = ? WHERE id = ?",
+                    "updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
                     (new_result, now, row["id"]),
                 )
             return len(rows)
@@ -1659,7 +1659,7 @@ class WorldModel:
             # goal.result edits, so a concurrent attachment cannot be approved
             # by a reviewer who never saw it.
             conn.execute(
-                "UPDATE goals SET updated_at = ? WHERE id = ?",
+                "UPDATE goals SET updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
                 (now, int(goal_id)),
             )
             # Approval covers the complete reviewed release payload.  A new
@@ -1737,7 +1737,7 @@ class WorldModel:
         """File a goal under a project (or clear it with ``None``)."""
         with self._writing() as conn:
             conn.execute(
-                "UPDATE goals SET project_id = ?, updated_at = ? WHERE id = ?",
+                "UPDATE goals SET project_id = ?, updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
                 (int(project_id) if project_id is not None else None, time.time(), int(goal_id)),
             )
 
@@ -1848,7 +1848,7 @@ class WorldModel:
         """Rename a goal, sealing the title column like ``create_goal`` does."""
         with self._writing() as conn:
             conn.execute(
-                "UPDATE goals SET title = ?, updated_at = ? WHERE id = ?",
+                "UPDATE goals SET title = ?, updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
                 (_enc_field(title), time.time(), int(goal_id)),
             )
 
@@ -1856,7 +1856,7 @@ class WorldModel:
         """Move a goal under a new parent (or to the root with ``None``)."""
         with self._writing() as conn:
             conn.execute(
-                "UPDATE goals SET parent_id = ?, updated_at = ? WHERE id = ?",
+                "UPDATE goals SET parent_id = ?, updated_at = MAX(updated_at + 0.000001, ?) WHERE id = ?",
                 (int(parent_id) if parent_id is not None else None,
                  time.time(), int(goal_id)),
             )
@@ -1867,9 +1867,13 @@ class WorldModel:
         return [(int(r["id"]), r["parent_id"]) for r in rows]
 
     def set_goal_status(self, goal_id: int, status: str, result: str | None = None) -> None:
+        # updated_at is both a timestamp and the public optimistic review
+        # version. All goal timestamp writes advance it atomically in SQL:
+        # coarse/repeated or backwards wall time cannot reauthorize stale
+        # bytes, even when independent connections mutate the same goal.
         with self._writing() as conn:
             cur = conn.execute(
-                "UPDATE goals SET status = ?, updated_at = ?, result = COALESCE(?, result) WHERE id = ?",
+                "UPDATE goals SET status = ?, updated_at = MAX(updated_at + 0.000001, ?), result = COALESCE(?, result) WHERE id = ?",
                 (status, time.time(), _enc_field(result), goal_id),
             )
             # A sign-off is authority over one immutable terminal payload, not
@@ -1934,7 +1938,7 @@ class WorldModel:
         owner predicate.
         """
         sql = (
-            "UPDATE goals SET status = 'active', updated_at = ? "
+            "UPDATE goals SET status = 'active', updated_at = MAX(updated_at + 0.000001, ?) "
             "WHERE id = ? AND status = 'pending'"
         )
         params: tuple[Any, ...] = (time.time(), int(goal_id))
@@ -1958,7 +1962,7 @@ class WorldModel:
         in-flight rows qualify; terminal goals are never revived. The owner
         predicate rides in the same statement so authorization cannot be
         separated from the touch by a race."""
-        sql = ("UPDATE goals SET updated_at = ? "
+        sql = ("UPDATE goals SET updated_at = MAX(updated_at + 0.000001, ?) "
                "WHERE id = ? AND status IN ('active', 'pending')")
         params: tuple[Any, ...] = (time.time(), int(goal_id))
         if expected_owner is not None:
