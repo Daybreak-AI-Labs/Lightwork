@@ -1,22 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Tenant Overview · Lightwork{% endblock %}
+{% block title %}Workspace overview · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% set suspended_count = rows | selectattr('suspended') | list | length %}
-  {% call hero('Administration', 'Tenant overview',
-               subtitle='Per-workspace rollup',
-               lede='A per-tenant summary: goals by status, today\'s spend,
-                     and how close each tenant is to its daily spend limit.
+  {% call hero('Administration', 'Workspace overview',
+               subtitle='Per-workspace summary',
+               lede='A per-workspace summary: goals by status, today\'s spend,
+                     and how close each workspace is to its daily spend limit.
                      The full roster — and where new workspaces are created —
-                     lives on <a href="/tenants">Tenants</a>.') %}
+                     lives on <a href="/tenants">Workspaces</a>.') %}
     {{ state('Current state',
              rows | length ~ ' workspace' ~ ('' if rows | length == 1 else 's') ~ ' reporting',
              badge=(suspended_count ~ ' suspended') if suspended_count
-                   else ('all active' if rows else 'single-tenant'),
+                   else ('all active' if rows else 'single workspace'),
              badge_class='warn' if suspended_count else ('ok' if rows else 'idle'),
              copy='Spend today across workspaces: $'
                   ~ ('%.2f' % (rows | sum(attribute='spend_today'))) ~ '.
-                  One budget per workspace — no tenant can spend
+                  One budget per workspace — no workspace can spend
                   another\'s.') }}
   {% endcall %}
 
@@ -35,46 +35,46 @@
 
   {% if not is_admin %}
     <div class="panel">
-      <p class="muted">Operator (admin) access is required to view the
-      cross-tenant rollup. You're seeing this scoped view because your
-      identity maps to a single tenant.</p>
+      <p class="muted">Administrator access is required to see all workspaces.
+      You're seeing only your own workspace because that is what your account
+      has access to.</p>
     </div>
   {% elif not rows %}
     <div class="panel">
-      <p class="muted" style="margin: 0;">No tenants provisioned. Single-tenant and
-      unprovisioned deployments run without a registry — create your first
-      workspace on <a href="/tenants">Tenants</a> when you take on a second
-      client or team.</p>
+      <p class="muted" style="margin: 0;">No workspaces yet. Single-workspace
+      deployments run without a registry — create your first workspace on
+      <a href="/tenants">Workspaces</a> when you take on a second client or
+      team.</p>
     </div>
   {% else %}
-    <div class="section-head"><h2>Per-workspace rollup</h2></div>
+    <div class="section-head"><h2>Per-workspace summary</h2></div>
     <div class="panel">
       <table>
         <thead>
           <tr>
-            <th scope="col">tenant</th><th scope="col">status</th>
-            <th scope="col">plan</th><th scope="col">goals</th>
-            <th scope="col">by status</th>
-            <th scope="col">spend today</th><th scope="col">quota</th>
+            <th scope="col">Workspace</th><th scope="col">Status</th>
+            <th scope="col">Plan</th><th scope="col">Goals</th>
+            <th scope="col">By status</th>
+            <th scope="col">Spend today</th><th scope="col">Daily limit</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
             <tr>
-              <td><code>{{ r.id }}</code>{% if r.display_name %} <span class="muted">{{ r.display_name }}</span>{% endif %}</td>
+              <td>{% if r.display_name %}{{ r.display_name }} <span class="muted">{{ r.id }}</span>{% else %}{{ r.id }}{% endif %}</td>
               <td>
                 {% if r.suspended %}
-                  <span class="badge blocked">suspended</span>
+                  <span class="badge blocked">Suspended</span>
                 {% else %}
-                  <span class="badge active">active</span>
+                  <span class="badge active">Active</span>
                 {% endif %}
               </td>
-              <td>{{ r.plan }}</td>
+              <td>{{ r.plan | capitalize }}</td>
               <td>{{ r.total_goals }}</td>
               <td>
                 {% if r.goals %}
                   {% for status, n in r.goals | dictsort %}
-                    <span class="badge {{ status }}">{{ status }} {{ n }}</span>
+                    <span class="badge {{ status }}">{{ status | humanize }} {{ n }}</span>
                   {% endfor %}
                 {% else %}
                   <span class="muted">no runs yet</span>

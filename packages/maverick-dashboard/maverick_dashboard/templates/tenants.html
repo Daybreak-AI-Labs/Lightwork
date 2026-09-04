@@ -1,18 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Tenants · Lightwork{% endblock %}
+{% block title %}Workspaces · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
   {% set active_tenants = tenants | selectattr('status', 'equalto', 'active') | list | length %}
-  {% call hero('Administration', 'Tenants',
+  {% call hero('Administration', 'Workspaces',
                subtitle='Isolated client workspaces',
-               lede='Each tenant is an isolated workspace with its own records
-                     and daily spend limit. This roster shows every tenant on
-                     this deployment — status, plan, and spend limit. The
-                     per-workspace rollup lives on
-                     <a href="/tenants/overview">Tenant overview</a>.') %}
+               lede='Each workspace is isolated, with its own records and daily
+                     spend limit. This roster shows every workspace on this
+                     deployment — status, plan, and spend limit. The
+                     per-workspace summary lives on
+                     <a href="/tenants/overview">Workspace overview</a>.') %}
     {{ state('Current state',
-             tenants | length ~ ' workspace' ~ ('' if tenants | length == 1 else 's') ~ ' provisioned',
-             badge=(active_tenants ~ ' active') if tenants else 'single-tenant',
+             tenants | length ~ ' workspace' ~ ('' if tenants | length == 1 else 's') ~ ' set up',
+             badge=(active_tenants ~ ' active') if tenants else 'single workspace',
              badge_class='ok' if active_tenants else 'idle',
              copy='One client per workspace: separate records, knowledge,
                    budget, and access — any one can be suspended without
@@ -103,15 +103,15 @@
 
   {% if not is_admin %}
     <div class="panel">
-      <p class="muted">Operator (admin) access is required to view the tenant
-      roster. You're seeing this scoped view because your identity maps to a
-      single tenant.</p>
+      <p class="muted">Administrator access is required to see all workspaces.
+      You're seeing only your own workspace because that is what your account
+      has access to.</p>
     </div>
   {% elif not tenants %}
     <div class="panel">
-      <p class="muted" style="margin: 0;">No tenants provisioned. Single-tenant and
-      unprovisioned deployments run without a registry — create your first
-      workspace above when you take on a second client or team.</p>
+      <p class="muted" style="margin: 0;">No workspaces yet. Single-workspace
+      deployments run without a registry — create your first workspace above
+      when you take on a second client or team.</p>
     </div>
   {% else %}
     <div class="section-head"><h2>Workspace roster</h2></div>
@@ -119,27 +119,26 @@
       <table>
         <thead>
           <tr>
-            <th scope="col">tenant</th><th scope="col">status</th>
-            <th scope="col">plan</th><th scope="col">quota</th>
-            <th scope="col">name</th><th scope="col">features</th>
+            <th scope="col">Workspace</th><th scope="col">Status</th>
+            <th scope="col">Plan</th><th scope="col">Daily limit</th>
+            <th scope="col">Features</th>
           </tr>
         </thead>
         <tbody>
           {% for t in tenants %}
             <tr>
-              <td><code>{{ t.id }}</code></td>
+              <td>{% if t.display_name %}{{ t.display_name }} <span class="muted">{{ t.id }}</span>{% else %}{{ t.id }}{% endif %}</td>
               <td>
                 {% if t.status == 'active' %}
-                  <span style="color: var(--accent);">active</span>
+                  <span style="color: var(--accent);">Active</span>
                 {% else %}
-                  <span style="color: var(--warn);">{{ t.status }}</span>
+                  <span style="color: var(--warn);">{{ t.status | humanize }}</span>
                 {% endif %}
               </td>
-              <td>{{ t.plan }}</td>
+              <td>{{ t.plan | capitalize }}</td>
               <td class="muted">
                 {% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}unlimited{% endif %}
               </td>
-              <td class="muted">{{ t.display_name or '—' }}</td>
               <td><a href="/tenants/{{ t.id | urlencode }}/features">Manage features</a></td>
             </tr>
           {% endfor %}

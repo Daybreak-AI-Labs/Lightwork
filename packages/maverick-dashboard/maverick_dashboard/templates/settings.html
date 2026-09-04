@@ -4,7 +4,7 @@
   {% from "_hero.html" import hero, state %}
   {% from "_integration_readiness.html" import integration_readiness %}
   {% set configured_providers = providers | selectattr('configured') | list %}
-  {% call hero('Control plane', 'Settings',
+  {% call hero('Administration', 'Settings',
                subtitle='Everything, managed in-app',
                lede='Appearance, models, spend, providers, and platform
                      capabilities — each section saves on its own and applies
@@ -214,20 +214,20 @@
   <div class="panel" data-settings-group="integrations">
     <p class="muted" style="margin-top: 0;">
       Set an API key for at least one provider to run goals. Keys are sealed
-      on this server and never shown again. Each row names the effective
-      source; higher-precedence tenant and operator overlays must be rotated at
-      that source. Leave a field blank to keep the current value.
+      on this server and never shown again. Each provider shows where its key
+      comes from; a key set at a higher level (workspace or operator) must be
+      changed there. Leave a field blank to keep the current value.
     </p>
     {% for p in providers %}
     <div data-settings-search-item style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
       <div style="min-width: 13rem; flex: 1 1 13rem;">
         <div style="font-weight: var(--font-medium);">{{ p.label }}</div>
         <div class="muted" style="font-size: var(--text-sm);">
-          {% if p.configured %}<span class="badge active">configured</span> via {{ p.via }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
+          {% if p.configured %}<span class="badge active">Configured</span> via {{ p.via }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
           {% else %}not set — paste a key to enable this provider{% endif %}
           {% if p.source_errors %}<div><span class="badge blocked">configuration source unreadable</span></div>{% endif %}
-          {% if not p.dashboard_can_set_api_key %}<div>API key is controlled by {{ p.api_key_source }}; rotate it there.</div>{% endif %}
-          {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>Base URL is controlled by {{ p.base_url_source }}; edit it there.</div>{% endif %}
+          {% if not p.dashboard_can_set_api_key %}<div>The API key is managed elsewhere ({{ p.api_key_source }}); update it there.</div>{% endif %}
+          {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The base URL is managed elsewhere ({{ p.base_url_source }}); update it there.</div>{% endif %}
         </div>
         <div style="margin-top: var(--space-2);">{{ integration_readiness(p.readiness) }}</div>
       </div>
@@ -242,7 +242,7 @@
                placeholder="Paste API key" aria-label="{{ p.label }} API key" autocomplete="off"
                {% if not p.dashboard_can_set_api_key %}disabled{% endif %} />
         <button type="submit" class="btn btn--primary"
-                {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save effective configuration</button>
+                {% if (not p.dashboard_can_set_api_key) and ((not p.base_url_field) or (not p.dashboard_can_set_base_url)) %}disabled aria-disabled="true"{% endif %}>Save</button>
       </form>
       {% if p.dashboard_set %}
       <form method="post" action="/settings/providers/clear">

@@ -138,7 +138,7 @@ def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path
     assert "governed-shell" in text
     assert "ordinary-shell" in text
     assert text.count("governance · Art 14") == 1
-    assert text.count(">consent</span>") == 1
+    assert text.count('class="muted">Consent</span>') == 1
 
 
 def test_no_pending_holds_shows_empty_state(monkeypatch, tmp_path):

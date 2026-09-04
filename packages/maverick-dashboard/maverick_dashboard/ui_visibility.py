@@ -1031,7 +1031,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/tenants",
-        "label": "Tenants",
+        "label": "Workspaces",
         "group": "Admin",
         "icon": "tenants",
         "floor": "admin",
@@ -1044,7 +1044,7 @@ PAGES: tuple[dict, ...] = (
     # it is admin-gated at the API.
     {
         "path": "/workspace/tenant",
-        "label": "Workspace tenant",
+        "label": "Choose a workspace",
         "group": "Admin",
         "icon": "tenants",
         "floor": "view",

@@ -39,7 +39,7 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     # The browser must not remove either row and imply the action is effective.
     assert "r.status === 202" in text
     assert "X-Lightwork-Approval-State" in text
-    assert "decision accepted but not effective" in text
+    assert "decision recorded but not yet in effect" in text
 
 
 def test_approve_transitions_state(monkeypatch, tmp_path):

@@ -2,11 +2,13 @@
 {% block title %}Users · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
+  {# Render a principal as a person, never as a raw sign-in subject. #}
+  {% macro who(principal) %}{% set p = principal | identity %}<span title="{{ p.raw }}">{{ p.name }}{% if p.detail %} <span class="muted" style="font-weight: normal;">· {{ p.detail }}</span>{% endif %}</span>{% endmacro %}
   {% call hero('Administration', 'Users &amp; roles',
                subtitle='Access, one roster',
                lede='Who can use this workspace and what each person is
-                     allowed to do. A new authenticated user starts as
-                     <code>' ~ default_role ~ '</code> until you change it
+                     allowed to do. A new person who signs in starts as
+                     <strong>' ~ (default_role | role_label) ~ '</strong> until you change it
                      here.') %}
     {{ state('Current state',
              users | length ~ ' user' ~ ('' if users | length == 1 else 's') ~ ' assigned',
@@ -37,14 +39,14 @@
   <div class="panel">
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: var(--space-3);">
       <div style="border: 1px solid var(--border); border-radius: 8px; padding: var(--space-3);">
-        <p style="margin: 0 0 var(--space-1);"><span class="badge active">admin</span></p>
+        <p style="margin: 0 0 var(--space-1);"><span class="badge active">{{ 'admin' | role_label }}</span></p>
         <p class="muted" style="margin: 0; font-size: var(--text-sm);">
           Runs the platform. Manages users and roles, settings, provider keys
           and secrets — plus everything an operator and an auditor can do.
         </p>
       </div>
       <div style="border: 1px solid var(--border); border-radius: 8px; padding: var(--space-3);">
-        <p style="margin: 0 0 var(--space-1);"><span class="badge running">operator</span></p>
+        <p style="margin: 0 0 var(--space-1);"><span class="badge running">{{ 'operator' | role_label }}</span></p>
         <p class="muted" style="margin: 0; font-size: var(--text-sm);">
           Does the work. Starts and cancels runs, approves or denies actions
           waiting for a decision, and uses tools. Can't change settings or
@@ -52,14 +54,14 @@
         </p>
       </div>
       <div style="border: 1px solid var(--border); border-radius: 8px; padding: var(--space-3);">
-        <p style="margin: 0 0 var(--space-1);"><span class="badge pending">auditor</span></p>
+        <p style="margin: 0 0 var(--space-1);"><span class="badge pending">{{ 'auditor' | role_label }}</span></p>
         <p class="muted" style="margin: 0; font-size: var(--text-sm);">
           Reviews the record. Reads the audit trail and reports — and nothing
           else. Can't run work or change anything, so review stays independent.
         </p>
       </div>
       <div style="border: 1px solid var(--border); border-radius: 8px; padding: var(--space-3);">
-        <p style="margin: 0 0 var(--space-1);"><span class="badge idle">viewer</span></p>
+        <p style="margin: 0 0 var(--space-1);"><span class="badge idle">{{ 'viewer' | role_label }}</span></p>
         <p class="muted" style="margin: 0; font-size: var(--text-sm);">
           Looks, doesn't touch. Sees dashboards and results, read-only.
         </p>
@@ -78,13 +80,13 @@
     </p>
     {% if custom_roles %}
     <table>
-      <thead><tr><th scope="col">role</th><th scope="col">can do</th>
-        <th scope="col">description</th><th scope="col">action</th></tr></thead>
+      <thead><tr><th scope="col">Role</th><th scope="col">Can do</th>
+        <th scope="col">Description</th><th scope="col">Action</th></tr></thead>
       <tbody>
       {% for name, rec in custom_roles %}
         <tr>
-          <td><span class="badge">{{ name }}</span></td>
-          <td class="muted" style="font-size: var(--text-sm);">{{ rec.permissions | join(' · ') }}</td>
+          <td><span class="badge">{{ name | role_label }}</span></td>
+          <td class="muted" style="font-size: var(--text-sm);">{{ rec.permissions | map('permission_label') | join(' · ') }}</td>
           <td class="muted" style="font-size: var(--text-sm);">{{ rec.description }}</td>
           <td>
             <form method="post" action="/users/roles/delete" style="display:inline;">
@@ -110,10 +112,10 @@
                pattern="[a-z][a-z0-9_-]{1,31}" spellcheck="false" autocomplete="off" />
       </label>
       <fieldset style="border: 0; padding: 0; margin: 0; display: flex; gap: var(--space-3);">
-        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 4px;">Adds (view is always on)</legend>
-        <label><input type="checkbox" name="permissions" value="operate" /> operate</label>
-        <label><input type="checkbox" name="permissions" value="audit" /> audit</label>
-        <label><input type="checkbox" name="permissions" value="admin" /> admin</label>
+        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 4px;">Adds (viewing is always on)</legend>
+        <label><input type="checkbox" name="permissions" value="operate" /> Run work</label>
+        <label><input type="checkbox" name="permissions" value="audit" /> Review audit trail</label>
+        <label><input type="checkbox" name="permissions" value="admin" /> Administer</label>
       </fieldset>
       <label style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 16rem;">
         <span class="muted" style="font-size: var(--text-sm);">Description (optional)</span>
@@ -132,21 +134,21 @@
     </p>
     <form method="post" action="/users/set" style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end;">
       <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">
-        <span>User principal</span>
-        <input class="ctl" type="text" name="principal" placeholder="user:&lt;subject&gt;"
-               aria-label="User principal" autocomplete="off" required />
+        <span>User ID</span>
+        <input class="ctl" type="text" name="principal" placeholder="Their sign-in ID"
+               aria-label="User ID" autocomplete="off" required />
       </label>
       <label style="display: flex; flex-direction: column; gap: var(--space-1);">
         <span>Role</span>
         <select class="ctl" name="role" aria-label="Role">
-          {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+          {% for r in roles %}<option value="{{ r }}">{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
       <button type="submit" class="btn btn--primary">Save user</button>
     </form>
-    <p class="muted" style="margin-bottom: 0; font-size: var(--text-sm);">A principal is the user's identity
-      from your company sign-in (SSO), written as <code>user:&lt;sub&gt;</code> — the same string shown on
-      their goals and in the audit log.</p>
+    <p class="muted" style="margin-bottom: 0; font-size: var(--text-sm);">Most teams add people with an email
+      invite below. Use this only to grant a role by a person's exact sign-in ID — the identifier your
+      company sign-in (SSO) issues for them, which also appears on their goals and in the audit trail.</p>
   </div>
 
   {% if invites_on %}
@@ -181,22 +183,22 @@
       <label style="display: flex; flex-direction: column; gap: var(--space-1);">
         <span>Role</span>
         <select class="ctl" name="role" aria-label="Invited role">
-          {% for r in roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r }}</option>{% endfor %}
+          {% for r in roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}
         </select>
       </label>
       <button type="submit" class="btn btn--primary">Create invite link</button>
     </form>
     <p class="muted" style="margin-bottom: 0; font-size: var(--text-sm);">
       With company sign-in (SSO) on, the link asks them to sign in and then grants the role.
-      Without SSO, opening the link signs them in directly as <code>user:&lt;email&gt;</code>.
+      Without SSO, opening the link signs them in directly using their email address.
       When email sending is set up for this deployment, the link is emailed to
       them automatically; either way you can copy it from here.</p>
     {% if pending_invites %}
     <div style="margin-top: var(--space-3);">
       {% for inv in pending_invites %}
       <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
-        <code style="flex: 1 1 14rem;">{{ inv.email }}</code>
-        <span class="badge">{{ inv.role }}</span>
+        <span style="flex: 1 1 14rem;">{{ inv.email }}</span>
+        <span class="badge">{{ inv.role | role_label }}</span>
         <form method="post" action="/users/invite/revoke">
           <input type="hidden" name="invite_id" value="{{ inv.id }}" />
           <button type="submit" class="btn">Revoke</button>
@@ -215,7 +217,7 @@
       not removable here, so you can never lock yourself out.</p>
     {% for a in bootstrap_admins %}
     <div style="padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
-      <code>{{ a }}</code> <span class="badge active">admin</span>
+      {{ who(a) }} <span class="badge active">{{ 'admin' | role_label }}</span>
     </div>
     {% endfor %}
   </div>
@@ -226,25 +228,25 @@
     {% if users %}
     {% for principal, role in users %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
-      <code style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ principal }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</code>
+      <span style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</span>
       <form method="post" action="/users/set" style="display: flex; gap: var(--space-2); align-items: center;">
         <input type="hidden" name="principal" value="{{ principal }}" />
-        <select class="ctl" name="role" aria-label="Role for {{ principal }}">
-          {% for r in roles %}<option value="{{ r }}"{% if r == role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+        <select class="ctl" name="role" aria-label="Role for {{ principal | identity }}">
+          {% for r in roles %}<option value="{{ r }}"{% if r == role %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}
         </select>
         <button type="submit" class="btn btn--primary"
-                aria-label="Save role for {{ principal }}">Save</button>
+                aria-label="Save role for {{ principal | identity }}">Save</button>
       </form>
       <form method="post" action="/users/remove">
         <input type="hidden" name="principal" value="{{ principal }}" />
         <button type="submit" class="btn"
-                aria-label="Remove {{ principal }} user assignment">Remove</button>
+                aria-label="Remove {{ principal | identity }} user assignment">Remove</button>
       </form>
     </div>
     {% endfor %}
     {% else %}
-    <p class="muted" style="margin: 0;">No explicit assignments yet. Authenticated users default to
-      <code>{{ default_role }}</code>; add someone above to give them a different role.</p>
+    <p class="muted" style="margin: 0;">No one has been given a specific role yet. People who sign in default to
+      <strong>{{ default_role | role_label }}</strong>; add someone above to give them a different role.</p>
     {% endif %}
   </div>
 
@@ -262,19 +264,19 @@
 
     {% for principal, suites in suite_grants %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
-      <code style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ principal }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</code>
+      <span style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ who(principal) }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</span>
       <form method="post" action="/users/suites/set" style="display: flex; gap: var(--space-2); align-items: flex-start;">
         <input type="hidden" name="principal" value="{{ principal }}" />
-        <select class="ctl" name="suites" aria-label="Departments for {{ principal }}" multiple size="4">
+        <select class="ctl" name="suites" aria-label="Departments for {{ principal | identity }}" multiple size="4">
           {% for key, title in all_suites %}<option value="{{ key }}"{% if key in suites %} selected{% endif %}>{{ title }}</option>{% endfor %}
         </select>
         <button type="submit" class="btn btn--primary"
-                aria-label="Save department access for {{ principal }}">Save</button>
+                aria-label="Save department access for {{ principal | identity }}">Save</button>
       </form>
       <form method="post" action="/users/suites/remove">
         <input type="hidden" name="principal" value="{{ principal }}" />
         <button type="submit" class="btn"
-                aria-label="Remove department override for {{ principal }}"
+                aria-label="Remove department override for {{ principal | identity }}"
                 title="Use the deployment default only when it is no broader">Remove override</button>
       </form>
     </div>
@@ -282,9 +284,9 @@
 
     <form method="post" action="/users/suites/set" style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin-top: var(--space-3);">
       <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">
-        <span>User principal</span>
-        <input class="ctl" type="text" name="principal" placeholder="user:&lt;subject&gt;"
-               aria-label="User principal for department access" autocomplete="off" required />
+        <span>User ID</span>
+        <input class="ctl" type="text" name="principal" placeholder="Their sign-in ID"
+               aria-label="User ID for department access" autocomplete="off" required />
       </label>
       <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">
         <span>Departments (hold Ctrl/Cmd to pick several)</span>

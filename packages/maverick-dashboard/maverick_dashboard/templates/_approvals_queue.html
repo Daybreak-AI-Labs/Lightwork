@@ -4,19 +4,19 @@
 {% if approvals %}
   <table>
     <thead><tr>
-      <th scope="col">action</th><th scope="col">risk</th>
-      <th scope="col">source</th>
-      <th scope="col">scope</th><th scope="col">detail</th>
-      <th scope="col">decision</th>
+      <th scope="col">Action</th><th scope="col">Risk</th>
+      <th scope="col">Source</th>
+      <th scope="col">Scope</th><th scope="col">Detail</th>
+      <th scope="col">Decision</th>
     </tr></thead>
     <tbody>
     {% for a in approvals %}
       <tr data-id="{{ a.id }}">
         <td><code>{{ a.action }}</code></td>
-        <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk }}</span></td>
+        <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk | humanize }}</span></td>
         <td>
           {% set _src = sources.get(a.id) if sources else None %}
-          {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">consent</span>{% endif %}
+          {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">Consent</span>{% endif %}
         </td>
         <td>{{ a.scope or '—' }}</td>
         <td class="muted approval-detail">{{ a.detail or '' }}</td>
@@ -119,9 +119,8 @@
             document.querySelectorAll('tr[data-id="' + id + '"] button.approval-btn')
               .forEach(function(b) { b.disabled = false; });
             msg.style.color = 'var(--warn)';
-            msg.textContent = '#' + id + ' decision accepted but not effective: ' +
-              'signed audit delivery is pending. Retrying is safe' +
-              (pending.decision_id ? ' (' + pending.decision_id.slice(0, 20) + 'â€¦).' : '.');
+            msg.textContent = '#' + id + ' decision recorded but not yet in effect: ' +
+              'the secure audit record is still being written. It is safe to try again.';
           } else if (r.status === 204) {
             const approvalState = r.headers.get('X-Lightwork-Approval-State') || '';
             if (approvalState === 'pending') {
@@ -135,7 +134,7 @@
               return;
             }
             msg.style.color = 'var(--accent)';
-            msg.textContent = '#' + id + ' ' + action + 'd.';
+            msg.textContent = '#' + id + (action === 'approve' ? ' approved.' : ' denied.');
             // Mutate in place rather than full-reload (keeps scroll
             // position): the decided item leaves the queue.
             const row = document.querySelector('tr[data-id="' + id + '"]');
