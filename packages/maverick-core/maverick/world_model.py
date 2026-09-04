@@ -1285,6 +1285,10 @@ class WorldModel:
         deployments with very slow turns can raise this via
         ``MAVERICK_ORPHAN_RECLAIM_SECONDS``.
 
+        A resolved window of zero explicitly reclaims every active/pending
+        goal, even when its monotonic review timestamp is ahead of the wall
+        clock. Positive windows continue to require the full stale interval.
+
         Returns rows reclaimed.
         """
         max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
@@ -1298,8 +1302,8 @@ class WorldModel:
                     "UPDATE goals SET status = 'blocked', "
                     "result = COALESCE(result, '') || ?, "
                     "updated_at = MAX(updated_at + 0.000001, ?) "
-                    "WHERE status IN ('active', 'pending') AND updated_at <= ?",
-                    (marker, now, cutoff),
+                    "WHERE status IN ('active', 'pending') AND (? = 0 OR updated_at <= ?)",
+                    (marker, now, max_age_seconds, cutoff),
                 )
                 return cur.rowcount
             # At-rest encryption on: `result` is sealed ciphertext. Appending the
@@ -1310,8 +1314,8 @@ class WorldModel:
             # is negligible.
             rows = conn.execute(
                 "SELECT id, result FROM goals "
-                "WHERE status IN ('active', 'pending') AND updated_at <= ?",
-                (cutoff,),
+                "WHERE status IN ('active', 'pending') AND (? = 0 OR updated_at <= ?)",
+                (max_age_seconds, cutoff),
             ).fetchall()
             from .crypto_at_rest import EncryptionUnavailable
             for row in rows:

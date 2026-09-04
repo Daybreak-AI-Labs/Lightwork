@@ -2312,6 +2312,9 @@ class PostgresWorldModel:
         ``updated_at`` is at least ``max_age_seconds`` old qualify, so a goal
         being driven live in a sibling process isn't reclaimed. Mirrors the
         SQLite WorldModel (kernel calls this on dashboard/serve startup).
+        A resolved zero window explicitly reclaims every active/pending goal
+        in scope, including monotonic review timestamps ahead of the wall clock.
+        Positive windows continue to require the full stale interval.
         Returns the number of rows reclaimed.
         """
         env_override = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
@@ -2330,9 +2333,9 @@ class PostgresWorldModel:
                 "UPDATE goals SET status = 'blocked', "
                 "result = COALESCE(result, '') || %s, "
                 "updated_at = GREATEST(updated_at + 0.000001, %s) "
-                "WHERE status IN ('active', 'pending') AND updated_at <= %s"
+                "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
             )
-            params: list = [marker, now, cutoff]
+            params: list = [marker, now, max_age_seconds, cutoff]
             if frag:
                 sql += " AND " + frag
                 params += fparams
@@ -2346,9 +2349,9 @@ class PostgresWorldModel:
         # set on startup is tiny, so the row-by-row cost is negligible.
         sel = (
             "SELECT id, result FROM goals "
-            "WHERE status IN ('active', 'pending') AND updated_at <= %s"
+            "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
         )
-        sparams: list = [cutoff]
+        sparams: list = [max_age_seconds, cutoff]
         if frag:
             sel += " AND " + frag
             sparams += fparams
