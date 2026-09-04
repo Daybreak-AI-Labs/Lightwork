@@ -78,8 +78,10 @@ def _shield_input_block_reason(shield: Any | None, text: str) -> str | None:
     original request, so a post-scan rewrite cannot assemble a blocked pattern.
     Shield remains optional/fail-open per kernel rule 1.
     """
+    from .shield_policy import shield_required
+    required = shield_required()
     if shield is None:
-        return None
+        return "required safety shield unavailable" if required else None
     try:
         safe = text
         try:
@@ -88,10 +90,14 @@ def _shield_input_block_reason(shield: Any | None, text: str) -> str | None:
         except Exception:  # pragma: no cover
             pass
         verdict = shield.scan_input(safe)
+        if required and getattr(verdict, "scan_error", False):
+            return "required safety scan unavailable"
         if not getattr(verdict, "allowed", True):
             return "; ".join(getattr(verdict, "reasons", []) or []) or "blocked by Shield"
     except Exception:  # pragma: no cover
-        log.exception("scan_input failed (fail-open)")
+        log.exception("scan_input failed")
+        if required:
+            return "required safety scan unavailable"
     return None
 
 
@@ -1013,6 +1019,8 @@ class _QuotaUsageSettlement:
         self.domain = domain
         self.goal: Any | None = None
         self.recorded = False
+        self.world: WorldModel | None = None
+        self.episode_id: int | None = None
 
     def record(self) -> None:
         """Charge current spend and release the run's reservation exactly once."""
@@ -1021,13 +1029,21 @@ class _QuotaUsageSettlement:
         self.recorded = True
         try:
             from . import quotas
-            quotas.record_usage(
+            prior = getattr(self.budget, "_checkpoint_settled", {})
+            acknowledged = quotas.record_usage(
                 self.principal,
-                self.budget.dollars,
-                self.budget.input_tokens,
-                self.budget.output_tokens,
+                max(0.0, self.budget.dollars - prior.get("dollars", 0)),
+                max(0, self.budget.input_tokens - prior.get("input_tokens", 0)),
+                max(0, self.budget.output_tokens - prior.get("output_tokens", 0)),
                 reservation_id=getattr(self.budget, "_tenant_reservation_id", None),
             )
+            if self.world is not None and self.episode_id is not None:
+                from . import checkpoint
+                if checkpoint.enabled():
+                    checkpoint.Checkpointer(self.world).record_settlement(
+                        self.goal.id, self.episode_id, self.budget,
+                        acknowledged=bool(acknowledged),
+                    )
         except Exception:  # pragma: no cover -- ledger is fully fail-soft
             log.debug("usage ledger record skipped for %s", self.principal)
         # Feed the self-tuning budget learner only for a real goal. Missing-goal
@@ -1040,6 +1056,52 @@ class _QuotaUsageSettlement:
                 )
             except Exception:  # pragma: no cover -- learner never blocks a run
                 pass
+
+
+class _RunLifecycle:
+    """Finalize the existing goal and episode records once, after all paid work.
+
+    Goal status remains the execution status; it does not confer validation,
+    human acceptance, or release. Those remain in their existing records.
+    """
+
+    def __init__(self, world: WorldModel, goal_id: int, budget: Budget):
+        self.world = world
+        self.goal_id = goal_id
+        self.budget = budget
+        self.started = False
+        self.episode_id: int | None = None
+        self.summary = "execution did not complete"
+        self.outcome: str | None = None
+        self.context_tokens: dict[str, Any] | None = None
+
+    def end_episode(self, summary: str, outcome: str) -> None:
+        # Stage the final outcome. Paid distillation or cleanup can still run;
+        # persisting spend now would make the episode and quota totals stale.
+        self.summary, self.outcome = summary, outcome
+
+    def finish(self, error: BaseException | None) -> None:
+        if not self.started:
+            return
+        if error is not None:
+            cancelled = isinstance(error, asyncio.CancelledError)
+            self.summary = "cancelled" if cancelled else f"internal error: {error}"
+            self.outcome = "interrupted" if cancelled else "failure"
+            self.world.set_goal_status(
+                self.goal_id, "cancelled" if cancelled else "blocked", result=self.summary,
+            )
+        else:
+            goal = self.world.get_goal(self.goal_id)
+            if goal.status == "cancelled":
+                self.summary, self.outcome = "cancelled", "interrupted"
+            elif goal.status == "active":
+                self.world.set_goal_status(self.goal_id, "blocked", result=self.summary)
+                self.outcome = self.outcome or "failure"
+        if self.episode_id is not None:
+            _end_episode_with_spend(
+                self.world, self.episode_id, self.summary, self.outcome or "blocked",
+                self.budget, self.goal_id,
+            )
 
 
 def _execution_principal(*, user_id: str | None, capability: Any | None) -> str:
@@ -1146,14 +1208,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     execution_principal: str = "user:local",
     *,
     _quota_settlement: _QuotaUsageSettlement,
+    _lifecycle: _RunLifecycle,
 ) -> str:
-    _record_quota_usage = _quota_settlement.record
     principal = _quota_settlement.principal
     goal = world.get_goal(goal_id)
     _quota_settlement.goal = goal
 
     if not goal:
-        _record_quota_usage()
         return f"no such goal: {goal_id}"
 
     # Bind the persisted execution identity to the authority the root agent
@@ -1168,11 +1229,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         )
     except Exception:
         log.exception("goal #%s execution-principal binding is unavailable", goal_id)
-        _record_quota_usage()
         return "BLOCKED: goal execution-principal binding is unavailable"
     if not execution_principal_matches:
         log.warning("goal #%s execution principal does not match its binding", goal_id)
-        _record_quota_usage()
         return "BLOCKED: goal is bound to a different execution principal"
     if was_unbound:
         try:
@@ -1185,7 +1244,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             != execution_principal
         ):
             log.error("goal #%s execution-principal binding was not observable", goal_id)
-            _record_quota_usage()
             return "BLOCKED: goal execution-principal binding is unavailable"
         # Downstream execution attribution must use the durable value, not the
         # stale pre-binding dataclass returned by the first read.
@@ -1213,7 +1271,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         from . import killswitch
         killswitch.check()
     except killswitch.Halted:
-        _record_quota_usage()
         world.set_goal_status(goal_id, "blocked", result="halted")
         return (
             "Stopped: Lightwork is halted (a HALT file is present).\n"
@@ -1232,7 +1289,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     except Exception as exc:
         _quota_reason = f"principal quota policy unavailable: {exc}"
     if _quota_reason:
-        _record_quota_usage()
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_quota_reason}")
         log.warning("goal #%s refused: %s", goal_id, _quota_reason)
         return _quota_reason
@@ -1252,7 +1308,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     except Exception as exc:
         _tenant_reason = f"tenant policy unavailable or inactive: {exc}"
     if _tenant_reason:
-        _record_quota_usage()
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_tenant_reason}")
         log.warning("goal #%s refused: %s", goal_id, _tenant_reason)
         return _tenant_reason
@@ -1266,9 +1321,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     try:
         from .logging_config import set_goal_context
         _ctx_tokens = set_goal_context(goal_id=goal_id, conversation_id=conversation_id)
+        _lifecycle.context_tokens = _ctx_tokens
     except Exception:  # pragma: no cover
         pass
 
+    if resume_episode_id is not None and not world.episode_exists(goal_id, resume_episode_id):
+        raise ValueError("resume episode does not belong to this goal")
+    _lifecycle.started = True
     world.set_goal_status(goal_id, "active")
     # Success-path audit: a tamper-evident GOAL_START on the signed chain so the
     # audit trail records the run beginning, not just denials. audit_event
@@ -1279,17 +1338,32 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 title=goal.title,
                 description=getattr(goal, "description", None))
     episode_id = resume_episode_id
-    if episode_id is None and resume:
-        try:
-            from . import checkpoint as _ckpt_mod
-            if _ckpt_mod.enabled():
-                episode_id = _ckpt_mod.Checkpointer(world).latest_episode_id(
-                    goal_id, "orchestrator-0",
-                )
-        except Exception:  # pragma: no cover -- resume lookup must fail open
-            episode_id = None
+    resume_agent_id = "orchestrator-0"
+    if resume or resume_episode_id is not None:
+        from . import checkpoint as _ckpt_mod
+        if _ckpt_mod.enabled():
+            boundary = _ckpt_mod.Checkpointer(world).orchestrator_for(
+                goal_id, episode_id=episode_id, required=True,
+            )
+            if boundary is not None:
+                resume_agent_id, episode_id = boundary
+                if not world.episode_exists(goal_id, episode_id):
+                    raise ValueError("checkpoint episode does not belong to this goal")
     if episode_id is None:
         episode_id = world.start_episode(goal_id)
+    _lifecycle.episode_id = episode_id
+    _quota_settlement.world = world
+    _quota_settlement.episode_id = episode_id
+    # Restore before briefing/planning can spend, and before any model or
+    # tool call. Agent restoration is idempotent on this same Budget object.
+    if resume or resume_episode_id is not None:
+        from . import checkpoint as _ckpt_mod
+        if _ckpt_mod.enabled():
+            saved = _ckpt_mod.Checkpointer(world).latest(
+                goal_id, resume_agent_id, episode_id=episode_id, required=True,
+            )
+            if saved is not None:
+                _ckpt_mod.restore_budget(saved.budget, into=budget)
     blackboard = Blackboard()
     blackboard.attach_world(world, goal_id)  # persist every post for live streaming
     # Replayable trace (opt-in via MAVERICK_TRACE_DIR): write this run's events
@@ -1332,7 +1406,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     if reason is not None:
         world.set_goal_status(goal_id, "blocked", result=f"input blocked: {reason}")
         try:
-            world.end_episode(episode_id, "input blocked by Shield", "blocked")
+            _lifecycle.end_episode("input blocked by Shield", "blocked")
         except Exception:  # pragma: no cover
             pass
         # tamper-evident record of the safety block; a refusal propagates
@@ -1340,7 +1414,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         audit_event(EventKind.SHIELD_BLOCK, goal_id=goal_id, stage="input",
                     reason=reason, score=None)
         log.warning("goal #%s input blocked by Shield: %s", goal_id, reason)
-        _record_quota_usage()
         return f"BLOCKED: goal input rejected by Shield ({reason})"
 
     # UserPromptSubmit hooks: let operators gate or annotate the incoming
@@ -1354,11 +1427,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     ):
         world.set_goal_status(goal_id, "blocked", result="input blocked by hook")
         try:
-            world.end_episode(episode_id, "input blocked by UserPromptSubmit hook", "blocked")
+            _lifecycle.end_episode("input blocked by UserPromptSubmit hook", "blocked")
         except Exception:  # pragma: no cover
             pass
         log.warning("goal #%s blocked by UserPromptSubmit hook", goal_id)
-        _record_quota_usage()
         return "BLOCKED: goal input rejected by a UserPromptSubmit hook"
 
     _fire_webhook("goal_created", {"goal_id": goal_id, "title": goal.title})
@@ -1396,7 +1468,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         if reason is not None:
             world.set_goal_status(goal_id, "blocked", result=f"brief blocked: {reason}")
             try:
-                world.end_episode(episode_id, "brief blocked by Shield", "blocked")
+                _lifecycle.end_episode("brief blocked by Shield", "blocked")
             except Exception:  # pragma: no cover
                 pass
             # tamper-evident record of the safety block; a refusal propagates
@@ -1422,8 +1494,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     msg = (f"no such domain: {domain!r} (unknown or its suite is "
                            "disabled). See `maverick compartments` for available domains.")
                     world.set_goal_status(goal_id, "blocked", result=msg)
-                    _end_episode_with_spend(world, episode_id, msg, "blocked", budget, goal_id)
-                    _record_quota_usage()
+                    _lifecycle.end_episode(msg, "blocked")
                     _fire_webhook("goal_finished", {
                         "goal_id": goal_id, "status": "blocked", "result": msg,
                     })
@@ -1437,8 +1508,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 )
                 log.error("%s", msg)
                 world.set_goal_status(goal_id, "blocked", result=msg)
-                _end_episode_with_spend(world, episode_id, msg, "blocked", budget, goal_id)
-                _record_quota_usage()
+                _lifecycle.end_episode(msg, "blocked")
                 _fire_webhook("goal_finished", {
                     "goal_id": goal_id, "status": "blocked", "result": msg,
                 })
@@ -1454,19 +1524,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
 
         try:
             result = await root.run()
-            # Durable execution: the root loop returned normally (it is no
-            # longer mid-step), so any checkpoints are stale — drop them. A
-            # crash that kills the process BEFORE this leaves them in place
-            # for `maverick resume` to pick up. Fail-open.
-            try:
-                from . import checkpoint as _ckpt_mod
-                if _ckpt_mod.enabled():
-                    _ckpt_mod.Checkpointer(world).clear(goal_id)
-            except Exception:  # pragma: no cover -- never block completion
-                pass
         except BudgetExceeded as e:
-            _end_episode_with_spend(world, episode_id, f"budget: {e}", "failure", budget, goal_id)
-            _record_quota_usage()
+            _lifecycle.end_episode(f"budget: {e}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
                 _ft.record_failure("budget", goal_id=goal_id, detail=str(e))
@@ -1491,10 +1550,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             # and close the episode, then re-raise so the caller can present
             # the error (the CLI turns it into a one-line message).
             try:
-                _end_episode_with_spend(
-                    world, episode_id, f"error: {e}", "failure", budget, goal_id,
-                )
-                _record_quota_usage()
+                _lifecycle.end_episode(f"error: {e}", "failure")
             except Exception:  # pragma: no cover
                 pass
             try:  # default-on local failure telemetry; no-op when disabled
@@ -1508,11 +1564,14 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 pass
             raise
 
+        # A dashboard cancellation can race the final model response. It must
+        # win before a returned result is persisted as successful or blocked.
+        if world.get_goal(goal_id).status == "cancelled":
+            _lifecycle.end_episode("cancelled", "interrupted")
+            return "Stopped: this goal was cancelled."
+
         if result.blocked_on_user:
-            _end_episode_with_spend(
-                world, episode_id, "blocked awaiting user", "interrupted", budget, goal_id,
-            )
-            _record_quota_usage()
+            _lifecycle.end_episode("blocked awaiting user", "interrupted")
             world.set_goal_status(goal_id, "blocked")
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked",
@@ -1564,10 +1623,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 "diff --git" in result.final_patch
                 or "--- a/" in result.final_patch
             ):
-                _end_episode_with_spend(
-                    world, episode_id, result.final_patch, "success", budget, goal_id,
-                )
-                _record_quota_usage()
+                _lifecycle.end_episode(result.final_patch, "success")
                 world.set_goal_status(
                     goal_id, "done", result=result.final_patch,
                 )
@@ -1596,8 +1652,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             try:
                 budget.check()
             except BudgetExceeded as be:
-                _end_episode_with_spend(world, episode_id, f"budget: {be}", "failure", budget, goal_id)
-                _record_quota_usage()
+                _lifecycle.end_episode(f"budget: {be}", "failure")
                 _maybe_record_reflexion(
                     goal, failure_class="budget", failure_msg=str(be),
                     blackboard=blackboard, shield=shield, channel=channel,
@@ -1613,8 +1668,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             # clear unhalt instruction rather than the generic error (whose
             # 'resume' advice would just halt again).
             if "halt" in (result.error or "").lower():
-                _end_episode_with_spend(world, episode_id, "halted", "interrupted", budget, goal_id)
-                _record_quota_usage()
+                _lifecycle.end_episode("halted", "interrupted")
                 world.set_goal_status(goal_id, "blocked", result="halted")
                 _fire_webhook("goal_finished", {
                     "goal_id": goal_id, "status": "blocked", "result": "halted",
@@ -1623,8 +1677,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "Stopped: Lightwork was halted mid-run (a HALT file is present).\n"
                     f"Run `maverick unhalt` to clear it, then `maverick resume {goal_id}`."
                 )
-            _end_episode_with_spend(world, episode_id, result.error, "failure", budget, goal_id)
-            _record_quota_usage()
+            _lifecycle.end_episode(result.error, "failure")
             _maybe_record_reflexion(
                 goal,
                 failure_class=(
@@ -1687,15 +1740,24 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # the builtin rules flag (rm -rf, curl | sh) and that path feeds
         # tooling/graders, not a chat answer.
         if shield is not None and not is_rendered_diff:
+            from .shield_policy import shield_required
+            reasons = None
             try:
                 out_v = shield.scan_output(summary)
-                if not getattr(out_v, "allowed", True):
+                if shield_required() and getattr(out_v, "scan_error", False):
+                    reasons = "required safety scan unavailable"
+                elif not getattr(out_v, "allowed", True):
                     reasons = "; ".join(getattr(out_v, "reasons", []) or []) or "blocked by Shield"
-                    log.warning("output scan blocked goal #%s: %s", goal_id, reasons)
-                    _record_quota_usage()
-                    return f"⚠ Output blocked by Shield: {reasons}"
-            except Exception:  # pragma: no cover -- fail open per kernel rule 1
-                log.exception("scan_output on summary failed (fail-open)")
+            except Exception:
+                log.exception("scan_output on summary failed")
+                if shield_required():
+                    reasons = "required safety scan unavailable"
+            if reasons is not None:
+                refusal = f"⚠ Output blocked by Shield: {reasons}"
+                log.warning("output scan blocked goal #%s: %s", goal_id, reasons)
+                world.set_goal_status(goal_id, "blocked", result=refusal)
+                _lifecycle.end_episode(refusal, "blocked")
+                return refusal
 
         if not is_rendered_diff:
             try:
@@ -1716,16 +1778,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "AI evidence gateway withheld the generated output. "
                     f"Operator action is required: {exc}"
                 )
-                _end_episode_with_spend(
-                    world,
-                    episode_id,
-                    refusal,
-                    "failure",
-                    budget,
-                    goal_id,
-                )
+                _lifecycle.end_episode(refusal, "failure")
                 world.set_goal_status(goal_id, "blocked", result=refusal)
-                _record_quota_usage()
                 _fire_webhook(
                     "goal_finished",
                     {
@@ -1749,7 +1803,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 )
             except Exception:  # pragma: no cover -- observability is best-effort
                 pass
-        _end_episode_with_spend(world, episode_id, summary, "success", budget, goal_id)
+        _lifecycle.end_episode(summary, "success")
         world.set_goal_status(goal_id, "done", result=summary)
         # Success-path audit: GOAL_END on the signed chain records the outcome,
         # closing the GOAL_START..GOAL_END pair for a completed run. Block/denial
@@ -1761,7 +1815,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         audit_event(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
                     status="succeeded",
                     result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
-        _record_quota_usage()
         # Index this finished goal into the semantic store (#432) so future
         # runs recall it via vector search. No-op unless a [memory] backend is
         # configured; re-reads the goal so the indexed status/result reflect
@@ -1945,13 +1998,11 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             return summary
         return f"DONE.\n\n{summary}{skill_note}\n\n[{budget.summary()}]"
     finally:
-        # The idempotent settlement covers every in-run return/exception,
-        # including brief preflight refusals that do not reach an explicit
-        # completion branch. It also releases the tenant hold before cleanup
-        # code can fail independently.
-        _record_quota_usage()
         if mcp_clients:
-            await stop_mcp_clients(mcp_clients)
+            try:
+                await stop_mcp_clients(mcp_clients)
+            except Exception:
+                log.warning("failed to stop MCP clients", exc_info=True)
         # A namespace is a per-run routing capability, so its queued traffic
         # must not outlive the run. Besides preventing stale delivery, clearing
         # non-empty inboxes here stops completed swarms from permanently
@@ -1963,16 +2014,6 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 agent_bus.clear(namespace=ctx.bus_namespace)
             except Exception:  # pragma: no cover - run cleanup is best effort
                 log.warning("failed to clear agent-bus namespace", exc_info=True)
-        # Restore the trace context to its prior value so the next goal on
-        # this thread/task doesn't inherit goal_id / conversation_id from this
-        # one, AND a concurrent/outer goal isn't wiped (FastAPI threadpool
-        # workers + the CLI chat REPL both reuse the execution context). Token
-        # reset restores the prior binding rather than nulling globally.
-        try:
-            from .logging_config import reset_goal_context
-            reset_goal_context(_ctx_tokens)
-        except Exception:  # pragma: no cover
-            pass
 
 
 async def run_goal(
@@ -1999,6 +2040,8 @@ async def run_goal(
     settlement = _QuotaUsageSettlement(
         principal=execution_principal, budget=budget, domain=domain,
     )
+    lifecycle = _RunLifecycle(world, goal_id, budget)
+    error: BaseException | None = None
     try:
         return await _run_goal_impl(
             llm=llm,
@@ -2018,11 +2061,33 @@ async def run_goal(
             allowed_suites=allowed_suites,
             execution_principal=execution_principal,
             _quota_settlement=settlement,
+            _lifecycle=lifecycle,
         )
+    except BudgetExceeded as exc:
+        error = exc
+        return _budget_exceeded_message(budget, goal_id)
+    except BaseException as exc:
+        error = exc
+        raise
     finally:
-        # This wrapper begins before get_goal and every preflight/setup step,
-        # unlike the MCP cleanup try/finally inside the implementation.
-        settlement.record()
+        # This boundary starts before setup, closes cancellation as well as
+        # ordinary errors, and accounts for paid finalization work.
+        try:
+            lifecycle.finish(error)
+        finally:
+            settlement.record()
+            try:
+                from .logging_config import reset_goal_context
+                reset_goal_context(lifecycle.context_tokens)
+            except Exception:  # pragma: no cover -- cleanup only
+                pass
+        if error is None and lifecycle.outcome == "success":
+            try:
+                from . import checkpoint
+                if checkpoint.enabled():
+                    checkpoint.Checkpointer(world).clear(goal_id)
+            except Exception:  # pragma: no cover -- completion is durable
+                log.warning("checkpoint cleanup failed", exc_info=True)
 
 
 def run_goal_sync(*args, **kwargs) -> str:

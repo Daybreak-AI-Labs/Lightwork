@@ -13,14 +13,15 @@ Scope of Phase 1 (intentionally narrow):
   - Append-only ``checkpoints`` table keyed by (goal_id, episode_id, agent_id, step_seq),
     in its OWN table so it needs no world-model schema-version migration.
 
-Posture (kernel rule 1): OFF by default, fail-open. ``enabled()`` gates the
-whole feature; every read/write is wrapped so a checkpoint-store error
-degrades to today's warm-restart, never aborts a run.
+Posture: OFF by default. Optional history inspection and checkpoint writes
+remain best-effort. When durable execution requests a resume boundary, corrupt
+or unavailable history blocks; it cannot silently become an empty fresh run.
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -89,6 +90,10 @@ class Checkpoint:
     meta: dict
 
 
+class CheckpointError(ValueError):
+    """A requested resume cannot establish a trustworthy execution boundary."""
+
+
 class Checkpointer:
     """Append-only checkpoint store over the world model's SQLite connection.
 
@@ -150,9 +155,11 @@ class Checkpointer:
             log.warning("checkpoint: save failed (continuing uncheckpointed): %s", e)
             return False
 
-    def latest_episode_id(self, goal_id: int, agent_id: str) -> int | None:
+    def latest_episode_id(self, goal_id: int, agent_id: str, *, required: bool = False) -> int | None:
         """Return the episode containing the newest checkpoint for (goal, agent)."""
         if goal_id is None or not self._ensure():
+            if required:
+                raise CheckpointError("checkpoint store unavailable")
             return None
         try:
             row = self._world._read_one(
@@ -163,14 +170,19 @@ class Checkpointer:
             )
         except Exception as e:  # pragma: no cover
             log.warning("checkpoint: latest_episode_id() failed: %s", e)
+            if required:
+                raise CheckpointError("checkpoint lookup unavailable") from e
             return None
         if row is None:
             return None
         return int(row[0])
 
-    def latest(self, goal_id: int, agent_id: str, episode_id: int = 0) -> Checkpoint | None:
+    def latest(self, goal_id: int, agent_id: str, episode_id: int = 0, *,
+               required: bool = False) -> Checkpoint | None:
         """Return the most recent checkpoint for (goal, episode, agent), or None."""
         if goal_id is None or not self._ensure():
+            if required:
+                raise CheckpointError("checkpoint store unavailable")
             return None
         try:
             row = self._world._read_one(
@@ -181,18 +193,28 @@ class Checkpointer:
             )
         except Exception as e:  # pragma: no cover
             log.warning("checkpoint: latest() failed: %s", e)
+            if required:
+                raise CheckpointError("checkpoint lookup unavailable") from e
             return None
         if row is None:
             return None
         try:
-            return Checkpoint(
+            saved = Checkpoint(
                 goal_id=row[0], episode_id=row[1], agent_id=row[2], step_seq=row[3],
                 messages=json.loads(row[4]), budget=json.loads(row[5]),
                 meta=json.loads(row[6]),
             )
+            if (not isinstance(saved.messages, list)
+                    or not all(isinstance(message, dict) for message in saved.messages)
+                    or not isinstance(saved.budget, dict)
+                    or not isinstance(saved.meta, dict)):
+                raise ValueError("invalid checkpoint structure")
+            return saved
         except (TypeError, ValueError) as e:
             log.warning("checkpoint: corrupt record for goal=%s ep=%s agent=%s: %s",
                         goal_id, episode_id, agent_id, e)
+            if required:
+                raise CheckpointError("checkpoint record corrupted") from e
             return None
 
     def _prune(self, goal_id: int, episode_id: int, agent_id: str) -> None:
@@ -223,23 +245,56 @@ class Checkpointer:
         except Exception as e:  # pragma: no cover
             log.debug("checkpoint: clear failed (non-fatal): %s", e)
 
+    def record_settlement(self, goal_id: int, episode_id: int, budget: Any, *,
+                          acknowledged: bool = True) -> None:
+        """Carry accounted spend past the last resumable message boundary.
+
+        Acknowledged counters are carried only after the usage ledger accepted
+        settlement. The stores are not one transaction: a crash before this
+        write can charge prior spend again. Messages stay at their committed
+        boundary; accounting includes later failed/finalize calls, even when
+        the ledger is unavailable and has not acknowledged the charge.
+        """
+        if not self._ensure():
+            return
+        snapshot = snapshot_budget(budget)
+        if acknowledged:
+            snapshot["_settled"] = {
+                key: snapshot[key] for key in ("dollars", "input_tokens", "output_tokens")
+            }
+        with self._world._writing() as conn:
+            conn.execute(
+                "UPDATE checkpoints SET budget = ? WHERE goal_id = ? AND episode_id = ?",
+                (json.dumps(snapshot, allow_nan=False), goal_id, episode_id),
+            )
+
     # ----- rewind / fork support (spec §4, G2) -----
 
-    def orchestrator_for(self, goal_id: int) -> tuple[str, int] | None:
+    def orchestrator_for(self, goal_id: int, *, episode_id: int | None = None,
+                         required: bool = False) -> tuple[str, int] | None:
         """``(agent_id, episode_id)`` of the goal's newest checkpoint.
 
         Phase 1 only checkpoints the depth-0 root, so the newest checkpoint's
         agent is the orchestrator — the node ``rewind`` operates on."""
         if goal_id is None or not self._ensure():
+            if required:
+                raise CheckpointError("checkpoint store unavailable")
             return None
         try:
+            where = "goal_id = ?"
+            args = (goal_id,)
+            if episode_id is not None:
+                where += " AND episode_id = ?"
+                args += (episode_id,)
             row = self._world._read_one(
-                "SELECT agent_id, episode_id FROM checkpoints WHERE goal_id = ? "
+                f"SELECT agent_id, episode_id FROM checkpoints WHERE {where} "
                 "ORDER BY created_at DESC, step_seq DESC, id DESC LIMIT 1",
-                (goal_id,),
+                args,
             )
         except Exception as e:  # pragma: no cover
             log.warning("checkpoint: orchestrator_for() failed: %s", e)
+            if required:
+                raise CheckpointError("checkpoint lookup unavailable") from e
             return None
         return (str(row[0]), int(row[1])) if row else None
 
@@ -401,6 +456,15 @@ _BUDGET_CAPS = (
 )
 
 
+def _finite_nonnegative(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
 def snapshot_budget(budget: Any) -> dict:
     """Serialize a Budget's caps + spent counters + elapsed wall time."""
     out: dict = {}
@@ -410,24 +474,63 @@ def snapshot_budget(budget: Any) -> dict:
         out["_elapsed"] = budget.elapsed()
     except Exception:
         out["_elapsed"] = 0.0
+    if getattr(budget, "_checkpoint_settled", None):
+        out["_settled"] = dict(budget._checkpoint_settled)
     return out
 
 
-def restore_budget(snapshot: dict):
-    """Rebuild a Budget from a snapshot, preserving spent counters + elapsed."""
+def restore_budget(snapshot: dict, *, into=None):
+    """Restore usage, keeping a live Budget's identity and current authority.
+
+    ``into`` is the execution path. Its caps, tenant reservation, pricing data
+    and in-flight reservations stay authoritative. Existing invocation spend
+    is added to saved history once, so preflight work cannot disappear. The
+    no-target form remains a compatible snapshot inspection helper.
+    """
     from .budget import Budget
+    if not isinstance(snapshot, dict):
+        raise ValueError("checkpoint budget must be an object")
+    if into is not None and not all(key in snapshot for key in (*_BUDGET_COUNTERS, "_elapsed")):
+        raise ValueError("checkpoint budget accounting is incomplete")
+    counters = {}
+    for key in _BUDGET_COUNTERS:
+        value = snapshot.get(key, 0)
+        if (not _finite_nonnegative(value)
+                or (key != "dollars" and not isinstance(value, int))):
+            raise ValueError(f"invalid checkpoint budget {key}")
+        counters[key] = value
+    elapsed = snapshot.get("_elapsed", 0.0)
+    if not _finite_nonnegative(elapsed):
+        raise ValueError("invalid checkpoint elapsed time")
+    settled = snapshot.get("_settled", {})
+    if not isinstance(settled, dict):
+        raise ValueError("invalid checkpoint settled usage")
+    for key, value in settled.items():
+        if (key not in {"dollars", "input_tokens", "output_tokens"}
+                or not _finite_nonnegative(value) or value > counters[key]
+                or (key != "dollars" and not isinstance(value, int))):
+            raise ValueError("invalid checkpoint settled usage")
+    if into is not None:
+        with into._lock:
+            if not getattr(into, "_checkpoint_restored", False):
+                for key, value in counters.items():
+                    setattr(into, key, getattr(into, key) + value)
+                into._started_monotonic -= elapsed
+                into.started_at -= elapsed
+                into._checkpoint_settled = settled
+                into._checkpoint_restored = True
+            into.check()
+        return into
     kwargs = {f: snapshot[f] for f in _BUDGET_CAPS if snapshot.get(f) is not None}
     b = Budget(**kwargs)
-    for f in _BUDGET_COUNTERS:
-        if snapshot.get(f) is not None:
-            setattr(b, f, snapshot[f])
+    for f, value in counters.items():
+        setattr(b, f, value)
     # Restore the wall-clock baseline so elapsed() continues from the saved
     # value. Budget.elapsed() reads `_started_monotonic` (set unconditionally in
     # __post_init__), NOT `started_at`, so back-dating started_at alone was a
     # dead write that reset the wall cap to ~0 on every resume -- a budget-cap
     # bypass on the durable-execution path. Back-date the monotonic baseline the
     # way Budget.__setstate__ already does.
-    elapsed = snapshot.get("_elapsed") or 0.0
     try:
         b._started_monotonic = time.monotonic() - max(0.0, float(elapsed))
         b.started_at = time.time() - float(elapsed)  # keep legacy field consistent
