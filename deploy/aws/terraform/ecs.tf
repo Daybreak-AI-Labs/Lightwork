@@ -49,6 +49,9 @@ resource "aws_ecs_task_definition" "app" {
           { name = "MAVERICK_OIDC_CLIENT_ID", value = var.oidc_client_id },
           { name = "MAVERICK_OIDC_AUDIENCE", value = var.oidc_client_id },
           { name = "MAVERICK_OIDC_REDIRECT_URI", value = "https://${var.domain_name}/auth/callback" },
+          # The ID-token verifier needs the JWKS endpoint explicitly (it does not
+          # derive it from the issuer). Standard OIDC discovery path off the issuer.
+          { name = "MAVERICK_OIDC_JWKS_URI", value = "${trimsuffix(var.oidc_issuer, "/")}/.well-known/jwks.json" },
         ],
         var.dashboard_admins == "" ? [] : [
           { name = "MAVERICK_DASHBOARD_ADMINS", value = var.dashboard_admins },
