@@ -1,12 +1,18 @@
 /* Lightwork site — demo-request modal.
    Opens from every "Book a demo" / "Request access" CTA on every page.
-   Delivery: provide a free Web3Forms access key to send submissions straight to
-   chris@daybreakailabs.com — set it at DEPLOY TIME without editing this file via
-   either:
+   Delivery: with no access key configured (the shipped default), the form
+   posts via a pre-filled mailto — nothing leaves the visitor's own mail
+   client, and no third party ever sees the submission.
+   Optionally, a free Web3Forms access key can be set at DEPLOY TIME (without
+   editing this file) to send submissions straight to chris@daybreakailabs.com
+   via Web3Forms instead:
      <meta name="web3forms-access-key" content="YOUR-KEY">   (in each page head), or
      window.LIGHTWORK_ACCESS_KEY = "YOUR-KEY";                (e.g. an uncommitted config.js)
-   With no key set, the form still posts via a pre-filled mailto, so it is never
-   a dead end. See pitch/site/README.md. */
+   BEFORE setting a key: privacy.html's "Information you give us" section must
+   name Web3Forms as a data processor and the vendor's data-handling terms
+   must be reviewed — the policy is written to describe exactly what happens
+   today (mailto only) and must be updated in the same change that turns this
+   on. See pitch/site/README.md. */
 (function () {
   "use strict";
   // Resolve the key from deploy-time injection first, then the inline constant.
@@ -35,6 +41,7 @@
         '<div class="field"><label for="df-email">Work email</label><input id="df-email" type="email" name="email" required autocomplete="email"></div>' +
         '<div class="field"><label for="df-company">Company</label><input id="df-company" name="company" autocomplete="organization"></div>' +
         '<div class="field"><label for="df-msg">What would you want to put under governance?</label><textarea id="df-msg" name="message" rows="3"></textarea></div>' +
+        '<p class="df-privacy">See our <a href="privacy.html" target="_blank" rel="noopener">privacy policy</a> for how this request is handled. Please don&rsquo;t include confidential, health, or other regulated data here &mdash; use this field only to describe the workflow, not the data itself.</p>' +
         '<input type="checkbox" name="botcheck" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">' +
         '<button type="submit" class="btn btn-primary df-submit">Request a demo</button>' +
         '<p class="df-foot">We read every request and reply personally.</p>' +
