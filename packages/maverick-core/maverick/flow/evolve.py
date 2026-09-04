@@ -209,6 +209,40 @@ def revert_node(flow: Flow, node_id: str, prior: FlowNode) -> Flow:
     return new
 
 
+def harden_evidence_renewal(flow: Flow, *, bindings: dict[str, str]) -> Flow:
+    """Restrict one reviewed renewal agent step to existing pure flow nodes.
+
+    Authority/source/downstream preconditions are enforced by the vendor
+    evolution application service before this graph receives its typed data.
+    No tool telemetry, tool generation, credential use or new permissions are
+    inferred. Only these two reviewed bindings are supported initially.
+    """
+    from .ir import NODE_BRANCH, NODE_SCOPE, NODE_SETVAR
+
+    if bindings != {"due_at": "due_at", "now": "now"}:
+        raise ValueError("renewal automation requires exact reviewed due_at/now bindings")
+    if len(flow.nodes) != 1 or flow.nodes[flow.start].kind != NODE_AGENT:
+        raise ValueError("renewal hardening supports one isolated agent step")
+    new = flow.copy()
+    new.nodes[flow.start] = FlowNode(
+        id=flow.start, kind=NODE_SCOPE,
+        body=Flow(id="renewal-arithmetic", name="Evidence freshness comparison", start="remaining", nodes={
+            "remaining": FlowNode(id="remaining", kind=NODE_SETVAR, next="due",
+                                  assignments={"remaining": "{{sub(due_at,now)}}"}),
+            "due": FlowNode(id="due", kind=NODE_BRANCH, condition="remaining <= 0",
+                            if_true="renew", if_false="fresh"),
+            "renew": FlowNode(id="renew", kind=NODE_SETVAR,
+                              assignments={"classification": "renewal_due"}),
+            "fresh": FlowNode(id="fresh", kind=NODE_SETVAR,
+                              assignments={"classification": "fresh"}),
+        }),
+    )
+    errors = new.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
+    return new
+
+
 def same_work_definition(left: FlowNode, right: FlowNode) -> bool:
     """Whether a later save preserved the exact work implementation.
 
