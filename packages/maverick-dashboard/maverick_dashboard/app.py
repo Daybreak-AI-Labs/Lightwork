@@ -264,10 +264,18 @@ def _nav_context(request: Request) -> dict:
         )
     except Exception:  # pragma: no cover -- shell rendering stays fail-closed
         can_halt = False
+    # Guarded like caller_role/can_halt above: with a browser login provider
+    # (OIDC) configured, an unauthenticated render raises 401 here, which would
+    # turn every branded error page (and the login redirect) into a 500. The
+    # shell affordance is fail-closed -- no principal means no create button.
+    try:
+        can_create_goal = has_permission(request, "operate")
+    except Exception:  # pragma: no cover -- shell rendering stays fail-closed
+        can_create_goal = False
     return {
         "nav_groups": groups,
         "show_settings_link": show_settings,
-        "can_create_goal": has_permission(request, "operate"),
+        "can_create_goal": can_create_goal,
         "can_halt": can_halt,
     }
 
