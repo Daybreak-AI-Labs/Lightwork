@@ -13,7 +13,7 @@
 
 <h1 class="page-title">Billing</h1>
 <p class="page-subtitle">
-  Statement for tenant <code>{{ tenant }}</code> — accrued charges from priced runs, bucketed by month.
+  Statement for {{ tenant_label }}{% if tenant_label != tenant %} <span class="muted">({{ tenant }})</span>{% endif %} — accrued charges from priced runs, bucketed by month.
 </p>
 
 <div class="toolbar">

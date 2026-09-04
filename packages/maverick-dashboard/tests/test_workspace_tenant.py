@@ -184,7 +184,7 @@ def test_browser_409_renders_the_picker_api_keeps_json():
     r = client.get(GATED_PAGE, headers={"Accept": "text/html"})
     assert r.status_code == 409
     assert r.headers["content-type"].startswith("text/html")
-    assert "Workspace tenant" in r.text
+    assert "Choose a workspace" in r.text
     assert '<h1 class="page-title"' in r.text
     assert 'var returnTo = "/consent/publish-settings";' in r.text
     assert "select an active tenant" in r.text  # the gate's own message
@@ -233,7 +233,7 @@ def test_picker_quick_workspace_creates_selects_and_recovers_original_url():
     blocked = client.get(GATED_PAGE, headers={"Accept": "text/html"})
     assert blocked.status_code == 409
     assert blocked.url.path == GATED_PAGE
-    assert "No tenants exist yet" in blocked.text
+    assert "No workspaces exist yet" in blocked.text
     assert 'id="tsel-quick"' in blocked.text
     assert "createAndSwitch({ id: 'local', display_name: 'My workspace', plan: 'free' }" in blocked.text
 

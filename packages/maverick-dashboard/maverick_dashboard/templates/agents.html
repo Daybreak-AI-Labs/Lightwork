@@ -155,13 +155,13 @@
                lede='Describe a specialist in plain English — its job, the
                      tools it can reach, and its guardrails — and Lightwork
                      tailors it for you. Saving patches only what you change;
-                     anything that would weaken the safety envelope is
+                     anything that would weaken the safety limits is
                      rejected, not saved.') %}
-    {{ state('Current state', 'Safety envelope enforced',
+    {{ state('Current state', 'Safety limits enforced',
              badge='guarded', badge_class='ok',
-             copy='Edits that widen tool access or raise a risk ceiling are
-                   rejected at save time — the envelope only ever
-                   tightens.') }}
+             copy='Edits that widen tool access or raise the maximum risk level
+                   are rejected at save time — these limits only ever
+                   tighten.') }}
   {% endcall %}
 
   <a class="af-ekko" href="/ekko" id="ekko-work-discovery-card">
@@ -276,14 +276,14 @@
             <span class="tt">Highest risk it may take
               <small>How far it can go without a stricter gate.</small></span>
             {% set cur_risk = selected.max_risk if selected else 'low' %}
-            <span class="risk-seg" id="risk-seg" role="group" aria-label="Risk ceiling">
+            <span class="risk-seg" id="risk-seg" role="group" aria-label="Maximum risk level">
               {% for r in ['low', 'medium', 'high'] %}
-              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ r }}</button>
+              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ r | capitalize }}</button>
               {% endfor %}
             </span>
-            <select id="f-risk" name="max_risk" hidden aria-label="Risk ceiling">
+            <select id="f-risk" name="max_risk" hidden aria-label="Maximum risk level">
               {% for r in ['low', 'medium', 'high'] %}
-              <option value="{{ r }}"{% if cur_risk == r %} selected{% endif %}>{{ r }}</option>
+              <option value="{{ r }}"{% if cur_risk == r %} selected{% endif %}>{{ r | capitalize }}</option>
               {% endfor %}
             </select>
           </div>

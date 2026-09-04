@@ -44,7 +44,7 @@ def _seed_tenant_with_runs_and_spend():
 def test_overview_page_empty_state(monkeypatch, tmp_path):
     r = _client().get("/tenants/overview")
     assert r.status_code == 200
-    assert "No tenants provisioned" in r.text
+    assert "No workspaces yet" in r.text
 
 
 def test_overview_page_rollup(monkeypatch, tmp_path):
@@ -53,8 +53,8 @@ def test_overview_page_rollup(monkeypatch, tmp_path):
     tr.create_tenant("beta")
     tr.suspend_tenant("beta")
     text = _client().get("/tenants/overview").text
-    assert "acme" in text and "Acme Inc" in text and "enterprise" in text
-    assert "done 1" in text and "pending 1" in text
+    assert "acme" in text and "Acme Inc" in text and "Enterprise" in text
+    assert "Done 1" in text and "Pending 1" in text
     assert "$1.25" in text
     assert "$100/day" in text
     # beta: suspended flag + no runs yet.
