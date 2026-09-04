@@ -665,6 +665,9 @@
     .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: var(--space-4); }
     /* Shared section header: an h2 with optional right-aligned count/action. */
     .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-2); }
+    /* Settings tabs and the in-page search toggle the hidden attribute on section heads;
+       the author-level display above would otherwise beat the UA [hidden] rule. */
+    .section-head[hidden] { display: none; }
     .section-head h2 { margin: 0; font-size: var(--text-lg); }
     .section-head h2:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) { .mv-toast, .mv-row, .card { animation: none; } }
