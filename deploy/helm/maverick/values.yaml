@@ -23,7 +23,8 @@ service:
 # Scale remote goal workers separately.
 replicaCount: 1
 
-# Persistent state (~/.maverick). Required for the default SQLite backend.
+# Persistent state (~/.maverick). Required with SQLite AND Postgres: approvals,
+# external-operation recovery, credentials, flow versions and audit remain local.
 persistence:
   enabled: true
   size: 10Gi
