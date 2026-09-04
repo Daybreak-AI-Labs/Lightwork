@@ -744,6 +744,16 @@ class UserSuitesIn(BaseModel):
     suites: list[str] = Field(default_factory=list, max_length=64)
 
 
+class TenantFeatureOverridesIn(BaseModel):
+    """Per-tenant feature overrides layered on top of the plan (admin only).
+
+    ``add`` grants features the plan lacks; ``remove`` revokes plan features.
+    A feature must not appear in both (rejected). Entries are validated against
+    the toggle catalog by the endpoint before persisting."""
+    add: list[str] = Field(default_factory=list, max_length=200)
+    remove: list[str] = Field(default_factory=list, max_length=200)
+
+
 class ClausePlaybookIn(BaseModel):
     """This deployment's own standard clause positions.
 

@@ -21,7 +21,7 @@ import math
 import os
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from ..file_lock import (
     atomic_read_text,
@@ -80,6 +80,12 @@ _BILLING_STATUSES = frozenset({BILLING_CURRENT, BILLING_PAST_DUE})
 # but callers now have to choose it rather than receiving it by omission.
 DEFAULT_TENANT_DAILY_DOLLARS = 5.0
 
+# Upper bound on each per-tenant feature-override list. A control-plane roster
+# edited by an operator should never carry an unbounded blob; a plan has only a
+# handful of features and the catalog a few dozen, so 200 is generous headroom
+# while keeping the record small.
+MAX_FEATURE_OVERRIDES = 200
+
 # Serializes the roster load-modify-save across threads in this process; the
 # cross_process_lock below extends that across processes (the registry is edited
 # from both the CLI and the dashboard, which are separate processes).
@@ -132,6 +138,13 @@ class TenantRecord:
     # here. Just a flag; the key bytes never touch the registry. Off => the
     # tenant uses the deployment-global provider key (unchanged behavior).
     byok: bool = False
+    # Per-tenant feature overrides layered ON TOP of the plan's entitlements:
+    # ``{"add": [feature, ...], "remove": [feature, ...]}`` (empty ``{}`` when
+    # unused). ``add`` grants features the plan lacks; ``remove`` revokes plan
+    # features. Resolved by :func:`maverick.billing.effective_features`
+    # (precedence: ``(plan | add) - remove``). Kept out of the serialized record
+    # entirely when empty, so tenants that never override stay byte-identical.
+    feature_overrides: dict[str, list[str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         out = {
@@ -149,6 +162,8 @@ class TenantRecord:
             out["billing_status"] = self.billing_status
         if self.byok:
             out["byok"] = self.byok
+        if self.feature_overrides:
+            out["feature_overrides"] = self.feature_overrides
         return out
 
     @classmethod
@@ -187,6 +202,19 @@ class TenantRecord:
         byok = d.get("byok", False)
         if not isinstance(byok, bool):
             raise ValueError("tenant byok must be a boolean")
+        raw_overrides = d.get("feature_overrides", {})
+        if raw_overrides in (None, ""):
+            raw_overrides = {}
+        if not isinstance(raw_overrides, dict):
+            raise ValueError("tenant feature_overrides must be an object")
+        unknown_keys = set(raw_overrides) - {"add", "remove"}
+        if unknown_keys:
+            raise ValueError(
+                f"tenant feature_overrides has unknown keys: {sorted(unknown_keys)}"
+            )
+        feature_overrides = _normalize_feature_overrides(
+            raw_overrides.get("add"), raw_overrides.get("remove")
+        )
         return cls(
             id=tenant_id, status=status, plan=plan,
             display_name=display_name, max_daily_dollars=cap,
@@ -194,6 +222,7 @@ class TenantRecord:
             stripe_customer_id=stripe_customer_id.strip(),
             billing_status=billing_status,
             byok=byok,
+            feature_overrides=feature_overrides,
         )
 
     @property
@@ -229,6 +258,53 @@ def _quota_value(value: object) -> float:
     if not math.isfinite(cap):
         raise ValueError("tenant quota must be a finite number")
     return max(0.0, cap)
+
+
+def _clean_feature_list(value: object, *, side: str) -> list[str]:
+    """Validate one override list (``add`` or ``remove``): strings only, no
+    blanks, deduped, sorted, capped. Raises ``ValueError`` on bad input."""
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"feature_overrides {side!r} must be a list")
+    if len(value) > MAX_FEATURE_OVERRIDES:
+        raise ValueError(
+            f"feature_overrides {side!r} exceeds the {MAX_FEATURE_OVERRIDES}-entry cap"
+        )
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"feature_overrides {side!r} entries must be strings")
+        name = item.strip()
+        if not name:
+            raise ValueError(f"feature_overrides {side!r} entries must be non-blank")
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    out.sort()
+    return out
+
+
+def _normalize_feature_overrides(add: object, remove: object) -> dict[str, list[str]]:
+    """Validate + normalize the per-tenant override lists into a canonical dict.
+
+    Returns ``{}`` when both lists are empty (so a tenant that never uses the
+    feature stays byte-identical on disk), else ``{"add": [...], "remove":
+    [...]}`` with sorted, deduped entries. A feature in BOTH lists is rejected
+    (rather than silently letting one win) so an operator's contradictory input
+    is surfaced instead of guessed."""
+    add_list = _clean_feature_list(add, side="add")
+    remove_list = _clean_feature_list(remove, side="remove")
+    overlap = sorted(set(add_list) & set(remove_list))
+    if overlap:
+        raise ValueError(
+            "feature_overrides: a feature must not be in both add and remove: "
+            + ", ".join(overlap)
+        )
+    if not add_list and not remove_list:
+        return {}
+    return {"add": add_list, "remove": remove_list}
 
 
 def _load() -> dict[str, TenantRecord]:
@@ -442,6 +518,22 @@ def set_byok(tenant_id: str, enabled: bool) -> TenantRecord:
     but no secret is configured, resolution falls back to the deployment-global
     key (never crashes). Off restores the global-key behavior."""
     return _mutate(tenant_id, byok=bool(enabled))
+
+
+def set_feature_overrides(
+    tenant_id: str, add: list[str], remove: list[str]
+) -> TenantRecord:
+    """Set the tenant's per-tenant feature overrides on top of its plan.
+
+    ``add`` grants features the plan does not include; ``remove`` revokes plan
+    features. The lists are validated (strings only, non-blank, deduped, capped
+    at :data:`MAX_FEATURE_OVERRIDES`) and a feature that appears in BOTH is
+    rejected. Persisted under the same in-process + cross-process lock and
+    atomic temp-file replace as the other setters. Passing two empty lists
+    clears any existing overrides. Raises :class:`ValueError` on invalid input
+    and :class:`UnknownTenant` for an unprovisioned tenant."""
+    overrides = _normalize_feature_overrides(add, remove)
+    return _mutate(tenant_id, feature_overrides=overrides)
 
 
 def get_tenant_by_stripe_customer(customer_id: str) -> TenantRecord | None:
@@ -929,13 +1021,15 @@ def tenant_remaining_today(tenant_id: str | None) -> float | None:
 
 
 __all__ = [
-    "ACTIVE", "SUSPENDED", "DEFAULT_TENANT_DAILY_DOLLARS", "TenantRecord",
+    "ACTIVE", "SUSPENDED", "DEFAULT_TENANT_DAILY_DOLLARS",
+    "MAX_FEATURE_OVERRIDES", "TenantRecord",
     "BILLING_CURRENT", "BILLING_PAST_DUE",
     "TenantSuspended", "UnknownTenant",
     "TenantRegistryError",
     "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
     "set_stripe_customer_id", "set_billing_status", "set_byok",
+    "set_feature_overrides",
     "get_tenant_by_stripe_customer",
     "is_active", "assert_tenant_active", "tenant_spend_today",
     "tenant_over_quota", "tenant_remaining_today",

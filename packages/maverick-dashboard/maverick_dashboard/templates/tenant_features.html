@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Features · {{ tenant.id }} · Lightwork{% endblock %}
+{% block content %}
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Administration', 'Feature overrides',
+               subtitle=tenant.display_name or tenant.id,
+               lede='Turn individual capabilities on or off for this workspace,
+                     on top of what its plan already grants. A checked box means
+                     the workspace has that capability. Boxes that match the plan
+                     need no override; the ones you change are stored as
+                     per-workspace overrides.') %}
+    {{ state('Current state',
+             on_count ~ ' feature' ~ ('' if on_count == 1 else 's') ~ ' enabled',
+             badge=tenant.plan ~ ' plan',
+             badge_class='ok',
+             copy='Plan (tier) sets the baseline; overrides are the exceptions
+                   you make for this one workspace. Removing a plan feature or
+                   granting one the plan lacks both persist here until changed.') }}
+  {% endcall %}
+
+  <div class="panel" style="margin-bottom: var(--space-3);">
+    <p class="muted" style="margin: 0;">
+      Workspace <code>{{ tenant.id }}</code> is on the <strong>{{ tenant.plan }}</strong>
+      plan. <a href="/tenants">Back to the roster</a>.
+    </p>
+  </div>
+
+  {% if is_admin %}
+  <form id="features-form" data-tenant-id="{{ tenant.id }}">
+    <div class="section-head"><h2>Capabilities</h2></div>
+    <div class="panel">
+      <fieldset style="border: 0; padding: 0; margin: 0;">
+        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-2);">
+          Cross-cutting features. A checked box is on for this workspace.</legend>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space-2);">
+          {% for r in caps %}
+          <label style="display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-1) 0;">
+            <input type="checkbox" name="feature" value="{{ r.feature }}"
+                   data-feature="{{ r.feature }}" data-in-plan="{{ '1' if r.in_plan else '0' }}"
+                   {% if r.on %}checked{% endif %}>
+            <span>
+              {{ r.label }}
+              {% if r.source == 'plan' %}<span class="badge ok">plan</span>
+              {% elif r.source == 'added' %}<span class="badge active">override on</span>
+              {% elif r.source == 'removed' %}<span class="badge warn">override off</span>{% endif %}
+              <br><code class="muted" style="font-size: var(--text-sm);">{{ r.feature }}</code>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    </div>
+
+    {% if depts %}
+    <div class="section-head"><h2>Departments</h2></div>
+    <div class="panel">
+      <fieldset style="border: 0; padding: 0; margin: 0;">
+        <legend class="muted" style="font-size: var(--text-sm); padding: 0 0 var(--space-2);">
+          Per-department access (<code>department:&lt;suite&gt;</code>). A checked box
+          lets this workspace deploy that department.</legend>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: var(--space-1);">
+          {% for r in depts %}
+          <label style="display: flex; gap: var(--space-2); align-items: baseline; padding: var(--space-1) 0;">
+            <input type="checkbox" name="feature" value="{{ r.feature }}"
+                   data-feature="{{ r.feature }}" data-in-plan="{{ '1' if r.in_plan else '0' }}"
+                   {% if r.on %}checked{% endif %}>
+            <span>
+              {{ r.label }}
+              {% if r.source == 'plan' %}<span class="badge ok">plan</span>
+              {% elif r.source == 'added' %}<span class="badge active">override on</span>
+              {% elif r.source == 'removed' %}<span class="badge warn">override off</span>{% endif %}
+              <br><code class="muted" style="font-size: var(--text-sm);">{{ r.feature }}</code>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    </div>
+    {% endif %}
+
+    <div class="panel" style="margin-top: var(--space-3); display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;">
+      <button type="submit" class="btn btn--primary">Save features</button>
+      <p id="features-msg" role="status" aria-live="polite" class="muted"
+         style="font-size: var(--text-sm); margin: 0;"></p>
+    </div>
+  </form>
+
+  <script>
+  (function () {
+    var form = document.getElementById('features-form');
+    var msg = document.getElementById('features-msg');
+    if (!form) return;
+    form.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var add = [], remove = [];
+      form.querySelectorAll('input[type="checkbox"][data-feature]').forEach(function (cb) {
+        var inPlan = cb.getAttribute('data-in-plan') === '1';
+        if (cb.checked && !inPlan) add.push(cb.getAttribute('data-feature'));
+        if (!cb.checked && inPlan) remove.push(cb.getAttribute('data-feature'));
+      });
+      msg.textContent = 'Saving…';
+      var tid = encodeURIComponent(form.getAttribute('data-tenant-id') || '');
+      try {
+        var r = await fetch('/api/v1/admin/tenants/' + tid + '/features', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ add: add, remove: remove }),
+        });
+        if (!r.ok) {
+          var j = await r.json().catch(function () { return {}; });
+          msg.textContent = j.detail || ('That did not work (error ' + r.status + ').');
+          return;
+        }
+        msg.textContent = 'Saved.';
+        setTimeout(function () { window.location.reload(); }, 350);
+      } catch (e) { msg.textContent = 'Connection lost — is the dashboard still running?'; }
+    });
+  })();
+  </script>
+  {% else %}
+  <div class="panel">
+    <p class="muted" style="margin: 0;">Operator (admin) access is required to
+      manage workspace features.</p>
+  </div>
+  {% endif %}
+{% endblock %}

@@ -154,6 +154,7 @@ from .api_schemas import (
     SpeakIn,
     TemplateIn,
     TenantCreateIn,
+    TenantFeatureOverridesIn,
     TenantOut,
     TenantPlanIn,
     TenantQuotaIn,
@@ -1095,6 +1096,58 @@ async def set_tenant_quota(
 
     _get_tenant_or_404(tenant_id)
     return _to_tenant_out(tenant_registry.set_quota(tenant_id, body.max_daily_dollars))
+
+
+@router.get("/admin/tenants/{tenant_id}/features")
+async def get_tenant_features(request: Request, tenant_id: str) -> dict:
+    """The tenant's plan features, its per-tenant overrides, the resolved
+    effective set, and the toggle catalog. Admin-only control-plane data."""
+    require_global_permission(request, "admin")
+    from maverick import billing
+
+    rec = _get_tenant_or_404(tenant_id)
+    overrides = getattr(rec, "feature_overrides", None) or {}
+    # plan_features is the *effective* baseline overrides apply on top of (the
+    # base tier when past-due), so effective == plan_features | add - remove.
+    return {
+        "plan": rec.plan,
+        "plan_features": sorted(billing.plan_features_for_tenant(tenant_id)),
+        "overrides": {
+            "add": list(overrides.get("add") or []),
+            "remove": list(overrides.get("remove") or []),
+        },
+        "effective": sorted(billing.effective_features(tenant_id)),
+        "catalog": billing.gateable_features(),
+    }
+
+
+@router.put("/admin/tenants/{tenant_id}/features")
+async def set_tenant_features(
+    request: Request,
+    tenant_id: str,
+    body: TenantFeatureOverridesIn,
+) -> dict:
+    """Replace the tenant's feature overrides. ``add``/``remove`` are validated
+    against the toggle catalog (unknown features rejected) and must not overlap;
+    the registry then persists them. Returns the new effective feature set."""
+    require_global_permission(request, "admin")
+    from maverick import billing
+    from maverick.tenant import registry as tenant_registry
+
+    _get_tenant_or_404(tenant_id)
+    catalog = set(billing.gateable_features())
+    unknown = sorted((set(body.add) | set(body.remove)) - catalog)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail="unknown feature(s) not in the catalog: " + ", ".join(unknown),
+        )
+    try:
+        tenant_registry.set_feature_overrides(tenant_id, body.add, body.remove)
+    except ValueError as exc:
+        # Overlap (a feature in both add and remove) or an over-long list.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"effective": sorted(billing.effective_features(tenant_id))}
 
 
 @router.delete("/admin/tenants/{tenant_id}", status_code=204)

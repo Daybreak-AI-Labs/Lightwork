@@ -121,7 +121,7 @@
           <tr>
             <th scope="col">tenant</th><th scope="col">status</th>
             <th scope="col">plan</th><th scope="col">quota</th>
-            <th scope="col">name</th>
+            <th scope="col">name</th><th scope="col">features</th>
           </tr>
         </thead>
         <tbody>
@@ -140,6 +140,7 @@
                 {% if t.max_daily_dollars %}${{ '%g' % t.max_daily_dollars }}/day{% else %}unlimited{% endif %}
               </td>
               <td class="muted">{{ t.display_name or '—' }}</td>
+              <td><a href="/tenants/{{ t.id | urlencode }}/features">Manage features</a></td>
             </tr>
           {% endfor %}
         </tbody>

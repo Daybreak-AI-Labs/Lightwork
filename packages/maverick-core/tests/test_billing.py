@@ -104,3 +104,84 @@ def test_tenant_entitled_reads_registered_plan(tmp_path):
     assert billing.tenant_entitled("acme", "nonexistent") is False
     # Unprovisioned tenant -> free.
     assert billing.tenant_entitled("ghost", "grpc") is False
+
+
+# ---- per-tenant feature overrides ------------------------------------------
+
+def test_override_add_grants_feature_beyond_plan():
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", plan="free")  # free => {"core"}
+    tr.set_feature_overrides("acme", ["channels", "department:finance"], [])
+    eff = billing.effective_features("acme")
+    assert "core" in eff  # still from the plan
+    assert "channels" in eff and "department:finance" in eff  # from the override
+    assert billing.tenant_entitled("acme", "channels") is True
+
+
+def test_override_remove_revokes_plan_feature():
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", plan="pro")  # pro => {core, grpc, channels}
+    tr.set_feature_overrides("acme", [], ["grpc"])
+    eff = billing.effective_features("acme")
+    assert "grpc" not in eff
+    assert {"core", "channels"} <= eff
+    assert billing.tenant_entitled("acme", "grpc") is False
+
+
+def test_feature_allowed_unchanged_for_no_tenant_and_unregistered():
+    # No active tenant (single-tenant / auth off) -> allowed.
+    assert billing.feature_allowed("grpc") is True
+    # A tenant not in the registry -> allowed (fail open), unchanged behaviour.
+    assert billing.feature_allowed("grpc", tenant="ghost") is True
+
+
+def test_feature_allowed_honours_overrides_for_registered_tenant():
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", plan="free")
+    assert billing.feature_allowed("channels", tenant="acme") is False
+    tr.set_feature_overrides("acme", ["channels"], [])
+    assert billing.feature_allowed("channels", tenant="acme") is True
+    # remove wins even over a plan feature.
+    tr.set_feature_overrides("acme", [], ["core"])
+    assert billing.feature_allowed("core", tenant="acme") is False
+
+
+def test_past_due_downgrade_still_wins_and_overrides_apply_on_top():
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", plan="enterprise")
+    tr.set_feature_overrides("acme", ["grpc"], ["core"])
+    tr.set_billing_status("acme", tr.BILLING_PAST_DUE)
+    eff = billing.effective_features("acme")
+    # Past-due downgrades enterprise -> free base {"core"}, then overrides apply:
+    # remove strips core, add restores grpc; enterprise-only features stay gone.
+    assert "audit_export" not in eff  # lost to the downgrade
+    assert "core" not in eff          # remove wins
+    assert "grpc" in eff              # add on top of the downgraded base
+    assert billing.tenant_entitled("acme", "audit_export") is False
+
+
+def test_plan_features_for_tenant_is_the_override_basis():
+    from maverick.tenant import registry as tr
+    tr.create_tenant("acme", plan="enterprise")  # includes audit_export
+    tr.set_feature_overrides("acme", ["department:legal"], ["audit_export"])
+    base = billing.plan_features_for_tenant("acme")
+    # The baseline excludes the overrides; the documented invariant holds.
+    assert "audit_export" in base and "department:legal" not in base
+    assert billing.effective_features("acme") == (base | {"department:legal"}) - {
+        "audit_export"
+    }
+    # Past-due downgrades the baseline itself to the free tier -- so a UI diff
+    # taken against it records no spurious remove for the lost features.
+    tr.set_billing_status("acme", tr.BILLING_PAST_DUE)
+    assert (
+        billing.plan_features_for_tenant("acme")
+        == billing.entitlements_for("free").features
+    )
+
+
+def test_gateable_features_catalog():
+    cat = billing.gateable_features()
+    assert cat[:4] == ["core", "channels", "audit_export", "grpc"]
+    assert "department:finance" in cat and "department:legal" in cat
+    # every entry past the base flags is a per-department gate.
+    assert all(f.startswith("department:") for f in cat[4:])

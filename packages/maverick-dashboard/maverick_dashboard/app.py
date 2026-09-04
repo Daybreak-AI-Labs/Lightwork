@@ -2991,6 +2991,80 @@ async def tenants_overview_api(request: Request) -> JSONResponse:
     return JSONResponse({"tenants": rows})
 
 
+def _feature_label(feature: str) -> str:
+    """A human-facing label for a catalog feature key. Departments read as
+    their business-suite title; the cross-cutting flags get short names."""
+    if feature.startswith("department:"):
+        from maverick.departments import department_title
+        return department_title(feature.split(":", 1)[1]) + " department"
+    return {
+        "core": "Core",
+        "channels": "Channels",
+        "audit_export": "Audit export",
+        "grpc": "gRPC API",
+    }.get(feature, feature)
+
+
+@app.get("/tenants/{tenant_id}/features", response_class=HTMLResponse)
+async def tenant_features_page(request: Request, tenant_id: str) -> HTMLResponse:
+    """Per-tenant feature overrides: toggle individual capabilities on/off on
+    top of the tenant's plan (tier).
+
+    Cross-tenant control-plane data, so admin-only exactly like ``/tenants``.
+    A checked box is a feature the tenant effectively has; each row shows whether
+    it comes from the plan or from an override. Saving posts the derived
+    ``add``/``remove`` overrides to ``PUT /api/v1/admin/tenants/{id}/features``.
+    """
+    require_global_permission(request, "admin")
+    from maverick import billing
+    from maverick.tenant.registry import get_tenant
+
+    rec = get_tenant(tenant_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="no such tenant")
+    # The diff basis MUST be the effective baseline overrides apply on top of
+    # (downgraded when past-due), not the subscribed plan -- otherwise saving a
+    # past-due tenant's page would record a spurious remove for every downgraded
+    # feature (and those persist past payment recovery).
+    plan_features = set(billing.plan_features_for_tenant(tenant_id))
+    effective = set(billing.effective_features(tenant_id))
+    caps: list[dict] = []
+    depts: list[dict] = []
+    on_count = 0
+    for feature in billing.gateable_features():
+        in_plan = feature in plan_features
+        is_on = feature in effective
+        if is_on:
+            on_count += 1
+        if in_plan and is_on:
+            source = "plan"
+        elif in_plan and not is_on:
+            source = "removed"
+        elif is_on:
+            source = "added"
+        else:
+            source = "off"
+        row = {
+            "feature": feature,
+            "label": _feature_label(feature),
+            "in_plan": in_plan,
+            "on": is_on,
+            "source": source,
+        }
+        (depts if feature.startswith("department:") else caps).append(row)
+    return templates.TemplateResponse(
+        request,
+        "tenant_features.html",
+        {
+            "tenant": rec,
+            "caps": caps,
+            "depts": depts,
+            "on_count": on_count,
+            "is_admin": True,
+        },
+    )
+
+
 @app.get("/skills", response_class=HTMLResponse)
 async def skills_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "skills.html", {"skills": _load_skills()})
