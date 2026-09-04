@@ -52,6 +52,43 @@ resource "aws_secretsmanager_secret_version" "anthropic_api_key" {
   }
 }
 
+# ---- OIDC browser login (Auth0) ----
+# Signs the dashboard's own session cookie after a successful OIDC login.
+# Terraform generates and owns this one.
+resource "random_password" "oidc_session_secret" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "oidc_session_secret" {
+  name                    = "${local.name}/oidc-session-secret"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "oidc_session_secret" {
+  secret_id     = aws_secretsmanager_secret.oidc_session_secret.id
+  secret_string = random_password.oidc_session_secret.result
+}
+
+# The Auth0 application client secret. Placeholder here so the task can
+# reference a stable ARN; the real value is written out-of-band (never in
+# Terraform state), e.g.:
+#   aws secretsmanager put-secret-value --secret-id lightwork-prod/oidc-client-secret \
+#     --secret-string '<auth0-client-secret>' --profile lightwork --region us-east-2
+resource "aws_secretsmanager_secret" "oidc_client_secret" {
+  name                    = "${local.name}/oidc-client-secret"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "oidc_client_secret" {
+  secret_id     = aws_secretsmanager_secret.oidc_client_secret.id
+  secret_string = "REPLACE_ME"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
 # Full Postgres DSN, assembled from the RDS endpoint. Alphanumeric password
 # means no URL-encoding is required.
 resource "aws_secretsmanager_secret" "pg_dsn" {

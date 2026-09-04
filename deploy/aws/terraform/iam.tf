@@ -6,6 +6,8 @@ locals {
     aws_secretsmanager_secret.pg_dsn.arn,
     aws_secretsmanager_secret.dashboard_token.arn,
     aws_secretsmanager_secret.anthropic_api_key.arn,
+    aws_secretsmanager_secret.oidc_session_secret.arn,
+    aws_secretsmanager_secret.oidc_client_secret.arn,
   ]
 }
 

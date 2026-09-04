@@ -1951,6 +1951,31 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         from .tenant_select_page import tenant_select_response
 
         return tenant_select_response(request, templates, detail=str(exc.detail))
+    if (
+        exc.status_code == 401
+        and _wants_html(request)
+        and request.method == "GET"
+    ):
+        # A browser navigating to a protected page with no valid session should
+        # land on the sign-in flow, not a static "sign in required" page. Only
+        # when a browser login provider is actually configured (OIDC); otherwise
+        # fall through to the branded page below (there is nowhere to send them).
+        try:
+            from maverick.oidc import login_enabled as _login_enabled
+
+            login_on = _login_enabled()
+        except Exception:  # pragma: no cover - never turn an auth error into a 500
+            login_on = False
+        if login_on:
+            from urllib.parse import quote
+
+            return_to = request.url.path
+            if request.url.query:
+                return_to = f"{return_to}?{request.url.query}"
+            return RedirectResponse(
+                f"/auth/login?return_to={quote(return_to, safe='')}",
+                status_code=302,
+            )
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {

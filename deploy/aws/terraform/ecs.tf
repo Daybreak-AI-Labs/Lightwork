@@ -38,15 +38,34 @@ resource "aws_ecs_task_definition" "app" {
         }
       ]
 
-      environment = [
-        { name = "MAVERICK_WORLD_BACKEND", value = "postgres" }
-      ]
+      environment = concat(
+        [{ name = "MAVERICK_WORLD_BACKEND", value = "postgres" }],
+        # Browser login via Auth0 (OIDC). Added only when an issuer is set, so
+        # an unconfigured stack stays on static-token auth. redirect_uri and
+        # audience are derived so there is one place to configure this.
+        var.oidc_issuer == "" ? [] : [
+          { name = "MAVERICK_OIDC_ENABLED", value = "1" },
+          { name = "MAVERICK_OIDC_ISSUER", value = var.oidc_issuer },
+          { name = "MAVERICK_OIDC_CLIENT_ID", value = var.oidc_client_id },
+          { name = "MAVERICK_OIDC_AUDIENCE", value = var.oidc_client_id },
+          { name = "MAVERICK_OIDC_REDIRECT_URI", value = "https://${var.domain_name}/auth/callback" },
+        ],
+        var.dashboard_admins == "" ? [] : [
+          { name = "MAVERICK_DASHBOARD_ADMINS", value = var.dashboard_admins },
+        ],
+      )
 
-      secrets = [
-        { name = "MAVERICK_PG_DSN", valueFrom = aws_secretsmanager_secret.pg_dsn.arn },
-        { name = "MAVERICK_DASHBOARD_TOKEN", valueFrom = aws_secretsmanager_secret.dashboard_token.arn },
-        { name = "ANTHROPIC_API_KEY", valueFrom = aws_secretsmanager_secret.anthropic_api_key.arn },
-      ]
+      secrets = concat(
+        [
+          { name = "MAVERICK_PG_DSN", valueFrom = aws_secretsmanager_secret.pg_dsn.arn },
+          { name = "MAVERICK_DASHBOARD_TOKEN", valueFrom = aws_secretsmanager_secret.dashboard_token.arn },
+          { name = "ANTHROPIC_API_KEY", valueFrom = aws_secretsmanager_secret.anthropic_api_key.arn },
+        ],
+        var.oidc_issuer == "" ? [] : [
+          { name = "MAVERICK_OIDC_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn },
+          { name = "MAVERICK_OIDC_SESSION_SECRET", valueFrom = aws_secretsmanager_secret.oidc_session_secret.arn },
+        ],
+      )
 
       logConfiguration = {
         logDriver = "awslogs"

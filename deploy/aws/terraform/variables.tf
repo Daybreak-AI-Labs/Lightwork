@@ -46,6 +46,28 @@ variable "health_check_path" {
   default     = "/livez"
 }
 
+# ---- OIDC browser login (Auth0) ----
+# Empty issuer disables the whole OIDC block (the dashboard stays on static-token
+# auth only). Set all three to turn on "Sign in" via Auth0. The client secret is
+# NOT a variable -- it is written straight into Secrets Manager out-of-band.
+variable "oidc_issuer" {
+  description = "OIDC issuer URL, e.g. https://dev-abc123.us.auth0.com/ (trailing slash). Empty disables browser login."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_id" {
+  description = "OIDC application client ID (Auth0 application). Also used as the ID-token audience."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_admins" {
+  description = "Comma-separated break-glass admin principals, e.g. user:auth0|abc123. These bypass all scoping. Set after first login once the principal's sub is known."
+  type        = string
+  default     = ""
+}
+
 variable "restrict_ingress_to_cloudflare" {
   description = "When true, the ALB only accepts traffic from Cloudflare's published IP ranges. Set this when the domain is proxied through Cloudflare (e.g. fronted by Cloudflare Access) so the public cannot bypass the edge by hitting the ALB directly. When false, the ALB is open to the internet."
   type        = bool
