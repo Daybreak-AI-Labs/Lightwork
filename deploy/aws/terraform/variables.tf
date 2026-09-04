@@ -34,6 +34,12 @@ variable "container_port" {
   default     = 8765
 }
 
+variable "domain_name" {
+  description = "Custom domain served over HTTPS (ACM cert + ALB 443 listener). Empty disables the cert/listener and leaves the stack HTTP-only on the ALB DNS name. DNS for this name is managed in Cloudflare, not Route 53."
+  type        = string
+  default     = "lightwork.daybreakailabs.com"
+}
+
 variable "health_check_path" {
   description = "ALB target-group health check path (deep liveness endpoint)."
   type        = string
