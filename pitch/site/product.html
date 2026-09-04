@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How Lightwork works: governed AI agents, every action audited</title>
-<meta name="description" content="How Lightwork works: every agent action clears one gate (capability, policy, shield, budget, audit) before it runs, and lands in a signed, hash-chained Operating Record you can verify offline. Cortex is the company brain it runs on. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.">
+<meta name="description" content="How Lightwork works: every agent action clears one governance gate &mdash; checked for scope, policy, safety, and budget &mdash; before it runs, and lands in a signed, hash-chained Operating Record you can verify offline. Cortex is the company brain it runs on. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="512x512" href="favicon-512.png">
@@ -12,7 +12,7 @@
 <meta name="theme-color" content="#04050A">
 <meta property="og:type" content="website">
 <meta property="og:title" content="How Lightwork works: governed AI agents, every action audited">
-<meta property="og:description" content="How Lightwork works: every agent action clears one gate (capability, policy, shield, budget, audit) before it runs, and lands in a signed, hash-chained Operating Record you can verify offline. Cortex is the company brain it runs on. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.">
+<meta property="og:description" content="How Lightwork works: every agent action clears one governance gate &mdash; checked for scope, policy, safety, and budget &mdash; before it runs, and lands in a signed, hash-chained Operating Record you can verify offline. Cortex is the company brain it runs on. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.">
 <meta property="og:image" content="https://daybreakailabs.com/og.png">
 <meta property="og:url" content="https://daybreakailabs.com/product">
 <meta name="twitter:card" content="summary_large_image">
@@ -47,7 +47,7 @@
       <span class="pill rv"><span class="dot"></span> Lightwork Platform &middot; how it works</span>
       <h1 class="rv d1">Every action clears <b>one gate</b> before it runs.</h1>
       <div class="dline rv d1" role="presentation"></div>
-      <p class="lede rv d2">Capability, policy, shield, budget, audit, in that order, on every tool call, every payment, every write, before it happens. What passes lands in a signed, hash-chained Operating Record you can verify offline. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.</p>
+      <p class="lede rv d2">Every action is checked for scope, policy, safety, and budget before it happens, on every tool call, every payment, every write. What passes lands in a signed, hash-chained Operating Record you can verify offline. Self-hosted, air-gapped, or hosted by Daybreak Labs: log in and go.</p>
       <div class="hero-cta rv d3">
         <a class="btn btn-primary" href="mailto:chris@daybreakailabs.com?subject=Request%20a%20Lightwork%20demo">Book a demo</a>
         <a class="btn btn-ghost" href="security.html">Security &amp; deployment</a>
@@ -81,15 +81,15 @@
   <div class="wrap">
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">01</span> The gate</span>
-      <h2>Capability, policy, shield, budget, audit, <b>in that order.</b></h2>
+      <h2>Every action is checked <b>before it runs.</b></h2>
       <p>Every action passes through this gate before it runs. An agent cannot do anything Lightwork didn't watch and record.</p>
     </div>
     <div class="gate rv">
-      <div class="stage"><div class="n">01</div><div class="t">Capability</div><div class="d">Attenuate-only tokens. An agent can narrow its rights, never widen them.</div></div>
+      <div class="stage"><div class="n">01</div><div class="t">Scope</div><div class="d">Every action is limited to the rights the task needs, and can never widen them.</div></div>
       <div class="stage"><div class="n">02</div><div class="t">Policy</div><div class="d">Allow, deny, or require a human, bound to every action.</div></div>
-      <div class="stage"><div class="n">03</div><div class="t">Shield</div><div class="d">Scans for the dangerous action and the prompt injection.</div></div>
+      <div class="stage"><div class="n">03</div><div class="t">Safety</div><div class="d">Screened for the dangerous action and the prompt injection.</div></div>
       <div class="stage"><div class="n">04</div><div class="t">Budget</div><div class="d">Hard caps on tokens, dollars, wall-clock, and tools.</div></div>
-      <div class="stage"><div class="n">05</div><div class="t">Audit</div><div class="d">A signed, hash-chained entry you can verify offline.</div></div>
+      <div class="stage"><div class="n">05</div><div class="t">Record</div><div class="d">A signed, hash-chained entry you can verify offline.</div></div>
     </div>
   </div>
 </section>
@@ -150,7 +150,7 @@
         </div>
       </div>
       <div class="term">
-        <div class="bar"><span class="chip">lightwork audit --verify</span><span>no network required</span></div>
+        <div class="bar"><span class="chip">audit &middot; verify offline</span><span>no network required</span></div>
         <div class="body">
           <div class="c"># offline verification of the chain</div>
           <div class="row"><span>read 0xA2 &rarr; 0xA4</span><span class="ok">&#10003; signatures valid</span></div>
@@ -193,14 +193,14 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">06</span> Provable learning</span>
       <h2>A workforce that <b>proves it improved.</b></h2>
-      <p>A closed, audited loop, off by default and reversible by snapshot. The harness rewrites itself, validates every edit for causal lift before it promotes it, and grades it on real outcomes once it ships. No change touches behavior on a hunch. What survives becomes a lesson in <a class="btn-link" href="cortex.html">Cortex</a>, where the next agent to face the same case finds it.</p>
+      <p>A closed, audited loop, off by default and reversible by snapshot. Every proposed change is validated for real, causal improvement before it is promoted, graded on real outcomes once it ships, and rolled back automatically if the lift doesn't hold. No change touches behavior on a hunch. What survives becomes a lesson in <a class="btn-link" href="cortex.html">Cortex</a>, where the next agent to face the same case finds it.</p>
     </div>
     <div class="cols cols-3">
-      <div class="card rv"><span class="idx">self-harness</span><h3>The harness rewrites itself</h3><p>It mines its own failure traces into one minimal guidance line per weakness, regression-tests it on a held-out corpus, and only then promotes it. A weakness learned for one model never leaks into another's harness.</p></div>
-      <div class="card rv d1"><span class="idx">canary</span><h3>Every learned change is a canary</h3><p>A promoted line ships watched, graded against real outcomes. It earns permanence from wins, or it is pulled automatically when it stops paying its way. Failures win ties.</p></div>
-      <div class="card rv d2"><span class="idx">evaluator</span><h3>Even the judge improves</h3><p>When the evaluator stops discriminating, a challenger can replace it, but only if it beats a checksum-locked, CI-enforced ground-truth anchor. Self-improvement can't grade its own homework.</p></div>
+      <div class="card rv"><span class="idx">proven</span><h3>Proven before it ships</h3><p>Every proposed change is tested for real, causal lift on work it hasn't seen before it is allowed to change behavior. Nothing ships on a hunch.</p></div>
+      <div class="card rv d1"><span class="idx">watched</span><h3>Watched after it ships</h3><p>A change ships watched and graded against real outcomes. It earns its place from wins, or it is pulled automatically when it stops paying its way. Failures win ties.</p></div>
+      <div class="card rv d2"><span class="idx">reversible</span><h3>Reversible, and it can't grade itself</h3><p>The whole loop is off by default and reversible by snapshot, and the judge that scores improvement is held to a locked benchmark, so self-improvement can never grade its own homework.</p></div>
     </div>
-    <p class="muted rv" style="margin-top:26px;font-size:16px">Underneath: offline consolidation (&ldquo;dreaming&rdquo;), the per-department memory in <a class="btn-link" href="cortex.html">Cortex</a> feeding a causal flywheel, and a deconfounded promotion gate that refuses to change behavior unless the effect survives a 64-permutation placebo test. Your fleet's own pass-vs-fail runs become preference-training data, with no hand-labeling. <code>lightwork prove-learning --strict</code> fails CI if a release can't show a significant lift.</p>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">The workforce's own pass-vs-fail runs, held in <a class="btn-link" href="cortex.html">Cortex</a>, are what a change is judged against, and a release can't ship unless the improvement survives a placebo control and clears the release gate in CI. The full learning architecture is covered in a technical deep-dive we share with design partners under NDA.</p>
   </div>
 </section>
 
@@ -210,14 +210,14 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">07</span> The library</span>
       <h2>The specialists, <b>already built.</b></h2>
-      <p>Turnkey departments of least-privilege specialist agents across finance, tax, legal, privacy, GRC, operations and more, every one of them running under the same five gates.</p>
+      <p>Turnkey departments of least-privilege specialist agents across finance, tax, legal, privacy, GRC, operations and more, every one of them running under the same governance gate.</p>
     </div>
     <div class="stats rv">
       <div class="s"><div class="big">Turnkey <b>departments</b></div><div class="lbl">finance, tax, legal, privacy, GRC, operations and more, each with a fixed job</div></div>
       <div class="s"><div class="big">Least <b>privilege</b></div><div class="lbl">a bounded persona, an allow-list, an explicit deny-list and a risk ceiling, per pack</div></div>
       <div class="s"><div class="big">Governed <b>deliverables</b></div><div class="lbl">typed, routed to a per-role inbox, certified by a human before release</div></div>
     </div>
-    <p class="muted rv" style="margin-top:26px;font-size:16px">Run <code>domains-lint</code> yourself: 0 errors, 0 warnings, across every specialist pack, on every build.</p>
+    <p class="muted rv" style="margin-top:26px;font-size:16px">Every specialist pack clears the same quality gate: 0 errors, 0 warnings, on every build.</p>
   </div>
 </section>
 
@@ -227,7 +227,7 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">08</span> What runs on it</span>
       <h2>One runtime. <b>The whole product line on top of it.</b></h2>
-      <p>Every product in the line is built on this runtime: the same five gates, the same Operating Record, the same company brain.</p>
+      <p>Every product in the line is built on this runtime: the same governance gate, the same Operating Record, the same company brain.</p>
     </div>
     <dl class="spec rv">
       <dt>The runtime</dt>
@@ -257,7 +257,7 @@
       <p>An analyst pack's work cites an authoritative source instead of recalling one. What it retrieves is kept in <a class="btn-link" href="cortex.html">Cortex</a> with its citation, so every answer says where it came from.</p>
     </div>
     <div class="cols cols-2">
-      <div class="card rv"><span class="idx">public data &middot; read-only</span><h3>37 public-data connectors, auto-granted</h3><p>Every analyst pack is auto-granted 37 read-only public-data connectors: SEC EDGAR, FRED, Treasury, FDIC, Census, BLS, CourtListener, the Federal Register, openFDA, ClinicalTrials, PubMed, NWS and NOAA, and more. Read-only and low-risk by default, with one kill-switch to turn it off.</p></div>
+      <div class="card rv"><span class="idx">public data &middot; read-only</span><h3>Dozens of public-data connectors, auto-granted</h3><p>Every analyst pack is auto-granted dozens of read-only public-data connectors, spanning public filings, economic and market data, federal registers, health and clinical data, and weather. Read-only and low-risk by default, with one kill-switch to turn it off.</p></div>
       <div class="card rv d1"><span class="idx">enterprise &middot; write-capable</span><h3>A deeper bench, behind approvals</h3><p>Write-capable enterprise connectors (Salesforce, ServiceNow, Stripe, Snowflake) sit behind confirm-gated approvals.</p></div>
     </div>
   </div>
@@ -269,11 +269,11 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">10</span> Proof</span>
       <h2>We don't say it's governed. <b>We show it.</b></h2>
-      <p>A live golden path refuses the dangerous action and leaves a receipt for every decision. One command signs an offline-verifiable evidence bundle.</p>
+      <p>A live golden path refuses the dangerous action and leaves a receipt for every decision. A single step signs an offline-verifiable evidence bundle.</p>
     </div>
     <div class="split rv" style="margin-top:48px">
       <div class="term">
-        <div class="bar"><span class="chip">lightwork golden-path</span><span>every row tamper-evident</span></div>
+        <div class="bar"><span class="chip">golden path</span><span>every row tamper-evident</span></div>
         <div class="body">
           <div class="row"><span>boot finance specialist</span><span class="seal">SEALED</span></div>
           <div class="row"><span>$60,000 wire</span><span class="deny">DENY</span></div>
@@ -283,7 +283,7 @@
         </div>
       </div>
       <div class="term">
-        <div class="bar"><span class="chip">lightwork proof-pack</span><span class="ok">&#9679; Ed25519 signed</span></div>
+        <div class="bar"><span class="chip">proof pack</span><span class="ok">&#9679; Ed25519 signed</span></div>
         <div class="body">
           <div class="c"># PROOF.md &middot; verifiable offline</div>
           <div class="row"><span>governance</span><span class="ok">&#10003; PASS</span></div>
@@ -321,11 +321,11 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">12</span> FinOps &amp; assurance</span>
       <h2>Cost and safety <b>you can assert in CI.</b></h2>
-      <p>Two commands and one view, so a pipeline can check spend and posture without opening a dashboard.</p>
+      <p>Two machine-readable reports and one view, so a pipeline can check spend and posture without opening a dashboard.</p>
     </div>
     <div class="cols cols-3">
-      <div class="card rv"><span class="idx">spend</span><h3>Run cost, exported</h3><p><code>lightwork spend --json</code> exports total, per-goal, and per-tag run cost for chargeback and BI.</p></div>
-      <div class="card rv d1"><span class="idx">safety</span><h3>Posture, asserted</h3><p><code>lightwork safety --json</code> prints shield status, sandbox isolation, and egress policy, so a pipeline can assert your deployment posture without opening a dashboard.</p></div>
+      <div class="card rv"><span class="idx">spend</span><h3>Run cost, exported</h3><p>A JSON spend report exports total, per-goal, and per-tag run cost for chargeback and BI.</p></div>
+      <div class="card rv d1"><span class="idx">safety</span><h3>Posture, asserted</h3><p>A machine-readable safety report prints shield status, sandbox isolation, and egress policy, so a pipeline can assert your deployment posture without opening a dashboard.</p></div>
       <div class="card rv d2"><span class="idx">billing</span><h3>Charges, itemized</h3><p>The billing view shows accrued charges, a period-over-period trend, and an itemized CSV invoice.</p></div>
     </div>
   </div>
@@ -343,7 +343,7 @@
       <dt>Where it runs</dt>
       <dd><b>Self-hosted, air-gapped, or hosted by Daybreak Labs.</b> Your VPC, a fully offline site, or infrastructure we run for you with tenant isolation and your own keys (KMS / BYOK).</dd>
       <dt>Packages</dt>
-      <dd><b>8 packages</b>.</dd>
+      <dd><b>Multiple packages</b>.</dd>
       <dt>Runs on</dt>
       <dd>Docker, K8s, or VPS.</dd>
       <dt>Surfaces</dt>
