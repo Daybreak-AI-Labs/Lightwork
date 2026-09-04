@@ -119,6 +119,14 @@ def _format_datetime(ts) -> str:
 
 
 templates.env.filters["datetime"] = _format_datetime
+# Human-friendly identities and roles: never show a raw OIDC sub or a lowercase
+# role slug in the UI. `identity` returns an object with .name/.detail/.raw/.kind.
+from . import identity_format as _idfmt  # noqa: E402
+
+templates.env.filters["identity"] = _idfmt.humanize_principal
+templates.env.filters["role_label"] = _idfmt.role_label
+templates.env.filters["permission_label"] = _idfmt.permission_label
+templates.env.filters["humanize"] = _idfmt.humanize
 # Make `theme` available unconditionally so templates rendered without
 # a Request object (rare; legacy paths) still resolve `theme or 'dark'`.
 templates.env.globals.setdefault("theme", "dark")
@@ -4917,6 +4925,17 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
     except Exception:
         tenant = "default"
 
+    # A human workspace name for the statement heading; fall back to the id.
+    tenant_label = tenant
+    try:
+        from maverick.tenant.registry import get_tenant
+
+        _rec = get_tenant(tenant)
+        if _rec and _rec.display_name:
+            tenant_label = _rec.display_name
+    except Exception:  # noqa: BLE001 - registry optional; label is cosmetic
+        pass
+
     if format == "csv":
         sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
         rows = [
@@ -4956,6 +4975,7 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
         "billing.html",
         {
             "tenant": tenant,
+            "tenant_label": tenant_label,
             "current": current,
             "previous": previous,
             "delta_pct": delta_pct,
