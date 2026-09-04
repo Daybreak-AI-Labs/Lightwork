@@ -113,7 +113,7 @@ def test_governance_hold_gets_source_label_on_approvals(monkeypatch, tmp_path):
     # The trusted governance hold is labelled so an operator can tell it apart,
     # and the spoofed ordinary hold does not create a second Art-14 badge.
     assert text.count("governance · Art 14") == 1
-    assert text.count(">consent</span>") == 1
+    assert text.count(">Consent</span>") == 1
     # Both holds still render in the queue.
     assert "shell" in text
     assert "rm-rf" in text

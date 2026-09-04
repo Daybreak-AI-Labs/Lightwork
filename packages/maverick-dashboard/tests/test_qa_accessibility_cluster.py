@@ -72,10 +72,10 @@ def test_extending_pages_leave_the_main_landmark_to_base(template_name: str) -> 
             "users.html",
             (
                 'aria-label="Delete {{ name }} role"',
-                'aria-label="Save role for {{ principal }}"',
-                'aria-label="Remove {{ principal }} user assignment"',
-                'aria-label="Save department access for {{ principal }}"',
-                'aria-label="Remove department override for {{ principal }}"',
+                'aria-label="Save role for {{ principal | identity }}"',
+                'aria-label="Remove {{ principal | identity }} user assignment"',
+                'aria-label="Save department access for {{ principal | identity }}"',
+                'aria-label="Remove department override for {{ principal | identity }}"',
             ),
         ),
         (
