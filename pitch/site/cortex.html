@@ -131,9 +131,9 @@
     <dl class="spec rv">
       <dt>Tenancy</dt><dd><b>Tenant-exact.</b> One tenant's Cortex is never read by, trained on, or aggregated with another's. No hivemind, no telemetry, no pooled data.</dd>
       <dt>Keys</dt><dd>Encrypted at rest with <b>your own keys</b> (KMS / BYOK). One tenant's key can never open another's.</dd>
-      <dt>Reads</dt><dd><b>Every read is audited</b> and roster-gated. Recall is an action that passes the same five gates as anything else.</dd>
+      <dt>Reads</dt><dd><b>Every read is audited</b> and roster-gated. Recall is an action that passes the same governance gate as anything else.</dd>
       <dt>Deployment</dt><dd><b>Self-hosted, air-gapped, or hosted by Daybreak Labs.</b> The same Cortex, the same gates, the same record; you choose where it lives.</dd>
-      <dt>Learning</dt><dd>Lessons are proven on held-out work before they ship, watched as canaries, and reversible. The evaluator itself only improves against a checksum-locked anchor.</dd>
+      <dt>Learning</dt><dd>Lessons are proven on held-out work before they ship, watched as canaries, and reversible. The evaluator that scores improvement is held to a locked benchmark, so it can't grade its own homework.</dd>
       <dt>Sharing</dt><dd>Cross-instance exchange is <b>opt-in, operator-run and signed</b>, and carries consolidated lessons only: never raw data, never automatic.</dd>
     </dl>
   </div>

@@ -45,7 +45,7 @@
 
 <!-- HERO: the stage -->
 <section class="hero stage">
-  <canvas class="neon" role="img" aria-label="Schematic: agent actions travel along circuit traces through five gates, capability, policy, shield, budget and audit, toward a sunrise. Actions that pass are signed; actions that fail stop at a gate."></canvas>
+  <canvas class="neon" role="img" aria-label="Schematic: agent actions travel along circuit traces through a governance gate that checks each action for scope, policy, safety and budget, toward a sunrise. Actions that pass are signed; actions that fail stop at a gate."></canvas>
   <div class="veil"></div>
   <div class="wrap">
     <div>
@@ -145,7 +145,7 @@
     </div>
     <div class="cols cols-3">
       <div class="card rv"><span class="idx">01</span><h3>Governance on every action</h3><p>Capability tokens, a policy engine, an egress lock, and a signed, hash-chained audit log, verifiable offline. Deep infrastructure, not a prompt over an API.</p></div>
-      <div class="card rv d1"><span class="idx">02</span><h3>Provable improvement</h3><p>Every change to the workforce is proven on held-out work before it ships, watched as a canary, and reversible. Even the evaluator only improves against a checksum-locked anchor. Every change audited.</p></div>
+      <div class="card rv d1"><span class="idx">02</span><h3>Provable improvement</h3><p>Every change to the workforce is proven on work it hasn't seen before it ships, watched after release, and reversible. Even the judge that scores improvement is held to a locked benchmark. Every change audited.</p></div>
       <div class="card rv d2"><span class="idx">03</span><h3>A workforce that arrives built</h3><p>Turnkey departments of specialist agents across finance, tax, legal, privacy, GRC, operations and more, each with a fixed job, least-privilege tools, and a human who signs off. Switch them on; don't prompt-engineer them.</p></div>
     </div>
     <p class="muted rv" style="margin-top:26px;font-size:16px">Six governance invariants (no drafting agent can reach a state-mutating tool, no child can out-scope its parent, hard refusals can't be stripped, budget caps can't be silently exceeded) are machine-checked across every specialist pack with a non-vacuous fault-injection control, property-fuzzed thousands of times per build.</p>
@@ -210,7 +210,7 @@
       <p>The platform, the brain it runs on, the specialist workforce, a governance plane for the agents you didn't build, bespoke builds for your operation, and two ways to move a whole function onto all of it.</p>
     </div>
     <div class="cols cols-3">
-      <a class="card prod rv" href="product.html"><span class="idx">01 &middot; Platform</span><h3>Lightwork Platform</h3><p>The governed runtime. Every agent action passes one gate: capability, policy, shield, budget, signed audit. Self-hosted, air-gapped, or hosted by Daybreak Labs.</p><span class="more">How it works &rarr;</span></a>
+      <a class="card prod rv" href="product.html"><span class="idx">01 &middot; Platform</span><h3>Lightwork Platform</h3><p>The governed runtime. Every agent action is checked for scope, policy, safety and budget before it runs, then signed into a tamper-evident record. Self-hosted, air-gapped, or hosted by Daybreak Labs.</p><span class="more">How it works &rarr;</span></a>
       <a class="card prod rv d1" href="cortex.html"><span class="idx">02 &middot; The company brain <span class="tagpill new">New</span></span><h3>Cortex</h3><p>The governed, tenant-exact memory the whole workforce reads from and writes to: your knowledge, decisions, lessons and the Operating Record. Never pooled across customers.</p><span class="more">Inside Cortex &rarr;</span></a>
       <a class="card prod rv d2" href="second-shift.html"><span class="idx">03 &middot; Specialist departments</span><h3>Second Shift</h3><p>Turnkey departments of specialist agents (finance, tax, legal, privacy, GRC and more), each with a fixed job, least-privilege tools, and a human who signs off.</p><span class="more">See the departments &rarr;</span></a>
       <a class="card prod rv" href="fleet-governance.html"><span class="idx">04 &middot; Govern any fleet</span><h3>Fleet Governance &amp; Memory</h3><p>Govern and learn from agents you didn't build: Agentforce, Copilot, in-house, open-source. They deposit into and recall from Cortex under the same audit.</p><span class="more">How it governs &rarr;</span></a>
@@ -227,11 +227,11 @@
     <div class="sec-head rv">
       <span class="eyebrow"><span class="n">08</span> Proof</span>
       <h2>We don't say it's governed. <b>We show it.</b></h2>
-      <p>One command signs an offline-verifiable evidence bundle. A live golden path refuses the dangerous action and leaves a receipt for every decision.</p>
+      <p>A single step signs an offline-verifiable evidence bundle. A live golden path refuses the dangerous action and leaves a receipt for every decision.</p>
     </div>
     <div class="split rv" style="margin-top:48px">
       <div class="term">
-        <div class="bar"><span class="chip">lightwork golden-path</span><span>every row tamper-evident</span></div>
+        <div class="bar"><span class="chip">golden path</span><span>every row tamper-evident</span></div>
         <div class="body">
           <div class="row"><span>boot finance specialist</span><span class="seal">SEALED</span></div>
           <div class="row"><span>$60,000 wire</span><span class="deny">DENY</span></div>
@@ -241,7 +241,7 @@
         </div>
       </div>
       <div class="term">
-        <div class="bar"><span class="chip">lightwork proof-pack</span><span style="color:var(--ok)">&#9679; Ed25519 signed</span></div>
+        <div class="bar"><span class="chip">proof pack</span><span style="color:var(--ok)">&#9679; Ed25519 signed</span></div>
         <div class="body">
           <div class="c"># PROOF.md &middot; verifiable offline</div>
           <div class="row"><span>governance</span><span class="ok">&#10003; PASS</span></div>
@@ -305,9 +305,9 @@
     </div>
     <div class="notes rv">
       <a class="note" href="product.html"><span class="kind">Benchmark</span><span><span class="ttl">Governance Frontier</span><span class="sum" style="display:block">A tracked benchmark of what the governance layer costs and what it catches, regenerated on every change to the control tree, and refused if the numbers drift from the code.</span></span><span class="go">&rarr;</span></a>
-      <a class="note" href="product.html"><span class="kind">Evaluation</span><span><span class="ttl">Harness overhead</span><span class="sum" style="display:block">How much latency and spend the five gates add to an action, measured against an ungoverned control, with the artifact committed beside the code that produced it.</span></span><span class="go">&rarr;</span></a>
-      <a class="note" href="product.html"><span class="kind">Quality gate</span><span><span class="ttl">Evaluator anchors</span><span class="sum" style="display:block">The evaluator that judges the workforce only improves against checksum-locked ground-truth anchors set in the build, so a weak or drifting judge can't launder a regression into a lift.</span></span><span class="go">&rarr;</span></a>
-      <a class="note" href="second-shift.html"><span class="kind">Quality gate</span><span><span class="ttl">domains-lint</span><span class="sum" style="display:block">Every specialist pack has a bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk ceiling: 0 errors, 0 warnings, on every build.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="product.html"><span class="kind">Evaluation</span><span><span class="ttl">Harness overhead</span><span class="sum" style="display:block">How much latency and spend the governance gate adds to an action, measured against an ungoverned control, with the artifact committed beside the code that produced it.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="product.html"><span class="kind">Quality gate</span><span><span class="ttl">Evaluator integrity</span><span class="sum" style="display:block">The evaluator that judges the workforce is held to a locked ground-truth benchmark, so a weak or drifting judge can't launder a regression into a lift.</span></span><span class="go">&rarr;</span></a>
+      <a class="note" href="second-shift.html"><span class="kind">Quality gate</span><span><span class="ttl">Pack quality gate</span><span class="sum" style="display:block">Every specialist pack has a bounded persona, a least-privilege allow-list, an explicit deny-list, and a risk ceiling: 0 errors, 0 warnings, on every build.</span></span><span class="go">&rarr;</span></a>
     </div>
   </div>
 </section>
