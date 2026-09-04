@@ -8,8 +8,6 @@ locals {
     aws_secretsmanager_secret.anthropic_api_key.arn,
     aws_secretsmanager_secret.oidc_session_secret.arn,
     aws_secretsmanager_secret.oidc_client_secret.arn,
-    aws_secretsmanager_secret.email_smtp_user.arn,
-    aws_secretsmanager_secret.email_smtp_password.arn,
   ]
 }
 
@@ -54,6 +52,23 @@ resource "aws_iam_role_policy" "task_execution_secrets" {
 resource "aws_iam_role" "task" {
   name               = "${local.name}-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_assume.json
+}
+
+# The app sends platform email (invite links) through the Amazon SES API using
+# this task role — no stored SMTP credential. Send-only; the verified identity
+# (daybreakailabs.com) is enforced by SES itself.
+data "aws_iam_policy_document" "task_ses" {
+  statement {
+    sid       = "SESSend"
+    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task_ses" {
+  name   = "ses-send"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.task_ses.json
 }
 
 # ---- CodeBuild role (build the image from S3 source, push to ECR, log) ----

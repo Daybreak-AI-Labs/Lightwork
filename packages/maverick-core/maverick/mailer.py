@@ -45,12 +45,19 @@ def _cfg(key: str, env: str, default: str = "") -> str:
 
 
 def configured() -> bool:
-    """True when a sending account is set up (user + app password present) and
-    the kill switch is off. The invite flow checks this to decide between
-    "emailed" and "copy this link" UX — never an error path."""
+    """True when a sending path is set up and the kill switch is off. The invite
+    flow checks this to decide between "emailed" and "copy this link" UX — never
+    an error path.
+
+    Two providers: ``smtp`` (default) needs ``EMAIL_USER`` + ``EMAIL_APP_PASSWORD``;
+    ``ses`` (``EMAIL_PROVIDER=ses``) sends via the Amazon SES API using the
+    ambient AWS role (no stored credential) and only needs a verified
+    ``EMAIL_FROM``."""
     import os
     if os.environ.get("MAVERICK_EMAIL_DISABLE") == "1":
         return False
+    if _cfg("provider", "EMAIL_PROVIDER", "smtp").lower() == "ses":
+        return bool(_cfg("from", "EMAIL_FROM"))
     return bool(_cfg("user", "EMAIL_USER") and _cfg("app_password", "EMAIL_APP_PASSWORD"))
 
 
@@ -61,6 +68,37 @@ def send(to: str, subject: str, body: str, *, transport=None) -> None:
     import os
     if os.environ.get("MAVERICK_EMAIL_DISABLE") == "1":
         raise MailerError("email send disabled by MAVERICK_EMAIL_DISABLE=1")
+
+    to = (to or "").strip()
+    subject = (subject or "").strip()
+    if not to or not subject:
+        raise MailerError("send requires a recipient and a subject")
+    # Reject CR/LF in header fields: a newline smuggles extra headers (e.g. a
+    # hidden Bcc:) into the message. Same guard as the email tool.
+    for field, val in (("to", to), ("subject", subject)):
+        if "\r" in val or "\n" in val:
+            raise MailerError(f"newline in email `{field}` (header injection blocked)")
+
+    provider = _cfg("provider", "EMAIL_PROVIDER", "smtp").lower()
+
+    # Amazon SES API path: sends with the ambient AWS role (the ECS task role) —
+    # no stored SMTP credential. The From must be a verified SES identity.
+    if provider == "ses":
+        from_addr = _cfg("from", "EMAIL_FROM")
+        if not from_addr:
+            raise MailerError("EMAIL_PROVIDER=ses requires EMAIL_FROM (a verified SES identity)")
+        if "\r" in from_addr or "\n" in from_addr:
+            raise MailerError("newline in email `from` (header injection blocked)")
+        try:
+            (transport or _ses_send)(from_addr, to, subject, body)
+        except MailerError:
+            raise
+        except Exception as e:  # noqa: BLE001 - surface a compact, typed failure
+            raise MailerError(f"ses send failed: {type(e).__name__}: {e}") from e
+        log.info("mailer.send(ses): %s subject=%r", to, subject)
+        return
+
+    # SMTP path (Gmail-style accounts, or any SMTP relay).
     user = _cfg("user", "EMAIL_USER")
     pw = _cfg("app_password", "EMAIL_APP_PASSWORD")
     if not user or not pw:
@@ -72,21 +110,9 @@ def send(to: str, subject: str, body: str, *, transport=None) -> None:
         port = int(port_raw)
     except ValueError as e:
         raise MailerError(f"bad smtp_port: {port_raw!r}") from e
-    to = (to or "").strip()
-    subject = (subject or "").strip()
-    if not to or not subject:
-        raise MailerError("send requires a recipient and a subject")
-    # Reject CR/LF in header fields: a newline smuggles extra headers (e.g. a
-    # hidden Bcc:) into the message. Same guard as the email tool.
-    for field, val in (("to", to), ("subject", subject)):
-        if "\r" in val or "\n" in val:
-            raise MailerError(f"newline in email `{field}` (header injection blocked)")
 
-    # From: an explicit EMAIL_FROM when set (required for providers like Amazon
-    # SES where the SMTP username is an access-key id, not a mailbox — the From
-    # must be a verified domain address). Falls back to the SMTP user, which is
-    # the address itself for Gmail-style accounts, so existing setups are
-    # unchanged.
+    # From: an explicit EMAIL_FROM when set, else the SMTP user (which is the
+    # address itself for Gmail-style accounts, so existing setups are unchanged).
     from_addr = _cfg("from", "EMAIL_FROM") or user
     if "\r" in from_addr or "\n" in from_addr:
         raise MailerError("newline in email `from` (header injection blocked)")
@@ -106,6 +132,30 @@ def send(to: str, subject: str, body: str, *, transport=None) -> None:
     except Exception as e:  # noqa: BLE001 - surface a compact, typed failure
         raise MailerError(f"smtp send failed: {type(e).__name__}: {e}") from e
     log.info("mailer.send: %s subject=%r", to, subject)
+
+
+def _ses_send(from_addr: str, to: str, subject: str, body: str) -> None:
+    """Send one plain-text email via the Amazon SES API using the ambient AWS
+    credential chain (on ECS, the task role). Region from ``AWS_REGION``. Needs
+    the optional ``boto3`` dependency (the ``[s3]`` extra), imported lazily so the
+    default SMTP path never requires it."""
+    import os
+    try:
+        import boto3
+    except ModuleNotFoundError as e:  # pragma: no cover - depends on install extra
+        raise MailerError(
+            "EMAIL_PROVIDER=ses needs boto3 (install the maverick-core [s3] extra)"
+        ) from e
+    client = boto3.client(
+        "ses",
+        region_name=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or None,
+        endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None,
+    )
+    client.send_email(
+        Source=from_addr,
+        Destination={"ToAddresses": [to]},
+        Message={"Subject": {"Data": subject}, "Body": {"Text": {"Data": body}}},
+    )
 
 
 def _smtp_transport(host: str, port: int, user: str, pw: str, msg) -> None:

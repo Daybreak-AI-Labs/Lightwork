@@ -60,9 +60,9 @@ resource "aws_ecs_task_definition" "app" {
           { name = "MAVERICK_DASHBOARD_INVITES", value = "1" },
         ] : [],
         var.email_enabled ? [
-          { name = "EMAIL_SMTP_HOST", value = var.email_smtp_host },
-          { name = "EMAIL_SMTP_PORT", value = var.email_smtp_port },
+          { name = "EMAIL_PROVIDER", value = "ses" },
           { name = "EMAIL_FROM", value = var.email_from },
+          { name = "AWS_REGION", value = var.region },
         ] : [],
       )
 
@@ -76,10 +76,6 @@ resource "aws_ecs_task_definition" "app" {
           { name = "MAVERICK_OIDC_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn },
           { name = "MAVERICK_OIDC_SESSION_SECRET", valueFrom = aws_secretsmanager_secret.oidc_session_secret.arn },
         ],
-        var.email_enabled ? [
-          { name = "EMAIL_USER", valueFrom = aws_secretsmanager_secret.email_smtp_user.arn },
-          { name = "EMAIL_APP_PASSWORD", valueFrom = aws_secretsmanager_secret.email_smtp_password.arn },
-        ] : [],
       )
 
       logConfiguration = {

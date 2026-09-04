@@ -13,3 +13,8 @@ dashboard_admins = "user:google-oauth2|115836816027351327475,user:auth0|6a9ad1a2
 
 # Invite-by-email flow on the /users page (accept -> Auth0 sign-in -> role bound).
 dashboard_invites = true
+
+# Platform email via the Amazon SES API using the task role (no SMTP credential).
+# SES domain identity daybreakailabs.com is verified; from noreply@daybreakailabs.com.
+email_enabled = true
+email_from    = "noreply@daybreakailabs.com"

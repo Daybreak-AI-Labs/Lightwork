@@ -69,27 +69,15 @@ variable "dashboard_admins" {
 }
 
 variable "email_enabled" {
-  description = "Wire the platform mailer (SES SMTP) into the task so invite emails actually send. Requires the SMTP user/password secrets to hold real values. Off until SMTP credentials are provisioned."
+  description = "Wire the platform mailer into the task so invite emails send via the Amazon SES API using the task role (no stored SMTP credential). Requires the SES domain identity to be verified and the task role to have ses:SendEmail (see iam.tf)."
   type        = bool
   default     = false
 }
 
 variable "email_from" {
-  description = "From address for platform emails (must be on the SES-verified domain)."
+  description = "From address for platform emails (must be a verified SES identity, e.g. on the verified domain)."
   type        = string
   default     = "noreply@daybreakailabs.com"
-}
-
-variable "email_smtp_host" {
-  description = "SES SMTP endpoint host."
-  type        = string
-  default     = "email-smtp.us-east-2.amazonaws.com"
-}
-
-variable "email_smtp_port" {
-  description = "SES SMTP port (465 = implicit TLS)."
-  type        = string
-  default     = "465"
 }
 
 variable "dashboard_invites" {
