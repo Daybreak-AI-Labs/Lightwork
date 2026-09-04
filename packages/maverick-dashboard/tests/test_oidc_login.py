@@ -375,6 +375,29 @@ def test_logout_clears_session(login_env, client):
     assert ol.SESSION_COOKIE in set_cookie
 
 
+def test_logout_redirects_to_idp_when_end_session_configured(
+    login_env, client, monkeypatch
+):
+    # With an end_session_endpoint, logout performs RP-initiated logout so the
+    # IdP's SSO session ends too -- otherwise the next /auth/login silently logs
+    # the user right back in ("logout doesn't work"). The local cookie is still
+    # cleared, and the browser is returned to the app origin the IdP allow-lists.
+    monkeypatch.setenv(
+        "MAVERICK_OIDC_END_SESSION_ENDPOINT",
+        "https://idp.example.com/oidc/logout",
+    )
+    resp = client.get("/auth/logout", follow_redirects=False)
+    assert resp.status_code == 303
+    parsed = urlparse(resp.headers["location"])
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == (
+        "https://idp.example.com/oidc/logout"
+    )
+    qs = parse_qs(parsed.query)
+    assert qs.get("client_id") == [CLIENT_ID]
+    assert qs.get("post_logout_redirect_uri") == ["http://testserver/"]
+    assert ol.SESSION_COOKIE in resp.headers.get("set-cookie", "")
+
+
 def test_logout_all_revokes_even_when_session_already_revoked(login_env, client):
     # Regression: "log out everywhere" must bump the epoch even if THIS session
     # was already revoked once -- otherwise other (newer) bearers survive.

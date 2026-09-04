@@ -41,6 +41,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import os
 import secrets
 import time
 from urllib.parse import urlencode, urlparse
@@ -561,6 +562,68 @@ def _is_same_origin_get(request: Request) -> bool:
     return False
 
 
+def _post_logout_redirect(cfg) -> str:
+    """Absolute URL the IdP returns the browser to after logout: the app origin.
+
+    Derived from the configured ``redirect_uri`` so it matches the deployment's
+    public host. It must be registered in the IdP's post-logout allow-list
+    (Auth0: *Allowed Logout URLs*); an unlisted URL makes the IdP reject the
+    logout, so we only send one we can derive deterministically.
+    """
+    ru = (getattr(cfg, "redirect_uri", "") or "").strip()
+    if not ru:
+        return ""
+    parsed = urlparse(ru)
+    if parsed.scheme not in ("https", "http") or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}/"
+
+
+def _configured_end_session_endpoint() -> str:
+    """The IdP ``end_session_endpoint`` (RP-initiated logout), from configuration.
+
+    Resolved from ``MAVERICK_OIDC_END_SESSION_ENDPOINT`` (env) or the
+    ``[auth.oidc].end_session_endpoint`` config key. Deliberately read here in the
+    dashboard package rather than added to :mod:`maverick.oidc`'s discovery: the
+    benchmark control-source snapshot hashes ``packages/maverick-core/maverick``,
+    so an OIDC field there would invalidate the signed harness-overhead /
+    governance-frontier manifests. ``https``-only; ``""`` when unset or not https.
+    """
+    value = (os.environ.get("MAVERICK_OIDC_END_SESSION_ENDPOINT") or "").strip()
+    if not value:
+        try:
+            from maverick.config import load_config
+
+            section = ((load_config() or {}).get("auth") or {}).get("oidc") or {}
+            value = str(section.get("end_session_endpoint", "") or "").strip()
+        except Exception:  # pragma: no cover - missing/unreadable config is not a session
+            value = ""
+    return value if value.lower().startswith("https://") else ""
+
+
+def _idp_logout_url(cfg) -> str | None:
+    """RP-initiated logout URL at the IdP, or ``None`` for local-only logout.
+
+    Clearing the local ``mvk_session`` cookie ends the *app* session but not the
+    IdP's own SSO session, so the next ``/auth/login`` silently re-authenticates
+    and the user is never actually logged out. When an ``end_session_endpoint`` is
+    configured (OIDC RP-initiated logout; Auth0's ``/oidc/logout``), send the
+    browser there after clearing the cookie so the IdP session ends too. Returns
+    ``None`` (prior local-only behaviour) when none is configured, so deployments
+    without one are unaffected.
+    """
+    end_session = _configured_end_session_endpoint()
+    if not end_session:
+        return None
+    params: dict[str, str] = {}
+    if getattr(cfg, "client_id", ""):
+        params["client_id"] = cfg.client_id
+    post_logout = _post_logout_redirect(cfg)
+    if post_logout:
+        params["post_logout_redirect_uri"] = post_logout
+    return end_session + ("?" + urlencode(params) if params else "")
+
+
 @router.get("/auth/logout")
 async def auth_logout(request: Request):
     """Clear the session cookie and return to ``/``.
@@ -573,6 +636,7 @@ async def auth_logout(request: Request):
     cleared regardless."""
     if not login_enabled():
         raise HTTPException(status_code=404)
+    cfg = load_oidc_config()
     if request.query_params.get("all") and _is_same_origin_get(request):
         # Derive the sub from the verified session payload DIRECTLY, not via
         # _principal_from_request_session -- that returns None for an
@@ -583,7 +647,11 @@ async def auth_logout(request: Request):
         if sub:
             from .session_revocation import revoke_principal
             revoke_principal(sub)
-    response = RedirectResponse("/", status_code=303)
+    # End the IdP's SSO session too (RP-initiated logout), not just the local
+    # cookie -- otherwise the next /auth/login silently re-authenticates and the
+    # user never actually logs out. Falls back to "/" when the IdP advertises no
+    # end_session_endpoint. The local cookie is cleared either way.
+    response = RedirectResponse(_idp_logout_url(cfg) or "/", status_code=303)
     _clear_cookie(response, SESSION_COOKIE)
     return response
 
