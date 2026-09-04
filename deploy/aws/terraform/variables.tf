@@ -68,6 +68,12 @@ variable "dashboard_admins" {
   default     = ""
 }
 
+variable "dashboard_invites" {
+  description = "Enable the dashboard's invite-by-email flow (the /users 'Invite someone by email' form and /auth/invite routes). With OIDC on, accepting an invite signs the invitee in via the IdP and binds their invited role."
+  type        = bool
+  default     = false
+}
+
 variable "restrict_ingress_to_cloudflare" {
   description = "When true, the ALB only accepts traffic from Cloudflare's published IP ranges. Set this when the domain is proxied through Cloudflare (e.g. fronted by Cloudflare Access) so the public cannot bypass the edge by hitting the ALB directly. When false, the ALB is open to the internet."
   type        = bool

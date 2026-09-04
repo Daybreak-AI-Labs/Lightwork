@@ -56,6 +56,9 @@ resource "aws_ecs_task_definition" "app" {
         var.dashboard_admins == "" ? [] : [
           { name = "MAVERICK_DASHBOARD_ADMINS", value = var.dashboard_admins },
         ],
+        var.dashboard_invites ? [
+          { name = "MAVERICK_DASHBOARD_INVITES", value = "1" },
+        ] : [],
       )
 
       secrets = concat(
