@@ -67,6 +67,9 @@ resource "aws_ecs_task_definition" "app" {
         var.flows_enabled ? [
           { name = "MAVERICK_FLOWS", value = "1" },
         ] : [],
+        var.data_use_enabled ? [
+          { name = "MAVERICK_DATA_USE_GOVERNANCE", value = "1" },
+        ] : [],
         var.email_enabled ? [
           { name = "EMAIL_PROVIDER", value = "ses" },
           { name = "EMAIL_FROM", value = var.email_from },
@@ -87,6 +90,13 @@ resource "aws_ecs_task_definition" "app" {
         ],
       )
 
+      # Durable ~/.maverick (tenant registry, roles, invites, saved flows,
+      # dashboard config). The Dockerfile runs as uid/gid 1000; the EFS access
+      # point pins the same identity so the non-root process can write.
+      mountPoints = [
+        { sourceVolume = "state", containerPath = "/home/maverick/.maverick", readOnly = false },
+      ]
+
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -97,6 +107,22 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
+
+  volume {
+    name = "state"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.state.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.state.id
+        iam             = "DISABLED"
+      }
+    }
+  }
+
+  # Keep superseded revisions registered so a rollback is one `update-service`
+  # away instead of "TaskDefinition is inactive".
+  skip_destroy = true
 }
 
 resource "aws_ecs_service" "app" {
@@ -106,9 +132,23 @@ resource "aws_ecs_service" "app" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
-  # The control plane is single-replica; replace rather than run two at once.
+  # Stop-then-start, deliberately. The kernel holds an exclusive control-plane
+  # lock on the data root (control_plane_lease.py) so exactly one writer ever
+  # touches the hash-chained ledgers under ~/.maverick. With that root on EFS a
+  # rolling deploy is impossible: the new task sees the old task's live lock and
+  # refuses to start (observed: "ControlPlaneBusy ... Exactly one may write this
+  # data root", rolled back by the circuit breaker). A deploy therefore has a
+  # short gap while the old task stops and the new one passes health checks;
+  # the circuit breaker restores the previous task definition if the new one
+  # fails to start.
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
+  platform_version                   = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     # Public subnets with a public IP so the task can reach ECR / Secrets

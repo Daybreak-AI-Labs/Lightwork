@@ -48,7 +48,7 @@
   <div class="section-head" data-settings-group="general"><h2>Appearance</h2></div>
   <div class="panel" data-settings-group="general">
     <p class="muted" style="margin-top: 0;">
-      Theme, density, font and language for this browser. Applies when you save.
+      Theme, density and font for this browser. Applies when you save.
     </p>
     <form method="get" action="/settings"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
@@ -78,18 +78,6 @@
           <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
           <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
         </select>
-      </label>
-      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
-        <span>Language</span>
-        <select class="ctl" name="lang">
-          <option value="en" {% if lang == 'en' %}selected{% endif %}>English (full content)</option>
-          <option value="fr" {% if lang == 'fr' %}selected{% endif %}>Français (navigation preview)</option>
-          <option value="de" {% if lang == 'de' %}selected{% endif %}>Deutsch (navigation preview)</option>
-          <option value="ja" {% if lang == 'ja' %}selected{% endif %}>日本語 (navigation preview)</option>
-          <option value="zh" {% if lang == 'zh' %}selected{% endif %}>中文 (navigation preview)</option>
-          <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية (partial navigation preview)</option>
-        </select>
-        <small class="muted">Language previews translate the display controls and this panel only; navigation and most page content remain English.</small>
       </label>
       <button type="submit" class="btn btn--primary">Apply</button>
     </form>

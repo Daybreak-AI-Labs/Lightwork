@@ -49,10 +49,15 @@ def test_base_layout_uses_logical_properties():
     assert "text-align: start" in css
 
 
-def test_lang_select_offers_arabic():
-    r = client.get("/")
-    assert 'value="ar"' in r.text
-    assert "العربية" in r.text
+def test_language_control_is_gone_but_lang_param_still_works():
+    """The language menu was removed from the chrome (it translated a handful
+    of labels, which read as a broken feature); the server-side ``?lang=``
+    contract and RTL handling stay for when a real translation ships."""
+    home = client.get("/")
+    assert 'id="lang-select"' not in home.text
+    assert 'data-ui-preference="lang"' not in home.text
+    r = client.get("/", params={"lang": "ar"})
+    assert 'dir="rtl"' in r.text and 'lang="ar"' in r.text
 
 
 def test_arabic_seed_is_partial_and_genuine():
@@ -70,7 +75,7 @@ def test_arabic_seed_is_partial_and_genuine():
     assert 0 < seeded < len(i18n.MESSAGES)  # partial by design
 
 
-def test_arabic_seed_strings_render_in_chrome():
-    r = client.get("/", params={"lang": "ar"})
-    # the language-select aria-label uses t('label.language')
-    assert "اللغة" in r.text
+def test_arabic_seed_strings_still_resolve_server_side():
+    # The chrome no longer renders label.language; the catalog entry itself
+    # remains the seed contract for the day the navigation is wired to t().
+    assert i18n.t("label.language", "ar") == "اللغة"

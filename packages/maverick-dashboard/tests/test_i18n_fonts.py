@@ -50,13 +50,16 @@ def test_lang_param_translates_chrome_and_sets_cookie():
     assert 'lang="ja"' in r2.text
 
 
-def test_language_selector_discloses_partial_translation_scope():
+def test_language_selector_is_not_rendered():
+    """Removed from the chrome and the Settings appearance form until the
+    navigation is actually translated; ``?lang=`` keeps working server-side."""
     r = client.get("/")
     assert r.status_code == 200
-    assert "Français (navigation preview)" in r.text
-    assert "العربية (partial navigation preview)" in r.text
-    assert "Most page content remains English" in r.text
-    assert 'aria-describedby="language-preview-note"' in r.text
+    assert "navigation preview" not in r.text
+    assert "language-preview-note" not in r.text
+    s = client.get("/settings")
+    assert 'name="lang"' not in s.text
+    assert "Language previews" not in s.text
 
 
 def test_font_axis_cookie_and_body_class():

@@ -92,6 +92,12 @@ variable "flows_enabled" {
   default     = false
 }
 
+variable "data_use_enabled" {
+  description = "Turn on the Data Use Governance module by setting MAVERICK_DATA_USE_GOVERNANCE=1 on the task (env-first, like flows_enabled). Off by default in the product."
+  type        = bool
+  default     = false
+}
+
 variable "restrict_ingress_to_cloudflare" {
   description = "When true, the ALB only accepts traffic from Cloudflare's published IP ranges. Set this when the domain is proxied through Cloudflare (e.g. fronted by Cloudflare Access) so the public cannot bypass the edge by hitting the ALB directly. When false, the ALB is open to the internet."
   type        = bool

@@ -3569,9 +3569,10 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
     from maverick import config
 
     try:
-        section = config.load_config().get("data_use_governance", {})
+        loaded = config.load_config()
+        section = loaded.get("data_use_governance", {})
     except Exception:
-        section = {}
+        loaded, section = {}, {}
     compiler = section.get("compiler") if isinstance(section, Mapping) else None
     from maverick.compliance_catalog import module_status
 
@@ -3579,7 +3580,7 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
         request,
         "data_use_governance.html",
         {
-            "data_use_enabled": (isinstance(section, Mapping) and section.get("enable") is True),
+            "data_use_enabled": config.data_use_governance_enabled(loaded),
             "data_use_compiler_enabled": (
                 isinstance(compiler, Mapping) and compiler.get("enable") is True
             ),

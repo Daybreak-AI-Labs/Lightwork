@@ -456,3 +456,17 @@ def test_env_file_recheck_is_throttled(monkeypatch):
         assert len(calls) == 2
     finally:
         cfg_mod.reset_config_cache()
+
+
+def test_data_use_governance_enabled_env_first_then_config(monkeypatch):
+    """MAVERICK_DATA_USE_GOVERNANCE wins; otherwise [data_use_governance] enable."""
+    from maverick.config import data_use_governance_enabled
+
+    monkeypatch.delenv("MAVERICK_DATA_USE_GOVERNANCE", raising=False)
+    assert data_use_governance_enabled({}) is False
+    assert data_use_governance_enabled({"data_use_governance": {"enable": True}}) is True
+    assert data_use_governance_enabled({"data_use_governance": {"enable": "yes"}}) is False
+    monkeypatch.setenv("MAVERICK_DATA_USE_GOVERNANCE", "1")
+    assert data_use_governance_enabled({}) is True
+    monkeypatch.setenv("MAVERICK_DATA_USE_GOVERNANCE", "0")
+    assert data_use_governance_enabled({"data_use_governance": {"enable": True}}) is False
