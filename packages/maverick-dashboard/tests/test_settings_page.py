@@ -44,7 +44,7 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
     assert "ArrowRight" in text and "ArrowLeft" in text
     assert "applySearch" in text
     assert "data-settings-search-item" in text
-    assert "most page content remains English" in text
+    assert "navigation and most page content remain English" in text
 
 
 def test_hidden_attribute_beats_author_display_rules():
@@ -65,6 +65,18 @@ def test_hidden_attribute_beats_author_display_rules():
     rule = re.search(r"(?<![\w.#-])\[hidden\]\s*\{([^}]*)\}", css)
     assert rule is not None, "global [hidden] reset missing from lightwork.css"
     assert re.search(r"display:\s*none\s*!important", rule.group(1))
+
+
+def test_light_theme_flips_the_root_color_scheme():
+    """The theme class is on <body>, but the UA canvas, scrollbars and native
+    controls follow color-scheme on the root, so Light must switch it there too."""
+    import re
+    from pathlib import Path
+    css = (Path(__file__).resolve().parents[1] / "maverick_dashboard"
+           / "static" / "lightwork.css").read_text(encoding="utf-8")
+    rule = re.search(r":root:has\(body\.theme-light\)\s*\{([^}]*)\}", css)
+    assert rule is not None
+    assert re.search(r"color-scheme:\s*light", rule.group(1))
 
 
 def test_settings_returns_to_section_that_was_saved(monkeypatch, tmp_path):

@@ -17,7 +17,7 @@
   /* Canvas view must STRETCH its columns: with align-items:start the canvas
      wrap collapses to its intrinsic (near-zero) height — the editor rendered
      as a 150px letterbox with new nodes spawning out of view. */
-  .fd[data-view="canvas"] .fdx-work { grid-template-columns: 168px 1fr 300px;
+  .fd[data-view="canvas"] .fdx-work { grid-template-columns: 168px minmax(360px, 1fr) 300px;
         align-items: stretch;
         height: calc(100vh - 230px); min-height: 460px; }
   .fd[data-view="canvas"] .fd__canvas-wrap { min-height: 0; }
@@ -26,8 +26,18 @@
      selection across the palette/props while wiring or moving nodes. */
   .fd__canvas-wrap, .fd__palette { user-select: none; -webkit-user-select: none; }
   @media (max-width: 900px) {
-    .fd[data-view="steps"] .fdx-work, .fd[data-view="canvas"] .fdx-work {
-      grid-template-columns: 1fr; height: auto; }
+    .fd[data-view="steps"] .fdx-work { grid-template-columns: 1fr; height: auto; }
+  }
+  /* Canvas view stacks earlier. Inside the app shell (248px sidebar, 48px main
+     padding) the middle track is narrower than the 320px copilot drawer from
+     ~1200px down, so the drawer overflowed the canvas' start edge and was
+     clipped ("…pilot" header, left-truncated messages). Stacked, the palette
+     wraps into a row and the canvas keeps a real height (a bare auto row
+     collapses the SVG to its 150px default). */
+  @media (max-width: 1240px) {
+    .fd[data-view="canvas"] .fdx-work { grid-template-columns: 1fr; height: auto; }
+    .fd[data-view="canvas"] .fd__palette { flex-direction: row; flex-wrap: wrap; }
+    .fd[data-view="canvas"] .fd__canvas-wrap { height: 60vh; min-height: 420px; }
   }
   .fdx-rail { display: flex; flex-direction: column; gap: var(--space-3); }
   .fdx-panel { background: var(--glass-soft); border: 1px solid var(--glass-border);
@@ -94,7 +104,7 @@
   .fd__chip:hover { border-color: var(--accent); color: var(--text); }
   .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
   /* breadcrumb: shown only while editing a nested sub-flow (foreach body / branch) */
-  .fd__crumbs { display: none; position: absolute; top: 8px; left: 8px; z-index: 2;
+  .fd__crumbs { display: none; position: absolute; top: 8px; inset-inline-start: 8px; z-index: 2;
                 background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
                 padding: 4px 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
                 overflow-x: auto; white-space: nowrap; }
@@ -114,13 +124,17 @@
   #fd-marquee { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent);
                 stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
   /* minimap (bottom-left overview; click to jump) */
-  .fd__minimap { position: absolute; left: 8px; bottom: 8px; z-index: 2; width: 160px; height: 110px;
+  .fd__minimap { position: absolute; inset-inline-start: 8px; bottom: 8px; z-index: 2; width: 160px; height: 110px;
                  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
                  opacity: .92; cursor: pointer; }
   .fd__minimap rect.mini-node { fill: var(--muted); }
   .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
-  /* copilot chat drawer (over the canvas' right edge) */
-  .fd__chat { display: none; position: absolute; top: 8px; right: 8px; bottom: 8px; width: 320px;
+  /* copilot chat drawer (over the canvas' end edge). Width tracks the canvas
+     column: min() keeps the drawer inside its container when the track is
+     narrower than 320px -- absolutely positioned, a fixed width overflowed the
+     clipped start edge instead of shrinking. */
+  .fd__chat { display: none; position: absolute; top: 8px; inset-inline-end: 8px; bottom: 8px;
+              width: min(320px, calc(100% - 16px)); max-width: calc(100% - 16px);
               z-index: 3; background: var(--surface); border: 1px solid var(--border);
               border-radius: var(--radius-lg); flex-direction: column; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.12)); }
   .fd__chat.on { display: flex; }

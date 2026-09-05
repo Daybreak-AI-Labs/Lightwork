@@ -143,7 +143,7 @@
         <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية (partial navigation preview)</option>
       </select>
           </label>
-          <small class="muted" id="language-preview-note">Language previews translate shared navigation and actions only. Most page content remains English.</small>
+          <small class="muted" id="language-preview-note">Language previews translate these display controls only. Most page content remains English.</small>
         </div>
       </details>
       {% if show_logout %}
@@ -202,9 +202,11 @@
     </nav>
   </aside>
   {# The finder is rendered from the same role-filtered registry as the
-     sidebar. Keep it outside the sidebar so a modal remains operable while
-     the mobile drawer is inert. JavaScript filters these existing links; it
-     never manufactures a destination. #}
+     sidebar, but it also indexes pages folded out of the rail (in_nav: False)
+     -- every destination the caller may open is searchable. Keep it outside
+     the sidebar so a modal remains operable while the mobile drawer is inert.
+     JavaScript filters these existing links; it never manufactures a
+     destination. #}
   <dialog class="navfinder" id="navfinder-dialog"
           aria-labelledby="navfinder-title" aria-describedby="navfinder-help">
     <div class="navfinder__head">
@@ -226,7 +228,7 @@
     </div>
     <p class="navfinder__count" id="navfinder-count" role="status" aria-live="polite" aria-atomic="true"></p>
     <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages">
-      {% for _group in nav_groups %}
+      {% for _group in finder_pages %}
         {% set _navfinder_group_index = loop.index0 %}
         {% for _link in _group.links %}
           <li role="none">

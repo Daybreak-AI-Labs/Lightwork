@@ -83,7 +83,11 @@ def _seeded_world():
          (20, 2, 100.0, 200.0, "bob-secret", 9.9, 1, 1, 1)],
     )
     conn.commit()
-    return types.SimpleNamespace(conn=conn)
+    # The export reads through the backend-portable ``query`` contract (SQLite
+    # paramstyle in, index+key rows out), which this stub mirrors on its sqlite.
+    return types.SimpleNamespace(
+        conn=conn, query=lambda sql, params=(): conn.execute(sql, tuple(params)).fetchall()
+    )
 
 
 def test_cost_csv_scoped_to_owner(monkeypatch):
@@ -270,6 +274,7 @@ def test_workforce_board_api_scoped_to_owner(monkeypatch):
     world.conn.execute(
         "CREATE TABLE goals (id INTEGER, owner TEXT, status TEXT, "
         "created_at REAL, updated_at REAL, domain TEXT)")
+    world.query = lambda sql, params=(): world.conn.execute(sql, tuple(params)).fetchall()
     monkeypatch.setattr(api_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "goal_owner_filter", lambda request: "user:alice")
 

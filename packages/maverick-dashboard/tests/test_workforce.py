@@ -84,6 +84,25 @@ def test_workforce_page_renders():
     assert "/workforce" in r.text
 
 
+def test_workforce_connector_search_is_race_safe():
+    """The connector search script must only render the latest response.
+
+    Regression: typing "slack" then "jira" rendered the slower, stale Slack
+    result because responses were not sequenced; a failed request also left
+    the previous list on screen with no error state.
+    """
+    html = client.get("/workforce").text
+    # Monotonic request id, compared before rendering (stale responses drop).
+    assert "connSearchSeq" in html
+    assert "if (seq !== connSearchSeq) return;" in html
+    # Failed request renders an error item instead of leaving stale results.
+    assert ".catch(" in html
+    assert "Could not search connectors right now." in html
+    # In-flight state is announced on the results list and cleared afterward.
+    assert 'results.setAttribute("aria-busy", "true")' in html
+    assert 'results.removeAttribute("aria-busy")' in html
+
+
 def test_workforce_distinguishes_catalog_from_deployment(monkeypatch):
     from maverick import connections, fleet
     from maverick.fleet import Fleet, FleetAgent

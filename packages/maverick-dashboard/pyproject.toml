@@ -43,4 +43,6 @@ include = ["maverick_dashboard*"]
 # wheel/PyInstaller bundle or `{% include "flow_designer_core.js" %}` raises
 # TemplateNotFound at render time (the page 500s in a built app while working
 # from a source checkout). Keep this glob covering every template file type.
-maverick_dashboard = ["templates/*.html", "templates/*.js", "static/*"]
+# setuptools globs do not cross "/": static/* alone left static/fonts/ out of
+# the wheel, so every page 404'd its web fonts and fell back to system fonts.
+maverick_dashboard = ["templates/*.html", "templates/*.js", "static/*", "static/fonts/*"]

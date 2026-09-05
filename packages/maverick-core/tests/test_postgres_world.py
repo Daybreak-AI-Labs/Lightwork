@@ -1686,3 +1686,38 @@ def test_erase_conversations_deletes_all_goal_child_rows(world):
     assert world.artifacts_for_goal(gid) == []
     assert world.share_links_for_goal(gid) == []
     assert world.signoffs_for_goals([gid]) == {}
+
+
+def test_query_rewrites_sqlite_paramstyle_and_buckets_days(world):
+    """The dashboard boards write SQLite-paramstyle SQL once and run it on
+    either backend; this is the live Postgres half of that contract."""
+    title = f"portable-{uuid.uuid4().hex[:8]}"
+    gid = world.create_goal(title, description="")
+    world.set_goal_status(gid, "done", result="ok")
+
+    rows = world.query(
+        "SELECT status, COUNT(*) AS n FROM goals WHERE id = ? GROUP BY status", (gid,)
+    )
+    assert len(rows) == 1
+    assert rows[0][0] == "done" and rows[0]["status"] == "done" and rows[0]["n"] == 1
+    (status, n), = rows
+    assert (status, n) == ("done", 1)
+
+    # A literal % (LIKE) alongside a placeholder must not be read as a marker.
+    like = world.query(
+        "SELECT COUNT(*) FROM goals WHERE id = ? AND COALESCE(owner, '') NOT LIKE 'agent:%'",
+        (gid,),
+    )
+    assert like[0][0] == 1
+
+    (day_row,) = world.query(
+        f"SELECT {world.sql_day_from_epoch('created_at')} AS day FROM goals WHERE id = ?", (gid,)
+    )
+    assert len(day_row["day"]) == 10 and day_row["day"][4] == "-"
+
+    # A failing statement must roll back and leave the shared connection usable.
+    import psycopg
+
+    with pytest.raises(psycopg.Error):
+        world.query("SELECT * FROM no_such_table_here WHERE id = ?", (1,))
+    assert world.query("SELECT COUNT(*) FROM goals WHERE id = ?", (gid,))[0][0] == 1

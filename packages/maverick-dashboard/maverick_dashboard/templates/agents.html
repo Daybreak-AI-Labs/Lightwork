@@ -229,11 +229,11 @@
           </datalist>
           {% if editable %}
           <span class="sub">or</span>
-          <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1" id="btn-new-agent">＋ New custom agent</a>
+          <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
           {% endif %}
         </div>
         {% elif editable %}
-        <a class="btn btn--primary" href="/agents?new=1" id="btn-new-agent">＋ New custom agent</a>
+        <a class="btn btn--primary" href="/agents?new=1#agent-form" id="btn-new-agent">＋ New custom agent</a>
         {% endif %}
       </div>
 
@@ -339,7 +339,7 @@
       </div>
       {% endif %}
       {% else %}
-      <p class="muted">Pick a specialist above to tailor it — or start a <a href="/agents?new=1">new custom agent</a>.</p>
+      <p class="muted">Pick a specialist above to tailor it — or start a <a href="/agents?new=1#agent-form">new custom agent</a>.</p>
       {% endif %}
     </div>
 
@@ -539,7 +539,7 @@
             .then(function (res) {
               if (!res.ok) { say((res.j && res.j.detail) || 'Drafting failed.', false); return; }
               sessionStorage.setItem('jd-draft', JSON.stringify(res.j.draft || {}));
-              location.href = '/agents?new=1';
+              location.href = '/agents?new=1#agent-form';
             })
             .catch(function () { say('Drafting failed — check your connection.', false); });
         });
