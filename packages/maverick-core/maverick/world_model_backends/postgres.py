@@ -798,6 +798,54 @@ def _pool_size() -> int:
         return 0
 
 
+def _to_pg_paramstyle(sql: str) -> str:
+    """Rewrite a SQLite-paramstyle statement for psycopg.
+
+    ``?`` placeholders outside single-quoted literals become ``%s``; every
+    literal ``%`` (``LIKE 'agent:%'``) is doubled, because psycopg treats ``%``
+    as the placeholder marker whenever parameters are passed -- inside string
+    literals too.
+    """
+    out: list[str] = []
+    in_literal = False
+    for ch in sql:
+        if ch == "'":
+            in_literal = not in_literal
+            out.append(ch)
+        elif ch == "%":
+            out.append("%%")
+        elif ch == "?" and not in_literal:
+            out.append("%s")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+class _PgRow(tuple):
+    """A psycopg tuple row that also answers ``row["column"]``.
+
+    ``WorldModel.query`` returns ``sqlite3.Row`` objects, which support index,
+    key and unpacking; this keeps the Postgres side interchangeable without
+    switching the shared connection's row factory.
+    """
+
+    _columns: dict[str, int]
+
+    @classmethod
+    def wrap(cls, row: tuple, columns: dict[str, int]) -> _PgRow:
+        obj = cls(row)
+        obj._columns = columns
+        return obj
+
+    def __getitem__(self, key):  # type: ignore[override]
+        if isinstance(key, str):
+            return tuple.__getitem__(self, self._columns[key])
+        return tuple.__getitem__(self, key)
+
+    def keys(self) -> list[str]:
+        return list(self._columns)
+
+
 def _tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
     """Read predicate scoping rows to the active tenant.
 
@@ -1785,6 +1833,31 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
         return {r[0]: int(r[1]) for r in rows}
+
+    # -- backend-portable raw reads (mirror of WorldModel.query) -------------
+
+    def query(self, sql: str, params: tuple | list = ()) -> list:
+        """Run a read-only statement written in SQLite paramstyle (``?``).
+
+        The statement is rewritten for psycopg (``%s``, ``%%``), executed inside
+        :meth:`_tx` (so it takes the connection lock, sets the tenant GUC and
+        rolls back on error instead of poisoning the shared connection), and
+        every row comes back as a tuple that also supports ``row["column"]``.
+        """
+        params = tuple(params)
+        with self._tx() as cur:
+            if params:
+                cur.execute(_to_pg_paramstyle(sql), params)
+            else:
+                cur.execute(sql)
+            columns = {d.name: i for i, d in enumerate(cur.description or ())}
+            rows = cur.fetchall()
+        return [_PgRow.wrap(r, columns) for r in rows]
+
+    def sql_day_from_epoch(self, column: str) -> str:
+        """UTC ``YYYY-MM-DD`` text for an epoch-seconds column -- the Postgres
+        spelling of SQLite's ``date(col, 'unixepoch')``."""
+        return f"to_char(to_timestamp({column}) AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
 
     def ping(self) -> bool:
         """Cheap liveness probe for ``/healthz`` -- confirms Postgres answers a
