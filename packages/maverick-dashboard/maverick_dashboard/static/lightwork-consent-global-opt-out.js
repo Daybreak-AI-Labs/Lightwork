@@ -153,7 +153,7 @@
       render(statusOutput, value);
       var ready = value && value.enabled === true && value.readiness && value.readiness.ready === true;
       runtimeStatus.textContent = ready
-        ? "Global Opt-Out composition is ready for this tenant."
+        ? "Global Opt-Out is ready for this workspace."
         : "Global Opt-Out is closed until its configured authorities are ready.";
       runtimeStatus.setAttribute("data-state", ready ? "ready" : "failed");
       operations.disabled = !ready;

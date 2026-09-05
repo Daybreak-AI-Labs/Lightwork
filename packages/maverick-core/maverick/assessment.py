@@ -4345,6 +4345,73 @@ def _rewrite_saved(
     return _public_assessment_record(refreshed) if refreshed is not None else None
 
 
+def answer_saved_question(
+    assessment_id: str,
+    question_id: str,
+    answer: str,
+    *,
+    note: str = "",
+    answered_by: str,
+    expected_revision: int,
+) -> dict | None:
+    """Record a human answer against a saved, pinned questionnaire draft.
+
+    Recompute the ordinary deterministic score without approving the record.
+    Prior answers (including their evidence metadata) remain in its history.
+    """
+    question = str(question_id or "").strip()
+    actor = str(answered_by or "").strip()
+    text = str(note or "").strip()
+    if not question or len(question) > 60 or not actor or len(actor) > 256:
+        raise ValueError("question and answer attribution are required")
+    if len(text) > 4000:
+        raise ValueError("answer note cannot exceed 4000 characters")
+    normalized_answer = str(answer or "").strip().lower()
+    if normalized_answer not in ANSWERS:
+        raise ValueError("answer must be yes, no, na, or unknown")
+
+    def _mutate(record: dict) -> None:
+        if record.get("status") not in ("pending_review", "needs_more"):
+            raise AssessmentTransitionError("Start a new assessment or reopen review before changing a decided assessment.")
+        if not record.get("template_snapshot"):
+            raise AssessmentTransitionError("Start a new assessment to use a pinned questionnaire.")
+        template = template_for_saved_record(record)
+        if template is None or template.question(question) is None:
+            raise ValueError("question is not part of this assessment’s pinned questionnaire")
+        answers = record.get("answers")
+        if not isinstance(answers, dict):
+            raise AssessmentStateError("saved assessment answers are invalid")
+        previous = answers.get(question)
+        if previous is not None and not isinstance(previous, dict):
+            raise AssessmentStateError("saved assessment answer is invalid")
+        if previous and previous.get("answer") == normalized_answer and previous.get("note", "") == text:
+            return
+        history = record.setdefault("answer_history", [])
+        if not isinstance(history, list) or len(history) >= 1000:
+            raise AssessmentTransitionError("Answer history is full; start a new assessment.")
+        change = {"question_id": question, "previous_answer": previous,
+                  "replaced_at_revision": record["revision"], "changed_by": actor,
+                  "changed_at": time.time()}
+        if record.get("risk_acceptance"):
+            change["superseded_risk_acceptance"] = record.pop("risk_acceptance")
+        history.append(change)
+        session = AssessmentSession(
+            id=record["id"], type=record["type"], subject=record["subject"],
+            answers=answers, template_snapshot=record["template_snapshot"],
+            template_revision=record["template_revision"], template_digest=record["template_digest"],
+        )
+        session.record(question, normalized_answer, text)
+        answers[question].update({"by": actor, "answered_at": time.time()})
+        record["result"] = asdict(session.evaluate())
+        record["status"] = "needs_more" if any(not f.get("answer") for f in record.get("followups", [])) else "pending_review"
+
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=_audit_receipt("ASSESSMENT_ANSWER_RECORDED", actor,
+                                    assessment=assessment_id, question_id=question),
+    )
+
+
 def add_followups(
     assessment_id: str,
     questions: list[str],
@@ -4582,13 +4649,33 @@ def answer_followup(
     hit = {"found": False}
 
     def _mutate(record: dict) -> None:
+        if record.get("status") not in ("pending_review", "needs_more"):
+            raise AssessmentTransitionError(
+                "Reopen review before changing a decided assessment."
+            )
         fups = record.get("followups") or []
         for f in fups:
             if f.get("id") == followup_id:
+                hit["found"] = True
+                if f.get("answer") == answer:
+                    return
+                if f.get("answer") or record.get("risk_acceptance"):
+                    history = record.setdefault("followup_answer_history", [])
+                    if not isinstance(history, list) or len(history) >= 1000:
+                        raise AssessmentTransitionError("Follow-up history is full; start a new assessment.")
+                    change = {
+                        "followup_id": followup_id,
+                        "previous_answer": {key: f.get(key) for key in ("answer", "answered_by", "answered_at")},
+                        "replaced_at_revision": record["revision"],
+                        "changed_by": answered_by,
+                        "changed_at": time.time(),
+                    }
+                    if record.get("risk_acceptance"):
+                        change["superseded_risk_acceptance"] = record.pop("risk_acceptance")
+                    history.append(change)
                 f["answer"] = answer
                 f["answered_by"] = answered_by
                 f["answered_at"] = time.time()
-                hit["found"] = True
         if hit["found"] and all(f.get("answer") for f in fups):
             record["status"] = "pending_review"
 
@@ -4954,6 +5041,8 @@ def list_saved() -> list[dict]:
                 "inherent_risk": res.get("inherent_risk", res.get("risk_rating", "?")),
                 "residual_risk": res.get("residual_risk", res.get("risk_rating", "?")),
                 "findings": len(res.get("findings", [])),
+                "answered": res.get("answered", 0),
+                "total": res.get("total", 0),
                 "created_at": data.get("created_at", 0),
                 "revision": revision,
                 "template_revision": data.get("template_revision"),

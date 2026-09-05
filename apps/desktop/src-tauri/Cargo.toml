@@ -22,7 +22,11 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+lightwork-desktop-runtime = { path = "../../desktop-runtime" }
 tauri = { version = "2", features = [] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 
 [features]
 default = ["custom-protocol"]

@@ -171,7 +171,7 @@
 
   async function refreshStatus() {
     readiness.textContent = "Checking…";
-    readinessDetail.textContent = "Loading the server-owned composition.";
+    readinessDetail.textContent = "Checking service availability.";
     statusBadge.className = "badge pending";
     statusBadge.textContent = "Checking";
     statusOutput.textContent = "";
@@ -182,7 +182,7 @@
       show(statusOutput, payload);
       if (payload.ready === true) {
         readiness.textContent = "Ready";
-        readinessDetail.textContent = "Operational readiness was explicitly verified for this tenant.";
+        readinessDetail.textContent = "Readiness was verified for this workspace.";
         statusBadge.className = "badge healthy";
         statusBadge.textContent = "Ready";
         operations.disabled = false;
@@ -198,7 +198,7 @@
         statusBadge.className = "badge warning";
         statusBadge.textContent = "Unready";
       } else {
-        readiness.textContent = "Needs composition";
+        readiness.textContent = "Setup incomplete";
         readinessDetail.textContent = "Enabled, but one or more server-owned authorities are missing.";
         statusBadge.className = "badge warning";
         statusBadge.textContent = "Unready";
@@ -385,7 +385,7 @@
         payload.new_key_ref = selected.new_key_ref;
         payload.expected_current_revision = positiveInteger(
           selected.expected_current_revision,
-          "Expected current revision"
+          "Current version"
         );
       } else if (selected.action === "retire_key" || selected.action === "revoke_key") {
         payload.key_revision = positiveInteger(selected.key_revision, "Key revision");

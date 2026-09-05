@@ -34,6 +34,7 @@ function fixture(fetchImpl) {
     flowInputs: [], saveInFlight: false, publishInFlight: false, runInFlight: false,
     applyInFlight: false, draftGeneration: 0, pendingDraft: null,
     snapshot: "unsaved draft", cleanDraft: null, description: { value: "First draft" },
+    sample: { value: "", focus() { this.focused = true; } }, testData: { open: false },
     proposals: { step: { to_kind: "agent" } },
     runState: {}, runCursor: null, lastRunId: null,
     commitRawFields() { return []; },
@@ -52,7 +53,8 @@ function fixture(fetchImpl) {
     load(...args) { loaded.push(args); },
     loadSuggestions() {}, loadSchema() {},
     document: { getElementById(id) {
-      if (id === "fd-sample") return { value: "" };
+      if (id === "fd-sample") return context.sample;
+      if (id === "fd-test-data") return context.testData;
       if (id === "fd-legend") return { classList: { add() {} } };
       if (id === "fd-nl") return context.description;
       return buttons.get(id);
@@ -170,6 +172,16 @@ test("a failed run request restores controls and preserves a useful server error
   assert.equal(ui.messages.at(-1).message, "Flow changed; reload it.");
   assert.equal(ui.messages.at(-1).error, true);
   assert.equal(ui.buttons.get("fd-run").disabled, false);
+});
+
+test("invalid advanced test data is revealed and focused before a test can run", () => {
+  const ui = fixture(async () => response({}));
+  ui.context.sample.value = "{ incomplete";
+  ui.context.run(true);
+  assert.equal(ui.calls.length, 0);
+  assert.equal(ui.context.testData.open, true);
+  assert.equal(ui.context.sample.focused, true);
+  assert.equal(ui.messages.at(-1).error, true);
 });
 
 function deferred() {

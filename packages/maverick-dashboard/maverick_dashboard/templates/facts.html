@@ -2,23 +2,37 @@
 {% block title %}Facts · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Facts</h1>
-  <p class="page-subtitle">Key–value facts Lightwork remembers across runs.</p>
-  <div class="panel">
+  <p class="page-subtitle">Details Lightwork remembers about your business across tasks.</p>
+  {% if can_create_goal %}
+  <section class="panel" aria-labelledby="fact-editor-title">
+    <h2 id="fact-editor-title">Add a fact</h2>
+    <form id="fact-editor">
+      <label for="fact-name">Name</label>
+      <input class="input" id="fact-name" required maxlength="200" placeholder="Business hours" autocomplete="off">
+      <label for="fact-detail">Detail</label>
+      <textarea class="input" id="fact-detail" required maxlength="20000" rows="3" placeholder="Monday to Friday, 9 am to 5 pm"></textarea>
+      <p class="muted">Facts are shared within this workspace. Keep access keys and other secrets out of these notes.</p>
+      <button class="btn btn--primary" id="fact-save" type="submit">Save fact</button>
+      <button class="btn btn--ghost" id="fact-cancel" type="button" hidden>Cancel edit</button>
+      <p id="fact-status" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+  {% endif %}
+  <section class="panel" aria-labelledby="fact-list-title">
+    <h2 id="fact-list-title">Saved facts</h2>
     {% if facts %}
-    <table>
-      <thead><tr><th scope="col">key</th><th scope="col">value</th></tr></thead>
+    <table id="fact-list">
+      <thead><tr><th scope="col">Name</th><th scope="col">Detail</th>{% if can_create_goal %}<th scope="col">Action</th>{% endif %}</tr></thead>
       <tbody>
       {% for k, v in facts.items() %}
-        <tr><td><code>{{ k }}</code></td><td>{{ v }}</td></tr>
+        <tr><td class="fact-key">{{ k }}</td><td class="fact-value" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ v }}</td>{% if can_create_goal %}<td><button class="btn btn--ghost" type="button" data-edit-fact aria-label="Edit {{ k }}">Edit</button></td>{% endif %}</tr>
       {% endfor %}
       </tbody>
     </table>
     {% else %}
-      <p class="muted">No facts yet. Lightwork remembers useful details here as it works on your goals.</p>
-      <details>
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: set a fact from the command line</summary>
-        <p class="muted" style="margin: var(--space-2) 0 0;">Set one with <code>maverick fact &lt;key&gt; &lt;value&gt;</code>.</p>
-      </details>
+      <p id="facts-empty" class="muted">No facts yet. Lightwork remembers useful details here as it works.</p>
+      <table id="fact-list" hidden><thead><tr><th scope="col">Name</th><th scope="col">Detail</th><th scope="col">Action</th></tr></thead><tbody></tbody></table>
     {% endif %}
-  </div>
+  </section>
 {% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-facts.js" defer></script>{% endblock %}

@@ -32,7 +32,10 @@ on the machine first** — the bootstrap installs it. This is why we shell
 out to the existing scripts instead of embedding a Python runtime: those
 scripts are already tested and are the single source of truth for "how
 to install" (winget/brew/apt, PATH, pipx, PEP 668). When the bootstrap
-finishes, the UI tells the user to run `maverick init` to configure.
+finishes, **Open Lightwork** launches the local dashboard in an app window for
+setup. Startup failures keep retry and bounded diagnostic output in the
+installer. The shared `apps/desktop-runtime` crate owns that launch; its source
+is included in the installer's commit-byte verification and provenance.
 
 ## Status
 

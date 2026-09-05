@@ -20,7 +20,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lightwork skill runner (Pyodide)</title>
+    <title>Compare sample answers · Lightwork</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 1.5rem; background: #0b0e14; color: #e6e6e6; }
       h1 { font-size: 1.1rem; }
@@ -32,14 +32,16 @@
     </style>
   </head>
   <body>
-    <h1>Lightwork skill on mobile: <code>disagreement.answer_entropy</code></h1>
+    <h1>Compare sample answers</h1>
     <p class="muted">
-      Runs the real pure-Python skill module
-      <code>packages/maverick-core/maverick/disagreement.py</code> in a
-      Pyodide (CPython-in-WASM) runtime, entirely in this browser.
+      Preview how Lightwork measures disagreement between answers. This demo
+      uses sample data and runs entirely in your browser.
     </p>
-    <button id="run" disabled>Loading Pyodide&hellip;</button>
-    <pre id="out">If this never becomes ready: vendor Pyodide first (see vendor/README.md).</pre>
+    <button id="run" disabled>Preparing demo&hellip;</button>
+    <pre id="out" role="status">Preparing the sample comparison.</pre>
+    <details><summary>Technical details</summary>
+      <pre id="diagnostics">Uses disagreement.answer_entropy with a locally installed Pyodide runtime. Installation instructions are in vendor/README.md.</pre>
+    </details>
 
     <!-- Locally vendored Pyodide only; committing a CDN hot-link is banned. -->
     <script src="./vendor/pyodide/pyodide.js"></script>
@@ -47,10 +49,12 @@
       var SKILL_MODULE = "../../../packages/maverick-core/maverick/disagreement.py";
       var out = document.getElementById("out");
       var btn = document.getElementById("run");
+      var diagnostics = document.getElementById("diagnostics");
 
       async function boot() {
         if (typeof loadPyodide === "undefined") {
-          out.textContent = "Pyodide is not vendored yet. Follow vendor/README.md, then reload.";
+          out.textContent = "This demo is not installed on this device. Ask your administrator to complete setup, then reload.";
+          btn.textContent = "Demo unavailable";
           return;
         }
         // indexURL must match the vendored layout.
@@ -59,9 +63,11 @@
         var src = await (await fetch(SKILL_MODULE)).text();
         pyodide.FS.writeFile("disagreement.py", src);
 
-        btn.textContent = "Run answer_entropy on sample fan-outs";
+        btn.textContent = "Compare sample answers";
         btn.disabled = false;
         btn.onclick = async function () {
+          btn.disabled = true;
+          try {
           var result = await pyodide.runPythonAsync(
             "import disagreement\n" +
             "cases = {\n" +
@@ -69,18 +75,28 @@
             "    'one dissenter': ['paris', 'paris', 'lyon'],\n" +
             "    'all unique':    ['paris', 'lyon', 'nice'],\n" +
             "}\n" +
-            "'\\n'.join(f'{k:>14}: entropy={disagreement.answer_entropy(v):.3f}'\n" +
+            "'\\n'.join(f'{k:>14}: difference={disagreement.answer_entropy(v):.3f}'\n" +
             "          for k, v in cases.items())"
           );
           out.textContent =
             result +
-            "\n\n(0 = proposers agree, 1 = every answer unique — the same " +
-            "signal the swarm's spawn machinery posts to the blackboard.)";
+            "\n\n0 means all answers agree. 1 means every answer is different.";
+          } catch (e) {
+            out.textContent = "The comparison could not finish. Try again or ask your administrator for help.";
+            diagnostics.textContent = "Comparison details: " + e;
+          } finally {
+            btn.disabled = false;
+          }
         };
-        out.textContent = "Ready. Pyodide " + pyodide.version + " booted from ./vendor/.";
+        out.textContent = "Ready. Compare the sample answers to see how much they differ.";
+        diagnostics.textContent = "Pyodide " + pyodide.version + " loaded from ./vendor/. Skill: disagreement.answer_entropy.";
       }
 
-      boot().catch(function (e) { out.textContent = "boot failed: " + e; });
+      boot().catch(function (e) {
+        out.textContent = "The demo could not start. Reload the page or ask your administrator for help.";
+        btn.textContent = "Demo unavailable";
+        diagnostics.textContent = "Startup details: " + e;
+      });
     </script>
   </body>
 </html>

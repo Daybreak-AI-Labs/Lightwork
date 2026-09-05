@@ -73,13 +73,13 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
     assert "AI evidence analysis" in response.text
     assert 'id="evidence-operations" disabled' in response.text
     assert "not legal advice, certification, or compliance conclusions" in response.text
-    assert "Raw artifact bytes are accepted only as a bounded request body" in response.text
-    assert "Extracted text is not persisted" in response.text
+    assert "Uploaded files are processed within size limits" in response.text
+    assert "Extracted text is not saved" in response.text
     assert "distinct authorized human" in response.text
-    assert "ephemeral process-memory zeroization is not guaranteed" in response.text
+    assert "Immediate erasure from processing memory is not guaranteed" in response.text
     assert "/api/v1/ai-evidence-analysis" in response.text
     assert "may be sent to that provider" in response.text
-    assert "Do not enter artifact contents, secrets, personal" in response.text
+    assert "Do not enter document contents, secrets, personal" in response.text
     assert 'aria-describedby="mv-copilot-egress"' in response.text
 
 
@@ -270,8 +270,8 @@ def test_client_uses_raw_file_body_without_persistent_or_html_injection_channels
     assert "forced-colors" in css
     assert "configured_for_operation_attempt" in source
     assert "operational_composition_verified" in source
-    assert "configured for an operation attempt" in source
-    assert "External Tesseract OCR was not detected" in source
+    assert "Evidence analysis is configured." in source
+    assert "Image text recognition is unavailable because OCR support is not installed" in source
     assert "enabled and composed for operations" not in source
     assert ".status-card > .governance-details" in css
     assert "Grounded in the current page" not in copilot_source

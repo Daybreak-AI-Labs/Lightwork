@@ -73,10 +73,10 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Govern bulk change, not just volume." in response.text
+    assert "Manage bulk consent changes" in response.text
     assert 'id="cbj-operations" disabled' in response.text
-    assert "store-free readiness endpoint" in response.text
-    assert "Credits are seeded once" in response.text
+    assert "Checking availability before enabling bulk actions" in response.text
+    assert "Checking status does not replenish job credits" in response.text
     assert 'data-api-base="/api/v1/consent/bulk-jobs"' in response.text
     assert 'data-copilot-page="/consent/bulk-jobs"' in response.text
     assert 'src="/static/lightwork-copilot.js"' in response.text

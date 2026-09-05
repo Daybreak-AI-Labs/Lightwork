@@ -16,18 +16,12 @@
 </style>
 
 <h1>Privacy Rights Orchestration</h1>
-<p>Exact-tenant control plane for rights requests, evidence, source work,
-  completeness-explicit manifests, response-package metadata, and closure.</p>
+<p>Coordinate privacy-rights requests from intake through evidence collection, response preparation, and closure. Keep missing evidence and incomplete source work visible.</p>
 <div class="pro-warning">
   <strong>Provider execution stays closed until the tenant source manifest,
     deployment subject authority, credential references, and encrypted retrieval
     custody are ready.</strong>
-  The stock worker supports Microsoft Graph, Google Workspace, Salesforce, and
-  ServiceNow discovery, retrieval, deletion, verification, retry, dead letter,
-  and ambiguity-safe reconciliation. Raw subject and external-request references
-  are replaced with tenant-keyed HMACs in orchestration state and are never
-  returned. This does not perform identity verification or response delivery,
-  prove estate completeness, or claim live provider/customer acceptance.
+  Supported integrations include Microsoft Graph, Google Workspace, Salesforce, and ServiceNow for discovery, retrieval, deletion, and verification. Original subject and external-request references are protected and are not returned here. This workflow does not verify a requester's identity, deliver a response, prove complete coverage, or establish successful operation with live providers or customers.
 </div>
 
 {% from "_module_gate.html" import module_gate %}
@@ -38,18 +32,18 @@
                        until it is on -- have your privacy owner review the
                        workflow first.') }}
 {% else %}
-<p><button class="btn" id="pro-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="pro-load-status" type="button">Check availability</button></p>
 <div class="pro-grid">
   <section class="panel pro-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and actor come only from the authenticated request. Unknown fields
       are rejected. After case opening, the browser clears the raw intake body.</p>
     <label>Operation
-      <select id="pro-operation">
+      <select id="pro-operation" data-guided-api="/api/v1/privacy/rights-orchestration">
         <option value="source-enroll" data-method="PUT" data-path="/sources/{source_id}">Source: enroll or revise</option>
         <option value="source-get" data-method="GET" data-path="/sources/{source_id}">Source: get</option>
         <option value="source-list" data-method="GET" data-path="/sources">Source: list</option>
-        <option value="case-open" data-method="PUT" data-path="/cases/{case_id}">Case: open raw-to-HMAC intake</option>
+        <option value="case-open" data-method="PUT" data-path="/cases/{case_id}">Case: open request</option>
         <option value="case-get" data-method="GET" data-path="/cases/{case_id}">Case: get</option>
         <option value="identity-evidence" data-method="POST" data-path="/cases/{case_id}/identity-verification">Case: identity evidence status</option>
         <option value="legal-hold" data-method="POST" data-path="/cases/{case_id}/legal-hold">Case: legal hold</option>
@@ -74,10 +68,10 @@
         <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
       </select>
     </label>
-    <label>Path values as JSON object
+    <label>Record references (JSON)
       <input class="input" id="pro-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="pro-body">{}</textarea>
     </label>
     <div class="pro-warning" id="pro-confirm-panel">
@@ -86,7 +80,7 @@
           retention, destructive-work, callback, or closure consequences.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="pro-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="pro-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>

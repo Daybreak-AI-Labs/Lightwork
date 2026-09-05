@@ -4,6 +4,7 @@ import React, { useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { BundleGoal, Goal, Settings, listGoals } from "../api";
+import { ConnectionNotice } from "../components/ConnectionNotice";
 import { offlineBanner, useCachedBundle } from "../offlineCache";
 import { usePolling } from "../poll";
 
@@ -39,7 +40,7 @@ export function RunsListScreen(props: {
       {offline && cached ? (
         <Text style={styles.banner}>{offlineBanner(cached)}</Text>
       ) : null}
-      {error && !offline ? <Text style={styles.error}>{error}</Text> : null}
+      {error && !offline ? <ConnectionNotice message={error} /> : null}
       <FlatList
         data={rows}
         keyExtractor={(g: Goal) => String(g.id)}
@@ -74,7 +75,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff8c5", color: "#4d2d00",
     padding: 8, textAlign: "center", fontSize: 13,
   },
-  error: { color: "#cf222e", padding: 8, fontSize: 13 },
   empty: { padding: 24, textAlign: "center", color: "#57606a" },
   row: {
     flexDirection: "row", alignItems: "center", gap: 10,

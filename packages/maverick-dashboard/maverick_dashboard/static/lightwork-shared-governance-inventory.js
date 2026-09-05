@@ -129,7 +129,7 @@
       state.dataset.state = ready ? (status.complete === true ? "ready" : "partial") : "failed";
       state.textContent = ready ? (status.complete === true ? "Complete" : "Partial") : "Unavailable";
       document.getElementById("sgi-health-title").textContent = ready ? "Inventory authority ready" : "Inventory authority unavailable";
-      document.getElementById("sgi-health-detail").textContent = ready ? "Every displayed item is pinned to the active immutable snapshot." : "Review the tenant feature gate, source authorities and integrity custody.";
+      document.getElementById("sgi-health-detail").textContent = ready ? "Every displayed item is pinned to the active immutable snapshot." : "Review workspace availability, source access, and record integrity.";
       var active = status.active && typeof status.active === "object" ? status.active : {};
       document.getElementById("sgi-revision").textContent = String(active.revision || 0);
       updateSourceCards(status.sources);

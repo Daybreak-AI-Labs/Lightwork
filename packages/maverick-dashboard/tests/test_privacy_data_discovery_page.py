@@ -60,17 +60,17 @@ def test_page_renders_full_operator_contract(page_client: TestClient) -> None:
     ):
         assert provider in response.text
     assert "Unsupported formats" in response.text
-    assert "Cooperative deadline" in response.text
-    assert "Remediation boundary" in response.text
-    assert "Managed retry boundary" in response.text
-    assert "remediation.scheduler.enable" in response.text
-    assert "Managed worker status is API-derived" in response.text
-    assert "durable retry outbox" in response.text
-    assert "Run leased scan — external side effect" in response.text
-    assert "Four-eyes approval" in response.text
-    assert "Run bounded outbox worker" in response.text
-    assert "List bounded remediation work" in response.text
-    assert "Reconcile exact data-map outcome" in response.text
+    assert "Timing limit" in response.text
+    assert "Where changes go" in response.text
+    assert "Automatic retries" in response.text
+    assert "remain off until enabled for this installation and workspace" in response.text
+    assert "Automatic update status" in response.text
+    assert "they do not scan providers or prove complete coverage" in response.text
+    assert "Run scan (contacts source)" in response.text
+    assert "Independent approval" in response.text
+    assert "Process queued updates" in response.text
+    assert "Review queued updates" in response.text
+    assert "Check an uncertain update" in response.text
     assert "verify integrity" in response.text
     assert "Purge expired reports" in response.text
     assert "Verify audit chain" in response.text

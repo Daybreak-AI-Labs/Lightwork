@@ -11,6 +11,11 @@
     return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
+  function confidenceLabel(basisPoints) {
+    return Number.isInteger(basisPoints) && basisPoints >= 0 && basisPoints <= 10000
+      ? String(basisPoints / 100) + "%" : "Not reported";
+  }
+
   function failure(message, code) {
     var error = new Error(message);
     error.code = code;
@@ -65,7 +70,7 @@
 
   function operationKey(value) {
     var selected = String(value || "").trim();
-    if (!OP_PATTERN.test(selected)) throw new Error("Idempotency key is invalid.");
+    if (!OP_PATTERN.test(selected)) throw new Error("Enter a valid request reference; reuse it only when retrying the same action.");
     return selected;
   }
 
@@ -115,12 +120,12 @@
       throw new Error(decision === "approve" ? "Select at least one eligible answer." : "Reject cannot select answers.");
     }
     var rationale = String(fields.rationale || "").trim();
-    if (!rationale || rationale.length > 4000) throw new Error("Review rationale is required and bounded to 4,000 characters.");
+    if (!rationale || rationale.length > 4000) throw new Error("Enter a reason for your decision using no more than 4,000 characters.");
     return {
       decision: decision,
       selected_question_ids: questions,
       rationale: rationale,
-      expected_revision: positiveInteger(fields.expected_revision, "Expected proposal revision"),
+      expected_revision: positiveInteger(fields.expected_revision, "Current proposal version"),
       idempotency_key: operationKey(fields.idempotency_key)
     };
   }
@@ -128,8 +133,8 @@
   function buildApplyPayload(fields) {
     if (fields.confirm !== true) throw new Error("Confirm the separate assessment write boundary.");
     return {
-      expected_revision: positiveInteger(fields.expected_revision, "Expected proposal revision"),
-      expected_assessment_revision: positiveInteger(fields.expected_assessment_revision, "Pinned assessment revision"),
+      expected_revision: positiveInteger(fields.expected_revision, "Current proposal version"),
+      expected_assessment_revision: positiveInteger(fields.expected_assessment_revision, "Assessment version being reviewed"),
       idempotency_key: operationKey(fields.idempotency_key)
     };
   }
@@ -145,7 +150,8 @@
         parseResponse: parseResponse,
         buildCreatePayload: buildCreatePayload,
         buildReviewPayload: buildReviewPayload,
-        buildApplyPayload: buildApplyPayload
+        buildApplyPayload: buildApplyPayload,
+        confidenceLabel: confidenceLabel
       })
     });
   }
@@ -217,7 +223,7 @@
       card.appendChild(title);
       addDefinitionList(card, [
         ["Proposed answer", candidate.answer],
-        ["Confidence", String(candidate.confidence_bps || 0) + " bps"],
+        ["Confidence", confidenceLabel(candidate.confidence_bps)],
         ["Eligible", candidate.eligible_for_apply === true ? "yes" : "no"],
         ["Flags", Array.isArray(candidate.flags) ? candidate.flags.join(", ") : "invalid"]
       ]);
@@ -234,7 +240,7 @@
         var check = document.createElement("input");
         var span = document.createElement("span");
         check.type = "checkbox"; check.name = "selected_question_ids"; check.value = candidate.question_id;
-        span.textContent = candidate.question_id + " — " + candidate.answer + " (" + candidate.confidence_bps + " bps)";
+        span.textContent = candidate.question_id + " — " + candidate.answer + " (" + confidenceLabel(candidate.confidence_bps) + ")";
         label.appendChild(check); label.appendChild(span); selection.appendChild(label);
       }
     });
@@ -268,7 +274,7 @@
   }
   function inspect(id) {
     return request("/proposals/" + encodeURIComponent(identifier(id, "Proposal ID"))).then(function (record) {
-      renderProposal(record); show(record, "Proposal loaded with bounded provenance."); return record;
+      renderProposal(record); show(record, "Proposal loaded with its evidence references."); return record;
     }).catch(showError);
   }
   function refreshList() { return request("/proposals?limit=100").then(renderQueue).catch(showError); }

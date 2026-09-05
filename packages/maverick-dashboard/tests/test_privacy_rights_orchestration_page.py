@@ -45,8 +45,8 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     assert "Privacy Rights Orchestration" in page
     assert "Provider execution stays closed" in page
     assert "Microsoft Graph, Google Workspace, Salesforce, and" in page
-    assert "ambiguity-safe reconciliation" in page
-    assert "never\n  returned" in page
+    assert "reconcile ambiguous deletes" in page
+    assert "protected and are not returned here" in page
     assert "/api/v1/privacy/rights-orchestration" in page
     for operation in (
         "source-enroll",

@@ -70,7 +70,7 @@
     <fieldset id="ga-operation-controls" disabled aria-disabled="true">
       <legend>Permission-scoped operations</legend>
       <label>Operation
-        <select id="ga-operation">
+        <select id="ga-operation" data-guided-api="/api/v1/governance-agents">
           {% if governance_can_admin %}
           <option value="policy-publish" data-status-key="policy_publish" data-method="PUT" data-path="/policies/{policy_id}" disabled>Policy: publish independently approved revision</option>
           <option value="policy-revoke" data-status-key="policy_revoke" data-method="POST" data-path="/policies/{policy_id}/revoke" disabled>Policy: revoke</option>

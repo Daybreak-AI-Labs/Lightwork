@@ -19,7 +19,7 @@
   .gb-field input { width: 100%; padding: 0.55rem 0.7rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 </style>
 <h1 class="page-title">Goal builder</h1>
-<p class="page-subtitle">Assemble a goal from building blocks — steps, a budget, a channel, a priority — then run it.</p>
+<p class="page-subtitle">Describe the steps, spending limit, and where you want updates, then start the work.</p>
 <div class="panel">
   <div class="gb-field" style="margin-bottom: 1rem;">
     <label for="gb-title">Goal title</label>
@@ -56,8 +56,8 @@
          style="display: none; margin: 0.75rem 0 0; color: var(--danger); font-size: 0.85rem;"></p>
       <p class="muted" style="font-size: 0.78rem;">
         Steps become a checklist in the goal description. Channel and priority
-        ride in the brief for the agent to act on; the budget block also
-        becomes the run's real spending cap.
+        are instructions for Lightwork to follow; the budget is also enforced
+        as the run's spending limit.
       </p>
     </div>
   </div>
@@ -185,7 +185,7 @@
     const parts = [];
     if (d.steps.length) parts.push("## Steps\n" + d.steps.map(function (s) { return "- [ ] " + s; }).join("\n"));
     const meta = [];
-    if (d.budget_dollars !== undefined && !isNaN(d.budget_dollars)) meta.push("Budget cap: $" + d.budget_dollars.toFixed(2) + " (also enforced as the run's max_dollars)");
+    if (d.budget_dollars !== undefined && !isNaN(d.budget_dollars)) meta.push("Spending limit: $" + d.budget_dollars.toFixed(2) + " (enforced for this run)");
     if (d.channel) meta.push("Announce progress on: " + d.channel);
     if (d.priority) meta.push("Priority: " + d.priority);
     if (meta.length) parts.push(meta.join("\n"));

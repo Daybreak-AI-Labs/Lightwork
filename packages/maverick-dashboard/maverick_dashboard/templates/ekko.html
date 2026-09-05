@@ -267,7 +267,7 @@
     if (control) {
       control.textContent = status.enabled ? 'Disable Ekko policy' : 'Enable Ekko policy';
       control.disabled = !!status.control_managed;
-      if (status.control_managed) setText('ekko-control-note', 'MAVERICK_EKKO owns this deployment-wide switch; the dashboard cannot override it.');
+      if (status.control_managed) setText('ekko-control-note', 'Your administrator manages this setting for the whole installation.');
     }
 
     var activeState = session ? session.state : '';

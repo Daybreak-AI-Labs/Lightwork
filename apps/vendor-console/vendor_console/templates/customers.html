@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Customers · Daybreak Console{% endblock %}
 {% block main %}
+{% from "_labels.html" import environment %}
 <div class="pagehead">
   <div>
     <h1>Customers</h1>
@@ -13,12 +14,12 @@
 
 <div class="card">
   <table>
-    <tr><th>Customer</th><th>Contact</th><th>Posture</th><th>Status</th></tr>
+    <tr><th>Customer</th><th>Contact</th><th>Environment</th><th>Status</th></tr>
     {% for c in customers %}
     <tr>
       <td><a href="/customers/{{ c.id }}"><strong>{{ c.name }}</strong></a></td>
       <td class="muted">{{ c.contact_email or '—' }}</td>
-      <td class="muted">{{ c.posture }}</td>
+      <td class="muted">{{ environment(c.posture) }}</td>
       <td><span class="badge b-{{ c.status }}">{{ c.status }}</span></td>
     </tr>
     {% endfor %}
@@ -34,11 +35,11 @@
       <div><label for="console-customers-name">Name</label><input id="console-customers-name" name="name" required></div>
       <div><label for="console-customers-contact_email">Contact email</label><input id="console-customers-contact_email" name="contact_email" type="email"></div>
       <div><label for="console-customers-primary_contact">Primary contact</label><input id="console-customers-primary_contact" name="primary_contact"></div>
-      <div><label for="console-customers-posture">Environment posture</label>
+      <div><label for="console-customers-posture">Customer environment</label>
         <select id="console-customers-posture" name="posture">
-          <option value="connected">Connected (egress to the console)</option>
-          <option value="vpc">Change-controlled VPC</option>
-          <option value="airgapped">Air-gapped (hand-delivered files)</option>
+          <option value="connected">{{ environment('connected') }}</option>
+          <option value="vpc">{{ environment('vpc') }}</option>
+          <option value="airgapped">{{ environment('airgapped') }}</option>
         </select>
       </div>
     </div>

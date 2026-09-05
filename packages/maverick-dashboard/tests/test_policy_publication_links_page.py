@@ -43,12 +43,12 @@ def test_operator_page_renders_full_safe_contract(page_client: TestClient) -> No
     assert response.status_code == 200
     assert "Policy Publication Links" in response.text
     assert "Four eyes" in response.text
-    assert "Stable link and current pointer" in response.text
-    assert "Schedule and bounded worker" in response.text
-    assert "Manual lease and retry" in response.text
+    assert "Choose the published version" in response.text
+    assert "Schedule publication" in response.text
+    assert "Process or retry scheduled work" in response.text
     assert "Audit, access, retention, integrity" in response.text
     assert "not live customer" in response.text
-    assert "tenant-isolated SQLite" in response.text
+    assert "Production use still requires encrypted storage" in response.text
     assert "performs no outbound network call" in response.text
     assert 'type="password"' in response.text
     assert "/api/v1/policy-publication-links" in response.text

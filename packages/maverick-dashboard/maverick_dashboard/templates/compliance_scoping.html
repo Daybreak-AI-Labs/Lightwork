@@ -16,9 +16,7 @@
 </style>
 
 <h1>Technology Risk &amp; Compliance Scoping</h1>
-<p>Exact-tenant control plane for closed questionnaires, deterministic scope
-  computation, responsibility assignment, overlaps, crosswalks, and signed
-  local exports.</p>
+<p>Answer scoping questions, identify applicable controls, assign responsibilities, and compare overlapping requirements. Export the results for review.</p>
 <div class="cs-warning">
   <strong>No licensed framework text, legal advice, external discovery,
     certification, network I/O, provider writes, or live acceptance.</strong>
@@ -35,14 +33,14 @@
                        and signed local exports stay off until your compliance
                        owner approves this workbench.') }}
 {% else %}
-<p><button class="btn" id="cs-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="cs-load-status" type="button">Check availability</button></p>
 <div class="cs-grid">
   <section class="panel cs-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and actor come only from the authenticated request. Unknown fields,
       free-text framework or evidence content, and key values are rejected.</p>
     <label>Operation
-      <select id="cs-operation">
+      <select id="cs-operation" data-guided-api="/api/v1/compliance/scoping">
         <option value="questionnaire-create" data-method="PUT" data-path="/questionnaires/{questionnaire_id}/versions">Questionnaire: create immutable version</option>
         <option value="questionnaire-get" data-method="GET" data-path="/questionnaires/{questionnaire_id}/versions/{version}">Questionnaire: get version</option>
         <option value="questionnaire-publish" data-method="POST" data-path="/questionnaires/{questionnaire_id}/versions/{version}/publish">Questionnaire: independent publish</option>
@@ -63,10 +61,10 @@
         <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
       </select>
     </label>
-    <label>Path values as JSON object
+    <label>Record references (JSON)
       <input class="input" id="cs-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="cs-body">{}</textarea>
     </label>
     <div class="cs-warning" id="cs-confirm-panel">
@@ -75,7 +73,7 @@
           finalization, or retention-purge consequences and the exact revision.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="cs-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="cs-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>

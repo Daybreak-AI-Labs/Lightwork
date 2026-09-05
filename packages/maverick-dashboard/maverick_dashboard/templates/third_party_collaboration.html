@@ -37,12 +37,12 @@
   <button class="btn" id="tpc-list" type="button">List invitations</button></p>
 <div class="tpc-grid">
   <section class="panel tpc-stack">
-    <h2>Governed operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and actor come only from the authenticated dashboard session.
       Unknown fields, raw files, credentials, provider decisions, and scoring
       rules are rejected.</p>
     <label>Operation
-      <select id="tpc-operation">
+      <select id="tpc-operation" data-guided-api="/api/v1/third-party/collaboration">
         <option value="issue" data-method="POST" data-path="/invitations">Issue invitation</option>
         <option value="get" data-method="GET" data-path="/invitations/{invitation_id}">Get invitation</option>
         <option value="rotate" data-method="POST" data-path="/invitations/{invitation_id}/rotate">Rotate credential</option>
@@ -57,7 +57,7 @@
     <label>Path values as JSON
       <input class="input" id="tpc-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="tpc-body">{}</textarea>
     </label>
     <div class="tpc-warning tpc-danger">

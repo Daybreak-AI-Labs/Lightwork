@@ -299,19 +299,17 @@
       <p class="aet-kicker">AI governance operations</p>
       <h1 class="aet-title" id="aet-title">AI entity tasks</h1>
       <p class="aet-lede">
-        Assign review and remediation work to an exact, revision-pinned AI inventory
-        entity. Every lifecycle change is tenant-bound, compare-and-swap protected,
-        idempotent, and retained in an integrity-linked history.
+        Assign review and remediation work to an AI inventory item. Track its owner, progress, and due date, with a verified history of changes.
       </p>
     </div>
     <div class="aet-runtime" aria-labelledby="aet-runtime-title">
-      <p class="aet-kicker" id="aet-runtime-title">Tenant runtime</p>
+      <p class="aet-kicker" id="aet-runtime-title">Availability</p>
       <div class="aet-runtime__row">
         <strong class="aet-runtime__value" id="aet-readiness">Checking…</strong>
         <span class="aet-status-mark" id="aet-status-mark" data-state="checking">Checking</span>
       </div>
       <p class="aet-muted" id="aet-readiness-detail" role="status" aria-live="polite">
-        Reading the store-free server status before enabling controls.
+        Checking availability before enabling actions.
       </p>
       <button class="btn" id="aet-refresh-status" type="button">Refresh status</button>
     </div>
@@ -319,11 +317,11 @@
 
   <aside class="aet-boundary" aria-labelledby="aet-boundary-title">
     <p class="aet-kicker">Authority boundary</p>
-    <h2 id="aet-boundary-title">The inventory authority remains server-owned</h2>
+    <h2 id="aet-boundary-title">Work from the current inventory record</h2>
     <ul>
-      <li>The browser selects only an inventory entity ID and exact revision; the server independently resolves its current authority and digest.</li>
-      <li>Tenant, authenticated actor, authority issuer, validity window, revocation state, retention policy, and storage path never come from this page.</li>
-      <li>A task response exposes the pinned authority digest for verification; callers cannot supply or override it.</li>
+      <li>Select the inventory item and version you reviewed. Lightwork checks that the item is current before saving a task.</li>
+      <li>Your workspace, identity, permissions, and retention rules are verified automatically.</li>
+      <li>Each task keeps a verification fingerprint linking it to the reviewed inventory record.</li>
       <li>Local readiness and integrity results do not prove live provider, customer, regulator, or certification acceptance.</li>
     </ul>
   </aside>
@@ -332,11 +330,11 @@
     <div class="aet-head">
       <div>
         <p class="aet-kicker">Readiness first</p>
-        <h2 id="aet-status-title">Server composition</h2>
+        <h2 id="aet-status-title">Service availability</h2>
       </div>
     </div>
     <details>
-      <summary>Runtime composition details</summary>
+      <summary>Technical details</summary>
       <pre class="aet-output" id="aet-status-output" tabindex="0"></pre>
     </details>
   </section>
@@ -394,8 +392,8 @@
 
       <section class="aet-card" aria-labelledby="aet-create-title">
         <p class="aet-kicker">Create · operator</p>
-        <h2 id="aet-create-title">Create exact-entity work</h2>
-        <p class="aet-help">Use the entity ID and revision shown by AI Inventory. Current authority is re-resolved by the server before creation.</p>
+        <h2 id="aet-create-title">Create a review or remediation task</h2>
+        <p class="aet-help">Use the item ID and version shown in AI Inventory. Lightwork checks them before creating the task.</p>
         <form class="aet-form" id="aet-create-form" autocomplete="off" novalidate>
           <fieldset class="aet-permission" id="aet-create-controls"{% if not task_can_operate %} disabled aria-disabled="true"{% endif %}>
             <legend class="sr-only">Create an AI entity task</legend>
@@ -403,7 +401,7 @@
               <label>Inventory entity ID
                 <input class="input" name="entity_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required>
               </label>
-              <label>Exact entity revision
+              <label>Entity version being reviewed
                 <input class="input" name="entity_revision" type="number" min="1" max="2147483647" step="1" required>
               </label>
               <label>Task kind
@@ -436,7 +434,7 @@
             <label>Due date <span class="aet-muted">Optional, tenant server time remains authoritative</span>
               <input class="input" name="due_at" type="datetime-local" step="1">
             </label>
-            <label>Idempotency key
+            <label>Request reference (reuse when retrying)
               <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
             </label>
             <button class="btn btn--primary" type="submit">Create task</button>
@@ -448,7 +446,7 @@
       <section class="aet-card" aria-labelledby="aet-update-title">
         <p class="aet-kicker">Lifecycle · operator</p>
         <h2 id="aet-update-title">Update selected task</h2>
-        <p class="aet-help">Load a current task to pin its exact revision. Select only fields that should change.</p>
+        <p class="aet-help">Load the current task, then select only the fields you want to change.</p>
         <form class="aet-form" id="aet-update-form" autocomplete="off" novalidate>
           <fieldset class="aet-permission" id="aet-update-controls"{% if not task_can_operate %} disabled aria-disabled="true"{% endif %}>
             <legend class="sr-only">Update an AI entity task</legend>
@@ -456,7 +454,7 @@
               <label>Task ID
                 <input class="input" name="task_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required>
               </label>
-              <label>Expected revision
+              <label>Current version
                 <input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required>
               </label>
               <label>Status
@@ -509,10 +507,10 @@
                 <input class="input" name="due_at" type="datetime-local" step="1" aria-label="New due date">
               </span>
             </div>
-            <label>Idempotency key
+            <label>Request reference (reuse when retrying)
               <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required>
             </label>
-            <button class="btn btn--primary" type="submit">Apply revision-pinned update</button>
+            <button class="btn btn--primary" type="submit">Save changes</button>
           </fieldset>
         </form>
         {% if not task_can_operate %}<p class="aet-help">Operator permission is required to update tasks.</p>{% endif %}
@@ -530,7 +528,7 @@
             <button class="btn" id="aet-load-history" type="button">Load history</button>
           </div>
         </form>
-        <p class="aet-help">History is available to viewers and preserves each exact authority-bound revision.</p>
+        <p class="aet-help">Viewers can inspect the history of each saved version.</p>
       </section>
 
       <section class="aet-card aet-card--third" aria-labelledby="aet-audit-title">
@@ -557,7 +555,7 @@
             </label>
             <label class="aet-confirmation">
               <input name="confirmation" type="checkbox" required>
-              <span>I understand that only terminal, retention-due tasks are eligible and immutable tombstones preserve replay protection.</span>
+              <span>I understand this permanently removes only completed or dismissed tasks whose retention period has ended. A deletion record is retained.</span>
             </label>
             <button class="btn btn--danger" type="submit">Purge retention-due tasks</button>
           </fieldset>
@@ -574,7 +572,7 @@
     </div>
   </fieldset>
 
-  <noscript><p class="aet-boundary">JavaScript is required for this bounded, API-backed task workbench.</p></noscript>
+  <noscript><p class="aet-boundary">Enable JavaScript to use these task controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

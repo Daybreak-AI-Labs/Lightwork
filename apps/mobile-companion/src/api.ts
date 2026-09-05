@@ -15,6 +15,8 @@
  * This app is READ-ONLY by design: no POST/DELETE/PUT anywhere.
  */
 
+import { connectionValidationError } from "./connectionValidation";
+
 export type Settings = { baseUrl: string; token: string; cacheScope?: string };
 
 export type Goal = {
@@ -79,37 +81,18 @@ export type OfflineBundle = {
   recent_events: (GoalEvent & { goal_id: number })[];
 };
 
-function isLoopbackHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
-}
-
-// Whether it's safe to attach the bearer token: https anywhere, or any scheme
-// to loopback. Sending it over plain http to a ROUTABLE host lets any on-path
-// device (coffee-shop / corporate Wi-Fi, VPN) sniff and replay the credential.
-// Mirrors the VS Code extension's shouldSendDashboardToken.
+// Use the same HTTPS/HTTP-loopback policy as connection setup.
 export function isTokenTransportSafe(baseUrl: string): boolean {
-  try {
-    const u = new URL(baseUrl);
-    return u.protocol === "https:" || isLoopbackHost(u.hostname);
-  } catch {
-    return false;
-  }
+  return connectionValidationError(baseUrl) === null;
 }
 
 async function apiGet<T>(cfg: Settings, path: string): Promise<T> {
-  const base = cfg.baseUrl.replace(/\/+$/, "");
+  const error = connectionValidationError(cfg.baseUrl, cfg.token);
+  if (error) throw new Error(error);
+  const base = cfg.baseUrl.trim().replace(/\/+$/, "");
   const headers: Record<string, string> = { Accept: "application/json" };
   if (cfg.token) {
-    // Fail closed rather than leak the token over cleartext to a remote host.
-    if (!isTokenTransportSafe(cfg.baseUrl)) {
-      throw new Error(
-        "Refusing to send the dashboard token over plain HTTP to a non-loopback " +
-          "host (an on-path attacker could steal it). Use an https:// URL or a " +
-          "secure tunnel (e.g. Tailscale / a reverse proxy).",
-      );
-    }
-    headers.Authorization = `Bearer ${cfg.token}`;
+    headers.Authorization = `Bearer ${cfg.token.trim()}`;
   }
   const res = await fetch(`${base}${path}`, { method: "GET", headers });
   if (!res.ok) throw new Error(`GET ${path} -> HTTP ${res.status}`);

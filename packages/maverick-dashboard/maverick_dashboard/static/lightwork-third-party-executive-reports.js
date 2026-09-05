@@ -29,7 +29,7 @@
   }
   function operation(value) {
     var selected = String(value || "").trim();
-    if (!OP_PATTERN.test(selected)) { throw failure("Idempotency key must contain 8-192 safe characters."); }
+    if (!OP_PATTERN.test(selected)) { throw failure("The request reference must contain 8 to 192 letters, numbers, or supported separators."); }
     return selected;
   }
   function integer(value, label, maximum) {
@@ -157,12 +157,12 @@
       setMutationReady(state.ready === true);
       var mark = document.getElementById("tper-runtime-state"); var detail = document.getElementById("tper-runtime-detail");
       mark.dataset.state = state.ready ? "ready" : "failed"; mark.textContent = state.ready ? "Ready" : (state.enabled ? "Not ready" : "Disabled");
-      detail.textContent = state.ready ? "Tenant report composition is ready. Live portfolio acceptance remains unverified." : "Enable and configure the tenant report composition before creating artifacts.";
+      detail.textContent = state.ready ? "Report creation is ready. Reports still require review against your live portfolio." : "Report creation requires workspace setup before you can continue.";
       var reports = await requestJson("/reports?limit=100"); renderReports(reports); show("Reports refreshed.", reports);
     } catch (error) { setMutationReady(false); document.getElementById("tper-runtime-state").dataset.state = "failed"; document.getElementById("tper-runtime-state").textContent = "Unavailable"; show(error.message, { error: true }); }
   }
   document.getElementById("tper-create-form").addEventListener("submit", async function (event) {
-    event.preventDefault(); try { busy("Creating immutable report…"); var values = formObject(event.currentTarget); var metadataRef = identifier(values.brand_asset_metadata_ref, "Brand asset metadata reference", true); var metadataDigest = String(values.brand_asset_metadata_sha256 || "").trim().toLowerCase() || null; if ((metadataRef === null) !== (metadataDigest === null) || (metadataDigest !== null && !DIGEST_PATTERN.test(metadataDigest))) { throw failure("Brand asset metadata reference and exact SHA-256 must be provided together; asset bytes are not rendered."); }
+    event.preventDefault(); try { busy("Creating a report version…"); var values = formObject(event.currentTarget); var metadataRef = identifier(values.brand_asset_metadata_ref, "Brand asset metadata reference", true); var metadataDigest = String(values.brand_asset_metadata_sha256 || "").trim().toLowerCase() || null; if ((metadataRef === null) !== (metadataDigest === null) || (metadataDigest !== null && !DIGEST_PATTERN.test(metadataDigest))) { throw failure("Brand asset metadata reference and exact SHA-256 must be provided together; asset bytes are not rendered."); }
       var payload = { report_id: identifier(values.report_id, "Report reference", true), expected_absent_revision: 0, selectors: selectors(values.selectors_json), brand: { organization_name: plain(values.organization_name, "Organization name", 120), report_title: plain(values.report_title, "Report title", 160), footer_text: plain(values.footer_text, "Footer text", 160), primary_color: String(values.primary_color).toUpperCase(), accent_color: String(values.accent_color).toUpperCase(), text_color: String(values.text_color).toUpperCase(), brand_asset_metadata_ref: metadataRef, brand_asset_metadata_sha256: metadataDigest }, idempotency_key: operation(values.idempotency_key) };
       var result = await requestJson("/reports", { method: "POST", body: JSON.stringify(payload) }); show("Report created.", result); await refresh();
     } catch (error) { show(error.message, { error: true }); }

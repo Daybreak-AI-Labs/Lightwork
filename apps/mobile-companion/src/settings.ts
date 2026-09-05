@@ -3,6 +3,7 @@
 import * as SecureStore from "expo-secure-store";
 
 import type { Settings } from "./api";
+import { connectionValidationError } from "./connectionValidation";
 
 const BASE_URL_KEY = "maverick.baseUrl";
 const TOKEN_KEY = "maverick.token";
@@ -67,8 +68,12 @@ export function saveSettings(s: Settings): Promise<void> {
   // One keychain write commits the URL and bearer token together. Never leave
   // a new dashboard URL paired with credentials from the previous dashboard.
   const connection = { baseUrl: s.baseUrl.trim(), token: s.token.trim() };
-  return inOrder(() => SecureStore.setItemAsync(CONNECTION_KEY, JSON.stringify({
-    ...connection,
-    cacheScope: newCacheScope(),
-  })));
+  return inOrder(() => {
+    const error = connectionValidationError(connection.baseUrl, connection.token);
+    if (error) throw new Error(error);
+    return SecureStore.setItemAsync(CONNECTION_KEY, JSON.stringify({
+      ...connection,
+      cacheScope: newCacheScope(),
+    }));
+  });
 }

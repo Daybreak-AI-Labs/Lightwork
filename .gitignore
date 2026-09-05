@@ -35,6 +35,7 @@ ENV/
 uv.lock
 poetry.lock
 package-lock.json
+!packages/maverick-dashboard/tests/js/package-lock.json
 
 # Testing / coverage
 .coverage

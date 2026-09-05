@@ -288,10 +288,10 @@
     <div>
       <p class="tpc-kicker">Third-party risk operations</p>
       <h1 class="tpc-title" id="tpc-title">Contracts and engagements</h1>
-      <p class="tpc-lede">Govern the commercial agreement and operating relationship as separate, first-class records pinned to an exact vendor revision. Lifecycle changes use compare-and-swap, idempotency, redaction-aware schemas, immutable history, and retention tombstones.</p>
+      <p class="tpc-lede">Manage vendor agreements and working relationships as separate records. Track the reviewed vendor version, record changes, and retain a clear history.</p>
     </div>
     <div class="tpc-runtime" aria-labelledby="tpc-runtime-title">
-      <p class="tpc-kicker" id="tpc-runtime-title">Tenant runtime</p>
+      <p class="tpc-kicker" id="tpc-runtime-title">Availability</p>
       <div class="tpc-runtime__row">
         <strong id="tpc-readiness">Checking…</strong>
         <span class="tpc-status-mark" id="tpc-status-mark" data-state="checking">Checking</span>
@@ -305,18 +305,18 @@
     <p class="tpc-kicker">Authority and content boundary</p>
     <h2 id="tpc-boundary-title">Vendor authority and sensitive content stay server-owned</h2>
     <ul>
-      <li>The browser selects only a vendor ID and exact revision. Vendor type, criticality, jurisdictions, classifications, issuer, validity, revocation, tenant, and actor are independently resolved by the server.</li>
-      <li>Text-like values are opaque references. Raw contracts, licensed templates, credentials, provider adapters, storage paths, and recovery destinations are never accepted by this page.</li>
-      <li>Custom schemas use closed field types and option codes. Formulas use a bounded deterministic AST; executable expressions are rejected.</li>
+      <li>Select the vendor and version you reviewed. Lightwork checks the current vendor details and your permissions before saving.</li>
+      <li>Use record references in these fields. Do not paste contract text, licensed templates, credentials, or storage locations.</li>
+      <li>Custom fields and formulas use supported types and options. Executable code is rejected.</li>
       <li>Confidential and restricted custom values are redacted unless the caller has global audit authority and explicitly requests them.</li>
     </ul>
   </aside>
 
   <section class="tpc-card tpc-card--wide" aria-labelledby="tpc-status-title">
     <div class="tpc-head">
-      <div><p class="tpc-kicker">Readiness first</p><h2 id="tpc-status-title">Server composition</h2></div>
+      <div><p class="tpc-kicker">Readiness first</p><h2 id="tpc-status-title">Service availability</h2></div>
     </div>
-    <details><summary>Runtime composition details</summary><pre class="tpc-output" id="tpc-status-output" tabindex="0"></pre></details>
+    <details><summary>Technical details</summary><pre class="tpc-output" id="tpc-status-output" tabindex="0"></pre></details>
   </section>
 
   <fieldset class="tpc-fieldset" id="tpc-operations" disabled>
@@ -352,7 +352,7 @@
               <label>Record kind<select class="select" name="record_kind" required><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
               <label>Optional record ID<input class="input" name="record_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
               <label>Vendor ID<input class="input" name="vendor_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
-              <label>Exact vendor revision<input class="input" name="vendor_revision" type="number" min="1" max="2147483647" step="1" required></label>
+              <label>Vendor version being reviewed<input class="input" name="vendor_revision" type="number" min="1" max="2147483647" step="1" required></label>
               <label>Title reference<input class="input" name="title_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
               <label>Owner reference<input class="input" name="owner_ref" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
             </div>
@@ -391,7 +391,7 @@
             <label>Custom field schema JSON<textarea class="input" name="field_schema_json" maxlength="32768">[]</textarea></label>
             <label>Custom field values JSON<textarea class="input" name="field_values_json" maxlength="32768">{}</textarea></label>
             <label>Safe formula definitions JSON<textarea class="input" name="formulas_json" maxlength="32768">[]</textarea></label>
-            <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required></label>
+            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" required></label>
             <button class="btn btn--primary" type="submit">Create record</button>
           </fieldset>
         </form>
@@ -406,8 +406,8 @@
             <div class="tpc-form-grid">
               <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
               <label>Record kind<select class="select" name="record_kind"><option value="contract">Contract</option><option value="engagement">Engagement</option></select></label>
-              <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required></label>
-              <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" required></label>
+              <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required></label>
+              <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
             </div>
             <label class="tpc-check"><input name="include_title_ref" type="checkbox"><span>Replace title reference</span></label>
             <input class="input" name="update_title_ref" maxlength="128" aria-label="Updated title reference">
@@ -442,8 +442,8 @@
         <form class="tpc-form" id="tpc-archive-form" autocomplete="off" novalidate>
           <fieldset class="tpc-permission" id="tpc-archive-controls"{% if not contracts_can_operate %} disabled aria-disabled="true"{% endif %}>
             <label>Record ID<input class="input" name="record_id" maxlength="128" required></label>
-            <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-            <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" required></label>
+            <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
+            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
             <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand archived records become immutable and retention-eligible.</span></label>
             <button class="btn" type="submit">Archive record</button>
           </fieldset>
@@ -455,8 +455,8 @@
         <form class="tpc-form" id="tpc-delete-form" autocomplete="off" novalidate>
           <fieldset class="tpc-permission" id="tpc-delete-controls"{% if not contracts_can_admin %} disabled aria-disabled="true"{% endif %}>
             <label>Archived record ID<input class="input" name="record_id" maxlength="128" required></label>
-            <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
-            <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" required></label>
+            <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" required></label>
+            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" required></label>
             <label class="tpc-check"><input name="confirmation" type="checkbox" required><span>I understand deletion removes the record and history while preserving an immutable replay-prevention tombstone.</span></label>
             <button class="btn btn--danger" type="submit">Delete archived record</button>
           </fieldset>
@@ -498,7 +498,7 @@
       </section>
     </div>
   </fieldset>
-  <noscript><p class="tpc-boundary">JavaScript is required for this bounded API-backed workbench.</p></noscript>
+  <noscript><p class="tpc-boundary">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

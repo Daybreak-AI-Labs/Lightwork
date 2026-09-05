@@ -60,9 +60,9 @@ def test_page_is_liquid_glass_candid_and_copilot_scoped(client: TestClient) -> N
         assert directive in csp
     for text in (
         "Governed document vault",
-        "No paths, locators, or plaintext keys",
-        "encrypted through Lightwork's at-rest key authority",
-        "one time",
+        "Protect documents and access",
+        "Documents are encrypted before storage",
+        "can be used once",
         "does not prove external object-store custody",
     ):
         assert text in response.text

@@ -32,9 +32,9 @@
 <div class="mg-banner" role="status" data-module-gate="{{ section }}">
   <strong>{{ label }} is turned off.</strong>
   {% if status and status in _status_badges %}<span class="badge {{ _status_badges[status][0] }}" data-module-status="{{ status }}">{{ _status_badges[status][1] }}</span>{% endif %}
-  <span class="mg-copy">{{ detail or 'The module gate must be on before this workbench can operate.' }}
-    Turning it on applies immediately. It does not prove credentials,
-    dependencies, custody, tenant setup, or runtime acceptance.</span>
+  <span class="mg-copy">{{ detail or 'Turn this feature on before using it.' }}
+    Turning it on applies immediately. Connections, workspace settings, and
+    evidence safeguards still need to be checked before use.</span>
   {% if can_activate %}
   <span class="mg-actions">
     <button type="button" class="btn btn--primary mg-on">Turn on {{ label|lower }}</button>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the full CI "lint" job locally before pushing.
+# Run the full CI "lint" job and release packaging checks before pushing.
 #
 # Plain `ruff`/`pytest` miss the bespoke gates that have repeatedly failed CI
 # *after* a green local run: the detect-secrets baseline check (which only scans
@@ -125,6 +125,9 @@ run "deprecations --ci"       python -m maverick.deprecations --ci
 run "grpc contract --check"   python -m maverick.grpc_api.contract --check
 run "a11y_audit --ci"         python -m maverick.a11y_audit --ci
 run "schema_migrations --ci"  python -m maverick.schema_migrations --ci
+
+echo "== release packaging and installer disclosures =="
+run "release packaging" python -m pytest -q packages/maverick-core/tests/test_release_packaging.py
 
 echo
 if [ "$fail" -ne 0 ]; then

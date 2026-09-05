@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}get started · Lightwork{% endblock %}
+{% block title %}Get started · Lightwork{% endblock %}
 {% block content %}
 <style>
   .gs { max-width: 760px; margin-inline: auto; }
@@ -44,7 +44,7 @@
 <div class="gs">
   <div class="gs__head">
     <h1 class="page-title">Get started</h1>
-    <p class="gs__sub">Three steps from zero to a governed AI workforce — this checklist updates itself as you go.</p>
+    <p class="gs__sub">Connect an AI service, create a workflow, and start your first task. Your progress updates as you go.</p>
     <div class="gs__progress">
       <div class="gs__bar" role="progressbar" aria-label="Setup progress"
            aria-valuenow="{{ done_count }}" aria-valuemin="0" aria-valuemax="{{ total }}">
@@ -56,26 +56,64 @@
 
   {% if runtime_all_set %}
   <div class="mv-empty" style="margin-bottom: var(--space-5);">
-    <p class="mv-empty__title">🎉 You’re runtime-ready</p>
-    <p class="mv-empty__body">The offline runtime checklist is complete.
-      Live provider acceptance and assurance deployment readiness are reported
-      separately below.{% if can_operate %} Manage runtime work from
+    <p class="mv-empty__title">Your setup checklist is complete</p>
+    <p class="mv-empty__body">Your saved settings pass the installation checks.
+      Live connections and assurance setup still need their own checks.
+      {% if can_operate %} Manage your work from
       <a href="/workflows">Workflows</a> and
       <a href="/automations">Automations</a>.{% else %} An operator can manage
       workflows and automations; your access remains read-only.{% endif %}</p>
   </div>
   {% endif %}
 
+  {% if needs_initial_settings %}
+  <section class="panel" aria-labelledby="initial-settings-title" style="margin-bottom:var(--space-5)">
+    <h2 id="initial-settings-title">Set up Lightwork</h2>
+    <p>Initial defaults are a $1 limit and a 10-minute limit per task, strict safety checks, and computer control and file-changing tools turned off. Existing administrator policies and choices saved in Settings remain in effect. {% if can_configure %}Review <a href="/permissions">Permissions</a> and <a href="/settings">Settings</a> before starting work.{% else %}Your administrator reviews permissions before work starts.{% endif %}</p>
+    {% if can_configure %}
+    <form id="setup-initialize">
+      <label><input type="checkbox" id="setup-confirm" required> I reviewed these initial settings.</label>
+      <button class="btn btn--primary" type="submit">Save initial settings</button>
+      <p id="setup-message" role="status" aria-live="polite"></p>
+    </form>
+    {% else %}<p>Your administrator can complete this step in the app.</p>{% endif %}
+  </section>
+  {% endif %}
+  <ol class="gs__steps" style="margin-bottom: var(--space-5);">
+    {% for s in steps %}
+    <li class="gs__step{% if s.done %} gs__step--done{% endif %}">
+      <span class="gs__mark" aria-hidden="true">{% if s.done %}✓{% else %}{{ loop.index }}{% endif %}</span>
+      <div class="gs__body">
+        <p class="gs__title">{{ s.title }}{% if s.done %} <span class="muted">· done</span>{% endif %}</p>
+        <p class="gs__desc">{{ s.body }}</p>
+      </div>
+      {% if s.allowed %}
+      <a class="btn {% if s.done %}btn--ghost{% else %}btn--primary{% endif %} gs__cta" href="{{ s.cta }}">{{ s.cta_label }}</a>
+      {% else %}
+      <span class="muted gs__cta" role="note">{{ s.readonly_label }}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+
   <section class="panel gs__preflight" aria-labelledby="install-preflight-title">
     <div class="gs__preflight-head">
-      <h2 id="install-preflight-title">Offline install preflight: runtime</h2>
+      <h2 id="install-preflight-title">Installation checks</h2>
       <span class="gs__status gs__status--{{ 'ready' if preflight.ready else 'blocked' }}">
-        {{ "ready to run" if preflight.ready else "blocked" }}
+        {{ "Setup complete" if preflight.ready else "Needs attention" }}
       </span>
     </div>
-    <p class="muted">This deterministic check reads configuration only. It makes no
-      network request and creates no runtime state. Use <code>maverick doctor</code>
-      afterward for live provider and database connectivity.</p>
+    <p class="muted">These checks review saved settings without contacting external services.
+      Test your live connections before starting work. If setup needs attention,
+      open the matching settings below.</p>
+    <p>{% if can_configure %}<a class="btn btn--ghost" href="/settings">Connection settings</a>
+      <a class="btn btn--ghost" href="/permissions">Permissions and work environment</a>
+      {% endif %}
+      <a class="btn btn--ghost" href="/start">Run checks again</a>
+      {% if can_configure %}<button class="btn btn--ghost" id="setup-download" type="button">Download setup report</button>{% endif %}</p>
+    <p id="setup-report-message" role="status"></p>
+    <details>
+      <summary>Setup details for administrators · {{ preflight.checks|length }} checks</summary>
     {% if not preflight.ready %}
       <p role="alert"><strong>Next fix:</strong>
         <code>{{ preflight.next_action }}</code>
@@ -87,8 +125,6 @@
     {% endif %}
     <p><code>maverick preflight --json</code>
       <span class="muted">— copyable output for deployment automation</span></p>
-    <details>
-      <summary>View {{ preflight.checks|length }} readiness checks</summary>
       <ul class="gs__checks">
         {% for check in preflight.checks %}
         <li class="gs__check gs__check--{{ check.status }}">
@@ -106,14 +142,15 @@
   <section class="panel gs__preflight"
            aria-labelledby="assurance-preflight-title">
     <div class="gs__preflight-head">
-      <h2 id="assurance-preflight-title">Assurance deployment readiness</h2>
+      <h2 id="assurance-preflight-title">Assurance setup</h2>
       <span class="gs__status gs__status--{{ 'ready' if assurance_preflight.ready else 'blocked' }}">
-        {{ "assurance ready" if assurance_preflight.ready else "assurance blocked" }}
+        {{ "Setup complete" if assurance_preflight.ready else "Needs attention" }}
       </span>
     </div>
-    <p class="muted">This stricter, separate posture requires an explicit
-      tenant, dashboard, evidence graph, AI Evidence-Ready Gateway, and Model
-      Risk Officer. Runtime readiness does not imply assurance readiness.</p>
+    <p class="muted">Assurance reviews and evidence features need additional setup.
+      Connecting an AI service alone does not complete these checks.</p>
+    <details>
+      <summary>Assurance setup details for administrators · {{ assurance_preflight.checks|length }} checks</summary>
     {% if not assurance_preflight.ready %}
       <p role="alert"><strong>Next assurance fix:</strong>
         <code>{{ assurance_preflight.next_action }}</code>
@@ -124,8 +161,6 @@
       </p>
     {% endif %}
     <p><code>maverick preflight --profile cockpit --json</code></p>
-    <details>
-      <summary>View {{ assurance_preflight.checks|length }} assurance checks</summary>
       <ul class="gs__checks">
         {% for check in assurance_preflight.checks %}
         <li class="gs__check gs__check--{{ check.status }}">
@@ -140,38 +175,19 @@
     </details>
   </section>
 
-  <ol class="gs__steps">
-    {% for s in steps %}
-    <li class="gs__step{% if s.done %} gs__step--done{% endif %}">
-      <span class="gs__mark" aria-hidden="true">{% if s.done %}✓{% else %}{{ loop.index }}{% endif %}</span>
-      <div class="gs__body">
-        <p class="gs__title">{{ s.title }}{% if s.done %} <span class="muted">· done</span>{% endif %}</p>
-        <p class="gs__desc">{{ s.body }}</p>
-        {% if s.command and not s.done %}
-          <code class="gs__command">{{ s.command }}</code>
-        {% endif %}
-      </div>
-      {% if s.allowed %}
-      <a class="btn {% if s.done %}btn--ghost{% else %}btn--primary{% endif %} gs__cta" href="{{ s.cta }}">{{ s.cta_label }}</a>
-      {% else %}
-      <span class="muted gs__cta" role="note">{{ s.readonly_label }}</span>
-      {% endif %}
-    </li>
-    {% endfor %}
-  </ol>
-
   <section class="panel gs__demo" aria-labelledby="synthetic-demo-title">
     <span class="gs__demo-label">SYNTHETIC DEMO DATA</span>
-    <h2 id="synthetic-demo-title">See an evidence-ready interaction before integration</h2>
-    <p>Use the Assurance Cockpit’s no-network demo only in an empty or dedicated
-      demo tenant. Every generated record stays labeled synthetic and does not
+    <h2 id="synthetic-demo-title">Try a sample assurance review</h2>
+    <p>This demo runs without external connections. Use an empty or dedicated
+      demo workspace. Every generated record stays labeled synthetic and does not
       count as production assurance evidence.</p>
     {% if can_operate %}
     <a class="btn btn--ghost" href="/security/assurance">Open Assurance Cockpit</a>
     {% else %}
     <p class="muted" role="note">An operator can open the Assurance Cockpit;
-      your onboarding view does not grant operating authority.</p>
+      you currently have read-only access.</p>
     {% endif %}
   </section>
 </div>
 {% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-setup.js" defer></script>{% endblock %}

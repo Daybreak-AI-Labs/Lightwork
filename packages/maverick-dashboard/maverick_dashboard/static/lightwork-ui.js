@@ -323,7 +323,7 @@
         label.textContent = detail || (armed
           ? (canHalt ? 'STOPPED — click to resume' : 'STOPPED')
           : state === 'clear'
-            ? (canHalt ? 'Stop configured scope' : 'Stop status: clear')
+            ? (canHalt ? 'Emergency stop' : 'Work is not stopped')
             : 'Stop status unavailable');
         if (canHalt) {
           pill.setAttribute('aria-pressed', known ? (armed ? 'true' : 'false') : 'mixed');
@@ -341,14 +341,14 @@
         }
         if (haltScope === null) haltScope = payload.scope;
         if (payload.scope !== haltScope) {
-          render('unknown', 'Stop scope changed — reload to verify status');
+          render('unknown', 'Stop settings changed — reload to verify status');
           return false;
         }
         if (haltScope === 'cluster' && payload.active !== payload.cluster_halt) {
           // `active` includes the local file while `cluster_halt` is the shared
           // authority.  Disagreement is a partial/unverified stop, not proof
           // that the configured cluster scope is stopped or clear.
-          render('partial', 'Partial stop — configured scope unverified');
+          render('partial', 'Partial stop — some workers are not confirmed stopped');
           return false;
         }
         render(payload.active ? 'armed' : 'clear');
@@ -378,7 +378,7 @@
           clearTimeout(timer);
         }
       }
-      render('unknown', 'checking');
+      render('unknown', 'Checking stop status…');
       async function refresh() {
         if (pending) return false;
         const generation = ++refreshGeneration;
@@ -402,7 +402,7 @@
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
         if (!canHalt) {
-          mvToast('Read only: permission for the configured halt scope is required.', { error: true });
+          mvToast('You do not have permission to stop or resume this work.', { error: true });
           return;
         }
         if (pending || !knownState()) {
@@ -419,7 +419,8 @@
             render(haltState, 'Resuming…');
             requestOptions = {method: 'DELETE'};
           } else {
-            if (!(await mvConfirm('Stop the configured halt scope? Governed work covered by that scope pauses safely at its next step and waits for an authorized resume.', { okText: 'Stop configured scope' }))) return;
+            const coverage = haltScope === 'cluster' ? 'across connected workers' : 'on this server';
+            if (!(await mvConfirm('Stop work ' + coverage + '? Work covered by this emergency stop pauses at its next step and waits for an authorized resume.', { okText: 'Stop work' }))) return;
             pending = true;
             refreshGeneration += 1;
             render(haltState, 'Stopping…');
@@ -447,8 +448,8 @@
             // A 204 only acknowledges the mutation request.  It is not a
             // status document and cannot prove either local or cluster state.
             render('unknown', wasArmed
-              ? 'Resume accepted — verifying configured scope…'
-              : 'Stop accepted — verifying configured scope…');
+              ? 'Resume requested — checking work status…'
+              : 'Stop requested — checking work status…');
           }
         } catch (e) {
           render('unknown');
@@ -487,32 +488,59 @@
       const errBox = document.getElementById('goal-error');
       if (!form || !errBox) return;
       const btn = form.querySelector('button[type="submit"]');
+      let authoringPending = false;
       form.addEventListener('submit', async function(ev) {
         ev.preventDefault();
+        if (authoringPending) return;
         errBox.style.display = 'none';
         const kindEl = form.querySelector('[name="authoring_kind"]');
         const kind = kindEl ? kindEl.value : 'goal';
         const files = form.querySelector('input[type="file"]');
-        // An explicit create-artifact choice stages an UNSAVED first pass in the
-        // dedicated editor.  Attachments continue through the ordinary goal path
-        // until authoring endpoints support their full evidence/security model.
+        // Stage an unsaved brief in the selected editor; never silently execute
+        // a goal when the selected authoring action cannot accept attachments.
+        if ((kind === 'flow' || kind === 'agent') && files && files.files.length) {
+          errBox.textContent = 'Workflow and agent drafts do not accept attachments yet. Remove the files to open the editor, or choose Start a task to use them. Your text and files are still here.';
+          errBox.style.display = 'block';
+          return;
+        }
         if ((kind === 'flow' || kind === 'agent') && !(files && files.files.length)) {
           const title = (form.querySelector('[name="title"]') || {}).value || '';
           const details = (form.querySelector('[name="description"]') || {}).value || '';
-          const brief = (title.trim() + (details.trim() ? '\n\n' + details.trim() : '')).slice(0, 8000);
+          const brief = title.trim() + (details.trim() ? '\n\n' + details : '');
           if (!brief) {
             errBox.textContent = 'Describe what you want Lightwork to draft.';
             errBox.style.display = 'block';
             return;
           }
+          if (Array.from(brief).length > 8000) {
+            errBox.textContent = 'Workflow briefs can contain up to 8,000 characters. Shorten the brief and try again; your text is still here.';
+            errBox.style.display = 'block';
+            return;
+          }
+          authoringPending = true;
+          if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
           try {
+            const contextResponse = await fetch('/api/v1/templates/draft-context', {credentials: 'same-origin', cache: 'no-store'});
+            if (!contextResponse.ok) throw new Error('Could not verify your workspace. Your brief is still here; try again.');
+            const contextData = await contextResponse.json();
+            if (!contextData || typeof contextData.context !== 'string' || !contextData.context) {
+              throw new Error('Could not verify your workspace. Your brief is still here; try again.');
+            }
+            if (title !== ((form.querySelector('[name="title"]') || {}).value || '') ||
+                details !== ((form.querySelector('[name="description"]') || {}).value || '') ||
+                kind !== (kindEl ? kindEl.value : 'goal') || (files && files.files.length)) {
+              throw new Error('Your brief changed while the editor was opening. Review it and continue again.');
+            }
             sessionStorage.setItem('lightwork.authoring-handoff', JSON.stringify({
-              kind: kind, brief: brief, created_at: Date.now()
+              kind: kind, brief: brief, context: contextData.context, created_at: Date.now()
             }));
             window.location.href = kind === 'flow' ? '/flows/designer' : '/workflow-builder';
           } catch (e) {
-            errBox.textContent = 'Could not stage the draft in this browser session.';
+            errBox.textContent = e.message || 'Could not open the editor. Your brief is still here; try again.';
             errBox.style.display = 'block';
+          } finally {
+            authoringPending = false;
+            if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); }
           }
           return;
         }
@@ -537,6 +565,18 @@
         }
       });
     })();
+
+    // Reveal invalid fields before native form validation attempts to focus
+    // them, including fields nested inside more than one closed disclosure.
+    document.addEventListener('invalid', function (event) {
+      var field = event.target;
+      if (!field || typeof field.closest !== 'function') return;
+      var disclosure = field.closest('details');
+      while (disclosure) {
+        disclosure.open = true;
+        disclosure = disclosure.parentElement && disclosure.parentElement.closest('details');
+      }
+    }, true);
 
     // Collapsible sidebar groups. Chat-first: groups start COLLAPSED so the
     // nav isn't a wall of every page — the group holding the active page is
@@ -573,7 +613,7 @@
         root.querySelectorAll('button, input, select, textarea').forEach(function (control) {
           control.disabled = true;
           if (!control.title) {
-            control.title = 'This capability is disabled by the server configuration.';
+            control.title = 'This feature is turned off. Ask your administrator to enable it.';
           }
         });
       });

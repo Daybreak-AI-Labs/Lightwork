@@ -176,7 +176,7 @@
       render(statusOutput, value);
       var ready = value && value.enabled === true && value.ready === true;
       runtimeStatus.textContent = ready
-        ? "Application manifest analysis is ready for this tenant."
+        ? "Application manifest analysis is ready for this workspace."
         : "Application manifest analysis is closed until its authority is ready.";
       runtimeStatus.setAttribute("data-state", ready ? "ready" : "failed");
       operations.disabled = !ready;
@@ -212,7 +212,7 @@
     event.preventDefault();
     var form = event.currentTarget;
     try {
-      setOperation("Reading bounded manifest files…", "pending");
+      setOperation("Reading manifest files…", "pending");
       var files = await manifestPayload(form.elements.files.files);
       var applicationId = inputValue(form, "application_id");
       if (!applicationId) throw new Error("Application ID is required.");

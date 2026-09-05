@@ -60,7 +60,7 @@
         <label class="csnp-wide">Proposal ID or accepted rollback proposal ID
           <input class="input" name="proposal_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" autocomplete="off">
         </label>
-        <label>Expected proposal revision
+        <label>Current proposal version
           <input class="input" name="expected_proposal_revision" type="number" min="1" max="2147483647" value="1">
         </label>
         <label>Expected head revision
@@ -69,14 +69,14 @@
         <label>Expected approval revision
           <input class="input" name="expected_approval_revision" type="number" min="1" max="2147483647" value="1">
         </label>
-        <label>Idempotency key
+        <label>Request reference (reuse when retrying)
           <input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}" autocomplete="off">
         </label>
         <label class="csnp-wide"><span><input name="acknowledge_local" type="checkbox"> I understand that acceptance is a local metadata baseline only and performs no legal-copy generation, site/app mutation, provider write, or notice publication.</span></label>
         <div class="csnp-actions">
-          <button class="btn btn--primary" id="csnp-run" type="submit">Run selected operation</button>
+          <button class="btn btn--primary" id="csnp-run" type="submit">Continue with selected action</button>
           <button class="btn" id="csnp-refresh" type="button">Refresh status</button>
-          <span class="muted">CAS and idempotency are mandatory for every mutation.</span>
+          <span class="muted">Use the current version and a unique request reference for each change.</span>
         </div>
       </form>
     </section>

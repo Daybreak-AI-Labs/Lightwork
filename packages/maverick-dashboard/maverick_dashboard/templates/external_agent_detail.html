@@ -50,7 +50,7 @@
   {% if a.memory %}
   <div class="panel">
     <h2 style="margin-top:0">Learning contributions</h2>
-    <p class="muted" style="font-size: var(--text-sm)">Experience this agent deposited into the governed fleet memory (consumed by the dream cycle; provable via <code>maverick proof --fleet</code>).</p>
+    <p class="muted" style="font-size: var(--text-sm)">Knowledge this agent contributed for future tasks. Review the supporting records in <a href="/audit">Audit</a>.</p>
     <p style="margin:0">
       {% for kind, n in a.memory.items() | sort %}
       <span class="badge">{{ n }} {{ kind }}</span>

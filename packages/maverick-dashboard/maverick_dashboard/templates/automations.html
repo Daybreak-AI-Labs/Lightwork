@@ -5,6 +5,10 @@
   .auto { max-width: 880px; margin-inline: auto; }
   .auto :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
   .auto__section { margin-bottom: var(--space-5); }
+  .auto details > summary { cursor: pointer; font-weight: var(--font-semibold); }
+  .auto details[open] > summary { margin-bottom: var(--space-3); }
+  .auto .field, .auto input, .auto select, .auto textarea { min-width: 0; max-width: 100%; }
+  .auto__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-3); }
   .auto__hint { color: var(--muted); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
   .auto__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .auto__url { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; font-size: var(--text-xs); }
@@ -23,7 +27,7 @@
 {% call hero('Always-on operations', 'Automations',
              subtitle='Schedules, triggers & flows',
              lede='Every way your workflows run without you — on a recurring
-                   schedule, from an inbound webhook, or when something new
+                   schedule, when another service sends an update, or when something new
                    appears in a connected source. Create them in the
                    <a href="/workflow-builder">Workflow Builder</a>.') %}
   {{ state('Current state',
@@ -33,7 +37,7 @@
            copy=schedule_count ~ ' schedule' ~ ('' if schedule_count == 1 else 's') ~ ' · '
                 ~ trigger_count ~ ' webhook trigger' ~ ('' if trigger_count == 1 else 's') ~ ' · '
                 ~ event_trigger_count ~ ' event trigger' ~ ('' if event_trigger_count == 1 else 's') ~ '.
-                Schedules fire while the background worker is running.') }}
+                Schedules run while Lightwork’s background service is running.') }}
 {% endcall %}
 
 <div class="auto">
@@ -43,7 +47,7 @@
       <h2 id="auto-sched-h" tabindex="-1">Schedules</h2>
       <span class="muted" id="auto-sched-count"></span>
     </div>
-    <p class="auto__hint">Recurring runs — daily reports, weekly digests. Schedules fire while the Lightwork background worker is on.</p>
+    <p class="auto__hint">Run daily reports, weekly digests, and other recurring work while Lightwork’s background service is running.</p>
     <ul class="auto__list" id="auto-sched-list" aria-label="Schedules"></ul>
     <div class="mv-empty" id="auto-sched-empty" hidden>
       <p class="mv-empty__title">No schedules yet</p>
@@ -56,15 +60,15 @@
   {% if triggers_enabled %}
   <section class="auto__section panel" id="auto-trig-section" aria-labelledby="auto-trig-h">
     <div class="section-head">
-      <h2 id="auto-trig-h" tabindex="-1">Webhook triggers</h2>
+      <h2 id="auto-trig-h" tabindex="-1">Starts from connected services</h2>
       <span class="muted" id="auto-trig-count"></span>
     </div>
     <p class="auto__hint">Start a workflow the moment another system calls in — a form submission, a new ticket, a payment event.</p>
-    <div class="auto__warn" id="auto-trig-nosecret" hidden>Webhook triggers are not fully set up yet — ask your administrator to configure a signing secret.</div>
+    <div class="auto__warn" id="auto-trig-nosecret" hidden>Incoming requests are not ready yet. Ask your administrator to finish connecting and securing this service.</div>
     <ul class="auto__list" id="auto-trig-list" aria-label="Webhook triggers"></ul>
     <div class="mv-empty" id="auto-trig-empty" hidden>
       <p class="mv-empty__title">No triggers yet</p>
-      <p class="mv-empty__body">Wire a saved workflow to an inbound webhook from the builder.</p>
+      <p class="mv-empty__body">Connect a saved workflow to another service from the builder.</p>
       <a class="btn btn--primary" href="/workflows">Open Workflows</a>
     </div>
   </section>
@@ -73,66 +77,88 @@
   {% if event_triggers_enabled %}
   <section class="auto__section panel" id="auto-event-section" aria-labelledby="auto-event-h">
     <div class="section-head">
-      <h2 id="auto-event-h" tabindex="-1">Event triggers</h2>
+      <h2 id="auto-event-h" tabindex="-1">Starts when new items arrive</h2>
       <span class="muted" id="auto-event-count"></span>
     </div>
-    <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — Lightwork checks each source automatically in the background and starts a run per new item, with the item’s fields filling the workflow’s parameters. Use “Poll now” to check immediately.</p>
+    <p class="auto__hint">Lightwork checks connected sources for new items and starts the matching workflow. Each new item supplies the information the workflow needs.</p>
     <ul class="auto__list" id="auto-event-list" aria-label="Event triggers"></ul>
     <div class="mv-empty" id="auto-event-empty" hidden>
       <p class="mv-empty__title">No event triggers yet</p>
-      <p class="mv-empty__body">Bind a saved workflow to a source below.</p>
+      <p class="mv-empty__body">Choose a saved workflow and a source below to get started.</p>
     </div>
-    <form id="auto-event-form" style="margin-top: var(--space-4);">
+    <button class="btn btn--ghost" type="button" id="auto-event-poll">Check now</button>
+    <p class="auto__hint" id="auto-event-msg" aria-live="polite"></p>
+    <details id="auto-event-setup" style="margin-top: var(--space-4);">
+    <summary>Add an event automation</summary>
+    <p class="auto__hint">Choose what to run and where to look for new items. The first check records existing items; later checks start work for new ones.</p>
+    <form id="auto-event-form">
       <div class="field">
-        <label for="auto-event-template">Workflow template (name/id)</label>
-        <input type="text" id="auto-event-template" placeholder="triage-lead" autocomplete="off" spellcheck="false" required />
+        <label for="auto-event-target-kind">What should run?</label>
+        <select id="auto-event-target-kind"><option value="template">Saved workflow</option><option value="flow">Published flow</option></select>
       </div>
+      <div class="field">
+        <label for="auto-event-template">Workflow or flow</label>
+        <select id="auto-event-template" required><option value="">Loading workflows…</option></select>
+        <p class="auto__hint" id="auto-event-target-hint"></p>
+        <a href="/workflow-builder">Create a workflow</a> · <a href="/flows/designer">Design and publish a flow</a>
+      </div>
+      <div id="auto-event-params" class="auto__fields"></div>
       <div class="field">
         <label for="auto-event-source">Source</label>
         <select id="auto-event-source"></select>
       </div>
-      <div class="field">
-        <label for="auto-event-config">Source config (JSON)</label>
-        <textarea id="auto-event-config" rows="4" spellcheck="false" placeholder='{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }'></textarea>
-        <p class="auto__hint" id="auto-event-formurl" hidden></p>
-      </div>
+      <p class="auto__hint" id="auto-event-source-hint"></p>
+      <div id="auto-event-fields" class="auto__fields"></div>
+      <p class="auto__hint" id="auto-event-formurl" hidden></p>
+      <details id="auto-event-config-advanced">
+        <summary>Advanced connection settings</summary>
+        <div class="field">
+          <label for="auto-event-config">Source settings (JSON)</label>
+          <textarea id="auto-event-config" rows="4" spellcheck="false">{}</textarea>
+          <p class="auto__hint">Guided fields and this editor stay in sync. Additional settings are preserved.</p>
+        </div>
+      </details>
       <div class="field">
         <label for="auto-event-name">Trigger name (optional)</label>
-        <input type="text" id="auto-event-name" placeholder="(defaults to the template name)" autocomplete="off" />
+        <input type="text" id="auto-event-name" maxlength="48" placeholder="Defaults to the workflow name" autocomplete="off" />
       </div>
       <div class="field">
-        <label for="auto-event-interval">Poll every (seconds, optional)</label>
+        <label for="auto-event-interval">Check every (seconds, optional)</label>
         <input type="number" id="auto-event-interval" min="60" max="86400" step="60" placeholder="300 (default; min 60)" autocomplete="off" />
       </div>
       <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
-        <button class="btn btn--primary" type="submit">Create event trigger</button>
-        <button class="btn btn--ghost" type="button" id="auto-event-poll">Poll now</button>
-        <span class="auto__hint" id="auto-event-msg" aria-live="polite"></span>
+        <button class="btn btn--primary" type="submit">Create automation</button>
       </div>
     </form>
+    </details>
 
     <div id="oauth-connect" style="margin-top: var(--space-5);" hidden>
       <h3 style="margin-bottom: var(--space-2);">Connected accounts</h3>
-      <p class="auto__hint">Connect a SaaS account once, then poll it from an OAuth’d source (set <code>{"provider": "&lt;name&gt;"}</code> in a source config). The token is sealed per-tenant and refreshed automatically. Set the app’s client id/secret in the named environment variables first.</p>
+      <p class="auto__hint">Connect an account so Lightwork can check it for new items. Access is stored privately for your organization.</p>
       <ul class="auto__list" id="oauth-list" aria-label="Connected accounts"></ul>
-      <div class="field" style="margin-top: var(--space-3);">
-        <label for="oauth-redirect">Redirect URI (registered with the OAuth app)</label>
-        <input type="text" id="oauth-redirect" placeholder="https://your-dashboard/oauth/callback" autocomplete="off" spellcheck="false" />
-      </div>
-      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center; flex-wrap: wrap;">
+      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center; flex-wrap: wrap; margin-top: var(--space-3);">
         <select id="oauth-provider" aria-label="Provider to connect"></select>
-        <button class="btn btn--ghost" type="button" id="oauth-get-url">Get consent link</button>
-        <span class="auto__hint" id="oauth-msg" aria-live="polite"></span>
+        <button class="btn btn--primary" type="button" id="oauth-get-url">Connect account</button>
+      </div>
+      <p class="auto__hint">You’ll visit the provider to approve access, then return here to finish automatically.</p>
+      <p class="auto__hint" id="oauth-msg" role="status" aria-live="polite"></p>
+      <details id="oauth-advanced-setup" style="margin-top: var(--space-3);">
+      <summary>Advanced account connection settings</summary>
+      <p class="auto__hint">Your administrator must register this return address with the provider and configure the app credentials. Access renews automatically when the service supports it. A custom return address uses the manual finish option below.</p>
+      <div class="field" style="margin-top: var(--space-3);">
+        <label for="oauth-redirect">Registered return address</label>
+        <input type="url" id="oauth-redirect" autocomplete="off" spellcheck="false" />
       </div>
       <div id="oauth-finish" style="margin-top: var(--space-3);" hidden>
-        <p class="auto__hint">Open the link, authorize, then paste the <code>code</code> from the redirect here to finish.</p>
-        <a id="oauth-open" class="btn btn--ghost" href="#" target="_blank" rel="noopener noreferrer">Open consent page ↗</a>
+        <p class="auto__hint">For a custom return address, approve access, then paste the returned authorization code here.</p>
+        <a id="oauth-open" class="btn btn--ghost" href="#" rel="noreferrer">Open consent page</a>
         <div class="field" style="margin-top: var(--space-2);">
           <label for="oauth-code">Authorization code</label>
           <input type="text" id="oauth-code" autocomplete="off" spellcheck="false" />
         </div>
         <button class="btn btn--primary" type="button" id="oauth-exchange">Finish connecting</button>
       </div>
+      </details>
     </div>
   </section>
   {% endif %}
@@ -142,7 +168,7 @@
       <h2 id="auto-flows-h" tabindex="-1">Flows</h2>
       <a class="btn btn--primary" href="/flows/designer" id="fd-new">✨ Design a flow</a>
     </div>
-    <p class="auto__hint">A flow is a deterministic skeleton — branch, loop, parallel, approval, delay — over steps that are either a fixed tool call or a full agentic goal. Describe one in plain English and the designer drafts it; run one and it pauses at any approval for a human decision; each node’s outcome trains which steps should be deterministic vs. agentic. <span class="muted" id="auto-flows-count"></span></p>
+    <p class="auto__hint">Flows connect tasks and actions into a repeatable process. Describe what should happen, review the steps, and publish when ready. Approval steps pause the run for a human decision. <span class="muted" id="auto-flows-count"></span></p>
     <div class="auto__insights" id="flow-insights" role="status" aria-live="polite" hidden
          style="margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: 8px;">
       <strong id="flow-insights-head"></strong>
@@ -151,7 +177,7 @@
     <ul class="auto__list" id="auto-flows-list" aria-label="Flows"></ul>
     <div class="mv-empty" id="auto-flows-empty" hidden>
       <p class="mv-empty__title">No flows yet</p>
-      <p class="mv-empty__body">Import a workflow or POST a flow definition to get started.</p>
+      <p class="mv-empty__body"><a href="/flows/designer">Describe your first flow</a> to get started.</p>
     </div>
     <h3 style="margin-top: var(--space-4);">Recent runs</h3>
     <ul class="auto__list" id="auto-flow-runs" aria-label="Flow runs"></ul>
@@ -163,7 +189,9 @@
     <div class="section-head">
       <h2 id="auto-import-h" tabindex="-1">Import from another platform</h2>
     </div>
-    <p class="auto__hint">Pull a client’s existing automations (n8n, Make, Workato, Power Automate, UiPath) into Lightwork templates. For Zapier/Notion (no exportable definitions), describe the automation as JSON or have it call an inbound webhook.</p>
+    <p class="auto__hint">Bring supported automations from n8n, Make, Workato, Power Automate, or UiPath into Lightwork. Review the import report before running them.</p>
+    <details id="auto-import-advanced">
+    <summary>Import settings and definitions</summary>
     <form id="auto-import-form">
       <div class="field">
         <label for="auto-import-source">Platform</label>
@@ -171,23 +199,32 @@
         <p class="auto__hint" id="auto-import-mode-hint" hidden></p>
       </div>
       <div class="field">
-        <label for="auto-import-defs">Exported definitions JSON (optional — leave blank to fetch live)</label>
+        <label for="auto-import-file">Upload an exported automation file (optional)</label>
+        <input type="file" id="auto-import-file" accept=".json,application/json">
+        <p class="auto__hint" id="auto-import-file-msg" role="status" aria-live="polite">Choose the JSON export from your other platform, or leave it empty to fetch from an existing connection.</p>
+      </div>
+      <details id="auto-import-json-advanced">
+      <summary>Advanced: paste or edit exported definitions</summary>
+      <div class="field">
+        <label for="auto-import-defs">Exported definitions (JSON)</label>
         <textarea id="auto-import-defs" name="definitions" rows="6" spellcheck="false" placeholder='[ { "id": "1", "name": "...", "nodes": [...] } ]'></textarea>
       </div>
+      </details>
       <div class="field">
-        <label><input type="checkbox" id="auto-import-webhooks"> Wire inbound webhook triggers for webhook automations</label>
+        <label><input type="checkbox" id="auto-import-webhooks"> Allow connected services to start imported automations</label>
       </div>
       <div class="field">
-        <label><input type="checkbox" id="auto-import-schedules"> Activate recovered schedules (arm a cron for scheduled automations)</label>
+        <label><input type="checkbox" id="auto-import-schedules"> Activate imported schedules</label>
       </div>
       <div class="field">
-        <label><input type="checkbox" id="auto-import-flows"> Also import as flow graphs (branches/loops preserved where the source exposes them, with a per-step fidelity report)</label>
+        <label><input type="checkbox" id="auto-import-flows"> Also create visual flows, preserving available decisions and repeated steps</label>
       </div>
       <div class="field">
-        <label><input type="checkbox" id="auto-import-dry"> Preview only (dry run)</label>
+        <label><input type="checkbox" id="auto-import-dry"> Preview only — do not import</label>
       </div>
       <button class="btn btn--primary" type="submit">Import</button>
     </form>
+    </details>
     <ul class="auto__list" id="auto-import-results" aria-label="Import results"></ul>
   </section>
   {% endif %}
@@ -272,9 +309,10 @@
       main.appendChild(el('div', 'mv-row__title', t.name));
       var pcount = t.params ? Object.keys(t.params).length : 0;
       var sub = el('div', 'mv-row__sub');
-      sub.appendChild(document.createTextNode('template ' + (t.template || '') + (pcount ? (' · ' + pcount + ' param' + (pcount === 1 ? '' : 's')) : '') + ' · '));
-      sub.appendChild(el('span', 'auto__url', 'POST ' + base + ' {"trigger":"' + t.name + '"}'));
+      sub.appendChild(document.createTextNode((t.template || '') + (pcount ? (' · ' + pcount + ' saved input' + (pcount === 1 ? '' : 's')) : '')));
       main.appendChild(sub);
+      var integration = el('details'); integration.appendChild(el('summary', '', 'Advanced integration details'));
+      integration.appendChild(el('div', 'auto__url', 'POST ' + base + ' {"trigger":"' + t.name + '"}')); main.appendChild(integration);
       var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('trigger', t.name, runs);
       li.appendChild(main);
       li.appendChild(delBtn('Delete trigger ' + t.name, function () { delTrigger(t.name); }));
@@ -337,12 +375,31 @@
     var sourceSel = document.getElementById('auto-import-source');
     var modeHint = document.getElementById('auto-import-mode-hint');
     var sourceModes = {};
+    var importBusy = false, importFileGeneration = 0, importFileLoading = false, importFileError = false;
+    var importFile = document.getElementById('auto-import-file');
+    var importDefs = document.getElementById('auto-import-defs');
+    var importFileMsg = document.getElementById('auto-import-file-msg');
+    importDefs.addEventListener('input', function () { importFileGeneration++; importFileLoading = false; importFileError = false; importFile.value = ''; importFileMsg.textContent = 'Using the definitions in the advanced editor.'; });
+    importFile.addEventListener('change', async function () {
+      var generation = ++importFileGeneration, file = importFile.files[0];
+      importFileLoading = !!file; importFileError = false;
+      if (!file) { importFileMsg.textContent = 'No file selected. Existing definitions are unchanged.'; return; }
+      importFileMsg.textContent = 'Reading export…';
+      try {
+        if (file.size > 5 * 1024 * 1024) throw new Error('Choose an export smaller than 5 MB.');
+        var text = await file.text(), parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object' || (Array.isArray(parsed) && parsed.some(function (item) { return !item || typeof item !== 'object' || Array.isArray(item); }))) throw new Error('The export must contain an automation object or a list of automation objects.');
+        if (generation !== importFileGeneration) return;
+        importDefs.value = text; importFileMsg.textContent = 'Ready to import ' + file.name + '. Review the options below before importing.';
+      } catch (e) { if (generation === importFileGeneration) { importFileError = true; importFileMsg.textContent = 'Could not read this export. Choose a valid JSON export or use the advanced editor.'; } }
+      finally { if (generation === importFileGeneration) importFileLoading = false; }
+    });
     function updateModeHint() {
       if (!modeHint) return;
       var mode = sourceModes[sourceSel.value];
       if (mode === 'connect-and-trigger') {
         modeHint.textContent = 'This platform doesn’t expose its automation definitions, '
-          + 'so there’s nothing to fetch. Paste the automation’s exported JSON above, or have '
+          + 'so there’s nothing to fetch. Upload the automation’s export, or have '
           + 'it call an inbound webhook trigger instead — importing with a blank box will report that.';
         modeHint.hidden = false;
       } else {
@@ -357,15 +414,17 @@
         sourceModes[s.source] = s.mode;
         var opt = document.createElement('option');
         opt.value = s.source;
-        opt.textContent = s.source + ' (' + s.mode + ')';
+        opt.textContent = s.source.replace(/_/g, ' ');
         sourceSel.appendChild(opt);
       });
       updateModeHint();
     })();
     importForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();
+      if (importBusy) return;
       var results = document.getElementById('auto-import-results');
       results.textContent = '';
+      if (importFileLoading || importFileError) { results.appendChild(el('li', 'auto__warn', importFileLoading ? 'Wait for the export to finish loading.' : 'Choose a valid export before importing.')); return; }
       var body = {
         source: sourceSel.value,
         dry_run: document.getElementById('auto-import-dry').checked,
@@ -378,10 +437,18 @@
         var parsed;
         try { parsed = JSON.parse(raw); } catch (e) {
           results.appendChild(el('li', 'auto__warn', 'Definitions are not valid JSON.'));
+          document.getElementById('auto-import-json-advanced').open = true; importDefs.focus();
           return;
+        }
+        if (!parsed || typeof parsed !== 'object' || (Array.isArray(parsed) && parsed.some(function (item) { return !item || typeof item !== 'object' || Array.isArray(item); }))) {
+          results.appendChild(el('li', 'auto__warn', 'Use an automation object or a list of automation objects.'));
+          document.getElementById('auto-import-json-advanced').open = true; importDefs.focus(); return;
         }
         body.definitions = Array.isArray(parsed) ? parsed : [parsed];
       }
+      importBusy = true;
+      var submit = importForm.querySelector('button[type="submit"]'); submit.disabled = true;
+      try {
       var resp = await fetch('/api/v1/import/run', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -392,6 +459,7 @@
         return;
       }
       var out = await resp.json();
+      if (!out || !Array.isArray(out.imported)) throw new Error('Import could not be confirmed. Review the automation list before trying again.');
       (out.imported || []).forEach(function (it) {
         var li = el('li', '');
         var verb = out.dry_run ? 'would import' : (it.created ? 'imported' : 'skipped');
@@ -433,6 +501,8 @@
           + ' skipped (malformed or an unsupported shape).'));
       }
       if (!out.dry_run) { loadSchedules(); loadTriggers(); }
+      } catch (e) { results.appendChild(el('li', 'auto__warn', e.message || 'Import failed. Check your connection and try again.')); }
+      finally { importBusy = false; submit.disabled = false; }
     });
   }
 
@@ -444,41 +514,141 @@
     var evCount = document.getElementById('auto-event-count');
     var evSource = document.getElementById('auto-event-source');
     var evMsg = document.getElementById('auto-event-msg');
+    var evCfg = document.getElementById('auto-event-config');
+    var evFields = document.getElementById('auto-event-fields');
+    var evAdvanced = document.getElementById('auto-event-config-advanced');
+    var evTarget = document.getElementById('auto-event-template');
+    var evTargetKind = document.getElementById('auto-event-target-kind');
+    var sourceDrafts = Object.create(null), currentSource = '', sourceControls = [];
+    var targetCatalog = { template: [], flow: [] }, targetErrors = {}, creatingEvent = false;
+    // Keys are the existing source contract; labels are for people setting up work.
+    var SOURCE_FIELDS = {
+      http_json: [['url', 'Feed address', 'url', true], ['items_path', 'Where the list appears in the response', 'text'], ['id_field', 'Unique item field', 'text', false, 'id']],
+      rss: [['url', 'RSS or Atom feed address', 'url', true]],
+      oauth_http_json: [['provider', 'Connected account', 'provider', true], ['url', 'Feed address', 'url', true], ['items_path', 'Where the list appears in the response', 'text'], ['id_field', 'Unique item field', 'text', false, 'id']],
+      github_issues: [['owner', 'GitHub organization or owner', 'text', true], ['repo', 'Repository name', 'text', true], ['state', 'Issue status', ['open', 'closed', 'all'], false, 'open'], ['provider', 'Connected account (optional for public repositories)', 'provider']],
+      imap_email: [['host', 'Mail server', 'text', true], ['username', 'Email account', 'text', true], ['password_env', 'Administrator-provided password reference', 'text', true], ['mailbox', 'Mailbox', 'text', false, 'INBOX'], ['port', 'Port', 'number', false, 993], ['use_ssl', 'Use an encrypted connection', 'checkbox', false, true], ['include_body', 'Include the message body', 'checkbox', false, false]],
+      file_dir: [['path', 'Folder inside the approved incoming-files area', 'text', true], ['glob', 'File pattern', 'text', false, '*'], ['recursive', 'Include subfolders', 'checkbox', false, false]],
+      form: [['token', 'Form address name', 'text', true]]
+    };
+    var SOURCE_LABELS = { http_json: 'Web feed', rss: 'RSS or Atom feed', oauth_http_json: 'Connected account feed', github_issues: 'GitHub issues', imap_email: 'Email inbox', file_dir: 'Incoming files', form: 'Form submissions' };
+    var SOURCE_HINTS = {
+      http_json: 'Use a feed that returns a list of items. For a list inside a response, enter its field name, such as data.items.',
+      oauth_http_json: 'Choose an account connected below. Lightwork uses its saved authorization; do not paste an access token.',
+      github_issues: 'Watch new issues in a repository. Connect GitHub below for private repositories.',
+      imap_email: 'A deployment administrator must supply the server password reference. Passwords are never stored in automation settings.',
+      file_dir: 'This folder is on the Lightwork server, inside your organization’s approved incoming-files area. Deployment administrator access is required.',
+      form: 'Choose a unique address name. Share the generated form link after creating this automation.'
+    };
+    var connectedProviders = [];
+    function readSourceConfig() {
+      var cfg;
+      try { cfg = JSON.parse(evCfg.value || '{}'); }
+      catch (e) { throw new Error('Check the JSON in Advanced connection settings.'); }
+      if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('Advanced connection settings must be a JSON object.');
+      return cfg;
+    }
+    function showFormUrl() {
+      var hint = document.getElementById('auto-event-formurl');
+      hint.hidden = evSource.value !== 'form'; hint.textContent = '';
+      if (hint.hidden) return;
+      var cfg; try { cfg = readSourceConfig(); } catch (e) { return; }
+      if (!cfg.token) return;
+      var link = el('a', '', 'Open submission form');
+      link.href = '/form/' + encodeURIComponent(String(cfg.token));
+      hint.appendChild(link);
+      hint.appendChild(document.createTextNode(' — available after this automation is created.'));
+    }
+    function fillSourceFields() {
+      evFields.textContent = ''; sourceControls = [];
+      var cfg;
+      try { cfg = readSourceConfig(); }
+      catch (e) { evMsg.textContent = e.message; return; }
+      (SOURCE_FIELDS[evSource.value] || []).forEach(function (field) {
+        var key = field[0], kind = field[2], choices = Array.isArray(kind) ? kind : null;
+        var wrapper = el('div', 'field'), label = el('label', '', field[1]);
+        var input = document.createElement(choices || kind === 'provider' ? 'select' : 'input');
+        input.id = 'auto-source-' + key; label.htmlFor = input.id;
+        if (choices) choices.forEach(function (value) { var option = el('option', '', value); option.value = value; input.appendChild(option); });
+        else if (kind === 'provider') {
+          var empty = el('option', '', field[3] ? 'Choose a connected account' : 'Use public or administrator-configured access'); empty.value = ''; input.appendChild(empty);
+          connectedProviders.forEach(function (provider) { var option = el('option', '', provider.label); option.value = provider.name; input.appendChild(option); });
+          if (cfg[key] && !connectedProviders.some(function (p) { return p.name === cfg[key]; })) {
+            var missing = el('option', '', String(cfg[key]) + ' — not connected'); missing.value = cfg[key]; input.appendChild(missing);
+          }
+        } else input.type = kind;
+        var value = Object.prototype.hasOwnProperty.call(cfg, key) ? cfg[key] : field[4];
+        if (kind === 'checkbox') input.checked = value === true;
+        else input.value = value === undefined ? '' : String(value);
+        if (kind === 'number') { input.min = '1'; input.max = '65535'; input.step = '1'; }
+        input.required = !!field[3];
+        input.addEventListener('input', function () {
+          var next; try { next = readSourceConfig(); } catch (e) { evMsg.textContent = e.message; evAdvanced.open = true; evCfg.focus(); return; }
+          if (kind === 'checkbox') next[key] = input.checked;
+          else if (!input.value.trim()) delete next[key];
+          else next[key] = kind === 'number' ? Number(input.value) : input.value.trim();
+          evCfg.value = JSON.stringify(next, null, 2); sourceDrafts[currentSource] = evCfg.value; showFormUrl();
+        });
+        wrapper.appendChild(label); wrapper.appendChild(input); evFields.appendChild(wrapper);
+        sourceControls.push(input);
+      });
+      showFormUrl();
+    }
+    function changeSource() {
+      if (currentSource) sourceDrafts[currentSource] = evCfg.value;
+      currentSource = evSource.value;
+      evCfg.value = sourceDrafts[currentSource] || '{}';
+      document.getElementById('auto-event-source-hint').textContent = SOURCE_HINTS[currentSource] || '';
+      evAdvanced.open = !SOURCE_FIELDS[currentSource];
+      fillSourceFields();
+    }
+    evSource.addEventListener('change', changeSource);
+    evCfg.addEventListener('input', function () { sourceDrafts[currentSource] = evCfg.value; fillSourceFields(); });
+    function renderTargetParams() {
+      var container = document.getElementById('auto-event-params'); container.textContent = '';
+      var target = targetCatalog[evTargetKind.value].find(function (item) { return item.name === evTarget.value; });
+      (target && target.params || []).forEach(function (name, index) {
+        var field = el('div', 'field'), input = document.createElement('input');
+        input.type = 'text'; input.id = 'auto-event-param-' + index; input.dataset.param = name;
+        var label = el('label', '', String(name).replace(/_/g, ' ') + ' (fallback when an item does not supply it)'); label.htmlFor = input.id;
+        field.appendChild(label); field.appendChild(input); container.appendChild(field);
+      });
+    }
+    function renderTargetChoices() {
+      evTarget.textContent = '';
+      var kind = evTargetKind.value, items = targetCatalog[kind];
+      var placeholder = el('option', '', items.length ? 'Choose a workflow' : 'No ' + (kind === 'flow' ? 'published flows' : 'saved workflows') + ' available'); placeholder.value = ''; evTarget.appendChild(placeholder);
+      items.forEach(function (item) { var option = el('option', '', item.title || item.name); option.value = item.name; evTarget.appendChild(option); });
+      document.getElementById('auto-event-target-hint').textContent = targetErrors[kind] || (kind === 'flow' ? 'Only published flows can start automatically. Their approval steps still apply.' : 'Each new item fills the workflow’s inputs. You can supply fallback values below.');
+      renderTargetParams();
+    }
+    evTargetKind.addEventListener('change', renderTargetChoices);
+    evTarget.addEventListener('change', renderTargetParams);
+    async function loadTargetChoices() {
+      await Promise.all(['template', 'flow'].map(async function (kind) {
+        try {
+          var response = await fetch('/api/v1/' + (kind === 'template' ? 'templates' : 'flows'));
+          if (!response.ok) throw new Error('Could not load ' + (kind === 'template' ? 'workflows' : 'flows') + '. Refresh to try again.');
+          var data = await response.json(), items = kind === 'template' ? data.templates : data.flows;
+          if (!Array.isArray(items)) throw new Error('The workflow list could not be read. Refresh to try again.');
+          targetCatalog[kind] = kind === 'template' ? items : items.filter(function (item) { return item.published; }).map(function (item) { return { name: item.id, title: item.name || item.id }; });
+        } catch (e) { targetErrors[kind] = e.message; }
+      }));
+      renderTargetChoices();
+    }
+    loadTargetChoices();
+    fetch('/api/v1/oauth/providers').then(function (r) { if (!r.ok) throw new Error(); return r.json(); }).then(function (data) {
+      connectedProviders = (data.providers || []).filter(function (p) { return (data.connected || []).indexOf(p.name) !== -1; });
+      if (currentSource) fillSourceFields();
+    }).catch(function () { /* Connection setup below retains its own feedback. */ });
     async function loadEventTriggers() {
       var data = {};
       try { data = await (await fetch('/api/v1/event-triggers')).json(); } catch (e) { return; }
       if (evSource && !evSource.children.length) {
         (data.sources || []).forEach(function (s) {
-          var o = document.createElement('option'); o.value = s; o.textContent = s; evSource.appendChild(o);
+          var o = document.createElement('option'); o.value = s; o.textContent = SOURCE_LABELS[s] || s.replace(/_/g, ' '); evSource.appendChild(o);
         });
-        // Show each source's config keys in the JSON textarea placeholder so a
-        // user knows what to fill in (the field stays free-form JSON).
-        var evCfg = document.getElementById('auto-event-config');
-        var HINTS = {
-          http_json: '{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }',
-          rss: '{ "url": "https://example.com/feed.xml" }',
-          oauth_http_json: '{ "url": "https://slack.com/api/...", "provider": "slack", "items_path": "messages" }',
-          github_issues: '{ "owner": "acme", "repo": "app", "state": "open" }',
-          imap_email: '{ "host": "imap.gmail.com", "username": "you@x.com", "password_env": "MY_IMAP_PW", "mailbox": "INBOX" }',  // pragma: allowlist secret
-          file_dir: '{ "path": "/data/inbound", "glob": "*.csv", "recursive": false }',
-          form: '{ "token": "signup" }  → POST submissions to /form/signup'
-        };
-        var formUrl = document.getElementById('auto-event-formurl');
-        var showFormUrl = function () {
-          if (!formUrl) return;
-          if (evSource.value !== 'form') { formUrl.hidden = true; return; }
-          var token = '';
-          try { token = (JSON.parse(evCfg.value || '{}').token || '').trim(); } catch (e) { token = ''; }
-          if (!token) { formUrl.textContent = 'Add {"token":"…"} above; submissions POST to /form/<token>.'; formUrl.hidden = false; return; }
-          formUrl.textContent = 'Point your form at: ' + window.location.origin + '/form/' + encodeURIComponent(token);
-          formUrl.hidden = false;
-        };
-        if (evCfg && evSource) {
-          var applyHint = function () { if (HINTS[evSource.value]) evCfg.placeholder = HINTS[evSource.value]; showFormUrl(); };
-          evSource.addEventListener('change', applyHint);
-          evCfg.addEventListener('input', showFormUrl);
-          applyHint();
-        }
+        changeSource();
       }
       var items = data.triggers || [];
       // One batched history fetch (owner-scoped), grouped by trigger name -- the
@@ -503,9 +673,10 @@
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
         main.appendChild(el('div', 'mv-row__title', t.name));
-        main.appendChild(el('div', 'mv-row__sub', 'source ' + t.source + ' · template ' + t.template
+        main.appendChild(el('div', 'mv-row__sub', (SOURCE_LABELS[t.source] || t.source.replace(/_/g, ' ')) + ' · ' + (t.template || t.flow)
           + ' · every ' + (t.interval_seconds ? t.interval_seconds + 's' : '5m')
-          + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
+          + (t.cursor ? '' : ' · awaiting first check')));
+        if (t.cursor) { var details = el('details'); details.appendChild(el('summary', '', 'Technical details')); details.appendChild(el('div', 'auto__url', 'Last processed position: ' + t.cursor)); main.appendChild(details); }
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
         var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
         var outc = el('div', 'auto__runs'); main.appendChild(outc); renderEventOutcomes(outByName[t.name] || {}, outc);
@@ -547,34 +718,50 @@
     }
     evForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();
+      if (creatingEvent) return;
       evMsg.textContent = '';
-      var cfgRaw = document.getElementById('auto-event-config').value.trim();
-      var config = {};
-      if (cfgRaw) { try { config = JSON.parse(cfgRaw); } catch (e) { evMsg.textContent = 'Config is not valid JSON.'; return; } }
+      var config;
+      try { config = readSourceConfig(); }
+      catch (e) { evMsg.textContent = e.message; evAdvanced.open = true; evCfg.focus(); return; }
+      if (!evForm.reportValidity()) return;
       var intervalRaw = document.getElementById('auto-event-interval').value.trim();
       var body = {
-        template: document.getElementById('auto-event-template').value.trim(),
         source: evSource.value, config: config,
         name: document.getElementById('auto-event-name').value.trim() || null,
-        interval_seconds: intervalRaw ? parseInt(intervalRaw, 10) : 0,
+        interval_seconds: intervalRaw ? Number(intervalRaw) : 0,
+        params: {}
       };
-      var resp = await fetch('/api/v1/event-triggers', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      body[evTargetKind.value] = evTarget.value;
+      document.querySelectorAll('#auto-event-params input').forEach(function (input) {
+        if (input.value.trim()) body.params[input.dataset.param] = input.value.trim();
       });
-      var data = await resp.json().catch(function () { return {}; });
-      if (!resp.ok) { evMsg.textContent = (typeof data.detail === 'string' ? data.detail : 'Create failed: ' + resp.status); return; }
-      evMsg.textContent = 'Created “' + data.name + '”. It polls when you (or a cron) hit “Poll now”.';
-      evForm.reset();
-      loadEventTriggers();
+      creatingEvent = true;
+      var submit = evForm.querySelector('button[type="submit"]'); submit.disabled = true;
+      evMsg.textContent = 'Creating automation…';
+      try {
+        var resp = await fetch('/api/v1/event-triggers', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        var data = await resp.json();
+        if (!resp.ok || !data || typeof data.name !== 'string') throw new Error(data && typeof data.detail === 'string' ? data.detail : 'The automation could not be confirmed. Refresh the list before trying again.');
+        evMsg.textContent = 'Created “' + data.name + '”. Lightwork checks for new items while its background service runs. You can also choose Check now.';
+        evForm.reset(); sourceDrafts = Object.create(null); currentSource = ''; changeSource(); renderTargetChoices();
+        loadEventTriggers();
+      } catch (e) { evMsg.textContent = e.message || 'Could not create the automation. Check your connection and try again.'; }
+      finally { creatingEvent = false; submit.disabled = false; }
     });
     document.getElementById('auto-event-poll').addEventListener('click', async function () {
-      evMsg.textContent = 'Polling…';
+      if (this.disabled) return;
+      this.disabled = true; evMsg.textContent = 'Checking for new items…';
       try {
-        var out = await (await fetch('/api/v1/event-triggers/poll', { method: 'POST' })).json();
-        var fired = (out.triggers || []).reduce(function (a, t) { return a + (t.fired || []).length + (t.fired_flows || []).length; }, 0);
-        evMsg.textContent = 'Polled ' + (out.polled || 0) + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
+        var response = await fetch('/api/v1/event-triggers/poll', { method: 'POST' });
+        var out = await response.json();
+        if (!response.ok || !out || !Array.isArray(out.triggers) || typeof out.polled !== 'number') throw new Error(out && typeof out.detail === 'string' ? out.detail : 'The check could not be confirmed.');
+        var fired = out.triggers.reduce(function (a, t) { return a + (t.fired || []).length + (t.fired_flows || []).length; }, 0);
+        evMsg.textContent = 'Checked ' + out.polled + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
         loadEventTriggers();
-      } catch (e) { evMsg.textContent = 'Poll failed.'; }
+      } catch (e) { evMsg.textContent = e.message || 'Check failed. Try again when your connection is restored.'; }
+      finally { this.disabled = false; }
     });
     loadEventTriggers();
   }
@@ -587,14 +774,70 @@
     var oMsg = document.getElementById('oauth-msg');
     var oFinish = document.getElementById('oauth-finish');
     var oOpen = document.getElementById('oauth-open');
-    var pendingVerifier = '';
+    var oauthContext = '', oauthBusy = false, pendingConnection = null;
+    var oauthStorageName = 'lightwork.oauth.pending.v1';
+    var defaultRedirect = window.location.origin + '/automations';
+    var redirectInput = document.getElementById('oauth-redirect');
+    redirectInput.value = defaultRedirect;
+    var returnUrl = new URL(window.location.href), oauthReturn = null;
+    if (returnUrl.searchParams.has('code') || returnUrl.searchParams.has('error')) {
+      oauthReturn = { code: returnUrl.searchParams.get('code'), state: returnUrl.searchParams.get('state'), error: returnUrl.searchParams.get('error') };
+      ['code', 'state', 'error', 'error_description', 'error_uri'].forEach(function (key) { returnUrl.searchParams.delete(key); });
+      window.history.replaceState(null, '', returnUrl.pathname + returnUrl.search + returnUrl.hash);
+    }
+    function readPendingConnection() {
+      try {
+        var pending = JSON.parse(window.sessionStorage.getItem(oauthStorageName) || 'null');
+        if (!pending || typeof pending.provider !== 'string' || !pending.provider ||
+            typeof pending.verifier !== 'string' || !/^[A-Za-z0-9_~.\-]{43,128}$/.test(pending.verifier) ||
+            typeof pending.state !== 'string' || !/^[a-f0-9]{64}$/.test(pending.state) ||
+            typeof pending.redirect !== 'string' || typeof pending.context !== 'string' ||
+            !Number.isFinite(pending.created) || Date.now() - pending.created > 600000 || pending.created > Date.now()) return null;
+        return pending;
+      } catch (e) { return null; }
+    }
+    function clearPendingConnection() {
+      pendingConnection = null;
+      try { window.sessionStorage.removeItem(oauthStorageName); } catch (e) { /* unavailable storage cannot retain a connection */ }
+    }
+    async function exchangeConnection(code, pending) {
+      if (oauthBusy) return;
+      if (!pending || pending.context !== oauthContext) { oMsg.textContent = 'This connection belongs to a different session or workspace. Connect the account again.'; clearPendingConnection(); return; }
+      oauthBusy = true;
+      var connectButton = document.getElementById('oauth-get-url'), finishButton = document.getElementById('oauth-exchange');
+      connectButton.disabled = true; finishButton.disabled = true;
+      // Consume before sending: a reload or repeated click cannot replay the code.
+      clearPendingConnection(); oMsg.textContent = 'Finishing account connection…';
+      try {
+        var response = await fetch('/api/v1/oauth/' + encodeURIComponent(pending.provider) + '/exchange', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: code, redirect_uri: pending.redirect, verifier: pending.verifier })
+        });
+        var data = await response.json();
+        if (!response.ok || !data || data.connected !== true || data.provider !== pending.provider) throw new Error('Connection could not be confirmed. Check saved accounts before reconnecting.');
+        oMsg.textContent = 'Account connected.'; oFinish.hidden = true; document.getElementById('oauth-code').value = '';
+        await loadOAuth();
+      } catch (e) { oMsg.textContent = e.message || 'Connection could not be confirmed. Check saved accounts before reconnecting.'; }
+      finally { oauthBusy = false; connectButton.disabled = false; finishButton.disabled = false; }
+    }
+    function finishOAuthReturn() {
+      var returned = oauthReturn; oauthReturn = null;
+      var pending = readPendingConnection();
+      if (!pending || !returned.state || returned.state !== pending.state || pending.redirect !== defaultRedirect || pending.context !== oauthContext) {
+        clearPendingConnection(); oMsg.textContent = 'The account connection expired or does not match this session. Connect the account again.'; return;
+      }
+      if (returned.error || !returned.code) { clearPendingConnection(); oMsg.textContent = 'Access was not approved. You can connect the account again when ready.'; return; }
+      exchangeConnection(returned.code, pending);
+    }
     async function loadOAuth() {
       var data;
-      try { data = await (await fetch('/api/v1/oauth/providers')).json(); }
-      catch (e) { return; }
+      try { var response = await fetch('/api/v1/oauth/providers'); if (!response.ok) throw new Error(); data = await response.json(); if (!data || !Array.isArray(data.providers) || typeof data.connection_context !== 'string') throw new Error(); }
+      catch (e) { oMsg.textContent = 'Could not load account connections. Refresh to try again.'; return; }
       if (!data.vault_enabled) { oauthBox.hidden = true; return; }
       oauthBox.hidden = false;
+      oauthContext = data.connection_context;
       var connected = data.connected || [];
+      if (typeof connectedProviders !== 'undefined') { connectedProviders = data.providers.filter(function (p) { return connected.indexOf(p.name) !== -1; }); if (currentSource) fillSourceFields(); }
       oList.textContent = '';
       if (oProv && !oProv.children.length) {
         (data.providers || []).forEach(function (p) {
@@ -607,11 +850,11 @@
         var st = status[p.name] || {};
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
-        var title = p.label + (st.expired ? ' · token expired' : ' · connected');
+        var title = p.label + (st.expired ? ' · authorization expired' : ' · connected');
         main.appendChild(el('div', 'mv-row__title', title));
-        var sub = 'provider ' + p.name;
+        var sub = 'Account access saved';
         if (st.expires_at) sub += ' · expires ' + fmtWhen(st.expires_at);
-        if (st.has_refresh_token) sub += ' · auto-refreshes';
+        if (st.has_refresh_token) sub += ' · renews automatically';
         main.appendChild(el('div', 'mv-row__sub', sub));
         li.appendChild(main);
         var actions = el('div', 'mv-row__actions');
@@ -647,41 +890,55 @@
       } catch (e) { mvToast('Could not disconnect', { error: true }); }
     }
     document.getElementById('oauth-get-url').addEventListener('click', async function () {
-      var redirect = (document.getElementById('oauth-redirect').value || '').trim();
-      if (!redirect) { oMsg.textContent = 'Enter the redirect URI first.'; return; }
-      oMsg.textContent = 'Building consent link…';
+      if (oauthBusy) return;
+      var redirect = redirectInput.value.trim() || defaultRedirect;
+      if (!redirectInput.reportValidity()) { document.getElementById('oauth-advanced-setup').open = true; redirectInput.focus(); return; }
+      if (!oauthContext || !oProv.value) { oMsg.textContent = 'Wait for account choices to load, then try again.'; return; }
+      oauthBusy = true; this.disabled = true; clearPendingConnection();
+      oMsg.textContent = 'Preparing secure account connection…';
       try {
-        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(oProv.value) + '/authorize-url', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ redirect_uri: redirect }),
+        var provider = oProv.value, context = oauthContext;
+        var response = await fetch('/api/v1/oauth/' + encodeURIComponent(provider) + '/authorize-url', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ redirect_uri: redirect })
         });
-        var j = await r.json();
-        if (!r.ok) { oMsg.textContent = j.detail || ('Failed: ' + r.status); return; }
-        pendingVerifier = j.verifier || '';
-        oOpen.href = j.authorize_url;
-        oFinish.hidden = false;
-        oMsg.textContent = 'Open the consent page, then paste the code below.';
-      } catch (e) { oMsg.textContent = 'Failed to build consent link.'; }
+        var data = await response.json();
+        if (!response.ok) throw new Error(data && typeof data.detail === 'string' ? data.detail : 'Account connection is unavailable.');
+        var consent = new URL(data.authorize_url);
+        if (consent.protocol !== 'https:' || consent.searchParams.get('redirect_uri') !== redirect || consent.searchParams.get('code_challenge_method') !== 'S256' ||
+            typeof data.verifier !== 'string' || !/^[A-Za-z0-9_~.\-]{43,128}$/.test(data.verifier)) throw new Error('The provider returned incomplete connection details. Try again.');
+        var bytes = new Uint8Array(32); window.crypto.getRandomValues(bytes);
+        var state = Array.from(bytes, function (value) { return value.toString(16).padStart(2, '0'); }).join('');
+        consent.searchParams.set('state', state);
+        pendingConnection = { provider: provider, redirect: redirect, context: context, state: state, verifier: data.verifier, created: Date.now() };
+        window.sessionStorage.setItem(oauthStorageName, JSON.stringify(pendingConnection));
+        oOpen.href = consent.href;
+        if (redirect === defaultRedirect) {
+          oMsg.textContent = 'Approve access with the provider. You will return here automatically.';
+          window.location.assign(consent.href);
+        } else {
+          document.getElementById('oauth-advanced-setup').open = true; oFinish.hidden = false;
+          oMsg.textContent = 'Open the consent page, then use the manual finish option for your custom return address.';
+          oOpen.focus();
+        }
+      } catch (e) { clearPendingConnection(); oMsg.textContent = e.message || 'Could not start the connection. Check that your browser permits session storage and try again.'; }
+      finally { oauthBusy = false; this.disabled = false; }
     });
-    document.getElementById('oauth-exchange').addEventListener('click', async function () {
-      var code = (document.getElementById('oauth-code').value || '').trim();
-      var redirect = (document.getElementById('oauth-redirect').value || '').trim();
+    document.getElementById('oauth-exchange').addEventListener('click', function () {
+      if (oauthBusy) return;
+      var code = document.getElementById('oauth-code').value.trim();
       if (!code) { oMsg.textContent = 'Paste the authorization code first.'; return; }
-      oMsg.textContent = 'Connecting…';
-      try {
-        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(oProv.value) + '/exchange', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: code, redirect_uri: redirect, verifier: pendingVerifier }),
-        });
-        var j = await r.json();
-        if (!r.ok) { oMsg.textContent = j.detail || ('Exchange failed: ' + r.status); return; }
-        oMsg.textContent = 'Connected ✓';
-        oFinish.hidden = true;
-        document.getElementById('oauth-code').value = '';
-        loadOAuth();
-      } catch (e) { oMsg.textContent = 'Exchange failed.'; }
+      exchangeConnection(code, pendingConnection || readPendingConnection());
     });
-    loadOAuth();
+    loadOAuth().then(function () {
+      if (oauthReturn) finishOAuthReturn();
+      else {
+        pendingConnection = readPendingConnection();
+        if (pendingConnection && pendingConnection.context === oauthContext && pendingConnection.redirect !== defaultRedirect) {
+          redirectInput.value = pendingConnection.redirect;
+          document.getElementById('oauth-advanced-setup').open = true; oFinish.hidden = false;
+        }
+      }
+    });
   }
 
   // ---- flows (deterministic skeleton over agentic/tool steps) ----

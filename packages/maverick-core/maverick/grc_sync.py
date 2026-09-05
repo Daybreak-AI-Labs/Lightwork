@@ -13,10 +13,10 @@ path every governed connector uses. The mapper is deliberately narrow:
   as the remote ``correlation_id`` (plus an optional backlink URL), and the
   outbound ledger stores the remote id the target returned — navigable in
   both directions.
-* **Fail-closed on ambiguity.** A write that succeeded but whose response
-  could not be parsed for a remote id lands in the terminal
-  ``delivered_unconfirmed`` state instead of being blindly retried into
-  duplicates; a failed write records a bounded error and stays retryable.
+* **Fail-closed on ambiguity.** Every write is claimed before dispatch.
+  Interrupted or uncertain writes stay held instead of being blindly retried
+  into duplicates. A successful create without a parseable remote id lands in
+  ``delivered_unconfirmed``; explicit rejections stay retryable.
 * **Bounded content.** Only the source record's id, type, severity, summary,
   and content digest leave the platform. Evidence bodies, citations, and
   detail payloads never do.
@@ -48,6 +48,11 @@ _PATH_KEYS = {
 _REMOTE_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{4,128}\Z")
 _MAX_ERROR = 500
 _MAX_BATCH = 200
+_HELD_STATUSES = frozenset({"dispatching", "dispatch_unconfirmed"})
+_HELD_REASON = (
+    "Delivery is in progress or its outcome is unconfirmed; review the outbound "
+    "record and external system before any retry."
+)
 
 
 class GRCSyncError(RuntimeError):
@@ -310,6 +315,21 @@ def _remote_id_from(response: str) -> str | None:
     return None
 
 
+def _response_is_uncertain(response: Any, *, op: str) -> bool:
+    if not isinstance(response, str):
+        return True
+    # The shared REST adapter deliberately renders errors without upstream
+    # bodies or secrets. Its transport-error strings do not prove that the
+    # remote mutation failed; the response may have been lost after commit.
+    if re.fullmatch(r"ERROR: [a-z0-9_]+ request failed \([^\r\n]+\)", response):
+        return True
+    if response == "ERROR: connector configuration or request failed (RuntimeError)":
+        return True
+    # A server failure after POST may still have created the record. A PATCH
+    # retry targets the existing remote id, so it cannot create another one.
+    return op == "post" and bool(re.match(r"ERROR: post \(5\d\d\):", response))
+
+
 def _deliver_one(
     row: Mapping[str, Any],
     *,
@@ -347,6 +367,8 @@ def _deliver_one(
                 raise
     status = str(current.get("status"))
     unchanged = current.get("source_sha256") == row["content_sha256"]
+    if status in _HELD_STATUSES:
+        return dict(current)
     if status == "delivered_unconfirmed":
         return dict(current)
     if status == "delivered" and unchanged:
@@ -360,16 +382,37 @@ def _deliver_one(
         op = "post"
         target_path = path
 
+    def claim(value: dict[str, Any]) -> None:
+        value["status"] = "dispatching"
+        value["attempts"] = int(value.get("attempts") or 0) + 1
+        value["last_error"] = _HELD_REASON
+
+    # Claim in the authoritative record *before* the remote side effect. This
+    # CAS works for local and shared backends; a process-local lock would not.
+    # A crashed sender remains held, without an expiring lease that could
+    # recreate an already-delivered remote record after a lost response.
+    current = _STORE.update(
+        outbound_id, claim, expected_revision=int(current.get("revision") or 0),
+        action="claim_grc_outbound", actor=actor,
+    )
+    if current is None:
+        raise GRCSyncStateError("GRC outbound record disappeared before delivery")
+    uncertain = False
     try:
         response = writer(op, target_path, payload)
+        uncertain = _response_is_uncertain(response, op=op)
     except Exception as exc:  # noqa: BLE001 - every failure is recorded, bounded
         response = f"ERROR: writer failed ({type(exc).__name__})"
+        uncertain = True
     succeeded = isinstance(response, str) and not response.startswith("ERROR:")
     remote_id = _remote_id_from(response) if succeeded else None
 
     def mutate(value: dict[str, Any]) -> None:
-        value["attempts"] = int(value.get("attempts") or 0) + 1
         value["payload_sha256"] = payload_sha
+        if uncertain:
+            value["status"] = "dispatch_unconfirmed"
+            value["last_error"] = _HELD_REASON
+            return
         if not succeeded:
             value["status"] = "failed" if value.get("remote_id") is None else "delivered"
             value["last_error"] = _bounded(response, _MAX_ERROR)
@@ -431,6 +474,9 @@ def run_sync(
             before is not None
             and before.get("source_sha256") == row["content_sha256"]
         )
+        if status_before in _HELD_STATUSES:
+            blocked.append({"source_id": row["source_id"], "reason": _HELD_REASON})
+            continue
         if status_before in {"delivered", "delivered_unconfirmed"} and same_source:
             unchanged += 1
             continue
@@ -453,7 +499,9 @@ def run_sync(
         except (GRCSyncError, RecordConflict, ValueError) as exc:
             failures.append({"source_id": row["source_id"], "reason": _bounded(exc, 256)})
             continue
-        if str(outcome.get("status")).startswith("delivered"):
+        if outcome.get("status") in _HELD_STATUSES:
+            blocked.append({"source_id": row["source_id"], "reason": _HELD_REASON})
+        elif str(outcome.get("status")).startswith("delivered") and not outcome.get("last_error"):
             delivered.append(outcome)
         else:
             failures.append(
@@ -498,7 +546,10 @@ def list_outbound(*, limit: int = 100) -> list[dict[str, Any]]:
 
 
 def sync_status() -> dict[str, Any]:
-    counts = {"pending": 0, "delivered": 0, "delivered_unconfirmed": 0, "failed": 0}
+    counts = {
+        "pending": 0, "delivered": 0, "delivered_unconfirmed": 0, "failed": 0,
+        "dispatching": 0, "dispatch_unconfirmed": 0,
+    }
     for row in _STORE.list(limit=500):
         status = str(row.get("status") or "")
         if status in counts:

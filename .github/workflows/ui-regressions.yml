@@ -35,6 +35,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: '22.23.1'
+      - name: Install dashboard DOM test dependencies
+        run: npm ci --prefix packages/maverick-dashboard/tests/js --ignore-scripts
       - name: Dashboard controller regressions
         run: node --test packages/maverick-dashboard/tests/js/*.test.js
       - name: Desktop splash regressions

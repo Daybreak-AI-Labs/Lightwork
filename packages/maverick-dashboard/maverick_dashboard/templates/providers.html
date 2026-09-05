@@ -5,14 +5,14 @@
   {% from "_integration_readiness.html" import integration_readiness %}
   {% set configured = inventory | selectattr('configured') | list %}
   {% set verified = inventory | selectattr('readiness.live.status', 'equalto', 'verified') | list %}
-  {% call hero('Integrations', 'Providers', subtitle='Configuration and measured readiness',
-               lede='Saved credentials, local dependencies, policy admission,
-                     bounded live checks, and observed call health are separate evidence.') %}
+  {% call hero('Integrations', 'Providers', subtitle='AI service connections',
+               lede='Review which AI services are set up, whether your organization
+                     allows them, and the results of their connection tests.') %}
     {{ state('Current state', configured | length ~ ' configured; ' ~ verified | length ~ ' live verified',
              badge='live verified' if verified else 'verification unknown',
              badge_class='ok' if verified else 'idle',
-             copy='A configured provider is not called ready until the current
-                   effective configuration passes a bounded live check.') }}
+             copy='Saving an access key does not test the connection.
+                   A successful live test is shown separately below.') }}
   {% endcall %}
 <section class="panel">
   <h2 style="margin-top: 0;">Provider inventory</h2>
@@ -30,9 +30,9 @@
   </table>
 </section>
 <section class="panel">
-  <h2 style="margin-top: 0;">Observed call health</h2>
+  <h2 style="margin-top: 0;">Recent service performance</h2>
   {% if not rows %}
-    <p class="muted">No provider calls recorded yet. This historical health view is not a readiness result and resets on restart.</p>
+    <p class="muted">No requests recorded yet. These recent results are separate from connection tests and reset when Lightwork restarts.</p>
   {% else %}
     <table>
       <thead>
@@ -41,9 +41,9 @@
           <th scope="col">model</th>
           <th scope="col">calls</th>
           <th scope="col">errors</th>
-          <th scope="col">err %</th>
-          <th scope="col">p50 ms</th>
-          <th scope="col">p95 ms</th>
+          <th scope="col">Error rate</th>
+          <th scope="col" title="Half of requests completed within this time">Median response (ms)</th>
+          <th scope="col" title="95% of requests completed within this time">95th percentile (ms)</th>
           <th scope="col">$ total</th>
           <th scope="col">last seen</th>
         </tr>
@@ -77,7 +77,7 @@
 <section class="panel">
   <div class="section-head"><h2>Monitoring export</h2></div>
   <details>
-    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: fetch these stats as JSON</summary>
+    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">Advanced: connect a monitoring tool</summary>
     <p class="muted" style="margin-top: var(--space-2);">JSON snapshot: <code>GET /api/v1/providers</code></p>
   </details>
 </section>

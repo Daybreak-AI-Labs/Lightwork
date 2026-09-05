@@ -83,9 +83,9 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
 
     assert "AI entity tasks" in response.text
     assert 'id="aet-operations" disabled' in response.text
-    assert "store-free server status" in response.text
-    assert "server independently resolves its current authority and digest" in response.text
-    assert "callers cannot supply or override it" in response.text
+    assert "Checking availability before enabling actions" in response.text
+    assert "Lightwork checks that the item is current before saving a task" in response.text
+    assert "Each task keeps a verification fingerprint linking it to the reviewed inventory record" in response.text
     assert 'data-api-base="/api/v1/ai-entity-tasks"' in response.text
     assert 'data-copilot-page="/ai-entity-tasks"' in response.text
     assert 'src="/static/lightwork-copilot.js"' in response.text

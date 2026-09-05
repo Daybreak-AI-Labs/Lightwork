@@ -8,6 +8,8 @@ retried; and only bounded pointer content ever leaves the platform.
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import pytest
 from maverick import config, grc_sync
@@ -194,7 +196,7 @@ def test_changed_source_updates_the_same_remote_record(monkeypatch):
 
 def test_failed_delivery_records_a_bounded_error_and_retries(monkeypatch):
     _sources(monkeypatch, findings=[_finding()])
-    writer = _Writer(responses=["ERROR: post (503): upstream request failed" + "x" * 900])
+    writer = _Writer(responses=["ERROR: post (400): upstream request failed" + "x" * 900])
 
     first = grc_sync.run_sync(actor="ops", writer=writer)
     assert first["failure_count"] == 1
@@ -206,6 +208,130 @@ def test_failed_delivery_records_a_bounded_error_and_retries(monkeypatch):
     second = grc_sync.run_sync(actor="ops", writer=writer)
     assert second["delivered_count"] == 1
     assert grc_sync.list_outbound()[0]["status"] == "delivered"
+
+
+def test_concurrent_dispatch_cannot_create_the_same_remote_record_twice(monkeypatch):
+    _sources(monkeypatch, findings=[_finding()])
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    def writer(op, path, body):
+        calls.append((op, path, body))
+        entered.set()
+        assert release.wait(5), "synthetic writer was not released"
+        return json.dumps({"result": {"sys_id": "synthetic-remote"}})
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(grc_sync.run_sync, actor="first", writer=writer)
+        assert entered.wait(5)
+        second = pool.submit(grc_sync.run_sync, actor="second", writer=writer)
+        try:
+            second.result(timeout=1)
+        except TimeoutError:
+            pass  # A broken implementation reached the blocked writer twice.
+        finally:
+            release.set()
+        first.result(timeout=5)
+        second_result = second.result(timeout=5)
+    assert len(calls) == 1
+    assert second_result["blocked_count"] == 1
+
+
+def test_failed_patch_is_reported_as_failure_and_retries_the_same_remote_id(monkeypatch):
+    finding = _finding()
+    _sources(monkeypatch, findings=[finding])
+    writer = _Writer()
+    first = grc_sync.run_sync(actor="ops", writer=writer)
+    remote_id = first["delivered"][0]["remote_id"]
+    _sources(monkeypatch, findings=[dict(finding, finding_sha256="e" * 64)])
+    writer.responses.append("ERROR: patch (503): unavailable")
+    failed = grc_sync.run_sync(actor="ops", writer=writer)
+    assert failed["delivered_count"] == 0
+    assert failed["failure_count"] == 1
+    assert grc_sync.list_outbound()[0]["remote_id"] == remote_id
+    assert grc_sync.run_sync(actor="ops", writer=writer)["delivered_count"] == 1
+    assert [op for op, _path, _body in writer.calls] == ["post", "patch", "patch"]
+
+
+def test_uncertain_writer_exception_is_held_instead_of_recreated(monkeypatch):
+    _sources(monkeypatch, findings=[_finding()])
+    calls = []
+
+    def interrupted_writer(*args):
+        calls.append(args)
+        raise TimeoutError("synthetic response lost after remote create")
+
+    first = grc_sync.run_sync(actor="ops", writer=interrupted_writer)
+    second = grc_sync.run_sync(actor="ops", writer=interrupted_writer)
+    assert len(calls) == 1
+    assert first["blocked_count"] == second["blocked_count"] == 1
+    assert first["delivered_count"] == 0
+
+
+@pytest.mark.parametrize("response", [
+    "ERROR: servicenow request failed (ReadTimeout)",
+    "ERROR: connector configuration or request failed (RuntimeError)",
+    "ERROR: post (503): upstream request failed",
+    None,
+])
+def test_uncertain_connector_response_is_held_instead_of_recreated(monkeypatch, response):
+    _sources(monkeypatch, findings=[_finding()])
+    writer = _Writer(responses=[response])
+    first = grc_sync.run_sync(actor="ops", writer=writer)
+    second = grc_sync.run_sync(actor="ops", writer=writer)
+    assert len(writer.calls) == 1
+    assert first["delivered_count"] == second["delivered_count"] == 0
+    assert first["blocked_count"] == second["blocked_count"] == 1
+    assert grc_sync.list_outbound()[0]["status"] == "dispatch_unconfirmed"
+
+
+def test_actual_rest_writer_lost_response_cannot_create_twice(monkeypatch):
+    from contextlib import contextmanager
+
+    import httpx
+    from maverick.tools import _ssrf
+
+    _sources(monkeypatch, findings=[_finding()])
+    monkeypatch.setenv("SERVICENOW_INSTANCE_URL", "https://synthetic.example.com")
+    monkeypatch.setenv("SERVICENOW_TOKEN", "synthetic-test-token")
+    calls = []
+
+    class Client:
+        def request(self, *args, **kwargs):
+            calls.append(args)
+            raise httpx.ReadTimeout("synthetic response lost after remote create")
+
+    @contextmanager
+    def fake_client(*args, **kwargs):
+        yield Client()
+
+    monkeypatch.setattr(_ssrf, "safe_client", fake_client)
+    first = grc_sync.run_sync(actor="ops")
+    second = grc_sync.run_sync(actor="ops")
+    assert len(calls) == 1
+    assert first["blocked_count"] == second["blocked_count"] == 1
+    assert first["delivered_count"] == 0
+
+
+def test_lost_local_delivery_receipt_keeps_remote_create_claimed(monkeypatch):
+    from maverick.privacy_ops import RecordConflict
+
+    _sources(monkeypatch, findings=[_finding()])
+    writer = _Writer()
+    original_update = grc_sync._STORE.update  # noqa: SLF001
+
+    def lose_delivery_receipt(*args, **kwargs):
+        if kwargs.get("action") == "deliver_grc_outbound":
+            raise RecordConflict("synthetic receipt persistence conflict")
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(grc_sync._STORE, "update", lose_delivery_receipt)  # noqa: SLF001
+    assert grc_sync.run_sync(actor="ops", writer=writer)["failure_count"] == 1
+    monkeypatch.setattr(grc_sync._STORE, "update", original_update)  # noqa: SLF001
+    assert grc_sync.run_sync(actor="ops", writer=writer)["blocked_count"] == 1
+    assert len(writer.calls) == 1
+    assert grc_sync.list_outbound()[0]["status"] == "dispatching"
 
 
 def test_unparseable_create_is_terminal_never_a_duplicate(monkeypatch):

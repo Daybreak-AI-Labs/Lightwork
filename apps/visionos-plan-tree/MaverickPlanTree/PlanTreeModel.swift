@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import LightworkConnectionKit
 
 /// One goal node from `GET /api/v1/goal-tree` — the server has already
 /// computed the layered layout (`depth`, `x`, `y` in pixels).
@@ -28,32 +30,29 @@ final class PlanTreeModel: ObservableObject {
     @Published var forest: GoalForest?
     @Published var error: String?
 
-    /// Dashboard base URL; the in-app settings or the scheme environment
-    /// (`MAVERICK_DASHBOARD_URL`) override the loopback default.
-    var baseURL: String =
-        ProcessInfo.processInfo.environment["MAVERICK_DASHBOARD_URL"]
-        ?? "http://127.0.0.1:8765"
-    var token: String? =
-        ProcessInfo.processInfo.environment["MAVERICK_DASHBOARD_TOKEN"]
+    let connectionStore = ConnectionStore(environmentURLKey: "MAVERICK_DASHBOARD_URL", defaultsURLKey: "dashboard_url")
+    private var generation = 0
+    private var lastConnection: DashboardConnection?
+
+    func connectionChanged() {
+        generation += 1
+        forest = nil
+        error = nil
+        lastConnection = nil
+    }
 
     func refresh() async {
-        guard let url = URL(string: "\(baseURL)/api/v1/goal-tree") else {
-            error = "bad dashboard URL"
-            return
-        }
-        var req = URLRequest(url: url)
-        if let token, !token.isEmpty {
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        generation += 1
+        let current = generation
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
-                error = "dashboard returned \((resp as? HTTPURLResponse)?.statusCode ?? -1)"
-                return
-            }
+            let connection = try connectionStore.load()
+            if connection != lastConnection { forest = nil; lastConnection = connection }
+            let data = try await dashboardData(path: "api/v1/goal-tree", connection: connection)
+            guard current == generation else { return }
             forest = try JSONDecoder().decode(GoalForest.self, from: data)
             error = nil
         } catch {
+            guard current == generation else { return }
             self.error = error.localizedDescription
         }
     }

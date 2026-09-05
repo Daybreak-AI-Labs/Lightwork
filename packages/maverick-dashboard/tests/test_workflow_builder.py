@@ -551,7 +551,7 @@ def test_builder_allows_unsaved_playbook_draft_when_pack_editing_off(monkeypatch
     assert "var PACK_EDITING = false" in html
     assert "draft now; admin validates and saves" in html
     assert 'id="pb-save-btn" class="btn btn--primary" disabled' in html
-    assert "do not create a runtime pause" in html
+    assert "review instructions do not automatically pause the work" in html
 
 
 def _stub_playbook(monkeypatch, draft):
@@ -831,11 +831,10 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     # Reachable from the primary nav (Operate group): the redesigned Flows
     # builder is the sidebar entry; the workflow builder is linked in-page from it.
     assert '<span class="nav-label">Flows</span>' in r.text
-    # A Copilot handoff is short-lived, consumed once, and drafts without saving.
+    # A Chat handoff is verified before filling the ordinary brief for review.
     assert "lightwork.authoring-handoff" in r.text
-    assert "AUTHOR_HANDOFF.kind !== 'agent'" in r.text
-    assert "10 * 60 * 1000" in r.text
-    assert "sessionStorage.removeItem" in r.text
+    assert "/api/v1/templates/draft-context" in r.text
+    assert 'id="wf-brief"' in r.text and 'id="wf-draft-btn"' in r.text
 
 
 def test_p1_builder_refinements(monkeypatch, tmp_path):

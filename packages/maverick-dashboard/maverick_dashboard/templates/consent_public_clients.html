@@ -22,7 +22,7 @@
         <div class="pcc-actions"><button class="btn btn--primary" type="submit">Mint once</button><button class="btn" id="pcc-list" type="button">List clients</button><button class="btn" id="pcc-list-profiles" type="button">List safe profile bindings</button></div>
       </form></section>
       <section class="pcc-card"><h2>Revoke client or profile capability</h2><form id="pcc-revoke-client" class="pcc-form">
-        <label>Client ID<input class="input" name="credential_id" required></label><label>Expected revision<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke client</button></div>
+        <label>Client ID<input class="input" name="credential_id" required></label><label>Current version<input class="input" name="expected_revision" type="number" min="1" value="1" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke client</button></div>
       </form><hr><form id="pcc-revoke-profile" class="pcc-form">
         <label>Property ID<input class="input" name="property_id" value="web-main" required></label><label>Profile reference<input class="input" name="profile_id" required></label><label class="pcc-wide">Review evidence SHA-256<input class="input" name="evidence_sha256" pattern="[0-9a-f]{64}" required></label><div class="pcc-actions"><button class="btn" type="submit">Revoke profile capability</button></div>
       </form></section>

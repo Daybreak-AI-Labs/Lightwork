@@ -24,13 +24,12 @@
                      shown below.') }}
     {% else %}
       {{ state('Current state',
-               (ns.loaded ~ ' of ' ~ ns.total ~ ' plugin entry point(s) loaded') if ns.total
+               (ns.loaded ~ ' of ' ~ ns.total ~ ' plugins loaded') if ns.total
                else 'No plugins installed yet',
                badge=(ns.failures ~ ' load issue(s)') if ns.failures else ('loaded' if ns.loaded else 'none loaded'),
                badge_class='warn' if ns.failures else ('ok' if ns.loaded else 'idle'),
-               copy='Configured means Lightwork is authorized to try the plugin.
-                     Loaded means its entry point imported now and passed the
-                     registration contract; it does not prove an integration call succeeded.') }}
+               copy='A loaded plugin has started successfully in Lightwork.
+                     Its external connections still need to be tested.') }}
     {% endif %}
   {% endcall %}
 
@@ -42,15 +41,13 @@
 
   <div class="panel">
     <p class="muted" style="margin: 0;">
-      Every row separates package discovery, effective configuration, trust-policy
-      admission, and an actual import check. Toggle changes apply from the next
-      run; this page immediately checks whether configured plugin code can load.
+      Review whether each plugin is installed, enabled, allowed by your organization,
+      and able to start. Changes apply from the next run; startup is checked immediately.
       {% if allowlist_active %}
         Your organization's allowlist selects which plugins are configured;
         dashboard toggles override that baseline.
       {% else %}
-        The wildcard policy configures every discovered plugin unless it is
-        explicitly turned off here.
+        Installed plugins are enabled by default unless they are turned off here.
       {% endif %}
     </p>
   </div>
@@ -64,9 +61,9 @@
           <thead>
             <tr>
               <th scope="col">name</th>
-              <th scope="col">module</th>
-              <th scope="col">discovery</th>
-              <th scope="col">configuration</th>
+              <th scope="col">Package details</th>
+              <th scope="col">Installation</th>
+              <th scope="col">Setup</th>
               <th scope="col">policy</th>
               <th scope="col">load check</th>
               <th scope="col">readiness</th>
@@ -78,8 +75,10 @@
             <tr>
               <td><code>{{ p.name }}</code></td>
               <td class="muted" style="font-size: 0.8rem;">
-                {{ p.module }}
-                {% if p.distribution %}<br><span>{{ p.distribution }}</span>{% endif %}
+                <details><summary>Package details</summary>
+                  {{ p.module }}
+                  {% if p.distribution %}<br><span>{{ p.distribution }}</span>{% endif %}
+                </details>
               </td>
               <td>
                 <span class="badge active">
@@ -106,9 +105,10 @@
                   {{ 'loaded' if p.loaded else p.state | replace('_', ' ') }}
                 </span>
                 {% if p.load_error and p.configured %}
-                  <div class="muted" style="font-size: 0.72rem; margin-top: var(--space-1);">
-                    {{ p.load_error }}
-                  </div>
+                  <details class="muted" style="font-size: var(--text-sm); margin-top: var(--space-1);">
+                    <summary>Startup error details</summary>
+                    <p>{{ p.load_error }}</p>
+                  </details>
                 {% endif %}
               </td>
               <td>{{ integration_readiness(p.readiness) }}</td>
@@ -175,10 +175,8 @@
         </tbody>
       </table>
       <p class="muted" style="font-size: 0.85rem; margin-top: var(--space-3); margin-bottom: 0;">
-        Installation only makes entry points discoverable. A plugin is not shown
-        as loaded until it is configured, admitted by policy, imported, and its
-        registration contract passes. Only these pre-approved packages can be
-        installed here — never arbitrary input.
+        After installation, enable the plugin and review its startup result above.
+        Only packages approved by your administrator can be installed here.
       </p>
     {% else %}
       <p class="muted" style="margin-bottom: 0;">

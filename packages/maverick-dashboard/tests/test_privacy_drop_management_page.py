@@ -231,7 +231,7 @@ def test_drop_client_has_bounded_transport_and_safe_rendering() -> None:
         "response.body.getReader()",
         "reader.cancel()",
         "JSON.parse(responseText)",
-        "operational readiness was explicitly verified".capitalize(),
+        "readiness was verified for this workspace".capitalize(),
     ):
         assert required in source
     for forbidden in (

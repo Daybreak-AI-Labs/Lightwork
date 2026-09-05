@@ -75,23 +75,31 @@ def main() -> None:
         def build(self):
             root = BoxLayout(orientation="vertical", padding=24, spacing=12)
             root.add_widget(Label(
-                text="Bundled pure skills:\n  - disagreement.answer_entropy",
+                text="Compare sample answers\nA preview of how Lightwork measures disagreement.",
                 size_hint_y=None, height=80,
             ))
-            output = Label(text="Tap run.")
+            output = Label(text="Tap Compare to see the sample results.")
+            diagnostic = ""
 
             def on_run(_button):
+                nonlocal diagnostic
                 try:
-                    output.text = run_skill()
+                    output.text = run_skill().replace("entropy=", "difference=").replace("proposers agree", "all answers agree")
+                    details_button.disabled = True
                 except FileNotFoundError as exc:
-                    output.text = str(exc)
+                    diagnostic = str(exc)
+                    output.text = "The demo is not installed correctly. Ask your administrator to complete setup."
+                    details_button.disabled = False
 
             run_button = Button(
-                text="Run answer_entropy", size_hint_y=None, height=56,
+                text="Compare", size_hint_y=None, height=56,
             )
             run_button.bind(on_press=on_run)
             root.add_widget(run_button)
             root.add_widget(output)
+            details_button = Button(text="Technical details", size_hint_y=None, height=48, disabled=True)
+            details_button.bind(on_press=lambda _button: setattr(output, "text", diagnostic))
+            root.add_widget(details_button)
             return root
 
     MaverickSkillsApp().run()

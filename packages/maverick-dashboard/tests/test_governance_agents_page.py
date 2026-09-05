@@ -88,7 +88,7 @@ def test_page_exposes_all_agents_and_confirmation_gated_operations(page_client) 
     assert "ga-confirm" in page
     assert "textContent" in page
     assert 'id="ga-operation-controls" disabled aria-disabled="true"' in page
-    operation_options = page.split('<select id="ga-operation">', 1)[1].split(
+    operation_options = page.split('id="ga-operation"', 1)[1].split(
         "</select>", 1
     )[0]
     assert operation_options.count("<option ") == operation_options.count(

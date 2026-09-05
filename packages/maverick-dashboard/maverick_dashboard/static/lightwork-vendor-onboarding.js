@@ -108,7 +108,7 @@
     byId("status").replaceChildren();
     const operation = record.operation || {};
     const outcome = record.outcome || {};
-    for (const label of ["Stage: " + friendly(record.stage), "Revision: " + record.revision,
+    for (const label of ["Stage: " + friendly(record.stage), "Version: " + record.revision,
       "External action: " + friendly(operation.state || operation.status || "not prepared"),
       "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : "pending")]) {
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
@@ -123,7 +123,7 @@
     const metrics = record.metrics || {};
     const timedReviews = (record.review_history || []).filter(review => review.review_seconds !== null && review.review_seconds !== undefined);
     const reviewTime = timedReviews.length ? `${Number(metrics.human_review_seconds).toFixed(1)} seconds reported` : "Unmeasured";
-    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate authorization required`);
+    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate approval required`);
     show("renewal-status", "Check current evidence and ticket versions before starting a renewal.");
     show("history", [...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item))].join("\n\n") || "No reviewer decisions or exceptions yet.");
@@ -142,7 +142,7 @@
       button.addEventListener("click", () => run(async () => render(await api("/cases/" + encodeURIComponent(record.id))), "Request loaded. Review its evidence and current status."));
       byId("cases").append(button);
     }
-    if (!result.cases.length) byId("cases").textContent = "No requests for this tenant.";
+    if (!result.cases.length) byId("cases").textContent = "No vendor requests in this workspace.";
   }
   async function run(operation, success = "Saved. Review the current case before the next action.", focusId) {
     if (busy) return;

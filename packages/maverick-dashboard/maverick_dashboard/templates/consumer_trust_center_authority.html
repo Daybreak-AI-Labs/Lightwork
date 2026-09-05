@@ -34,7 +34,7 @@
                        capability grants and rights authorizations -- review
                        your approver assignments first.') }}
 {% else %}
-<p><button class="btn" id="tca-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="tca-load-status" type="button">Check availability</button></p>
 <div class="tca-grid">
   <section class="panel tca-stack">
     <h2>Strict JSON authority workbench</h2>
@@ -44,7 +44,7 @@
       the safe enrolled client ID, property ID, and profile ID; the server
       resolves every credential digest and the context reference.</p>
     <label>Operation
-      <select id="tca-operation">
+      <select id="tca-operation" data-guided-api="/api/v1/consent/trust-center-authority">
         <option value="context-create" data-method="PUT" data-path="/contexts/{context_ref}">Context: enroll server binding</option>
         <option value="context-get" data-method="GET" data-path="/contexts/{context_ref}">Context: get digest-only authority</option>
         <option value="context-revise" data-method="PATCH" data-path="/contexts/{context_ref}">Context: revise exact binding and limits</option>
@@ -68,7 +68,7 @@
     <label>Path/query values as JSON object
       <input class="input" id="tca-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="tca-body">{}</textarea>
     </label>
     <div class="tca-warning" id="tca-confirm-panel">
@@ -77,7 +77,7 @@
           and requester/approver separation affected by this operation.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="tca-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="tca-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>
@@ -207,9 +207,9 @@
   <div class="tca-grid">
     <div class="tca-stack">
       <label>Operation
-        <select id="tcb-operation">
+        <select id="tcb-operation" data-guided-api="/api/v1/consent/trust-center-branding">
           <option data-method="GET" data-path="/status">Status</option>
-          <option data-method="POST" data-path="/assets/{asset_id}/versions" data-file="true">Asset: propose version</option>
+          <option data-method="POST" data-path="/assets/{asset_id}/versions" data-file="true" data-guided-provided-fields="content_base64 media_type">Asset: propose version</option>
           <option data-method="GET" data-path="/assets/{asset_id}/versions/{asset_version}">Asset: inspect</option>
           <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/review">Asset: independent review</option>
           <option data-method="POST" data-path="/assets/{asset_id}/versions/{asset_version}/activate">Asset: activate</option>

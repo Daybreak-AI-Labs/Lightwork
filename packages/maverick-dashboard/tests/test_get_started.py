@@ -48,9 +48,9 @@ def test_fresh_workspace_nothing_done(monkeypatch, tmp_path):
         lambda: _route_state(False),
     )
     t = _client().get("/start").text
-    assert "Connect a model provider" in t and "Build a workflow or agent" in t
+    assert "Connect your AI service" in t and "Build a workflow or agent" in t
     assert "0 of 3 done" in t and 'role="progressbar"' in t
-    assert "Offline install preflight" in t
+    assert "Installation checks" in t
     assert "maverick preflight --json" in t
     assert "SYNTHETIC DEMO DATA" in t
     assert "Every generated record stays labeled synthetic" in t
@@ -209,7 +209,7 @@ def test_viewer_redirected_from_root_can_read_setup_without_mutation_links(
 
     setup = client.get("/start")
     assert setup.status_code == 200
-    assert "Ask a global administrator to configure model routes." in setup.text
+    assert "Ask your administrator to connect an AI service." in setup.text
     assert "An operator can build the first workflow or agent." in setup.text
     assert 'href="/settings"' not in setup.text
     assert 'href="/workflow-builder"' not in setup.text

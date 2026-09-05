@@ -2363,9 +2363,9 @@ def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
                    'data-add="while"', 'data-add="wait_event"', 'data-add="scope"',
                    "/api/v1/flows/chat", "upstreamOutputs", "validateFlow"):
         assert needle in r.text, needle
-    # A Copilot handoff is short-lived, consumed once, and drafts without saving.
-    for needle in ("lightwork.authoring-handoff", "handoff.kind !== 'flow'",
-                   "10 * 60 * 1000", "sessionStorage.removeItem", "draft();"):
+    # A Chat handoff verifies its workspace and fills the ordinary brief.
+    for needle in ("lightwork.authoring-handoff", "/api/v1/templates/draft-context",
+                   'id="fd-nl"', 'id="fd-draft"'):
         assert needle in r.text, needle
 
 

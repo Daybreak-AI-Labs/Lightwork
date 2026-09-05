@@ -19,12 +19,19 @@ there, and the splash navigates to `http://127.0.0.1:8765` the moment
 
 - **Dashboard already running?** The shell leaves it alone, only navigates;
   it never kills a process it didn't spawn.
-- **CLI not installed / not found?** The splash shows a help card with a
-  "Try again" button and the exact command to run; it keeps polling so it
-  connects automatically once the dashboard comes up.
+- **Lightwork not installed / not found?** The splash points to the Lightwork
+  installer, offers an actual launch retry, and can show/copy startup details.
+  It keeps polling while the dashboard starts.
 - **Native menu:** Reload Dashboard (Cmd/Ctrl-R), Open in Browser
-  (Cmd/Ctrl-Shift-O), Quit, plus a standard Edit menu so copy/paste/select-all
+  (Cmd/Ctrl-Shift-O), Reconnect Lightwork, Quit, plus a standard Edit menu so copy/paste/select-all
   work in the dashboard's text fields (required for clipboard on macOS).
+  Reconnect returns a disconnected dashboard to the fixed bundled startup
+  screen and tries the installed launcher. Remote dashboard pages receive no
+  additional native command permissions.
+
+Run `cargo test --locked --lib --manifest-path apps/desktop/src-tauri/Cargo.toml`
+from the repository root for Tauri mock-runtime reconnect tests. These require
+the platform build SDK and linker; they do not prove packaged app startup.
 
 ## What was fixed (vs. the first scaffold)
 

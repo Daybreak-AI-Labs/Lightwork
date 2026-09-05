@@ -162,7 +162,7 @@
         return (loc ? loc + ": " : "") + (item.msg || "invalid");
       }).join("; ");
     }
-    return "Recall failed.";
+    return "Search failed.";
   }
 
   async function readJson(response) {
@@ -175,7 +175,7 @@
     if (text.length > maxResponseBytes) { throw fail("Response exceeds the console byte bound."); }
     var payload;
     try { payload = text ? JSON.parse(text) : {}; }
-    catch (_error) { throw fail("The server returned invalid JSON."); }
+    catch (_error) { throw fail("The search response could not be read. Try again."); }
     if (!response.ok) {
       if (response.status === 403) {
         throw fail("Your role cannot read Cortex, or the request was not same-origin. Reload the page and try again.");
@@ -212,7 +212,7 @@
       result.audited ? "audited" : "not audited"));
     metaEl.appendChild(chip("hits", hits.length));
     metaEl.appendChild(chip("took", result.took_ms === null || result.took_ms === undefined ? "—" : result.took_ms + " ms"));
-    metaEl.appendChild(chip("tenant", result.tenant || "none"));
+    metaEl.appendChild(chip("workspace", result.tenant || "none selected"));
     var per = result.per_source || {};
     Object.keys(per).forEach(function (source) { metaEl.appendChild(chip(source, per[source])); });
   }
@@ -240,7 +240,7 @@
     var order = Array.isArray(result.sources) ? result.sources.slice() : [];
     hits.forEach(function (hit) { if (order.indexOf(hit.source) < 0) { order.push(hit.source); } });
     if (!hits.length) {
-      hitsEl.appendChild(el("p", "muted", "Nothing recalled for that query."));
+      hitsEl.appendChild(el("p", "muted", "No results found for that search."));
       return;
     }
     order.forEach(function (source) {
@@ -283,7 +283,7 @@
     catch (error) { stateEl.textContent = error.message; return; }
     submit.disabled = true;
     submit.setAttribute("aria-busy", "true");
-    stateEl.textContent = "Recalling…";
+    stateEl.textContent = "Searching…";
     try {
       var result = await recall(body);
       renderMeta(result);
@@ -296,7 +296,7 @@
         (asked === 1 ? " source" : " sources") + (result.audited ? ", audited." : "; the audit write failed.");
       if (lattice) { lattice.pulse(Math.max(3, count * 2)); }
     } catch (error) {
-      stateEl.textContent = error && error.message ? error.message : "Recall failed.";
+      stateEl.textContent = error && error.message ? error.message : "Search failed.";
     } finally {
       submit.disabled = false;
       submit.removeAttribute("aria-busy");

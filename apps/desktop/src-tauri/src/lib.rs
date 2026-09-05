@@ -15,90 +15,44 @@
 //! apps/installer-msi, pipx) already own "how Lightwork gets installed"; this
 //! shell stays a thin window.
 
-use std::ffi::OsString;
-use std::net::{SocketAddr, TcpStream};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
-use std::time::Duration;
+use lightwork_desktop_runtime::{Dashboard, DASHBOARD_URL};
+use std::process::Command;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
 
-const DASHBOARD_PORT: u16 = 8765;
-
-struct Sidecar(Mutex<Option<Child>>);
-
-fn dashboard_url() -> String {
-    format!("http://127.0.0.1:{DASHBOARD_PORT}/")
+#[tauri::command]
+fn retry_dashboard(state: tauri::State<'_, Dashboard>) -> Result<String, String> {
+    state.start()
 }
 
-fn dashboard_listening() -> bool {
-    let addr = SocketAddr::from(([127, 0, 0, 1], DASHBOARD_PORT));
-    TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok()
+#[tauri::command]
+fn dashboard_diagnostics(state: tauri::State<'_, Dashboard>) -> Result<String, String> {
+    state.diagnostics()
 }
 
-/// Locate the `maverick` CLI.
-///
-/// A GUI launch (Finder/Dock/Explorer) does **not** inherit the shell's `PATH`
-/// — it gets a minimal one (`/usr/bin:/bin:…`) that omits the very directories
-/// pip/pipx install into. So `Command::new("maverick")` alone fails for almost
-/// every real install. We check `MAVERICK_BIN`, then the common install dirs,
-/// then fall back to the bare name (which still works when launched from a
-/// shell that has it on PATH).
-fn maverick_bin() -> OsString {
-    let exe = if cfg!(windows) {
-        "maverick.exe"
+fn bundled_splash_url() -> tauri::Url {
+    // Tauri's bundled-asset origin, matching the default useHttpsScheme=false
+    // in tauri.conf.json. This destination never comes from dashboard content.
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost/index.html"
     } else {
-        "maverick"
+        "tauri://localhost/index.html"
     };
-
-    if let Some(explicit) = std::env::var_os("MAVERICK_BIN") {
-        return explicit;
-    }
-
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = PathBuf::from(home);
-        candidates.push(home.join(".local").join("bin").join(exe)); // pip/pipx --user
-        candidates.push(home.join("bin").join(exe));
-    }
-    if let Some(profile) = std::env::var_os("USERPROFILE") {
-        let profile = PathBuf::from(profile);
-        candidates.push(profile.join(".local").join("bin").join(exe)); // Windows --user
-    }
-    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
-        candidates.push(Path::new(dir).join(exe));
-    }
-    for c in candidates {
-        if c.exists() {
-            return c.into_os_string();
-        }
-    }
-    OsString::from(exe)
+    origin.parse().expect("fixed bundled splash address")
 }
 
-fn spawn_dashboard() -> Option<Child> {
-    // Loopback-only bind and no token: the dashboard serves loopback without
-    // auth by design (see maverick_dashboard/app.py bearer_auth).
-    // Use the DASHBOARD_PORT constant (not a literal) so the spawned port, the
-    // URL, and the listening check can never drift apart.
-    let port = DASHBOARD_PORT.to_string();
-    match Command::new(maverick_bin())
-        .args(["dashboard", "--host", "127.0.0.1", "--port", port.as_str()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => Some(child),
-        Err(e) => {
-            // Not fatal: the splash keeps polling and shows the user how to
-            // start it themselves (or install the CLI).
-            eprintln!("maverick-desktop: could not spawn `maverick dashboard`: {e}");
-            None
-        }
+fn reconnect_dashboard<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    start: impl FnOnce(),
+) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window("main") {
+        // Return to local recovery controls even if launch fails. Remote
+        // dashboard pages retain no authority to invoke native commands.
+        window.navigate(bundled_splash_url())?;
+        start();
     }
+    Ok(())
 }
 
 /// Open a URL in the user's default browser (std only — no extra plugin/dep).
@@ -115,14 +69,15 @@ fn open_in_browser(url: &str) {
 }
 
 pub fn run() {
-    let child = if dashboard_listening() {
-        None
-    } else {
-        spawn_dashboard()
-    };
+    let dashboard = Dashboard::default();
+    let _ = dashboard.start();
 
     tauri::Builder::default()
-        .manage(Sidecar(Mutex::new(child)))
+        .manage(dashboard)
+        .invoke_handler(tauri::generate_handler![
+            retry_dashboard,
+            dashboard_diagnostics
+        ])
         // A real menu: Reload / Open in Browser / Quit, plus a standard Edit
         // menu so Cmd-C / Cmd-V / Select-All work in the dashboard's text
         // fields (on macOS the webview has no clipboard shortcuts without it).
@@ -133,10 +88,13 @@ pub fn run() {
             let reload = MenuItemBuilder::with_id("reload", "Reload Dashboard")
                 .accelerator("CmdOrCtrl+R")
                 .build(handle)?;
+            let reconnect =
+                MenuItemBuilder::with_id("reconnect", "Reconnect Lightwork").build(handle)?;
             let quit = PredefinedMenuItem::quit(handle, Some("Quit Lightwork"))?;
             let app_menu = SubmenuBuilder::new(handle, "Lightwork")
                 .item(&open_browser)
                 .item(&reload)
+                .item(&reconnect)
                 .separator()
                 .item(&quit)
                 .build()?;
@@ -157,7 +115,12 @@ pub fn run() {
                     let _ = w.eval("window.location.reload()");
                 }
             }
-            "open_browser" => open_in_browser(&dashboard_url()),
+            "open_browser" => open_in_browser(DASHBOARD_URL),
+            "reconnect" => {
+                let _ = reconnect_dashboard(app, || {
+                    let _ = app.state::<Dashboard>().start();
+                });
+            }
             _ => {}
         })
         .build(tauri::generate_context!())
@@ -166,12 +129,38 @@ pub fn run() {
             if let RunEvent::Exit = event {
                 // Kill only the dashboard *we* started; an externally started
                 // one was never put into the Sidecar state.
-                if let Ok(mut guard) = app.state::<Sidecar>().0.lock() {
-                    if let Some(child) = guard.as_mut() {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                    }
-                }
+                app.state::<Dashboard>().stop_owned();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_returns_a_failed_dashboard_to_bundled_controls_before_launch() {
+        let app = tauri::test::mock_app();
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            "main",
+            tauri::WebviewUrl::External(DASHBOARD_URL.parse().unwrap()),
+        )
+        .build()
+        .unwrap();
+        let mut starts = 0;
+        reconnect_dashboard(app.handle(), || {
+            assert_eq!(window.url().unwrap(), bundled_splash_url());
+            starts += 1;
+        })
+        .unwrap();
+        assert_eq!(starts, 1);
+        assert_ne!(window.url().unwrap().as_str(), DASHBOARD_URL);
+    }
+
+    #[test]
+    fn reconnect_does_not_launch_without_a_recovery_window() {
+        let app = tauri::test::mock_app();
+        reconnect_dashboard(app.handle(), || panic!("no window to recover")).unwrap();
+    }
 }

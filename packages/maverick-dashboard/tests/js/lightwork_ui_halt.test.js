@@ -109,7 +109,7 @@ test("a local/shared disagreement is partial and never renders STOPPED", async (
   await turn();
 
   assert.match(ui.label.textContent, /Partial stop/);
-  assert.match(ui.label.textContent, /scope unverified/);
+  assert.match(ui.label.textContent, /some workers are not confirmed stopped/);
   assert.doesNotMatch(ui.label.textContent, /STOPPED/);
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
   assert.equal(ui.pill.getAttribute("aria-pressed"), "mixed");
@@ -135,11 +135,11 @@ test("204 arm and clear responses stay unknown until a strict GET verifies state
     return response(null, { status: 204 });
   });
   await turn();
-  assert.equal(ui.label.textContent, "Stop configured scope");
+  assert.equal(ui.label.textContent, "Emergency stop");
 
   const arm = ui.pill.listeners.click(clickEvent());
   await turn();
-  assert.equal(ui.label.textContent, "Stop accepted — verifying configured scope…");
+  assert.equal(ui.label.textContent, "Stop requested — checking work status…");
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
   assert.equal(ui.pill.getAttribute("aria-pressed"), "mixed");
   assert.doesNotMatch(ui.label.textContent, /STOPPED/);
@@ -150,12 +150,12 @@ test("204 arm and clear responses stay unknown until a strict GET verifies state
 
   const clear = ui.pill.listeners.click(clickEvent());
   await turn();
-  assert.equal(ui.label.textContent, "Resume accepted — verifying configured scope…");
+  assert.equal(ui.label.textContent, "Resume requested — checking work status…");
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
   assert.equal(ui.pill.getAttribute("aria-pressed"), "mixed");
   clearRead.resolve(response({ active: false, scope: "local" }));
   await clear;
-  assert.equal(ui.label.textContent, "Stop configured scope");
+  assert.equal(ui.label.textContent, "Emergency stop");
   assert.equal(ui.pill.getAttribute("aria-disabled"), "false");
   assert.deepEqual(mutations, ["POST", "DELETE"]);
 });
@@ -177,7 +177,7 @@ test("a post-mutation GET from another scope cannot verify the change", async ()
   verification.resolve(response({ active: true, scope: "local" }));
   await arm;
 
-  assert.match(ui.label.textContent, /scope changed/);
+  assert.match(ui.label.textContent, /settings changed/);
   assert.doesNotMatch(ui.label.textContent, /STOPPED/);
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
   assert.equal(ui.pill.getAttribute("aria-pressed"), "mixed");
@@ -197,14 +197,14 @@ test("failed, non-OK, and invalid polls invalidate a previously known state", as
     return next;
   });
   await turn();
-  assert.equal(ui.label.textContent, "Stop configured scope");
+  assert.equal(ui.label.textContent, "Emergency stop");
 
   await ui.poll();
   assert.equal(ui.label.textContent, "Stop status unavailable");
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
 
   await ui.poll();
-  assert.equal(ui.label.textContent, "Stop configured scope");
+  assert.equal(ui.label.textContent, "Emergency stop");
   await ui.poll();
   assert.equal(ui.label.textContent, "Stop status unavailable");
   assert.equal(ui.pill.getAttribute("aria-disabled"), "true");
@@ -245,7 +245,7 @@ test("a stalled status read times out and invalidates known state", async () => 
     return new Promise(() => {});
   }, { haltTimeoutMs: 10 });
   await turn();
-  assert.equal(ui.label.textContent, "Stop configured scope");
+  assert.equal(ui.label.textContent, "Emergency stop");
 
   await ui.poll();
   assert.equal(ui.label.textContent, "Stop status unavailable");

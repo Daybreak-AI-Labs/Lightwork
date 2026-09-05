@@ -12,6 +12,7 @@ const CANONICAL_REMOTE_URLS: &[&str] = &[
     "ssh://git@github.com/Daybreak-AI-Labs/Lightwork.git",
 ];
 const INSTALLER_ROOT: &str = "apps/installer-desktop";
+const RUNTIME_ROOT: &str = "apps/desktop-runtime";
 const SHELL_INSTALLER: &str = "deploy/desktop/install.sh";
 const POWERSHELL_INSTALLER: &str = "deploy/desktop/install.ps1";
 const GENERATED_PATHS: &[&str] = &[
@@ -21,6 +22,7 @@ const GENERATED_PATHS: &[&str] = &[
     "apps/installer-desktop/provenance",
     "apps/installer-desktop/src-tauri/gen",
     "apps/installer-desktop/src-tauri/target",
+    "apps/desktop-runtime/target",
 ];
 
 fn main() {
@@ -227,6 +229,7 @@ fn tracked_blobs(repository_root: &Path, install_ref: &str) -> BTreeMap<String, 
             install_ref,
             "--",
             INSTALLER_ROOT,
+            RUNTIME_ROOT,
             SHELL_INSTALLER,
             POWERSHELL_INSTALLER,
         ],
@@ -280,6 +283,7 @@ fn is_scoped_repository_path(repository_path: &str) -> bool {
             .all(|component| !matches!(component, "" | "." | ".."));
     valid_components
         && (repository_path.starts_with(&format!("{INSTALLER_ROOT}/"))
+            || repository_path.starts_with(&format!("{RUNTIME_ROOT}/"))
             || repository_path == SHELL_INSTALLER
             || repository_path == POWERSHELL_INSTALLER)
 }
@@ -332,11 +336,9 @@ fn collect_directory_files(repository_root: &Path, directory: &Path, files: &mut
 
 fn worktree_files(repository_root: &Path) -> BTreeSet<String> {
     let mut files = BTreeSet::new();
-    collect_directory_files(
-        repository_root,
-        &repository_root.join(INSTALLER_ROOT),
-        &mut files,
-    );
+    for root in [INSTALLER_ROOT, RUNTIME_ROOT] {
+        collect_directory_files(repository_root, &repository_root.join(root), &mut files);
+    }
     for required in [SHELL_INSTALLER, POWERSHELL_INSTALLER] {
         let path = repository_root.join(required);
         let metadata = fs::symlink_metadata(&path)

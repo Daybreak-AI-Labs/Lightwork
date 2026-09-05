@@ -26,6 +26,23 @@
   var trouble = document.getElementById("trouble");
   var tries = 0;
   var connected = false;
+  var probeTimer;
+  var generation = 0;
+  var retryPending = false;
+  var diagnostics = document.getElementById("diagnostics");
+
+  function invoke(command) {
+    if (window.__TAURI__ && window.__TAURI__.core) return window.__TAURI__.core.invoke(command);
+    return Promise.reject(new Error("Startup controls are available in the Lightwork desktop app."));
+  }
+
+  function refreshDetails() {
+    return invoke("dashboard_diagnostics").then(function (text) {
+      if (diagnostics) diagnostics.textContent = text;
+    }, function (error) {
+      if (diagnostics) diagnostics.textContent = String(error);
+    });
+  }
 
   function setStatus(msg) {
     if (statusText) statusText.textContent = msg;
@@ -40,6 +57,7 @@
 
   function probe() {
     if (connected) return;
+    var current = generation;
     tries += 1;
 
     if (tries === 1) setStatus("Starting the Lightwork engine…");
@@ -47,15 +65,17 @@
 
     fetch(DASH + "/healthz", { mode: "no-cors", cache: "no-store" })
       .then(function () {
+        if (current !== generation) return;
         connect();
       })
       .catch(function () {
+        if (current !== generation) return;
         if (tries >= TROUBLE_AFTER) {
           showTrouble();
           // Keep trying slowly so it auto-recovers if the user starts it.
-          setTimeout(probe, SLOW_MS);
+          probeTimer = setTimeout(probe, SLOW_MS);
         } else {
-          setTimeout(probe, FAST_MS);
+          probeTimer = setTimeout(probe, FAST_MS);
         }
       });
   }
@@ -68,19 +88,38 @@
   // --- trouble-card controls ---
   var retry = document.getElementById("retry");
   if (retry) {
-    retry.addEventListener("click", function () {
+    retry.addEventListener("click", async function () {
+      if (retryPending || connected) return;
+      retryPending = true;
+      retry.disabled = true;
+      generation += 1;
+      clearTimeout(probeTimer);
       if (trouble) trouble.style.display = "none";
       tries = 0;
       setStatus("Retrying…");
-      probe();
+      try {
+        await invoke("retry_dashboard");
+        probe();
+      } catch (error) {
+        if (diagnostics) diagnostics.textContent = String(error);
+        showTrouble();
+        setStatus("Lightwork could not start. Review startup details, then try again.");
+        probeTimer = setTimeout(probe, SLOW_MS);
+      } finally {
+        retryPending = false;
+        retry.disabled = false;
+      }
     });
   }
+
+  var refresh = document.getElementById("refresh-details");
+  if (refresh) refresh.addEventListener("click", refreshDetails);
 
   var copy = document.getElementById("copy");
   var copied = document.getElementById("copied");
   if (copy) {
     copy.addEventListener("click", function () {
-      var cmd = "maverick dashboard";
+      var cmd = diagnostics ? diagnostics.textContent : "No startup details available.";
       var flash = function (message) {
         if (!copied) return;
         copied.textContent = message || "Copied";
@@ -101,9 +140,9 @@
         ta.select();
         try {
           if (document.execCommand("copy")) flash();
-          else flash("Could not copy. Select the command above.");
+          else flash("Could not copy. Select the details above.");
         } catch (e) {
-          flash("Could not copy. Select the command above.");
+          flash("Could not copy. Select the details above.");
         } finally {
           document.body.removeChild(ta);
         }

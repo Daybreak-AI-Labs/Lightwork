@@ -16,36 +16,35 @@
       <p class="hero-kicker">Governed evidence workbench</p>
       <h1 class="hero-title">AI evidence analysis</h1>
       <p class="hero-lede">
-        Extract bounded, criteria-pinned technical evidence and route the result
-        to an independently authorized human reviewer.
+        Analyze a document against the selected criteria, then send the findings to a separate authorized reviewer.
       </p>
     </div>
   </section>
 
   <aside class="boundary evidence-boundary" aria-labelledby="boundary-title">
     <p class="eyebrow">Trust boundary</p>
-    <h2 id="boundary-title">Evidence and authority boundary</h2>
+    <h2 id="boundary-title">Before you use the findings</h2>
     <ul>
       <li>Results are technical evidence aids, not legal advice, certification, or compliance conclusions.</li>
-      <li>Raw artifact bytes are accepted only as a bounded request body and are not persisted by the evidence store.</li>
-      <li>Extracted text is not persisted; ephemeral process-memory zeroization is not guaranteed.</li>
-      <li>Tenant, operator identity, retention policy, adapters, source authority, criteria authority, and reviewer authority are resolved by the server.</li>
+      <li>Uploaded files are processed within size limits and are not saved in the evidence store.</li>
+      <li>Extracted text is not saved. Immediate erasure from processing memory is not guaranteed.</li>
+      <li>Lightwork verifies your workspace, permissions, document source, review criteria, and retention rules before processing.</li>
       <li>Every result stays pending until a distinct authorized human approves or rejects it.</li>
-      <li>Parser availability is deployment-specific; unsupported, unavailable, active, or unsafe content fails closed.</li>
+      <li>Supported file formats depend on this installation. Unavailable, unsupported, active, or unsafe content is rejected.</li>
     </ul>
   </aside>
 
   <section class="panel status-card evidence-status-card" aria-labelledby="status-title">
     <div>
-      <p class="eyebrow">Runtime status</p>
-      <h2 id="status-title">Server composition</h2>
+      <p class="eyebrow">Availability</p>
+      <h2 id="status-title">Service availability</h2>
     </div>
     <button class="btn" type="button" id="refresh-status">Refresh status</button>
     <p id="runtime-status" class="status" role="status" aria-live="polite">
-      Checking the tenant-scoped server composition…
+      Checking service availability…
     </p>
     <details class="governance-details">
-      <summary>Runtime composition details</summary>
+      <summary>Technical details</summary>
       <pre id="status-output" class="output" tabindex="0"></pre>
     </details>
   </section>
@@ -54,11 +53,10 @@
     <legend class="sr-only">Evidence analysis operations</legend>
     <section class="panel" aria-labelledby="analyze-title">
       <p class="eyebrow">Step 1</p>
-      <h2 id="analyze-title">Analyze an attested artifact</h2>
+      <h2 id="analyze-title">Analyze a verified document</h2>
       <p class="help">
-        Select a file only after its source record and exact authority digest
-        are available. The browser sends the file directly as the request body;
-        it does not use multipart temporary-file spooling.
+        Select a file after its source record and verification fingerprint are
+        available. Use the document and criteria versions you intend to review.
       </p>
       <form id="analyze-form" autocomplete="off" novalidate>
         <fieldset class="permission-fieldset" id="evidence-analyze-controls"{% if not evidence_can_operate %} disabled aria-disabled="true"{% endif %}>
@@ -76,7 +74,7 @@
             <input class="input" id="source-ref" name="source_ref" maxlength="128" required>
           </div>
           <div>
-            <label for="source-revision">Source revision</label>
+            <label for="source-revision">Source version</label>
             <input class="input" id="source-revision" name="source_revision" type="number" min="1" step="1" required>
           </div>
           <div>
@@ -85,7 +83,7 @@
           </div>
         </div>
 
-        <label for="artifact-authority-digest">Artifact authority SHA-256</label>
+        <label for="artifact-authority-digest">Document verification fingerprint (SHA-256)</label>
         <input class="input digest" id="artifact-authority-digest"
                name="expected_artifact_authority_sha256" minlength="64"
                maxlength="64" spellcheck="false" required>
@@ -96,18 +94,18 @@
             <input class="input" id="criteria-set-id" name="criteria_set_id" maxlength="128" required>
           </div>
           <div>
-            <label for="criteria-revision">Criteria revision</label>
+            <label for="criteria-revision">Criteria version</label>
             <input class="input" id="criteria-revision" name="expected_criteria_revision"
                    type="number" min="1" step="1" required>
           </div>
         </div>
 
-        <label for="criteria-authority-digest">Criteria authority SHA-256</label>
+        <label for="criteria-authority-digest">Criteria verification fingerprint (SHA-256)</label>
         <input class="input digest" id="criteria-authority-digest"
                name="expected_criteria_authority_sha256" minlength="64"
                maxlength="64" spellcheck="false" required>
 
-        <label for="analyze-operation-id">Idempotency key</label>
+        <label for="analyze-operation-id">Request reference (reuse when retrying)</label>
         <input class="input" id="analyze-operation-id" name="idempotency_key" maxlength="192" required>
 
         <button class="btn btn--primary" type="submit" id="analyze-button">
@@ -140,7 +138,7 @@
         <legend class="sr-only">Review evidence analysis</legend>
         <div class="two-column">
           <div>
-            <label for="review-revision">Expected revision</label>
+            <label for="review-revision">Current version</label>
             <input class="input" id="review-revision" name="expected_revision"
                    type="number" min="1" step="1" required>
           </div>
@@ -152,7 +150,7 @@
             </select>
           </div>
         </div>
-        <label for="review-operation-id">Review idempotency key</label>
+        <label for="review-operation-id">Review request reference (reuse for an exact retry)</label>
         <input class="input" id="review-operation-id" name="idempotency_key" maxlength="192" required>
         <button class="btn btn--primary" type="submit">Record human decision</button>
         </fieldset>
@@ -164,7 +162,7 @@
         <legend class="sr-only">Revoke evidence analysis</legend>
         <div class="two-column">
           <div>
-            <label for="revoke-revision">Expected revision</label>
+            <label for="revoke-revision">Current version</label>
             <input class="input" id="revoke-revision" name="expected_revision"
                    type="number" min="1" step="1" required>
           </div>
@@ -173,7 +171,7 @@
             <input class="input" id="revocation-reason" name="reason_code" maxlength="128" required>
           </div>
         </div>
-        <label for="revoke-operation-id">Revocation idempotency key</label>
+        <label for="revoke-operation-id">Revocation request reference (reuse for an exact retry)</label>
         <input class="input" id="revoke-operation-id" name="idempotency_key" maxlength="192" required>
         <button class="btn btn--danger" type="submit">Revoke analysis</button>
         </fieldset>
@@ -221,7 +219,7 @@
   </fieldset>
 
   <noscript>
-    <p class="boundary">JavaScript is required for the bounded raw-body upload workbench.</p>
+    <p class="boundary">Enable JavaScript to upload and review evidence in this workspace.</p>
   </noscript>
 </div>
 {% endblock %}

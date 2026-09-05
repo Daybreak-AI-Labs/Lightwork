@@ -109,13 +109,14 @@
 <div class="chat-home">
   {% if not model_route_ready %}
   <section class="panel" id="model-route-setup" role="status">
-    <h2 style="margin-top:0">Connect the selected model route first</h2>
+    <h2 style="margin-top:0">Finish connecting AI</h2>
     <p class="muted">This workspace is not ready to start AI work yet. Finish
-      the model-provider setup and offline preflight before submitting a goal.</p>
+      the connection setup and readiness checks before starting a goal.</p>
     <a class="btn btn--primary" href="/start">Continue setup</a>
   </section>
   {% endif %}
   <form method="post" action="/chat/send" class="composer chat-anim chat-anim-2" enctype="multipart/form-data">
+    <p id="template-draft-notice" class="muted" role="status" hidden></p>
     <fieldset class="composer__controls"{% if not model_route_ready %} disabled{% endif %}>
     <legend class="sr-only">Start governed AI work</legend>
     <input
@@ -210,6 +211,42 @@
 </div>
 
 <script>
+  // A prepared template becomes an ordinary draft for review, never a run.
+  (async function receiveTemplateDraft() {
+    var raw;
+    try { raw = sessionStorage.getItem('lightwork:template-draft:v1'); sessionStorage.removeItem('lightwork:template-draft:v1'); }
+    catch (e) { return; }
+    if (!raw) return;
+    var draft;
+    try { draft = JSON.parse(raw); } catch (e) { return; }
+    if (!draft || typeof draft.title !== 'string' || !draft.title.trim() ||
+        typeof draft.description !== 'string' || typeof draft.context !== 'string' || !draft.context ||
+        !Number.isFinite(draft.created_at) || Date.now() - draft.created_at < 0 || Date.now() - draft.created_at > 600000) return;
+    var form = document.querySelector('form.composer');
+    if (!form) return;
+    var title = form.querySelector('input[name="title"]'), description = form.querySelector('textarea[name="description"]');
+    if (!title || !description || title.value.trim() || description.value.trim()) return;
+    var notice = document.getElementById('template-draft-notice');
+    if (Array.from(draft.title).length > 200 || Array.from(draft.description).length > 16000) {
+      notice.textContent = 'This template is too long to start as a goal. Return to Templates and shorten the title to 200 characters and details to 16,000 characters.';
+      notice.hidden = false; return;
+    }
+    var touched = false;
+    function markTouched() { touched = true; }
+    title.addEventListener('input', markTouched); description.addEventListener('input', markTouched);
+    try {
+      var response = await fetch('/api/v1/templates/draft-context');
+      var current = await response.json();
+      if (!response.ok || !current || current.context !== draft.context) throw new Error('The prepared template does not match this workspace or session. Return to Templates and prepare it again.');
+      if (touched || title.value.trim() || description.value.trim()) return;
+      title.value = draft.title; description.value = draft.description;
+      var details = description.closest('details'); if (details) details.open = true;
+      notice.textContent = 'Template ready. Review the goal and details, then choose Start goal when you are ready.'; notice.hidden = false;
+    } catch (e) {
+      notice.textContent = 'The prepared template could not be verified in this workspace. Return to Templates and prepare it again.'; notice.hidden = false;
+    } finally { title.removeEventListener('input', markTouched); description.removeEventListener('input', markTouched); }
+  })();
+
   // Absolute recent-goal timestamps -> relative ("3h ago"); absolute stays on hover.
   (function () {
     function rel(ts) {

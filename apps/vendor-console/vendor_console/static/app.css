@@ -31,6 +31,8 @@ h2{font-size:15px;margin:26px 0 12px;color:var(--dim);text-transform:uppercase;l
 .sub{color:var(--dim);margin:0 0 22px}
 .row{display:flex;gap:20px;flex-wrap:wrap}
 .grow{flex:1;min-width:0}
+.customer-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,300px);gap:20px}
+.customer-layout>div{min-width:0}
 .pagehead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:20px}
 
 /* ---- cards / tables ---- */
@@ -42,6 +44,8 @@ td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:none}
 .mono{font-family:var(--mono);font-size:12px}
 .muted{color:var(--dim)}
+details>summary{cursor:pointer;color:var(--accent);padding:4px 0}
+details pre{white-space:pre-wrap;overflow-wrap:anywhere}
 
 /* ---- badges ---- */
 .badge{display:inline-block;padding:1px 9px;border-radius:20px;font-size:11px;font-weight:600;
@@ -84,8 +88,11 @@ button.link{background:none;border:none;color:var(--accent);cursor:pointer;paddi
 .auth-card p.sub{margin-bottom:20px}
 .auth-card .btn{width:100%;margin-top:18px;text-align:center}
 
-a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{
   outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:1000px){
+  .customer-layout{grid-template-columns:minmax(0,1fr);gap:0}
+}
 @media(max-width:760px){
   .shell{flex-direction:column}
   .sidebar{width:100%;flex-basis:auto;border-right:0;border-bottom:1px solid var(--line)}

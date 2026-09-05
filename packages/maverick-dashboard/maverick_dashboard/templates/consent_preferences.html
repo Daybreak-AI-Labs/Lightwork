@@ -15,16 +15,18 @@
   .cp-form .input{min-width:0;max-width:100%}
   .cp-form .wide{grid-column:1/-1}.cp-actions{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;grid-column:1/-1;min-width:0}
   .cp-actions>.btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+  .cp-purpose-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:.5rem;align-items:end;margin-bottom:.65rem}
+  .cp-purpose-row>.btn{white-space:normal;max-width:100%}
   .cp-table{width:100%;border-collapse:collapse;font-size:.82rem}.cp-table th,.cp-table td{text-align:left;border-bottom:1px solid var(--border);padding:.5rem .35rem;vertical-align:top}
   .cp-table code{word-break:break-all}.cp-empty{color:var(--muted);padding:.75rem 0}.cp-result{white-space:pre-wrap;word-break:break-word;max-height:18rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.7rem;font-size:.78rem}
   .cp-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}
   @media(max-width:1000px){.cp-grid{grid-template-columns:repeat(2,1fr)}.cp-layout{grid-template-columns:1fr}}
-  @media(max-width:620px){.cp-grid,.cp-form{grid-template-columns:minmax(0,1fr)}.cp-form .wide{grid-column:auto}.cp-hero>.cp-actions{justify-content:flex-start}}
+  @media(max-width:620px){.cp-grid,.cp-form,.cp-purpose-row{grid-template-columns:minmax(0,1fr)}.cp-form .wide{grid-column:auto}.cp-hero>.cp-actions{justify-content:flex-start}}
 </style>
 <div class="cp-shell">
   <header class="cp-hero">
-    <div><div class="cp-kicker">Consumer privacy control plane</div><h1>Consent & Preferences</h1>
-      <p class="muted">Version-bound receipts, preference profiles, tracker governance, privacy signals, enforcement, and replayable downstream synchronization.</p></div>
+    <div><div class="cp-kicker">Consent management</div><h1>Consent & Preferences</h1>
+      <p class="muted">Manage consent policies, record choices, review preference profiles, and check how those choices are enforced.</p></div>
     <div class="cp-actions"><a class="btn" href="/consent/publishing">Experience publishing</a><a class="btn" href="/consent/experiments">Experiments</a><a class="btn" href="/consent/public-clients">Public SDK clients</a><a class="btn" href="/consent/profile-data">Profile data</a><a class="btn" href="/consent/trust-center-authority">Trust Center authority</a><a class="btn" href="/consent/delivery">Signed delivery</a><a class="btn" href="/consent/scan-inventory">Scan inventory</a><a class="btn" href="/consent/scan-notice-proposals">Disclosure proposals</a><button class="btn" id="cp-refresh" type="button">Refresh</button></div>
   </header>
   {% from "_module_gate.html" import module_gate %}
@@ -53,7 +55,16 @@
           <label>Version<input class="input" name="version" type="number" min="1" step="1" required value="1"></label>
           <label>Effective timestamp<input class="input" name="effective_at" type="number" step="any" required></label>
           <label>Notice SHA-256<input class="input" name="notice_sha256" pattern="[0-9a-f]{64}" required></label>
-          <label class="wide">Purposes JSON <textarea class="input" name="purposes" rows="3" required>{"analytics":"consent","essential":"contract"}</textarea></label>
+          <div class="wide"><h3>Purposes and lawful bases</h3>
+            <p class="muted">Add each purpose covered by this policy and select the basis approved by your privacy team.</p>
+            <div id="cp-purpose-rows"></div>
+            <button class="btn" id="cp-purpose-add" type="button">Add purpose</button>
+            <p id="cp-purpose-error" role="alert"></p>
+            <details id="cp-purpose-advanced"><summary>Advanced: edit purposes as JSON</summary>
+              <label>Purpose mapping<textarea class="input" name="purposes" rows="3">{"analytics":"consent","essential":"contract"}</textarea></label>
+              <button class="btn" id="cp-purpose-apply" type="button">Apply JSON to fields</button>
+            </details>
+          </div>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Publish immutable version</button><span class="muted">Admin required</span></div>
         </fieldset></form>
       </section>
@@ -62,7 +73,7 @@
         <form id="cp-preference-form"><fieldset class="cp-form" id="cp-preference-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
           <legend class="sr-only">Preference receipt controls</legend>
           <label>Profile ID<input class="input" name="profile_id" required></label>
-          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
           <label>Policy ID<input class="input" name="policy_id" value="global-consent" required></label>
           <label>Policy version<input class="input" name="policy_version" type="number" min="1" step="1" required value="1"></label>
           <label>Purpose<input class="input" name="purpose_id" value="analytics" required></label>
@@ -71,7 +82,7 @@
           <label>Vendor<input class="input" name="vendor_id" value="all" required></label>
           <label>Jurisdiction<input class="input" name="jurisdiction" value="global" required></label>
           <label>Country code<input class="input" name="country_code" value="US" minlength="2" maxlength="2" required></label>
-          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
+          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Record choice</button></div>
         </fieldset></form>
       </section>
@@ -80,7 +91,7 @@
       <section class="cp-card" aria-labelledby="cp-identity-heading">
         <div class="cp-kicker">Immutable identity lifecycle</div>
         <h2 id="cp-identity-heading">Link, unlink, relink &amp; account transition evidence</h2>
-        <p class="muted">Inspect the active association and its hash-chained history. Operators cannot unlink or relink here: those transitions require the public client’s current profile capability, fresh verified OIDC/pairing evidence, exact revisions, and revocation of the redeemed proof.</p>
+        <p class="muted">Inspect the current identity link and its verified history. Unlinking or changing the link requires a newly verified identity through the public consent experience and cannot be done here.</p>
         <form id="cp-identity-form"><fieldset class="cp-form" id="cp-identity-controls" data-feature-enabled="{{ 'true' if consent_preferences_enabled else 'false' }}"{% if not consent_preferences_enabled %} disabled aria-disabled="true"{% endif %}>
           <legend class="sr-only">Identity lifecycle inspection controls</legend>
           <label class="wide">Anonymous profile ID<input class="input" name="profile_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"></label>
@@ -97,7 +108,7 @@
           <label>Profile ID<input class="input" name="profile_id" required></label>
           <label>Identity kind<select class="input" name="identity_kind"><option>anonymous</option><option>known</option></select></label>
           <label class="wide">Subject SHA-256<input class="input" name="subject_sha256" pattern="[0-9a-f]{64}" required></label>
-          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
+          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Create profile</button></div>
         </fieldset></form>
       </section>
@@ -124,8 +135,8 @@
           <label>Vendor ID<input class="input" name="vendor_id" required></label>
           <label>Status<select class="input" name="status"><option>blocked</option><option>approved</option><option>retired</option></select></label>
           <label>Purposes (comma separated)<input class="input" name="purpose_ids" value="analytics" required></label>
-          <label>Expected revision<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
-          <label class="wide">Idempotency key<input class="input" name="idempotency_key" required></label>
+          <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
+          <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required></label>
           <div class="cp-actions"><button class="btn btn--primary" type="submit">Save tracker</button><span class="muted">Admin required</span></div>
         </fieldset></form>
       </section>
@@ -151,11 +162,20 @@
     </div>
   </div>
 </div>
+<script src="/static/lightwork-consent-policy-editor.js"></script>
 <script>
 (function(){
   "use strict";
   var API="/api/v1/consent";
   var status=document.getElementById("cp-status");
+  var policyEditor;
+  try {
+    if (!window.LightworkConsentPolicyEditor || typeof window.LightworkConsentPolicyEditor.mount !== 'function') throw new Error('Policy editor unavailable');
+    policyEditor=window.LightworkConsentPolicyEditor.mount(document.getElementById('cp-policy-form'),document);
+  } catch (_error) {
+    document.getElementById('cp-policy-controls').disabled=true;
+    document.getElementById('cp-purpose-error').textContent='The policy editor could not load. Reload this page to publish a policy; other consent tools remain available.';
+  }
   function val(form,name){return form.elements[name].value.trim();}
   async function call(path,options){
     var response=await fetch(API+path,Object.assign({headers:{"Content-Type":"application/json"}},options||{}));
@@ -180,7 +200,7 @@
     }catch(error){status.textContent=error.message;}
   }
   document.getElementById('cp-refresh').addEventListener('click',refresh);
-  document.getElementById('cp-policy-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget;try{await call('/policies',{method:'POST',body:JSON.stringify({policy_id:val(f,'policy_id'),version:Number(val(f,'version')),purposes:JSON.parse(val(f,'purposes')),notice_sha256:val(f,'notice_sha256'),effective_at:Number(val(f,'effective_at'))})});status.textContent='Policy version published.';await refresh();}catch(error){status.textContent=error.message;}});
+  document.getElementById('cp-policy-form').addEventListener('submit',async function(event){event.preventDefault();if(!policyEditor){status.textContent='Reload this page to load the policy editor before publishing.';return;}var f=event.currentTarget;try{await call('/policies',{method:'POST',body:JSON.stringify({policy_id:val(f,'policy_id'),version:Number(val(f,'version')),purposes:policyEditor.read(),notice_sha256:val(f,'notice_sha256'),effective_at:Number(val(f,'effective_at'))})});status.textContent='Policy version published.';await refresh();}catch(error){status.textContent=error.message;}});
   document.getElementById('cp-profile-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget;try{await call('/profiles',{method:'POST',body:JSON.stringify({profile_id:val(f,'profile_id'),identity_kind:val(f,'identity_kind'),subject_sha256:val(f,'subject_sha256'),idempotency_key:val(f,'idempotency_key')})});status.textContent='Profile created.';await refresh();}catch(error){status.textContent=error.message;}});
   document.getElementById('cp-preference-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget,p=val(f,'profile_id');try{await call('/profiles/'+encodeURIComponent(p)+'/preferences',{method:'POST',body:JSON.stringify({policy_id:val(f,'policy_id'),policy_version:Number(val(f,'policy_version')),context:{jurisdiction:val(f,'jurisdiction'),country_code:val(f,'country_code'),collection_point:'web',asserted_source:'operator'},choices:[{purpose_id:val(f,'purpose_id'),action:val(f,'action'),channel:val(f,'channel'),vendor_id:val(f,'vendor_id')}],expected_revision:Number(val(f,'expected_revision')),idempotency_key:val(f,'idempotency_key')})});status.textContent='Preference receipt recorded.';await refresh();}catch(error){status.textContent=error.message;}});
   document.getElementById('cp-decision-form').addEventListener('submit',async function(event){event.preventDefault();var f=event.currentTarget,payload={profile_id:val(f,'profile_id'),purpose_id:val(f,'purpose_id'),channel:val(f,'channel'),vendor_id:val(f,'vendor_id')};if(val(f,'policy_id'))payload.policy_id=val(f,'policy_id');if(val(f,'policy_version'))payload.policy_version=Number(val(f,'policy_version'));try{var result=await call('/decisions',{method:'POST',body:JSON.stringify(payload)});document.getElementById('cp-decision').textContent=JSON.stringify(result,null,2);}catch(error){status.textContent=error.message;}});

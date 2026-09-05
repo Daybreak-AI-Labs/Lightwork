@@ -101,14 +101,13 @@
     <p class="eyebrow">Consent data governance</p>
     <h1>Custom data-element indexes</h1>
     <p>
-      Build exact-match, HMAC-tokenized projections over closed, published
-      consent profile fields without persisting raw search values.
+      Search published consent-profile fields for exact matches without saving the original search values.
     </p>
   </header>
 
   <aside class="custom-index-boundary" aria-labelledby="custom-index-boundary-title">
     <p class="eyebrow">Trust boundary</p>
-    <h2 id="custom-index-boundary-title">What this workbench proves</h2>
+    <h2 id="custom-index-boundary-title">Search limits</h2>
     <ul>
       <li>Tenant, operator, key reference, key version, retention, and quotas are resolved by the server.</li>
       <li>Only exact boolean, opaque value-ID, or unique value-ID-list matches are supported.</li>
@@ -120,8 +119,8 @@
 
   <section class="custom-index-panel custom-index-status" aria-labelledby="custom-index-status-title">
     <div>
-      <p class="eyebrow">Runtime status</p>
-      <h2 id="custom-index-status-title">Tenant composition</h2>
+      <p class="eyebrow">Availability</p>
+      <h2 id="custom-index-status-title">Service availability</h2>
       <p id="custom-index-runtime-status" class="custom-index-status-text"
          role="status" aria-live="polite">Checking server-owned custody and source readiness…</p>
     </div>
@@ -145,7 +144,7 @@
           <input class="input" id="custom-index-create-id" name="index_id" maxlength="128" required>
           <label for="custom-index-element-name">Published element name</label>
           <input class="input" id="custom-index-element-name" name="element_name" maxlength="128" required>
-          <label for="custom-index-create-operation">Idempotency key</label>
+          <label for="custom-index-create-operation">Request reference (reuse when retrying)</label>
           <input class="input" id="custom-index-create-operation" name="idempotency_key" minlength="8" maxlength="192" required>
           <button class="btn btn--primary" type="submit">Create pending index</button>
         </fieldset>
@@ -184,7 +183,7 @@
       <p class="help">Both actions require the exact current revision. Revocation removes all searchable projection entries.</p>
       <form class="custom-index-form" id="custom-index-build-form" autocomplete="off" novalidate>
         <fieldset id="custom-index-build-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-build-revision">Expected revision</label>
+          <label for="custom-index-build-revision">Current version</label>
           <input class="input" id="custom-index-build-revision" name="expected_revision" type="number" min="1" max="1000000" step="1" required>
           <label for="custom-index-build-operation">Build idempotency key</label>
           <input class="input" id="custom-index-build-operation" name="idempotency_key" minlength="8" maxlength="192" required>
@@ -193,7 +192,7 @@
       </form>
       <form class="custom-index-form" id="custom-index-revoke-form" autocomplete="off" novalidate>
         <fieldset id="custom-index-revoke-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
-          <label for="custom-index-revoke-revision">Expected revision</label>
+          <label for="custom-index-revoke-revision">Current version</label>
           <input class="input" id="custom-index-revoke-revision" name="expected_revision" type="number" min="1" max="1000000" step="1" required>
           <label for="custom-index-revoke-operation">Revocation idempotency key</label>
           <input class="input" id="custom-index-revoke-operation" name="idempotency_key" minlength="8" maxlength="192" required>
@@ -209,7 +208,7 @@
     <section class="custom-index-panel" aria-labelledby="custom-index-search-title">
       <p class="eyebrow">Exact search</p>
       <h2 id="custom-index-search-title">Search a ready index</h2>
-      <p class="help">Search values travel only in the bounded JSON body. They are tokenized under deployment custody and never persisted.</p>
+      <p class="help">Search values are protected during processing and are not saved.</p>
       <form class="custom-index-form" id="custom-index-search-form" autocomplete="off" novalidate>
         <fieldset id="custom-index-search-controls"{% if not custom_index_can_admin %} disabled aria-disabled="true"{% endif %}>
           <label for="custom-index-value-type">Value type</label>
@@ -257,7 +256,7 @@
     </section>
   </fieldset>
 
-  <noscript><p class="custom-index-boundary">JavaScript is required for the bounded administrative workbench.</p></noscript>
+  <noscript><p class="custom-index-boundary">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

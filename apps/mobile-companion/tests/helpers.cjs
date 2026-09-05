@@ -35,6 +35,8 @@ function source(relative, mocks = {}) {
     if (name === 'react') return React;
     if (name === 'react-native') return native;
     if (name === 'expo-status-bar') return { StatusBar: 'StatusBar' };
+    if (name.endsWith('/connectionValidation')) return source('src/connectionValidation.ts', mocks);
+    if (name === '../components/ConnectionNotice') return source('src/components/ConnectionNotice.tsx', mocks);
     if (name.includes('/screens/')) {
       const screen = name.split('/').at(-1);
       if (screen === 'SettingsScreen') return source('src/screens/SettingsScreen.tsx', mocks);
@@ -43,7 +45,8 @@ function source(relative, mocks = {}) {
     throw new Error(`Unexpected import: ${name}`);
   }
   vm.runInNewContext(compiled.outputText, {
-    module, exports: module.exports, require: requireMock, console, Error,
+    module, exports: module.exports, require: requireMock, console, Error, URL,
+    fetch: mocks.fetch,
     expo: Object.hasOwn(mocks, 'expo') ? mocks.expo : { uuidv4: randomUUID },
     crypto: mocks.crypto,
     setInterval: mocks.setInterval || (() => 1),

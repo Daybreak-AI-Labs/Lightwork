@@ -47,7 +47,7 @@ def test_native_provider_page_explains_disabled_and_external_boundaries() -> Non
     assert "not been accepted against a live customer" in page
     assert "does not restore arbitrary prior native state" in page
     assert "no secret is submitted here" in page
-    assert "caller-authored SQL and control IR" in page
+    assert "These controls do not accept custom SQL" in page
 
 
 def test_native_provider_page_reflects_exact_direct_provider_gate(

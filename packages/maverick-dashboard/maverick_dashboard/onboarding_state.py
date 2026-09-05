@@ -171,17 +171,20 @@ def build(
     activated = _has_run(world) or _has_automation()
     steps = [
         {
-            "title": "Connect a model provider",
+            "title": "Connect your AI service",
             "done": provider_ok,
             "body": (
-                f"{model_route_state['detail']} Run the live doctor before the "
-                "first task."
+                "Your selected AI services are configured. Test the connection "
+                "in Settings before starting your first task."
+                if provider_ok else
+                "Choose an AI service in Settings, add its access key, and "
+                "test the connection before starting your first task."
             ),
             "status": model_route_state["status"],
             "cta": "/settings",
             "cta_label": "Open Settings",
             "allowed": bool(can_configure),
-            "readonly_label": "Ask a global administrator to configure model routes.",
+            "readonly_label": "Ask your administrator to connect an AI service.",
             "command": "maverick preflight",
         },
         {
@@ -199,11 +202,11 @@ def build(
             "command": "",
         },
         {
-            "title": "Run it or put it on autopilot",
+            "title": "Start your first task",
             "done": activated,
             "body": (
-                "Start a goal from chat, or arm a schedule or webhook trigger "
-                "to run it."
+                "Describe what you need in Chat. You can also schedule a "
+                "saved workflow from Automations."
             ),
             "status": "complete" if activated else "incomplete",
             "cta": "/chat",
@@ -217,6 +220,8 @@ def build(
     next_step = next((step for step in steps if not step["done"]), None)
     runtime_preflight = _preflight_state("run")
     assurance_preflight = _preflight_state("cockpit")
+    from maverick.config import config_path
+
     return {
         "steps": steps,
         "done_count": done_count,
@@ -224,6 +229,8 @@ def build(
         "next_step": next_step,
         "model_route_state": model_route_state,
         "can_operate": bool(can_operate),
+        "can_configure": bool(can_configure),
+        "needs_initial_settings": not config_path().exists(),
         # Compatibility alias for existing template and API consumers.
         "preflight": runtime_preflight,
         "runtime_preflight": runtime_preflight,

@@ -54,11 +54,13 @@ def test_templates_page_lists_catalog_with_ratings(catalog):
     # reachable at /templates and rendered above.)
 
 
-def test_use_template_links_prefill_chat_not_autostart(catalog):
+def test_use_template_collects_inputs_before_chat_review(catalog):
     r = client.get("/templates")
-    # One-click use: a link to /chat with title+description query params.
-    assert 'href="/chat?title=Plan%20a%20trip%20to%20%7B%7B%20city%20%7D%7D' in r.text
-    assert "description=" in r.text
+    # In-app preparation collects declared inputs without exposing drafts in URLs.
+    assert 'data-prepare-template' in r.text
+    assert 'data-template-param="city"' in r.text
+    assert 'Review in Chat' in r.text
+    assert 'href="/chat?title=' not in r.text
     # No goal was created by rendering the marketplace.
     from maverick_dashboard.app import _world
     assert _world().list_goals() == []

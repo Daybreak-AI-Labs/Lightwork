@@ -1,21 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Serve token · Daybreak Console{% endblock %}
+{% block title %}Connection token · Daybreak Console{% endblock %}
 {% block main %}
 <h1>{{ customer.name }} created</h1>
-<p class="sub">Copy the serve token now — it is shown <strong>once</strong> (only its
-  hash is stored).</p>
+<p class="sub">Copy this connection token now — it is shown <strong>once</strong>. Store it securely and share it only with the installation administrator.</p>
 
 <div class="card">
-  <h2 style="margin-top:0">Deployment serve token</h2>
+  <h2 style="margin-top:0">Installation connection token</h2>
   <div class="codebox">{{ token }}</div>
-  <div class="ok">
-    A <strong>connected</strong> deployment uses this as its entitlement-API bearer:
+  <p>Use this token to let a connected installation receive its license. Offline installations receive a license file instead.</p>
+  <details><summary>Administrator setup instructions</summary><div class="ok">
+    To configure automatic license updates:
     set <span class="mono">[license] api_url</span> to this console's
     <span class="mono">/api/v1/license</span> and
     <span class="mono">MAVERICK_LICENSE_API_TOKEN</span> to the token above.
-    <span class="mono">refresh_from_server()</span> then pulls the current signed
-    license. Air-gapped customers skip this and get the license file hand-delivered.
-  </div>
+    The installation can then retrieve its current signed license.
+  </div></details>
   <a class="btn" href="/customers/{{ customer.id }}">Continue to {{ customer.name }}</a>
 </div>
 {% endblock %}

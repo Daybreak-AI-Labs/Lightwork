@@ -216,7 +216,7 @@
   });
 
   bind("pdd-list-sources", "click", async function () {
-    show(await call("/sources?limit=500"), "Bounded tenant sources loaded.");
+    show(await call("/sources?limit=500"), "Workspace sources loaded.");
   });
 
   bind("pdd-source-state", "submit", async function (event) {
@@ -252,7 +252,7 @@
   });
 
   bind("pdd-list-schedules", "click", async function () {
-    show(await call("/schedules?limit=500"), "Bounded schedules loaded.");
+    show(await call("/schedules?limit=500"), "Schedules loaded.");
   });
 
   bind("pdd-enqueue-due", "click", async function () {
@@ -280,7 +280,7 @@
   });
 
   bind("pdd-list-jobs", "click", async function () {
-    show(await call("/jobs?limit=500"), "Bounded jobs loaded.");
+    show(await call("/jobs?limit=500"), "Jobs loaded.");
   });
 
   bind("pdd-job", "submit", async function (event) {
@@ -325,7 +325,7 @@
     else if (action === "diff") {
       path = "/reports/diff?base_report_id=" + encodeURIComponent(identifier(base, "Base report ID", false)) + "&target_report_id=" + encodeURIComponent(identifier(target, "Target report ID", false)) + "&limit=1000";
     } else if (action !== "inventory") { throw problem("Read action is invalid."); }
-    show(await call(path), "Digest-only discovery evidence loaded. Absence is not proven.");
+    show(await call(path), "Discovery findings loaded without source content. No findings does not prove that no personal data exists.");
   });
 
   bind("pdd-propose", "submit", async function (event) {
@@ -378,7 +378,7 @@
     var limit = finiteNumber(formValue(form, "limit"), "List limit", 1, 100, true);
     var query = "?limit=" + encodeURIComponent(String(limit));
     if (state) { query += "&state=" + encodeURIComponent(state); }
-    show(await call("/remediation/work" + query), "Bounded remediation work metadata loaded. Use an ambiguous work ID and exact revision for reconciliation.");
+    show(await call("/remediation/work" + query), "Remediation tasks loaded. Select an uncertain result and its current version to check what happened.");
   });
 
   bind("pdd-remediation-reconcile", "submit", async function (event) {
@@ -409,20 +409,20 @@
     event.preventDefault();
     requirePermission("admin");
     var form = event.currentTarget;
-    if (!global.confirm("Purge expired reports? Digest-only audit tombstones remain.")) { return; }
+    if (!global.confirm("Permanently delete expired reports? Audit records of the deletions will remain.")) { return; }
     var payload = { idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true) };
     show(await call("/retention/purge", { method: "POST", body: JSON.stringify(payload) }), "Retention purge completed.");
   });
 
-  bind("pdd-audit", "click", async function () { requirePermission("audit"); show(await call("/audit?limit=500"), "Bounded audit events loaded."); });
-  bind("pdd-verify", "click", async function () { requirePermission("audit"); show(await call("/audit/verify"), "Tenant audit chain verified."); });
+  bind("pdd-audit", "click", async function () { requirePermission("audit"); show(await call("/audit?limit=500"), "Audit events loaded."); });
+  bind("pdd-verify", "click", async function () { requirePermission("audit"); show(await call("/audit/verify"), "Workspace audit history verified."); });
   bind("pdd-posture", "click", async function () { show(await call("/posture"), "Privacy posture and limits loaded."); });
-  bind("pdd-runtime", "click", async function () { show(await call("/status"), "Composition readiness loaded. Live-provider acceptance remains separate."); });
+  bind("pdd-runtime", "click", async function () { show(await call("/status"), "Availability loaded. Operation with a live provider has not been verified by this check."); });
 
   applyPermissions();
   if (root.dataset.featureEnabled === "true") {
     call("/status").then(function (payload) {
-      show(payload, "Privacy discovery runtime loaded. Confirm provider authority before execution.");
+      show(payload, "Privacy discovery status loaded. Confirm authorization for the provider before starting a scan.");
     }).catch(fail);
   } else {
     status.textContent = "Privacy data discovery is disabled by configuration.";

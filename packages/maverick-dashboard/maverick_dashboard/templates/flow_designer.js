@@ -1153,6 +1153,26 @@
     out.revision = String(rootFlow.revision || '');
     return out;
   }
+  function syncScheduleControls() {
+    var preset = document.getElementById('fd-schedule-preset');
+    var schedule = document.getElementById('fd-schedule');
+    if (!preset || !schedule) return;
+    var value = schedule.value.trim();
+    preset.value = Array.from(preset.options).some(function (option) { return option.value === value; })
+      ? value : 'custom';
+  }
+  function chooseSchedule() {
+    var preset = document.getElementById('fd-schedule-preset');
+    var schedule = document.getElementById('fd-schedule');
+    var advanced = document.getElementById('fd-schedule-advanced');
+    if (preset.value === 'custom') {
+      advanced.open = true;
+      schedule.focus();
+    } else {
+      schedule.value = preset.value;
+      advanced.open = false;
+    }
+  }
   function fromApiFlow(f, savedSnapshot) {
     runState = {}; runCursor = null; impacts = {};
     stack = []; crumbs = ['Main flow']; renderCrumbs();
@@ -1168,6 +1188,7 @@
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
+    syncScheduleControls();
     var tzEl = document.getElementById('fd-tz'); if (tzEl) tzEl.value = f.timezone || '';
     var mcEl = document.getElementById('fd-maxconc'); if (mcEl) mcEl.value = f.max_concurrent || '';
     flowInputs = (f.inputs || []).map(function (i) { return Object.assign({}, i); });
@@ -1301,7 +1322,11 @@
     if (runInFlight) return;
     var data = {};
     var raw = document.getElementById('fd-sample').value.trim();
-    if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
+    if (raw) { try { data = JSON.parse(raw); } catch (e) {
+      var testData = document.getElementById('fd-test-data'); if (testData) testData.open = true;
+      document.getElementById('fd-sample').focus();
+      say('Check the JSON in Advanced test data, then test again.', true); return;
+    } }
     async function proceed() {
       if (runInFlight) return;
       var url, payload;
@@ -1355,7 +1380,7 @@
       return;
     }
     if (dryRun) { proceed(); return; }
-    window.mvConfirm('Run the published revision? This creates real goals and calls real connectors.', { okText: 'Run published' })
+    window.mvConfirm('Run the published version? This starts real work and uses connected services.', { okText: 'Run published' })
       .then(function (ok) { if (ok) proceed(); });
   }
   function runUrl(runId) {
@@ -1891,6 +1916,8 @@
     b.addEventListener('click', function () { addNode(b.getAttribute('data-add')); });
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
+  document.getElementById('fd-schedule-preset').addEventListener('change', chooseSchedule);
+  document.getElementById('fd-schedule').addEventListener('input', syncScheduleControls);
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
   document.getElementById('fd-publish').addEventListener('click', publishFlow);
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
@@ -1944,17 +1971,43 @@
     }
   });
 
+  async function receiveAuthoringHandoff(blocked) {
+    var raw, handoff;
+    try {
+      raw = sessionStorage.getItem('lightwork.authoring-handoff');
+      sessionStorage.removeItem('lightwork.authoring-handoff');
+      if (!raw) return;
+      handoff = JSON.parse(raw);
+    } catch (e) { say('The saved draft could not be read. Return to Chat and prepare it again.', true); return; }
+    if (!handoff || handoff.kind !== 'flow' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
+        Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
+        !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
+      say('This saved draft is invalid or expired. Return to Chat and prepare a brief of 8,000 characters or fewer.', true); return;
+    }
+    var brief = document.getElementById('fd-nl');
+    function hasDraft() { return brief.value.trim() || draftIsDirty() || rootFlow.id || rootFlow.name || rootFlow.nodes.length; }
+    if (blocked || hasDraft()) { say('Your existing draft was kept. The draft from Chat was not loaded.'); return; }
+    var touched = false;
+    function markTouched() { touched = true; }
+    ['input', 'change', 'click'].forEach(function (event) { document.addEventListener(event, markTouched, true); });
+    try {
+      var response = await fetch('/api/v1/templates/draft-context');
+      var current = await response.json();
+      if (!response.ok || !current || current.context !== handoff.context) throw new Error('workspace mismatch');
+      if (touched || hasDraft()) { say('Your current work was kept. The draft from Chat was not loaded.'); return; }
+      brief.value = handoff.brief;
+      say('Brief ready. Review it, then choose Draft when you are ready.');
+    } catch (e) {
+      say('The saved draft could not be verified in this workspace. Return to Chat and prepare it again.', true);
+    } finally {
+      ['input', 'change', 'click'].forEach(function (event) { document.removeEventListener(event, markTouched, true); });
+    }
+  }
+
   buildExamples();
   loadGallery();
   loadTools();
   var editId = canvas.getAttribute('data-flow-id');
-  var handoff = null;
-  try {
-    handoff = JSON.parse(sessionStorage.getItem('lightwork.authoring-handoff') || 'null');
-    if (!handoff || handoff.kind !== 'flow' || !handoff.brief
-        || Date.now() - Number(handoff.created_at || 0) > 10 * 60 * 1000) handoff = null;
-    if (handoff) sessionStorage.removeItem('lightwork.authoring-handoff');
-  } catch (e) { handoff = null; }
   var seedEl = document.getElementById('fd-seed');
   var seed = null;
   if (seedEl) { try { seed = JSON.parse(seedEl.textContent); } catch (e) { seed = null; } }
@@ -1963,15 +2016,11 @@
   // dirty and therefore receive the unload warning until saved.
   markClean();
   if (editId) load(editId);
-  else if (handoff) {
-    render(); renderProps();
-    document.getElementById('fd-nl').value = String(handoff.brief).slice(0, 8000);
-    draft();
-  }
   else if (seed && seed.nodes) {   // ?from_template= -> the template as a 1-node flow
     fromApiFlow(seed);
     say('Loaded the template as a flow — add branches, approvals, or loops around it.');
   } else { render(); renderProps(); }
+  receiveAuthoringHandoff(!!(editId || (seed && seed.nodes)));
 
   // The friendly Steps view renders the LIVE graph (not just the server seed),
   // so nodes built on the canvas show up the moment you switch views.

@@ -185,7 +185,7 @@ def test_runtime_policy_error_is_actionable_and_path_safe(monkeypatch):
         headers={"Accept": "text/html"},
     )
     assert html.status_code == 503
-    assert "Operator policy unavailable" in html.text
+    assert "Safety settings need attention" in html.text
     assert "maverick doctor" in html.text
     assert "C:/Users/example" not in html.text
 

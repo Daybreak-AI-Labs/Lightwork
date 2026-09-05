@@ -42,7 +42,7 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
     assert 'data-module-gate="consent_preferences"' in page
     assert "Consent preferences is turned off." in page
     assert "[consent_preferences] enable = true" not in page
-    assert "Consumer privacy control plane" in page
+    assert "Consent management" in page
     assert "cp-policy-form" in page
     assert "cp-preference-form" in page
     assert "cp-decision-form" in page
@@ -54,7 +54,7 @@ def test_consent_page_is_explicit_about_default_off_and_product_boundary():
     assert "cp-identity-form" in page
     assert "Link, unlink, relink &amp; account transition evidence" in page
     assert "/identity-links/integrity?limit=500" in page
-    assert "Operators cannot unlink or relink here" in page
+    assert "Unlinking or changing the link requires a newly verified identity" in page
     assert 'value="web_tracker"' in page
     assert "consent_required" not in page
 

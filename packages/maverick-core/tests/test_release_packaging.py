@@ -908,8 +908,12 @@ def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
     assert "if-no-files-found: error" in desktop
     assert "without a GitHub login" not in desktop
     assert "authenticated source-bootstrap" in desktop
-    assert "Install from authorized source" in app
-    assert "private Lightwork repository" in app
+    # Guard the installation boundary, independently of the button's label.
+    app_text = " ".join(app.split())
+    assert "downloads and installs Lightwork's source code" in app_text
+    assert "internet connection" in app_text
+    assert "authorized access to the private Lightwork repository on GitHub" in app_text
+    assert "Python source code remains readable" in app_text
     assert "not a self-contained native installer" in bootstrap_readme
     assert "| **Native installer**" not in distribution
     assert "| **Container image**" in distribution

@@ -78,7 +78,7 @@
     document.getElementById("rob-obligations-note").textContent = note;
     if (!items.length) {
       var empty = document.createElement("tr");
-      var td = cell("No regulation is active: the gate carries no compiled obligation. Enable profiles in [compliance] to change that.");
+      var td = cell("No regulatory checks are active. Regulatory profiles must be selected during installation.");
       td.colSpan = 6;
       empty.appendChild(td);
       rows.appendChild(empty);
@@ -156,15 +156,15 @@
     if (!st.active_profiles.length) {
       setMark("partial", "Nothing compiled");
       title.textContent = "No regulation is active";
-      detail.textContent = "The action gate carries no compiled obligation. Enable profiles in [compliance] (installer: regulated-posture step) and restart.";
+      detail.textContent = "No regulatory checks are active. Select regulatory profiles during installation to enable them.";
     } else if (st.verification.sound) {
       setMark("ready", "Live gates");
-      title.textContent = st.active_profiles.join(", ") + " compiled and verified";
-      detail.textContent = st.verification.inspected + " obligation(s) inspected; every one is a live, non-vacuous gate.";
+      title.textContent = st.active_profiles.join(", ") + " enabled and verified";
+      detail.textContent = st.verification.inspected + " check(s) tested; each actively enforces its rule.";
     } else {
       setMark("failed", "Vacuous gate");
-      title.textContent = "A compiled obligation does not bite";
-      detail.textContent = "Verification found " + st.verification.problems.length + " problem(s). The CI gate would fail; see the list below.";
+      title.textContent = "A regulatory check is not enforcing its rule";
+      detail.textContent = "Verification found " + st.verification.problems.length + " problem(s). Review the issues below before relying on these checks.";
     }
     renderObligations(st.obligations, st.active_profiles.length ? "Under " + st.active_profiles.join(", ") : "Nothing is active");
     renderLibrary(st.library);

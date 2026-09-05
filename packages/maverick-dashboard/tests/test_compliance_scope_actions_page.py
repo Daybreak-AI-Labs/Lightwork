@@ -45,7 +45,7 @@ def test_page_exposes_complete_honest_operator_workbench(page_client) -> None:
     assert response.status_code == 200
     page = response.text
     assert "Compliance Scope Actions" in page
-    assert "authoritative finalized compliance" in page
+    assert "finalized compliance scope" in page
     assert "No licensed framework text, raw evidence, free-text task descriptions" in page
     assert "built-in provider writes, network I/O" in page
     assert "or live acceptance" in page

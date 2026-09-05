@@ -43,6 +43,16 @@ function response(chunks, contentLength = null) {
 
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
 
+test("confidence displays as a percentage without inventing missing or invalid certainty", () => {
+  const api = client();
+  assert.equal(api.confidenceLabel(10000), "100%");
+  assert.equal(api.confidenceLabel(9250), "92.5%");
+  assert.equal(api.confidenceLabel(125), "1.25%");
+  assert.equal(api.confidenceLabel(0), "0%");
+  for (const value of [undefined, null, "9250", -1, 10001, NaN])
+    assert.equal(api.confidenceLabel(value), "Not reported");
+});
+
 test("bounded response rejects declared and streamed overflow", async () => {
   const api = client();
   const declared = response([], String(api.MAX_RESPONSE_BYTES + 1));

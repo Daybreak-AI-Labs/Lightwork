@@ -37,15 +37,14 @@ Requirements:
 
 - **Network**: the phone must reach the dashboard (`maverick dashboard`,
   default port 8400) — same Wi-Fi, VPN, or a tunnel. Set the base URL in the
-  Settings tab (e.g. `http://192.168.1.20:8400`).
+  Settings tab (e.g. `https://lightwork.example.com`).
 - **Token**: if dashboard auth is enabled, paste a bearer token in Settings.
   It is stored in the device keychain via `expo-secure-store`, never in
   plain storage. With auth off (local trusted networks only), leave it empty.
-  **Security:** the app refuses to send the token over plain `http://` to a
-  non-loopback host (an on-path attacker on shared Wi-Fi/VPN could sniff it) —
-  for remote access *with a token*, use an `https://` URL or a secure tunnel
-  (Tailscale, a reverse proxy, etc.). Plain `http://` to a LAN IP is fine only
-  with auth off (no token).
+  **Security:** connection setup and requests require HTTPS for a remote
+  dashboard. Plain HTTP is allowed only for loopback development on the same
+  device. Invalid addresses or tokens never replace the saved connection;
+  Settings preserves the entered values and explains how to correct them.
 - **Offline cache**: the last good `/api/v1/offline/bundle` payload is kept
   in `AsyncStorage` (`@react-native-async-storage/async-storage`) and
   rendered with an "as of N min ago — offline" banner when fetches fail.
