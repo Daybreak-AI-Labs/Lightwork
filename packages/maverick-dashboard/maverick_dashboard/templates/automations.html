@@ -775,7 +775,7 @@
     var oFinish = document.getElementById('oauth-finish');
     var oOpen = document.getElementById('oauth-open');
     var oauthContext = '', oauthBusy = false, pendingConnection = null;
-    var oauthKey = 'lightwork.oauth.pending.v1';
+    var oauthStorageName = 'lightwork.oauth.pending.v1';
     var defaultRedirect = window.location.origin + '/automations';
     var redirectInput = document.getElementById('oauth-redirect');
     redirectInput.value = defaultRedirect;
@@ -787,7 +787,7 @@
     }
     function readPendingConnection() {
       try {
-        var pending = JSON.parse(window.sessionStorage.getItem(oauthKey) || 'null');
+        var pending = JSON.parse(window.sessionStorage.getItem(oauthStorageName) || 'null');
         if (!pending || typeof pending.provider !== 'string' || !pending.provider ||
             typeof pending.verifier !== 'string' || !/^[A-Za-z0-9_~.\-]{43,128}$/.test(pending.verifier) ||
             typeof pending.state !== 'string' || !/^[a-f0-9]{64}$/.test(pending.state) ||
@@ -798,7 +798,7 @@
     }
     function clearPendingConnection() {
       pendingConnection = null;
-      try { window.sessionStorage.removeItem(oauthKey); } catch (e) { /* unavailable storage cannot retain a connection */ }
+      try { window.sessionStorage.removeItem(oauthStorageName); } catch (e) { /* unavailable storage cannot retain a connection */ }
     }
     async function exchangeConnection(code, pending) {
       if (oauthBusy) return;
@@ -910,7 +910,7 @@
         var state = Array.from(bytes, function (value) { return value.toString(16).padStart(2, '0'); }).join('');
         consent.searchParams.set('state', state);
         pendingConnection = { provider: provider, redirect: redirect, context: context, state: state, verifier: data.verifier, created: Date.now() };
-        window.sessionStorage.setItem(oauthKey, JSON.stringify(pendingConnection));
+        window.sessionStorage.setItem(oauthStorageName, JSON.stringify(pendingConnection));
         oOpen.href = consent.href;
         if (redirect === defaultRedirect) {
           oMsg.textContent = 'Approve access with the provider. You will return here automatically.';

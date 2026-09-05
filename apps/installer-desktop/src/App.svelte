@@ -244,13 +244,15 @@
 
   {#if status === 'idle'}
     <section>
+      <p>This setup app downloads and installs Lightwork's source code.</p>
       <p>
-        You need an internet connection and authorized access to Lightwork's
-        private GitHub repository. Python will be installed if needed.
+        You need an internet connection and
+        authorized access to the private Lightwork repository on GitHub.
+        Python will be installed if needed.
       </p>
       <details><summary>What will be installed?</summary>
-        <p>This installer downloads a pinned version of Lightwork's source code
-          and installs it on this computer.</p>
+        <p>This setup app installs a pinned version of Lightwork.
+          Its Python source code remains readable on this computer.</p>
       </details>
       <button disabled={!listenersRegistered} onclick={startInstall}>
         {listenersRegistered ? 'Install Lightwork' : 'Preparing installer…'}

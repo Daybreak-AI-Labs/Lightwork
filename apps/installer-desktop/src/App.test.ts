@@ -31,6 +31,16 @@ describe('installer terminal state', () => {
     vi.restoreAllMocks();
   });
 
+  it('explains source installation and access requirements before install', async () => {
+    render(App);
+    const disclosure = screen.getByText(/downloads and installs Lightwork's source code/);
+    expect(disclosure.closest('details')).toBeNull();
+    expect(screen.getByText(/authorized access to the private Lightwork repository on GitHub/).closest('details')).toBeNull();
+    expect(screen.getByText(/internet connection/)).toBeTruthy();
+    expect((await screen.findByRole('button', { name: 'Install Lightwork' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(tauri.invoke).not.toHaveBeenCalled();
+  });
+
   it('shows success when invoke resolves even if no completion event arrives', async () => {
     let completeInstall!: () => void;
     tauri.invoke.mockReturnValue(
