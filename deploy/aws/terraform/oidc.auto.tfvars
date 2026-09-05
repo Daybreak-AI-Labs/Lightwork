@@ -16,6 +16,7 @@ dashboard_invites = true
 
 # Platform email via the Amazon SES API using the task role (no SMTP credential).
 # SES domain identity daybreakailabs.com is verified; from noreply@daybreakailabs.com.
-email_enabled = true
-email_from    = "noreply@daybreakailabs.com"
-flows_enabled = true
+email_enabled    = true
+email_from       = "noreply@daybreakailabs.com"
+flows_enabled    = true
+data_use_enabled = true

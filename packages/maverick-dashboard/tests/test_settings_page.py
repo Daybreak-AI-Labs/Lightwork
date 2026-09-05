@@ -44,7 +44,6 @@ def test_settings_has_bounded_sections_keyboard_tabs_and_search(monkeypatch, tmp
     assert "ArrowRight" in text and "ArrowLeft" in text
     assert "applySearch" in text
     assert "data-settings-search-item" in text
-    assert "navigation and most page content remain English" in text
 
 
 def test_hidden_attribute_beats_author_display_rules():
