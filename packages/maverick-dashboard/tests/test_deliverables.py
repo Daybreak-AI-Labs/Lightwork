@@ -37,6 +37,19 @@ class TestBuildInbox:
         assert [it["domain"] for it in m["items"]] == ["risk_x"]
         assert m["role"] == "risk_officer"
 
+    def test_role_filter_accepts_partial_and_mixed_case_roles(self):
+        # "billing" must reach billing_analyst the way the other searches do;
+        # an exact role still wins over a substring hit.
+        m = build_inbox([_FORECAST, _RISK], {}, role="fpa")
+        assert [it["domain"] for it in m["items"]] == ["finance_cash13w"]
+        m = build_inbox([_FORECAST, _RISK], {}, role="Risk_Officer")
+        assert [it["domain"] for it in m["items"]] == ["risk_x"]
+        # exact match preferred: "treasurer" is a consumer AND a substring of nothing else
+        m = build_inbox([_FORECAST, _RISK], {}, role="treasurer")
+        assert [it["domain"] for it in m["items"]] == ["finance_cash13w"]
+        # a substring nobody has stays empty rather than 500ing
+        assert build_inbox([_FORECAST, _RISK], {}, role="zzz")["items"] == []
+
     def test_finished_gated_run_is_awaiting_signoff(self):
         runs = {"finance_cash13w": [_Run(7, "Refresh forecast", "done", 100.0)]}
         m = build_inbox([_FORECAST], runs)
