@@ -337,17 +337,29 @@
       var search = document.getElementById("conn-search");
       var results = document.getElementById("conn-results");
       var timer = null;
+      // Monotonic request id: only the latest response may render, so a slow
+      // earlier query (e.g. "slack") cannot overwrite a newer one ("jira").
+      var connSearchSeq = 0;
       search.addEventListener("input", function () {
         var q = search.value.trim();
         if (timer) clearTimeout(timer);
         timer = setTimeout(function () {
-          if (!q) { results.innerHTML = ""; return; }
+          var seq = ++connSearchSeq;
+          if (!q) { results.innerHTML = ""; results.removeAttribute("aria-busy"); return; }
+          results.setAttribute("aria-busy", "true");
           fetch("/api/v1/marketplace/connectors?q=" + encodeURIComponent(q))
             .then(function (r) { return r.json(); })
             .then(function (d) {
+              if (seq !== connSearchSeq) return;
               results.innerHTML = (d.connectors || []).slice(0, 20).map(function (c) {
                 return "<li>" + esc(c.label) + " <span class=\"muted\">(" + esc(c.name) + ")</span></li>";
               }).join("") || "<li>No match.</li>";
+              results.removeAttribute("aria-busy");
+            })
+            .catch(function () {
+              if (seq !== connSearchSeq) return;
+              results.innerHTML = "<li>Could not search connectors right now.</li>";
+              results.removeAttribute("aria-busy");
             });
         }, 200);
       });

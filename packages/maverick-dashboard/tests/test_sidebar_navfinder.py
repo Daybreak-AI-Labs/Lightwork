@@ -84,11 +84,19 @@ def test_page_finder_has_an_accessible_dialog_and_combobox_contract(monkeypatch,
     assert "/static/lightwork-navfinder.js" in markup.scripts
 
 
-def test_page_finder_destinations_exactly_match_visible_sidebar_registry(monkeypatch, tmp_path):
+def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(monkeypatch, tmp_path):
+    from maverick_dashboard import ui_visibility
+
     markup = _overview_markup(monkeypatch, tmp_path)
 
     assert markup.sidebar_hrefs
-    assert markup.finder_hrefs == markup.sidebar_hrefs
+    # The finder is the role-filtered registry INCLUDING pages folded out of
+    # the rail (in_nav: False); the sidebar stays the curated subset of it.
+    assert set(markup.sidebar_hrefs) < set(markup.finder_hrefs)
+    assert markup.finder_hrefs == [
+        ln["href"] for g in ui_visibility.finder_pages(None) for ln in g["links"]
+    ]
+    assert "/fleets" in markup.finder_hrefs and "/fleets" not in markup.sidebar_hrefs
     assert all(href.startswith("/") for href in markup.finder_hrefs)
     assert "#" not in markup.finder_hrefs
     assert not any(href.startswith("//") for href in markup.finder_hrefs)

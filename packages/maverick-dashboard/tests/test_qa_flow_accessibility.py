@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 TEMPLATES = Path(__file__).parents[1] / "maverick_dashboard" / "templates"
@@ -120,3 +121,57 @@ def test_qa_066_workflow_picker_traps_escape_tab_and_restores_opener() -> None:
     assert close_picker.index("pickerOpener.focus()") < close_picker.index(
         "pickerOpener = null"
     )
+
+
+def _designer_css_rules() -> tuple[str, list[tuple[str, str]]]:
+    """Leaf CSS rules of the designer's inline stylesheet as (selector, body)."""
+    source = _source("flow_designer.html")
+    style = source[source.index("<style>") : source.index("</style>")]
+    style = re.sub(r"/\*.*?\*/", "", style, flags=re.DOTALL)
+    rules = [(sel.strip(), body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", style)]
+    return style, rules
+
+
+def test_qa_067_flow_designer_copilot_drawer_stays_inside_its_canvas_track() -> None:
+    """The Canvas-view copilot drawer is absolutely positioned inside the
+    canvas wrap (overflow:hidden). A fixed 320px width overflowed the wrap's
+    start edge whenever the middle grid track was narrower than the drawer --
+    inside the app shell (248px sidebar + main padding) that was every
+    viewport between ~900 and ~1200px: the header read "...pilot", messages
+    were left-truncated and the user's own bubble survived as a stray
+    rectangle. The drawer must size to its track and the track needs a floor."""
+    style, rules = _designer_css_rules()
+
+    chat_rules = [body for sel, body in rules if sel == ".fd__chat"]
+    assert chat_rules, "the .fd__chat drawer rule is missing"
+    assert any("width: min(320px, calc(100% - 16px))" in body for body in chat_rules)
+    assert any("max-width: calc(100% - 16px)" in body for body in chat_rules)
+    for body in chat_rules:
+        widths = re.findall(r"(?<![\w-])width:\s*([^;]+);", body)
+        assert all("min(" in width for width in widths), widths
+        # Logical insets: the drawer hugs the END edge, so RTL mirrors it.
+        assert "right:" not in body and "left:" not in body
+    assert any("inset-inline-end: 8px" in body for body in chat_rules)
+    for overlay in (".fd__crumbs", ".fd__minimap"):
+        bodies = [body for sel, body in rules if sel == overlay]
+        assert any("inset-inline-start: 8px" in body for body in bodies), overlay
+        assert not any("left:" in body for body in bodies), overlay
+
+    canvas_grid = [
+        body
+        for sel, body in rules
+        if sel == '.fd[data-view="canvas"] .fdx-work' and "grid-template-columns" in body
+    ]
+    assert any("minmax(360px, 1fr)" in body for body in canvas_grid), canvas_grid
+
+    # The stacked fallback must cover the whole band where three columns
+    # cannot hold a 320px drawer (floor + palette + props + gaps + shell).
+    breakpoints = [
+        int(px) for px in re.findall(r"@media \(max-width: (\d+)px\)", style)
+    ]
+    assert max(breakpoints) >= 1200, breakpoints
+    stacked = style[style.index(f"@media (max-width: {max(breakpoints)}px)") :]
+    assert '.fd[data-view="canvas"] .fdx-work { grid-template-columns: 1fr;' in stacked
+    # A bare auto grid row collapses the SVG to its 150px default height.
+    assert '.fd[data-view="canvas"] .fd__canvas-wrap { height:' in stacked
+

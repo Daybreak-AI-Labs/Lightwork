@@ -62,3 +62,19 @@ def test_js_templates_are_covered_by_package_data():
     for name in js_files:
         assert _is_packaged(f"templates/{name}", globs), (
             f"templates/{name} is not covered by package-data {globs}")
+
+
+def test_every_static_asset_is_covered_by_package_data():
+    """setuptools globs do not cross '/': ``static/*`` alone shipped a wheel
+    with zero web fonts, so every page 404'd static/fonts/*.woff2 in production
+    and rendered in fallback fonts."""
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    globs = data["tool"]["setuptools"]["package-data"]["maverick_dashboard"]
+    static = _PKG / "static"
+    missing = [
+        str(path.relative_to(_PKG))
+        for path in sorted(static.rglob("*"))
+        if path.is_file() and not _is_packaged(str(path.relative_to(_PKG)), globs)
+    ]
+    assert not missing, f"not packaged: {missing} (globs: {globs})"
+    assert any(f.suffix == ".woff2" for f in static.rglob("*")), "font files vanished"

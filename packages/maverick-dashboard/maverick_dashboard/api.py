@@ -548,30 +548,30 @@ def _board_overview(w, owner, days: int) -> dict:
     own, params = _owner_sql(owner)
     by_status = {
         r[0]: int(r[1])
-        for r in w.conn.execute(
+        for r in w.query(
             "SELECT status, COUNT(*) FROM goals WHERE 1=1" + own + " GROUP BY status", params
-        ).fetchall()
+        )
     }
     daily = {d.isoformat(): {"d": d.isoformat(), "started": 0, "delivered": 0} for d in day_list}
     for col, key, extra in (
         ("created_at", "started", ""),
         ("updated_at", "delivered", " AND status = 'done'"),
     ):
-        rows = w.conn.execute(
-            f"SELECT date({col}, 'unixepoch') AS day, COUNT(*) FROM goals "
+        rows = w.query(
+            f"SELECT {w.sql_day_from_epoch(col)} AS day, COUNT(*) FROM goals "
             f"WHERE {col} >= ?" + extra + own + " GROUP BY day",
             (since, *params),
-        ).fetchall()
+        )
         for day, n in rows:
             if day in daily:
                 daily[day][key] += int(n)
 
     def _count(col: str, lo: float, hi: float, extra: str = "") -> int:
         return int(
-            w.conn.execute(
+            w.query(
                 f"SELECT COUNT(*) FROM goals WHERE {col} >= ? AND {col} < ?" + extra + own,
                 (lo, hi, *params),
-            ).fetchone()[0]
+            )[0][0]
         )
 
     now = time.time()
@@ -585,11 +585,11 @@ def _board_overview(w, owner, days: int) -> dict:
     from maverick.domain import suite_for
 
     domains: dict[str, dict] = {}
-    for dom, total, done in w.conn.execute(
-        "SELECT domain, COUNT(*), SUM(status = 'done') FROM goals "
+    for dom, total, done in w.query(
+        "SELECT domain, COUNT(*), SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) FROM goals "
         "WHERE 1=1" + own + " GROUP BY domain",
         params,
-    ).fetchall():
+    ):
         suite = suite_for(dom or "") if dom else None
         label = department_title(suite) if suite else "General"
         row = domains.setdefault(label, {"label": label, "total": 0, "done": 0})
@@ -624,8 +624,8 @@ def _board_spend(w, owner, days: int) -> dict:
     ended = " WHERE e.ended_at IS NOT NULL"
 
     daily = {d.isoformat(): {"d": d.isoformat(), "cost": 0.0, "runs": 0} for d in day_list}
-    for day, cost, runs in w.conn.execute(
-        "SELECT date(e.started_at, 'unixepoch') AS day, "
+    for day, cost, runs in w.query(
+        "SELECT " + w.sql_day_from_epoch("e.started_at") + " AS day, "
         "SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
         + join
         + ended
@@ -633,12 +633,12 @@ def _board_spend(w, owner, days: int) -> dict:
         + own
         + " GROUP BY day",
         (since, *params),
-    ).fetchall():
+    ):
         if day in daily:
             daily[day] = {"d": day, "cost": float(cost or 0), "runs": int(runs)}
 
     def _tot(lo: float) -> dict:
-        r = w.conn.execute(
+        r = w.query(
             "SELECT COALESCE(SUM(e.cost_dollars), 0), COUNT(*), "
             "COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0), "
             "COALESCE(SUM(e.tool_calls), 0) "
@@ -647,7 +647,7 @@ def _board_spend(w, owner, days: int) -> dict:
             + " AND e.started_at >= ? AND e.started_at < ?"
             + own,
             (lo, lo + days * 86400 + 1, *params),
-        ).fetchone()
+        )[0]
         return {
             "dollars": float(r[0]),
             "runs": int(r[1]),
@@ -673,7 +673,7 @@ def _board_spend(w, owner, days: int) -> dict:
         for e in episodes[:60]
     ]
     top_goals = []
-    for gid, cost, runs in w.conn.execute(
+    for gid, cost, runs in w.query(
         "SELECT e.goal_id, SUM(COALESCE(e.cost_dollars, 0)) AS c, COUNT(*) "
         + join
         + ended
@@ -681,7 +681,7 @@ def _board_spend(w, owner, days: int) -> dict:
         + own
         + " GROUP BY e.goal_id ORDER BY c DESC LIMIT 8",
         (since, *params),
-    ).fetchall():
+    ):
         g = w.get_goal(int(gid)) if gid is not None else None
         top_goals.append(
             {
@@ -717,13 +717,13 @@ def _external_platform_spend(w, owner, since: float) -> list[dict]:
     if not platform_of:
         return []
     agg: dict[str, dict] = {}
-    for own_id, cost, runs in w.conn.execute(
+    for own_id, cost, runs in w.query(
         "SELECT g.owner, SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
         "FROM episodes e JOIN goals g ON e.goal_id = g.id "
         "WHERE e.ended_at IS NOT NULL AND e.started_at >= ? "
         "AND g.owner LIKE 'agent:%' GROUP BY g.owner",
         (since,),
-    ).fetchall():
+    ):
         platform = platform_of.get(str(own_id))
         if platform is None:
             continue
@@ -757,11 +757,11 @@ def _board_workforce(w, owner, days: int) -> dict:
 
     def _delivered(lo: float, hi: float) -> int:
         return int(
-            w.conn.execute(
+            w.query(
                 "SELECT COUNT(*) FROM goals WHERE status = 'done' "
                 "AND updated_at >= ? AND updated_at < ?" + own,
                 (lo, hi, *params),
-            ).fetchone()[0]
+            )[0][0]
         )
 
     return {
@@ -795,13 +795,13 @@ def _external_platform_workforce(w, owner) -> list[dict]:
     if not platform_of:
         return []
     agg: dict[str, dict] = {}
-    for own_id, completed, total, spend in w.conn.execute(
+    for own_id, completed, total, spend in w.query(
         "SELECT g.owner, "
         "SUM(CASE WHEN g.status = 'done' THEN 1 ELSE 0 END), COUNT(*), "
         "(SELECT COALESCE(SUM(e.cost_dollars), 0) FROM episodes e "
         " JOIN goals g2 ON e.goal_id = g2.id WHERE g2.owner = g.owner) "
         "FROM goals g WHERE g.owner LIKE 'agent:%' GROUP BY g.owner"
-    ).fetchall():
+    ):
         platform = platform_of.get(str(own_id))
         if platform is None:
             continue
@@ -911,11 +911,11 @@ def _board_savings(w, owner, days: int) -> dict:
     day_list, since, _prev = _board_day_list(days)
     own, params = _owner_sql(owner)
     daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
-    for day, n in w.conn.execute(
-        "SELECT date(updated_at, 'unixepoch') AS day, COUNT(*) FROM goals "
+    for day, n in w.query(
+        "SELECT " + w.sql_day_from_epoch("updated_at") + " AS day, COUNT(*) FROM goals "
         "WHERE status = 'done' AND updated_at >= ?" + own + " GROUP BY day",
         (since, *params),
-    ).fetchall():
+    ):
         if day in daily:
             daily[day]["n"] = int(n)
     report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value()))

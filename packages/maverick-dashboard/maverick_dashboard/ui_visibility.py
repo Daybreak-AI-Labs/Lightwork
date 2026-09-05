@@ -721,6 +721,28 @@ PAGES: tuple[dict, ...] = (
         "default": "operate",
         "in_nav": False,
     },
+    # Reached from Security & GRC (and Get started) in-page; governed here so
+    # the visibility matrix and the page finder both know them.
+    {
+        "path": "/security/report",
+        "label": "Security Readiness Report",
+        "aliases": "board pack readiness print",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/security/assurance",
+        "label": "Model Risk & AI Assurance",
+        "aliases": "assurance cockpit evidence gateway model risk",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
     # The governance workspace: plain-language FRIA / Annex IV / literacy /
     # Art. 73 workflows for legal, privacy, and compliance staff. Its own
     # sidebar entry -- those personas never open the technical cockpit.
@@ -1279,10 +1301,24 @@ def nav_groups(role: str | None) -> list[dict]:
     dropped whole. ``role=None`` (auth off) returns the full nav. Pages marked
     ``in_nav: False`` stay governed but never render a sidebar entry.
     """
+    return _grouped_links(role, include_folded=False)
+
+
+def finder_pages(role: str | None) -> list[dict]:
+    """The page finder's index for ``role``, shaped exactly like ``nav_groups``.
+
+    Same RBAC / lockout / admin-override resolution as the sidebar, but
+    ``in_nav`` is ignored: pages folded out of the rail (reached in-page or by
+    URL) are still destinations the role may open, so they must be searchable.
+    """
+    return _grouped_links(role, include_folded=True)
+
+
+def _grouped_links(role: str | None, *, include_folded: bool) -> list[dict]:
     ov = overrides() if role is not None else {}
     groups: list[dict] = []
     for page in PAGES:
-        if not page.get("in_nav", True):
+        if not include_folded and not page.get("in_nav", True):
             continue
         if role is not None:
             if (page["path"], role) not in LOCKED:
@@ -1367,5 +1403,6 @@ __all__ = [
     "apply_selection",
     "page_for",
     "nav_groups",
+    "finder_pages",
     "matrix",
 ]

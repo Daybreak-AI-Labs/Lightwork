@@ -88,7 +88,13 @@ def build_inbox(specs: list[dict], runs_by_domain: dict[str, list],
     })
     showing_mine = bool(mine) and not role
     if role:
-        specs = [s for s in specs if role in s.get("consumers", [])]
+        # Exact role first; otherwise a case-insensitive substring so "billing"
+        # reaches billing_analyst the way the Permissions and connector searches do.
+        q = role.strip().lower()
+        exact = [s for s in specs if q in {c.lower() for c in s.get("consumers", [])}]
+        specs = exact or [
+            s for s in specs if any(q in c.lower() for c in s.get("consumers", []))
+        ]
     elif mine:
         specs = [s for s in specs if set(s.get("consumers", [])) & mine]
 

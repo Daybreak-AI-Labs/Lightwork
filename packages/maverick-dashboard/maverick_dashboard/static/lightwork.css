@@ -66,6 +66,9 @@
       --shadow-md: 0 4px 16px rgba(20,28,46,0.08);
       --shadow-lg: 0 12px 40px rgba(20,28,46,0.12);
     }
+    /* The theme class lives on <body>; color-scheme on the root controls the UA
+       canvas, scrollbars and native form controls, so flip it with the theme. */
+    :root:has(body.theme-light) { color-scheme: light; }
     body.theme-solarized {
       color-scheme: dark;
       --bg: #002b36; --panel: #073642; --border: #586e75;

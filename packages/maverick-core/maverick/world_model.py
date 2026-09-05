@@ -1760,6 +1760,26 @@ class WorldModel:
         rows = self._read_all("SELECT status, COUNT(*) AS n FROM goals GROUP BY status")
         return {r["status"]: int(r["n"]) for r in rows}
 
+    # -- backend-portable raw reads ------------------------------------------
+    # The dashboard's boards and exports need a handful of aggregate queries
+    # that have no accessor here. They used to reach into ``.conn`` directly,
+    # which only works on SQLite (``?`` paramstyle, ``sqlite3.Row``,
+    # ``date(x, 'unixepoch')``) and crashed on the Postgres backend. These two
+    # methods are the contract both backends implement: write the SQL in
+    # SQLite paramstyle and access rows by index or by column name.
+
+    def query(self, sql: str, params: tuple[Any, ...] | list = ()) -> list:
+        """Run a read-only statement written in SQLite paramstyle (``?``) and
+        return every row. Rows support both ``row[0]`` and ``row["col"]`` and
+        unpack like tuples. Mirrored on the Postgres backend, which rewrites
+        the paramstyle and wraps its tuple rows the same way."""
+        return self._read_all(sql, tuple(params))
+
+    def sql_day_from_epoch(self, column: str) -> str:
+        """SQL expression bucketing an epoch-seconds column into a UTC
+        ``YYYY-MM-DD`` string -- the dialect-specific half of a daily series."""
+        return f"date({column}, 'unixepoch')"
+
     def ping(self) -> bool:
         """Cheap liveness probe for ``/healthz`` -- confirms the world store
         answers a trivial read. Backend-agnostic (mirrored on Postgres) so the
