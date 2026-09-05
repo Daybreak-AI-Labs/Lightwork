@@ -480,6 +480,114 @@ def test_ci_gate_never_asserts_a_timing():
     assert overhead._ci_failures(_manifest_like(rows)) == []
 
 
+def _lineage_rows():
+    tasks = {task["shape"]: task for task in overhead.load_tasks()}
+    return [
+        {
+            "arm": "governed", "task_id": tasks[shape]["id"], "shape": shape,
+            "goal_id": goal_id, "artifacts": {"lineage_receipts": count},
+        }
+        for shape, goal_id, count in (("analysis", 1, 0), ("actuation", 2, 2))
+    ]
+
+
+def _persist_lineage_receipts(lineage_dir, goal_id, count):
+    from maverick.governed_actions import record_tool_lineage
+
+    for index in range(count):
+        assert record_tool_lineage(
+            goal_id, overhead.CONSEQUENTIAL_TOOL, {"receipt": index},
+            phase="PREPARE" if index == 0 else "COMMIT", force=True, strict=True,
+            store_dir=lineage_dir,
+        )
+
+
+@pytest.mark.parametrize("empty_analysis_file", [False, True])
+def test_lineage_gate_accepts_intentional_analysis_absence_and_verified_actuation(
+    tmp_path, empty_analysis_file,
+):
+    _persist_lineage_receipts(tmp_path, 2, 2)
+    if empty_analysis_file:
+        (tmp_path / "1.ndjson").write_text("", encoding="utf-8")
+
+    assert overhead._lineage_evidence(_lineage_rows(), tmp_path) == {
+        "chains_with_receipts": 1,
+        "chains_verified": 1,
+        "all_verified": True,
+        "store": "temporary_run_directory",
+    }
+
+
+@pytest.mark.parametrize("failure", ["missing", "empty", "corrupt", "unavailable", 1, 3])
+def test_lineage_gate_rejects_each_missing_or_invalid_actuation_chain(tmp_path, failure):
+    rows = _lineage_rows()
+    # Keep another actuation chain healthy so partial evidence cannot pass.
+    healthy = copy.deepcopy(rows[1])
+    healthy["goal_id"] = 3
+    rows.append(healthy)
+    _persist_lineage_receipts(tmp_path, 3, 2)
+    path = tmp_path / "2.ndjson"
+    if failure == "empty":
+        path.write_text("", encoding="utf-8")
+    elif failure == "corrupt":
+        path.write_text("{broken", encoding="utf-8")
+    elif failure == "unavailable":
+        path.mkdir()
+    elif isinstance(failure, int):
+        _persist_lineage_receipts(tmp_path, 2, failure)
+
+    result = overhead._lineage_evidence(rows, tmp_path)
+    assert result["chains_with_receipts"] == 2
+    assert result["chains_verified"] == 1
+    assert result["all_verified"] is False
+
+
+@pytest.mark.parametrize("failure", ["corrupt", "unavailable", 1, 2])
+def test_lineage_gate_rejects_invalid_or_unexpected_analysis_evidence(tmp_path, failure):
+    _persist_lineage_receipts(tmp_path, 2, 2)
+    path = tmp_path / "1.ndjson"
+    if failure == "corrupt":
+        path.write_text("{broken", encoding="utf-8")
+    elif failure == "unavailable":
+        path.mkdir()
+    else:
+        _persist_lineage_receipts(tmp_path, 1, failure)
+
+    assert overhead._lineage_evidence(_lineage_rows(), tmp_path)["all_verified"] is False
+
+
+@pytest.mark.parametrize("observed_count", [0, 1, 3])
+def test_lineage_gate_requires_observed_receipt_count_to_match_real_chain(
+    tmp_path, observed_count,
+):
+    _persist_lineage_receipts(tmp_path, 2, 2)
+    rows = _lineage_rows()
+    rows[1]["artifacts"]["lineage_receipts"] = observed_count
+
+    assert overhead._lineage_evidence(rows, tmp_path)["all_verified"] is False
+
+
+def test_lineage_gate_cannot_relabel_a_missing_actuation_as_analysis(tmp_path):
+    rows = _lineage_rows()
+    rows[1]["shape"] = "analysis"
+    rows[1]["artifacts"]["lineage_receipts"] = 0
+
+    result = overhead._lineage_evidence(rows, tmp_path)
+    assert result["chains_with_receipts"] == 1
+    assert result["chains_verified"] == 0
+    assert result["all_verified"] is False
+
+
+def test_lineage_gate_cannot_relabel_unexpected_analysis_receipts_as_actuation(tmp_path):
+    _persist_lineage_receipts(tmp_path, 1, 2)
+    _persist_lineage_receipts(tmp_path, 2, 2)
+    rows = _lineage_rows()
+    rows[0]["shape"] = "actuation"
+    rows[0]["artifacts"]["lineage_receipts"] = 2
+
+    assert overhead._lineage_evidence(rows, tmp_path)["all_verified"] is False
+
+
 # -- published artifacts ---------------------------------------------------
 
 @pytest.fixture(scope="module")
