@@ -878,6 +878,11 @@
         border-color: var(--glass-border);
         box-shadow: var(--shadow-lg), var(--glass-edge);
       }
+      body:not(.theme-hicontrast) .prefs__panel {
+        /* The blurred topbar bounds descendant backdrop filtering. A solid
+           themed surface keeps page text from showing through the labels. */
+        background: var(--glass-sheen), var(--panel);
+      }
       body:not(.theme-hicontrast) .mv-confirm::backdrop,
       body:not(.theme-hicontrast) .navfinder::backdrop,
       body:not(.theme-hicontrast) .arv::backdrop {

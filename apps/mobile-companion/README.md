@@ -49,6 +49,13 @@ Requirements:
 - **Offline cache**: the last good `/api/v1/offline/bundle` payload is kept
   in `AsyncStorage` (`@react-native-async-storage/async-storage`) and
   rendered with an "as of N min ago — offline" banner when fetches fail.
+  Each saved connection has an opaque cache scope stored with its URL and
+  token in one keychain record. Saving settings starts a new cache scope,
+  including when switching tokens on the same dashboard. Reconnect and open
+  Glance to refresh that connection's cache. Older URL-only caches are ignored;
+  existing URL/token settings remain readable and migrate on the next save.
+  If the runtime cannot generate a secure UUID, online settings still work,
+  but offline caching stays disabled. Tokens are never stored in cache keys.
 
 ## Building store binaries
 
@@ -63,3 +70,21 @@ not vendor `node_modules`, so CI here only guarantees the sources are
 syntactically valid TypeScript. Imports are limited to `react`,
 `react-native`, `expo-status-bar`, `expo-secure-store`, and
 `@react-native-async-storage/async-storage`.
+
+## Local regression tests
+
+These tests execute the actual TypeScript/React settings, polling, cache, and
+screen code with synthetic storage and controlled promises. They do not call
+providers, the OS keychain, or a native simulator. Their small, separate package
+pins React and its matching renderer; installing Expo is unnecessary:
+
+```bash
+cd apps/mobile-companion
+npm ci --prefix tests --ignore-scripts
+npm test
+```
+
+Coverage includes failed/legacy keychain writes, concurrent reads and saves,
+out-of-order responses, slow polling, unmounts, save feedback, and cached data
+isolation when the dashboard or token changes. Native iOS/Android layout and
+keychain acceptance still require a device build.

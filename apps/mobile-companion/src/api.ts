@@ -15,7 +15,7 @@
  * This app is READ-ONLY by design: no POST/DELETE/PUT anywhere.
  */
 
-export type Settings = { baseUrl: string; token: string };
+export type Settings = { baseUrl: string; token: string; cacheScope?: string };
 
 export type Goal = {
   id: number;

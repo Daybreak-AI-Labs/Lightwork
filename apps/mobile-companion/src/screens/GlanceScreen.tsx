@@ -7,7 +7,7 @@
  * GET /api/v1/offline/bundle when the dashboard serves it (404 on older
  * dashboards is fine — the cache just isn't refreshed). When everything is
  * unreachable, renders the cached bundle with an offline banner. */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import {
@@ -19,14 +19,13 @@ import {
   getOfflineBundle,
   getSpend,
 } from "../api";
-import { CachedBundle, loadBundle, offlineBanner, saveBundle } from "../offlineCache";
+import { offlineBanner, saveBundle, useCachedBundle } from "../offlineCache";
 import { usePolling } from "../poll";
 
 type GlanceData = { active: ActiveGoal[]; spend: SpendTotal | null };
 
 export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
   const { settings } = props;
-  const [cached, setCached] = useState<CachedBundle | null>(null);
 
   const fetcher = useCallback(async (): Promise<GlanceData> => {
     const [activeRes, spendRes] = await Promise.all([
@@ -34,15 +33,13 @@ export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
       getSpend(settings).catch(() => null),
     ]);
     // Best-effort cache refresh; endpoint may not exist on older dashboards.
-    getOfflineBundle(settings).then((b) => saveBundle(b, settings.baseUrl)).catch(() => undefined);
+    getOfflineBundle(settings).then((b) => saveBundle(b, settings.baseUrl, settings.cacheScope)).catch(() => undefined);
     return { active: activeRes.goals, spend: spendRes ? spendRes.total : null };
   }, [settings]);
 
   const { data, error } = usePolling<GlanceData>(fetcher, 15_000);
 
-  useEffect(() => {
-    if (error && !data) loadBundle(settings.baseUrl).then(setCached);
-  }, [error, data, settings.baseUrl]);
+  const cached = useCachedBundle(settings, Boolean(error && !data));
 
   if (!data && cached) {
     const g = cached.bundle.glance;

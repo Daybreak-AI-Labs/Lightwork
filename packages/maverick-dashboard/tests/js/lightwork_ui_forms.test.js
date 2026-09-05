@@ -40,7 +40,7 @@ class Element {
   }
 }
 
-function fixture({ fallback = false, answers = [], copyResult = true } = {}) {
+function fixture({ fallback = false, answers = [], copyResult = true, acceptPromptDefault = false } = {}) {
   const elements = new Map([
     "mv-toasts", "mv-toasts-alert", "mv-form", "mv-form-form", "mv-form-fields",
     "mv-form-err", "mv-form-cancel", "mv-form-title", "mv-form-ok",
@@ -62,7 +62,11 @@ function fixture({ fallback = false, answers = [], copyResult = true } = {}) {
     },
     navigator: {},
     setTimeout() {},
-    prompt(message) { prompts.push(message); return answers.length ? answers.shift() : null; },
+    prompt(message, defaultValue) {
+      prompts.push(message);
+      return acceptPromptDefault ? (prompts.length === 1 ? defaultValue : null)
+        : answers.length ? answers.shift() : null;
+    },
   };
   context.window = context;
   const source = fs.readFileSync(
@@ -112,6 +116,24 @@ test("prompt fallback retries empty required values and returns boolean false as
   assert.equal(values.urgent, false);
   assert.equal(ui.prompts.length, 3);
 });
+
+for (const [defaultValue, expected] of [
+  [false, false], ["false", false], [" FALSE ", false], ["no", false], ["0", false],
+  [0, false], [null, false], [undefined, false], ["", false], ["unexpected", false],
+  [true, true], ["true", true], [" YES ", true], ["1", true], [1, true],
+]) {
+  test(`boolean default ${JSON.stringify(defaultValue)} agrees in dialog and prompt`, async () => {
+    const fields = [{ key: "notify", type: "bool", default: defaultValue }];
+    const ui = fixture();
+    const result = ui.context.mvForm("Run", fields);
+    const control = ui.elements.get("mv-form-fields").querySelector();
+    assert.equal(control.checked, expected);
+    ui.elements.get("mv-form-form").dispatch("submit");
+    assert.equal((await result).notify, expected);
+    const fallback = fixture({ fallback: true, acceptPromptDefault: true });
+    assert.equal((await fallback.context.mvForm("Run", fields)).notify, expected);
+  });
+}
 
 test("prompt fallback retries invalid number and select input rather than submitting it", async () => {
   const ui = fixture({ fallback: true, answers: ["Infinity", "4.25", "other", "review"] });

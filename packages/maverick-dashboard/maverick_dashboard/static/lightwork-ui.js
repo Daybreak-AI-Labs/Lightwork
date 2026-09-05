@@ -115,6 +115,12 @@
       // a {key:value} object, or null if cancelled. Falls back to sequential
       // prompts where <dialog> is unsupported.
       var fdlg = document.getElementById('mv-form');
+      function booleanDefault(value) {
+        // Imported fields can carry serialized booleans. Only an explicit
+        // affirmative value may preselect a boolean; "false" is not truthy here.
+        return value === true || value === 1 ||
+          (typeof value === 'string' && /^(true|yes|1)$/i.test(value.trim()));
+      }
       window.mvForm = function (title, fields, opts) {
         opts = opts || {};
         fields = fields || [];
@@ -132,7 +138,7 @@
             var problem = '';
             while (true) {
               var v0 = window.prompt((problem ? problem + '\n' : '') + promptLabel,
-                s.default != null ? String(s.default) : (boolField ? 'false' : ''));
+                boolField ? String(booleanDefault(s.default)) : s.default != null ? String(s.default) : '');
               if (v0 === null) return Promise.resolve(null);
               v0 = v0.trim();
               if (!v0 && s.required) { problem = 'This field is required.'; continue; }
@@ -171,7 +177,7 @@
           var ctl;
           if (f.type === 'bool' || f.type === 'checkbox') {
             wrap.className += ' mv-form__check';
-            ctl = document.createElement('input'); ctl.type = 'checkbox'; ctl.checked = !!f.default; ctl.id = id;
+            ctl = document.createElement('input'); ctl.type = 'checkbox'; ctl.checked = booleanDefault(f.default); ctl.id = id;
             var l1 = document.createElement('label'); l1.setAttribute('for', id); l1.textContent = f.label || f.key;
             wrap.appendChild(ctl); wrap.appendChild(l1);
           } else {

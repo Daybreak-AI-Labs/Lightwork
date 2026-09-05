@@ -48,6 +48,9 @@
   var saveInFlight = false;
   var publishInFlight = false;
   var runInFlight = false;
+  var applyInFlight = false;
+  var draftGeneration = 0;
+  var pendingDraft = null;
 
   function draftSnapshot() {
     // Keep the editable object rather than the wire serialization: buffered
@@ -76,8 +79,12 @@
   function markClean(snapshot) { cleanDraft = snapshot || draftSnapshot(); }
   function draftIsDirty() { return cleanDraft !== null && cleanDraft !== draftSnapshot(); }
   function syncSaveButtons() {
-    saveButton.disabled = saveInFlight || publishInFlight;
-    publishButton.disabled = saveInFlight || publishInFlight;
+    saveButton.disabled = saveInFlight || publishInFlight || applyInFlight;
+    publishButton.disabled = saveInFlight || publishInFlight || applyInFlight;
+    props.querySelectorAll('[data-apply-node]').forEach(function (button) {
+      button.disabled = saveInFlight || publishInFlight || applyInFlight ||
+        button.getAttribute('data-apply-blocked') === 'true' || !proposals[button.getAttribute('data-apply-node')];
+    });
   }
   function canonicalizeSavedFlow(id) {
     var path = '/flows/designer/' + encodeURIComponent(id);
@@ -991,7 +998,7 @@
       props.appendChild(il);
     }
     // self-rewrite proposal for this node (from grounded per-node outcomes)
-    var prop = proposals[n.id];
+    var prop = flow === rootFlow ? proposals[n.id] : null;
     if (prop) {
       var pbox = document.createElement('div');
       pbox.style.cssText = 'margin-top:var(--space-3);padding:var(--space-2);border:1px solid var(--accent);border-radius:8px;';
@@ -999,13 +1006,16 @@
       pl.textContent = '💡 ' + prop.reason;
       // Persisted apply: saves a new version + logs the change so its impact is measured.
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
+      pb.setAttribute('data-apply-node', n.id);
+      pb.setAttribute('data-apply-blocked', String(prop.applicable === false));
+      pb.disabled = saveInFlight || publishInFlight || applyInFlight;
       pb.textContent = 'Apply & track (→ ' + prop.to_kind
         + (prop.inferred_tool ? ' · ' + prop.inferred_tool : '') + ')';
       if (prop.applicable === false) {
         pb.disabled = true;
         pb.title = prop.blocking_reason || 'Review parameter bindings before applying.';
       }
-      pb.addEventListener('click', function () { applyProposal(n, prop); });
+      pb.addEventListener('click', function () { applyProposal(n, prop, pb); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
     // actions
@@ -1215,8 +1225,8 @@
   function slugify(s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
-  async function save() {
-    if (saveInFlight) return false;
+  async function save(forApply) {
+    if (saveInFlight || (applyInFlight && forApply !== true)) return false;
     var bad = commitRawFields();
     if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return false; }
     var body = toApiFlow();
@@ -1254,7 +1264,7 @@
     }
   }
   async function publishFlow() {
-    if (publishInFlight || saveInFlight) return;
+    if (publishInFlight || saveInFlight || applyInFlight) return;
     publishInFlight = true; syncSaveButtons();
     // Publish is the explicit activation authority. Save the reviewed canvas as
     // a draft, then bind activation to the exact CAS tokens the save returned.
@@ -1442,26 +1452,68 @@
     var origin = (run.origin && run.origin !== 'manual') ? ' · via ' + run.origin : '';
     return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '') + cost + origin;
   }
-  function draft() {
+  async function draft() {
     var desc = document.getElementById('fd-nl').value.trim();
     if (!desc) { say('Describe your workflow first.', true); return; }
+    if (saveInFlight || publishInFlight || applyInFlight) {
+      say('Wait for the current save or apply to finish before drafting.', true); return;
+    }
+    var snapshot = draftSnapshot(), flowId = idInput.value || '';
+    if (pendingDraft && pendingDraft.description === desc && pendingDraft.flowId === flowId &&
+        pendingDraft.snapshot === snapshot) return;
+    var generation = ++draftGeneration;
+    pendingDraft = { description: desc, flowId: flowId, snapshot: snapshot };
+    var button = document.getElementById('fd-draft');
+    if (button) button.setAttribute('aria-busy', 'true');
     say('Drafting… (a few seconds)');
-    apiFetch('/api/v1/flows/draft', { method: 'POST', body: JSON.stringify({ description: desc, flow_id: idInput.value || '' }) })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
-        if (!res.ok) { say(res.j.detail || 'Draft failed', true); return; }
-        pushHistory();                    // the pre-draft canvas is one Ctrl+Z away
-        fromApiFlow(res.j.flow);
-        say((res.j.notes && res.j.notes.length) ? res.j.notes[0] : 'Drafted ✓ — edit and save.');
-      }).catch(function () { say('Draft failed', true); });
+    try {
+      var response = await apiFetch('/api/v1/flows/draft', {
+        method: 'POST', body: JSON.stringify({ description: desc, flow_id: flowId })
+      });
+      var result = await readMutationResult(response, 'Draft');
+      if (generation !== draftGeneration) return;
+      // A newer request owns the result; edits made while the model was working
+      // also remain authoritative, including buffered invalid JSON fields.
+      if (draftSnapshot() !== snapshot || document.getElementById('fd-nl').value.trim() !== desc ||
+          saveInFlight || publishInFlight || applyInFlight) {
+        say('The draft was not loaded because the workflow or description changed. Your edits were kept; draft again when ready.', true);
+        return;
+      }
+      var draftedFlow = result.flow;
+      if (!draftedFlow || typeof draftedFlow !== 'object' || Array.isArray(draftedFlow) ||
+          !Array.isArray(draftedFlow.nodes) || !draftedFlow.nodes.length ||
+          draftedFlow.nodes.some(function (node) { return !node || typeof node !== 'object' || Array.isArray(node); }) ||
+          FDCore.validateFlow(draftedFlow).length) {
+        throw new Error('Draft could not be loaded. Your current workflow was kept; try drafting again.');
+      }
+      pushHistory();                    // the pre-draft canvas is one Ctrl+Z away
+      fromApiFlow(draftedFlow);
+      say(Array.isArray(result.notes) && typeof result.notes[0] === 'string'
+        ? result.notes[0] : 'Drafted ✓ — edit and save.');
+    } catch (e) {
+      if (generation === draftGeneration) say(e.message || 'Draft failed', true);
+    } finally {
+      if (generation === draftGeneration) {
+        pendingDraft = null;
+        if (button) button.removeAttribute('aria-busy');
+      }
+    }
   }
-  function load(id) {
-    apiFetch('/api/v1/flows/' + encodeURIComponent(id)).then(function (r) {
+  function load(id, expectedDraftSnapshot) {
+    var loadingFlow = rootFlow;
+    return apiFetch('/api/v1/flows/' + encodeURIComponent(id)).then(function (r) {
       if (!r.ok) { say('Could not load flow', true); return; }
-      return r.json().then(function (saved) { fromApiFlow(saved, true); });
+      return r.json().then(function (saved) {
+        if (expectedDraftSnapshot !== undefined &&
+            (rootFlow !== loadingFlow || draftSnapshot() !== expectedDraftSnapshot)) {
+          say('Applied on the server. Your newer canvas edits were kept; reload when ready to inspect the applied version.');
+          return;
+        }
+        fromApiFlow(saved, true);
+        loadSuggestions(id);
+        loadSchema(id);
+      });
     }).catch(function () { say('Could not load flow', true); });
-    loadSuggestions(id);
-    loadSchema(id);
   }
   function loadSchema(id) {
     // learned output shapes -> nested data pills (order.total, etc.)
@@ -1506,29 +1558,57 @@
       if (selected) renderProps();
     }).catch(function () {});
   }
-  function applyProposal(n, prop) {
+  async function applyProposal(n, prop, button) {
     // Persisted apply: save the current graph, then enact the swap server-side so
     // it becomes a new version and its before/after impact is measured. Hardening
     // needs a tool: the node's own, else the one the loop inferred it keeps calling.
+    if (applyInFlight || saveInFlight || publishInFlight || prop.applicable === false) return;
+    // Proposal IDs address root nodes only; nested bodies may reuse those IDs.
+    if (flow !== rootFlow || rootFlow.nodes.indexOf(n) < 0) {
+      say('Select the current step in the main flow before applying its suggestion.', true); return;
+    }
     var tool = n.tool || (prop.inferred_tool || '');
     if (prop.to_kind === 'action' && !tool) {
       say('Give this step a Tool first, then Apply (an action needs one).', true); return;
     }
-    save(function () {
-      var body = {
-        node_id: n.id, to_kind: prop.to_kind, tool: tool,
-        brief: n.brief || n.label || '',
-        version: rootFlow.version, revision: rootFlow.revision
-      };
-      apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/apply', { method: 'POST', body: JSON.stringify(body) })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-        .then(function (res) {
-          if (!res.ok) { say(res.j.detail || 'Apply failed', true); return; }
-          delete proposals[n.id];
-          say('Applied ✓ — now v' + res.j.version + '. Impact appears as new runs land.');
-          load(rootFlow.id);                          // reload the new version + refresh
-        }).catch(function () { say('Apply failed', true); });
-    });
+    var applyingFlow = rootFlow, fromKind = n.kind, confirmed = false;
+    var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
+    applyInFlight = true;
+    if (button) button.disabled = true;
+    syncSaveButtons();
+    try {
+      if (!(await save(true))) return;
+      if (rootFlow !== applyingFlow || draftIsDirty()) {
+        say('The workflow changed while saving. Your edits were kept; review the suggestion and apply again.', true);
+        return;
+      }
+      var flowId = rootFlow.id, snapshot = draftSnapshot();
+      body.version = rootFlow.version;
+      body.revision = rootFlow.revision;
+      say('Applying suggestion…');
+      var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
+        method: 'POST', body: JSON.stringify(body)
+      });
+      var result = await readMutationResult(response, 'Apply');
+      if (result.id !== flowId || result.node_id !== body.node_id || result.from_kind !== fromKind ||
+          result.to_kind !== body.to_kind || !Number.isInteger(result.version) || result.version <= body.version) {
+        throw new Error(unconfirmedMutation('Apply'));
+      }
+      confirmed = true;
+      if (rootFlow === applyingFlow) delete proposals[body.node_id];
+      if (rootFlow !== applyingFlow || draftSnapshot() !== snapshot) {
+        say('Applied on the server. Your newer canvas edits were kept; reload when ready to inspect the applied version.');
+        return;
+      }
+      say('Applied ✓ — now v' + result.version + '. Impact appears as new runs land.');
+      await load(flowId, snapshot);                  // retain edits made during the refresh too
+    } catch (e) {
+      say(e.message || unconfirmedMutation('Apply'), true);
+    } finally {
+      applyInFlight = false;
+      if (button) button.disabled = confirmed || prop.applicable === false;
+      syncSaveButtons();
+    }
   }
   function showHistory() {
     if (!rootFlow.id) { say('Save the flow first.', true); return; }

@@ -34,6 +34,7 @@ function deferred() {
 
 function fixture(records = [], intercept = null) {
   const document = { elements: new Map(), activeElement: null };
+  let now = 2000;
   class Element {
     constructor(tag) {
       this.tagName = tag.toUpperCase(); this.children = []; this.parentElement = null;
@@ -95,7 +96,7 @@ function fixture(records = [], intercept = null) {
   };
   vm.runInNewContext(fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
-  ), { document, fetch, performance: { now: () => 2000 }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
+  ), { document, fetch, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {
       await new Promise(resolve => setImmediate(resolve));
@@ -105,6 +106,7 @@ function fixture(records = [], intercept = null) {
   }
   return {
     root, byId, calls, document, settle,
+    advanceTime(milliseconds) { now += milliseconds; },
     caseButton(id) { return byId("cases").children.find(button => button.dataset.caseId === id); },
     async load(id) { this.caseButton(id).listeners.click(); await settle(); },
     async click(id) { byId(id).listeners.click(); await settle(); },
@@ -133,12 +135,156 @@ test("switching cases clears decision drafts and updates current-request context
   await ui.settle(); await ui.load("one");
   ui.byId("rationale").value = "Only applies to vendor one";
   ui.byId("acceptance-reason").value = "One was accepted";
+  ui.byId("answer-training").value = "no";
+  ui.byId("note-training").value = "Only applies to vendor one";
   await ui.load("two");
   assert.equal(ui.byId("rationale").value, "");
   assert.equal(ui.byId("acceptance-reason").value, "");
+  assert.equal(ui.byId("answer-training").value, "unknown");
+  assert.equal(ui.byId("note-training").value, "");
   assert.match(ui.byId("case-reference").textContent, /Initial request · two/);
   assert.equal(ui.caseButton("two").getAttribute("aria-current"), "true");
   assert.equal(ui.caseButton("one").getAttribute("aria-current"), "false");
+});
+
+test("refreshing or reselecting an unchanged case preserves corrections and submits them for approval", async () => {
+  let submitted;
+  const ui = fixture([record("one")], call => {
+    if (!call.url.endsWith("/review")) return undefined;
+    submitted = call.body;
+    return response(record("one", { revision: 2 }));
+  });
+  await ui.settle(); await ui.load("one");
+  const answer = ui.byId("answer-training");
+  const note = ui.byId("note-training");
+  answer.value = "no";
+  note.value = "Vendor terms reviewed";
+  ui.byId("rationale").value = "Approve with corrected answer";
+  ui.advanceTime(3000);
+  await ui.click("refresh");
+  await ui.load("one");
+  ui.advanceTime(2000);
+  assert.equal(ui.byId("answer-training"), answer);
+  assert.equal(ui.byId("note-training"), note);
+  assert.equal(answer.value, "no");
+  assert.equal(note.value, "Vendor terms reviewed");
+  assert.equal(ui.byId("rationale").value, "Approve with corrected answer");
+  await ui.click("review-approve");
+  assert.equal(submitted.expected_revision, 1);
+  assert.equal(submitted.decision, "approved");
+  assert.equal(submitted.rationale, "Approve with corrected answer");
+  assert.equal(submitted.review_seconds, 5);
+  assert.deepEqual(submitted.corrections, { training: { answer: "no", note: "Vendor terms reviewed" } });
+  assert.equal(ui.byId("rationale").value, "");
+});
+
+test("reordered assessment object keys preserve the same review draft", async () => {
+  const records = [record("one")];
+  const ui = fixture(records);
+  await ui.settle(); await ui.load("one");
+  ui.byId("answer-training").value = "no";
+  ui.byId("note-training").value = "Draft correction note";
+  ui.byId("rationale").value = "Draft review reason";
+  records[0] = record("one", { assessment: {
+    answers: { training: { note: "", answer: "unknown" } },
+    template_snapshot: { questions: [{ guidance: "Check terms.", section: "Data", text: "Customer training?", id: "training" }] },
+    result: { risk_rating: "low", total: 1, answered: 1 },
+    status: "pending",
+  } });
+  await ui.click("refresh");
+  assert.equal(ui.byId("answer-training").value, "no");
+  assert.equal(ui.byId("note-training").value, "Draft correction note");
+  assert.equal(ui.byId("rationale").value, "Draft review reason");
+  assert.match(ui.byId("message").textContent, /^Requests refreshed/);
+});
+
+for (const change of ["revision", "assessment", "assessment answer"]) {
+  test(`refreshing a changed ${change} resets stale drafts and requires a new decision reason`, async () => {
+    const records = [record("one")];
+    const ui = fixture(records);
+    await ui.settle(); await ui.load("one");
+    ui.byId("answer-training").value = "no";
+    ui.byId("note-training").value = "Review of old evidence";
+    ui.byId("rationale").value = "Approval of the old version";
+    ui.byId("acceptance-reason").value = "Acceptance of the old version";
+    if (change === "revision") records[0] = record("one", { revision: 2 });
+    else if (change === "assessment") {
+      records[0] = record("one");
+      records[0].assessment = { ...records[0].assessment, id: "replacement-assessment" };
+    } else {
+      records[0] = record("one");
+      records[0].assessment.answers.training = { answer: "yes", note: "Updated source" };
+    }
+    await ui.click("refresh");
+    assert.equal(ui.byId("answer-training").value, records[0].assessment.answers.training.answer);
+    assert.equal(ui.byId("note-training").value, records[0].assessment.answers.training.note);
+    assert.equal(ui.byId("rationale").value, "");
+    assert.equal(ui.byId("acceptance-reason").value, "");
+    assert.match(ui.byId("message").textContent, /changed.*draft.*reset/i);
+    await ui.click("review-approve");
+    assert.match(ui.byId("message").textContent, /Enter a review rationale/);
+    assert.equal(ui.calls.some(call => call.method === "POST"), false);
+  });
+}
+
+test("refresh preserves acceptance text only for the same case version", async () => {
+  const records = [record("one", { operation: { state: "verified" } })];
+  const ui = fixture(records);
+  await ui.settle(); await ui.load("one");
+  ui.byId("acceptance-reason").value = "Verified current external result";
+  await ui.click("refresh");
+  assert.equal(ui.byId("acceptance-reason").value, "Verified current external result");
+  records[0] = record("one", { revision: 2, operation: { state: "verified" } });
+  await ui.click("refresh");
+  assert.equal(ui.byId("acceptance-reason").value, "");
+  await ui.click("accept");
+  assert.match(ui.byId("message").textContent, /Enter an acceptance or rejection reason/);
+  assert.equal(ui.calls.some(call => call.method === "POST"), false);
+});
+
+test("a pending refresh protects draft controls and prevents duplicate refresh or approval", async () => {
+  const pending = deferred();
+  let refreshing = false;
+  const ui = fixture([record("one")], call => refreshing && call.url.endsWith("/cases/one") ? pending.promise : undefined);
+  await ui.settle(); await ui.load("one");
+  ui.byId("answer-training").value = "no";
+  ui.byId("note-training").value = "Unsaved review note";
+  ui.byId("rationale").value = "Unsaved reason";
+  refreshing = true;
+  ui.byId("refresh").listeners.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.root.getAttribute("aria-busy"), "true");
+  for (const id of ["refresh", "answer-training", "note-training", "rationale", "review-approve"])
+    assert.equal(ui.byId(id).disabled, true, id);
+  const requests = ui.calls.length;
+  ui.byId("refresh").listeners.click();
+  ui.byId("review-approve").listeners.click();
+  assert.equal(ui.calls.length, requests);
+  pending.resolve(response(record("one")));
+  await ui.settle();
+  assert.equal(ui.root.getAttribute("aria-busy"), "false");
+  assert.equal(ui.byId("answer-training").disabled, false);
+  assert.equal(ui.byId("answer-training").value, "no");
+  assert.equal(ui.byId("note-training").value, "Unsaved review note");
+  assert.equal(ui.byId("rationale").value, "Unsaved reason");
+});
+
+test("a failed refresh leaves review drafts intact and reports the error", async () => {
+  let failRefresh = false;
+  const ui = fixture([record("one")], call => failRefresh && call.url.endsWith("/cases/one")
+    ? response({ detail: "Case refresh temporarily unavailable" }, 503) : undefined);
+  await ui.settle(); await ui.load("one");
+  ui.byId("answer-training").value = "no";
+  ui.byId("note-training").value = "Unsaved note";
+  ui.byId("rationale").value = "Unsaved reason";
+  failRefresh = true;
+  await ui.click("refresh");
+  assert.equal(ui.byId("answer-training").value, "no");
+  assert.equal(ui.byId("note-training").value, "Unsaved note");
+  assert.equal(ui.byId("rationale").value, "Unsaved reason");
+  assert.match(ui.byId("message").textContent, /Case refresh temporarily unavailable/);
+  assert.equal(ui.byId("message").getAttribute("role"), "alert");
+  assert.equal(ui.byId("refresh").disabled, false);
 });
 
 test("stages gate human review, execution, reconciliation and acceptance separately", async () => {

@@ -6,7 +6,7 @@
  * existing read-only REST endpoints (see src/api.ts); the app never mutates.
  */
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 
 import type { Settings } from "./src/api";
@@ -23,14 +23,29 @@ export default function App(): React.JSX.Element {
   const [settingsError, setSettingsError] = useState("");
   const [tab, setTab] = useState<Tab>("runs");
   const [runId, setRunId] = useState<number | null>(null);
+  const mounted = useRef(false);
+  const settingsRequest = useRef(0);
 
   const reloadSettings = useCallback(() => {
+    if (!mounted.current) return;
+    const request = ++settingsRequest.current;
     setSettingsError("");
-    loadSettings().then(setSettings, () => {
+    loadSettings().then((loaded) => {
+      if (!mounted.current || request !== settingsRequest.current) return;
+      setSettings(loaded);
+    }, () => {
+      if (!mounted.current || request !== settingsRequest.current) return;
       setSettingsError("Could not load connection settings. Unlock your device and try again.");
     });
   }, []);
-  useEffect(reloadSettings, [reloadSettings]);
+  useEffect(() => {
+    mounted.current = true;
+    reloadSettings();
+    return () => {
+      mounted.current = false;
+      settingsRequest.current += 1;
+    };
+  }, [reloadSettings]);
 
   let body: React.JSX.Element;
   if (!settings || settingsError) {

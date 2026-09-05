@@ -83,15 +83,26 @@
     if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request was rejected; check fields and reload the case.");
     return data;
   }
+  function sameJSON(left, right) {
+    if (left === right) return true;
+    if (!left || !right || typeof left !== "object" || typeof right !== "object" ||
+        Array.isArray(left) !== Array.isArray(right)) return false;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every(key =>
+      Object.prototype.hasOwnProperty.call(right, key) && sameJSON(left[key], right[key]));
+  }
   function render(record) {
     if (typeof record.id !== "string" || !Number.isInteger(record.revision) || typeof record.vendor_name !== "string")
       throw new Error("Case response is incomplete; refresh requests before continuing.");
-    if (selected?.id !== record.id) {
+    const sameCase = selected?.id === record.id;
+    const sameReview = sameCase && selected.revision === record.revision &&
+      sameJSON(selected.assessment, record.assessment);
+    if (!sameReview) {
       byId("rationale").value = "";
       byId("acceptance-reason").value = "";
+      reviewedAt = performance.now();
     }
     selected = record;
-    reviewedAt = performance.now();
     show("case-title", record.vendor_name);
     show("case-reference", `${record.renewal_of ? "Renewal" : "Initial request"} · ${record.id}`);
     byId("status").replaceChildren();
@@ -104,7 +115,8 @@
     }
     const evidence = record.evidence;
     show("evidence", evidence ? `Status: ${friendly(evidence.status)}\nGoogle Drive file: ${record.document_id}\nVersion: ${evidence.version || "unverified"}\nLast modified: ${date(evidence.modified_at)}\nValid until: ${date(evidence.fresh_until)}\nContent fingerprint: ${evidence.content_sha256 || "unavailable"}` : "No evidence obtained.");
-    assessmentView(record);
+    // Keep the review controls and unsaved corrections for this exact version.
+    if (!sameReview) assessmentView(record);
     const payload = operation.payload;
     show("operation", payload ? `Project: ${payload.project}\nTicket title: ${payload.summary}\n\n${payload.description}\n\nApproval expires: ${date(operation.expires_at)}\nVerified ticket: ${operation.external_confirmation?.key || "pending"}` : "No action prepared.");
     show("operation-record", operation);
@@ -116,6 +128,8 @@
     show("history", [...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item))].join("\n\n") || "No reviewer decisions or exceptions yet.");
     buttons();
+    if (sameCase && !sameReview)
+      return "The request or assessment changed. Draft answers, notes, and decision reasons were reset. Review the current version before deciding.";
   }
   async function refresh() {
     const result = await api("/cases");
@@ -136,7 +150,7 @@
     root.setAttribute("aria-busy", "true");
     buttons();
     let succeeded = false;
-    try { await operation(); message(success); succeeded = true; }
+    try { message((await operation()) || success); succeeded = true; }
     catch (error) { message(error.message, true); }
     finally {
       busy = false;
@@ -153,7 +167,7 @@
     await refresh();
   }
   const click = (id, operation, success, focusId) => byId(id).addEventListener("click", () => run(operation, success, focusId));
-  click("refresh", async () => { await refresh(); if (selected) render(await api("/cases/" + encodeURIComponent(selected.id))); }, "Requests refreshed. Review the current case before continuing.");
+  click("refresh", async () => { await refresh(); if (selected) return render(await api("/cases/" + encodeURIComponent(selected.id))); }, "Requests refreshed. Review the current case before continuing.");
   byId("intake").addEventListener("submit", event => {
     event.preventDefault();
     run(async () => {
