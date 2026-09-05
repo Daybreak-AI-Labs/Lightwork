@@ -3405,7 +3405,18 @@ def pick_security_suite() -> dict[str, Any]:
         "No document bytes, filenames, paths, or object-store credentials are stored.",
         default=False,
     )
+    vendor_onboarding = _q_confirm(
+        "Enable AI vendor onboarding and evidence renewal with Google Drive "
+        "evidence, named human review, and approved Jira Task creation?",
+        default=False,
+    )
+    vendor_onboarding_owner = (
+        _q_text("  Enrolled vendor resource owner (principal or team reference)", default="").strip()
+        if vendor_onboarding else ""
+    )
     result = {
+        "vendor_onboarding": vendor_onboarding,
+        "vendor_onboarding_owner": vendor_onboarding_owner,
         "customer_sandbox_lifecycle": customer_sandbox_lifecycle,
         "security_ops": security_ops,
         "administration_document_access": administration_document_access,
@@ -6273,10 +6284,10 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         'backend = "auto"',
         "",
         "[evidence_graph]",
-        f"enable = {'true' if security_suite.get('evidence_graph', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('evidence_graph', False) or security_suite.get('vendor_onboarding', False) else 'false'}",
         "",
         "[model_risk_assurance]",
-        f"enable = {'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('model_risk_assurance', False) or security_suite.get('vendor_onboarding', False) else 'false'}",
         "gate_promotions = "
         f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
         "",
@@ -6302,7 +6313,7 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "authority_max_age_seconds = 604800",
         "",
         "[ai_vendor_risk]",
-        f"enable = {'true' if security_suite.get('ai_vendor_risk', False) else 'false'}",
+        f"enable = {'true' if security_suite.get('ai_vendor_risk', False) or security_suite.get('vendor_onboarding', False) else 'false'}",
         f"portal_enable = {'true' if vendor_portal_enabled else 'false'}",
         "",
         "[portfolio_risk]",
@@ -7944,6 +7955,9 @@ def write_config(
     # advanced flow extras into the single dedicated [flows] table so it is
     # emitted exactly once. Copy `advanced` so we never mutate the caller's dict.
     advanced = dict(advanced or {})
+    if security_suite and security_suite.get("vendor_onboarding"):
+        advanced["vendor_management"] = True
+        advanced["connections"] = True
     if advanced.pop("flows", False):
         flows = dict(flows or {})
         flows.setdefault("enable", True)
@@ -8006,6 +8020,14 @@ def write_config(
     lines += _cfg_value(value)
     lines += _cfg_assessments(assessments)
     lines += _cfg_security_suite(security_suite)
+    if security_suite is not None:
+        lines += [
+            "", "[vendor_onboarding]",
+            f"enable = {'true' if security_suite.get('vendor_onboarding', False) else 'false'}",
+            "resource_owner = " + _toml_str(security_suite.get("vendor_onboarding_owner", "")),
+            'document_connection = "gdrive"',
+            'ticket_connection = "jira"',
+        ]
 
     capability_config = dict(capabilities or {})
     if web_search_enabled and not capability_config.get("web_search"):

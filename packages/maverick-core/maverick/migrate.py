@@ -102,6 +102,7 @@ KNOWN_SECTIONS = frozenset({
     "content_provenance",
     "llm_gateway",
     "vendor_management",
+    "vendor_onboarding",
     "consent_registry",
     "data_map",
     "breach_notification",

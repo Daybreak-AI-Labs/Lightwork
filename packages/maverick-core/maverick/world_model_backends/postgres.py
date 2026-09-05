@@ -1359,13 +1359,16 @@ class PostgresWorldModel:
         return _dec_goal_row(row)
 
     def set_goal_status(self, goal_id: int, status: str, *, result: str | None = None) -> None:
+        # Match SQLite's monotonically advancing optimistic review version.
+        # GREATEST is evaluated against the row under the UPDATE lock, not a
+        # stale client-side SELECT, including on a stalled/backwards clock.
         now = time.time()
         frag, fparams = _tenant_scope()
         sql = (
             # COALESCE so a status-only update (result=None) doesn't wipe
             # an existing result -- matches the SQLite backend.
             "UPDATE goals SET status=%s, result=COALESCE(%s, result), "
-            "updated_at=%s WHERE id=%s"
+            "updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         )
         params: list = [status, _seal(result), now, goal_id]
         if frag:
@@ -1441,7 +1444,7 @@ class PostgresWorldModel:
         now = time.time()
         frag, fparams = _mutation_tenant_scope()
         sql = (
-            "UPDATE goals SET status='active', updated_at=%s "
+            "UPDATE goals SET status='active', updated_at=GREATEST(updated_at + 0.000001, %s) "
             "WHERE id=%s AND status='pending'"
         )
         params: list = [now, int(goal_id)]
@@ -1463,7 +1466,7 @@ class PostgresWorldModel:
         qualify, and the owner predicate rides in the same statement."""
         now = time.time()
         frag, fparams = _tenant_scope()
-        sql = ("UPDATE goals SET updated_at=%s "
+        sql = ("UPDATE goals SET updated_at=GREATEST(updated_at + 0.000001, %s) "
                "WHERE id=%s AND status IN ('active', 'pending')")
         params: list = [now, int(goal_id)]
         if expected_owner is not None:
@@ -1496,7 +1499,7 @@ class PostgresWorldModel:
         """Rename a goal, sealing the title column like ``create_goal`` does."""
         now = time.time()
         frag, fparams = _tenant_scope()
-        sql = "UPDATE goals SET title=%s, updated_at=%s WHERE id=%s"
+        sql = "UPDATE goals SET title=%s, updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         params: list = [_seal(title), now, goal_id]
         if frag:
             sql += " AND " + frag
@@ -1508,7 +1511,7 @@ class PostgresWorldModel:
         """Move a goal under a new parent (or to the root with ``None``)."""
         now = time.time()
         frag, fparams = _tenant_scope()
-        sql = "UPDATE goals SET parent_id=%s, updated_at=%s WHERE id=%s"
+        sql = "UPDATE goals SET parent_id=%s, updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         params: list = [
             int(parent_id) if parent_id is not None else None, now, goal_id]
         if frag:
@@ -1745,7 +1748,7 @@ class PostgresWorldModel:
     def set_goal_project(self, goal_id: int, project_id: int | None) -> None:
         """File a goal under a project (or clear it with ``None``)."""
         frag, fparams = _tenant_scope()
-        sql = "UPDATE goals SET project_id=%s, updated_at=%s WHERE id=%s"
+        sql = "UPDATE goals SET project_id=%s, updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s"
         params: list = [
             int(project_id) if project_id is not None else None,
             time.time(), int(goal_id),
@@ -1836,7 +1839,7 @@ class PostgresWorldModel:
                 # Keep goal.updated_at as the optimistic version for the whole
                 # release payload, including its artifact set.
                 cur.execute(
-                    "UPDATE goals SET updated_at=%s WHERE id=%s",
+                    "UPDATE goals SET updated_at=GREATEST(updated_at + 0.000001, %s) WHERE id=%s",
                     (time.time(), int(goal_id)),
                 )
                 # Public release includes artifacts; adding a version changes
@@ -2309,6 +2312,9 @@ class PostgresWorldModel:
         ``updated_at`` is at least ``max_age_seconds`` old qualify, so a goal
         being driven live in a sibling process isn't reclaimed. Mirrors the
         SQLite WorldModel (kernel calls this on dashboard/serve startup).
+        A resolved zero window explicitly reclaims every active/pending goal
+        in scope, including monotonic review timestamps ahead of the wall clock.
+        Positive windows continue to require the full stale interval.
         Returns the number of rows reclaimed.
         """
         env_override = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
@@ -2326,10 +2332,10 @@ class PostgresWorldModel:
             sql = (
                 "UPDATE goals SET status = 'blocked', "
                 "result = COALESCE(result, '') || %s, "
-                "updated_at = %s "
-                "WHERE status IN ('active', 'pending') AND updated_at <= %s"
+                "updated_at = GREATEST(updated_at + 0.000001, %s) "
+                "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
             )
-            params: list = [marker, now, cutoff]
+            params: list = [marker, now, max_age_seconds, cutoff]
             if frag:
                 sql += " AND " + frag
                 params += fparams
@@ -2343,9 +2349,9 @@ class PostgresWorldModel:
         # set on startup is tiny, so the row-by-row cost is negligible.
         sel = (
             "SELECT id, result FROM goals "
-            "WHERE status IN ('active', 'pending') AND updated_at <= %s"
+            "WHERE status IN ('active', 'pending') AND (%s = 0 OR updated_at <= %s)"
         )
-        sparams: list = [cutoff]
+        sparams: list = [max_age_seconds, cutoff]
         if frag:
             sel += " AND " + frag
             sparams += fparams
@@ -2375,14 +2381,14 @@ class PostgresWorldModel:
                     # stuck goal. Reclaim the status; leave the result intact
                     # rather than corrupting or dropping it.
                     cur.execute(
-                        "UPDATE goals SET status = 'blocked', updated_at = %s "
+                        "UPDATE goals SET status = 'blocked', updated_at = GREATEST(updated_at + 0.000001, %s) "
                         "WHERE id = %s",
                         (now, row[0]),
                     )
                     continue
                 cur.execute(
                     "UPDATE goals SET status = 'blocked', result = %s, "
-                    "updated_at = %s WHERE id = %s",
+                    "updated_at = GREATEST(updated_at + 0.000001, %s) WHERE id = %s",
                     (new_result, now, row[0]),
                 )
             return len(rows)

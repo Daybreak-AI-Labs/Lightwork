@@ -15,8 +15,9 @@ Backends (chosen automatically in order):
   2. ``builtin_rules`` (~20 high-impact rules bundled with maverick-shield)
   3. No-op (only if the user explicitly disabled safety via [safety] profile=off)
 
-Fail-open on internal errors -- a broken scanner must not stop the agent --
-but never fail-open SILENTLY; the constructor logs which backend is active.
+Optional balanced/permissive policies allow detector failures with an explicit
+scan_error verdict and warning. Strict/required policies block unavailable
+checks. Callers can distinguish a clean allow from an unavailable detector.
 """
 from __future__ import annotations
 
@@ -93,6 +94,7 @@ class ShieldVerdict:
     severity: str           # "none" | "low" | "medium" | "high" | "critical"
     reasons: list[str]
     raw: Any = None
+    scan_error: bool = False
 
     @classmethod
     def allow(cls) -> ShieldVerdict:
@@ -120,6 +122,7 @@ class Shield:
         scan_tool_calls: bool = True,
         scan_output: bool = True,
         constitution: list | None = None,
+        fail_closed: bool = False,
     ):
         # Normalize: profile/threshold/backend come from user-typed TOML, and
         # the comparisons below (== "off"/"none", the {"strict": ...} sensitivity
@@ -133,6 +136,7 @@ class Shield:
         backend = _normalize_config_token(backend, "auto")
         self.profile = profile
         self.block_threshold = block_threshold
+        self.fail_closed = bool(fail_closed) or profile == "strict"
         # Per-sink enable flags ([safety] scan_input/scan_tool_calls/
         # scan_output). Enforced centrally here so every call site honors the
         # config — previously these keys existed but no consumer read them, so
@@ -197,8 +201,11 @@ class Shield:
             safety = get_safety()
         except Exception:
             safety = {"profile": "balanced", "block_threshold": "high"}
-        if safety.get("profile") == "off":
-            return cls(profile="off", backend="none", warn_if_missing=False)
+        try:
+            from maverick.shield_policy import shield_required
+            required = shield_required()
+        except ImportError:  # standalone shield package, without the kernel
+            required = bool(safety.get("require_shield", False))
         return cls(
             profile=safety.get("profile", "balanced"),
             block_threshold=safety.get("block_threshold", "high"),
@@ -207,7 +214,27 @@ class Shield:
             scan_output=safety.get("scan_output", True),
             constitution=safety.get("constitution"),
             warn_if_missing=warn_if_missing,
+            fail_closed=required,
         )
+
+    def _scan_failure(
+        self, detector: str, error: Exception | None = None,
+        verdict: ShieldVerdict | None = None,
+    ) -> ShieldVerdict:
+        """Keep failure evidence through composition, without relaxing a block."""
+        log.error("Shield %s unavailable (%s): %s", detector,
+                  "blocking" if self.fail_closed else "optional allow", error or "disabled")
+        reason = f"shield scan error: {detector} unavailable"
+        if verdict is None:
+            verdict = ShieldVerdict.allow()
+        return ShieldVerdict(
+            allowed=verdict.allowed and not self.fail_closed,
+            severity=_max_severity(verdict.severity, "high" if self.fail_closed else "none"),
+            reasons=[*verdict.reasons, reason], raw=verdict.raw, scan_error=True,
+        )
+
+    def _disabled_verdict(self, sink: str) -> ShieldVerdict:
+        return self._scan_failure(sink) if self.fail_closed else ShieldVerdict.allow()
 
     def _scan_via_backend(self, text: str) -> ShieldVerdict:
         # Coerce non-str input to text BEFORE scanning. Previously a bytes /
@@ -222,7 +249,7 @@ class Shield:
             else:
                 text = str(text)
         if self.backend == self.BACKEND_NONE:
-            return ShieldVerdict.allow()
+            return self._disabled_verdict("backend")
         if self.backend == self.BACKEND_SDK:
             try:
                 result = self._sdk.scanInput(text)  # type: ignore
@@ -236,8 +263,7 @@ class Shield:
                     )
                 return ShieldVerdict.allow()
             except Exception as e:
-                log.error("Shield SDK scan failed (fail-open): %s", e)
-                return ShieldVerdict.allow()
+                return self._scan_failure("SDK", e)
         # builtin
         try:
             blocked, severity, names = builtin_scan(text, block_threshold=self.block_threshold)
@@ -246,13 +272,12 @@ class Shield:
                     severity=severity, reason="; ".join(names) or "builtin-rule",
                 )
             return ShieldVerdict.allow()
-        except Exception as e:  # pragma: no cover
-            log.error("Shield builtin scan failed (fail-open): %s", e)
-            return ShieldVerdict.allow()
+        except Exception as e:
+            return self._scan_failure("builtin", e)
 
     def scan_input(self, text: str) -> ShieldVerdict:
         if not self._scan_input_enabled:
-            return ShieldVerdict.allow()
+            return self._disabled_verdict("input")
         verdict = self._apply_constitution(text, self._scan_via_backend(text))
         # Decode pre-pass (C6): an attacker hides a payload from the literal
         # detectors with base64 / hex / percent-encoding / Unicode homoglyphs.
@@ -267,6 +292,7 @@ class Shield:
         if verdict.allowed and self.backend != self.BACKEND_NONE:
             decoded = self._scan_decoded_variants(text)
             if decoded is not None:
+                decoded.scan_error = decoded.scan_error or verdict.scan_error
                 return decoded
         return verdict
 
@@ -288,59 +314,64 @@ class Shield:
                 return ShieldVerdict.block(
                     severity=severity, reason="; ".join(names) or "builtin-rule")
             return ShieldVerdict.allow()
-        except Exception as e:  # pragma: no cover -- detector bug must fail open
-            log.error("Shield builtin floor scan failed (fail-open): %s", e)
-            return ShieldVerdict.allow()
+        except Exception as e:
+            return self._scan_failure("builtin floor", e)
 
     def _scan_decoded_variants(self, text: str) -> ShieldVerdict | None:
         """Re-scan de-obfuscated variants of an allowed input through the local
         builtin floor; return a BLOCK if any decoded layer trips a rule (the
-        payload the literal surface form hid), else ``None``. Fail-open: a
-        pre-pass error leaves the literal verdict standing. Escape hatch:
+        payload the literal surface form hid), else ``None``. A pre-pass error
+        follows the selected failure policy and retains scan_error. Escape hatch:
         ``MAVERICK_SHIELD_NO_DECODE=1``."""
         if (not isinstance(text, str)
                 or os.environ.get("MAVERICK_SHIELD_NO_DECODE", "").strip().lower()
                 in {"1", "true", "yes", "on"}):
             return None
+        failure = None
         try:
             from .deobfuscate import decoded_variants
             for variant in decoded_variants(text):
                 v = self._apply_constitution(variant, self._scan_builtin_floor(variant))
                 if not v.allowed:
-                    return ShieldVerdict.block(
+                    return ShieldVerdict(
+                        allowed=False,
                         severity=v.severity,
-                        reason="decoded-layer: " + "; ".join(v.reasons),
+                        reasons=["decoded-layer: " + "; ".join(v.reasons)],
+                        scan_error=v.scan_error,
                     )
-        except Exception as e:  # pragma: no cover -- pre-pass must never break scan
-            log.error("Shield decode pre-pass failed (fail-open): %s", e)
-        return None
+                if v.scan_error:
+                    failure = v
+        except Exception as e:
+            return self._scan_failure("decode pre-pass", e)
+        return failure
 
     def _apply_constitution(self, text: str, verdict: ShieldVerdict) -> ShieldVerdict:
         """Compose operator-defined constitutional rules onto ``verdict``.
 
         No-op when safety is off, no rules are configured, or the matched
-        severity is below the block threshold. Fail-open on detector error.
+        severity is below the block threshold. Errors follow the selected policy.
         """
         if self.backend == self.BACKEND_NONE or not self._constitution:
             return verdict
         try:
             matched, severity, names = _constitutional_scan(text, self._constitution)
-        except Exception as e:  # pragma: no cover -- detector bug must not block
-            log.error("Shield constitutional scan failed (fail-open): %s", e)
-            return verdict
+        except Exception as e:
+            return self._scan_failure("constitution", e, verdict)
         threshold_idx = SEVERITY_ORDER.get(self.block_threshold, SEVERITY_ORDER["high"])
         if not matched or SEVERITY_ORDER.get(severity, -1) < threshold_idx:
             return verdict
         reasons = [f"constitution: {n}" for n in names]
         if not verdict.allowed:
-            return ShieldVerdict.block(
+            return ShieldVerdict(
+                allowed=False,
                 severity=_max_severity(verdict.severity, severity),
-                reason="; ".join(verdict.reasons + reasons))
-        return ShieldVerdict.block(severity=severity, reason="; ".join(reasons))
+                reasons=verdict.reasons + reasons, scan_error=verdict.scan_error)
+        return ShieldVerdict(allowed=False, severity=severity, reasons=reasons,
+                             scan_error=verdict.scan_error)
 
     def scan_tool_call(self, tool_name: str, args: dict) -> ShieldVerdict:
         if not self._scan_tool_calls_enabled:
-            return ShieldVerdict.allow()
+            return self._disabled_verdict("tool calls")
         # Scan the raw string leaves of ``args`` rather than ``repr(args)``.
         # repr() wraps each value in quotes, so a payload like
         # ``{'cmd': 'rm -rf /'}`` rendered the command as ``'rm -rf /'`` —
@@ -355,24 +386,25 @@ class Shield:
         # Compose operator-defined constitutional rules onto the tool-call
         # surface too -- the most dangerous sink. scan_input/scan_output do
         # this; omitting it here left the constitution unenforced exactly where
-        # it matters most. Fail-open semantics preserved by _apply_constitution.
+        # it matters most. Error policy is enforced by _apply_constitution.
         verdict = self._apply_constitution(payload, verdict)
         # Decode pre-pass on the tool-call surface (C6): an encoded payload in a
         # tool ARGUMENT must not bypass the detectors either. Same monotonic,
-        # local-builtin-floor, fail-open mechanism as scan_input; runs under any
+        # local-builtin-floor mechanism as scan_input; runs under any
         # active backend.
         if verdict.allowed and self.backend != self.BACKEND_NONE:
             decoded = self._scan_decoded_variants(payload)
             if decoded is not None:
+                decoded.scan_error = decoded.scan_error or verdict.scan_error
                 return decoded
         return verdict
 
     def scan_output(self, text: str, known_prompt: str | None = None) -> ShieldVerdict:
         if not self._scan_output_enabled:
-            return ShieldVerdict.allow()
+            return self._disabled_verdict("output")
         verdict = self._scan_via_backend(text)
         # Output-side detectors the input rule pack can't see: verbatim
-        # system-prompt regurgitation and refusal-then-leak. Fail-open.
+        # system-prompt regurgitation and refusal-then-leak.
         if self.backend == self.BACKEND_NONE:
             return verdict
         threshold_idx = SEVERITY_ORDER.get(self.block_threshold, SEVERITY_ORDER["high"])
@@ -380,11 +412,11 @@ class Shield:
         extra_reasons: list[str] = []
 
         # Output-policy detectors: verbatim system-prompt regurgitation,
-        # refusal-then-leak. Fail-open.
+        # refusal-then-leak. Errors follow the selected policy.
         try:
             policy = output_policy_scan(text, known_prompt=known_prompt)
-        except Exception as e:  # pragma: no cover -- detector bug must not block
-            log.error("Shield output-policy scan failed (fail-open): %s", e)
+        except Exception as e:
+            verdict = self._scan_failure("output policy", e, verdict)
             policy = None
         if (policy is not None and policy.blocked
                 and SEVERITY_ORDER.get(policy.severity, -1) >= threshold_idx):
@@ -392,12 +424,12 @@ class Shield:
             extra_reasons += policy.reasons
 
         # Phishing-content detector: credential harvesting + deceptive links,
-        # whether the agent fetched the content or is about to emit it. Fail-open.
+        # whether the agent fetched the content or is about to emit it.
         try:
             from .phishing import detect_phishing
             ph = detect_phishing(text)
-        except Exception as e:  # pragma: no cover -- detector bug must not block
-            log.error("Shield phishing scan failed (fail-open): %s", e)
+        except Exception as e:
+            verdict = self._scan_failure("phishing", e, verdict)
             ph = None
         if (ph is not None and ph.suspicious
                 and SEVERITY_ORDER.get(ph.severity, -1) >= threshold_idx):
@@ -408,8 +440,8 @@ class Shield:
         if self._constitution:
             try:
                 c_matched, c_sev, c_names = _constitutional_scan(text, self._constitution)
-            except Exception as e:  # pragma: no cover -- detector bug must not block
-                log.error("Shield constitutional scan failed (fail-open): %s", e)
+            except Exception as e:
+                verdict = self._scan_failure("constitution", e, verdict)
                 c_matched = False
             if c_matched and SEVERITY_ORDER.get(c_sev, -1) >= threshold_idx:
                 extra_sev = _max_severity(extra_sev, c_sev)
@@ -424,13 +456,15 @@ class Shield:
             )
         else:
             final = ShieldVerdict.block(severity=extra_sev, reason="; ".join(extra_reasons))
+        final.scan_error = final.scan_error or verdict.scan_error
         # Decode pre-pass on the output surface too (C6): an encoded payload in
         # tool OUTPUT must not bypass the detectors. Same monotonic,
-        # local-builtin-floor, fail-open mechanism as scan_input; runs under any
+        # local-builtin-floor mechanism as scan_input; runs under any
         # active backend.
         if final.allowed and self.backend != self.BACKEND_NONE:
             decoded = self._scan_decoded_variants(text)
             if decoded is not None:
+                decoded.scan_error = decoded.scan_error or final.scan_error
                 return decoded
         return final
 

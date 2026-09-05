@@ -1003,15 +1003,36 @@ def _run_arms(seeds: tuple[int, ...], home: Path) -> tuple[list[dict], dict[str,
 def _lineage_evidence(rows: list[dict], lineage_dir: Path) -> dict[str, Any]:
     from maverick.governed_actions import verify_lineage_file
 
-    goal_ids = sorted(
-        {int(row["goal_id"]) for row in rows if row["arm"] == "governed" and row.get("goal_id")}
-    )
-    verdicts = {str(goal_id): verify_lineage_file(goal_id, lineage_dir) for goal_id in goal_ids}
-    chains = {key: value for key, value in verdicts.items() if not value.startswith("VALID: 0")}
+    expected_receipts = {
+        task["id"]: 2 if task["shape"] == "actuation" else 0 for task in load_tasks()
+    }
+    chains_required = 0
+    chains_verified = 0
+    all_verified = True
+    for row in rows:
+        if row["arm"] != "governed":
+            continue
+        expected = expected_receipts[row["task_id"]]
+        verdict = verify_lineage_file(int(row["goal_id"]), lineage_dir)
+        observed = row["artifacts"]["lineage_receipts"]
+        if expected:
+            # Pin the PREPARE/COMMIT requirement to the task definition, not
+            # the observed count: lost or empty actuation chains must fail.
+            chains_required += 1
+            verified = observed == expected and verdict.startswith("VALID: 2 link(s)")
+            chains_verified += int(verified)
+        else:
+            # Read-only tasks intentionally persist no lineage file. Missing
+            # evidence is allowed only for these tasks; unreadable or corrupt
+            # files and unexpected receipts are still failures.
+            verified = observed == 0 and (
+                verdict.startswith("MISSING:") or verdict.startswith("VALID: 0 link(s)")
+            )
+        all_verified = all_verified and verified
     return {
-        "chains_with_receipts": len(chains),
-        "chains_verified": sum(value.startswith("VALID") for value in chains.values()),
-        "all_verified": bool(chains) and all(v.startswith("VALID") for v in chains.values()),
+        "chains_with_receipts": chains_required,
+        "chains_verified": chains_verified,
+        "all_verified": bool(chains_required) and all_verified,
         "store": "temporary_run_directory",
     }
 

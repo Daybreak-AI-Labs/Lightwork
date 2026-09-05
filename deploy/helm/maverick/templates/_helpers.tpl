@@ -45,6 +45,17 @@ could split approval/idempotency authority across pods. Scale remote workers
 separately until every control-plane store has a shared transactional backend.
 */}}
 {{- define "maverick.validate" -}}
+{{- if not .Values.persistence.enabled -}}
+{{- fail "persistence.enabled must be true: approval records, external-operation reconciliation, flow versions, audit and credential state remain local even with Postgres." -}}
+{{- end -}}
+{{- if ne .Values.persistence.mountPath "/home/maverick/.maverick" -}}
+{{- fail "persistence.mountPath must be /home/maverick/.maverick so every durable control-plane store uses the mounted state volume." -}}
+{{- end -}}
+{{- if hasKey .Values.env "MAVERICK_HOME" -}}
+{{- if ne (toString .Values.env.MAVERICK_HOME) .Values.persistence.mountPath -}}
+{{- fail "env.MAVERICK_HOME must match persistence.mountPath." -}}
+{{- end -}}
+{{- end -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
 {{- fail "replicaCount > 1 is not supported for the Lightwork control plane: Postgres centralizes the world model, but flows, A2A idempotency, audit, and learning state remain tenant-local. Run one dashboard/serve replica and scale remote workers separately." -}}
 {{- end -}}

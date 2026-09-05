@@ -590,7 +590,7 @@
         if (d.status === 'blocked') {
           pollQuestions();
         }
-        if (d.status === 'done' || d.status === 'cancelled' || d.status === 'failed') {
+        if (d.terminal === true) {
           done = true;
           cancelBtn.disabled = true;
         }

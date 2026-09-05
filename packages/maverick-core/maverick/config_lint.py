@@ -241,6 +241,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "authority_max_age_seconds",
     },
     "ai_vendor_risk": {"enable", "portal_enable"},
+    "vendor_onboarding": {
+        "enable", "resource_owner", "document_connection", "ticket_connection",
+    },
     "policy_packs": {"enable"},
     "portfolio_risk": {"enable"},
     "drift_monitoring": {

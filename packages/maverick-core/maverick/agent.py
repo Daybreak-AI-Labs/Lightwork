@@ -3321,13 +3321,13 @@ class Agent:
             return await self._run_inner()
 
     def _resume_from_checkpoint(self, messages: list[dict], bb, ep_id: int):
-        """Resume durable loop state for a depth-0 run (opt-in, fail-open).
+        """Resume durable loop state for a depth-0 run.
 
         Returns ``(ckpt, start_step, messages)``. When durable checkpointing is
-        disabled, there is no goal id, this is not the root agent, or anything
-        raises, returns ``(None, 0, messages)`` unchanged — today's warm-restart
-        behavior. Restores ``self.ctx.budget`` from the snapshot as a side effect
-        when one is present. Extracted from ``_run_inner`` (CheckpointManager).
+        disabled, there is no goal id, or this is not the root agent, returns
+        ``(None, 0, messages)`` unchanged. Missing history starts at zero;
+        corrupt/unavailable history or exhausted current caps blocks execution.
+        Usage is restored into the authoritative shared Budget.
         """
         start_step = 0
         ckpt = None
@@ -3340,17 +3340,19 @@ class Agent:
                     # random uuid that never matched on a fresh-process resume).
                     saved = ckpt.latest(
                         self.ctx.goal_id, self.checkpoint_id, episode_id=ep_id,
+                        required=True,
                     )
                     if saved is not None and saved.messages:
+                        # Restore accounting before accepting messages. Never
+                        # replace the shared Budget or import historical caps.
+                        _ckpt_mod.restore_budget(saved.budget, into=self.ctx.budget)
                         messages = saved.messages
                         start_step = saved.step_seq
-                        try:
-                            self.ctx.budget = _ckpt_mod.restore_budget(saved.budget)
-                        except Exception:
-                            pass
                         bb.post(self.name, "plan",
                                 f"resumed from checkpoint at step {start_step}")
-            except Exception as e:  # pragma: no cover -- never block a run
+            except (BudgetExceeded, ValueError):
+                raise
+            except Exception as e:  # pragma: no cover -- optional store lookup
                 log.debug("checkpoint resume skipped: %s", e)
         return ckpt, start_step, messages
 

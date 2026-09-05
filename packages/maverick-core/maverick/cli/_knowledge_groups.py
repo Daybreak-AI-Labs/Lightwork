@@ -2,8 +2,8 @@
 subject's documents were erased.
 
 Registered via import at the end of the cli package so the decorators fire on
-import. Every command fails soft when maverick-knowledge is absent or knowledge
-RAG is disabled — the kernel never requires the package.
+import. Disabled knowledge remains optional. Configured but unavailable
+knowledge is reported as an error, never a successful verification or erasure.
 """
 from __future__ import annotations
 
@@ -52,8 +52,16 @@ def knowledge_residual(channel: str, user: str, tenant: str | None,
     Zero after `maverick erase` — the knowledge half of the right-to-erasure
     proof (`maverick erase-verify` already folds this count into its verdict).
     """
-    from ..knowledge_admin import count_subject
-    n = count_subject(channel, user, tenant=tenant)
+    from ..knowledge_admin import KnowledgeUnavailable, count_subject
+    try:
+        n = count_subject(channel, user, tenant=tenant)
+    except KnowledgeUnavailable as exc:
+        if as_json:
+            click.echo(_json.dumps({"channel": channel, "user": user,
+                                    "knowledge_chunks": None, "clean": False,
+                                    "checked": False, "error": str(exc)}))
+            raise SystemExit(2) from exc
+        raise click.ClickException(str(exc)) from exc
     if as_json:
         click.echo(_json.dumps({"channel": channel, "user": user,
                                 "knowledge_chunks": n, "clean": n == 0}))
@@ -79,8 +87,11 @@ def knowledge_erase_subject(channel: str, user: str, tenant: str | None,
     if not yes:
         click.confirm(
             f"Erase all knowledge chunks for {channel}:{user}?", abort=True)
-    from ..knowledge_admin import erase_subject
-    removed = erase_subject(channel, user, tenant=tenant)
+    from ..knowledge_admin import KnowledgeUnavailable, erase_subject
+    try:
+        removed = erase_subject(channel, user, tenant=tenant)
+    except KnowledgeUnavailable as exc:
+        raise click.ClickException(str(exc)) from exc
     total = sum(removed.values())
     click.echo(f"erased {total} knowledge chunk(s) for {channel}:{user}")
     if removed:

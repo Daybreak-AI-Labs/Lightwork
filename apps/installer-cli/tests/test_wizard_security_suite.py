@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
@@ -15,6 +17,8 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
     monkeypatch.setattr(wizard, "_q_confirm", lambda *args, **kwargs: next(answers))
 
     assert wizard.pick_security_suite() == {
+        "vendor_onboarding": False,
+        "vendor_onboarding_owner": "",
         "customer_sandbox_lifecycle": False,
         "security_ops": True,
         "administration_document_access": False,
@@ -187,6 +191,7 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
             "a" * 64,
             "virustotal, abuseipdb",
             "120",
+            "procurement",
         ]
     )
     monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: next(text_answers))
@@ -1051,3 +1056,74 @@ def test_customer_sandbox_wizard_step_is_default_off_and_explicitly_rendered(
         "source_revision": 1,
     }
     assert lint_config(rendered) == []
+
+
+def _write_vendor_onboarding_config(tmp_path, monkeypatch, security_suite, **kwargs):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / "config.toml")
+    monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".env")
+    wizard.write_config(
+        providers=["anthropic"], role_models={}, channels={},
+        safety={"profile": "balanced"},
+        budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
+        sandbox={"backend": "local", "workdir": str(tmp_path / "workspace")},
+        keys={}, capabilities={}, security_suite=security_suite, **kwargs,
+    )
+    return tomllib.loads((tmp_path / "config.toml").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("advanced", [None, {"connections": False, "vendor_management": False}])
+def test_vendor_onboarding_opt_in_writes_all_runtime_dependencies(tmp_path, monkeypatch, advanced):
+    from maverick import (
+        ai_vendor_risk,
+        config,
+        connections,
+        evidence_graph,
+        model_risk_assurance,
+        vendor_management,
+        vendor_onboarding,
+    )
+    from maverick.vendor_onboarding_config import VendorOnboardingSettings
+
+    original_advanced = None if advanced is None else dict(advanced)
+    parsed = _write_vendor_onboarding_config(
+        tmp_path, monkeypatch,
+        {"vendor_onboarding": True, "vendor_onboarding_owner": "procurement"},
+        advanced=advanced,
+    )
+    assert advanced == original_advanced, "deriving dependencies must not mutate caller selections"
+    settings = VendorOnboardingSettings.from_config(parsed)
+    assert settings.enable is True
+    assert settings.resource_owner == "procurement"
+    assert settings.document_connection == "gdrive"
+    assert settings.ticket_connection == "jira"
+    assert settings.document_connection != settings.ticket_connection
+    for dependency in (
+        "vendor_management", "connections", "evidence_graph", "model_risk_assurance", "ai_vendor_risk",
+    ):
+        assert parsed[dependency]["enable"] is True
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    try:
+        assert vendor_onboarding.enabled()
+        assert vendor_management.enabled()
+        assert connections.enabled()
+        assert evidence_graph.enabled()
+        assert model_risk_assurance.enabled()
+        assert ai_vendor_risk.enabled()
+    finally:
+        config.reset_config_cache()
+
+
+def test_vendor_onboarding_writer_retains_disabled_default(tmp_path, monkeypatch):
+    from maverick.vendor_onboarding_config import VendorOnboardingSettings
+
+    parsed = _write_vendor_onboarding_config(tmp_path, monkeypatch, {})
+    assert VendorOnboardingSettings.from_config(parsed).enable is False
+    for dependency in (
+        "vendor_management", "connections", "evidence_graph", "model_risk_assurance", "ai_vendor_risk",
+    ):
+        assert parsed.get(dependency, {}).get("enable", False) is False

@@ -247,9 +247,11 @@ class KnowledgeBase:
 
     def collections(self) -> list[str]:
         """Every collection the backing store holds (the erasure sweep surface).
-        Empty when the store predates the ``collections()`` primitive."""
+        Unavailable enumeration cannot establish that a store is empty."""
         fn = getattr(self.store, "collections", None)
-        return list(fn()) if callable(fn) else []
+        if not callable(fn):
+            raise RuntimeError("knowledge store cannot enumerate collections")
+        return list(fn())
 
     def erase_subject(self, subject: str, collections=None) -> dict[str, int]:
         """Delete every chunk belonging to ``subject`` (GDPR Art. 17).

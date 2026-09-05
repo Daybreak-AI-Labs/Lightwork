@@ -350,11 +350,13 @@ def record_usage(
     out_tokens: int = 0,
     *,
     reservation_id: str | None = None,
-) -> None:
+) -> bool:
     """Record a finished run's spend against ``principal`` for today's window.
 
     Always safe to call (even when enforcement is off — recording is how the
-    ledger accrues chargeback data); fail-soft on any ledger error.
+    ledger accrues chargeback data); fail-soft on any ledger error. Returns
+    whether the ledger acknowledged the charge; callers may only persist a
+    settled checkpoint marker after a true acknowledgement.
 
     ``reservation_id``: when the run's budget reserved an in-flight tenant dollar
     hold at start (``budget._tenant_reservation_id`` from
@@ -383,6 +385,7 @@ def record_usage(
         except Exception as e:  # pragma: no cover -- reservation release is fail-soft
             log.warning("quotas: failed to release reservation %r: %s",
                         reservation_id, e)
+    return recorded
 
 
 def over_quota(principal: str) -> str | None:
