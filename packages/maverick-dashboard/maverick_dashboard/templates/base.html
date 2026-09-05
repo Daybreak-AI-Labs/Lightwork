@@ -131,19 +131,6 @@
         <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
       </select>
           </label>
-          <label class="prefs__row"><span>{{ t('label.language') }}</span>
-      <select class="ctl" id="lang-select" data-ui-preference="lang"
-              aria-label="{{ t('label.language') }}" aria-describedby="language-preview-note">
-        <option value="">{{ t('label.language') }}</option>
-        <option value="en" {% if lang == 'en' %}selected{% endif %}>English (full content)</option>
-        <option value="fr" {% if lang == 'fr' %}selected{% endif %}>Français (navigation preview)</option>
-        <option value="de" {% if lang == 'de' %}selected{% endif %}>Deutsch (navigation preview)</option>
-        <option value="ja" {% if lang == 'ja' %}selected{% endif %}>日本語 (navigation preview)</option>
-        <option value="zh" {% if lang == 'zh' %}selected{% endif %}>中文 (navigation preview)</option>
-        <option value="ar" {% if lang == 'ar' %}selected{% endif %}>العربية (partial navigation preview)</option>
-      </select>
-          </label>
-          <small class="muted" id="language-preview-note">Language previews translate these display controls only. Most page content remains English.</small>
         </div>
       </details>
       {% if show_logout %}

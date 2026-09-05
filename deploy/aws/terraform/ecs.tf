@@ -67,6 +67,9 @@ resource "aws_ecs_task_definition" "app" {
         var.flows_enabled ? [
           { name = "MAVERICK_FLOWS", value = "1" },
         ] : [],
+        var.data_use_enabled ? [
+          { name = "MAVERICK_DATA_USE_GOVERNANCE", value = "1" },
+        ] : [],
         var.email_enabled ? [
           { name = "EMAIL_PROVIDER", value = "ses" },
           { name = "EMAIL_FROM", value = var.email_from },
@@ -87,6 +90,13 @@ resource "aws_ecs_task_definition" "app" {
         ],
       )
 
+      # Durable ~/.maverick (tenant registry, roles, invites, saved flows,
+      # dashboard config). The Dockerfile runs as uid/gid 1000; the EFS access
+      # point pins the same identity so the non-root process can write.
+      mountPoints = [
+        { sourceVolume = "state", containerPath = "/home/maverick/.maverick", readOnly = false },
+      ]
+
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -97,6 +107,22 @@ resource "aws_ecs_task_definition" "app" {
       }
     }
   ])
+
+  volume {
+    name = "state"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.state.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.state.id
+        iam             = "DISABLED"
+      }
+    }
+  }
+
+  # Keep superseded revisions registered so a rollback is one `update-service`
+  # away instead of "TaskDefinition is inactive".
+  skip_destroy = true
 }
 
 resource "aws_ecs_service" "app" {
@@ -106,9 +132,17 @@ resource "aws_ecs_service" "app" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
-  # The control plane is single-replica; replace rather than run two at once.
-  deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
+  # Rolling: start the new task and let it pass health checks before the old
+  # one stops. World state is in Postgres and ~/.maverick is on EFS, so a brief
+  # overlap is safe, and a bad image rolls back instead of taking the site down.
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  platform_version                   = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     # Public subnets with a public IP so the task can reach ECR / Secrets

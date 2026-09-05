@@ -2816,6 +2816,25 @@ def get_deployment() -> dict:
     return {"type": str(cfg.get("type", "")).strip()}
 
 
+def data_use_governance_enabled(cfg: dict | None = None) -> bool:
+    """Whether the Data Use Governance module is on.
+
+    ``MAVERICK_DATA_USE_GOVERNANCE`` wins when set (the same env-first contract
+    as the flow engine's ``MAVERICK_FLOWS``), so a hosted deployment whose
+    config file lives on ephemeral storage can still turn the module on.
+    Otherwise ``[data_use_governance] enable`` decides. OFF by default; never
+    raises.
+    """
+    v = env_flag("MAVERICK_DATA_USE_GOVERNANCE")
+    if v is not None:
+        return v
+    try:
+        section = (cfg if cfg is not None else load_config()).get("data_use_governance", {})
+    except Exception:  # pragma: no cover -- config must never block
+        return False
+    return isinstance(section, dict) and section.get("enable") is True
+
+
 def get_flows() -> dict:
     """Return the ``[flows]`` section (the flow engine).
 
