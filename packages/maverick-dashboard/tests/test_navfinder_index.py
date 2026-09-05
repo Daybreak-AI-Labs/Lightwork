@@ -1,0 +1,169 @@
+"""The page finder (Ctrl+K) indexes every governed page the caller may open,
+including pages folded out of the sidebar rail (``in_nav: False``) -- the
+sidebar stays the curated subset, the finder is the searchable whole.
+
+Contracts under test:
+  * ``finder_pages`` applies exactly nav_groups' RBAC + override filtering but
+    ignores ``in_nav``; nav_groups' output is unchanged;
+  * the rendered shell's finder lists the folded pages, the sidebar does not;
+  * ``/security/report`` and ``/security/assurance`` are governed registry
+    pages (previously live routes the visibility matrix did not know about).
+"""
+from __future__ import annotations
+
+from html.parser import HTMLParser
+
+import pytest
+
+fastapi = pytest.importorskip("fastapi")
+TestClient = pytest.importorskip("fastapi.testclient").TestClient
+
+# Reachable in-page / by URL, deliberately off the rail, previously unsearchable.
+FOLDED = (
+    "/fleets",
+    "/third-party/intelligence",
+    "/third-party/lifecycle",
+    "/third-party/collaboration",
+    "/security/threats",
+    "/security/soc",
+)
+# Live routes linked from security.html / get_started.html; now registered.
+NEWLY_GOVERNED = ("/security/report", "/security/assurance")
+
+
+def _hrefs(groups: list[dict]) -> list[str]:
+    return [ln["href"] for g in groups for ln in g["links"]]
+
+
+# ---------- registry + pure logic (no HTTP) ----------
+
+def test_finder_pages_lists_folded_pages_that_nav_groups_excludes(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_dashboard import ui_visibility
+
+    nav = set(_hrefs(ui_visibility.nav_groups("admin")))
+    finder = _hrefs(ui_visibility.finder_pages("admin"))
+    assert set(FOLDED) <= set(finder)
+    assert set(FOLDED).isdisjoint(nav)
+    # The sidebar is a strict subset of the finder; nothing is finder-only
+    # beyond in_nav=False pages, and the finder has no duplicates.
+    assert nav <= set(finder)
+    assert len(finder) == len(set(finder))
+    assert set(finder) - nav == {
+        p["path"] for p in ui_visibility.PAGES if not p.get("in_nav", True)
+    }
+    # auth off: every registered page exactly once (grouped by label like the
+    # nav, so a group split in the registry is merged, not duplicated).
+    auth_off = _hrefs(ui_visibility.finder_pages(None))
+    assert sorted(auth_off) == sorted(p["path"] for p in ui_visibility.PAGES)
+    # Groups merge by label like the nav (no duplicate sections).
+    labels = [g["label"] for g in ui_visibility.finder_pages("admin")]
+    assert len(labels) == len(set(labels))
+
+
+def test_finder_pages_applies_the_same_rbac_and_overrides_as_nav_groups(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_dashboard import rbac, ui_visibility
+
+    # Floor: a viewer never reaches operate-floor pages, folded or not.
+    viewer = set(_hrefs(ui_visibility.finder_pages("viewer")))
+    assert viewer.isdisjoint({"/security/threats", "/security/soc", "/chat", "/settings"})
+    assert "/overview" in viewer
+    # Overrides: hiding a folded page for a role hides it from that role's finder.
+    assert "/fleets" in _hrefs(ui_visibility.finder_pages("operator"))
+    ui_visibility.set_visibility("/fleets", "operator", False)
+    assert "/fleets" not in _hrefs(ui_visibility.finder_pages("operator"))
+    assert "/fleets" in _hrefs(ui_visibility.finder_pages("admin"))
+    # Lockout guard: the store refuses to hide /settings from admins, and the
+    # finder keeps it regardless.
+    with pytest.raises(ValueError):
+        ui_visibility.set_visibility("/settings", "admin", False)
+    assert "/settings" in _hrefs(ui_visibility.finder_pages("admin"))
+    # For every role the finder is nav_groups plus exactly the folded pages
+    # that role may see -- same resolution, in_nav ignored.
+    for role in [None, *rbac.ROLES]:
+        nav = _hrefs(ui_visibility.nav_groups(role))
+        finder = _hrefs(ui_visibility.finder_pages(role))
+        assert [h for h in finder if h in set(nav)] == nav
+        expected_extra = {
+            p["path"] for p in ui_visibility.PAGES
+            if not p.get("in_nav", True) and ui_visibility.is_visible(p, role)
+        }
+        assert set(finder) - set(nav) == expected_extra, role
+
+
+def test_security_report_and_assurance_are_governed_registry_pages():
+    from maverick_dashboard import ui_visibility
+
+    by_path = {p["path"]: p for p in ui_visibility.PAGES}
+    threats = by_path["/security/threats"]
+    for path in NEWLY_GOVERNED:
+        page = by_path[path]
+        assert page["in_nav"] is False
+        assert page["group"] == threats["group"] == "Govern"
+        assert page["icon"] == threats["icon"]
+        # Same floor/default as the neighbouring security consoles: the routes
+        # themselves require "operate", so the registry must not promise more.
+        assert page["floor"] == threats["floor"] == "operate"
+        assert page["default"] == threats["default"] == "operate"
+        # Longest-prefix governance: the page's own entry wins over /security.
+        assert ui_visibility.page_for(path)["path"] == path
+
+
+# ---------- rendered shell ----------
+
+class _ShellLinks(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_sidebar = 0
+        self.in_finder = 0
+        self.sidebar_hrefs: list[str] = []
+        self.finder_hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        values = dict(attrs)
+        if tag == "aside" and values.get("id") == "sidebar":
+            self.in_sidebar += 1
+        if tag == "dialog" and values.get("id") == "navfinder-dialog":
+            self.in_finder += 1
+        if tag != "a" or not values.get("href"):
+            return
+        classes = set((values.get("class") or "").split())
+        if self.in_sidebar and "navquick" not in classes:
+            self.sidebar_hrefs.append(values["href"])
+        if self.in_finder and "data-navfinder-target" in values:
+            self.finder_hrefs.append(values["href"])
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "aside" and self.in_sidebar:
+            self.in_sidebar -= 1
+        if tag == "dialog" and self.in_finder:
+            self.in_finder -= 1
+
+
+def _client(monkeypatch, tmp_path) -> TestClient:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick import world_model
+    from maverick_dashboard import app as dashboard_app
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    dashboard_app._world_cache.clear()
+    return TestClient(dashboard_app.app, headers={"Origin": "http://testserver"})
+
+
+def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, tmp_path):
+    from maverick_dashboard import ui_visibility
+
+    response = _client(monkeypatch, tmp_path).get("/overview")
+    assert response.status_code == 200
+    markup = _ShellLinks()
+    markup.feed(response.text)
+
+    assert set(FOLDED) | set(NEWLY_GOVERNED) <= set(markup.finder_hrefs)
+    assert set(FOLDED).isdisjoint(markup.sidebar_hrefs)
+    assert set(NEWLY_GOVERNED).isdisjoint(markup.sidebar_hrefs)
+    # The sidebar stays the curated rail; the finder is the governed whole.
+    assert set(markup.sidebar_hrefs) < set(markup.finder_hrefs)
+    assert markup.finder_hrefs == _hrefs(ui_visibility.finder_pages(None))
+    assert markup.sidebar_hrefs == _hrefs(ui_visibility.nav_groups(None))

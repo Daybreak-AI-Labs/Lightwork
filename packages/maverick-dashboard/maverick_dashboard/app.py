@@ -259,6 +259,9 @@ def _nav_context(request: Request) -> dict:
     except Exception:  # pragma: no cover -- nav must never break a render
         role = None
     groups = ui_visibility.nav_groups(role)
+    # The Ctrl+K page finder: same role resolution, but it also indexes pages
+    # folded out of the rail (in_nav: False) -- reachable must mean searchable.
+    finder = ui_visibility.finder_pages(role)
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     # A deployment-wide halt backend is a global control even when the caller
@@ -295,6 +298,7 @@ def _nav_context(request: Request) -> dict:
         show_logout = False
     return {
         "nav_groups": groups,
+        "finder_pages": finder,
         "show_settings_link": show_settings,
         "can_create_goal": can_create_goal,
         "can_halt": can_halt,
@@ -327,6 +331,7 @@ templates.context_processors.append(_workspace_context)
 from . import ui_visibility as _ui_visibility  # noqa: E402
 
 templates.env.globals.setdefault("nav_groups", _ui_visibility.nav_groups(None))
+templates.env.globals.setdefault("finder_pages", _ui_visibility.finder_pages(None))
 
 
 def _set_theme_cookie(response, theme: str) -> None:
