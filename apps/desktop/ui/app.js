@@ -81,10 +81,11 @@
   if (copy) {
     copy.addEventListener("click", function () {
       var cmd = "maverick dashboard";
-      var flash = function () {
+      var flash = function (message) {
         if (!copied) return;
+        copied.textContent = message || "Copied";
         copied.style.opacity = "1";
-        setTimeout(function () { copied.style.opacity = "0"; }, 1400);
+        setTimeout(function () { copied.style.opacity = "0"; }, message ? 5000 : 1400);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(cmd).then(flash, fallbackCopy);
@@ -98,8 +99,14 @@
         ta.style.opacity = "0";
         document.body.appendChild(ta);
         ta.select();
-        try { document.execCommand("copy"); flash(); } catch (e) { /* no-op */ }
-        document.body.removeChild(ta);
+        try {
+          if (document.execCommand("copy")) flash();
+          else flash("Could not copy. Select the command above.");
+        } catch (e) {
+          flash("Could not copy. Select the command above.");
+        } finally {
+          document.body.removeChild(ta);
+        }
       }
     });
   }

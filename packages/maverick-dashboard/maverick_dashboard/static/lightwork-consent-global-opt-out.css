@@ -247,6 +247,14 @@
 }
 
 @media (max-width: 40rem) {
+  /* Decorative glows must fit their shell instead of widening the page. */
+  .goo-shell::before,
+  .goo-shell::after {
+    inline-size: 100%;
+    inset-inline-start: 0;
+    inset-inline-end: auto;
+  }
+
   .goo-hero {
     grid-template-columns: minmax(0, 1fr);
   }

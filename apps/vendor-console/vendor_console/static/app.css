@@ -23,7 +23,7 @@ a:hover{text-decoration:underline}
 .who{margin-top:auto;border-top:1px solid var(--line);padding-top:14px}
 .who .email{font-size:12px;word-break:break-all}
 .who .role{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
-.main{flex:1;padding:28px 34px;max-width:1180px}
+.main{flex:1;min-width:0;padding:28px 34px;max-width:1180px}
 
 /* ---- headings / layout ---- */
 h1{font-size:22px;margin:0 0 4px}
@@ -34,7 +34,7 @@ h2{font-size:15px;margin:26px 0 12px;color:var(--dim);text-transform:uppercase;l
 .pagehead{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:20px}
 
 /* ---- cards / tables ---- */
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-bottom:18px;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;color:var(--dim);font-weight:600;font-size:11px;text-transform:uppercase;
   letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--line)}
@@ -68,7 +68,7 @@ button.link{background:none;border:none;color:var(--accent);cursor:pointer;paddi
 .formgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:0 18px}
 .checkgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px;margin:6px 0 2px}
 .check{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
-.check input{accent-color:var(--brand)}
+.check input{width:auto;flex:none;accent-color:var(--brand)}
 .err{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.35);color:#ffb4ae;
   padding:10px 13px;border-radius:8px;margin-bottom:14px;font-size:13px}
 .ok{background:rgba(63,185,80,.1);border:1px solid rgba(63,185,80,.3);color:#9be9a8;
@@ -83,3 +83,16 @@ button.link{background:none;border:none;color:var(--accent);cursor:pointer;paddi
 .auth-card .brand{font-size:20px;margin-bottom:6px}
 .auth-card p.sub{margin-bottom:20px}
 .auth-card .btn{width:100%;margin-top:18px;text-align:center}
+
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:760px){
+  .shell{flex-direction:column}
+  .sidebar{width:100%;flex-basis:auto;border-right:0;border-bottom:1px solid var(--line)}
+  .sidebar nav{flex-direction:row;flex-wrap:wrap}
+  .brand{margin-bottom:12px}
+  .who{margin-top:12px}
+  .main{padding:20px 16px}
+  .pagehead{flex-direction:column;gap:12px}
+  .formgrid,.checkgrid{grid-template-columns:minmax(0,1fr)}
+}

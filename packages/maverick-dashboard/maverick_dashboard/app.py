@@ -9320,6 +9320,16 @@ async def shell_copilot_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-plugins.js")
+async def plugin_mutations_js() -> FileResponse:
+    """Serve plugin confirmations, duplicate-submit guards, and error feedback."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-plugins.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/static/lightwork-navfinder.js")
 async def shell_navfinder_js() -> FileResponse:
     """Accessible registry-backed sidebar search and command palette."""

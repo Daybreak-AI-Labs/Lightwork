@@ -53,18 +53,25 @@
     var rows = document.getElementById('sbx-rows');
     var err = document.getElementById('sbx-err');
     var canManageSandbox = {{ 'true' if permissions_can_manage_sandbox else 'false' }};
+    var switching = false;
 
-    function pick(backend) {
-      if (!canManageSandbox) return;
+    async function pick(backend) {
+      if (!canManageSandbox || switching) return;
       err.textContent = '';
       var body = { backend: backend };
       if (backend === 'local') {
-        if (!window.confirm(
+        if (!(await mvConfirm(
           'Switch to the local backend? The agent’s shell will run on this ' +
-          'host with NO filesystem or network isolation.'
-        )) return;
+          'host with NO filesystem or network isolation.', { okText: 'Use local backend' }
+        ))) return;
         body.acknowledge_local_risk = true;
       }
+      switching = true;
+      var controls = Array.from(rows.querySelectorAll('button')).map(function (button) {
+        var state = { button: button, disabled: button.disabled };
+        button.disabled = true; button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('aria-busy', 'true'); return state;
+      });
       fetch('/api/v1/sandbox/backend', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -77,9 +84,23 @@
             throw new Error(b.detail || ('Could not switch (' + r.status + ').'));
           });
         }
-        location.reload();
+        return r.json().catch(function () {
+          throw new Error('Could not confirm the selected sandbox. Reload this page before retrying.');
+        }).then(function (result) {
+          if (!result || result.backend !== backend) {
+            throw new Error('Could not confirm the selected sandbox. Reload this page before retrying.');
+          }
+          location.reload();
+        });
       }).catch(function (e) {
         err.textContent = (e && e.message) || 'Could not reach the server.';
+      }).finally(function () {
+        switching = false;
+        controls.forEach(function (state) {
+          state.button.disabled = state.disabled;
+          state.button.setAttribute('aria-disabled', state.disabled ? 'true' : 'false');
+          state.button.removeAttribute('aria-busy');
+        });
       });
     }
 
@@ -280,6 +301,7 @@
       const msg = document.getElementById('perm-msg');
       document.querySelectorAll('button.perm-toggle').forEach(function(btn) {
         btn.addEventListener('click', async function() {
+          if (btn.disabled) return;
           const name = btn.dataset.name;
           const action = btn.dataset.action;  // "disable" | "enable"
           btn.disabled = true;
@@ -291,9 +313,18 @@
             const r = await fetch('/api/v1/permissions/tools/' + encodeURIComponent(name) + '/' + action, {
               method: 'POST',
             });
-            const result = r.status === 204 ? {} : await r.json().catch(function() { return {}; });
+            const result = r.status === 204 ? {} : await r.json().catch(function() {
+              if (r.ok) throw new Error('Could not confirm the updated tool permissions. Reload this page before retrying.');
+              return {};
+            });
             if (r.ok) {
-              const effective = result.tool || {};
+              const effective = result && result.tool || {};
+              if ((action === 'disable' && r.status !== 204) ||
+                  (action === 'enable' && (effective.name !== name || effective.overlay_blocked !== false ||
+                    typeof effective.base_acl_allowed !== 'boolean' || typeof effective.usable !== 'boolean' ||
+                    typeof effective.state !== 'string'))) {
+                throw new Error('Could not confirm the updated tool permissions. Reload this page before retrying.');
+              }
               const row = btn.closest('tr');
               const baseAllowed = action === 'disable'
                 ? row && row.dataset.baseAclState === 'ready'
@@ -344,12 +375,12 @@
             } else {
               btn.disabled = false;
               msg.style.color = 'var(--danger)';
-              msg.textContent = (result.detail || ('Failed: ' + r.status));
+              msg.textContent = result && typeof result.detail === 'string' ? result.detail : ('Failed: ' + r.status);
             }
           } catch (e) {
             btn.disabled = false;
             msg.style.color = 'var(--danger)';
-            msg.textContent = String(e);
+            msg.textContent = e.message || 'Could not reach the server. Reload this page before retrying.';
           }
         });
       });

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from html.parser import HTMLParser
 
 import pytest
 from fastapi.testclient import TestClient
@@ -153,3 +154,33 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert asset.status_code == 200
     assert "textContent" in asset.text
     assert "innerHTML" not in asset.text
+
+
+def test_vendor_page_has_one_main_landmark_and_labelled_decision_fields(web):
+    class Markup(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.elements = []
+
+        def handle_starttag(self, tag, attrs):
+            self.elements.append((tag, dict(attrs)))
+
+    client, *_ = web
+    response = client.get("/third-party/vendor-onboarding")
+    assert response.status_code == 200, response.text
+    markup = Markup()
+    markup.feed(response.text)
+    main = [attrs for tag, attrs in markup.elements if tag == "main"]
+    assert len(main) == 1
+    assert main[0]["id"] == "content"
+    root = next((tag, attrs) for tag, attrs in markup.elements if attrs.get("id") == "vendor-onboarding")
+    assert root[0] == "section"
+    assert root[1]["aria-labelledby"] == "vo-title"
+    ids = [attrs["id"] for _, attrs in markup.elements if "id" in attrs]
+    assert len(ids) == len(set(ids)), "Duplicate IDs break labels and request controls"
+    label_targets = {attrs.get("for") for tag, attrs in markup.elements if tag == "label"}
+    for field in ("vo-rationale", "vo-acceptance-reason", "vo-vendor", "vo-document",
+                  "vo-project", "vo-purpose", "vo-freshness", "vo-renewal"):
+        assert field in label_targets
+    message = next(attrs for _, attrs in markup.elements if attrs.get("id") == "vo-message")
+    assert message["aria-live"] == "polite"

@@ -122,10 +122,36 @@
           var out0 = {};
           for (var i = 0; i < fields.length; i++) {
             var s = fields[i];
-            var v0 = window.prompt((s.label || s.key) + (s.required ? ' *' : ''),
-              s.default != null ? String(s.default) : '');
-            if (v0 === null) return Promise.resolve(null);
-            if (v0 !== '') out0[s.key] = v0;
+            var promptLabel = (s.label || s.key) + (s.required ? ' *' : '');
+            var boolField = s.type === 'bool' || s.type === 'checkbox';
+            var choices = (s.options || []).map(function (o) {
+              return String(o && o.value != null ? o.value : o);
+            });
+            if (boolField) promptLabel += ' (true or false)';
+            if (s.type === 'select') promptLabel += ' (' + choices.join(', ') + ')';
+            var problem = '';
+            while (true) {
+              var v0 = window.prompt((problem ? problem + '\n' : '') + promptLabel,
+                s.default != null ? String(s.default) : (boolField ? 'false' : ''));
+              if (v0 === null) return Promise.resolve(null);
+              v0 = v0.trim();
+              if (!v0 && s.required) { problem = 'This field is required.'; continue; }
+              if (boolField) {
+                if (!/^(true|false|yes|no|1|0)$/i.test(v0)) {
+                  problem = 'Enter true or false.'; continue;
+                }
+                out0[s.key] = /^(true|yes|1)$/i.test(v0);
+              } else if (v0) {
+                if (s.type === 'number' && !Number.isFinite(Number(v0))) {
+                  problem = 'Enter a valid number.'; continue;
+                }
+                if (s.type === 'select' && choices.indexOf(v0) < 0) {
+                  problem = 'Choose one of the listed values.'; continue;
+                }
+                out0[s.key] = v0;
+              }
+              break;
+            }
           }
           return Promise.resolve(out0);
         }
@@ -164,27 +190,41 @@
             } else {
               ctl = document.createElement('input');
               ctl.type = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+              if (f.type === 'number') ctl.step = 'any';
               ctl.className = 'input';
               if (f.default != null) ctl.value = String(f.default);
               if (f.placeholder) ctl.placeholder = f.placeholder;
             }
             ctl.id = id;
+            ctl.required = !!f.required;
             wrap.appendChild(ctl);
           }
-          if (f.help) { var h = document.createElement('div'); h.className = 'mv-form__help'; h.textContent = f.help; wrap.appendChild(h); }
+          if (f.help) {
+            var h = document.createElement('div'); h.className = 'mv-form__help';
+            h.id = id + '-help'; h.textContent = f.help;
+            ctl.setAttribute('aria-describedby', h.id); wrap.appendChild(h);
+          }
           controls.push({ f: f, ctl: ctl });
           body.appendChild(wrap);
         });
         return new Promise(function (resolve) {
           function collect() {
-            var out = {}, missing = [];
+            var out = {}, missing = [], firstMissing = null;
             controls.forEach(function (c) {
+              c.ctl.removeAttribute('aria-invalid');
               if (c.f.type === 'bool' || c.f.type === 'checkbox') { out[c.f.key] = c.ctl.checked; return; }
               var val = (c.ctl.value || '').trim();
-              if (!val && c.f.required && c.f.default == null) { missing.push(c.f.label || c.f.key); return; }
+              if (!val && c.f.required) {
+                missing.push(c.f.label || c.f.key); c.ctl.setAttribute('aria-invalid', 'true');
+                if (!firstMissing) firstMissing = c.ctl;
+                return;
+              }
               if (val) out[c.f.key] = val;
             });
-            if (missing.length) { errEl.textContent = 'Required: ' + missing.join(', '); return null; }
+            if (missing.length) {
+              errEl.textContent = 'Required: ' + missing.join(', ');
+              firstMissing.focus(); return null;
+            }
             return out;
           }
           function done(val) {
@@ -212,12 +252,17 @@
           navigator.clipboard.writeText(String(text)).then(ok, fail);
           return;
         }
+        var ta, opener = document.activeElement;
         try {
-          var ta = document.createElement('textarea');
+          ta = document.createElement('textarea');
           ta.value = String(text); ta.style.position = 'fixed'; ta.style.opacity = '0';
           document.body.appendChild(ta); ta.select();
-          document.execCommand('copy'); ta.remove(); ok();
+          if (document.execCommand('copy')) ok(); else fail();
         } catch (e) { fail(); }
+        finally {
+          if (ta) ta.remove();
+          if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+        }
       };
       // Small DOM builder + a uniform timestamp formatter, shared by the
       // list-rendering pages (was reimplemented per page).
@@ -539,11 +584,34 @@
       if (!btn) return;
       const KEY = 'mvk_sidebar_collapsed';
       const mobile = window.matchMedia('(max-width: 880px)');
+      const covered = Array.from(document.querySelectorAll('main, body > footer')).map(function(element) {
+        return {element: element, wasInert: element.hasAttribute('inert')};
+      });
+      const topbar = document.querySelector('.topbar');
+      function syncHeaderHeight() {
+        if (topbar) body.style.setProperty('--shell-topbar-h', Math.ceil(topbar.getBoundingClientRect().height) + 'px');
+      }
+      // Status messages, display fonts and phone wrapping can grow the header.
+      // Position navigation beneath its real height instead of covering controls.
+      if (topbar && typeof ResizeObserver === 'function') {
+        new ResizeObserver(syncHeaderHeight).observe(topbar);
+      } else {
+        window.addEventListener('resize', syncHeaderHeight);
+      }
+      syncHeaderHeight();
       try { if (localStorage.getItem(KEY) === '1') body.classList.add('nav-collapsed'); } catch (e) {}
       function syncAria() {
         const shown = mobile.matches ? body.classList.contains('nav-open')
                                      : !body.classList.contains('nav-collapsed');
         btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
+        // The mobile backdrop covers page controls. Keep keyboard and assistive
+        // technology users in the visible shell until the drawer closes.
+        // Header controls remain reachable, including the emergency stop.
+        covered.forEach(function(item) {
+          const inert = item.wasInert || (mobile.matches && shown);
+          item.element.inert = inert;
+          item.element.toggleAttribute('inert', inert);
+        });
         // A closed drawer is only translated off-screen on mobile, so it can
         // otherwise remain in the accessibility tree and keyboard tab order.
         // Use both the reflected property and the content attribute: the
@@ -571,11 +639,19 @@
           try { localStorage.setItem(KEY, collapsed ? '1' : ''); } catch (e) {}
         }
         syncAria();
+        if (mobile.matches && body.classList.contains('nav-open') && sidebar) {
+          const first = sidebar.querySelector('a[href], button:not([disabled])');
+          if (first) first.focus();
+        }
       });
       if (backdrop) backdrop.addEventListener('click', closeDrawer);
       document.addEventListener('keydown', function(ev) { if (ev.key === 'Escape') closeDrawer(); });
-      document.querySelectorAll('.sidebar a').forEach(function(a) { a.addEventListener('click', closeDrawer); });
-      if (mobile.addEventListener) mobile.addEventListener('change', syncAria);
+      document.querySelectorAll('.sidebar a, .skip-link').forEach(function(a) { a.addEventListener('click', closeDrawer); });
+      if (mobile.addEventListener) mobile.addEventListener('change', function() {
+        // An open mobile drawer must not silently reopen after a desktop visit.
+        if (!mobile.matches) body.classList.remove('nav-open');
+        syncAria();
+      });
       syncAria();
     })();
 

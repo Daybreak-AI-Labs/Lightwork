@@ -6,6 +6,7 @@
      tiles on this page; the shared include still renders them elsewhere. */
   .sec-links { display:flex; gap:var(--space-2); flex-wrap:wrap; margin:var(--space-3) 0; }
   .sec-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-4); }
+  .sec-grid > .panel { min-width:0; }
   .sec-heat { display:flex; gap:var(--space-2); flex-wrap:wrap; margin-top:var(--space-3); }
   .sec-heat__cell { min-width:7rem; padding:var(--space-3); border:1px solid var(--border);
                     border-radius:8px; background:var(--surface-2); }
@@ -45,10 +46,7 @@
   .sec-hunter__foot { display:flex; align-items:center; gap:var(--space-2);
                       flex-wrap:wrap; margin-top:auto; }
   @media (max-width:900px) {
-    .sec-grid { grid-template-columns:1fr; }
-    .sec-form { grid-template-columns:1fr; }
-    .sec-frameworks { grid-template-columns:1fr; }
-    .sec-hunters { grid-template-columns:1fr; }
+    .sec-grid,.sec-form,.sec-frameworks,.sec-hunters { grid-template-columns:minmax(0,1fr); }
   }
 </style>
 

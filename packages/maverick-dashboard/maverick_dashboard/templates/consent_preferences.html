@@ -3,20 +3,23 @@
 {% block content %}
 <style>
   .cp-shell{max-width:1500px;margin:0 auto;padding:1.25rem}
-  .cp-hero{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+  .cp-hero{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+  .cp-hero>div{flex:1 1 24rem;min-width:0}.cp-hero>.cp-actions{justify-content:flex-end}
   .cp-hero h1{margin:.1rem 0}.cp-kicker{text-transform:uppercase;letter-spacing:.12em;color:var(--accent);font-size:.72rem;font-weight:700}
   .cp-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;margin:1rem 0}
   .cp-stat,.cp-card{background:linear-gradient(145deg,color-mix(in srgb,var(--panel) 86%,transparent),color-mix(in srgb,var(--panel) 64%,transparent));border:1px solid color-mix(in srgb,var(--border) 76%,white 24%);border-radius:18px;padding:1rem;box-shadow:0 18px 45px color-mix(in srgb,#07111f 18%,transparent),inset 0 1px 0 color-mix(in srgb,white 20%,transparent);backdrop-filter:blur(22px) saturate(145%);-webkit-backdrop-filter:blur(22px) saturate(145%)}
   .cp-stat strong{display:block;font-size:1.7rem}.cp-stat span{color:var(--muted);font-size:.83rem}
-  .cp-layout{display:grid;grid-template-columns:1.1fr .9fr;gap:1rem}.cp-card{margin-bottom:1rem}
+  .cp-layout{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:1rem}.cp-card{margin-bottom:1rem;min-width:0}.cp-layout>div{min-width:0}
   .cp-card h2{font-size:1rem;margin:.1rem 0 .75rem}.cp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem;border:0;margin:0;padding:0;min-width:0}
-  .cp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted)}
-  .cp-form .wide{grid-column:1/-1}.cp-actions{display:flex;gap:.5rem;align-items:center;grid-column:1/-1}
+  .cp-form label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:var(--muted);min-width:0}
+  .cp-form .input{min-width:0;max-width:100%}
+  .cp-form .wide{grid-column:1/-1}.cp-actions{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;grid-column:1/-1;min-width:0}
+  .cp-actions>.btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}
   .cp-table{width:100%;border-collapse:collapse;font-size:.82rem}.cp-table th,.cp-table td{text-align:left;border-bottom:1px solid var(--border);padding:.5rem .35rem;vertical-align:top}
   .cp-table code{word-break:break-all}.cp-empty{color:var(--muted);padding:.75rem 0}.cp-result{white-space:pre-wrap;word-break:break-word;max-height:18rem;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.7rem;font-size:.78rem}
   .cp-banner{border:1px solid #a66a00;background:color-mix(in srgb,#a66a00 12%,var(--panel));border-radius:10px;padding:.8rem;margin:.75rem 0}
   @media(max-width:1000px){.cp-grid{grid-template-columns:repeat(2,1fr)}.cp-layout{grid-template-columns:1fr}}
-  @media(max-width:620px){.cp-grid,.cp-form{grid-template-columns:1fr}.cp-form .wide{grid-column:auto}}
+  @media(max-width:620px){.cp-grid,.cp-form{grid-template-columns:minmax(0,1fr)}.cp-form .wide{grid-column:auto}.cp-hero>.cp-actions{justify-content:flex-start}}
 </style>
 <div class="cp-shell">
   <header class="cp-hero">

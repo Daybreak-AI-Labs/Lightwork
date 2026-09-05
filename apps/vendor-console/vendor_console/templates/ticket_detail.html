@@ -42,7 +42,8 @@
       {% if not comments %}<p class="muted" style="margin:0">No activity yet.</p>{% endif %}
       {% if staff.can_support %}
       <form method="post" action="/support/{{ ticket.id }}/comment" style="margin-top:12px">
-        <textarea name="body" rows="2" placeholder="Add an internal note…" required></textarea>
+        <label for="console-ticket-comment">Internal note</label>
+        <textarea id="console-ticket-comment" name="body" rows="2" placeholder="Add an internal note…" required></textarea>
         <button class="btn small" type="submit" style="margin-top:8px">Add note</button>
       </form>
       {% endif %}
@@ -54,21 +55,21 @@
     <h2>Triage</h2>
     <div class="card">
       <form method="post" action="/support/{{ ticket.id }}/status">
-        <label>Set status</label>
-        <select name="status">
+        <label for="console-ticket_detail-status">Set status</label>
+        <select id="console-ticket_detail-status" name="status">
           {% for s in ["open","in_progress","waiting","resolved","closed"] %}
           <option value="{{ s }}" {% if s==ticket.status %}selected{% endif %}>{{ s.replace('_',' ') }}</option>
           {% endfor %}
         </select>
-        <label>Note <span class="muted">(optional)</span></label>
-        <input name="note">
+        <label for="console-ticket_detail-note">Note <span class="muted">(optional)</span></label>
+        <input id="console-ticket_detail-note" name="note">
         <button class="btn small" type="submit" style="margin-top:10px">Update status</button>
       </form>
       <form method="post" action="/support/{{ ticket.id }}/assign" style="margin-top:16px">
-        <label>Assignee</label>
-        <input name="assignee" value="{{ ticket.assignee }}" placeholder="you@daybreak.co">
-        <label>Priority</label>
-        <select name="priority">
+        <label for="console-ticket_detail-assignee">Assignee</label>
+        <input id="console-ticket_detail-assignee" name="assignee" value="{{ ticket.assignee }}" placeholder="you@daybreak.co">
+        <label for="console-ticket_detail-priority">Priority</label>
+        <select id="console-ticket_detail-priority" name="priority">
           {% for p in ["low","normal","high","urgent"] %}
           <option value="{{ p }}" {% if p==ticket.priority %}selected{% endif %}>{{ p }}</option>
           {% endfor %}

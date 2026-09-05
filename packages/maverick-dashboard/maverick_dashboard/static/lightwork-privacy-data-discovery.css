@@ -5,10 +5,12 @@
   border: 0;
   display: grid;
   gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
   isolation: isolate;
   margin: 0 auto;
   max-width: 1480px;
   min-inline-size: 0;
+  overflow-wrap: anywhere;
   padding: clamp(.75rem, 2vw, 1.5rem);
   position: relative;
   width: 100%;
@@ -138,10 +140,10 @@
 
 @media (max-width: 980px) {
   .pdd-grid,
-  .pdd-form { grid-template-columns: 1fr; }
+  .pdd-form { grid-template-columns: minmax(0, 1fr); }
   .pdd-form .wide,
   .pdd-actions { grid-column: auto; }
-  .pdd-hero { display: grid; }
+  .pdd-hero { display: grid; grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {

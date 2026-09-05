@@ -47,6 +47,7 @@
   var cleanDraft = null;
   var saveInFlight = false;
   var publishInFlight = false;
+  var runInFlight = false;
 
   function draftSnapshot() {
     // Keep the editable object rather than the wire serialization: buffered
@@ -1189,6 +1190,28 @@
   function apiFetch(url, opts) {
     return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
   }
+  function unconfirmedMutation(action) {
+    return action + ' could not be confirmed. ' + (action === 'Run'
+      ? 'Check recent runs before retrying.' : 'Reload the flow before retrying.');
+  }
+  async function readMutationResult(response, action) {
+    var result;
+    try { result = await response.json(); }
+    catch (e) { throw new Error(unconfirmedMutation(action)); }
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      throw new Error(unconfirmedMutation(action));
+    }
+    if (!response.ok) {
+      throw new Error(typeof result.detail === 'string' ? result.detail : action + ' failed (' + response.status + ').');
+    }
+    return result;
+  }
+  function validPublication(result) {
+    return typeof result.published === 'boolean' && (result.published
+      ? Number.isInteger(result.published_version) && result.published_version > 0 &&
+        typeof result.published_revision === 'string' && !!result.published_revision.trim()
+      : result.published_version === null && result.published_revision === '');
+  }
   function slugify(s) {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
   }
@@ -1210,19 +1233,22 @@
       var response = await apiFetch('/api/v1/flows', {
         method: 'POST', body: JSON.stringify({ flow: body })
       });
-      var result = await response.json().catch(function () { return {}; });
-      if (!response.ok) { say(result.detail || 'Save failed', true); return false; }
-      rootFlow.version = parseInt(result.version, 10) || rootFlow.version || 1;
-      rootFlow.revision = String(result.revision || rootFlow.revision || '');
-      rootFlow.published = !!result.published;
-      rootFlow.published_version = parseInt(result.published_version, 10) || 0;
-      rootFlow.published_revision = String(result.published_revision || '');
+      var result = await readMutationResult(response, 'Save');
+      if (result.id !== body.id || !Number.isInteger(result.version) || result.version < 1 ||
+          typeof result.revision !== 'string' || !result.revision.trim() || !validPublication(result)) {
+        throw new Error(unconfirmedMutation('Save'));
+      }
+      rootFlow.version = result.version;
+      rootFlow.revision = result.revision;
+      rootFlow.published = result.published;
+      rootFlow.published_version = result.published_version || 0;
+      rootFlow.published_revision = result.published_revision;
       markClean(savedDraftSnapshot);
       canonicalizeSavedFlow(rootFlow.id);
       say('Saved ✓');
       return true;
     } catch (e) {
-      say('Save failed', true); return false;
+      say(e.message || unconfirmedMutation('Save'), true); return false;
     } finally {
       saveInFlight = false; syncSaveButtons();
     }
@@ -1239,14 +1265,17 @@
           version: rootFlow.version, revision: rootFlow.revision
         })
       });
-      var result = await response.json().catch(function () { return {}; });
-      if (!response.ok) { say(result.detail || 'Publish failed', true); return; }
+      var result = await readMutationResult(response, 'Publish');
+      if (result.id !== rootFlow.id || !validPublication(result) || !result.published ||
+          result.published_version !== rootFlow.version) {
+        throw new Error(unconfirmedMutation('Publish'));
+      }
       rootFlow.published = true;
-      rootFlow.published_version = parseInt(result.published_version, 10) || 0;
-      rootFlow.published_revision = String(result.published_revision || '');
+      rootFlow.published_version = result.published_version;
+      rootFlow.published_revision = result.published_revision;
       say('Published v' + rootFlow.published_version);
     } catch (e) {
-      say('Publish failed', true);
+      say(e.message || unconfirmedMutation('Publish'), true);
     } finally {
       publishInFlight = false; syncSaveButtons();
     }
@@ -1259,11 +1288,13 @@
     });
   }
   function run(dryRun) {
+    if (runInFlight) return;
     var data = {};
     var raw = document.getElementById('fd-sample').value.trim();
     if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
-    function proceed() {
-      var request;
+    async function proceed() {
+      if (runInFlight) return;
+      var url, payload;
       if (dryRun) {
         var bad = commitRawFields();
         if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
@@ -1275,29 +1306,33 @@
         if (errors.length) { say('Fix first: ' + errors.slice(0, 3).join(' / '), true); return; }
         // The unsaved graph is the execution input. This endpoint does not save,
         // publish, or let a draft schedule enter the scheduler inventory.
-        request = apiFetch('/api/v1/flows/dry-run', {
-          method: 'POST', body: JSON.stringify({ flow: draftBody, data: data })
-        });
+        url = '/api/v1/flows/dry-run'; payload = { flow: draftBody, data: data };
       } else {
         if (!rootFlow.id) { say('Publish the flow before running it for real.', true); return; }
         if (!rootFlow.published) { say('Publish a reviewed draft before running it for real.', true); return; }
-        request = apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', {
-          method: 'POST', body: JSON.stringify({ data: data, dry_run: false })
-        });
+        url = '/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run';
+        payload = { data: data, dry_run: false };
       }
-        request
-          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
-          .then(function (res) {
-            // Check res.ok first: a 4xx/5xx returns {detail} with no run_id, and
-            // treating that as "Run started" would swallow the real failure.
-            if (!res.ok) { say(res.j.detail || ('Run failed (' + res.status + ')'), true); return; }
-            var j = res.j;
-            if (!j.run_id) { say('Run started'); return; }
-            runState = {}; runCursor = null; lastRunId = j.run_id;
-            say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
-            document.getElementById('fd-legend').classList.add('on');
-            watchRun(j.run_id);
-          }).catch(function () { say('Run failed', true); });
+      var buttons = ['fd-run', 'fd-run-real'].map(function (id) { return document.getElementById(id); });
+      runInFlight = true;
+      buttons.forEach(function (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); });
+      try {
+        var response = await apiFetch(url, { method: 'POST', body: JSON.stringify(payload) });
+        var result = await readMutationResult(response, 'Run');
+        if (typeof result.run_id !== 'string' || !result.run_id.trim() ||
+            typeof result.status !== 'string' || !result.status.trim() || result.dry_run !== dryRun) {
+          throw new Error(unconfirmedMutation('Run'));
+        }
+        runState = {}; runCursor = null; lastRunId = result.run_id;
+        say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + result.run_id.slice(0, 8) + '…)');
+        document.getElementById('fd-legend').classList.add('on');
+        watchRun(result.run_id);
+      } catch (e) {
+        say(e.message || unconfirmedMutation('Run'), true);
+      } finally {
+        runInFlight = false;
+        buttons.forEach(function (button) { button.disabled = false; button.removeAttribute('aria-busy'); });
+      }
     }
     var fields = inputFields();
     if (fields.length) {   // the typed-input form doubles as the run confirmation

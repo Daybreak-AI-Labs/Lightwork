@@ -26,6 +26,8 @@
     <p id="perf-empty" class="muted" hidden>No benchmark history recorded yet.</p>
   </div>
 
+{% endblock %}
+{% block scripts_extra %}
   <script>
     // Build cells with textContent (mvEl) rather than innerHTML string
     // concatenation: benchmark/SLA names come from local tool output and must

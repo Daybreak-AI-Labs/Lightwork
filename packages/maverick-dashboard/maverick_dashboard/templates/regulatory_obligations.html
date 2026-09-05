@@ -2,7 +2,7 @@
 {% block title %}Regulatory Obligations - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .rob-shell{--rob-glass:color-mix(in srgb,var(--panel) 66%,transparent);--rob-soft:color-mix(in srgb,var(--panel) 45%,transparent);--rob-edge:color-mix(in srgb,var(--text) 14%,transparent);display:grid;gap:var(--space-5);isolation:isolate;position:relative}
+  .rob-shell{--rob-glass:color-mix(in srgb,var(--panel) 66%,transparent);--rob-soft:color-mix(in srgb,var(--panel) 45%,transparent);--rob-edge:color-mix(in srgb,var(--text) 14%,transparent);display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr);isolation:isolate;min-width:0;overflow-wrap:anywhere;position:relative}
   .rob-shell::before{background:radial-gradient(circle at 10% 8%,color-mix(in srgb,#34d399 16%,transparent),transparent 30rem),radial-gradient(circle at 88% 18%,color-mix(in srgb,#3b82f6 15%,transparent),transparent 32rem),radial-gradient(circle at 50% 94%,color-mix(in srgb,#f59e0b 11%,transparent),transparent 28rem);content:"";inset:0;pointer-events:none;position:fixed;z-index:-1}
   .rob-glass{background:var(--rob-glass);border:1px solid var(--rob-edge);box-shadow:0 18px 52px color-mix(in srgb,#000 22%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 13%,transparent);-webkit-backdrop-filter:blur(26px) saturate(155%);backdrop-filter:blur(26px) saturate(155%)}
   .rob-hero{align-items:center;border-radius:1.65rem;display:grid;gap:var(--space-5);grid-template-columns:minmax(0,1fr) minmax(17rem,25rem);overflow:hidden;padding:clamp(1.4rem,3vw,2.8rem)}
@@ -17,8 +17,8 @@
   .rob-verdict{font-size:1.5rem;font-weight:900;letter-spacing:-.02em;margin:0}.rob-verdict[data-decision=allow]{color:var(--success,#45c786)}.rob-verdict[data-decision=require_human]{color:var(--warn)}.rob-verdict[data-decision=deny]{color:var(--danger,#f06b75)}
   .rob-library{display:grid;gap:.5rem;list-style:none;margin:.7rem 0 0;padding:0}.rob-library li{align-items:center;background:var(--rob-soft);border:1px solid var(--rob-edge);border-radius:.8rem;display:flex;flex-wrap:wrap;gap:.6rem;justify-content:space-between;padding:.65rem .8rem}.rob-library button{white-space:nowrap}
   .rob-problems{color:var(--danger,#f06b75);margin:.4rem 0 0;padding-left:1.2rem}
-  @media(max-width:900px){.rob-hero{grid-template-columns:1fr}.rob-card{grid-column:1/-1}.rob-metrics{grid-template-columns:1fr 1fr}}
-  @media(max-width:560px){.rob-fields,.rob-metrics{grid-template-columns:1fr}}
+  @media(max-width:900px){.rob-hero{grid-template-columns:minmax(0,1fr)}.rob-card{grid-column:1/-1}.rob-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:560px){.rob-fields,.rob-metrics{grid-template-columns:minmax(0,1fr)}}
 </style>
 {% endblock %}
 {% block content %}

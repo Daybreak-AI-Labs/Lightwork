@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
@@ -121,6 +122,18 @@ def test_ekko_page_and_agent_factory_entry_explain_the_safe_boundary(
     assert factory.status_code == 200
     assert 'id="ekko-work-discovery-card"' in factory.text
     assert 'href="/ekko"' in factory.text
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_ekko_initial_render_runs_after_shared_ui_helpers(tmp_path, monkeypatch, enabled):
+    """The immediate status render needs mvEl before its client script executes."""
+    _isolate(tmp_path, monkeypatch, enabled=enabled)
+    page = client.get("/ekko")
+    assert page.status_code == 200
+    shared_helpers = page.text.index('<script src="/static/lightwork-ui.js">')
+    client_start = page.text.index("var initial = JSON.parse(document.getElementById('ekko-initial')")
+    initial_render = page.text.index("renderStatus(initial);", client_start)
+    assert shared_helpers < client_start < initial_render
 
 
 def test_status_is_default_off_and_payload_cannot_inject_owner_or_tenant(

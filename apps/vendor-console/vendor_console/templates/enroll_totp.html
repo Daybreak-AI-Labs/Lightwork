@@ -4,7 +4,7 @@
 <div class="auth-card">
   <div class="brand">◐ Daybreak<span>control plane</span></div>
   <p class="sub">Set up two-factor authentication (required).</p>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
   <p class="muted" style="font-size:13px">Add this secret to Google/Microsoft
     Authenticator or 1Password, then enter the current code to confirm.</p>
   <label>Secret key</label>
@@ -12,8 +12,8 @@
   <label style="margin-top:12px">Or open this URI</label>
   <div class="codebox">{{ uri }}</div>
   <form method="post" action="/enroll-totp">
-    <label>Confirm 6-digit code</label>
-    <input name="code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+    <label for="console-enroll_totp-code">Confirm 6-digit code</label>
+    <input id="console-enroll_totp-code" name="code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
            maxlength="6" required autofocus>
     <button class="btn" type="submit">Confirm &amp; enable</button>
   </form>

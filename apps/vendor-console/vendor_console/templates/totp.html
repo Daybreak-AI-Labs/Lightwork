@@ -4,10 +4,10 @@
 <div class="auth-card">
   <div class="brand">◐ Daybreak<span>control plane</span></div>
   <p class="sub">Enter the 6-digit code from your authenticator.</p>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/totp">
-    <label>Authentication code</label>
-    <input name="code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+    <label for="console-totp-code">Authentication code</label>
+    <input id="console-totp-code" name="code" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
            maxlength="6" required autofocus>
     <button class="btn" type="submit">Verify</button>
   </form>

@@ -196,4 +196,33 @@ describe('installer terminal state', () => {
 
     await waitFor(() => expect(lateUnlisten).toHaveBeenCalledTimes(3));
   });
+
+  it('shows a cancellation request failure while the installer remains active', async () => {
+    let completeInstall!: () => void;
+    const operation = new Promise<void>((resolve) => {
+      completeInstall = resolve;
+    });
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === 'install') return operation;
+      if (command === 'cancel_install') {
+        return Promise.reject({ code: 'failed', message: 'process control unavailable' });
+      }
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+
+    render(App);
+    await fireEvent.click(
+      await screen.findByRole('button', { name: 'Install from authorized source' })
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel installation' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not cancel safely: process control unavailable'
+    );
+    expect(screen.getByRole('heading', { name: 'Installing…' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Cancel installation' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(tauri.close).not.toHaveBeenCalled();
+    completeInstall();
+    expect(await screen.findByRole('heading', { name: /Lightwork is installed/ })).toBeTruthy();
+  });
 });

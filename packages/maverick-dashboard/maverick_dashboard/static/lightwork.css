@@ -36,6 +36,7 @@
       --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
       /* ---- layout ---- */
       --sidebar-w: 248px; --topbar-h: 56px; --drawer-w: min(82vw, 320px);
+      --shell-topbar-h: var(--topbar-h);
       --content-max: 1180px;
       /* ---- elevation (dark-tuned default; light theme overrides) ---- */
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.20);
@@ -50,6 +51,7 @@
       --bg: #0e1320; --panel: #161c2c; --border: #283149;
       --text: #e8ebf2; --muted: #97a1b5; --accent: #3ecf8e;
       --warn: #e0a23a; --danger: #e5564b;
+      --danger-fg: #000000;
     }
     body.theme-dark {
       --brand: #4f7bd0; --brand-hi: #6f95df; --brand-fg: #ffffff; --info: #56b6c2;
@@ -57,9 +59,9 @@
     body.theme-light {
       color-scheme: light;
       --bg: #f4f6fa; --panel: #ffffff; --border: #dde2ea;
-      --text: #18202e; --muted: #5b6575; --accent: #1f9d57;
-      --warn: #9a6a12; --danger: #c0392b;
-      --brand: #21426f; --brand-hi: #2d5790; --brand-fg: #ffffff; --info: #2a6f9e;
+      --text: #18202e; --muted: #505b6b; --accent: #176a3a;
+      --warn: #80560d; --danger: #b02e22; --danger-fg: #ffffff;
+      --brand: #21426f; --brand-hi: #2d5790; --brand-fg: #ffffff; --info: #245e88;
       --shadow-sm: 0 1px 2px rgba(20,28,46,0.06);
       --shadow-md: 0 4px 16px rgba(20,28,46,0.08);
       --shadow-lg: 0 12px 40px rgba(20,28,46,0.12);
@@ -67,15 +69,15 @@
     body.theme-solarized {
       color-scheme: dark;
       --bg: #002b36; --panel: #073642; --border: #586e75;
-      --text: #eee8d5; --muted: #93a1a1; --accent: #6c9b00;
-      --warn: #b58900; --danger: #dc322f;
-      --brand: #268bd2; --brand-hi: #4fa3d8; --brand-fg: #ffffff; --info: #2aa198;
+      --text: #eee8d5; --muted: #b1bdbd; --accent: #b0cc57;
+      --warn: #e2b24b; --danger: #ff948a; --danger-fg: #000000;
+      --brand: #4fa3d8; --brand-hi: #73b6e4; --brand-fg: #000000; --info: #69c5bf;
     }
     body.theme-hicontrast {
       color-scheme: dark;
       --bg: #000000; --panel: #111111; --border: #ffffff;
       --text: #ffffff; --muted: #cccccc; --accent: #00ff00;
-      --warn: #ffff00; --danger: #ff5050;
+      --warn: #ffff00; --danger: #ff5050; --danger-fg: #000000;
       --brand: #00ffff; --brand-hi: #aaffff; --brand-fg: #000000; --info: #66ccff;
     }
     /* Derived tokens — declared on <body>, where the theme class lives, so the
@@ -228,13 +230,13 @@
     /* ---------- sidebar nav ---------- */
     .sidebar {
       grid-column: 1; grid-row: 2;
-      position: sticky; top: var(--topbar-h); align-self: start;
+      position: sticky; top: var(--shell-topbar-h); align-self: start;
       /* Fill the visible column even on short pages: without the min-height the
          rail (background + border) stops at its content and the column below
          reads as a broken half-drawn panel. Sticky + exactly viewport-height
          means the visible rail is always fully painted. */
-      min-height: calc(100dvh - var(--topbar-h));
-      max-height: calc(100dvh - var(--topbar-h)); overflow-y: auto;
+      min-height: calc(100dvh - var(--shell-topbar-h));
+      max-height: calc(100dvh - var(--shell-topbar-h)); overflow-y: auto;
       background: linear-gradient(180deg,
         color-mix(in srgb, var(--panel) 58%, var(--bg)),
         color-mix(in srgb, var(--panel) 30%, var(--bg)));
@@ -524,7 +526,7 @@
     .btn--primary:hover { background: var(--brand-hi); border-color: transparent;
       box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent); }
     .btn--ghost { background: transparent; }
-    .btn--danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+    .btn--danger { background: var(--danger); border-color: var(--danger); color: var(--danger-fg); }
     .btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
     .input, .select, .textarea {
       background: var(--surface-sunken); color: var(--text);
@@ -558,9 +560,9 @@
       color: var(--text); text-decoration: none;
     }
     .halt-pill:hover { border-color: var(--danger); text-decoration: none; }
-    .halt-pill.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
+    .halt-pill.armed { background: var(--danger); color: var(--danger-fg); border-color: var(--danger); }
     .halt-pill .dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted); }
-    .halt-pill.armed .dot { background: #fff; animation: pulse 1.2s ease-in-out infinite; }
+    .halt-pill.armed .dot { background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
     /* ---------- adaptive density. Comfortable is the default above;
@@ -586,14 +588,14 @@
       .topbar__menu { display: inline-flex; }
       main { grid-column: 1; padding: var(--space-5) var(--space-4); }
       .sidebar {
-        position: fixed; top: var(--topbar-h); bottom: 0;
+        position: fixed; top: var(--shell-topbar-h); bottom: 0;
         inset-inline-start: calc(-1 * var(--drawer-w));
         width: var(--drawer-w); z-index: 60;
         box-shadow: var(--shadow-lg); transition: inset-inline-start 0.2s ease;
       }
       body.nav-open .sidebar { inset-inline-start: 0; }
       .nav-backdrop {
-        position: fixed; inset: var(--topbar-h) 0 0 0; z-index: 55;
+        position: fixed; inset: var(--shell-topbar-h) 0 0 0; z-index: 55;
         background: var(--scrim);
       }
       body.nav-open .nav-backdrop { display: block; }
@@ -604,17 +606,35 @@
          phones. That clipped every page, not just the header. Keep all safety
          controls reachable while collapsing only the redundant wordmark. */
       .topbar {
+        min-width: 0;
         gap: var(--space-2);
         padding-inline: var(--space-3);
       }
+      .topbar__menu, .brand { flex: none; }
       .brand { gap: var(--space-1); }
       .brand__name { display: none; }
       .topbar__controls {
         min-width: 0;
+        flex: 1 1 auto;
         gap: var(--space-1);
         flex-wrap: nowrap;
       }
-      .halt-pill { padding-inline: 0.55rem; white-space: nowrap; }
+      .halt-pill { min-width: 0; padding-inline: 0.55rem; white-space: normal; }
+      .halt-pill .dot { flex: none; }
+      #halt-label { overflow-wrap: anywhere; }
+      .prefs__panel {
+        position: fixed; inset-inline: var(--space-3);
+        top: calc(var(--shell-topbar-h) + var(--space-2));
+        min-width: 0; max-height: calc(100dvh - var(--shell-topbar-h) - var(--space-5));
+        overflow-y: auto;
+      }
+      .prefs__row .ctl { min-width: 0; max-width: 70%; }
+    }
+    @media (max-width: 360px) {
+      /* Keep safety and preference controls comfortably reachable on small
+         phones; status text remains complete instead of being truncated. */
+      .topbar { flex-wrap: wrap; }
+      .topbar__controls { flex-basis: 100%; }
     }
     /* Desktop: the hamburger collapses the persistent sidebar for more room. */
     @media (min-width: 881px) {
@@ -1304,7 +1324,7 @@ body.theme-hicontrast :where(
   padding: var(--space-3) var(--space-4);
   margin: 0 0 var(--space-4);
 }
-.mg-banner .mg-copy { color: var(--muted); flex: 1 1 24rem; min-width: 16rem; }
+.mg-banner .mg-copy { color: var(--muted); flex: 1 1 24rem; min-width: 0; overflow-wrap: anywhere; }
 .mg-banner .mg-err:not(:empty) {
   flex-basis: 100%;
   color: var(--danger);
@@ -1342,7 +1362,7 @@ body.theme-hicontrast :where(
   --text: #EEF1F7; --muted: #8E97AC; --accent: #3DDC97;
   --warn: #FFB547; --danger: #FF6B6B;
 }
-body.theme-dark { --brand: #3D8BFF; --brand-hi: #79ACFF; --brand-fg: #ffffff; --info: #37D7FF; }
+body.theme-dark { --brand: #3D8BFF; --brand-hi: #79ACFF; --brand-fg: #000000; --info: #37D7FF; }
 body:not(.font-dyslexic) { font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
 .mono, code, pre, kbd { font-family: var(--font-mono); }
 
