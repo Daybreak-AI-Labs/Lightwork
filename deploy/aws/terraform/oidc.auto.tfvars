@@ -18,3 +18,4 @@ dashboard_invites = true
 # SES domain identity daybreakailabs.com is verified; from noreply@daybreakailabs.com.
 email_enabled = true
 email_from    = "noreply@daybreakailabs.com"
+flows_enabled = true

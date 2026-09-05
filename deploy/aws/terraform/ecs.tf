@@ -64,6 +64,9 @@ resource "aws_ecs_task_definition" "app" {
         var.dashboard_invites ? [
           { name = "MAVERICK_DASHBOARD_INVITES", value = "1" },
         ] : [],
+        var.flows_enabled ? [
+          { name = "MAVERICK_FLOWS", value = "1" },
+        ] : [],
         var.email_enabled ? [
           { name = "EMAIL_PROVIDER", value = "ses" },
           { name = "EMAIL_FROM", value = var.email_from },

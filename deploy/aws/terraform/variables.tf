@@ -86,6 +86,12 @@ variable "dashboard_invites" {
   default     = false
 }
 
+variable "flows_enabled" {
+  description = "Turn on the flow engine (Flows designer Save/Publish/Run and the /api/v1/flows routes) by setting MAVERICK_FLOWS=1 on the task. Off by default in the product. Saved flows live under the task's data dir, so without persistent storage they do not survive a redeploy."
+  type        = bool
+  default     = false
+}
+
 variable "restrict_ingress_to_cloudflare" {
   description = "When true, the ALB only accepts traffic from Cloudflare's published IP ranges. Set this when the domain is proxied through Cloudflare (e.g. fronted by Cloudflare Access) so the public cannot bypass the edge by hitting the ALB directly. When false, the ALB is open to the internet."
   type        = bool
