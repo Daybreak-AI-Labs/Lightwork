@@ -103,3 +103,22 @@ resource "aws_secretsmanager_secret_version" "pg_dsn" {
   secret_id     = aws_secretsmanager_secret.pg_dsn.id
   secret_string = "postgresql://${var.db_username}:${random_password.db.result}@${aws_db_instance.main.address}:5432/${var.db_name}" # pragma: allowlist secret -- Terraform interpolation, no literal secret
 }
+
+# At-rest encryption key. The kernel otherwise generates one on first use under
+# the task's data dir, which is ephemeral on Fargate: every task replacement
+# minted a new key and every goal sealed under the previous key became
+# unreadable (cryptography InvalidTag on /goals and /chat). Pin it here so the
+# key survives deploys. 32 bytes, hex-encoded, as crypto_at_rest expects.
+resource "random_id" "at_rest_key" {
+  byte_length = 32
+}
+
+resource "aws_secretsmanager_secret" "at_rest_key" {
+  name                    = "${local.name}/at-rest-encryption-key"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "at_rest_key" {
+  secret_id     = aws_secretsmanager_secret.at_rest_key.id
+  secret_string = random_id.at_rest_key.hex
+}
