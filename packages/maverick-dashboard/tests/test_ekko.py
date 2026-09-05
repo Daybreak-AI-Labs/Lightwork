@@ -236,3 +236,27 @@ def test_forget_device_revokes_enrollment_and_erases_data(tmp_path, monkeypatch)
     assert status["enrollment"] is None
     assert status["session"] is None
     assert store.get_session(session.session_id) is None
+
+
+def test_ekko_inline_script_runs_after_shared_ui_helpers_load(tmp_path, monkeypatch):
+    # Regression: the page script calls renderStatus(initial) at parse time and
+    # uses mvEl/mvToast/mvConfirm from /static/lightwork-ui.js, which base.html
+    # loads after the content block. Emitting the script inside the content block
+    # threw ``ReferenceError: mvEl is not defined`` on every page load.
+    _isolate(tmp_path, monkeypatch, enabled=False)
+
+    page = client.get("/ekko")
+    assert page.status_code == 200
+    html = page.text
+
+    ui_tag = '<script src="/static/lightwork-ui.js">'
+    bootstrap_tag = '<script id="ekko-initial" type="application/json">'
+    assert ui_tag in html
+    assert bootstrap_tag in html
+
+    first_mv_el = html.index("mvEl(")
+    inline_script_open = html.rfind("<script>", 0, first_mv_el)
+    assert inline_script_open != -1
+    assert inline_script_open > html.index(ui_tag)
+    # The JSON bootstrap must still precede the code that reads it.
+    assert html.index(bootstrap_tag) < inline_script_open
