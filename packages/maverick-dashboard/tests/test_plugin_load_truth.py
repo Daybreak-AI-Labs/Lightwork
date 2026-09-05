@@ -160,3 +160,20 @@ def test_plugin_template_wires_every_control_plane_mutation_to_guard():
     assert "install-switch-on" in template
     assert 'aria-live="polite"' in template
     assert '/static/lightwork-plugins.js' in template
+
+
+def test_plugin_mutation_guard_script_is_served(monkeypatch, tmp_path: Path):
+    client = _prepare(monkeypatch, tmp_path, _EntryPoint("weather", lambda: object()))
+
+    response = client.get("/static/lightwork-plugins.js")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/javascript")
+    expected = (
+        Path(__file__).parents[1]
+        / "maverick_dashboard"
+        / "static"
+        / "lightwork-plugins.js"
+    ).read_bytes()
+    assert response.content == expected
+    assert b"LightworkPluginMutations" in response.content

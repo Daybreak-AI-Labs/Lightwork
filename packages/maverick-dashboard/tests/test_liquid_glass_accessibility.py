@@ -81,4 +81,4 @@ def test_danger_actions_remain_semantic_not_glass_controls() -> None:
     danger = _rule(shared, ".btn--danger")
     assert "background: var(--danger)" in danger
     assert "border-color: var(--danger)" in danger
-    assert "color: #fff" in danger
+    assert "color: var(--danger-fg)" in danger

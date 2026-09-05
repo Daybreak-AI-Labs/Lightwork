@@ -16,33 +16,59 @@ export function usePolling<T>(
   fetcher: () => Promise<T>,
   intervalMs: number,
 ): Polled<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const alive = useRef(true);
-
-  const tick = useCallback(() => {
-    fetcher().then(
-      (d) => {
-        if (!alive.current) return;
-        setData(d);
-        setError(null);
-      },
-      (e: unknown) => {
-        if (!alive.current) return;
-        setError(e instanceof Error ? e.message : String(e));
-      },
-    );
-  }, [fetcher]);
+  const [snapshot, setSnapshot] = useState<{
+    fetcher: () => Promise<T>;
+    data: T | null;
+    error: string | null;
+  }>({ fetcher, data: null, error: null });
+  const refreshCurrent = useRef<() => void>(() => {});
+  const refresh = useCallback(() => refreshCurrent.current(), []);
 
   useEffect(() => {
-    alive.current = true;
+    // The flag belongs to this fetcher generation, so a later effect cannot
+    // revive callbacks from the previous dashboard or from before unmount.
+    let current = true;
+    let latestRequest = 0;
+    let pending = false;
+    setSnapshot({ fetcher, data: null, error: null });
+    const tick = () => {
+      if (!current) return;
+      const request = ++latestRequest;
+      pending = true;
+      Promise.resolve().then(fetcher).then(
+        (data) => {
+          if (!current || request !== latestRequest) return;
+          setSnapshot({ fetcher, data, error: null });
+        },
+        (e: unknown) => {
+          if (!current || request !== latestRequest) return;
+          setSnapshot(previous => ({
+            fetcher,
+            data: previous.fetcher === fetcher ? previous.data : null,
+            error: e instanceof Error ? e.message : String(e),
+          }));
+        },
+      ).finally(() => {
+        if (request === latestRequest) pending = false;
+      });
+    };
+    refreshCurrent.current = tick;
     tick();
-    const id = setInterval(tick, intervalMs);
+    // Slow automatic polls must be allowed to finish instead of being made
+    // obsolete on every interval. Explicit refresh may still supersede one.
+    const id = setInterval(() => { if (!pending) tick(); }, intervalMs);
     return () => {
-      alive.current = false;
+      current = false;
+      refreshCurrent.current = () => {};
       clearInterval(id);
     };
-  }, [tick, intervalMs]);
+  }, [fetcher, intervalMs]);
 
-  return { data, error, refresh: tick };
+  // Hide the previous identity's data even in the render before effect cleanup.
+  const matches = snapshot.fetcher === fetcher;
+  return {
+    data: matches ? snapshot.data : null,
+    error: matches ? snapshot.error : null,
+    refresh,
+  };
 }

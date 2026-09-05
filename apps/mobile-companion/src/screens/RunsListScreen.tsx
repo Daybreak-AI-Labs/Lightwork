@@ -1,10 +1,10 @@
 /* Runs list — GET /api/v1/goals (newest first), polled every 10s.
  * Falls back to the cached offline bundle when the dashboard is unreachable. */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { BundleGoal, Goal, Settings, listGoals } from "../api";
-import { CachedBundle, loadBundle, offlineBanner } from "../offlineCache";
+import { offlineBanner, useCachedBundle } from "../offlineCache";
 import { usePolling } from "../poll";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -23,11 +23,7 @@ export function RunsListScreen(props: {
   const { settings, onOpenRun } = props;
   const fetcher = useCallback(() => listGoals(settings, 50), [settings]);
   const { data, error } = usePolling<Goal[]>(fetcher, 10_000);
-  const [cached, setCached] = useState<CachedBundle | null>(null);
-
-  useEffect(() => {
-    if (error && !data) loadBundle(settings.baseUrl).then(setCached);
-  }, [error, data, settings.baseUrl]);
+  const cached = useCachedBundle(settings, Boolean(error && !data));
 
   const offline = !data && cached;
   const rows: Goal[] = data

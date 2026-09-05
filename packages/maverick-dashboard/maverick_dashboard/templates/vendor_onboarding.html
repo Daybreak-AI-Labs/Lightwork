@@ -2,7 +2,9 @@
 {% block title %}AI vendor onboarding - Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
-  .vo-layout {display:grid; grid-template-columns:minmax(15rem,1fr) minmax(22rem,3fr); gap:1.5rem}
+  .vo-layout {display:grid; grid-template-columns:minmax(0,1fr) minmax(0,2.3fr); gap:1.5rem}
+  .vo-layout > * {min-width:0}
+  .vo-card h2,.vo-card button,.vo-status span {overflow-wrap:anywhere}
   .vo-card {padding:1.2rem; border:1px solid var(--border); border-radius:12px; background:var(--panel); margin-bottom:1rem}
   .vo-card label {display:block; margin-top:.7rem}
   .vo-card input,.vo-card select,.vo-card textarea {display:block; width:100%; margin:.3rem 0 .7rem}
@@ -19,14 +21,18 @@
   .vo-card details {margin-top:1rem}
   .vo-status {display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0}
   .vo-status span {padding:.5rem .8rem; border:1px solid var(--border); border-radius:8px}
-  #vo-message {min-height:1.5rem; padding:.6rem 0}
+  #vo-message {position:sticky; top:calc(var(--shell-topbar-h,56px) + .5rem); z-index:20; padding:.75rem; border:1px solid var(--border); border-radius:8px; background:var(--panel)}
+  #vo-message:empty {display:none}
+  #vo-message[role="alert"] {color:var(--err); border-color:currentColor}
   #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0}
+  #vo-cases button[aria-current="true"] {border-color:var(--accent); background:var(--surface-2)}
+  #vo-case-reference {overflow-wrap:anywhere; color:var(--muted)}
   @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
 </style>
 {% endblock %}
 {% block content %}
-<main id="vendor-onboarding" data-api-base="/api/v1/vendor-onboarding">
-  <h1>AI vendor onboarding</h1>
+<section id="vendor-onboarding" aria-labelledby="vo-title" data-api-base="/api/v1/vendor-onboarding">
+  <h1 id="vo-title" class="page-title">AI vendor onboarding</h1>
   {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
   <p>Bring in evidence, review the assessment, and approve a verified Jira task. Renewals retain the previous evidence and decisions.</p>
   <p id="vo-message" role="status" aria-live="polite"></p>
@@ -54,6 +60,7 @@
     <div>
       <section class="vo-card" aria-labelledby="vo-case-title">
         <h2 id="vo-case-title">Select a request</h2>
+        <p id="vo-case-reference"></p>
         <div id="vo-status" class="vo-status"></div>
         <div class="vo-actions">
           <button id="vo-collect" type="button" disabled>Obtain current evidence</button>
@@ -99,6 +106,6 @@
       </section>
     </div>
   </div>
-</main>
+</section>
 <script src="/static/lightwork-vendor-onboarding.js" defer></script>
 {% endblock %}

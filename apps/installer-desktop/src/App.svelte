@@ -161,7 +161,7 @@
       await invoke('cancel_install');
     } catch (e) {
       cancellationRequested = false;
-      errorMsg = `Could not cancel safely: ${String(e)}`;
+      errorMsg = `Could not cancel safely: ${installFailure(e).message}`;
       return false;
     }
     try {
@@ -227,6 +227,7 @@
     <section>
       <h2>Installing…</h2>
       <p class="sub">Hang tight — this can take a minute or two.</p>
+      {#if errorMsg}<p class="error" role="alert">{errorMsg}</p>{/if}
       <pre bind:this={logEl} class="log">{lines.join('\n')}</pre>
       <button class="cancel" disabled={cancellationRequested} onclick={cancelInstall}>
         {cancellationRequested ? 'Cancelling…' : 'Cancel installation'}
@@ -241,7 +242,7 @@
   {:else if status === 'failed'}
     <section class="failed">
       <h2>Install failed</h2>
-      <p class="error">{errorMsg}</p>
+      <p class="error" role="alert">{errorMsg}</p>
       <pre class="log">{lines.join('\n')}</pre>
       {#if cleanupBlocked}
         <p>

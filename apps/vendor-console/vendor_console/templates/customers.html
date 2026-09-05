@@ -7,7 +7,7 @@
     <p class="sub">{{ customers|length }} account{{ '' if customers|length==1 else 's' }}</p>
   </div>
   <form method="get" action="/customers">
-    <input name="q" value="{{ q }}" placeholder="Search name / email" style="width:240px">
+    <input name="q" value="{{ q }}" aria-label="Search customers by name or email" placeholder="Search name / email" style="width:240px;max-width:100%">
   </form>
 </div>
 
@@ -31,11 +31,11 @@
 <div class="card">
   <form method="post" action="/customers">
     <div class="formgrid">
-      <div><label>Name</label><input name="name" required></div>
-      <div><label>Contact email</label><input name="contact_email" type="email"></div>
-      <div><label>Primary contact</label><input name="primary_contact"></div>
-      <div><label>Environment posture</label>
-        <select name="posture">
+      <div><label for="console-customers-name">Name</label><input id="console-customers-name" name="name" required></div>
+      <div><label for="console-customers-contact_email">Contact email</label><input id="console-customers-contact_email" name="contact_email" type="email"></div>
+      <div><label for="console-customers-primary_contact">Primary contact</label><input id="console-customers-primary_contact" name="primary_contact"></div>
+      <div><label for="console-customers-posture">Environment posture</label>
+        <select id="console-customers-posture" name="posture">
           <option value="connected">Connected (egress to the console)</option>
           <option value="vpc">Change-controlled VPC</option>
           <option value="airgapped">Air-gapped (hand-delivered files)</option>

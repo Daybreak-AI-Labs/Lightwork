@@ -4,12 +4,12 @@
 <div class="auth-card">
   <div class="brand">◐ Daybreak<span>control plane</span></div>
   <p class="sub">Sign in to continue.</p>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
   <form method="post" action="/login">
-    <label>Email</label>
-    <input name="email" type="email" required autofocus>
-    <label>Password</label>
-    <input name="password" type="password" required>
+    <label for="console-login-email">Email</label>
+    <input id="console-login-email" name="email" type="email" autocomplete="username" required autofocus>
+    <label for="console-login-password">Password</label>
+    <input id="console-login-password" name="password" type="password" autocomplete="current-password" required>
     <button class="btn" type="submit">Sign in</button>
   </form>
 </div>

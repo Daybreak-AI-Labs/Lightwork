@@ -13,10 +13,11 @@
   .sh-slas .sh-actual { color: var(--muted); margin-left: 4px; }
   .sh-exc { margin-top: var(--space-3); }
   .sh-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-3); align-items: end; }
-  .sh-form .field { display: flex; flex-direction: column; gap: 4px; }
-  .sh-form label { font-size: var(--text-xs); color: var(--muted); }
-  .sh-form input, .sh-form select { padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-sunken); color: var(--text); }
-  .sh-sla-row { display: grid; grid-template-columns: 1.2fr 1.4fr 0.8fr; gap: var(--space-2); margin-bottom: var(--space-2); }
+  .sh-form .field, .sh-sla-row .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .sh-form label, .sh-sla-row label { font-size: var(--text-xs); color: var(--muted); }
+  .sh-form input, .sh-form select, .sh-sla-row input, .sh-sla-row select { width: 100%; min-width: 0; max-width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-sunken); color: var(--text); }
+  .sh-sla-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) minmax(0, 0.8fr); gap: var(--space-2); margin-bottom: var(--space-2); }
+  @media (max-width: 620px) { .sh-sla-row { grid-template-columns: minmax(0, 1fr); } }
   .sh-note { font-size: var(--text-xs); color: var(--muted); }
   .sh-remove { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; padding: 0.25rem 0.6rem; font-size: var(--text-xs); }
   .sh-remove:hover { border-color: var(--danger); color: var(--danger); }

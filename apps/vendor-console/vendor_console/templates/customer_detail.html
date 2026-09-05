@@ -51,18 +51,18 @@
         grant; an unchecked feature the tier includes becomes an explicit denial.</p>
       <form method="post" action="/customers/{{ customer.id }}/licenses">
         <div class="formgrid">
-          <div><label>Tier</label>
-            <select name="tier">
+          <div><label for="console-customer_detail-tier">Tier</label>
+            <select id="console-customer_detail-tier" name="tier">
               <option value="basic" {% if matrix.tier=='basic' %}selected{% endif %}>Basic</option>
               <option value="gold" {% if matrix.tier=='gold' or not matrix.tier %}selected{% endif %}>Gold</option>
               <option value="platinum" {% if matrix.tier=='platinum' %}selected{% endif %}>Platinum</option>
             </select>
           </div>
-          <div><label>Seats <span class="muted">(blank = unlimited)</span></label>
-            <input name="seats" inputmode="numeric"></div>
-          <div><label>Expires <span class="muted">(YYYY-MM-DD, blank = perpetual)</span></label>
-            <input name="expires" placeholder="2027-01-01"></div>
-          <div><label>Grace days</label><input name="grace_days" value="14" inputmode="numeric"></div>
+          <div><label for="console-customer_detail-seats">Seats <span class="muted">(blank = unlimited)</span></label>
+            <input id="console-customer_detail-seats" name="seats" inputmode="numeric"></div>
+          <div><label for="console-customer_detail-expires">Expires <span class="muted">(YYYY-MM-DD, blank = perpetual)</span></label>
+            <input id="console-customer_detail-expires" name="expires" placeholder="2027-01-01"></div>
+          <div><label for="console-customer_detail-grace_days">Grace days</label><input id="console-customer_detail-grace_days" name="grace_days" value="14" inputmode="numeric"></div>
         </div>
 
         <label style="margin-top:14px">Gated features</label>
@@ -90,9 +90,9 @@
         </div>
 
         <div style="margin-top:12px">
-          <label>Custom feature grants <span class="muted">(comma-sep, outside the
+          <label for="console-customer_detail-features_extra">Custom feature grants <span class="muted">(comma-sep, outside the
             registry — for bespoke chokepoints)</span></label>
-          <input name="features_extra" value="{{ matrix.extra|join(', ') }}">
+          <input id="console-customer_detail-features_extra" name="features_extra" value="{{ matrix.extra|join(', ') }}">
         </div>
 
         <button class="btn" type="submit" style="margin-top:16px">Issue signed license</button>
@@ -101,7 +101,7 @@
     {% endif %}
   </div>
 
-  <div style="flex:0 0 300px">
+  <div style="flex:0 1 300px;min-width:0">
     <h2>Deployment</h2>
     <div class="card">
       {% if checkin %}
@@ -114,8 +114,8 @@
       {% endif %}
       {% if staff.can_write %}
       <form method="post" action="/customers/{{ customer.id }}/channel" style="margin-top:12px">
-        <label>Release channel</label>
-        <select name="channel" onchange="this.form.submit()">
+        <label for="console-customer_detail-channel">Release channel</label>
+        <select id="console-customer_detail-channel" name="channel" onchange="this.form.submit()">
           <option value="stable" {% if customer.channel=='stable' %}selected{% endif %}>stable</option>
           <option value="edge" {% if customer.channel=='edge' %}selected{% endif %}>edge</option>
         </select>

@@ -9,7 +9,10 @@
   let reviewedAt = null;
   let busy = false;
   const show = (id, value) => { byId(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); };
-  const message = text => show("message", text);
+  const message = (text, error = false) => {
+    byId("message").setAttribute("role", error ? "alert" : "status");
+    show("message", text);
+  };
   const date = value => value ? new Date(value * 1000).toLocaleString() : "Not recorded";
   const friendly = value => String(value || "pending").replaceAll("_", " ");
   function element(tag, text, parent) {
@@ -27,6 +30,15 @@
       reconcile: ["executing", "reconciliation_required"].includes(op.state),
       accept: op.state === "verified" && !row.outcome, reject: op.state === "verified" && !row.outcome};
     for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || !enabled;
+    byId("intake").querySelectorAll("input,textarea,button").forEach(control => { control.disabled = busy; });
+    byId("refresh").disabled = busy;
+    byId("cases").querySelectorAll("button").forEach(button => {
+      button.disabled = busy;
+      button.setAttribute("aria-current", String(button.dataset.caseId === selected?.id));
+    });
+    byId("corrections").querySelectorAll("select,textarea").forEach(control => { control.disabled = busy || !allowed["review-approve"]; });
+    byId("rationale").disabled = busy || !allowed["review-approve"];
+    byId("acceptance-reason").disabled = busy || !allowed.accept;
   }
   function assessmentView(record) {
     byId("assessment").replaceChildren(); byId("corrections").replaceChildren();
@@ -67,57 +79,84 @@
     });
     let data;
     try { data = await response.json(); } catch (_) { throw new Error("Server response unavailable; reload the case before retrying."); }
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Server response unavailable; reload the case before retrying.");
     if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request was rejected; check fields and reload the case.");
     return data;
   }
+  function sameJSON(left, right) {
+    if (left === right) return true;
+    if (!left || !right || typeof left !== "object" || typeof right !== "object" ||
+        Array.isArray(left) !== Array.isArray(right)) return false;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length && keys.every(key =>
+      Object.prototype.hasOwnProperty.call(right, key) && sameJSON(left[key], right[key]));
+  }
   function render(record) {
+    if (typeof record.id !== "string" || !Number.isInteger(record.revision) || typeof record.vendor_name !== "string")
+      throw new Error("Case response is incomplete; refresh requests before continuing.");
+    const sameCase = selected?.id === record.id;
+    const sameReview = sameCase && selected.revision === record.revision &&
+      sameJSON(selected.assessment, record.assessment);
+    if (!sameReview) {
+      byId("rationale").value = "";
+      byId("acceptance-reason").value = "";
+      reviewedAt = performance.now();
+    }
     selected = record;
-    reviewedAt = performance.now();
-    show("case-title", record.vendor_name + " · " + record.id);
+    show("case-title", record.vendor_name);
+    show("case-reference", `${record.renewal_of ? "Renewal" : "Initial request"} · ${record.id}`);
     byId("status").replaceChildren();
     const operation = record.operation || {};
     const outcome = record.outcome || {};
-    for (const label of ["Stage: " + record.stage, "Revision: " + record.revision,
-      "External action: " + (operation.state || operation.status || "not prepared"),
+    for (const label of ["Stage: " + friendly(record.stage), "Revision: " + record.revision,
+      "External action: " + friendly(operation.state || operation.status || "not prepared"),
       "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : "pending")]) {
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
     }
     const evidence = record.evidence;
     show("evidence", evidence ? `Status: ${friendly(evidence.status)}\nGoogle Drive file: ${record.document_id}\nVersion: ${evidence.version || "unverified"}\nLast modified: ${date(evidence.modified_at)}\nValid until: ${date(evidence.fresh_until)}\nContent fingerprint: ${evidence.content_sha256 || "unavailable"}` : "No evidence obtained.");
-    assessmentView(record);
+    // Keep the review controls and unsaved corrections for this exact version.
+    if (!sameReview) assessmentView(record);
     const payload = operation.payload;
     show("operation", payload ? `Project: ${payload.project}\nTicket title: ${payload.summary}\n\n${payload.description}\n\nApproval expires: ${date(operation.expires_at)}\nVerified ticket: ${operation.external_confirmation?.key || "pending"}` : "No action prepared.");
     show("operation-record", operation);
     const metrics = record.metrics || {};
     const timedReviews = (record.review_history || []).filter(review => review.review_seconds !== null && review.review_seconds !== undefined);
     const reviewTime = timedReviews.length ? `${Number(metrics.human_review_seconds).toFixed(1)} seconds reported` : "Unmeasured";
-    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd === null ? "unmeasured" : "$" + (metrics.execution_cost_usd || 0)}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate authorization required`);
+    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate authorization required`);
     show("renewal-status", "Check current evidence and ticket versions before starting a renewal.");
     show("history", [...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item))].join("\n\n") || "No reviewer decisions or exceptions yet.");
     buttons();
+    if (sameCase && !sameReview)
+      return "The request or assessment changed. Draft answers, notes, and decision reasons were reset. Review the current version before deciding.";
   }
   async function refresh() {
     const result = await api("/cases");
+    if (!Array.isArray(result.cases)) throw new Error("Request list is unavailable; refresh before continuing.");
     byId("cases").replaceChildren();
     for (const record of result.cases) {
       const button = document.createElement("button"); button.type = "button";
-      button.textContent = record.vendor_name + " · " + record.stage;
-      button.addEventListener("click", () => run(async () => render(await api("/cases/" + encodeURIComponent(record.id)))));
+      button.dataset.caseId = record.id;
+      button.textContent = `${record.vendor_name} · ${record.renewal_of ? "Renewal" : "Initial request"} · ${friendly(record.stage)}`;
+      button.addEventListener("click", () => run(async () => render(await api("/cases/" + encodeURIComponent(record.id))), "Request loaded. Review its evidence and current status."));
       byId("cases").append(button);
     }
     if (!result.cases.length) byId("cases").textContent = "No requests for this tenant.";
   }
-  async function run(operation) {
+  async function run(operation, success = "Saved. Review the current case before the next action.", focusId) {
     if (busy) return;
     busy = true;
-    root.querySelectorAll("button").forEach(button => { button.disabled = true; });
-    try { await operation(); message("Saved. Review the current case before the next action."); }
-    catch (error) { message(error.message); }
+    root.setAttribute("aria-busy", "true");
+    buttons();
+    let succeeded = false;
+    try { message((await operation()) || success); succeeded = true; }
+    catch (error) { message(error.message, true); }
     finally {
       busy = false;
-      root.querySelectorAll("button").forEach(button => { button.disabled = false; });
+      root.setAttribute("aria-busy", "false");
       buttons();
+      if (succeeded && focusId) byId(focusId).focus();
     }
   }
   async function action(name, extra = {}) {
@@ -127,8 +166,8 @@
     render(updated);
     await refresh();
   }
-  const click = (id, operation) => byId(id).addEventListener("click", () => run(operation));
-  click("refresh", async () => { await refresh(); if (selected) render(await api("/cases/" + encodeURIComponent(selected.id))); });
+  const click = (id, operation, success, focusId) => byId(id).addEventListener("click", () => run(operation, success, focusId));
+  click("refresh", async () => { await refresh(); if (selected) return render(await api("/cases/" + encodeURIComponent(selected.id))); }, "Requests refreshed. Review the current case before continuing.");
   byId("intake").addEventListener("submit", event => {
     event.preventDefault();
     run(async () => {
@@ -146,7 +185,7 @@
     if (!selected) throw new Error("Select the accepted request first.");
     const result = await api("/cases/" + encodeURIComponent(selected.id) + "/check-renewal", {expected_revision: selected.revision});
     show("renewal-status", `Renewal check: ${friendly(result.classification)}. ${result.reason || "Review the current evidence and start a renewal request when due."}`);
-  });
+  }, "Renewal readiness checked. Review the result before starting a new request.");
   for (const decision of ["approve", "reject"]) click("review-" + decision, () => {
     const rationale = byId("rationale").value.trim();
     if (!rationale) throw new Error("Enter a review rationale or exception reason.");
@@ -171,7 +210,6 @@
     for (const [field, key] of [["vendor", "vendor_name"], ["document", "document_id"], ["project", "project"], ["purpose", "purpose"], ["freshness", "freshness_days"]])
       byId(field).value = selected[key];
     byId("renewal").value = selected.id;
-    byId("document").focus();
-  });
-  run(refresh);
+  }, "Renewal details copied. Review the new request fields, then choose Create request.", "document");
+  run(refresh, "Requests loaded. Select a request to begin.");
 })();

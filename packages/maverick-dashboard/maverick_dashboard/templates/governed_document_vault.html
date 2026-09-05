@@ -6,8 +6,10 @@
     --vault-glass: color-mix(in srgb, var(--panel, #111827) 72%, transparent);
     --vault-line: color-mix(in srgb, var(--text, #f8fafc) 17%, transparent);
     --vault-glow: color-mix(in srgb, var(--accent, #67e8f9) 24%, transparent);
-    display: grid; gap: 1.15rem;
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.15rem;
   }
+  .document-vault-shell > *, .document-vault-grid > *, .document-vault-row > * { min-width: 0; }
+  .document-vault-shell :is(input, select, textarea) { min-width: 0; max-width: 100%; }
   .document-vault-hero, .document-vault-panel, .document-vault-boundary {
     background: linear-gradient(145deg, var(--vault-glow), transparent 38%), var(--vault-glass);
     border: 1px solid var(--vault-line); border-radius: 1.45rem;
@@ -24,7 +26,7 @@
   .document-vault-grid { border: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); margin: 0; min-inline-size: 0; padding: 0; }
   .document-vault-form, .document-vault-form fieldset { display: grid; gap: .75rem; }
   .document-vault-form fieldset { border: 0; margin: 0; min-inline-size: 0; padding: 0; }
-  .document-vault-row { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+  .document-vault-row { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); }
   .document-vault-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
   .document-vault-output { background: color-mix(in srgb, #020617 50%, transparent); border: 1px solid var(--vault-line); border-radius: 1rem; max-block-size: 32rem; min-block-size: 8rem; overflow: auto; padding: 1rem; white-space: pre-wrap; }
   .document-vault-status[data-state="failed"] { color: var(--danger, #fb7185); }

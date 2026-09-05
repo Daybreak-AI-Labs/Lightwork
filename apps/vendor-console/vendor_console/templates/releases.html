@@ -44,18 +44,18 @@
     <span class="mono">sha256sum</span>).</p>
   <form method="post" action="/releases">
     <div class="formgrid">
-      <div><label>Version</label><input name="version" placeholder="v0.1.7" required></div>
-      <div><label>Channel</label>
-        <select name="channel"><option value="stable">stable</option><option value="edge">edge</option></select>
+      <div><label for="console-releases-version">Version</label><input id="console-releases-version" name="version" placeholder="v0.1.7" required></div>
+      <div><label for="console-releases-channel">Channel</label>
+        <select id="console-releases-channel" name="channel"><option value="stable">stable</option><option value="edge">edge</option></select>
       </div>
-      <div><label>Min upgrade-from</label><input name="min_from" placeholder="v0.1.5"></div>
-      <div><label>Governed migrations <span class="muted">(comma/line-sep)</span></label>
-        <input name="migrations" placeholder="m6, m7"></div>
+      <div><label for="console-releases-min_from">Min upgrade-from</label><input id="console-releases-min_from" name="min_from" placeholder="v0.1.5"></div>
+      <div><label for="console-releases-migrations">Governed migrations <span class="muted">(comma/line-sep)</span></label>
+        <input id="console-releases-migrations" name="migrations" placeholder="m6, m7"></div>
     </div>
-    <label>Release notes</label>
-    <textarea name="notes" rows="2" placeholder="What changed"></textarea>
-    <label>Artifacts <span class="muted">(one per line: name sha256 size)</span></label>
-    <textarea name="artifacts" rows="3" class="mono"
+    <label for="console-releases-notes">Release notes</label>
+    <textarea id="console-releases-notes" name="notes" rows="2" placeholder="What changed"></textarea>
+    <label for="console-releases-artifacts">Artifacts <span class="muted">(one per line: name sha256 size)</span></label>
+    <textarea id="console-releases-artifacts" name="artifacts" rows="3" class="mono"
               placeholder="maverick-macos-arm64  &lt;sha256&gt;  10485760"></textarea>
     <button class="btn" type="submit" style="margin-top:16px">Sign &amp; publish</button>
   </form>
