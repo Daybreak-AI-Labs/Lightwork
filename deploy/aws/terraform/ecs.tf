@@ -132,11 +132,17 @@ resource "aws_ecs_service" "app" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
-  # Rolling: start the new task and let it pass health checks before the old
-  # one stops. World state is in Postgres and ~/.maverick is on EFS, so a brief
-  # overlap is safe, and a bad image rolls back instead of taking the site down.
-  deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent         = 200
+  # Stop-then-start, deliberately. The kernel holds an exclusive control-plane
+  # lock on the data root (control_plane_lease.py) so exactly one writer ever
+  # touches the hash-chained ledgers under ~/.maverick. With that root on EFS a
+  # rolling deploy is impossible: the new task sees the old task's live lock and
+  # refuses to start (observed: "ControlPlaneBusy ... Exactly one may write this
+  # data root", rolled back by the circuit breaker). A deploy therefore has a
+  # short gap while the old task stops and the new one passes health checks;
+  # the circuit breaker restores the previous task definition if the new one
+  # fails to start.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
   platform_version                   = "1.4.0"
 
   deployment_circuit_breaker {
