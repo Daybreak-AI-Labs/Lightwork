@@ -41,7 +41,7 @@ describe('installer terminal state', () => {
 
     render(App);
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Install from authorized source' })
+      await screen.findByRole('button', { name: 'Install Lightwork' })
     );
 
     expect(screen.getByRole('heading', { name: 'Installing…' })).toBeTruthy();
@@ -65,14 +65,52 @@ describe('installer terminal state', () => {
 
     render(App);
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Install from authorized source' })
+      await screen.findByRole('button', { name: 'Install Lightwork' })
     );
 
     expect(await screen.findByRole('heading', { name: 'Install failed' })).toBeTruthy();
     expect(screen.getByText('authorization denied')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).not.toContain('authorization denied');
+    expect(screen.getByText('authorization denied').closest('details')?.open).toBe(false);
     await waitFor(() => {
       expect(tauri.listen).not.toHaveBeenCalledWith('install-failed', expect.any(Function));
     });
+  });
+
+  it('opens the installed app for setup and prevents repeated launch requests', async () => {
+    let open!: () => void;
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === 'install') return Promise.resolve();
+      if (command === 'open_lightwork') return new Promise<void>((resolve) => { open = resolve; });
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Lightwork' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Open Lightwork' }));
+    expect((screen.getByRole('button', { name: 'Opening Lightwork…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(tauri.invoke).toHaveBeenNthCalledWith(2, 'open_lightwork');
+    expect(screen.queryByText(/maverick init|Terminal or PowerShell/)).toBeNull();
+    open();
+    expect(await screen.findByRole('button', { name: 'Return to Lightwork' })).toBeTruthy();
+    expect(screen.getByText('Lightwork opened in its own app window.')).toBeTruthy();
+  });
+
+  it('keeps launch retry and diagnostics inside the installer after startup fails', async () => {
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command === 'install') return Promise.resolve();
+      if (command === 'open_lightwork') return Promise.reject('synthetic launch error');
+      if (command === 'dashboard_diagnostics') return Promise.resolve('synthetic startup output');
+      return Promise.reject(new Error(`unexpected command: ${command}`));
+    });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Lightwork' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Open Lightwork' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Review startup details');
+    expect(screen.getByRole('alert').textContent).not.toContain('synthetic');
+    expect((screen.getByRole('button', { name: 'Open Lightwork' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText('synthetic launch error').closest('details')?.open).toBe(false);
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh startup details' }));
+    expect(await screen.findByText('synthetic startup output')).toBeTruthy();
   });
 
   it('waits for owned process teardown before reporting cancellation', async () => {
@@ -94,7 +132,7 @@ describe('installer terminal state', () => {
 
     render(App);
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Install from authorized source' })
+      await screen.findByRole('button', { name: 'Install Lightwork' })
     );
     await fireEvent.click(
       screen.getByRole('button', { name: 'Cancel installation' })
@@ -132,7 +170,7 @@ describe('installer terminal state', () => {
     render(App);
     await waitFor(() => expect(closeHandler).toBeTypeOf('function'));
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Install from authorized source' })
+      await screen.findByRole('button', { name: 'Install Lightwork' })
     );
     closeHandler?.();
 
@@ -168,7 +206,7 @@ describe('installer terminal state', () => {
     render(App);
     await waitFor(() => expect(closeHandler).toBeTypeOf('function'));
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Install from authorized source' })
+      await screen.findByRole('button', { name: 'Install Lightwork' })
     );
     closeHandler?.();
 
@@ -212,13 +250,14 @@ describe('installer terminal state', () => {
 
     render(App);
     await fireEvent.click(
-      await screen.findByRole('button', { name: 'Install from authorized source' })
+      await screen.findByRole('button', { name: 'Install Lightwork' })
     );
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel installation' }));
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Could not cancel safely: process control unavailable'
+      'Installation could not be stopped safely'
     );
+    expect(screen.getByText('Could not cancel safely: process control unavailable').closest('details')?.open).toBe(false);
     expect(screen.getByRole('heading', { name: 'Installing…' })).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Cancel installation' }) as HTMLButtonElement).disabled).toBe(false);
     expect(tauri.close).not.toHaveBeenCalled();

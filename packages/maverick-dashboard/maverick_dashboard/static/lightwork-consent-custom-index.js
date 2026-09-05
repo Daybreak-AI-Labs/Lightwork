@@ -163,7 +163,7 @@
       } else if (payload.enabled === true) {
         setStatus(runtimeStatus, "Custom indexes are enabled, but custody or source storage is not ready.", true);
       } else {
-        setStatus(runtimeStatus, "Custom indexes are disabled for the active tenant.", true);
+        setStatus(runtimeStatus, "Custom indexes are disabled for this workspace.", true);
       }
     } catch (error) {
       setStatus(runtimeStatus, `Status unavailable: ${error.message}`, true);

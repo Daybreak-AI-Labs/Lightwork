@@ -62,11 +62,11 @@
 {% block content %}
 {% from "_hero.html" import hero, state %}
 {% set state_copy %}
-  {%- if status.error -%}The kernel status could not be read: {{ status.error }}.
-  {%- elif status.tenant -%}Tenant <code>{{ status.tenant }}</code>.
-  {%- else -%}No active tenant: reads are floored to the deployment root.
-  {%- endif %} Every read fans out under one provenance envelope and lands as one audit row;
-  a source that is off or broken is reported as <em>denied</em>, never silently skipped.
+  {%- if status.error -%}Knowledge status could not be loaded. Review the support details below.
+  {%- elif status.tenant -%}Searching your current workspace.
+  {%- else -%}No workspace selected: searches use installation-level sources.
+  {%- endif %} Searches record where results came from. Unavailable sources are
+  shown so you can see what is missing.
 {% endset %}
 <div class="ctx" id="ctx-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-enabled="{{ 'true' if status.enabled else 'false' }}">
@@ -74,7 +74,7 @@
                subtitle='One governed mind',
                lede='Everything the company knows, in one governed mind: knowledge
                      with citations, skills, proven lessons, the Operating Record
-                     and fleet memory — tenant-exact, every read audited.') %}
+                     and team memory — scoped to your workspace, with an audit record for every search.') %}
     {{ state('Current state',
              'Cortex on' if status.enabled else 'Cortex off',
              badge=answering ~ ' of ' ~ total ~ ' sources answering',
@@ -82,14 +82,18 @@
                          else ('warn' if status.enabled and answering else 'idle'),
              copy=state_copy) }}
   {% endcall %}
+  {% if status.error %}
+  <details class="panel">
+    <summary>Knowledge status: support details</summary>
+    <p>{{ status.error }}</p>
+  </details>
+  {% endif %}
 
   <section class="panel" aria-labelledby="ctx-figure-caption">
     <figure class="ctx-figure">
       <canvas id="cortex-lattice" width="640" height="480" class="ctx-lattice" role="img"
-              aria-labelledby="ctx-figure-caption">The lattice needs a canvas-capable browser; the sources below are the same brain.</canvas>
-      <figcaption id="ctx-figure-caption">One lattice, five memories. Each node is something the
-        company knows; a node lights when the workforce writes to it, and a read lights the
-        nodes it touched. Nothing here crosses a tenant.</figcaption>
+              aria-labelledby="ctx-figure-caption">The source map needs a browser with canvas support. The same sources are listed below.</canvas>
+      <figcaption id="ctx-figure-caption">A map of the available knowledge sources. Nodes light up when information is added or read. Workspace records stay within their workspace.</figcaption>
     </figure>
   </section>
 
@@ -111,7 +115,7 @@
           {% for label, value in c.counts %}<div><dt>{{ label }}</dt><dd data-count="{{ label }}">{{ value }}</dd></div>{% endfor %}
         </dl>
         {% if c.collections %}<p class="muted ctx-card__foot">{{ c.collections | join(' · ') }}</p>{% endif %}
-        {% if c.error %}<p class="ctx-card__err">{{ c.error }}</p>{% endif %}
+        {% if c.error %}<details class="ctx-card__err"><summary>Source unavailable: details</summary><p>{{ c.error }}</p></details>{% endif %}
       </article>
       {% endfor %}
     </div>
@@ -119,33 +123,33 @@
       <div class="ctx-posture__cell" data-at-rest="{{ 'true' if status.encryption.at_rest else 'false' }}">
         <span>Encryption at rest</span><strong>{{ 'on' if status.encryption.at_rest else 'off' }}</strong></div>
       <div class="ctx-posture__cell" data-per-tenant="{{ 'true' if status.encryption.per_tenant else 'false' }}">
-        <span>Per-tenant keys</span><strong>{{ 'on' if status.encryption.per_tenant else 'off' }}</strong></div>
+        <span>Separate workspace keys</span><strong>{{ 'on' if status.encryption.per_tenant else 'off' }}</strong></div>
       <div class="ctx-posture__cell" data-tenant-floored="{{ 'true' if status.isolation.tenant_floored else 'false' }}">
-        <span>Tenant floored</span><strong>{{ 'yes' if status.isolation.tenant_floored else 'no active tenant' }}</strong></div>
+        <span>Limited to this workspace</span><strong>{{ 'yes' if status.isolation.tenant_floored else 'no workspace selected' }}</strong></div>
       <div class="ctx-posture__cell" data-pooled="{{ 'true' if status.isolation.pooled_across_tenants else 'false' }}">
-        <span>Pooled across tenants</span><strong>{{ 'yes' if status.isolation.pooled_across_tenants else 'never' }}</strong></div>
+        <span>Combined across workspaces</span><strong>{{ 'yes' if status.isolation.pooled_across_tenants else 'never' }}</strong></div>
       {% if status.isolation.note %}<p class="ctx-posture__note">{{ status.isolation.note }}</p>{% endif %}
     </div>
   </section>
 
   <section aria-labelledby="ctx-recall-h">
     <div class="section-head">
-      <h2 id="ctx-recall-h">Recall</h2>
-      <span class="muted">POST {{ api_base }}/recall · one audit row per read</span>
+      <h2 id="ctx-recall-h">Search knowledge</h2>
+      <span class="muted">Each search is recorded in the activity log.</span>
     </div>
     <form class="panel ctx-form" id="ctx-recall-form" autocomplete="off">
       <div class="ctx-form__grid">
         <div class="ctx-field ctx-field--wide">
-          <label for="ctx-query">Query</label>
+          <label for="ctx-query">What would you like to find?</label>
           <textarea class="textarea" id="ctx-query" name="query" rows="3" maxlength="{{ max_query }}" required
                     placeholder="What does the company know about…"></textarea>
         </div>
         <div class="ctx-field">
-          <label for="ctx-domain">Domain (optional)</label>
+          <label for="ctx-domain">Business area (optional)</label>
           <input class="input" id="ctx-domain" name="domain" maxlength="64" placeholder="finance">
         </div>
         <div class="ctx-field">
-          <label for="ctx-k">Hits per source</label>
+          <label for="ctx-k">Results per source</label>
           <input class="input" id="ctx-k" name="k" type="number" min="1" max="{{ max_k }}" value="{{ default_k }}" inputmode="numeric">
         </div>
         <fieldset class="ctx-field--wide ctx-sources">
@@ -154,8 +158,8 @@
         </fieldset>
       </div>
       <div class="ctx-form__row">
-        <button class="btn btn--primary" type="submit" id="ctx-recall-submit">Recall</button>
-        <span class="muted" id="ctx-recall-state" role="status" aria-live="polite">Nothing recalled yet. Every read lands as one audit row.</span>
+        <button class="btn btn--primary" type="submit" id="ctx-recall-submit">Search</button>
+        <span class="muted" id="ctx-recall-state" role="status" aria-live="polite">No searches yet. Each search is recorded in the activity log.</span>
       </div>
     </form>
     <div class="panel" id="ctx-result" hidden>
@@ -168,20 +172,20 @@
   <section aria-labelledby="ctx-recent-h">
     <div class="section-head">
       <h2 id="ctx-recent-h">Recent reads and writes</h2>
-      <span class="muted">last {{ recent_n }} on today's audit tail</span>
+      <span class="muted">Latest {{ recent_n }} recorded today</span>
     </div>
     <div class="panel">
       {% if not can_audit %}
-        <p class="muted" id="ctx-recent-locked">The audit tail names who asked and what answered, so it
+        <p class="muted" id="ctx-recent-locked">This activity includes who searched and which sources answered, so it
           needs the <strong>audit</strong> permission — the same gate as the Audit page.</p>
       {% elif not recent %}
-        <p class="muted" id="ctx-recent-empty">No Cortex reads or writes on today's audit tail yet.
-          Recall something above and it will appear here.</p>
+        <p class="muted" id="ctx-recent-empty">No knowledge searches or updates recorded today.
+          Search above to add a recorded activity.</p>
       {% else %}
         <div class="ctx-table-wrap">
           <table class="ctx-table">
             <thead><tr>
-              <th scope="col">When</th><th scope="col">Op</th><th scope="col">Caller</th>
+              <th scope="col">When</th><th scope="col">Action</th><th scope="col">Requested by</th>
               <th scope="col">Per source</th><th scope="col">Denied</th><th scope="col">Outcome</th>
             </tr></thead>
             <tbody>
@@ -211,8 +215,8 @@
     </div>
   </section>
 
-  <noscript><p class="panel">JavaScript is required for the lattice and the recall console; what the brain
-    holds and the recent reads and writes above are rendered on the server.</p></noscript>
+  <noscript><p class="panel">Enable JavaScript to search your knowledge and view its connections.
+    You can still review the sources and recent activity above.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-cortex.js" defer></script>{% endblock %}

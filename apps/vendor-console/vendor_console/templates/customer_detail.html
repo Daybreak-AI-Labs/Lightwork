@@ -1,19 +1,20 @@
 {% extends "base.html" %}
 {% block title %}{{ customer.name }} · Daybreak Console{% endblock %}
 {% block main %}
+{% from "_labels.html" import environment, feature %}
 <div class="pagehead">
   <div>
     <h1>{{ customer.name }}</h1>
     <p class="sub">
       <span class="badge b-{{ customer.status }}">{{ customer.status }}</span>
-      &nbsp;{{ customer.posture }} &nbsp;·&nbsp; {{ customer.contact_email or 'no contact email' }}
+      &nbsp;{{ environment(customer.posture) }} &nbsp;·&nbsp; {{ customer.contact_email or 'no contact email' }}
     </p>
   </div>
   <a class="btn ghost small" href="/customers">← All customers</a>
 </div>
 
-<div class="row">
-  <div class="grow">
+<div class="customer-layout">
+  <div>
     <h2>Licenses</h2>
     <div class="card">
       <table>
@@ -43,12 +44,10 @@
     {% if staff.can_write %}
     <h2>Feature access</h2>
     <div class="card">
-      <p class="muted" style="margin-top:0;font-size:13px">Check what this customer
-        should have; saving issues a new signed license (also the upsell path — the
-        newest non-revoked license is what the deployment serves, so changes apply
-        without a redeploy; a connected deployment picks them up on its next
-        auto-refresh poll). A checked feature below the tier becomes an à-la-carte
-        grant; an unchecked feature the tier includes becomes an explicit denial.</p>
+      <p class="muted" style="margin-top:0;font-size:13px">Choose the features this customer can use. Saving issues a new signed license.
+        Connected installations receive it on their next refresh. Checked features
+        are enabled, including those outside the selected plan; unchecked features
+        are disabled, including those normally included in the plan.</p>
       <form method="post" action="/customers/{{ customer.id }}/licenses">
         <div class="formgrid">
           <div><label for="console-customer_detail-tier">Tier</label>
@@ -65,13 +64,13 @@
           <div><label for="console-customer_detail-grace_days">Grace days</label><input id="console-customer_detail-grace_days" name="grace_days" value="14" inputmode="numeric"></div>
         </div>
 
-        <label style="margin-top:14px">Gated features</label>
+        <label style="margin-top:14px">Available features</label>
         <div class="checkgrid">
           {% for f in matrix.features %}
           <label class="check">
             <input type="checkbox" name="features_on" value="{{ f.name }}"
                    {% if f.enabled %}checked{% endif %}>
-            <span class="mono">{{ f.name }}</span>
+            <span title="{{ f.name }}">{{ feature(f.name) }}</span>
             <span class="muted" style="font-size:11px">{{ f.min_tier }}+
               {%- if f.source == 'grant' %} · à la carte{% elif f.source == 'denied' %} · denied{% endif %}</span>
           </label>
@@ -84,16 +83,15 @@
           <label class="check">
             <input type="checkbox" name="suites_on" value="{{ s.name }}"
                    {% if s.enabled %}checked{% endif %}>
-            <span class="mono">{{ s.name }}</span>
+            <span title="{{ s.name }}">{{ feature(s.name) }}</span>
           </label>
           {% endfor %}
         </div>
 
-        <div style="margin-top:12px">
-          <label for="console-customer_detail-features_extra">Custom feature grants <span class="muted">(comma-sep, outside the
-            registry — for bespoke chokepoints)</span></label>
+        <details style="margin-top:12px"><summary>Advanced feature settings</summary>
+          <label for="console-customer_detail-features_extra">Custom feature access <span class="muted">(feature names, separated by commas)</span></label>
           <input id="console-customer_detail-features_extra" name="features_extra" value="{{ matrix.extra|join(', ') }}">
-        </div>
+        </details>
 
         <button class="btn" type="submit" style="margin-top:16px">Issue signed license</button>
       </form>
@@ -101,7 +99,7 @@
     {% endif %}
   </div>
 
-  <div style="flex:0 1 300px;min-width:0">
+  <div>
     <h2>Deployment</h2>
     <div class="card">
       {% if checkin %}
@@ -109,8 +107,7 @@
       <div class="mono">{{ checkin.version or 'unknown' }} · {{ checkin.license_status }}</div>
       <div class="muted mono" style="font-size:11px;margin-top:4px">{{ checkin.deployment_id or '—' }}</div>
       {% else %}
-      <p class="muted" style="margin:0">No check-ins yet — this deployment hasn't
-        polled the serve API, or it's air-gapped.</p>
+      <p class="muted" style="margin:0">This installation has not connected yet. It may be offline or set up without a network connection.</p>
       {% endif %}
       {% if staff.can_write %}
       <form method="post" action="/customers/{{ customer.id }}/channel" style="margin-top:12px">
@@ -124,12 +121,12 @@
       <div class="muted" style="font-size:12px;margin-top:10px">Channel: {{ customer.channel }}</div>
       {% endif %}
     </div>
-    <h2>Trust anchor</h2>
+    <h2>License verification</h2>
     <div class="card">
+      <details><summary>Verification key and setup</summary>
       <div class="muted" style="font-size:12px">PUBLISHER PUBLIC KEY</div>
       <div class="codebox" style="font-size:11px">{{ pubkey }}</div>
-      <p class="muted" style="font-size:12px">Embed in this customer's build so their
-        deployment trusts licenses you sign.</p>
+      <p class="muted" style="font-size:12px">Your installation administrator uses this public key to verify licenses from your organization.</p></details>
     </div>
   </div>
 </div>

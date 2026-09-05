@@ -11,9 +11,7 @@
       <p class="eyebrow">Consent and preference governance</p>
       <h1>Mobile and connected-app manifest analysis</h1>
       <p class="cas-lead">
-        Inspect bounded Android, Fire OS, iOS, tvOS, Roku, Tizen, and webOS
-        manifest metadata. Findings remain cited observations until a different
-        principal reviews the exact application revision and result digest.
+        Review application manifests for Android, Fire OS, iOS, tvOS, Roku, Tizen, and webOS. Findings include source references and require a separate person to review the application version and result.
       </p>
     </div>
     <div class="cas-orb" aria-hidden="true"></div>
@@ -33,8 +31,8 @@
 
   <section class="cas-panel glass-surface cas-status" aria-labelledby="cas-status-title">
     <div>
-      <p class="eyebrow">Runtime status</p>
-      <h2 id="cas-status-title">Tenant composition</h2>
+      <p class="eyebrow">Availability</p>
+      <h2 id="cas-status-title">Service availability</h2>
       <p id="cas-runtime-status" role="status" aria-live="polite">Checking application-scanner custody…</p>
     </div>
     <button class="btn" id="cas-refresh-status" type="button">Refresh status</button>
@@ -62,7 +60,7 @@
           <label for="cas-display-name">Display name
             <input class="input" id="cas-display-name" name="display_name" maxlength="255" required>
           </label>
-          <label for="cas-register-key">Idempotency key
+          <label for="cas-register-key">Request reference (reuse when retrying)
             <input class="input" id="cas-register-key" name="idempotency_key" maxlength="192" required>
           </label>
           <button class="btn btn--primary" type="submit">Register application</button>
@@ -96,7 +94,7 @@
 
     <section class="cas-panel glass-surface" aria-labelledby="cas-review-title">
       <p class="eyebrow">Independent decision</p>
-      <h2 id="cas-review-title">Review an exact result</h2>
+      <h2 id="cas-review-title">Review the analysis result</h2>
       <form id="cas-review-form" class="cas-form" autocomplete="off" novalidate>
         <fieldset{% if not application_scanner_can_admin %} disabled aria-disabled="true"{% endif %}>
           <label for="cas-scan-id">Scan ID
@@ -140,7 +138,7 @@
     </section>
   </fieldset>
 
-  <noscript><p class="cas-boundary glass-surface">JavaScript is required for this bounded administrative workbench.</p></noscript>
+  <noscript><p class="cas-boundary glass-surface">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

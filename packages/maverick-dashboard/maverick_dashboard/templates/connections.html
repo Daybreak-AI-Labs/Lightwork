@@ -35,10 +35,10 @@
 
 {% from "_hero.html" import hero, state %}
 {% call hero('Integrations', 'Connections',
-             subtitle='Your tools, wired in once',
+             subtitle='Connect the services you use',
              lede='Connect a tool once — pick what it is and paste its API
-                   token — and your flows can use it by name with no further
-                   setup.') %}
+                   token. Your workflows can then refer to the saved connection
+                   by name.') %}
   {{ state('Current state', 'Sealed credential vault',
            badge='encrypted at rest', badge_class='ok',
            copy='Tokens are sealed the moment you save and are never shown
@@ -81,7 +81,7 @@
         </div>
         <p class="cx__sub" id="cx-hint" style="margin:var(--space-2) 0 0;"></p>
         <div class="cx__fld" style="margin-top:var(--space-3);">
-          <label><input type="checkbox" id="cx-tenant-access"> Allow every authenticated user in this tenant to use this credential</label>
+          <label><input type="checkbox" id="cx-tenant-access"> Allow every signed-in user in this workspace to use this connection</label>
           <p class="cx__sub" style="margin:3px 0 0;">Off by default. Credential management stays admin-only either way.</p>
         </div>
         <div class="cx__fld" style="margin-bottom:0;">

@@ -43,23 +43,23 @@
   <header class="document-vault-hero">
     <p class="eyebrow">Administration · governed custody</p>
     <h1>Governed document vault</h1>
-    <p>Ingest approved document bytes into tenant-private encrypted custody, bind exact immutable authority, and deliver only through short-lived one-time grants.</p>
+    <p>Store approved documents securely in your workspace and share them through short-lived, one-time downloads.</p>
   </header>
 
   <aside class="document-vault-boundary" aria-labelledby="document-vault-boundary-title">
     <p class="eyebrow">Trust boundary</p>
-    <h2 id="document-vault-boundary-title">No paths, locators, or plaintext keys</h2>
+    <h2 id="document-vault-boundary-title">Protect documents and access</h2>
     <ul>
-      <li>The browser sends bounded bytes, an approved media type, and a safe display name. Filesystem paths, URLs, bucket keys, and object locators are not API inputs.</li>
-      <li>Content is SHA-256 bound to immutable revisions and encrypted through Lightwork's at-rest key authority before persistence.</li>
-      <li>Download tokens and delivery grants are principal-bound, short-lived, CAS protected, and one time. Raw grants and principals are not persisted.</li>
+      <li>Upload an approved file with a display name. Storage paths, external download links, and encryption keys are not accepted here.</li>
+      <li>Documents are encrypted before storage. Each saved version has a verification fingerprint to detect changes.</li>
+      <li>Downloads are limited to the authorized recipient, expire quickly, and can be used once. Download secrets are not retained.</li>
       <li>Local custody readiness does not prove external object-store custody, backup restoration, malware scanning, or live customer-workflow acceptance.</li>
     </ul>
   </aside>
 
   <section class="document-vault-panel" aria-labelledby="document-vault-status-title">
     <p class="eyebrow">Readiness</p>
-    <h2 id="document-vault-status-title">Tenant vault authority</h2>
+    <h2 id="document-vault-status-title">Vault availability</h2>
     <p id="document-vault-runtime-status" class="document-vault-status" role="status" aria-live="polite">Checking encrypted custody…</p>
     <div class="document-vault-actions">
       <button class="btn" id="document-vault-refresh-status" type="button">Refresh readiness</button>
@@ -111,7 +111,7 @@
 
     <section class="document-vault-panel" aria-labelledby="document-vault-token-title">
       <p class="eyebrow">One-time delivery</p>
-      <h2 id="document-vault-token-title">Mint, redeem, download</h2>
+      <h2 id="document-vault-token-title">Authorize and download</h2>
       <form class="document-vault-form" id="document-vault-token-form" autocomplete="off" novalidate>
         <fieldset id="document-vault-token-controls"{% if not document_vault_can_admin %} disabled aria-disabled="true"{% endif %}>
           <div class="document-vault-row">
@@ -147,7 +147,7 @@
       <pre class="document-vault-output" id="document-vault-operation-output" tabindex="0"></pre>
     </section>
   </fieldset>
-  <noscript><p class="document-vault-boundary">JavaScript is required for this bounded administrative workbench.</p></noscript>
+  <noscript><p class="document-vault-boundary">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-governed-document-vault.js" defer></script>{% endblock %}

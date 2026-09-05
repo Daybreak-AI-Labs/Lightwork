@@ -4,13 +4,13 @@
 <div class="pagehead">
   <div>
     <h1>Releases</h1>
-    <p class="sub">Signed release manifests connected deployments pull per channel.</p>
+    <p class="sub">Manage software updates offered to customer installations.</p>
   </div>
 </div>
 
 <div class="card">
   <table>
-    <tr><th>Version</th><th>Channel</th><th>From</th><th>Migrations</th><th>Artifacts</th><th>Published</th><th></th></tr>
+    <tr><th>Version</th><th>Channel</th><th>Minimum version</th><th>Migrations</th><th>Files</th><th>Published</th><th></th></tr>
     {% for r in releases %}
     <tr>
       <td><strong class="mono">{{ r.version }}</strong></td>
@@ -19,13 +19,13 @@
       <td class="muted">{{ r.migrations|length }}</td>
       <td class="muted">{{ r.artifacts|length }}</td>
       <td class="mono muted">{{ r.created_at|ts }}
-        {% if r.yanked %}<span class="badge b-revoked">yanked</span>{% endif %}</td>
+        {% if r.yanked %}<span class="badge b-revoked">withdrawn</span>{% endif %}</td>
       <td style="white-space:nowrap">
-        <a class="btn ghost small" href="/releases/{{ r.id }}/manifest">Manifest</a>
+        <a class="btn ghost small" href="/releases/{{ r.id }}/manifest">Download release record</a>
         {% if staff.can_write and not r.yanked %}
         <form method="post" action="/releases/{{ r.id }}/yank" style="display:inline"
-              onsubmit="return confirm('Yank {{ r.version }}@{{ r.channel }}? Deployments will stop being offered it.')">
-          <button class="btn danger small" type="submit">Yank</button>
+              onsubmit="return confirm('Withdraw {{ r.version }} from {{ r.channel }}? Customer installations will no longer be offered this release.')">
+          <button class="btn danger small" type="submit">Withdraw</button>
         </form>
         {% endif %}
       </td>
@@ -38,23 +38,21 @@
 {% if staff.can_write %}
 <h2>Publish a release</h2>
 <div class="card">
-  <p class="muted" style="margin-top:0;font-size:13px">The manifest is signed with your
-    publisher key (same as licenses). Binaries ship out-of-band; enter each artifact's
-    <span class="mono">name&nbsp;sha256&nbsp;size</span> (one per line — compute with
-    <span class="mono">sha256sum</span>).</p>
+  <p class="muted" style="margin-top:0;font-size:13px">Publish a signed update for customer installations. Release files must be distributed separately.</p>
   <form method="post" action="/releases">
     <div class="formgrid">
       <div><label for="console-releases-version">Version</label><input id="console-releases-version" name="version" placeholder="v0.1.7" required></div>
       <div><label for="console-releases-channel">Channel</label>
         <select id="console-releases-channel" name="channel"><option value="stable">stable</option><option value="edge">edge</option></select>
       </div>
-      <div><label for="console-releases-min_from">Min upgrade-from</label><input id="console-releases-min_from" name="min_from" placeholder="v0.1.5"></div>
-      <div><label for="console-releases-migrations">Governed migrations <span class="muted">(comma/line-sep)</span></label>
+      <div><label for="console-releases-min_from">Oldest supported version</label><input id="console-releases-min_from" name="min_from" placeholder="v0.1.5"></div>
+      <div><label for="console-releases-migrations">Required migrations <span class="muted">(names separated by commas or new lines)</span></label>
         <input id="console-releases-migrations" name="migrations" placeholder="m6, m7"></div>
     </div>
     <label for="console-releases-notes">Release notes</label>
     <textarea id="console-releases-notes" name="notes" rows="2" placeholder="What changed"></textarea>
-    <label for="console-releases-artifacts">Artifacts <span class="muted">(one per line: name sha256 size)</span></label>
+    <label for="console-releases-artifacts">Release files</label>
+    <details><summary>File format help</summary><p>Enter one file per line: its name, SHA-256 checksum, and size in bytes. Your release administrator can provide these values; use <code>sha256sum</code> to calculate a checksum.</p></details>
     <textarea id="console-releases-artifacts" name="artifacts" rows="3" class="mono"
               placeholder="maverick-macos-arm64  &lt;sha256&gt;  10485760"></textarea>
     <button class="btn" type="submit" style="margin-top:16px">Sign &amp; publish</button>

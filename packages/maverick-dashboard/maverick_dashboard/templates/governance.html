@@ -26,14 +26,17 @@
   <p class="gov-muted">Plain-language workflows for legal, privacy, compliance, and HR:
     fundamental-rights assessments, technical-documentation checklists, conformity
     routes, AI-literacy tracking, and serious-incident clocks. Every entry is recorded
-    under your name in the governed ledger. Nothing on this page transmits anything to
-    an authority or external system. Engineers and risk owners work in the
-    <a href="/security/assurance">technical assurance cockpit</a>; both surfaces share
-    the same governed records.</p>
+    under your name in the governed ledger. Authority filings are recorded here;
+    Lightwork does not submit them to an authority. The GRC sync action can send
+    records to your configured external system after explicit confirmation.
+    <a href="/security/assurance">Model risk assurance</a> shares these records.</p>
 </section>
 
 <section class="panel">
   <h2>Needs attention</h2>
+  <p><button class="btn" type="button" id="gov-refresh-attention">Refresh alerts</button>
+    <span id="gov-attention-status" role="status" aria-live="polite"></span></p>
+  <div id="gov-attention-summary">
   {% if attention.attention_count %}
   <p>
     {% set incidents = attention.sections.serious_incidents %}
@@ -65,8 +68,14 @@
   {% else %}
   <p class="gov-empty">Nothing needs attention right now.</p>
   {% endif %}
-  <p class="gov-help">Headless check for schedulers: <code>maverick governance-alerts due</code>
-    prints this digest and exits non-zero when anything is listed.</p>
+  {% for name, section in attention.sections.items() %}{% if section.error %}
+  <p class="gov-alert">{{ name|replace('_', ' ')|title }} alerts are unavailable. Other available results are shown above.</p>
+  {% endif %}{% endfor %}
+  </div>
+  <details><summary>Technical details: automated checks</summary>
+    <p class="gov-help">The command <code>maverick governance-alerts due</code>
+      prints these alerts and returns a non-zero status when action is needed.</p>
+  </details>
 </section>
 
 <section class="panel">
@@ -471,14 +480,13 @@
   {% else %}
   {% if literacy_error %}<p class="gov-alert">{{ literacy_error }}</p>{% endif %}
   {% if literacy_plane_status.reconciliation_required %}
-  <p class="gov-alert"><strong>Reconciliation required.</strong> This workspace is
-    the role-compatibility intake plane, not the canonical compliance-evidence
-    authority. Its records are never promoted automatically. Add the provider,
-    content-version, expiry, and evidence-digest fields through the canonical
-    AI-literacy register before relying on them as compliance evidence.</p>
+  <p class="gov-alert"><strong>Evidence review required.</strong> These role-training
+    records are not yet compliance evidence. Add the training provider, content
+    version, expiry date, and evidence fingerprint in the AI-literacy evidence
+    register before relying on them for compliance.</p>
   {% else %}
-  <p class="gov-muted">Operational role tracking is separate from the
-    privacy-minimising canonical evidence authority.</p>
+  <p class="gov-muted">Role-training records and reviewed compliance evidence are
+    tracked separately.</p>
   {% endif %}
   {% if literacy_gaps and literacy_gaps.person_count %}
   <p>{{ literacy_gaps.person_count }} person(s) tracked —
@@ -545,7 +553,7 @@
   {% endif %}
 </section>
 
-<section class="panel">
+<section class="panel" id="serious-incidents">
   <h2>Serious incidents (Art. 73)</h2>
   {% if not ai_incident_enabled %}
   <p class="gov-alert">Enable AI incident reporting to declare serious incidents and
@@ -632,8 +640,17 @@
       <td>{{ row.remote_id or "—" }}</td>
     </tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<p class="gov-empty">Nothing has been mirrored yet. An operator runs
-    <code>maverick grc-sync run</code> on a schedule.</p>{% endif %}
+  {% else %}<p class="gov-empty">Nothing has been mirrored yet. Run a sync to send eligible records to the configured GRC system.</p>{% endif %}
+  <form id="gov-grc-run" class="gov-form">
+    <label>Maximum records this time<input class="input" type="number" name="limit" min="1" max="200" step="1" value="50" required></label>
+    <label class="gov-form__wide"><span><input type="checkbox" name="confirm_dispatch" required>
+      I authorize sending eligible findings, accepted risks, and incidents to the configured external GRC system.</span></label>
+    <div class="gov-form__wide"><button class="btn btn--primary" type="submit">Sync records now</button>
+      <span class="gov-help">A signed-in administrator is required. Unconfirmed deliveries are held for review to avoid duplicates.</span></div>
+  </form>
+  <p id="gov-grc-status" role="status" aria-live="polite"></p>
+  <ul id="gov-grc-problems"></ul>
+  <details><summary>Technical details: latest sync result</summary><pre class="gov-render" id="gov-grc-output"></pre></details>
   {% endif %}
 </section>
 
@@ -690,6 +707,72 @@
     return response.json();
   };
   const epoch = value => Math.floor(new Date(value).getTime() / 1000);
+  const refreshAttention = document.getElementById("gov-refresh-attention");
+  refreshAttention.addEventListener("click", async () => {
+    if (refreshAttention.disabled) return;
+    refreshAttention.disabled = true;
+    status("gov-attention-status", "Checking alerts…");
+    try {
+      const result = await get(prefix, "/alerts");
+      if (!result || !Number.isInteger(result.attention_count) || !result.sections) throw new Error("The alert response was incomplete. Try again.");
+      const summary = document.getElementById("gov-attention-summary");
+      summary.replaceChildren();
+      const count = document.createElement("p");
+      count.textContent = result.attention_count ? `${result.attention_count} item(s) need attention.` : "No items need attention in the available results.";
+      summary.appendChild(count);
+      const labels = {
+        serious_incidents: {label:"Serious incidents",fields:{overdue:"reports overdue",due_soon:"reports due soon"}},
+        ai_literacy: {label:"AI literacy",fields:{missing:"trainings missing",expired:"trainings expired",expiring_soon:"trainings expiring soon"}},
+        eu_conformity: {label:"EU conformity",fields:{outdated_frias:"assessments reopened",reassessment_required:"routes needing reassessment"}},
+        vendors: {label:"Vendors",fields:{contracts_overdue:"contracts past renewal",contracts_due_soon:"contracts renewing soon"}},
+        data_map: {label:"Data map",fields:{unlinked_flagged_assets:"flagged assets unlinked"}},
+      };
+      Object.entries(labels).forEach(([name, definition]) => {
+        const section = result.sections[name];
+        if (!section) return;
+        if (section.error) {
+          const warning = document.createElement("p"); warning.className = "gov-alert";
+          warning.textContent = `${definition.label} alerts are unavailable. Other available results are shown.`;
+          summary.appendChild(warning); return;
+        }
+        Object.entries(definition.fields).forEach(([key, label]) => {
+          const number = Array.isArray(section[key]) ? section[key].length : section[key];
+          if (!number) return;
+          const item = document.createElement("p"); item.textContent = `${definition.label}: ${number} ${label}.`; summary.appendChild(item);
+        });
+      });
+      status("gov-attention-status", "Alerts refreshed.");
+    }
+    catch (error) { status("gov-attention-status", error.message || "Alerts could not be refreshed."); }
+    finally { refreshAttention.disabled = false; }
+  });
+  const grcRun = document.getElementById("gov-grc-run");
+  if (grcRun) grcRun.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = grcRun.querySelector('button[type="submit"]');
+    if (button.disabled || !grcRun.reportValidity()) return;
+    button.disabled = true;
+    status("gov-grc-status", "Syncing records…");
+    const problems = document.getElementById("gov-grc-problems");
+    problems.replaceChildren();
+    document.getElementById("gov-grc-output").textContent = "";
+    try {
+      const result = await post(prefix, "/grc-sync/run", {
+        limit: Number(grcRun.elements.limit.value),
+        confirm_dispatch: grcRun.elements.confirm_dispatch.checked,
+      });
+      const unconfirmed = (result.delivered || []).filter(row => row.status === "delivered_unconfirmed").length;
+      status("gov-grc-status", `${Math.max(0, (result.delivered_count || 0) - unconfirmed)} confirmed, ${unconfirmed} awaiting delivery confirmation, ${result.unchanged_count || 0} already current, ${result.blocked_count || 0} held for review, ${result.failure_count || 0} failed. The outbound table above reflects the last page load.`);
+      [...(result.blocked || []), ...(result.failures || [])].forEach(row => {
+        const item = document.createElement("li");
+        item.textContent = `${row.source_id}: ${row.reason}`;
+        problems.appendChild(item);
+      });
+      document.getElementById("gov-grc-output").textContent = JSON.stringify(result, null, 2);
+      grcRun.elements.confirm_dispatch.checked = false;
+    } catch (error) { status("gov-grc-status", error.message || "Sync could not finish. Check the outbound records before retrying."); }
+    finally { button.disabled = false; }
+  });
   const download = (filename, text) => {
     const blob = new Blob([text], {type: "text/plain"});
     const url = URL.createObjectURL(blob);

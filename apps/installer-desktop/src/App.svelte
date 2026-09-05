@@ -14,6 +14,10 @@
   let status: Status = 'idle';
   let lines: string[] = [];
   let errorMsg = '';
+  let openingLightwork = false;
+  let launchError = '';
+  let startupDetails = '';
+  let lightworkOpened = false;
   let logEl: HTMLElement | undefined;
   let activeInstall: Promise<void> | undefined;
   let cancellationRequested = false;
@@ -180,7 +184,7 @@
       return;
     }
     if (!window.confirm(
-      'Installation is still running. Cancel it, stop its child processes, and close Lightwork?'
+      'Installation is still running. Stop the installation and its background tasks, then close Lightwork?'
     )) {
       return;
     }
@@ -191,7 +195,7 @@
 
   async function confirmForceExit() {
     if (!window.confirm(
-      'Lightwork could not verify that every installer child process stopped. Restart is blocked. Force the installer app to exit now?'
+      'Some installation tasks may still be running. Starting another install is blocked. Force the installer app to close now?'
     )) {
       return;
     }
@@ -199,6 +203,32 @@
       await invoke('force_exit_after_cleanup_failure');
     } catch (error) {
       errorMsg = `Could not force the installer to exit: ${installFailure(error).message}`;
+    }
+  }
+
+  async function openLightwork() {
+    if (openingLightwork) return;
+    openingLightwork = true;
+    launchError = '';
+    try {
+      await invoke('open_lightwork');
+      if (!destroyed) lightworkOpened = true;
+    } catch (error) {
+      if (!destroyed) {
+        launchError = 'Lightwork could not open yet. Review startup details, then try again.';
+        startupDetails = String(error);
+      }
+    } finally {
+      if (!destroyed) openingLightwork = false;
+    }
+  }
+
+  async function refreshStartupDetails() {
+    try {
+      const details = await invoke<string>('dashboard_diagnostics');
+      if (!destroyed) startupDetails = details;
+    } catch (error) {
+      if (!destroyed) startupDetails = String(error);
     }
   }
 </script>
@@ -209,26 +239,32 @@
   </p>
   <header>
     <h1>Lightwork</h1>
-    <p class="sub">Authenticated source bootstrap for authorized operators.</p>
+    <p class="sub">Set up Lightwork on this computer.</p>
   </header>
 
   {#if status === 'idle'}
     <section>
       <p>
-        This clones a pinned commit from the private Lightwork repository and
-        installs its readable Python source. Network access and GitHub authorization
-        are required. Python is installed first if needed.
+        You need an internet connection and authorized access to Lightwork's
+        private GitHub repository. Python will be installed if needed.
       </p>
+      <details><summary>What will be installed?</summary>
+        <p>This installer downloads a pinned version of Lightwork's source code
+          and installs it on this computer.</p>
+      </details>
       <button disabled={!listenersRegistered} onclick={startInstall}>
-        {listenersRegistered ? 'Install from authorized source' : 'Preparing installer…'}
+        {listenersRegistered ? 'Install Lightwork' : 'Preparing installer…'}
       </button>
     </section>
   {:else if status === 'installing'}
     <section>
       <h2>Installing…</h2>
       <p class="sub">Hang tight — this can take a minute or two.</p>
-      {#if errorMsg}<p class="error" role="alert">{errorMsg}</p>{/if}
-      <pre bind:this={logEl} class="log">{lines.join('\n')}</pre>
+      {#if errorMsg}<p class="error" role="alert">Installation could not be stopped safely. It is still running. You can try cancelling again.</p>{/if}
+      <details><summary>Installation details</summary>
+        {#if errorMsg}<p class="error">{errorMsg}</p>{/if}
+        <pre bind:this={logEl} class="log">{lines.join('\n')}</pre>
+      </details>
       <button class="cancel" disabled={cancellationRequested} onclick={cancelInstall}>
         {cancellationRequested ? 'Cancelling…' : 'Cancel installation'}
       </button>
@@ -236,18 +272,32 @@
   {:else if status === 'done'}
     <section class="done">
       <h2>Lightwork is installed. 🎉</h2>
-      <p>Open a terminal and run <code>maverick init</code> to finish setup.</p>
-      <pre class="log">{lines.join('\n')}</pre>
+      <p>Open Lightwork to connect your AI service and finish setup in the app.</p>
+      <button disabled={openingLightwork} onclick={openLightwork}>
+        {openingLightwork ? 'Opening Lightwork…' : lightworkOpened ? 'Return to Lightwork' : 'Open Lightwork'}
+      </button>
+      {#if lightworkOpened}<p role="status">Lightwork opened in its own app window.</p>{/if}
+      {#if launchError}<p class="error" role="alert">{launchError}</p>{/if}
+      <details><summary>Startup details</summary>
+        <button onclick={refreshStartupDetails}>Refresh startup details</button>
+        <pre class="log">{startupDetails || 'No startup details loaded yet.'}</pre>
+      </details>
+      <details><summary>Installation details</summary><pre class="log">{lines.join('\n')}</pre></details>
     </section>
   {:else if status === 'failed'}
     <section class="failed">
       <h2>Install failed</h2>
-      <p class="error" role="alert">{errorMsg}</p>
-      <pre class="log">{lines.join('\n')}</pre>
+      <p class="error" role="alert">{cleanupBlocked
+        ? 'Some installation tasks may still be running. Starting another install is blocked.'
+        : listenerRegistrationFailed ? 'The installer could not start. Reload it and try again.'
+        : 'Installation could not finish. Review the details, then try again.'}</p>
+      <details><summary>Installation details</summary>
+        <p class="error">{errorMsg}</p><pre class="log">{lines.join('\n')}</pre>
+      </details>
       {#if cleanupBlocked}
         <p>
-          A new install is blocked to prevent overlap with an unverified process tree.
-          Review the diagnostics above, then close the app explicitly.
+          Review the installation details before closing the app. Force closing
+          the installer does not confirm that its background tasks have stopped.
         </p>
         <button class="cancel" onclick={confirmForceExit}>Force close installer</button>
       {:else if listenerRegistrationFailed}
@@ -259,8 +309,10 @@
   {:else}
     <section class="cancelled">
       <h2>Installation cancelled</h2>
-      <p>{errorMsg}</p>
-      <pre class="log">{lines.join('\n')}</pre>
+      <p>You can start again when you're ready.</p>
+      <details><summary>Installation details</summary>
+        <p>{errorMsg}</p><pre class="log">{lines.join('\n')}</pre>
+      </details>
       <button onclick={startInstall}>Start again</button>
     </section>
   {/if}
@@ -277,6 +329,9 @@
   header { margin-bottom: 2rem; }
   h1 { font-size: 2rem; margin: 0; }
   .sub { color: #8b949e; }
+  details { margin: 1rem 0; }
+  summary { cursor: pointer; color: #c9d1d9; }
+  summary:focus-visible { outline: 2px solid #58a6ff; outline-offset: 4px; }
   section { background: #161b22; padding: 1.5rem; border-radius: 8px; }
   h2 { margin-top: 0; font-size: 1.25rem; }
   button {
@@ -305,10 +360,6 @@
     background: #8b1a1a;
   }
   button.cancel:hover { background: #a52727; }
-  code {
-    background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
-    padding: 0.1rem 0.35rem; font-size: 0.9em;
-  }
   .log {
     margin-top: 1rem; max-height: 320px; overflow: auto;
     background: #010409; border: 1px solid #30363d; border-radius: 6px;

@@ -572,7 +572,7 @@
   async function loadStatus() {
     statusMark.dataset.state = "checking";
     statusMark.textContent = "Checking";
-    readiness.textContent = "Checking composition";
+    readiness.textContent = "Checking availability";
     try {
       var payload = await request("/status");
       statusOutput.textContent = JSON.stringify(payload, null, 2);
@@ -582,7 +582,7 @@
       statusMark.dataset.state = ready ? "ready" : "failed";
       statusMark.textContent = ready ? "Ready" : "Unavailable";
       readiness.textContent = ready ? "Studio authority ready" : "Studio authority unavailable";
-      readinessDetail.textContent = ready ? "Tenant-private authoring controls are enabled. Runtime target writes remain separately configured." : "Review the feature gate, custody and composition details before retrying.";
+      readinessDetail.textContent = ready ? "The builder is available in this workspace. Applying changes to connected systems requires separate setup." : "Review the availability details before retrying.";
     } catch (error) {
       operations.disabled = true;
       statusMark.dataset.state = "failed";

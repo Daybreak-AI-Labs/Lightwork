@@ -174,8 +174,8 @@
       ? "Native consent authority ready"
       : (enabled ? "Native consent is fail-closed" : "Native consent is disabled");
     document.getElementById("nca-health-detail").textContent = ready
-      ? "Every registered application is pinned to its current signer, publication and tenant registry."
-      : "Review the bounded reasons below before enrolling or dispatching devices.";
+      ? "Registered applications are linked to their current receipt keys, publication, and workspace."
+      : "Review the reasons below before enrolling or contacting devices.";
     document.getElementById("nca-applications").textContent = String(
       Number.isSafeInteger(status.applications) ? status.applications : 0,
     );
@@ -294,7 +294,7 @@
       var body = {
         expected_directory_revision: boundedInteger(
           form.elements.expected_directory_revision.value,
-          "Expected directory revision",
+          "Current directory version",
           1,
           2147483647,
         ),

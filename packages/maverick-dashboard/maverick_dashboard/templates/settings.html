@@ -13,8 +13,8 @@
              configured_providers | length ~ ' of ' ~ providers | length ~ ' providers configured',
              badge='configured' if configured_providers else 'add a provider key',
              badge_class='ok' if configured_providers else 'warn',
-             copy='Configuration is not a live readiness result. Provider keys
-                   are sealed on this server and never shown again.') }}
+             copy='Saved keys still need a successful connection test.
+                   Keys are stored securely and never shown again.') }}
   {% endcall %}
 
   {% if saved %}
@@ -28,7 +28,7 @@
            data-initial-group="{{ saved_section or 'general' }}">
     <div>
       <h2 id="settings-index-title">Settings sections</h2>
-      <p class="muted">Open one bounded section at a time, or search every setting by name and description.</p>
+      <p class="muted">Choose a section, or search settings by name and description.</p>
     </div>
     <label for="settings-search">Find a setting
       <input class="input" id="settings-search" type="search" maxlength="100"

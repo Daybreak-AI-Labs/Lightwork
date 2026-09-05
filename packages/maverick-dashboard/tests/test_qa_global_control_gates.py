@@ -269,8 +269,8 @@ def test_halt_shell_reports_failed_mutations():
     assert "if (pending || !knownState())" in response.text
     assert "haltState = 'unknown'" in response.text
     assert "renderVerifiedPayload(result.body)" in response.text
-    assert "Partial stop — configured scope unverified" in response.text
-    assert "Stop accepted — verifying configured scope" in response.text
+    assert "Partial stop — some workers are not confirmed stopped" in response.text
+    assert "Stop requested — checking work status" in response.text
     assert "const verified = await refresh()" in response.text
 
 
@@ -279,11 +279,11 @@ def test_halt_shell_authority_copy_is_scope_neutral():
     page = client.get("/", headers=_headers())
     assert page.status_code == 200
     assert "Halt permission is required to change it." in page.text
-    assert "permission for the configured halt scope is required" in page.text
+    assert "You do not have permission to stop or resume this work." in page.text
     assert "A global administrator is required to change it." not in page.text
 
     script = client.get("/static/lightwork-ui.js", headers=_headers())
     assert script.status_code == 200
-    assert "permission for the configured halt scope is required" in script.text
+    assert "You do not have permission to stop or resume this work." in script.text
     assert "a global administrator is required to stop or resume" not in script.text
     assert "Stop all work?" not in script.text

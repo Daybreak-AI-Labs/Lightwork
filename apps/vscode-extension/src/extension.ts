@@ -104,7 +104,7 @@ class RunItem extends vscode.TreeItem {
     const dur = run.duration_s != null ? `${run.duration_s.toFixed(1)}s` : "—";
     this.description = `${state} · $${run.cost_dollars.toFixed(4)}`;
     const tooltip = new vscode.MarkdownString();
-    tooltip.appendMarkdown(`**Episode #${run.episode_id}** (goal #${run.goal_id})\n\n`);
+    tooltip.appendMarkdown(`**Run #${run.episode_id}** (goal #${run.goal_id})\n\n`);
     tooltip.appendMarkdown("Goal: ");
     tooltip.appendText(title);
     tooltip.appendMarkdown(
@@ -147,20 +147,27 @@ class RunsProvider implements vscode.TreeDataProvider<RunItem>, vscode.Disposabl
       out = await runCliCapture(["runs", "--json"]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      vscode.window.showErrorMessage(`Lightwork CLI failed: ${msg}`);
+      showFailure("Could not load your Lightwork runs. Check that Lightwork is installed on this computer.", msg);
       return [];
     }
     let rows: RunRecord[];
     try {
       rows = JSON.parse(out.trim() || "[]") as RunRecord[];
     } catch {
-      vscode.window.showErrorMessage(
-        "Lightwork: could not parse `maverick runs --json` output.",
-      );
+      showFailure("Lightwork returned an unreadable run list. Try refreshing it.", "Could not parse maverick runs --json output.");
       return [];
     }
     return rows.map((r) => new RunItem(r));
   }
+}
+
+function showFailure(message: string, error: unknown): void {
+  const out = getOutput();
+  out.appendLine(message);
+  out.appendLine(stripTerminalControl(error instanceof Error ? error.message : String(error)));
+  void vscode.window.showErrorMessage(message, "View details").then(choice => {
+    if (choice === "View details") out.show(true);
+  });
 }
 
 let outputChannel: vscode.OutputChannel | undefined;
@@ -186,7 +193,7 @@ async function startGoalCommand() {
     const code = await runCliStream(["start", goal], (line) => out.appendLine(line));
     out.appendLine(`[exit ${code}]`);
   } catch (e: unknown) {
-    vscode.window.showErrorMessage(`Lightwork start failed: ${(e as Error).message}`);
+    showFailure("Could not start your Lightwork task.", e);
   }
 }
 
@@ -197,7 +204,7 @@ async function statusCommand() {
     out.show(true);
     out.append(txt);
   } catch (e: unknown) {
-    vscode.window.showErrorMessage(`Lightwork status failed: ${(e as Error).message}`);
+    showFailure("Could not load Lightwork status.", e);
   }
 }
 
@@ -217,7 +224,7 @@ async function exportCommand() {
     await runCliCapture(["export", idStr.trim(), "-o", dest.fsPath]);
     vscode.window.showInformationMessage(`Exported goal ${idStr} → ${dest.fsPath}`);
   } catch (e: unknown) {
-    vscode.window.showErrorMessage(`Lightwork export failed: ${(e as Error).message}`);
+    showFailure("Could not export this Lightwork task.", e);
   }
 }
 
@@ -349,7 +356,7 @@ export function activate(context: vscode.ExtensionContext): void {
       } catch (e: unknown) {
         // A silent failure here is dangerous: the user would believe the
         // agent was halted when the CLI call actually failed.
-        vscode.window.showErrorMessage(`Lightwork halt failed: ${(e as Error).message}`);
+        showFailure("Could not stop Lightwork.", e);
       }
     }),
     vscode.commands.registerCommand("maverick.unhalt", async () => {
@@ -357,7 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await runCliCapture(["unhalt"]);
         vscode.window.showInformationMessage("Lightwork resumed.");
       } catch (e: unknown) {
-        vscode.window.showErrorMessage(`Lightwork unhalt failed: ${(e as Error).message}`);
+        showFailure("Could not clear the Lightwork emergency stop.", e);
       }
     }),
     vscode.commands.registerCommand("maverick.openExport", exportCommand),

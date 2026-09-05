@@ -16,8 +16,7 @@
 </style>
 
 <h1>Managed-cloud AI agent governance</h1>
-<p>Content-free inventory and revision-pinned controls for AWS Bedrock,
-  Azure AI Foundry, Google Vertex AI, and reviewed Databricks framework mappings.</p>
+<p>Review AI agents across AWS Bedrock, Azure AI Foundry, Google Vertex AI, and approved Databricks mappings. Check policy decisions and verify changes without importing agent content.</p>
 <div class="cag-warning">
   <strong>Bounded governance evidence.</strong> Inventory can be incomplete.
   Adapter acceptance is not proof that a provider-side write occurred. Ambiguous
@@ -28,9 +27,8 @@
 
 {% if not ai_cloud_agent_governance_configuration_available %}
 <section class="panel">
-  <h2>Configuration authority unavailable</h2>
-  <p>The workbench is closed because no exact active tenant and server-owned
-    capability probe are available.</p>
+  <h2>Workspace setup unavailable</h2>
+  <p>Controls are unavailable because the active workspace or its configured service could not be verified.</p>
 </section>
 {% elif not ai_cloud_agent_governance_enabled %}
 <section class="panel">
@@ -39,12 +37,12 @@
     tenant/provider authorities before using this surface.</p>
 </section>
 {% else %}
-<p><button class="btn" id="cag-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="cag-load-status" type="button">Check availability</button></p>
 <div class="cag-grid">
   <section class="panel cag-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <label>Operation
-      <select id="cag-operation">
+      <select id="cag-operation" data-guided-api="/api/v1/assurance/cloud-agents">
         <option value="inventory" data-method="GET" data-path="/inventory">Inventory: list all server-configured providers</option>
         <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state root</option>
         <option value="evaluate" data-method="POST" data-path="/policy-evaluations">Enforcement: evaluate exact policy pins</option>
@@ -57,20 +55,18 @@
         <option value="framework-activate" data-method="POST" data-path="/databricks/framework-activations">Databricks: activate approved mapping pack</option>
       </select>
     </label>
-    <label>Path values as JSON object
+    <label>Record references (JSON)
       <input class="input" id="cag-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="cag-body">{}</textarea>
     </label>
     <div class="cag-warning" id="cag-confirm-panel">
       <label class="cag-confirm"><input id="cag-confirm" type="checkbox">
-        <span>I reviewed the exact opaque references, expected revisions,
-          policy/evidence digests, intended effect, and current tenant context.
-          I understand that provider acceptance is not proof of applied state.</span>
+        <span>I reviewed the selected records, current versions, policy and evidence references, intended change, and workspace. A provider accepting a request does not confirm that the change took effect.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="cag-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="cag-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>

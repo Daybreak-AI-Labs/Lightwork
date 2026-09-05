@@ -88,12 +88,12 @@
   <header class="publish-settings-hero">
     <p class="eyebrow">Consent publishing governance</p>
     <h1>Website SDK publish settings</h1>
-    <p>Version and activate a closed SDK runtime policy against the exact current web property and consent publication resolved by the server.</p>
+    <p>Review and activate consent settings for your website SDK. Lightwork verifies the website and current consent publication before activation.</p>
   </header>
 
   <aside class="publish-settings-boundary" aria-labelledby="publish-settings-boundary-title">
     <p class="eyebrow">Trust boundary</p>
-    <h2 id="publish-settings-boundary-title">Pinned authority, candid proof</h2>
+    <h2 id="publish-settings-boundary-title">Before activation</h2>
     <ul>
       <li>Property and publication revisions, digests, tenant, operator, retention, and custody are never browser inputs.</li>
       <li>A CSP nonce requirement can be published; nonce values are never accepted, stored, or projected.</li>
@@ -103,8 +103,8 @@
   </aside>
 
   <section class="publish-settings-panel" aria-labelledby="publish-settings-status-title">
-    <p class="eyebrow">Runtime status</p>
-    <h2 id="publish-settings-status-title">Tenant composition</h2>
+    <p class="eyebrow">Availability</p>
+    <h2 id="publish-settings-status-title">Service availability</h2>
     <p id="publish-settings-runtime-status" class="publish-settings-status" role="status" aria-live="polite">Checking the server-owned publishing authority…</p>
     <div class="publish-settings-actions">
       <button class="btn" id="publish-settings-refresh-status" type="button">Refresh status</button>
@@ -128,7 +128,7 @@
               <input class="input" id="publish-settings-expected-revision" name="expected_head_revision" type="number" min="0" max="2147483647" step="1" value="0" required>
             </div>
             <div>
-              <label for="publish-settings-idempotency">Idempotency key</label>
+              <label for="publish-settings-idempotency">Request reference (reuse when retrying)</label>
               <input class="input" id="publish-settings-idempotency" name="idempotency_key" minlength="8" maxlength="192" required>
             </div>
           </div>
@@ -168,15 +168,15 @@
     </section>
 
     <section class="publish-settings-panel" aria-labelledby="publish-settings-lifecycle-title">
-      <p class="eyebrow">CAS lifecycle</p>
-      <h2 id="publish-settings-lifecycle-title">Inspect and change the head</h2>
+      <p class="eyebrow">Version management</p>
+      <h2 id="publish-settings-lifecycle-title">Review or activate a version</h2>
       <form class="publish-settings-form" id="publish-settings-lifecycle-form" autocomplete="off" novalidate>
         <fieldset id="publish-settings-lifecycle-controls"{% if not publish_settings_can_admin %} disabled aria-disabled="true"{% endif %}>
           <label for="publish-settings-version-id">Settings version reference</label>
           <input class="input" id="publish-settings-version-id" name="version_id" maxlength="128">
           <label for="publish-settings-lifecycle-revision">Expected settings head revision</label>
           <input class="input" id="publish-settings-lifecycle-revision" name="expected_head_revision" type="number" min="1" max="2147483647" step="1">
-          <label for="publish-settings-lifecycle-idempotency">Idempotency key</label>
+          <label for="publish-settings-lifecycle-idempotency">Request reference (reuse when retrying)</label>
           <input class="input" id="publish-settings-lifecycle-idempotency" name="idempotency_key" minlength="8" maxlength="192">
           <div class="publish-settings-actions">
             <button class="btn" id="publish-settings-load" type="button">Load property head</button>
@@ -209,7 +209,7 @@
       <pre class="publish-settings-output" id="publish-settings-operation-output" tabindex="0"></pre>
     </section>
   </fieldset>
-  <noscript><p class="publish-settings-boundary">JavaScript is required for this bounded administrative workbench.</p></noscript>
+  <noscript><p class="publish-settings-boundary">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

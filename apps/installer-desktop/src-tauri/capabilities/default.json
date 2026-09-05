@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "identifier": "default",
-  "description": "Capability set for the installer window. The frontend may invoke the `install` command, listen for its progress events, and use core window ops; nothing else (no fs, no arbitrary http from the frontend). The install itself runs the bootstrap process from the Rust side.",
+  "description": "Local installer window: install/cancel, fixed local dashboard launch, startup diagnostics, progress events, and window operations. The remote dashboard window receives no installer capability or arbitrary filesystem, HTTP, or shell access.",
   "windows": ["main"],
   "permissions": [
     "core:default",

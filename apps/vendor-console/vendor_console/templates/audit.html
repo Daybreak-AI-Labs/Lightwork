@@ -2,10 +2,9 @@
 {% block title %}Audit log · Daybreak Console{% endblock %}
 {% block main %}
 <h1>Vendor audit log</h1>
-<p class="sub">Every console action, SHA-256 hash-chained — tamper-evident, like the
-  product's own audit trail.
-  {% if chain_ok %}<span class="badge b-active">chain intact</span>
-  {% else %}<span class="badge b-expired">BROKEN at #{{ broken }}</span>{% endif %}
+<p class="sub">Review recorded customer administration activity and its verification status.
+  {% if chain_ok %}<span class="badge b-active">History verified</span>
+  {% else %}<span class="badge b-expired">Verification failed at entry #{{ broken }}</span>{% endif %}
 </p>
 <div class="card">
   <table>
@@ -14,9 +13,9 @@
     <tr>
       <td class="mono muted">{{ e.ts|ts }}</td>
       <td class="mono">{{ e.actor }}</td>
-      <td><strong>{{ e.action }}</strong></td>
+      <td><strong>{{ e.action.replace(".", " ").replace("_", " ")|title }}</strong></td>
       <td>{{ e.target }}</td>
-      <td class="mono muted" style="font-size:11px">{{ e.detail }}</td>
+      <td><details><summary>View details</summary><pre class="mono">{{ e.detail }}</pre></details></td>
     </tr>
     {% endfor %}
     {% if not events %}<tr><td colspan="5" class="muted">No events yet.</td></tr>{% endif %}

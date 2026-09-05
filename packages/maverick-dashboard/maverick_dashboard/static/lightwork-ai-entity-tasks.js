@@ -104,7 +104,7 @@
   function operationKey(raw) {
     var selected = String(raw || "").trim();
     if (!OPERATION_PATTERN.test(selected)) {
-      throw new Error("Idempotency key must be a valid operation reference.");
+      throw new Error("Enter a valid request reference; reuse it only when retrying the same action.");
     }
     return selected;
   }
@@ -419,7 +419,7 @@
 
   async function refreshStatus() {
     readiness.textContent = "Checking…";
-    readinessDetail.textContent = "Reading the store-free server status before enabling controls.";
+    readinessDetail.textContent = "Checking availability before enabling actions.";
     setMark("Checking", "checking");
     statusOutput.textContent = "";
     operations.disabled = true;
@@ -428,7 +428,7 @@
       show(statusOutput, payload);
       if (payload.ready === true && payload.enabled === true && payload.configured === true) {
         readiness.textContent = "Ready";
-        readinessDetail.textContent = "Operational readiness was explicitly verified for this tenant. Each mutation still re-resolves exact entity authority.";
+        readinessDetail.textContent = "Task controls are ready. Lightwork checks the current inventory item before each change.";
         setMark("Ready", "ready");
         operations.disabled = false;
         try { await loadTasks(); }
@@ -438,8 +438,8 @@
         readinessDetail.textContent = "Enable both AI Inventory and AI Entity Tasks before operating.";
         setMark("Disabled", "failed");
       } else if (payload.configured !== true) {
-        readiness.textContent = "Needs composition";
-        readinessDetail.textContent = "The capability is enabled, but its server-owned store and authority composition are incomplete.";
+        readiness.textContent = "Setup incomplete";
+        readinessDetail.textContent = "This feature is enabled, but workspace setup is incomplete.";
         setMark("Unready", "failed");
       } else {
         readiness.textContent = "Not verified";

@@ -2,9 +2,10 @@
  * keychain via expo-secure-store. The app stays read-only regardless of the
  * token's privileges: it only ever issues GETs. */
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput } from "react-native";
 
 import { loadSettings, saveSettings } from "../settings";
+import { connectionValidationError } from "../connectionValidation";
 
 export function SettingsScreen(props: {
   onSaved: () => void;
@@ -40,6 +41,12 @@ export function SettingsScreen(props: {
 
   async function save(): Promise<void> {
     if (loading || loadFailed || saveInFlight.current) return;
+    const validation = connectionValidationError(baseUrl, token);
+    if (validation) {
+      setError(validation);
+      setNote("");
+      return;
+    }
     saveInFlight.current = true;
     setSaving(true);
     setError("");
@@ -59,36 +66,37 @@ export function SettingsScreen(props: {
   const disabled = loading || loadFailed || saving;
 
   return (
-    <View style={styles.fill}>
+    <ScrollView contentContainerStyle={styles.fill} keyboardShouldPersistTaps="handled">
+      <Text style={styles.help}>Connect to your organization's Lightwork dashboard. Ask your administrator for the address and access token.</Text>
       {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
       {loadFailed ? (
         <Pressable style={styles.button} accessibilityRole="button" onPress={() => setLoadAttempt(loadAttempt + 1)}>
           <Text style={styles.buttonText}>Retry loading settings</Text>
         </Pressable>
       ) : null}
-      <Text style={styles.label}>Dashboard base URL</Text>
+      <Text style={styles.label}>Dashboard address</Text>
       <TextInput
         style={styles.input}
-        accessibilityLabel="Dashboard base URL"
+        accessibilityLabel="Dashboard address"
         editable={!disabled}
         value={baseUrl}
         onChangeText={setBaseUrl}
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="url"
-        placeholder="http://192.168.1.20:8400"
+        placeholder="https://lightwork.example.com"
       />
-      <Text style={styles.label}>API token (Authorization: Bearer …)</Text>
+      <Text style={styles.label}>Access token</Text>
       <TextInput
         style={styles.input}
-        accessibilityLabel="API token"
+        accessibilityLabel="Access token"
         editable={!disabled}
         value={token}
         onChangeText={setToken}
         autoCapitalize="none"
         autoCorrect={false}
         secureTextEntry
-        placeholder="leave empty if dashboard auth is off"
+        placeholder="Leave empty only if sign-in is not required"
       />
       <Pressable style={[styles.button, disabled && styles.disabled]} accessibilityRole="button"
         accessibilityState={{ disabled, busy: saving }} disabled={disabled} onPress={save}>
@@ -96,17 +104,17 @@ export function SettingsScreen(props: {
       </Pressable>
       {note ? <Text style={styles.note} accessibilityLiveRegion="polite">{note}</Text> : null}
       <Text style={styles.help}>
-        This app is read-only: it watches runs and never starts, cancels, or
-        approves anything. The phone must be able to reach the dashboard
-        (same network, VPN, or tunnel). The token is kept in the device
-        keychain (expo-secure-store).
+        You can view runs here. Start, cancel, or approve work in the dashboard.
+        Use your organization's network or VPN to connect. Use a secure HTTPS
+        address for a remote dashboard. Your token is
+        kept in your device's secure storage.
       </Text>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  fill: { flex: 1, padding: 16 },
+  fill: { flexGrow: 1, padding: 16 },
   label: { fontSize: 13, color: "#57606a", marginTop: 14, marginBottom: 4 },
   input: {
     borderWidth: 1, borderColor: "#d0d7de", borderRadius: 6,

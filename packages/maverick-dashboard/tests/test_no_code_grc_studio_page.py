@@ -43,7 +43,7 @@ def test_page_is_liquid_glass_copilot_wired_and_permission_aware(monkeypatch) ->
     assert f'data-copilot-page="{page.PAGE_PATH}"' in body
     assert "backdrop-filter: blur(26px)" in body
     assert page.ASSET_PATH in body
-    assert "Configuration without executable surface area" in body
+    assert "Build with supported fields and rules" in body
     assert 'id="grcs-builder-form"' in body
     assert 'data-can-operate="true"' in body
     assert 'data-can-audit="true"' in body

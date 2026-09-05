@@ -435,7 +435,7 @@
     if (!records.length) {
       var empty = document.createElement("p");
       empty.className = "tpc-empty";
-      empty.textContent = "No Contract or Engagement matched the current tenant filters.";
+      empty.textContent = "No contracts or engagements match these filters.";
       recordList.appendChild(empty);
       return;
     }
@@ -504,13 +504,13 @@
         readiness.textContent = "Unavailable";
         statusMark.textContent = "Closed";
         statusMark.dataset.state = "failed";
-        readinessDetail.textContent = "Controls remain closed until the exact tenant composition reports enabled, configured, and ready.";
+        readinessDetail.textContent = "Controls are unavailable until this workspace is enabled, configured, and ready.";
         return;
       }
       readiness.textContent = "Ready";
       statusMark.textContent = "Ready";
       statusMark.dataset.state = "ready";
-      readinessDetail.textContent = "Tenant composition is ready. Role-specific controls remain independently enforced.";
+      readinessDetail.textContent = "This workspace is ready. Available actions depend on your permissions.";
       operations.disabled = false;
       await loadRecords();
     } catch (error) {
@@ -603,11 +603,11 @@
     catch (_error) { /* governed status already rendered */ }
   });
   document.getElementById("tpc-load-history").addEventListener("click", async function () {
-    try { await run("Loading immutable history", function () { return request("/" + inspectRecordId() + "/history" + sensitiveQuery()); }); }
+    try { await run("Loading change history", function () { return request("/" + inspectRecordId() + "/history" + sensitiveQuery()); }); }
     catch (_error) { /* governed status already rendered */ }
   });
   document.getElementById("tpc-load-tombstone").addEventListener("click", async function () {
-    try { await run("Loading irreversible tombstone", function () { return request("/" + inspectRecordId() + "/tombstone"); }); }
+    try { await run("Loading the permanent deletion record", function () { return request("/" + inspectRecordId() + "/tombstone"); }); }
     catch (_error) { /* governed status already rendered */ }
   });
 

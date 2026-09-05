@@ -15,6 +15,8 @@ _HUNTER_BATCH_BYTES = 16 * 1024 * 1024
 _HUNTER_EVENT_BYTES = 256 * 1024
 _HUNTER_MAX_DEPTH = 12
 _HUNTER_MAX_CONTAINER_ITEMS = 2_048
+GOAL_TITLE_MAX_LENGTH = 200
+GOAL_DESCRIPTION_MAX_LENGTH = 16_000
 
 
 def _validate_hunter_events(events: list[dict], *, label: str) -> int:
@@ -145,13 +147,19 @@ class RoleOverrideIn(BaseModel):
     effort: str | None = None
 
 
+class GoalResumeIn(BaseModel):
+    """Optional spending limit for a resumed attempt; deployment caps still apply."""
+
+    max_dollars: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
 class GoalIn(BaseModel):
-    title: str = Field(..., max_length=200)
+    title: str = Field(..., max_length=GOAL_TITLE_MAX_LENGTH)
     # Bound the description like the title: it flows into SQLite, the at-rest
     # seal, and every downstream prompt, so an unbounded value from an untrusted
     # REST caller is a cost / DB-bloat amplification vector. 16k chars is ample
     # for a goal brief; oversized payloads get a 422 rather than silent bloat.
-    description: str = Field("", max_length=16000)
+    description: str = Field("", max_length=GOAL_DESCRIPTION_MAX_LENGTH)
     max_dollars: float = Field(5.0, ge=0.0, le=100.0)
     max_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
     max_depth: int = Field(3, ge=1, le=5)
@@ -986,6 +994,17 @@ class AssessmentCommentIn(BaseModel):
         ...,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$",
     )
+
+
+class AssessmentAnswerIn(BaseModel):
+    answer: Literal["yes", "no", "na", "unknown"]
+    note: str = Field(default="", max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class AssessmentFollowupAnswerIn(BaseModel):
+    answer: str = Field(..., min_length=1, max_length=4000, pattern=r"\S")
+    expected_revision: int = Field(..., ge=1)
 
 
 class AssessmentAnswerAiMetadataIn(BaseModel):

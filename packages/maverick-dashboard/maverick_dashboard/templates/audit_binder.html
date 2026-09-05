@@ -139,7 +139,7 @@
     </table>
     </div>
     <p class="muted" style="font-size: var(--text-xs); margin-top: var(--space-2);">
-      Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} record(s) in print. The signed JSON snapshot contains all records in the exact window; each revision is CAS-guarded and includes its full template digest.</p>
+      Showing {{ [b.assessments | length, 80] | min }} of {{ b.assessments_total }} record(s) in print. The signed JSON download contains all records in this time window, including each reviewed version and its template verification fingerprint.</p>
     {% else %}
     <p class="muted">No assessment records yet.</p>
     {% endif %}

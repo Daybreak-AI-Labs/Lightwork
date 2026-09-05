@@ -84,7 +84,7 @@ function analysisId() {
 }
 
 async function refreshStatus() {
-  setStatus(runtimeStatus, "Checking the tenant-scoped server composition…");
+  setStatus(runtimeStatus, "Checking service availability…");
   statusOutput.textContent = "";
   operations.disabled = true;
   try {
@@ -93,22 +93,22 @@ async function refreshStatus() {
     const tesseractDetected = payload.external_parser_binaries_detected &&
       payload.external_parser_binaries_detected.tesseract === true;
     const ocrNotice = tesseractDetected ? "" :
-      " External Tesseract OCR was not detected, so image OCR is unavailable.";
+      " Image text recognition is unavailable because OCR support is not installed.";
     if (payload.ready === true && payload.operational_composition_verified === true) {
-      setStatus(runtimeStatus, `Evidence analysis operational composition was verified.${ocrNotice}`);
+      setStatus(runtimeStatus, `Evidence analysis is ready.${ocrNotice}`);
       operations.disabled = false;
     } else if (payload.configured_for_operation_attempt === true) {
       setStatus(
         runtimeStatus,
-        "Evidence analysis is enabled and configured for an operation attempt. " +
-          "Status does not open the store or resolve artifact-specific authorities; " +
-          `each operation validates them before work begins.${ocrNotice}`
+        "Evidence analysis is configured. " +
+          "Document access and permissions have not been checked yet; " +
+          `they will be checked when you start.${ocrNotice}`
       );
       operations.disabled = false;
     } else if (payload.enabled === true) {
-      setStatus(runtimeStatus, "Evidence analysis is enabled but server composition is incomplete.", true);
+      setStatus(runtimeStatus, "Evidence analysis is enabled, but setup is incomplete.", true);
     } else {
-      setStatus(runtimeStatus, "Evidence analysis is disabled for this tenant.", true);
+      setStatus(runtimeStatus, "Evidence analysis is disabled for this workspace.", true);
     }
   } catch (error) {
     setStatus(runtimeStatus, `Status unavailable: ${error.message}`, true);

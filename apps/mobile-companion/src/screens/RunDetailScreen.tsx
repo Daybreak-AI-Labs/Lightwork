@@ -5,6 +5,7 @@ import React, { useCallback } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { GoalEvent, GoalEventsResponse, Settings, getGoalEvents } from "../api";
+import { ConnectionNotice } from "../components/ConnectionNotice";
 import { usePolling } from "../poll";
 
 function clock(ts: number): string {
@@ -34,7 +35,7 @@ export function RunDetailScreen(props: {
         </Text>
       </View>
       {data?.result ? <Text style={styles.result}>{data.result}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <ConnectionNotice message={error} /> : null}
       <FlatList
         data={data ? [...data.events].reverse() : []}
         keyExtractor={(e: GoalEvent) => String(e.id)}
@@ -67,7 +68,6 @@ const styles = StyleSheet.create({
   back: { fontSize: 16, color: "#0969da" },
   headline: { fontSize: 16, fontWeight: "600", flexShrink: 1 },
   result: { padding: 12, backgroundColor: "#ddf4ff", fontSize: 14 },
-  error: { color: "#cf222e", padding: 8, fontSize: 13 },
   empty: { padding: 24, textAlign: "center", color: "#57606a" },
   event: { flexDirection: "row", paddingHorizontal: 14, paddingVertical: 8 },
   spine: {

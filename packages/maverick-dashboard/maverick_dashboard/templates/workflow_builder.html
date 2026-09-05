@@ -148,11 +148,11 @@
     <div class="seg" role="group" aria-label="What to build">
       <button type="button" id="wf-form-template" class="seg__opt is-active" aria-pressed="true">
         Reusable template
-        <span class="seg__sub">a parameterized goal anyone can run</span>
+        <span class="seg__sub">repeat the work with new details each time</span>
       </button>
       <button type="button" id="wf-form-playbook" class="seg__opt" aria-pressed="false">
         Agent playbook
-        <span class="seg__sub">an unsaved specialist first pass with persona &amp; tools</span>
+        <span class="seg__sub">draft a specialist’s instructions and allowed actions</span>
       </button>
     </div>
 
@@ -160,7 +160,7 @@
       <div class="wf__field" style="margin-bottom: var(--space-3);">
         <label for="wf-brief">Describe the <span id="wf-noun">workflow</span></label>
         <textarea id="wf-brief" class="input wf__brief"
-          placeholder="{% raw %}e.g. Weekly competitive-intel report — gather recent news on {{ competitor }}, summarize the notable moves, and draft an email to the team.{% endraw %}"></textarea>
+          placeholder="e.g. Gather weekly news about a competitor I choose, summarize the important changes, and draft an email to the team."></textarea>
         <div class="wf__chips" id="wf-examples" aria-label="Starter examples"></div>
       </div>
       <div class="wf__row">
@@ -185,8 +185,8 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
-          <label for="wf-name">Name (id)</label>
-          <input type="text" id="wf-name" class="input" aria-label="Workflow id" />
+          <label for="wf-name">Short name</label>
+          <input type="text" id="wf-name" class="input" aria-label="Workflow short name" />
         </div>
         <div class="wf__field" style="flex: 2 1 18rem;">
           <label for="wf-title">Title</label>
@@ -199,9 +199,9 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field">
-          <label for="wf-params">Parameters (comma-separated)</label>
+          <label for="wf-params">Ask for these inputs (separate with commas)</label>
           <input type="text" id="wf-params" class="input" placeholder="competitor, timeframe"
-                 aria-label="Workflow parameters" />
+                 aria-label="Information to ask for each time" />
         </div>
         <div class="wf__field wf__field--sm">
           <label for="wf-budget">Budget ($)</label>
@@ -234,8 +234,8 @@
       </div>
       <div class="wf-grid">
         <div class="wf__field" style="flex: 1 1 16rem;">
-          <label for="pb-name">Name (id)</label>
-          <input type="text" id="pb-name" class="input" aria-label="Agent id" />
+          <label for="pb-name">Short name</label>
+          <input type="text" id="pb-name" class="input" aria-label="Specialist short name" />
         </div>
         <div class="wf__field wf__field--sm">
           <label for="pb-risk">Max risk</label>
@@ -251,34 +251,40 @@
         <input type="text" id="pb-desc" class="input" aria-label="Agent description" />
       </div>
       <div class="wf__field">
-        <label for="pb-persona">Persona</label>
-        <textarea id="pb-persona" class="input pb-persona" aria-label="Agent persona"></textarea>
+        <label for="pb-persona">Role and working instructions</label>
+        <textarea id="pb-persona" class="input pb-persona" aria-label="Specialist role and instructions"></textarea>
       </div>
       <div class="wf-grid">
         <div class="wf__field">
-          <label for="pb-allow">Allowed tools</label>
-          <div class="wf__toolfield">
+          <strong>Allowed actions</strong>
+          <div id="pb-allow-summary" class="wf__row" aria-label="Selected allowed actions"></div>
+          <button type="button" class="btn btn--ghost" data-browse="allow"
+                  aria-label="Choose allowed actions">Choose actions…</button>
+          <details id="pb-allow-advanced">
+            <summary>Advanced action identifiers</summary>
+            <label for="pb-allow">Allowed tool identifiers (separate with commas)</label>
             <input type="text" id="pb-allow" class="input" placeholder="web_search, send_email"
                    aria-label="Allowed tools" />
-            <button type="button" class="btn btn--ghost" data-browse="allow"
-                    aria-label="Browse connectors for allowed tools">Browse…</button>
-          </div>
+          </details>
         </div>
         <div class="wf__field">
-          <label for="pb-deny">Denied tools</label>
-          <div class="wf__toolfield">
+          <strong>Always blocked actions</strong>
+          <div id="pb-deny-summary" class="wf__row" aria-label="Selected blocked actions"></div>
+          <button type="button" class="btn btn--ghost" data-browse="deny"
+                  aria-label="Choose blocked actions">Choose actions…</button>
+          <details id="pb-deny-advanced">
+            <summary>Advanced action identifiers</summary>
+            <label for="pb-deny">Blocked tool identifiers (separate with commas)</label>
             <input type="text" id="pb-deny" class="input" placeholder="shell, delete_file"
                    aria-label="Denied tools" />
-            <button type="button" class="btn btn--ghost" data-browse="deny"
-                    aria-label="Browse connectors for denied tools">Browse…</button>
-          </div>
+          </details>
         </div>
       </div>
       <div class="wf__field">
-        <label>Steps <span class="wf__hint" style="text-transform: none; letter-spacing: 0;">— a top-to-bottom playbook; gates are review instructions</span></label>
-        <p class="wf__hint" id="pb-gate-boundary">Playbook gates guide the agent and reviewer but do not create a runtime pause. For a system-enforced checkpoint, use an <a href="/flows/designer">executable Flow approval node</a>.</p>
+        <label>Steps <span class="wf__hint" style="text-transform: none; letter-spacing: 0;">— instructions to follow in order</span></label>
+        <p class="wf__hint" id="pb-gate-boundary">Playbook review instructions do not automatically pause the work. To require a human decision before continuing, add an <a href="/flows/designer">approval step in a flow</a>.</p>
         <div class="pb-flow">
-          <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>Trigger — the agent starts here</div>
+          <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>Start here</div>
           <div id="pb-steps"></div>
           <div class="pb-flow__node pb-flow__end" id="pb-flow-end" hidden><span class="dot" aria-hidden="true"></span>Goal complete</div>
         </div>
@@ -381,9 +387,12 @@
         <div id="trig-howto" hidden>
           <p class="wf__hint">Other systems can start this workflow by sending a signed request to this address (your administrator holds the signing secret).<span id="trig-secret-warn" hidden> ⚠ No signing secret is set yet — an administrator must configure one before this address will accept calls.</span></p>
           <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">Copy URL</button></div>
-          <p class="wf__hint" style="margin: var(--space-3) 0 var(--space-1);">Or copy a ready-to-run signed request:</p>
+          <details id="trig-request-advanced">
+          <summary>Advanced integration example</summary>
+          <p class="wf__hint" style="margin: var(--space-3) 0 var(--space-1);">For the administrator connecting your external service:</p>
           <pre class="wf__curl" id="trig-curl" aria-label="Signed curl example"></pre>
           <div class="wf__row"><button type="button" class="btn btn--ghost" id="trig-curl-copy">Copy curl</button></div>
+          </details>
         </div>
         <ul class="wf__sched-list" id="trig-list" aria-label="Webhook triggers"></ul>
       </details>
@@ -395,7 +404,7 @@
       <div class="picker">
         <div class="picker__head">
           <h3 id="tp-title">Browse connectors</h3>
-          <input type="search" id="tp-search" class="input" placeholder="Search tools by name or description…"
+          <input type="search" id="tp-search" class="input" placeholder="Search actions by name or description…"
                  aria-label="Search connectors" autocomplete="off" />
           <p class="picker__count muted" id="tp-count" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);"></p>
         </div>
@@ -438,6 +447,32 @@
     var pbPersona = document.getElementById('pb-persona');
     var pbAllow = document.getElementById('pb-allow');
     var pbDeny = document.getElementById('pb-deny');
+    function renderToolSelections() {
+      [[pbAllow, 'pb-allow-summary'], [pbDeny, 'pb-deny-summary']].forEach(function (entry) {
+        var input = entry[0], host = document.getElementById(entry[1]);
+        host.textContent = '';
+        var tools = splitList(input.value);
+        if (!tools.length) host.textContent = input === pbAllow ? 'No actions selected' : 'No extra blocked actions';
+        tools.forEach(function (tool, index) {
+          var button = document.createElement('button');
+          var label = tool.replace(/_/g, ' ');
+          button.type = 'button'; button.className = 'btn btn--ghost';
+          button.textContent = label + ' ×'; button.title = tool;
+          button.setAttribute('aria-label', 'Remove ' + label + ' from this selection');
+          button.addEventListener('click', function () {
+            input.value = splitList(input.value).filter(function (name) { return name !== tool; }).join(', ');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            var remaining = host.querySelectorAll('button');
+            var target = remaining[Math.min(index, remaining.length - 1)] ||
+              document.querySelector('[data-browse="' + (input === pbAllow ? 'allow' : 'deny') + '"]');
+            if (target) target.focus();
+          });
+          host.appendChild(button);
+        });
+      });
+    }
+    pbAllow.addEventListener('input', renderToolSelections);
+    pbDeny.addEventListener('input', renderToolSelections);
     var pbRisk = document.getElementById('pb-risk');
     var pbSteps = document.getElementById('pb-steps');
     var pbFlowEnd = document.getElementById('pb-flow-end');
@@ -1093,6 +1128,7 @@
       pbPersona.value = d.persona || '';
       pbAllow.value = (d.allow_tools || []).join(', ');
       pbDeny.value = (d.deny_tools || []).join(', ');
+      renderToolSelections();
       pbRisk.value = d.max_risk || 'medium';
       pbSteps.innerHTML = '';
       (d.workflow || []).forEach(function (s) { addStep(s); });
@@ -1277,8 +1313,8 @@
         return !q || t.name.toLowerCase().indexOf(q) >= 0
           || (t.description || '').toLowerCase().indexOf(q) >= 0;
       });
-      tpCount.textContent = matches.length + (matches.length === 1 ? ' tool' : ' tools')
-        + (pickerRestrict ? ' allowed by this pack' : ' available')
+      tpCount.textContent = matches.length + (matches.length === 1 ? ' action' : ' actions')
+        + (pickerRestrict ? ' allowed for this specialist' : ' available')
         + (matches.length > 80 ? ' — showing first 80' : '');
       matches.slice(0, 80).forEach(function (t) {
         var risk = t.risk || 'medium';
@@ -1289,7 +1325,8 @@
         var main = document.createElement('div');
         main.className = 'picker__main';
         var nameRow = document.createElement('div');
-        nameRow.appendChild(pill('picker__name', t.name));
+        nameRow.appendChild(pill('picker__name', t.name.replace(/_/g, ' ')));
+        item.title = t.name;
         if (already.has(t.name)) nameRow.appendChild(pill('picker__added', '✓ added'));
         if (over) nameRow.appendChild(pill('picker__over', 'exceeds max risk'));
         main.appendChild(nameRow);
@@ -1422,6 +1459,42 @@
     wfRefine.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); refine('template'); } });
     pbRefine.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); refine('playbook'); } });
 
+    async function receiveAuthoringHandoff(blocked) {
+      var raw, handoff;
+      try {
+        raw = sessionStorage.getItem('lightwork.authoring-handoff');
+        sessionStorage.removeItem('lightwork.authoring-handoff');
+        if (!raw) return;
+        handoff = JSON.parse(raw);
+      } catch (e) { setStatus('The saved draft could not be read. Return to Chat and prepare it again.', true); return; }
+      if (!handoff || handoff.kind !== 'agent' || typeof handoff.brief !== 'string' || !handoff.brief.trim() ||
+          Array.from(handoff.brief).length > 8000 || typeof handoff.context !== 'string' || !handoff.context ||
+          !Number.isFinite(handoff.created_at) || Date.now() - handoff.created_at < 0 || Date.now() - handoff.created_at > 600000) {
+        setStatus('This saved draft is invalid or expired. Return to Chat and prepare a brief of 8,000 characters or fewer.', true); return;
+      }
+      function hasDraft() {
+        return brief.value.trim() || templateWorkspaceStarted || playbookWorkspaceStarted || fileInput.files.length ||
+          [elName, elTitle, elSteps, pbName, pbDesc, pbPersona].some(function (field) { return field.value.trim(); });
+      }
+      if (blocked || hasDraft()) { setStatus('Your existing draft was kept. The draft from Chat was not loaded.'); return; }
+      var touched = false;
+      function markTouched() { touched = true; }
+      ['input', 'change', 'click'].forEach(function (event) { document.addEventListener(event, markTouched, true); });
+      try {
+        var response = await fetch('/api/v1/templates/draft-context');
+        var current = await response.json();
+        if (!response.ok || !current || current.context !== handoff.context) throw new Error('workspace mismatch');
+        if (touched || hasDraft()) { setStatus('Your current work was kept. The draft from Chat was not loaded.'); return; }
+        setForm('playbook');
+        brief.value = handoff.brief;
+        setStatus('Brief ready. Review it, then choose Draft when you are ready.');
+      } catch (e) {
+        setStatus('The saved draft could not be verified in this workspace. Return to Chat and prepare it again.', true);
+      } finally {
+        ['input', 'change', 'click'].forEach(function (event) { document.removeEventListener(event, markTouched, true); });
+      }
+    }
+
     renderExamples();
 
     // Deep-links from the Templates / Agents pages:
@@ -1432,14 +1505,6 @@
     var PB_EDIT_DENIED = {{ edit_agent_denied | tojson }};
     var WF_EDIT = {{ edit_prefill | tojson }};
     var WF_PREFILL = {{ prefill | tojson }};
-    var AUTHOR_HANDOFF = null;
-    try {
-      AUTHOR_HANDOFF = JSON.parse(sessionStorage.getItem('lightwork.authoring-handoff') || 'null');
-      if (!AUTHOR_HANDOFF || AUTHOR_HANDOFF.kind !== 'agent' || !AUTHOR_HANDOFF.brief
-          || Date.now() - Number(AUTHOR_HANDOFF.created_at || 0) > 10 * 60 * 1000) {
-        AUTHOR_HANDOFF = null;
-      }
-    } catch (e) { AUTHOR_HANDOFF = null; }
     if (PB_EDIT && PB_EDIT.name && PACK_EDITING) {
       setForm('playbook');
       pbEditPreserve = PB_EDIT.preserve || null;
@@ -1460,12 +1525,8 @@
       showSaved('/templates', 'Open Templates');
       showScheduling({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
       showTriggers({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
-    } else if (AUTHOR_HANDOFF) {
-      sessionStorage.removeItem('lightwork.authoring-handoff');
-      setForm('playbook');
-      brief.value = String(AUTHOR_HANDOFF.brief).slice(0, 8000);
-      draft();
     }
+    receiveAuthoringHandoff(!!(PB_EDIT || PB_EDIT_DENIED || WF_EDIT || WF_PREFILL));
   })();
   </script>
 {% endblock %}

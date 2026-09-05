@@ -53,7 +53,9 @@
   .fd-hero .hero-statebox { padding: var(--space-3); }
   .fdx-kv { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
   .fdx-kv label { width: 92px; flex: none; color: var(--muted); font-size: var(--text-sm); }
-  .fdx-kv .input { padding: 0.4rem 0.55rem; font-size: var(--text-sm); }
+  .fdx-kv .input { min-width: 0; padding: 0.4rem 0.55rem; font-size: var(--text-sm); }
+  .fdx-panel details > summary { cursor: pointer; font-weight: var(--font-semibold); }
+  .fdx-panel details[open] > summary { margin-bottom: var(--space-3); }
   .fdx-mini { color: var(--muted); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
   .fd__nl { flex: 1; min-width: 220px; display: flex; gap: var(--space-2); }
   .fd__nl input { flex: 1; }
@@ -208,16 +210,15 @@
 <div class="fd-hero">
   {% call hero('Your AI workforce', 'Flow designer',
                subtitle='Draft · test · publish',
-               lede='Design a governed flow — describe it in plain English and
-                     hit Draft, or build it step by step on the canvas.') %}
+               lede='Describe the work in plain English, choose Draft, and
+                     review the steps before saving or publishing.') %}
     {{ state('Current state',
              ('Editing ' ~ flow_id) if flow_id else 'New draft',
              badge='saved flow' if flow_id
                    else ('from template' if seed_flow else 'unsaved'),
              badge_class='ok' if flow_id else 'idle',
-             copy='Schedules, triggers, and real runs execute the published
-                   revision only — Test runs are mocked and touch nothing
-                   real.') }}
+             copy='Scheduled and real runs use the published version.
+                   Test simulates the steps without taking external actions.') }}
   {% endcall %}
 </div>
 
@@ -227,13 +228,13 @@
     <input class="input fd__name" id="fd-name" placeholder="Untitled flow" aria-label="Flow name" />
     <div class="fd__viewswitch" role="group" aria-label="Flow view">
       <button type="button" id="fd-view-steps" class="is-on" aria-pressed="true">Steps</button>
-      <button type="button" id="fd-view-canvas" aria-pressed="false">Canvas</button>
+      <button type="button" id="fd-view-canvas" aria-pressed="false">Advanced canvas</button>
     </div>
     <span class="fdx-head__spacer"></span>
     <button class="btn btn--primary" type="button" id="fd-save">Save draft</button>
     <button class="btn btn--ghost" type="button" id="fd-publish" title="Activate this exact draft for schedules, triggers, and real runs">Publish</button>
-    <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test</button>
-    <button class="btn btn--ghost" type="button" id="fd-run-real" title="Run the exact published revision with real agents and connectors">Run published</button>
+    <button class="btn btn--ghost" type="button" id="fd-run" title="Simulate the steps without taking external actions">▷ Test</button>
+    <button class="btn btn--ghost" type="button" id="fd-run-real" title="Run the published version using connected services">Run published</button>
     <button class="btn btn--ghost" type="button" id="fd-history">⏱ History</button>
     <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
@@ -331,14 +332,27 @@
     <div class="fdx-panel">
       <h2 class="fdx-panel__t">Schedule</h2>
       <div class="fdx-kv">
-        <label for="fd-schedule">Run on</label>
-        <input class="input" id="fd-schedule" placeholder="cron, e.g. 0 9 * * 1" aria-label="Cron schedule" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am). Blank = manual/trigger only." />
+        <label for="fd-schedule-preset">Repeat</label>
+        <select class="input" id="fd-schedule-preset">
+          <option value="">No schedule</option>
+          <option value="0 9 * * *">Every day at 9 am</option>
+          <option value="0 9 * * 1-5">Weekdays at 9 am</option>
+          <option value="0 9 * * 1">Mondays at 9 am</option>
+          <option value="0 9 1 * *">First of each month at 9 am</option>
+          <option value="custom">Custom schedule</option>
+        </select>
       </div>
       <div class="fdx-kv">
-        <label for="fd-tz">Timezone</label>
-        <input class="input" id="fd-tz" placeholder="America/New_York" aria-label="Schedule timezone" title="IANA zone for the schedule. Blank = UTC. Adjusts across DST." />
+        <label for="fd-tz">Time zone</label>
+        <input class="input" id="fd-tz" placeholder="America/New_York" aria-label="Schedule time zone" title="Blank uses UTC. Named time zones adjust for daylight saving time." />
       </div>
-      <p class="fdx-mini">Leave blank to run manually or from a trigger.</p>
+      <p class="fdx-mini">Times use this time zone, or UTC if blank. Publish to activate schedule changes.</p>
+      <details id="fd-schedule-advanced">
+        <summary>Advanced schedule</summary>
+        <label for="fd-schedule">Schedule expression (cron)</label>
+        <input class="input" id="fd-schedule" placeholder="0 9 * * 1" aria-label="Custom schedule expression" />
+        <p class="fdx-mini">For example, 0 9 * * 1 means Mondays at 9 am. Leave blank for manual or event starts only.</p>
+      </details>
     </div>
 
     <div class="fdx-panel">
@@ -348,22 +362,25 @@
         <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="0" aria-label="Flow agent budget in dollars" title="Aggregate agent spend ceiling for one run (0 = none)." />
       </div>
       <div class="fdx-kv">
-        <label for="fd-maxsec">Deadline s</label>
-        <input class="input" id="fd-maxsec" type="number" min="0" placeholder="0" aria-label="Flow deadline in seconds" title="Whole-flow wall-clock deadline (0 = none)." />
+        <label for="fd-maxsec">Time limit (seconds)</label>
+        <input class="input" id="fd-maxsec" type="number" min="0" placeholder="0" aria-label="Flow time limit in seconds" title="Time allowed for the whole flow (0 = no limit)." />
       </div>
       <div class="fdx-kv">
         <label for="fd-maxconc">Max runs</label>
-        <input class="input" id="fd-maxconc" type="number" min="0" placeholder="0" aria-label="Max concurrent runs" title="Cap simultaneous runs (0 = unlimited). Set 1 for a singleton that must never overlap itself." />
+        <input class="input" id="fd-maxconc" type="number" min="0" placeholder="0" aria-label="Maximum simultaneous runs" title="Limit simultaneous runs (0 = unlimited). Set 1 to prevent overlapping runs." />
       </div>
       <p class="fdx-mini">0 means no cap.</p>
     </div>
 
     <div class="fdx-panel">
-      <h2 class="fdx-panel__t">Test input</h2>
-      <div class="fdx-kv" style="align-items:flex-start;">
-        <label for="fd-sample">Sample</label>
-        <input class="input" id="fd-sample" placeholder='{"issue":"…"}' aria-label="Sample input JSON" />
-      </div>
+      <details id="fd-test-data">
+        <summary>Advanced test data</summary>
+        <p class="fdx-mini">Optional values to use in a test. Enter a JSON object when a step needs specific input data.</p>
+        <div class="fdx-kv" style="align-items:flex-start;">
+          <label for="fd-sample">Input data (JSON)</label>
+          <input class="input" id="fd-sample" placeholder='{"issue":"…"}' aria-label="Sample input JSON" />
+        </div>
+      </details>
       <label class="fdx-mini" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
         <input type="checkbox" id="fd-notify" /> Notify me on approval / finish
       </label>
@@ -394,10 +411,10 @@
     var ICON = { agent: '🧠', action: '⚙️', branch: '🔀', switch: '🔃', foreach: '🔁',
       while: '🔄', parallel: '🔱', approval: '✅', delay: '⏱', wait_event: '📥',
       scope: '🛡', subflow: '📎', setvar: '📝', trigger: '⚡' };
-    var KLABEL = { agent: 'Agent', action: 'Action', branch: 'Branch', switch: 'Switch',
-      foreach: 'For-each', while: 'While', parallel: 'Parallel', approval: 'Approval',
-      delay: 'Delay', wait_event: 'Wait for event', scope: 'Try / catch',
-      subflow: 'Sub-flow', setvar: 'Set data' };
+    var KLABEL = { agent: 'AI task', action: 'Connected action', branch: 'Decision', switch: 'Choose a path',
+      foreach: 'Repeat for each item', while: 'Repeat while a condition holds', parallel: 'Run together', approval: 'Approval',
+      delay: 'Wait', wait_event: 'Wait for an event', scope: 'Handle a failure',
+      subflow: 'Run another flow', setvar: 'Update data' };
 
     function seed() {
       // Prefer the canvas engine's LIVE graph, so steps built (or drafted) on
@@ -407,8 +424,8 @@
       catch (e) { return null; }
     }
     function summarize(n) {
-      return (n.brief || n.prompt || n.condition || n.tool || n.name
-              || (n.params && JSON.stringify(n.params)) || '').toString();
+      return (n.brief || n.prompt || n.condition || (n.tool && n.tool.replace(/_/g, ' ')) || n.name
+              || (n.params && Object.keys(n.params).length ? 'Input values configured' : '') || '').toString();
     }
     function render() {
       var f = seed();
@@ -432,7 +449,7 @@
         var kind = document.createElement('div'); kind.className = 'fd-scard__kind';
         kind.textContent = KLABEL[n.kind] || (n.kind || 'step');
         var title = document.createElement('div'); title.className = 'fd-scard__t';
-        title.textContent = n.title || n.name || KLABEL[n.kind] || 'Step';
+        title.textContent = n.label || n.title || n.name || KLABEL[n.kind] || 'Step';
         var desc = document.createElement('div'); desc.className = 'fd-scard__d';
         desc.textContent = summarize(n);
         mid.appendChild(kind); mid.appendChild(title); if (desc.textContent) mid.appendChild(desc);
@@ -443,7 +460,7 @@
       foot.className = 'fd-simple__foot';
       var edit = document.createElement('button');
       edit.type = 'button'; edit.className = 'btn btn--ghost';
-      edit.textContent = 'Edit structure in Canvas →';
+      edit.textContent = 'Edit connections in Advanced canvas →';
       edit.addEventListener('click', function () { setView('canvas'); });
       foot.appendChild(edit);
       body.appendChild(foot);

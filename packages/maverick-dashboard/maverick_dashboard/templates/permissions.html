@@ -8,16 +8,16 @@
   {%- endmacro %}
   {% call hero('Governance', 'Permissions',
                subtitle='What Lightwork can do',
-               lede='Catalog, configuration, policy admission, sandbox state,
-                     and runtime proof are separate. Disabling a tool here
-                     takes effect on the next goal.') %}
+               lede='Choose which tools Lightwork may use and review whether
+                     their setup is complete. Blocking a tool here takes effect
+                     on the next goal.') %}
     {{ state('Current state',
-             perm.tool_page.admitted_total ~ ' of ' ~ perm.tool_page.catalog_total ~ ' catalog tools policy-admitted',
+             perm.tool_page.admitted_total ~ ' of ' ~ perm.tool_page.catalog_total ~ ' tools allowed by policy',
              badge='review sandbox' if perm.sandbox_warning else 'governed',
              badge_class='warn' if perm.sandbox_warning else 'ok',
              copy='Sandbox: <code>' ~ (perm.sandbox.backend or 'local') ~
                   '</code> · network policy: <code>' ~ perm.network ~
-                  '</code>. Policy admission is not a live readiness test.') }}
+                  '</code>. Allowed tools still need their connections and setup checked.') }}
   {% endcall %}
 
   {% if perm.error %}
@@ -30,13 +30,12 @@
     </div>
   {% endif %}
 
-  <div class="section-head"><h2>Execution sandbox</h2></div>
+  <div class="section-head"><h2>Where work runs</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      Where the agent's shell and code actually run. Switch it right here —
-      the change applies from the next goal, no config file, no restart. A
-      container backend can only be selected while its daemon is reachable,
-      so a switch never strands your goals on a dead runtime.
+      Choose the environment where agents run commands and code. Changes apply
+      from the next goal. A container can be selected only when its service
+      is reachable. Review the isolation warning before changing environments.
     </p>
     {% if not permissions_can_manage_sandbox %}
     <p class="muted" role="note">
@@ -167,11 +166,11 @@
       <label for="perm-query">Search catalog</label>
       <input class="input" id="perm-query" name="q" type="search" maxlength="128"
              value="{{ perm.tool_page.query }}" placeholder="Tool name or policy reason">
-      <label for="perm-state">Effective ACL state</label>
+      <label for="perm-state">Access policy</label>
       <select class="select" id="perm-state" name="state">
         <option value="all"{% if perm.tool_page.state == 'all' %} selected{% endif %}>All</option>
-        <option value="admitted"{% if perm.tool_page.state == 'admitted' %} selected{% endif %}>ACL admitted</option>
-        <option value="blocked"{% if perm.tool_page.state == 'blocked' %} selected{% endif %}>ACL blocked</option>
+        <option value="admitted"{% if perm.tool_page.state == 'admitted' %} selected{% endif %}>Allowed by policy</option>
+        <option value="blocked"{% if perm.tool_page.state == 'blocked' %} selected{% endif %}>Blocked by policy</option>
       </select>
       <input type="hidden" name="per_page" value="{{ perm.tool_page.per_page }}">
       <button class="btn" type="submit">Apply filter</button>
@@ -182,12 +181,11 @@
       ({{ perm.tool_page.catalog_total }} in the catalog).
     </p>
     {% if perm.tools %}
-      <p class="muted">Catalog presence and ACL admission do not prove that a
-        tool is usable. Provider, saved-connection, feature/module, and sandbox
-        dimensions stay unknown until explicit evidence exists; unknown is not
-        usable.</p>
+      <p class="muted">An allowed tool may still need setup. Its AI service,
+        saved connection, enabled features, and execution environment must be
+        checked before it can be shown as usable. Unknown means not yet verified.</p>
       <table>
-        <thead><tr><th scope="col">tool</th><th scope="col">catalog</th><th scope="col">provider</th><th scope="col">connection</th><th scope="col">feature/module</th><th scope="col">base ACL</th><th scope="col">dashboard override</th><th scope="col">sandbox</th><th scope="col">overall</th><th scope="col">ACL action</th></tr></thead>
+        <thead><tr><th scope="col">Tool</th><th scope="col">Listed</th><th scope="col">AI service</th><th scope="col">Connection</th><th scope="col">Feature</th><th scope="col">Organization policy</th><th scope="col">Additional restriction</th><th scope="col">Environment</th><th scope="col">Overall</th><th scope="col">Change access</th></tr></thead>
         <tbody>
         {% for t in perm.tools %}
           <tr data-tool-name="{{ t.name }}" data-tool-usable="{{ 'true' if t.usable else 'false' }}"
@@ -263,7 +261,7 @@
         <span class="badge {{ 'active' if c.enabled else 'done' }}">{{ c.name }}</span>
       {% endfor %}
     {% else %}
-      <p class="muted">No channels enabled — nothing is reachable from the network.</p>
+      <p class="muted">No messaging channels are enabled.</p>
     {% endif %}
   </div>
 
@@ -272,7 +270,7 @@
     <p class="muted">
       Your prompts and tool outputs are sent to:
       {% if perm.providers %}<strong>{{ perm.providers | join(', ') }}</strong>{% else %}<strong>(no provider configured)</strong>{% endif %}.
-      Nothing else.
+      Approved tools and connections may also receive information needed to perform your tasks.
     </p>
     <ul class="muted">
       <li>No telemetry. Lightwork collects no usage analytics.</li>

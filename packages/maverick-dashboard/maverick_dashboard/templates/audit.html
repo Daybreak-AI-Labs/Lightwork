@@ -43,23 +43,23 @@
   <section class="panel" aria-labelledby="audit-custody-title">
     <div class="aud-custody-actions">
       <div style="flex: 1 1 32rem;">
-        <div class="muted" style="font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em;">Production custody composition</div>
+        <div class="muted" style="font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em;">Audit protection</div>
         <h2 id="audit-custody-title">Unified audit custody</h2>
-        <p>Read-only readiness for the exact-tenant checkpoint, WORM, signing,
-          anchor, and at-least-once SIEM composition. Automatic day sealing
-          remains an operator-controlled action.</p>
+        <p>Check audit protection for this workspace, including saved checkpoints,
+          immutable storage, signatures, and security-event delivery. This check
+          does not change settings or automatically seal daily records.</p>
       </div>
       <button class="btn" id="audit-custody-refresh" type="button">Refresh custody status</button>
     </div>
     <p id="audit-custody-status" role="status" aria-live="polite" class="muted">Custody status has not loaded.</p>
     <div class="aud-custody-grid" aria-label="Unified audit custody readiness">
-      <div class="aud-custody-metric"><span class="muted">Composition</span><strong id="audit-custody-enabled">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">Availability</span><strong id="audit-custody-enabled">—</strong></div>
       <div class="aud-custody-metric"><span class="muted">Checkpoint</span><strong id="audit-custody-checkpoint">—</strong></div>
-      <div class="aud-custody-metric"><span class="muted">WORM</span><strong id="audit-custody-worm">—</strong></div>
-      <div class="aud-custody-metric"><span class="muted">SIEM delivery</span><strong id="audit-custody-siem">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">Immutable storage</span><strong id="audit-custody-worm">—</strong></div>
+      <div class="aud-custody-metric"><span class="muted">Security-event delivery</span><strong id="audit-custody-siem">—</strong></div>
       <div class="aud-custody-metric"><span class="muted">Independent production proof</span><strong id="audit-custody-proof">Not verified</strong></div>
     </div>
-    <p class="muted" style="margin-top: var(--space-3);">A ready local composition does not prove off-host key custody, S3 Object Lock, SIEM interoperability, recovery/scale, or customer acceptance.</p>
+    <p class="muted" style="margin-top: var(--space-3);">Local readiness does not verify independent key storage, external immutable storage, security-system integration, recovery, scale, or customer acceptance.</p>
   </section>
 
   <script>

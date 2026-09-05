@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,33 @@ def test_page_is_wired_and_hardened(monkeypatch) -> None:
 
 def test_unknown_query_params_are_404(monkeypatch) -> None:
     assert _app(monkeypatch, set()).get(page.PAGE_PATH + "?x=1").status_code == 404
+
+
+def test_technical_disclosures_do_not_hide_decisions_or_enforcement_problems(monkeypatch) -> None:
+    class DisclosureMarkup(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.details = []
+            self.contexts = {}
+
+        def handle_starttag(self, tag, attrs):
+            values = dict(attrs)
+            if tag == "details":
+                self.details.append(values)
+            if values.get("id"):
+                self.contexts[values["id"]] = list(self.details)
+
+        def handle_endtag(self, tag):
+            if tag == "details":
+                self.details.pop()
+
+    markup = DisclosureMarkup()
+    markup.feed(_app(monkeypatch, {"view"}).get(page.PAGE_PATH).text)
+    for identifier in ("rob-enable-snippet", "rob-output"):
+        assert markup.contexts[identifier]
+        assert all("open" not in attrs for attrs in markup.contexts[identifier])
+    for identifier in ("rob-check-form", "rob-verdict", "rob-problem-list", "rob-health-title"):
+        assert markup.contexts[identifier] == []
 
 
 def test_page_requires_a_template_authority() -> None:

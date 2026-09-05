@@ -1,7 +1,7 @@
 {% macro integration_readiness(r) %}
   <div style="display: grid; gap: var(--space-1); min-width: 15rem; font-size: var(--text-sm);">
     <div>
-      <span class="muted">Configuration:</span>
+      <span class="muted">Setup:</span>
       <span class="badge {{ 'active' if r.configured else 'blocked' }}">
         {{ 'configured' if r.configured else 'not configured' }}
       </span>
@@ -17,24 +17,39 @@
       {% endif %}
     </div>
     <div>
-      <span class="muted">Dependency:</span>
+      <span class="muted">Required software:</span>
       <span class="badge {{ 'active' if r.dependency.status == 'passed' else ('blocked' if r.dependency.status == 'failed' else '') }}">
         {{ r.dependency.status | replace('_', ' ') }}
       </span>
     </div>
     <div>
-      <span class="muted">Runtime:</span>
+      <span class="muted">Local check:</span>
       <span class="badge {{ 'active' if r.runtime.status == 'passed' else ('blocked' if r.runtime.status == 'failed' else '') }}">
         {{ r.runtime.status | replace('_', ' ') }}
       </span>
     </div>
     <div>
-      <span class="muted">Live verification:</span>
+      <span class="muted">Connection test:</span>
       <span class="badge {{ 'active' if r.live.status == 'verified' else ('blocked' if r.live.status == 'failed' else '') }}">
         {{ r.live.status }}
       </span>
     </div>
-    <div class="muted">
+    <p class="muted" style="margin: 0;">
+      {% if r.policy_allowed is sameas false %}
+        Your organization's policy does not allow this connection.
+      {% elif r.runtime.status == 'failed' or r.dependency.status == 'failed' %}
+        Setup needs attention before this connection can be used.
+      {% elif r.live.status == 'failed' %}
+        The connection test failed. Review the details before retrying.
+      {% elif r.live.status == 'verified' %}
+        The latest connection test passed.
+      {% else %}
+        A successful live connection has not been verified.
+      {% endif %}
+    </p>
+    <details>
+      <summary>Connection details</summary>
+      <div class="muted">
       {% if r.policy_allowed is sameas false %}
         {{ r.policy_detail }}
       {% elif r.runtime.status == 'failed' %}
@@ -44,6 +59,7 @@
       {% else %}
         {{ r.live.detail }}
       {% endif %}
-    </div>
+      </div>
+    </details>
   </div>
 {% endmacro %}

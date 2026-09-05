@@ -53,7 +53,9 @@ def test_page_exposes_full_publishing_lifecycle_and_default_off_boundary() -> No
     ):
         assert element in page
     assert "Prior records remain immutable." in page
-    assert "Closed structured JSON only" in page
+    assert 'data-guided-selector="cpp-resource-kind"' in page
+    assert "Save new version" in page
+    assert "Text references connect titles" in page
     assert "Brand theme" in page
     assert "contrast-checked hex colors" in page
     assert "content-free immutable tombstone" in page

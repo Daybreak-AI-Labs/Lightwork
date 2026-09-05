@@ -5,24 +5,47 @@
 <style>
   .arv { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 0; width: min(760px, calc(100vw - 2rem)); max-height: min(84vh, 900px); background: var(--surface-1); color: var(--text); box-shadow: var(--shadow-lg); }
   .arv::backdrop { background: var(--scrim); }
-  .arv__head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: inherit; }
+  .arv[open] { display: flex; flex-direction: column; overflow: hidden; }
+  .arv__head { display: flex; flex-wrap: wrap; flex: none; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); background: inherit; }
   .arv__head h3 { margin: 0; font-size: var(--text-lg); text-transform: none; letter-spacing: 0; color: var(--text); }
-  .arv__body { padding: var(--space-4) var(--space-5); overflow-y: auto; max-height: calc(84vh - 120px); }
-  .arv__row { display: grid; grid-template-columns: 1fr auto; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--hairline); }
+  .arv__risks { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; margin-inline-start: auto; }
+  .arv__body { padding: var(--space-4) var(--space-5); overflow-y: auto; min-height: 0; min-width: 0; overflow-wrap: anywhere; }
+  .arv__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--hairline); }
   .arv__q { font-size: var(--text-base); }
   .arv__note { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
   .arv__ans { align-self: start; }
   .arv__section { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold); }
   .arv textarea { width: 100%; min-height: 84px; background: var(--surface-sunken); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); font: inherit; }
-  .arv__foot { display: flex; gap: var(--space-2); justify-content: flex-end; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border); }
+  .arv__answer-editor { min-width: 0; margin-block: var(--space-4); }
+  .arv__answer-editor select { width: 100%; min-width: 0; max-width: 100%; }
+  .arv__answer-editor label { display: block; margin-top: var(--space-3); }
+  .arv__answer-editor button { margin-top: var(--space-3); margin-inline-end: var(--space-2); }
+  .arv__incomplete { display: block; padding: var(--space-3); border: 1px solid var(--border-strong); border-inline-start: 3px solid var(--warn); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font: inherit; line-height: 1.5; }
+  .arv pre { max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .arv__foot { display: flex; flex-wrap: wrap; flex: none; gap: var(--space-2); justify-content: flex-end; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border); }
+  .arv__foot > *, .arv .badge { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  #arv-status:not(:empty) { flex-basis: 100%; }
+  #arv-cadence-wrap { flex-wrap: wrap; }
+  @media (max-width: 600px) {
+    .arv__head, .arv__body, .arv__foot { padding-inline: var(--space-3); }
+    .arv__head h3 { flex: 1; min-width: 0; }
+    .arv__risks { order: 2; flex-basis: 100%; margin-inline-start: 0; }
+    .arv__row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  }
+  @media (max-height: 500px) {
+    .arv { max-height: calc(100dvh - 1rem); }
+    .arv__foot { max-height: 35dvh; overflow-y: auto; }
+  }
 </style>
 
 <dialog class="arv" id="arv-dialog" aria-labelledby="arv-title">
   <div class="arv__head">
     <h3 id="arv-title">Assessment review</h3>
-    <span class="badge" id="arv-inherent" style="margin-inline-start:auto;"></span>
-    <span aria-hidden="true" class="muted">→</span>
-    <span class="badge" id="arv-risk"></span>
+    <div class="arv__risks">
+      <span class="badge" id="arv-inherent"></span>
+      <span aria-hidden="true" class="muted">→</span>
+      <span class="badge" id="arv-risk"></span>
+    </div>
     <button class="btn btn--ghost" id="arv-close" aria-label="Close review">✕</button>
   </div>
   <div class="arv__body" id="arv-body"><p class="muted">Loading…</p></div>
@@ -63,6 +86,8 @@
     let currentId = null;
     let currentRevision = null;
     let decidedInDialog = false;
+    let viewGeneration = 0, answerBusy = false, answerDirty = false, selectedQuestion = '', currentQuestions = {};
+    let currentCompletion = { answered: 0, total: 0, incomplete: false };
 
     function el(tag, cls, text) {
       const n = document.createElement(tag);
@@ -75,25 +100,41 @@
       return 'badge ' + (r === 'high' ? 'blocked' : r === 'medium' ? 'warn' : 'done');
     }
 
+    function questionnaireCompletion(rec) {
+      const result = rec.result || {}, questions = rec.question_text || {};
+      const total = Number.isInteger(result.total) ? result.total : Object.keys(questions).length;
+      const answered = Number.isInteger(result.answered) ? result.answered : Object.keys(questions).filter(function (id) {
+        return ['yes', 'no', 'na'].includes(((rec.answers || {})[id] || {}).answer);
+      }).length;
+      return { answered: answered, total: total, incomplete: total > 0 && answered < total };
+    }
+
     function render(rec) {
+      if (rec.question_text) currentQuestions = rec.question_text;
+      else rec.question_text = currentQuestions;
       currentRevision = Number(rec.revision || 0);
       body.innerHTML = '';
       const res = rec.result || {};
+      currentCompletion = questionnaireCompletion(rec);
+      const incomplete = currentCompletion.incomplete;
+      const hasAnswers = Object.keys(rec.answers || {}).length > 0;
       const inherent = res.inherent_risk || res.risk_rating || '?';
       const residual = res.residual_risk || res.risk_rating || '?';
       const inhEl = document.getElementById('arv-inherent');
-      inhEl.textContent = 'inherent ' + inherent;
-      inhEl.className = riskClass(inherent);
-      riskEl.textContent = 'residual ' + residual;
-      riskEl.className = riskClass(residual);
+      inhEl.textContent = incomplete ? (hasAnswers ? 'provisional inherent ' + inherent : 'inherent not yet assessed') : 'inherent ' + inherent;
+      inhEl.className = incomplete ? 'badge warn' : riskClass(inherent);
+      riskEl.textContent = incomplete ? (hasAnswers ? 'provisional residual ' + residual : 'residual not yet assessed') : 'residual ' + residual;
+      riskEl.className = incomplete ? 'badge warn' : riskClass(residual);
       const sub = el('p', 'muted');
-      const controls = (res.risks_in_scope != null)
+      const controls = (!incomplete && res.risks_in_scope != null)
         ? ' · ' + (res.controls_in_place || 0) + ' of ' + res.risks_in_scope +
           ' in-scope risk areas controlled'
         : '';
       sub.append(rec.type ? rec.type.toUpperCase() + ' · ' : '',
                  (rec.subject || '') + controls);
       body.appendChild(sub);
+      if (incomplete) body.appendChild(el('p', 'arv__incomplete', 'Questionnaire incomplete: ' + currentCompletion.answered + ' of ' + currentCompletion.total + ' questions resolved. Unanswered questions and recorded Unknown answers still need resolution. Any risk estimate is provisional; approving now records a decision on an incomplete questionnaire.'));
+      renderAnswerEditor(rec);
 
       if (rec.status === 'approved' || rec.status === 'rejected') {
         const line = el('p', null);
@@ -134,7 +175,7 @@
         body.appendChild(p);
       }
       // Risk trend (B12): the vendor's residual risk over successive reviews.
-      renderTrend(rec);
+      if (!incomplete) renderTrend(rec);
 
       body.appendChild(el('div', 'arv__section', 'Answers'));
       const answers = rec.answers || {};
@@ -196,6 +237,105 @@
       triggerBtn.style.display = (rec.status === 'approved') ? '' : 'none';
     }
 
+    function renderAnswerEditor(rec) {
+      answerDirty = false;
+      if (rec.status !== 'pending_review' && rec.status !== 'needs_more') return;
+      const questions = rec.question_text || {}, answers = rec.answers || {};
+      const choices = Object.keys(questions).map(function (id) { return { key: 'q:' + id, id: id, text: questions[id].text, guidance: questions[id].guidance || '', saved: answers[id] || {} }; });
+      (rec.followups || []).forEach(function (item) {
+        choices.push({ key: 'f:' + item.id, id: item.id, text: item.question, followup: true, saved: { answer: item.answer || '', note: item.answer || '' } });
+      });
+      if (!choices.length) return;
+      const section = el('details', 'arv__answer-editor'); section.open = true;
+      section.appendChild(el('summary', '', 'Complete the questionnaire'));
+      section.appendChild(el('p', 'muted', 'Record what you can confirm. Choose Unknown when information is missing. Saving answers updates findings; it does not approve the assessment.'));
+      const form = el('form'), picker = el('select'), answer = el('select'), note = el('textarea');
+      picker.id = 'arv-answer-question'; answer.id = 'arv-answer-value'; note.id = 'arv-answer-note'; note.maxLength = 4000;
+      const questionLabel = el('label', '', 'Question'); questionLabel.htmlFor = picker.id;
+      const answerLabel = el('label', '', 'Your answer'); answerLabel.htmlFor = answer.id;
+      const noteLabel = el('label', '', 'Notes and supporting information (optional)'); noteLabel.htmlFor = note.id;
+      choices.forEach(function (choice, index) {
+        const option = el('option', '', (choice.followup ? 'Follow-up: ' : (index + 1) + '. ') + choice.text); option.value = choice.key; picker.appendChild(option);
+      });
+      [['', 'Choose an answer'], ['yes', 'Yes'], ['no', 'No'], ['na', 'Not applicable'], ['unknown', 'Unknown — information needed']].forEach(function (value) {
+        const option = el('option', '', value[1]); option.value = value[0]; answer.appendChild(option);
+      });
+      const prompt = el('p'), guidance = el('p', 'muted'), save = el('button', 'btn btn--primary', 'Save answer'); save.type = 'submit';
+      const discard = el('button', 'btn btn--ghost', 'Discard answer changes'); discard.type = 'button';
+      let selected = choices.find(function (choice) { return choice.key === selectedQuestion; }) || choices.find(function (choice) { return !choice.saved.answer; }) || choices[0];
+      function hydrate(choice) {
+        selected = choice; selectedQuestion = choice.key; picker.value = choice.key;
+        prompt.textContent = choice.text; guidance.textContent = choice.guidance || '';
+        answer.value = choice.saved.answer || ''; note.value = choice.saved.note || '';
+        answer.hidden = answerLabel.hidden = !!choice.followup; answer.disabled = !!choice.followup; answer.required = !choice.followup;
+        note.required = !!choice.followup; noteLabel.textContent = choice.followup ? 'Your reply' : 'Notes and supporting information (optional)'; answerDirty = false;
+      }
+      picker.addEventListener('change', async function () {
+        const next = choices.find(function (choice) { return choice.key === picker.value; });
+        if (!next) return;
+        picker.disabled = true;
+        try {
+          if (answerDirty && !(await mvConfirm('Discard the unsaved answer before changing questions?', { okText: 'Discard changes' }))) { picker.value = selected.key; return; }
+          hydrate(next);
+        } finally { picker.disabled = answerBusy; }
+      });
+      answer.addEventListener('input', function () { answerDirty = true; }); note.addEventListener('input', function () { answerDirty = true; });
+      discard.addEventListener('click', function () { if (!answerBusy) hydrate(selected); });
+      form.append(questionLabel, picker, prompt, guidance, answerLabel, answer, noteLabel, note, save, discard);
+      section.appendChild(form); body.appendChild(section); hydrate(selected);
+      form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        if (answerBusy || !form.reportValidity()) return;
+        const id = currentId, revision = currentRevision, generation = viewGeneration, choice = selected;
+        const value = choice.followup ? note.value.trim() : answer.value;
+        if (!value) { statusEl.textContent = 'Enter an answer before saving.'; return; }
+        const controls = [picker, answer, note, save, discard, sendBtn, approveBtn, rejectBtn, acceptBtn, triggerBtn];
+        const disabled = controls.map(function (control) { return control.disabled; });
+        controls.forEach(function (control) { control.disabled = true; }); answerBusy = true; statusEl.textContent = 'Saving answer…';
+        try {
+          const path = choice.followup ? '/followups/' + encodeURIComponent(choice.id) + '/answer' : '/answers/' + encodeURIComponent(choice.id);
+          const payload = { answer: value, expected_revision: revision };
+          if (!choice.followup) payload.note = note.value.trim();
+          const response = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id) + path, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          });
+          const data = await response.json();
+          if (generation !== viewGeneration || id !== currentId) return;
+          if (!response.ok) throw new Error(response.status === 409 ? 'This assessment changed. Reload the latest version before saving this answer.' : (data && typeof data.detail === 'string' ? data.detail : 'Could not save the answer.'));
+          if (!data || typeof data !== 'object') throw new Error('The saved answer could not be confirmed. Reload the assessment before trying again.');
+          const saved = choice.followup ? (data.followups || []).find(function (item) { return item.id === choice.id; }) : data.answers && data.answers[choice.id];
+          if (!data || data.id !== id || !Number.isInteger(data.revision) || data.revision < revision || !saved || saved.answer !== value) throw new Error('The saved answer could not be confirmed. Reload the assessment before trying again.');
+          answerDirty = false; decidedInDialog = true;
+          const next = choices[choices.indexOf(choice) + 1]; selectedQuestion = next ? next.key : choice.key;
+          render(data); statusEl.textContent = 'Answer saved. Continue the questionnaire or review the findings.';
+          const focus = document.getElementById(choice.followup ? 'arv-answer-note' : 'arv-answer-value'); if (focus) focus.focus();
+        } catch (error) {
+          if (generation === viewGeneration && id === currentId) {
+            statusEl.textContent = error.message || 'Could not save the answer. Check your connection.';
+            const refresh = el('button', 'btn btn--ghost', 'Reload latest assessment'); refresh.type = 'button';
+            refresh.addEventListener('click', async function () {
+              if (answerDirty && !(await mvConfirm('Discard this unsaved answer and load the latest assessment?', { okText: 'Reload latest' }))) return;
+              answerDirty = false; await reload();
+            }); statusEl.appendChild(refresh);
+          }
+        } finally { answerBusy = false; controls.forEach(function (control, index) { control.disabled = disabled[index]; }); }
+      });
+      const history = (rec.answer_history || []).filter(function (item) { return item.previous_answer; });
+      const replies = rec.followup_answer_history || [];
+      if (history.length || replies.length) {
+        const details = el('details'); details.appendChild(el('summary', '', 'Previous answers and source information'));
+        history.forEach(function (item) {
+          const old = item.previous_answer, question = questions[item.question_id];
+          details.appendChild(el('p', '', (question ? question.text : item.question_id) + ': ' + old.answer + (old.note ? ' — ' + old.note : '') + (old.by ? ' · ' + old.by : '')));
+          if (old.ai_metadata) { const pre = el('pre'); pre.textContent = JSON.stringify(old.ai_metadata, null, 2); details.appendChild(pre); }
+        });
+        replies.forEach(function (item) {
+          const previous = item.previous_answer || {}, question = (rec.followups || []).find(function (followup) { return followup.id === item.followup_id; });
+          details.appendChild(el('p', '', (question ? question.question : 'Follow-up') + ': ' + (previous.answer || 'No previous reply') + (previous.answered_by ? ' · ' + previous.answered_by : '')));
+        }); section.appendChild(details);
+      }
+    }
+
     const RISK_RANK = { minimal: 0, low: 1, medium: 2, high: 3 };
     async function renderTrend(rec) {
       if (!rec.subject) return;
@@ -223,9 +363,13 @@
     }
 
     async function decide(decision) {
+      if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before recording a review decision.'; return; }
+      const id = currentId, revision = currentRevision, generation = viewGeneration;
       approveBtn.disabled = rejectBtn.disabled = true;
-      statusEl.textContent = decision === 'approved' ? 'Approving…' : 'Rejecting…';
       try {
+        if (decision === 'approved' && currentCompletion.incomplete && !(await mvConfirm('Only ' + currentCompletion.answered + ' of ' + currentCompletion.total + ' questions are resolved. Approve this incomplete questionnaire?', { okText: 'Approve incomplete' }))) return;
+        if (id !== currentId || revision !== currentRevision || generation !== viewGeneration || answerBusy || answerDirty) return;
+        statusEl.textContent = decision === 'approved' ? 'Approving…' : 'Rejecting…';
         const days = parseInt(cadenceSel.value, 10) || 0;
         const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/decide', {
           method: 'POST',
@@ -265,6 +409,7 @@
 
     // Accept the residual risk (B11): named owner, rationale, expiry.
     acceptBtn.addEventListener('click', async function () {
+      if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before accepting risk.'; return; }
       const rationale = window.prompt('Rationale for accepting this residual risk ' +
         '(e.g. compensating controls, business justification):');
       if (rationale == null || !rationale.trim()) return;
@@ -287,6 +432,7 @@
 
     // Force a re-review now (B14): an external event trigger.
     triggerBtn.addEventListener('click', async function () {
+      if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before reopening review.'; return; }
       const reason = window.prompt('Why re-review now? (contract renewal, new sub-processor, material change)');
       if (reason == null) return;
       triggerBtn.disabled = true;
@@ -306,23 +452,28 @@
     });
 
     async function open(id) {
+      if (answerBusy) { statusEl.textContent = 'Wait for the answer to finish saving before opening another assessment.'; return; }
+      if (answerDirty && !(await mvConfirm('Discard this unsaved answer and open another assessment?', { okText: 'Discard changes' }))) return;
+      const generation = ++viewGeneration; answerDirty = false; selectedQuestion = ''; currentQuestions = {};
       currentId = id;
       currentRevision = null;
       statusEl.textContent = '';
       body.innerHTML = '<p class="muted">Loading…</p>';
       sendBtn.style.display = 'none';
-      dlg.showModal();
+      if (!dlg.open) dlg.showModal();
       try {
         const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        render(await r.json());
+        const record = await r.json(); if (generation === viewGeneration) render(record);
       } catch (e) {
+        if (generation !== viewGeneration) return;
         body.innerHTML = '';
         body.appendChild(el('p', 'muted', 'Could not load assessment: ' + e.message));
       }
     }
 
     sendBtn.addEventListener('click', async function () {
+      if (answerBusy || answerDirty) { statusEl.textContent = 'Save or discard the answer changes before asking for more detail.'; return; }
       const ta = document.getElementById('arv-questions');
       const questions = (ta && ta.value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
       if (!questions.length) { statusEl.textContent = 'Write at least one question first.'; return; }
@@ -346,10 +497,17 @@
         sendBtn.disabled = false;
       }
     });
-    document.getElementById('arv-close').addEventListener('click', function () { dlg.close(); });
+    async function closeReview() {
+      if (answerBusy) { statusEl.textContent = 'Wait for the answer to finish saving before closing this assessment.'; return; }
+      if (answerDirty && !(await mvConfirm('Discard the unsaved answer and close this assessment?', { okText: 'Discard changes' }))) return;
+      answerDirty = false; dlg.close();
+    }
+    document.getElementById('arv-close').addEventListener('click', closeReview);
+    dlg.addEventListener('cancel', function (event) { event.preventDefault(); closeReview(); });
     // A decision changes the row the page shows (status badge, due date):
     // refresh once the reviewer is done, not mid-dialog.
     dlg.addEventListener('close', function () {
+      viewGeneration++;
       if (decidedInDialog) location.reload();
     });
 

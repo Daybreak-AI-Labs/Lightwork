@@ -40,7 +40,7 @@
 
   function operation(value) {
     if (typeof value !== "string" || !operationPattern.test(value.trim())) {
-      throw failure("field_invalid", "Idempotency key is invalid.");
+      throw failure("field_invalid", "Enter a valid request reference; reuse it only when retrying the same action.");
     }
     return value.trim();
   }
@@ -284,7 +284,7 @@
       } else if (payload.enabled === true) {
         setStatus(runtimeStatus, "Enabled, but the publishing authority is not ready.", true);
       } else {
-        setStatus(runtimeStatus, "Website publish settings are disabled for this tenant.", true);
+        setStatus(runtimeStatus, "Website publish settings are disabled for this workspace.", true);
       }
     } catch (error) { setStatus(runtimeStatus, `Status unavailable: ${error.message}`, true); }
   }

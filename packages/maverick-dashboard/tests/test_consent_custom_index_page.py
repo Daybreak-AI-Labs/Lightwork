@@ -65,7 +65,7 @@ def test_workbench_is_store_free_closed_and_liquid_glass(client: TestClient) -> 
     ):
         assert directive in csp
     assert "Custom data-element indexes" in response.text
-    assert "HMAC-tokenized projections" in response.text
+    assert "without saving the original search values" in response.text
     assert "key reference, key version, retention, and quotas are resolved by the server" in response.text
     assert "search fails closed" in response.text
     assert 'id="custom-index-operations" disabled' in response.text

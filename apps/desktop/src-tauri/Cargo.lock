@@ -1648,6 +1648,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightwork-desktop-runtime"
+version = "0.1.0"
+
+[[package]]
 name = "litemap"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1683,6 +1687,7 @@ dependencies = [
 name = "maverick-desktop"
 version = "0.1.7"
 dependencies = [
+ "lightwork-desktop-runtime",
  "tauri",
  "tauri-build",
 ]

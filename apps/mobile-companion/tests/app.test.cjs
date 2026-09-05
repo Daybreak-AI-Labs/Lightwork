@@ -3,6 +3,21 @@ const assert = require('node:assert/strict');
 const { React, act, create, source, deferred, connection, newer, text, tab, button } = require('./helpers.cjs');
 const mocks = settings => ({ './src/settings': settings, '../settings': settings });
 
+test('connection errors lead with guidance and reveal technical detail only on request', async () => {
+  const { ConnectionNotice } = source('src/components/ConnectionNotice.tsx');
+  const message = 'GET /api/v1/goals -> HTTP 403';
+  let app;
+  await act(async () => { app = create(React.createElement(ConnectionNotice, { message })); });
+  assert.match(text(app), /Check your connection/);
+  assert.doesNotMatch(text(app), /GET \/api/);
+  await act(async () => { button(app, 'Connection details').props.onPress(); });
+  assert.match(text(app), /GET \/api/);
+  assert.equal(app.root.findByType('Pressable').props.accessibilityState.expanded, true);
+  await act(async () => { button(app, 'Hide connection details').props.onPress(); });
+  assert.doesNotMatch(text(app), /GET \/api/);
+  app.unmount();
+});
+
 test('startup keychain errors remain visible and retryable', async () => {
   let calls = 0;
   const App = source('App.tsx', mocks({ loadSettings: async () => {
@@ -67,6 +82,27 @@ test('repeated save presses remain single-flight until persistence settles', asy
   assert.equal(button(app, 'Saving…').props.disabled, true);
   await act(async () => { pending.resolve(); await first; });
   assert.equal(button(app, 'Save').props.disabled, false);
+  app.unmount();
+});
+
+test('invalid address stays editable with actionable guidance and no false save', async () => {
+  let saves = 0, callbacks = 0, app;
+  const { SettingsScreen } = source('src/screens/SettingsScreen.tsx', mocks({
+    loadSettings: async () => connection, saveSettings: async () => { saves++; },
+  }));
+  await act(async () => { app = create(React.createElement(SettingsScreen, { onSaved() { callbacks++; } })); });
+  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText('http://remote.example.test'); });
+  await act(async () => { await button(app, 'Save').props.onPress(); });
+  assert.equal(saves, 0);
+  assert.equal(callbacks, 0);
+  assert.match(text(app), /HTTPS/);
+  assert.doesNotMatch(text(app), /Saved\./);
+  assert.equal(app.root.findAllByType('TextInput')[0].props.value, 'http://remote.example.test');
+  await act(async () => { app.root.findAllByType('TextInput')[0].props.onChangeText(newer.baseUrl); });
+  await act(async () => { await button(app, 'Save').props.onPress(); });
+  assert.equal(saves, 1);
+  assert.equal(callbacks, 1);
+  assert.match(text(app), /Saved\./);
   app.unmount();
 });
 

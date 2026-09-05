@@ -57,6 +57,29 @@ test('failed update retains the complete committed connection', async () => {
   assert.deepEqual(plain(await settings.loadSettings()), newer);
 });
 
+test('invalid connection changes never replace the saved address and token', async () => {
+  const f = fixture({ [RECORD]: JSON.stringify(connection) });
+  const settings = f.load();
+  for (const baseUrl of ['', 'not an address', 'http://remote.example.test',
+    'ftp://localhost',
+    'https://user:password@example.test', // pragma: allowlist secret - synthetic invalid URL fixture
+    'https://example.test?redirect=elsewhere', 'https://example.test#fragment']) {
+    await assert.rejects(settings.saveSettings({ baseUrl, token: newer.token }));
+    assert.deepEqual(plain(await settings.loadSettings()), connection);
+  }
+  await assert.rejects(settings.saveSettings({ ...newer, token: 'invalid\nheader' }));
+  assert.deepEqual(plain(await settings.loadSettings()), connection);
+});
+
+test('valid HTTPS and loopback HTTP addresses can still be saved', async () => {
+  const settings = fixture().load();
+  for (const baseUrl of ['https://dashboard.example.test/team', 'http://localhost:8765',
+    'http://127.0.0.1:8765', 'http://[::1]:8765']) {
+    await settings.saveSettings({ baseUrl, token: newer.token });
+    assert.equal((await settings.loadSettings()).baseUrl, baseUrl);
+  }
+});
+
 test('malformed primary record fails closed instead of restoring stale legacy credentials', async () => {
   for (const raw of ['{', 'null', '[]', '{}', '{"baseUrl":"https://new.example.test","token":5}']) {
     await assert.rejects(fixture({ ...legacy, [RECORD]: raw }).load().loadSettings());

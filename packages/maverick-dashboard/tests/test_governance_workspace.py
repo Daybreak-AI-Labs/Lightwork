@@ -895,7 +895,7 @@ def test_literacy_register_through_the_api_and_page():
     assert page.status_code == 200
     assert "analyst@example.com" in page.text
     assert "model-limits (missing)" in page.text
-    assert "Reconciliation required" in page.text
+    assert "Evidence review required" in page.text
 
 
 # ---------------------------------------------------------------------------
@@ -1072,6 +1072,102 @@ def test_grc_sync_status_and_outbound_surface_on_api_and_page():
     page = client.get("/security/governance")
     assert page.status_code == 200
     assert _FAKE_SYS_ID in page.text
+
+
+@pytest.mark.parametrize("global_role", ["viewer", "operator", "auditor"])
+def test_grc_dispatch_requires_global_admin_even_for_tenant_admin(monkeypatch, global_role):
+    from maverick import grc_sync
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:tenant-admin")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: global_role)
+    calls = []
+    monkeypatch.setattr(grc_sync, "run_sync", lambda **kwargs: calls.append(kwargs))
+    response = client.post(f"{_PREFIX}/grc-sync/run", json={"confirm_dispatch": True})
+    assert response.status_code == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize("principal", [None, "token:automation", "agent:worker"])
+def test_grc_dispatch_requires_an_authenticated_human(monkeypatch, principal):
+    from maverick import grc_sync
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda value: "admin")
+    calls = []
+    monkeypatch.setattr(grc_sync, "run_sync", lambda **kwargs: calls.append(kwargs))
+    assert client.post(
+        f"{_PREFIX}/grc-sync/run", json={"confirm_dispatch": True}
+    ).status_code == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"confirm_dispatch": False}, {"confirm_dispatch": "true"},
+    {"confirm_dispatch": 1}, {"confirm_dispatch": True, "limit": 0},
+    {"confirm_dispatch": True, "limit": 201}, {"confirm_dispatch": True, "limit": True},
+    {"confirm_dispatch": True, "actor": "user:spoofed"},
+    {"confirm_dispatch": True, "writer": "custom"},
+])
+def test_grc_dispatch_rejects_unconfirmed_unbounded_or_injected_inputs(monkeypatch, body):
+    from maverick import grc_sync
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    calls = []
+    monkeypatch.setattr(grc_sync, "run_sync", lambda **kwargs: calls.append(kwargs))
+    assert client.post(f"{_PREFIX}/grc-sync/run", json=body).status_code == 422
+    assert calls == []
+
+
+def test_grc_dispatch_records_signed_in_actor_and_avoids_duplicate_delivery(monkeypatch):
+    from maverick import audit, grc_sync
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    _assurance_incident()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:grc-admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    sent = []
+    audit_events = []
+    monkeypatch.setattr(audit, "record", lambda kind, **fields: audit_events.append(fields) or True)
+
+    def writer(operation, path, payload):
+        sent.append((operation, path, payload))
+        return json.dumps({"result": {"sys_id": _FAKE_SYS_ID}})
+
+    monkeypatch.setattr(grc_sync, "_default_writer", lambda config: writer)
+    body = {"confirm_dispatch": True, "limit": 1}
+    first = _ok(client.post(f"{_PREFIX}/grc-sync/run", json=body))
+    assert first["delivered_count"] == 1
+    assert first["limit"] == 1
+    assert len(sent) == 1
+    assert first["delivered"][0]["remote_id"] == _FAKE_SYS_ID
+    second = _ok(client.post(f"{_PREFIX}/grc-sync/run", json=body))
+    assert second["unchanged_count"] == 1
+    assert len(sent) == 1
+    deliveries = [event for event in audit_events if event["action"] == "deliver_grc_outbound"]
+    assert deliveries and all(event["actor"] == "user:grc-admin" for event in deliveries)
+
+
+def test_grc_dispatch_refuses_disabled_module_before_dispatch(monkeypatch):
+    from maverick import grc_sync
+    from maverick_dashboard import auth
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda principal: "admin")
+    calls = []
+    monkeypatch.setattr(grc_sync, "run_sync", lambda **kwargs: calls.append(kwargs))
+    assert client.post(
+        f"{_PREFIX}/grc-sync/run", json={"confirm_dispatch": True}
+    ).status_code == 403
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ import {
   getSpend,
 } from "../api";
 import { offlineBanner, saveBundle, useCachedBundle } from "../offlineCache";
+import { ConnectionNotice } from "../components/ConnectionNotice";
 import { usePolling } from "../poll";
 
 type GlanceData = { active: ActiveGoal[]; spend: SpendTotal | null };
@@ -62,7 +63,7 @@ export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
 
   return (
     <ScrollView style={styles.fill}>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <ConnectionNotice message={error} /> : null}
       <Stat label="active runs" value={data ? String(data.active.length) : "…"} />
       <Stat
         label="total spend"
@@ -101,7 +102,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff8c5", color: "#4d2d00",
     padding: 8, textAlign: "center", fontSize: 13,
   },
-  error: { color: "#cf222e", padding: 8, fontSize: 13 },
   stat: { paddingHorizontal: 16, paddingVertical: 10 },
   statValue: { fontSize: 22, fontWeight: "700" },
   statLabel: { fontSize: 13, color: "#57606a" },

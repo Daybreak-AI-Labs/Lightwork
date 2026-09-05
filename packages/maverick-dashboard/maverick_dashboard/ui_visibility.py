@@ -263,7 +263,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/benchmarks",
         "label": "Benchmarks",
-        "group": "Observe",
+        "group": "Advanced tools",
         "icon": "bench",
         "floor": "view",
         "default": "view",
@@ -1003,7 +1003,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/plugins",
         "label": "Plugins",
-        "group": "Extend",
+        "group": "Advanced tools",
         "icon": "plugins",
         "floor": "view",
         "default": "operate",
@@ -1021,7 +1021,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/mcp",
         "label": "Tool Servers",
-        "group": "Extend",
+        "group": "Advanced tools",
         "icon": "mcp",
         "floor": "admin",
         "default": "admin",
@@ -1085,7 +1085,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/cache",
         "label": "Cache",
-        "group": "Admin",
+        "group": "Advanced tools",
         "icon": "cache",
         "floor": "view",
         "default": "admin",
@@ -1093,7 +1093,7 @@ PAGES: tuple[dict, ...] = (
     {
         "path": "/embed-demo",
         "label": "Embed Analytics",
-        "group": "Admin",
+        "group": "Advanced tools",
         "icon": "embed",
         "floor": "view",
         "default": "admin",
@@ -1345,7 +1345,8 @@ def _grouped_links(role: str | None, *, include_folded: bool) -> list[dict]:
                 "aliases": page.get("aliases", ""),
             }
         )
-    return groups
+    # Technical setup and diagnostics stay discoverable after everyday work.
+    return sorted(groups, key=lambda group: group["label"] == "Advanced tools")
 
 
 def matrix() -> list[dict]:

@@ -47,9 +47,9 @@ def test_page_exposes_honest_one_time_operator_workbench(page_client) -> None:
     assert "stores only its digest and cannot replay it" in page
     assert "never accepts a tenant, actor, consumer subject" in page
     assert "no consumer redeem" in page
-    assert "Production composition gates" in page
-    assert "independent operator-to-consumer identity mapping" in page
-    assert "never used as consumer identity proof" in page
+    assert "Delivery requirements" in page
+    assert "independently verify the intended recipient" in page
+    assert "does not prove the recipient's identity" in page
     assert "/api/v1/privacy/rights-consumer-delivery" in page
     for operation in (
         "delivery-mint",

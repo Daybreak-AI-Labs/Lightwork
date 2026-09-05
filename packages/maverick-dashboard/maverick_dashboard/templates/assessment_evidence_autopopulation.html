@@ -18,25 +18,25 @@
     <div>
       <p class="eyebrow">Privacy + third-party assessment intelligence</p>
       <h1>Evidence-assisted assessment proposals</h1>
-      <p class="aep-lede">Convert already released evidence analyses into questionnaire-bound answer drafts, then keep human review and application as explicit, separate steps.</p>
+      <p class="aep-lede">Use approved evidence analyses to draft questionnaire answers. Review the answers first, then choose which approved answers to add to the assessment.</p>
     </div>
     <div class="aep-runtime" aria-live="polite">
       <span class="aep-pill" id="aep-status-pill" data-state="checking">Checking</span>
-      <strong id="aep-status-title">Tenant composition</strong>
-      <span id="aep-status-detail">No proposal or evidence store has been opened by this page.</span>
+      <strong id="aep-status-title">Service availability</strong>
+      <span id="aep-status-detail">Checking whether evidence proposals are available.</span>
       <button class="btn" id="aep-refresh-status" type="button">Refresh status</button>
     </div>
   </header>
 
   <aside class="aep-glass aep-boundary" aria-labelledby="aep-boundary-title">
     <p class="eyebrow">Decision boundary</p>
-    <h2 id="aep-boundary-title">Documents propose. Humans decide. Apply is separate.</h2>
+    <h2 id="aep-boundary-title">Review evidence before adding answers</h2>
     <ul>
       <li>Only current, human-approved AI Evidence Analysis records can support a proposal.</li>
       <li>Partial, missing, conflicting, or low-confidence evidence can never become an automatically applicable answer.</li>
       <li>Approval selects exact eligible questions; it does not change the assessment.</li>
-      <li>Apply rechecks evidence and assessment CAS, fills only unanswered questions, and never overwrites a human answer.</li>
-      <li>Digest citations and local integrity do not establish legal conclusions, provider truth, customer acceptance, or an external WORM anchor.</li>
+      <li>Before adding answers, Lightwork checks that the evidence and assessment are unchanged. It fills only unanswered questions and never overwrites a human answer.</li>
+      <li>Evidence references and integrity checks do not establish legal conclusions, prove a provider's claims, confirm customer acceptance, or provide an independently stored audit record.</li>
     </ul>
   </aside>
 
@@ -50,7 +50,7 @@
           <input class="input" id="aep-assessment-id" name="assessment_id" maxlength="128" required>
           <label for="aep-analysis-ids">Released evidence analysis IDs <span>one per line</span></label>
           <textarea class="input" id="aep-analysis-ids" name="analysis_ids" rows="5" maxlength="4128" required></textarea>
-          <label for="aep-create-idempotency">Idempotency key</label>
+          <label for="aep-create-idempotency">Request reference (reuse when retrying)</label>
           <input class="input" id="aep-create-idempotency" name="idempotency_key" maxlength="192" required>
           <button class="btn btn-primary" type="submit">Generate proposal only</button>
         </fieldset>
@@ -59,12 +59,12 @@
 
     <article class="aep-glass aep-panel">
       <p class="eyebrow">Step 2</p>
-      <h2>Review explicit answer subset</h2>
+      <h2>Review proposed answers</h2>
       <form class="aep-form" id="aep-review-form" autocomplete="off" novalidate>
         <fieldset id="aep-review-controls" data-aep-mutation disabled aria-disabled="true">
           <label for="aep-review-id">Proposal ID</label>
           <input class="input" id="aep-review-id" name="proposal_id" maxlength="128" required>
-          <label for="aep-review-revision">Expected proposal revision</label>
+          <label for="aep-review-revision">Current proposal version</label>
           <input class="input" id="aep-review-revision" name="expected_revision" type="number" min="1" max="9223372036854775807" step="1" required>
           <label for="aep-review-decision">Decision</label>
           <select class="select" id="aep-review-decision" name="decision"><option value="approve">Approve selected eligible answers</option><option value="reject">Reject proposal</option></select>
@@ -72,9 +72,9 @@
             <legend>Eligible questions loaded from inspected proposal</legend>
             <p class="aep-muted">Inspect a proposal to load its independently eligible questions.</p>
           </fieldset>
-          <label for="aep-review-rationale">Human rationale</label>
+          <label for="aep-review-rationale">Reason for your decision</label>
           <textarea class="input" id="aep-review-rationale" name="rationale" rows="4" maxlength="4000" required></textarea>
-          <label for="aep-review-idempotency">Idempotency key</label>
+          <label for="aep-review-idempotency">Request reference (reuse when retrying)</label>
           <input class="input" id="aep-review-idempotency" name="idempotency_key" maxlength="192" required>
           <button class="btn btn-primary" type="submit">Record review decision</button>
         </fieldset>
@@ -89,17 +89,17 @@
           <label for="aep-apply-id">Approved proposal ID</label>
           <input class="input" id="aep-apply-id" name="proposal_id" maxlength="128" required>
           <div class="aep-row">
-            <label for="aep-apply-revision">Expected proposal revision
+            <label for="aep-apply-revision">Current proposal version
               <input class="input" id="aep-apply-revision" name="expected_revision" type="number" min="1" max="9223372036854775807" step="1" required>
             </label>
-            <label for="aep-assessment-revision">Pinned assessment revision
+            <label for="aep-assessment-revision">Assessment version being reviewed
               <input class="input" id="aep-assessment-revision" name="expected_assessment_revision" type="number" min="1" max="9223372036854775807" step="1" required>
             </label>
           </div>
-          <label for="aep-apply-idempotency">Idempotency key</label>
+          <label for="aep-apply-idempotency">Request reference (reuse when retrying)</label>
           <input class="input" id="aep-apply-idempotency" name="idempotency_key" maxlength="192" required>
-          <label class="aep-confirm"><input id="aep-apply-confirm" name="confirm" type="checkbox" required> I understand this is a separate CAS write that fills only unanswered questions and still requires final assessment review.</label>
-          <button class="btn btn-primary" type="submit">Apply approved subset</button>
+          <label class="aep-confirm"><input id="aep-apply-confirm" name="confirm" type="checkbox" required> I understand this adds only the approved answers to unanswered questions. The assessment still requires final review.</label>
+          <button class="btn btn-primary" type="submit">Add selected approved answers</button>
         </fieldset>
       </form>
     </article>
@@ -117,7 +117,7 @@
     </div>
     <p class="aep-status" id="aep-operation-status" role="status" aria-live="polite"></p>
     <div class="aep-candidates" id="aep-candidates" aria-live="polite"></div>
-    <details class="aep-details"><summary>Bounded server response</summary><pre class="aep-output" id="aep-output" tabindex="0"></pre></details>
+    <details class="aep-details"><summary>Technical details</summary><pre class="aep-output" id="aep-output" tabindex="0"></pre></details>
   </section>
 
   <section class="aep-glass aep-panel aep-panel--wide" aria-labelledby="aep-queue-title">

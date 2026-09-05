@@ -167,7 +167,7 @@
       if (Number.isSafeInteger(limit) && limit > 0 && limit <= ABSOLUTE_MAX_DOCUMENT_BYTES) configuredMaxBytes = limit;
       if (payload.enabled === true && payload.configured === true && payload.ready === true) {
         operations.disabled = false;
-        setStatus(runtimeStatus, "Encrypted tenant custody is ready.", false);
+        setStatus(runtimeStatus, "Encrypted document storage is ready.", false);
       } else {
         setStatus(runtimeStatus, "The vault is disabled, incomplete, or not ready.", true);
       }
@@ -219,7 +219,7 @@
     run("Revoking document authority", async () => {
       const ref = bounded(field("document-vault-document-ref"), opaquePattern, "Document reference");
       const payload = await postJson(vaultBase, `/documents/${encodeURIComponent(ref)}/revoke`, {
-        expected_revision: integer(field("document-vault-authority-revision"), "Authority revision", 1, 2147483647),
+        expected_revision: integer(field("document-vault-authority-revision"), "Record version", 1, 2147483647),
       });
       hydrate(payload);
       return payload;

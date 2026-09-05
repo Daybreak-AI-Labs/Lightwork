@@ -16,8 +16,7 @@
 </style>
 
 <h1>Privacy Rights Consumer Delivery</h1>
-<p>Authenticated operator control plane for short-lived, one-time capabilities
-  bound to an exact closed rights case and exact response package.</p>
+<p>Authorize a short-lived, one-time download of the response package for a closed privacy-rights case.</p>
 <div class="prcd-warning">
   <strong>A raw consumer capability appears only in the first mint response.
     Copy it immediately; Lightwork stores only its digest and cannot replay it.</strong>
@@ -27,15 +26,11 @@
 </div>
 
 <section class="panel" aria-labelledby="prcd-production-heading">
-  <h2 id="prcd-production-heading">Production composition gates</h2>
-  <p>The stock runtime re-resolves the exact closed case and package, requires
-    a separately authenticated public profile plus independent reauthentication,
-    and reads only the pinned active package from the encrypted governed-document
-    vault. It checks the package digest and vault authority before grant issue,
-    before byte consumption, and again before returning the response.</p>
-  <p><strong>Fail-closed seam:</strong> operator minting remains unavailable until
-    the deployment supplies an independent operator-to-consumer identity mapping.
-    The case/package authority is never used as consumer identity proof.</p>
+  <h2 id="prcd-production-heading">Delivery requirements</h2>
+  <p>Delivery requires a closed case, the approved response package, and independent verification of the recipient. Lightwork checks the encrypted package and recipient authorization before creating access and again before download.</p>
+  <p><strong>Recipient verification is required:</strong> access creation remains unavailable
+    until this installation can independently verify the intended recipient.
+    Approval of the case or response package does not prove the recipient's identity.</p>
 </section>
 
 {% from "_module_gate.html" import module_gate %}
@@ -46,15 +41,15 @@
                        the rights orchestration it depends on -- have your
                        privacy owner review both first.') }}
 {% else %}
-<p><button class="btn" id="prcd-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="prcd-load-status" type="button">Check availability</button></p>
 <div class="prcd-grid">
   <section class="panel prcd-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and principal come only from authenticated server context. The
       consumer binding comes only from a trusted runtime resolver. Unknown
       fields are rejected.</p>
     <label>Operation
-      <select id="prcd-operation">
+      <select id="prcd-operation" data-guided-api="/api/v1/privacy/rights-consumer-delivery">
         <option value="delivery-mint" data-method="PUT" data-path="/deliveries/{delivery_id}">Delivery: mint one-time capability</option>
         <option value="delivery-get" data-method="GET" data-path="/deliveries/{delivery_id}">Delivery: get digest-only metadata</option>
         <option value="delivery-revoke" data-method="POST" data-path="/deliveries/{delivery_id}/revoke">Delivery: revoke</option>
@@ -64,10 +59,10 @@
         <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
       </select>
     </label>
-    <label>Path values as JSON object
+    <label>Record references (JSON)
       <input class="input" id="prcd-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="prcd-body">{}</textarea>
     </label>
     <div class="prcd-warning" id="prcd-confirm-panel">
@@ -76,10 +71,10 @@
           TTL, retention, revision, and bearer-issuance or revocation impact.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="prcd-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="prcd-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
-    <h2>Result and composition readiness</h2>
+    <h2>Result and availability</h2>
     <pre class="prcd-output" id="prcd-output" aria-live="polite">No request made.</pre>
   </section>
 </div>

@@ -62,6 +62,7 @@ from ._shared import (
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear app._world_cache
 from .api import router as api_router
+from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
     SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
@@ -931,6 +932,9 @@ attach_unified_audit_composition(app)
 install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
+from .in_app_routes import router as in_app_router  # noqa: E402
+
+app.include_router(in_app_router)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
 )
@@ -6823,7 +6827,11 @@ def template_market_entries() -> list[dict]:
                 "rating_bar": stars_bar(float(stars), 0) if stars else "unrated",
             }
         )
-    return entries
+    preferred = {
+        "weekly-update": 0, "project-plan": 1, "vendor-evidence-review": 2,
+        "compare-options": 3, "trip-plan": 4, "standup": 5,
+    }
+    return sorted(entries, key=lambda entry: (preferred.get(entry["name"], 99), entry["name"]))
 
 
 @app.get("/templates", response_class=HTMLResponse)
@@ -7628,13 +7636,24 @@ async def chat_send(
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="goal text is required")
-    w = _world()
+    if len(title) > GOAL_TITLE_MAX_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Shorten the goal to {GOAL_TITLE_MAX_LENGTH:,} characters or fewer. Move additional instructions to Add details.",
+        )
+    if len(description) > GOAL_DESCRIPTION_MAX_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Shorten the details to {GOAL_DESCRIPTION_MAX_LENGTH:,} characters or fewer before starting the goal.",
+        )
     # The optional "Add details" textarea gives the agent a real brief; fall
     # back to the title when empty (prior behavior was description == title).
-    description = (description or "").strip()
+    # Preserve the full reviewed brief, including meaningful whitespace.
+    description = description if description.strip() else title
+    w = _world()
     goal_id = w.create_goal(
-        title[:200],
-        (description or title)[:8000],
+        title,
+        description,
         owner=caller_principal(request) or "",
     )
     # Persist any uploaded files as goal attachments. The agent reaches them
@@ -9321,6 +9340,22 @@ async def shell_copilot_js() -> FileResponse:
     return FileResponse(
         _STATIC_DIR / "lightwork-copilot.js",
         media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/lightwork-facts.js")
+@app.get("/static/lightwork-consent-policy-editor.js")
+@app.get("/static/lightwork-setup.js")
+@app.get("/static/lightwork-template-library.js")
+@app.get("/static/lightwork-guided-actions.js")
+@app.get("/static/lightwork-guided-actions.css")
+async def in_app_ui_asset(request: Request) -> FileResponse:
+    """Serve only the explicitly registered in-app form assets."""
+    name = request.url.path.rsplit("/", 1)[-1]
+    return FileResponse(
+        _STATIC_DIR / name,
+        media_type=("text/css" if name.endswith(".css") else "application/javascript") + "; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )
 

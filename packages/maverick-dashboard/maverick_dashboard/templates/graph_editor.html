@@ -28,7 +28,7 @@
 </style>
 <p class="muted"><a href="/goals">← all goals</a> · <a href="/plan-tree-3d">3D view</a></p>
 <h1 class="page-title">Goal map</h1>
-<p class="page-subtitle">Every goal in this deployment as a living map — click a node to select it, rename goals, and reorganize how they nest.</p>
+<p class="page-subtitle">See how your goals fit together. Select a goal to rename it, move it, or add a smaller goal beneath it.</p>
 <div class="panel">
   <div class="legend">
     <span><span class="badge active">active</span></span>
@@ -39,31 +39,31 @@
     <span class="live" id="ge-status" role="status" aria-live="polite">loading…</span>
   </div>
   <div class="ge-wrap">
-    <svg id="ge-svg" role="img" aria-label="Goal graph: {{ node_count }} goals, drawn as a force-directed constellation. Use the editor panel beside the graph to select and edit nodes without a pointer."></svg>
+    <svg id="ge-svg" role="img" aria-label="Map of {{ node_count }} goals. Use the editor beside the map to select and edit goals with the keyboard."></svg>
     <div class="ge-form panel" style="margin-bottom: 0;">
       <h2 style="margin: 0; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Edit a goal</h2>
 
       <label for="ge-select">Selected goal</label>
-      <select id="ge-select"><option value="">(click a node or pick here)</option></select>
+      <select id="ge-select"><option value="">Choose a goal here or on the map</option></select>
 
       <label for="ge-title">Title</label>
       <input id="ge-title" type="text" maxlength="200" autocomplete="off">
       <button type="button" id="ge-retitle">Save title</button>
 
-      <label for="ge-parent">Parent (non-descendants only)</label>
-      <select id="ge-parent"><option value="">(root — no parent)</option></select>
-      <button type="button" id="ge-reparent">Move under parent</button>
+      <label for="ge-parent">Move this goal under</label>
+      <select id="ge-parent"><option value="">Keep as a top-level goal</option></select>
+      <button type="button" id="ge-reparent">Move goal</button>
 
-      <label for="ge-child-title">New child title</label>
+      <label for="ge-child-title">New subgoal title</label>
       <input id="ge-child-title" type="text" maxlength="200" autocomplete="off"
              placeholder="Subgoal to add under the selected goal">
-      <button type="button" id="ge-add-child">Add child</button>
+      <button type="button" id="ge-add-child">Add subgoal</button>
 
       <p class="muted" style="font-size: 0.78rem; margin-bottom: 0;">
-        Children created here are <em>pending</em> and not started —
+        Subgoals created here are <em>pending</em> and not started —
         run them from <a href="/chat">chat</a> when ready.
-        Drag a node to nudge it, hover to spotlight its links,
-        drag the canvas to pan, scroll to zoom.
+        Drag a goal to move it on the map, hover to see its connections,
+        drag the background to move the view, or scroll to zoom.
       </p>
       <p id="ge-error" role="alert" aria-live="assertive"
          style="display: none; color: var(--danger); font-size: 0.85rem;"></p>
@@ -385,12 +385,12 @@
       const o = document.createElement("option");
       o.value = value; o.textContent = text; return o;
     };
-    selectEl.replaceChildren(opt("", "(click a node or pick here)"));
+    selectEl.replaceChildren(opt("", "Choose a goal here or on the map"));
     state.nodes.forEach((n) => {
       selectEl.appendChild(opt(String(n.id), "#" + n.id + " " + (n.title || "(untitled)")));
     });
     selectEl.value = selected === null ? "" : String(selected);
-    parentEl.replaceChildren(opt("", "(root — no parent)"));
+    parentEl.replaceChildren(opt("", "Keep as a top-level goal"));
     if (selected !== null) {
       const banned = descendants(selected);
       banned.add(selected);
@@ -410,7 +410,7 @@
     titleEl.value = n ? n.title : "";
     rebuildSelects();
     paint();
-    setStatus(n ? ("selected #" + n.id) : (state.nodes.length + " goals"));
+    setStatus(n ? ("Selected: " + (n.title || "Untitled goal")) : (state.nodes.length + " goals"));
   }
 
   function seedLayout() {
@@ -501,7 +501,7 @@
     const t = document.getElementById("ge-child-title").value;
     if (await post("/api/v1/goals/" + selected + "/children", { title: t })) {
       document.getElementById("ge-child-title").value = "";
-      setStatus("child created (pending)"); await load();
+      setStatus("Subgoal created — ready to start when you are"); await load();
     }
   });
 

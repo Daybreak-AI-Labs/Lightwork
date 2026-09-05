@@ -7,6 +7,19 @@ _ASSET_ID = r"^MAA-[0-9a-f]{32}$"
 _IDENT = r"^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}$"
 
 
+class GRCSyncRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    limit: int = Field(default=50, ge=1, le=200)
+    confirm_dispatch: bool
+
+    @model_validator(mode="after")
+    def require_dispatch_confirmation(self):
+        if self.confirm_dispatch is not True:
+            raise ValueError("confirm sending records to the external GRC system")
+        return self
+
+
 class FRIAOpenIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

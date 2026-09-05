@@ -1,11 +1,14 @@
 import SwiftUI
+import LightworkConnectionKit
 
 /// One-screen glance: counts, today's spend, last result. Complication-sized.
 struct GlanceView: View {
     @StateObject private var model = GlanceModel()
+    @State private var settingsShown = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 8) {
             if let g = model.glance {
                 HStack {
                     Label("\(g.active)", systemImage: "play.circle")
@@ -21,10 +24,24 @@ struct GlanceView: View {
                         .lineLimit(2)
                         .foregroundStyle(.secondary)
                 }
-            } else if let err = model.error {
-                Text(err).font(.caption2).foregroundStyle(.red)
-            } else {
+            } else if model.error == nil {
                 ProgressView()
+            }
+            if let err = model.error {
+                Text("Could not update Lightwork. Open Connection to check your settings.")
+                    .font(.caption2).foregroundStyle(.red)
+                DisclosureGroup("Connection details") {
+                    Text(err).font(.caption2)
+                }
+            }
+            Button("Connection") { settingsShown = true }
+            Button("Refresh") { Task { await model.refresh() } }
+          }
+        }
+        .sheet(isPresented: $settingsShown) {
+            ConnectionSettingsView(store: model.connectionStore) {
+                model.connectionChanged()
+                Task { await model.refresh() }
             }
         }
         .task { await model.refresh() }

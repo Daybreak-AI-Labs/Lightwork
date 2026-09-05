@@ -8,12 +8,17 @@ GET https://<your-host>:8765/api/v1/glance
 -> {active, done_today, failed_today, spend_today, last_result, as_of}
 ```
 
-**Build requirements (not possible in this repo's CI):** Xcode 16+ on macOS
+**App build requirements:** Xcode 16+ on macOS
 with the watchOS SDK; create a watchOS App target named `MaverickGlance` and
-add the two Swift files. Set `MAVERICK_GLANCE_URL` (and the dashboard token
-if configured) in the scheme's environment or the in-app settings. The
+add the two Swift files and the local `apps/apple-companion-core` package,
+linking `LightworkConnectionKit`. Use **Connection** in the app to save the
+dashboard address and token to device-only Keychain storage. Legacy scheme
+settings are read until the first successful in-app save. The
 URL must use HTTPS for any non-localhost dashboard; plain HTTP is accepted
 only for loopback development (`localhost`, `127.0.0.1`, or `::1`).
+
+CI compiles/tests the shared connection package on macOS with isolated storage;
+the complete watch app and on-device input remain unverified.
 
 Security model: the watch talks only to YOUR dashboard host; include the
 `Authorization: Bearer <MAVERICK_DASHBOARD_TOKEN>` header when the dashboard

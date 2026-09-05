@@ -252,8 +252,9 @@
     <div class="assurance-table"><table><caption>Declared serious incidents, most urgent first</caption><thead><tr><th>Declaration</th><th>Category</th><th>Member State</th><th>Status</th><th>Clock</th></tr></thead><tbody>
     {% for row in ai_incident_declarations %}<tr><td>{{ row.id }}</td><td>{{ row.category }}</td><td>{{ row.member_state }}</td><td>{{ row.status }}</td><td>{% if row.overdue %}<strong>{{ row.clock_label }}</strong> ({{ row.deadline_citation }}){% else %}{{ row.clock_label }} ({{ row.deadline_citation }}){% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
-    <p class="assurance-muted">Declarations, submissions, and withdrawals are human assertions recorded through <code>maverick ai-incidents</code> or the authenticated API; nothing is ever transmitted to an authority by the platform.</p>
+    <p class="assurance-muted">Declarations, filings, and withdrawals record human assertions. Lightwork does not transmit them to an authority.</p>
     {% else %}<p class="assurance-empty">No serious-incident declarations. Clocks start from awareness the moment one is declared.</p>{% endif %}
+    <p><a class="btn" href="/security/governance#serious-incidents">Declare an incident or record a filing</a></p>
   </section>
 </section>
 

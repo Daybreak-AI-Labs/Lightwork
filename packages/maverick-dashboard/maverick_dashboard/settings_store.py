@@ -111,35 +111,35 @@ FEATURE_DEFAULTS = {
 CAPABILITY_INFO = {
     "computer_use": "Agents drive a real desktop inside the sandbox — click, "
                     "type, read the screen. The highest-impact capability; "
-                    "enable only for workflows that genuinely need a GUI.",
-    "browser": "Headless web browsing for agents: open pages, follow links, "
-               "read rendered content. Governed by the egress policy.",
+                    "enable only for workflows that need to use another app.",
+    "browser": "Agents open web pages, follow links, and read page content. "
+               "Your rules for external connections still apply.",
     "web_search": "Live web search for research tasks; results flow into the "
                   "agent's context with their sources.",
-    "mobile_tools": "Drive Android/iOS devices through the mobile toolchain "
-                    "(taps, swipes, screen reads) for app testing and flows.",
-    "ros": "Robot Operating System bridge — agents publish/subscribe to ROS "
-           "topics. Only for robotics deployments.",
+    "mobile_tools": "Agents use connected Android or iOS devices to tap, "
+                    "swipe, and read screens for app testing and tasks.",
+    "ros": "Agents exchange instructions and readings with connected robots. "
+           "Requires an installed Robot Operating System connection.",
     "code_exec": "Agents run the code they write, inside the governed "
-                 "sandbox (every shell call goes through sandbox.exec with "
-                 "its allowlists and audit).",
+                 "work environment. Allowed actions are checked and recorded "
+                 "before shell commands run.",
 }
 FEATURE_INFO = {
-    "skills": "Reusable learned procedures agents can load mid-task — the "
-              "skill library built by the learning loop.",
+    "skills": "Agents can use saved procedures from the Skills library "
+              "while working on a task.",
     "world_model": "The shared operating record: goals, episodes, approvals, "
                    "and memory live in one governed store. Turning this off "
-                   "disables cross-run state.",
-    "streaming": "Live token streaming to the dashboard chat and goal "
-                 "timelines (off = responses arrive only when complete).",
+                   "stops information from carrying across tasks.",
+    "streaming": "Show responses as they are written in Chat and task "
+                 "activity. When off, responses appear when complete.",
     "pack_editing": "Edit and override domain packs from the dashboard. Turn "
                     "off to make pack editors read-only.",
     "role_editing": "Edit core agent role prompts, models, and effort from the "
                     "dashboard. Turn off to lock the role roster.",
-    "scheduling": "Arm recurring workflow schedules from the dashboard. Host "
-                  "CLI scheduling remains an operator-controlled path.",
-    "triggers": "Bind saved templates to signed inbound webhooks. Requires a "
-                "configured webhook signing secret.",
+    "scheduling": "Create recurring workflow schedules in Automations. "
+                  "Existing schedules are managed from that page.",
+    "triggers": "Start saved workflows when a connected service sends an "
+                "authenticated event. Requires a configured signing secret.",
 }
 
 # The self-learning loop's subsystems -- ONE source of truth shared by the

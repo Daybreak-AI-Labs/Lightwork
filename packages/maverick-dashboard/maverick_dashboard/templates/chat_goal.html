@@ -206,7 +206,7 @@
       Lightwork
     </div>
     <p id="goal-action-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: 0 0 0.75rem;"></p>
-    <details class="activity" id="work-activity" open>
+    <details class="activity" id="work-activity">
       <summary class="activity__bar" aria-label="Agent activity — expand to show the full work log">
         <span class="spinner" id="work-spin" aria-hidden="true"></span>
         <span class="activity__now" id="work-now">Working…</span>
@@ -221,9 +221,9 @@
         <p id="loading-placeholder" class="muted" aria-busy="true" style="margin: 0;">
           <span class="spinner" aria-hidden="true"></span> Working…
         </p>
-        <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0; color: var(--danger);"></p>
       </div>
     </details>
+    <p id="stream-error" role="alert" class="muted" style="display: none; margin: 0 0 var(--space-4); color: var(--danger);"></p>
     <div id="result-section" class="answer" style="display: {% if goal.result %}block{% else %}none{% endif %};">
       <div class="answer__eyebrow">Result</div>
       {% if rendered and rendered.structured %}
@@ -287,8 +287,8 @@
       {% endif %}
     </div>
     {% if artifacts %}
-    <div class="artifacts" aria-label="Artifacts">
-      <div class="artifacts__head">Artifacts <span class="badge">{{ artifacts|length }}</span></div>
+    <div class="artifacts" aria-label="Files and results">
+      <div class="artifacts__head">Files and results <span class="badge">{{ artifacts|length }}</span></div>
       {% for a in artifacts %}
         <div class="artifact">
           <div class="artifact__head">
@@ -349,15 +349,15 @@
         This usually means the goal reached its budget or time cap, the emergency stop was armed, or it hit an error.
         You can resume it from here, or <a href="/oversight">open Oversight</a> for details.
       </p>
-      <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3);">
-        <button id="halt-resume" class="btn btn--primary" type="button">Resume this goal</button>
+      <form id="halt-resume-form" style="margin-top: var(--space-3);">
+        <div class="field">
+          <label for="halt-resume-budget">Spending limit for this attempt (USD, optional)</label>
+          <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01" placeholder="Use the deployment’s default limit" aria-describedby="halt-resume-budget-hint">
+          <p id="halt-resume-budget-hint" class="muted">This limits the resumed attempt. Your organization’s spending and safety limits still apply.</p>
+        </div>
+        <button id="halt-resume" class="btn btn--primary" type="submit">Resume this goal</button>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
-      </div>
-      <details style="margin-top: var(--space-3);">
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: resume from the command line</summary>
-        <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Resume with a higher cap:
-          <code>maverick resume {{ goal.id }} --max-dollars 5</code></p>
-      </details>
+      </form>
     </div>
   </div>
 
@@ -469,6 +469,7 @@
         if (e && (e.kind === 'trace_meta' || fmtAgent(e.agent) === 'system')) return;
         hidePlaceholder();
         const line = document.createElement('div');
+        line.dataset.kind = e.kind || '';
         const agent = document.createElement('span');
         agent.className = 'muted';
         agent.textContent = '[' + fmtAgent(e.agent) + '] ';
@@ -671,14 +672,19 @@
       if (!btn) return;
       var msg = document.getElementById('halt-resume-msg');
       var goalId = {{ goal.id }};
-      btn.addEventListener('click', function () {
+      var form = document.getElementById('halt-resume-form');
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (btn.disabled || !form.reportValidity()) return;
+        var raw = document.getElementById('halt-resume-budget').value.trim();
+        var payload = raw ? { max_dollars: Number(raw) } : {};
         btn.disabled = true;
         msg.textContent = 'Resuming…';
-        fetch('/api/v1/goals/' + goalId + '/resume', { method: 'POST' })
+        fetch('/api/v1/goals/' + goalId + '/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
           .then(function (r) {
             if (r.ok || r.status === 204) { location.reload(); return null; }
             return r.json().catch(function () { return {}; }).then(function (j) {
-              msg.textContent = j.detail || ('Could not resume (' + r.status + ').');
+              msg.textContent = j && typeof j.detail === 'string' ? j.detail : ('Could not resume (' + r.status + '). Check the spending limit and try again.');
               btn.disabled = false;
             });
           })
@@ -799,8 +805,12 @@
       function refreshFromEvents() {
         var lines = events.children;
         if (lines.length) {
-          nowEl.textContent = (lines[lines.length - 1].textContent || '').trim() || 'Working…';
-          metaEl.textContent = lines.length + (lines.length === 1 ? ' step' : ' steps');
+          var kind = lines[lines.length - 1].dataset.kind;
+          var progress = { plan: 'Planning the next step…', finding: 'Preparing an answer…',
+            observation: 'Reviewing progress…', error: 'An issue needs attention — open Show work for details.',
+            verify: 'Checking the result…', artifact: 'Preparing a result…' };
+          nowEl.textContent = progress[kind] || 'Working…';
+          metaEl.textContent = lines.length + (lines.length === 1 ? ' update' : ' updates');
         }
       }
       function settle() {
@@ -809,7 +819,7 @@
         activity.open = false;
         if (spin) spin.style.display = 'none';
         var n = events.children.length;
-        nowEl.textContent = 'Worked across ' + n + (n === 1 ? ' step' : ' steps');
+        nowEl.textContent = 'Work log: ' + n + (n === 1 ? ' update' : ' updates');
         metaEl.textContent = st === 'done' ? 'complete' : st;
         return true;
       }

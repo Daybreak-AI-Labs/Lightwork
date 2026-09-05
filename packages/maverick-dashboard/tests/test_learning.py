@@ -426,7 +426,7 @@ def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
     assert "core learning components are on" in t
-    assert "separate feature switches appear below" in t
+    assert "Individual controls appear below" in t
     # The static tiles became a live board: the accumulated-judgement card
     # and its container render client-side from /api/v1/learning.
     assert "Accumulated judgement" in t

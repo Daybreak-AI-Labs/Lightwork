@@ -82,8 +82,9 @@ def test_headless_first_run_journey(monkeypatch, tmp_path):
 
     started = client.get("/start")
     assert started.status_code == 200, started.text
-    assert "ready to run" in started.text
-    assert "Offline install preflight" in started.text
+    assert "Your selected AI services are configured." in started.text
+    assert "Your setup checklist is complete" not in started.text
+    assert "Installation checks" in started.text
 
     from maverick import ai_evidence_gateway
 

@@ -46,8 +46,8 @@ def test_settings_capabilities_carry_descriptions():
     html = client.get("/settings").text
     # Every toggle explains itself before it is selected.
     assert "highest-impact capability" in html          # computer_use
-    assert "governed" in html and "sandbox.exec" in html  # code_exec
-    assert "skill library built by the learning loop" in html  # skills
+    assert "governed" in html and "Allowed actions are checked and recorded" in html  # code_exec
+    assert "saved procedures from the Skills library" in html  # skills
     from maverick_dashboard.settings_store import (
         CAPABILITY_DEFAULTS,
         CAPABILITY_INFO,

@@ -16,16 +16,16 @@
 
 <div class="row">
   <div class="grow">
-    <h2>Diagnostics summary</h2>
+    <h2>Issue summary</h2>
     <div class="card">
       <table>
         <tr><td class="muted" style="width:180px">Customer / tier</td>
           <td>{{ ticket.summary.get('customer') or '—' }} · <span class="tier tier-{{ ticket.tier or 'basic' }}">{{ ticket.tier or '—' }}</span></td></tr>
         <tr><td class="muted">Agent version</td><td class="mono">{{ ticket.agent_version or 'unknown' }}</td></tr>
-        <tr><td class="muted">Entitlement status</td><td>{{ ticket.summary.get('entitlement_status') or '—' }}</td></tr>
-        <tr><td class="muted">Readiness failing</td>
+        <tr><td class="muted">License status</td><td>{{ ticket.summary.get('entitlement_status') or '—' }}</td></tr>
+        <tr><td class="muted">Checks needing attention</td>
           <td>{% if ticket.summary.get('readiness_failing') %}<span class="badge b-expired">{{ ticket.summary.get('readiness_failing')|join(', ') }}</span>{% else %}<span class="badge b-active">healthy</span>{% endif %}</td></tr>
-        <tr><td class="muted">Failure modes</td><td class="mono muted" style="font-size:12px">{{ ticket.summary.get('failure_modes') or '—' }}</td></tr>
+        <tr><td class="muted">Error details</td><td class="mono muted" style="font-size:12px"><details><summary>View error details</summary>{{ ticket.summary.get('failure_modes') or 'No error details reported.' }}</details></td></tr>
         <tr><td class="muted">Failed jobs</td><td>{{ ticket.summary.get('failed_job_count') if ticket.summary.get('failed_job_count') is not none else '—' }}</td></tr>
       </table>
     </div>
@@ -52,7 +52,7 @@
 
   {% if staff.can_support %}
   <div style="flex:0 0 260px">
-    <h2>Triage</h2>
+    <h2>Manage ticket</h2>
     <div class="card">
       <form method="post" action="/support/{{ ticket.id }}/status">
         <label for="console-ticket_detail-status">Set status</label>

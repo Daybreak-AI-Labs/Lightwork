@@ -65,7 +65,7 @@ def test_liquid_glass_workbench_is_store_free_closed_and_copilot_bound(client):
         "style-src 'self'",
     ):
         assert directive in csp
-    assert "Documents propose. Humans decide. Apply is separate." in response.text
+    assert "Review evidence before adding answers" in response.text
     assert "fills only unanswered questions" in response.text
     assert f'data-api-base="{page.API_BASE}"' in response.text
     assert f'data-copilot-page="{page.PAGE_PATH}"' in response.text

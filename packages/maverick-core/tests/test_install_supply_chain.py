@@ -15,6 +15,7 @@ import subprocess
 from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from packaging.requirements import Requirement
@@ -46,6 +47,22 @@ def _read(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def test_desktop_bundle_provenance_scripts_are_valid_javascript():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is required for desktop provenance script validation")
+    scripts = re.findall(
+        r"(?ms)^[ \t]*node <<'NODE'\n(.*?)^[ \t]*NODE$",
+        _read(".github/workflows/desktop.yml"),
+    )
+    assert scripts, "desktop workflow must validate its actual provenance scripts"
+    for script in scripts:
+        result = subprocess.run(
+            [node, "--check"], input=dedent(script), capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stderr
+
+
 def _git(repository: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -72,6 +89,8 @@ def _desktop_verifier_fixture(tmp_path: Path) -> tuple[Path, str]:
         "apps/installer-desktop/.gitignore": "ignored-probe.txt\n",
         "apps/installer-desktop/index.html": "<main>verified</main>\n",
         "apps/installer-desktop/src-tauri/icons/icon.png": "icon fixture\n",
+        "apps/desktop-runtime/Cargo.toml": '[package]\nname = "runtime-fixture"\n',
+        "apps/desktop-runtime/src/lib.rs": "pub fn fixture() {}\n",
         "deploy/desktop/install.sh": "#!/bin/sh\nprintf verified\n",
         "deploy/desktop/install.ps1": "Write-Output 'verified'\n",
     }
@@ -337,6 +356,21 @@ def test_desktop_source_verifier_rejects_raw_and_ignored_changes(tmp_path):
     modified_result = _run_desktop_verifier(repository, revision)
     assert modified_result.returncode == 1
     assert "raw bytes differ" in modified_result.stderr
+
+
+def test_desktop_source_verifier_covers_shared_launcher(tmp_path):
+    repository, revision = _desktop_verifier_fixture(tmp_path)
+    generated = repository / "apps/desktop-runtime/target/debug/generated.bin"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"generated output")
+    assert _run_desktop_verifier(repository, revision).returncode == 0
+
+    source = repository / "apps/desktop-runtime/src/lib.rs"
+    source.write_text("pub fn substituted() {}\n", encoding="utf-8")
+    result = _run_desktop_verifier(repository, revision)
+    assert result.returncode == 1
+    assert "raw bytes differ" in result.stderr
+    assert "apps/desktop-runtime/src/lib.rs" in result.stderr
 
 
 def test_desktop_source_verifier_is_not_subverted_by_git_replace(tmp_path):

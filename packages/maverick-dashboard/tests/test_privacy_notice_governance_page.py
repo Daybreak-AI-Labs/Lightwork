@@ -49,10 +49,10 @@ def test_page_exposes_complete_honest_confirmed_workbench(page_client) -> None:
     assert "external delivery" in page
     assert "/api/v1/privacy/notices" in page
     assert 'data-copilot-page="/privacy/notice-governance"' in page
-    assert "Local publication runtime" in page
+    assert "Publication updates in Lightwork" in page
     assert "/publication-runtime/status" in page
     assert "/publication-runtime/run-once" in page
-    assert "cannot update a website, SDK, tag manager" in page
+    assert "does not publish changes to a website, app, tag manager" in page
     for operation in (
         "policy-set",
         "policy-get",

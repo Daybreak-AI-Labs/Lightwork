@@ -155,7 +155,7 @@
                subtitle='Hire & tailor specialists',
                lede='Describe a specialist in plain English — its job, the
                      tools it can reach, and its guardrails — and Lightwork
-                     tailors it for you. Saving patches only what you change;
+                     tailors it for you. Saving updates only what you change;
                      anything that would weaken the safety limits is
                      rejected, not saved.') %}
     {{ state('Current state', 'Safety limits enforced',
@@ -249,8 +249,8 @@
       <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-creating="{{ '1' if creating else '' }}">
         {% if creating %}
         <div class="fld">
-          <label for="f-new-id">Agent ID <span class="sub">— unique, lowercase &amp; underscores, e.g. onboarding_buddy</span></label>
-          <input id="f-new-id" type="text" placeholder="my_custom_agent" autocomplete="off" spellcheck="false">
+          <label for="f-new-id">Short name <span class="sub">— choose a unique name for this specialist</span></label>
+          <input id="f-new-id" type="text" placeholder="onboarding assistant" autocomplete="off" spellcheck="false">
         </div>
         {% endif %}
         <div class="fld">
@@ -264,18 +264,18 @@
         </div>
 
         <div class="fld">
-          <label>Skills &amp; tools <span class="sub">— what it can reach</span></label>
+          <label>Allowed actions <span class="sub">— what it can use</span></label>
           <div class="chips" id="skill-chips" aria-label="Tools this specialist can use"></div>
           {# The chips sync into this hidden input, which the save script reads. #}
           <input id="f-allow" name="allow_tools" type="hidden" value="{{ selected.allow_tools|join(' ') if selected else '' }}">
-          <p class="sub" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Select a chip to grant a tool, select again to remove it. Anything not granted here stays out of reach.</p>
+          <p class="sub" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Select an action to allow it; select it again to remove access. Anything not allowed here stays out of reach.</p>
         </div>
 
         <div class="fld">
           <label>Guardrails <span class="sub">— the safety limits it works within</span></label>
           <div class="guard-row">
             <span class="tt">Highest risk it may take
-              <small>How far it can go without a stricter gate.</small></span>
+              <small>The maximum risk allowed for its actions.</small></span>
             {% set cur_risk = selected.max_risk if selected else 'low' %}
             <span class="risk-seg" id="risk-seg" role="group" aria-label="Maximum risk level">
               {% for r in ['low', 'medium', 'high'] %}
@@ -289,10 +289,10 @@
             </select>
           </div>
           <div class="guard-row">
-            <span class="tt">Require human approval to finish
-              <small>Adds a sign-off gate to the last step before it completes.</small></span>
+            <span class="tt">Include a final human review
+              <small>Adds review instructions to the last step. For an enforced pause, use an approval step in a flow.</small></span>
             <button type="button" class="switch" id="g-approval" aria-pressed="false"
-                    aria-label="Require human approval to finish"></button>
+                    aria-label="Include final human review instructions"></button>
           </div>
           <div class="guard-row">
             <span class="tt">Model <small>Runs on your configured model; set per role in Settings.</small></span>
@@ -324,8 +324,8 @@
 
         {% if editable %}
         <div class="af-actions">
-          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else 'Deploy specialist' }}</button>
-          <button type="button" class="btn" id="btn-validate">Validate</button>
+          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else 'Save specialist' }}</button>
+          <button type="button" class="btn" id="btn-validate">Check settings</button>
           {% if not creating %}<button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>{% endif %}
         </div>
         {% else %}
@@ -562,10 +562,10 @@
         sel.forEach(function (t) { seen[t] = 1; addChip(t, true); });
         SUGGEST.forEach(function (t) { if (!seen[t]) addChip(t, false); });
         var add = document.createElement('button');
-        add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add tool';
+        add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add custom action';
         add.addEventListener('click', async function () {
-          var vals = await mvForm('Add a tool', [
-            { key: 'name', label: 'Tool name', type: 'text', required: true,
+          var vals = await mvForm('Advanced: add an action by its identifier', [
+            { key: 'name', label: 'Action identifier', type: 'text', required: true,
               placeholder: 'e.g. slack_bot' },
           ], { okText: 'Add' });
           if (vals === null) return;
@@ -578,7 +578,11 @@
         var b = document.createElement('button');
         b.type = 'button'; b.className = 'chip' + (on ? ' on' : '');
         if (on) { var t = document.createElement('span'); t.className = 'tick'; t.textContent = '✓'; b.appendChild(t); }
-        b.appendChild(document.createTextNode(tool));
+        var labels = { web_search: 'Search the web', email: 'Email', browser: 'Browse websites',
+          code: 'Write code', shell: 'Run commands', files: 'Work with files' };
+        b.appendChild(document.createTextNode(labels[tool] || tool.replace(/_/g, ' ')));
+        b.title = tool;
+        b.setAttribute('aria-pressed', String(on));
         b.addEventListener('click', function () {
           var i = sel.indexOf(tool);
           if (i === -1) sel.push(tool); else sel.splice(i, 1);

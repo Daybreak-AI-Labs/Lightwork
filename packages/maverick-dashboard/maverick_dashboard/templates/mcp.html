@@ -11,8 +11,8 @@
     {{ state('Current state', (servers | length) ~ ' configured; ' ~ (verified | length) ~ ' live verified',
              badge='live verified' if verified else 'verification unknown',
              badge_class='ok' if verified else 'idle',
-             copy='Saving a server only configures it. A bounded initialize and
-                   tools/list handshake is required before it is shown live verified.') }}
+             copy='After saving, test the connection to confirm that the server
+                   responds and makes its tools available.') }}
   {% endcall %}
 
   {% if saved %}
@@ -74,7 +74,7 @@
     <p class="muted" style="margin-top: 0;">
       Runs a command on this machine that provides tools to your agents.
       Saving configures the command for the next goal; use Test readiness to
-      prove its dependency and MCP handshake.
+      check that the service responds and its tools are available.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">

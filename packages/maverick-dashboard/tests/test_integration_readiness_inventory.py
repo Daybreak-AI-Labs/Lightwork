@@ -63,8 +63,8 @@ def test_settings_renders_readiness_for_every_provider_row():
     assert response.status_code == 200
     for provider in PROVIDERS:
         assert provider["label"] in response.text
-    assert response.text.count("Live verification:") >= len(PROVIDERS)
-    assert "Configuration is not a live readiness result" in response.text
+    assert response.text.count("Connection test:") >= len(PROVIDERS)
+    assert "A successful live connection has not been verified." in response.text
 
 
 def test_provider_unknown_then_fingerprint_bound_live_verified(monkeypatch):
@@ -207,7 +207,7 @@ command = "lightwork-command-that-does-not-exist"
     assert channel["readiness"]["state"] == "runtime_failed"
     channel_page = client.get("/channels")
     assert channel_page.status_code == 200
-    assert "Live verification:" in channel_page.text
+    assert "Connection test:" in channel_page.text
 
     server = client.get("/api/v1/mcp").json()["servers"][0]
     assert server["readiness"]["dependency"]["status"] == "failed"

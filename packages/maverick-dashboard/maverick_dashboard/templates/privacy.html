@@ -297,12 +297,13 @@
           These are the positions a vendor's paper is redlined <em>to</em>. The
           shipped text is our standard language; edit any clause to your own and
           every future redline demands yours instead. Clauses you leave alone
-          keep the shipped position. Also settable with
-          <code>maverick clause-playbook init</code>.
+          keep the shipped position. Review the wording here, then save your
+          playbook. Saving requires administrator permission.
         </p>
         <div id="pw-playbook-rows"></div>
         <div class="pw-form-actions">
-          <button class="btn btn--primary" id="pw-playbook-save" type="button">Save playbook</button>
+          <button class="btn btn--primary" id="pw-playbook-save" type="button" disabled>Save playbook</button>
+          <button class="btn" id="pw-playbook-retry" type="button" hidden>Retry loading playbook</button>
           <span class="muted" id="pw-playbook-path" style="font-size:var(--text-xs);"></span>
           <span class="pw-form-err" id="pw-playbook-err" role="alert"></span>
         </div>
@@ -1526,16 +1527,31 @@
   var playbook = document.getElementById('pw-playbook');
   if (playbook) {
     var loaded = false;
-    playbook.addEventListener('toggle', function () {
-      if (!playbook.open || loaded) { return; }
-      loaded = true;
+    var loadingPlaybook = false;
+    var playbookSave = document.getElementById('pw-playbook-save');
+    var playbookRetry = document.getElementById('pw-playbook-retry');
+    function loadPlaybook() {
+      if (loaded || loadingPlaybook) { return; }
+      loadingPlaybook = true;
+      playbookSave.disabled = true;
+      playbookRetry.hidden = true;
+      document.getElementById('pw-playbook-err').textContent = '';
+      document.getElementById('pw-playbook-path').textContent = 'Loading clauses…';
       fetch('/api/v1/privacy/clause-playbook')
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) { throw new Error('Could not load the playbook (HTTP ' + r.status + '). Retry loading before saving.'); }
+          return r.json();
+        })
         .then(function (pb) {
+          if (!pb || !pb.positions || typeof pb.positions !== 'object' || Array.isArray(pb.positions) ||
+              !Object.keys(pb.positions).length || !Array.isArray(pb.customised) ||
+              Object.values(pb.positions).some(function (value) { return typeof value !== 'string'; })) {
+            throw new Error('The playbook response was incomplete. Retry loading before saving.');
+          }
           document.getElementById('pw-playbook-path').textContent =
-            'stored at ' + pb.path;
+            pb.customised.length + ' custom clause(s). Other clauses use the standard wording.';
           var rows = document.getElementById('pw-playbook-rows');
-          rows.innerHTML = '';
+          rows.replaceChildren();
           Object.keys(pb.positions).sort().forEach(function (key) {
             var custom = pb.customised.indexOf(key) !== -1;
             var wrap = document.createElement('label');
@@ -1552,29 +1568,48 @@
             wrap.appendChild(ta);
             rows.appendChild(wrap);
           });
+          loaded = true;
+          playbookSave.disabled = false;
         })
         .catch(function (e) {
+          loaded = false;
+          playbookRetry.hidden = false;
+          document.getElementById('pw-playbook-path').textContent = 'Playbook not loaded.';
           document.getElementById('pw-playbook-err').textContent = e.message;
-        });
+        }).finally(function () { loadingPlaybook = false; });
+    }
+    playbook.addEventListener('toggle', function () {
+      if (playbook.open) { loadPlaybook(); }
     });
-    document.getElementById('pw-playbook-save').addEventListener('click', function () {
+    playbookRetry.addEventListener('click', loadPlaybook);
+    playbookSave.addEventListener('click', function () {
+      if (!loaded || loadingPlaybook || playbookSave.disabled) { return; }
       var err = document.getElementById('pw-playbook-err');
       err.textContent = '';
       var positions = {};
-      document.querySelectorAll('#pw-playbook-rows textarea[data-clause]')
-        .forEach(function (ta) {
+      var clauseInputs = document.querySelectorAll('#pw-playbook-rows textarea[data-clause]');
+      clauseInputs.forEach(function (ta) {
           if (ta.value.trim()) { positions[ta.dataset.clause] = ta.value.trim(); }
-        });
+          ta.disabled = true;
+      });
+      playbookSave.disabled = true;
+      document.getElementById('pw-playbook-path').textContent = 'Saving playbook…';
       fetch('/api/v1/privacy/clause-playbook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ positions: positions })
       }).then(function (r) {
-        if (r.ok) { location.reload(); return; }
+        if (r.ok) { document.getElementById('pw-playbook-path').textContent = 'Playbook saved. Future reviews will use these clauses.'; return; }
         return r.text().then(function (t) {
           throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 300));
         });
-      }).catch(function (e) { err.textContent = e.message; });
+      }).catch(function (e) {
+        document.getElementById('pw-playbook-path').textContent = 'Save not confirmed. Your edits are still here.';
+        err.textContent = e.message;
+      }).finally(function () {
+        playbookSave.disabled = false;
+        clauseInputs.forEach(function (ta) { ta.disabled = false; });
+      });
     });
   }
 

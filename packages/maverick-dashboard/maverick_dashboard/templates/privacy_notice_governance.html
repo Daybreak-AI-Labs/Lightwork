@@ -21,9 +21,7 @@
 
 <div class="png-shell" data-copilot-page="/privacy/notice-governance">
 <h1>Privacy Notice Governance</h1>
-<p>Exact-tenant control plane for content-free notice versions, independent
-  approvals, scheduled publication intents, rollback, withdrawal, governed
-  update proposals, effective-release resolution, and signed local exports.</p>
+<p>Review privacy-notice versions, request independent approval, and manage publication schedules, withdrawals, and rollback. This page tracks notice references rather than storing notice text.</p>
 <div class="png-warning">
   <strong>No raw notice content, personal data, secret values, direct external
     network I/O, unconfigured provider writes, automatic legal-applicability
@@ -44,14 +42,11 @@
                        exports all stay safely off until it is on -- have your
                        privacy owner review the approval workflow first.') }}
 {% else %}
-<p><button class="btn" id="png-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="png-load-status" type="button">Check availability</button></p>
 <section class="panel png-runtime" aria-labelledby="png-runtime-title">
   <div>
-    <h2 id="png-runtime-title">Local publication runtime</h2>
-    <p>Inspect the exact tenant binding and bounded scheduler health, or run one
-      tenant-derived cycle. A run can update only Lightwork's tenant-private
-      Consent Publishing store. It cannot update a website, SDK, tag manager,
-      consent provider, or any other external system.</p>
+    <h2 id="png-runtime-title">Publication updates in Lightwork</h2>
+    <p>Check scheduled publication updates or process one cycle for this workspace. This updates only Lightwork's consent publication records; it does not publish changes to a website, app, tag manager, or consent provider.</p>
   </div>
   <div class="png-runtime__actions">
     <button class="btn" id="png-runtime-status" type="button">Refresh runtime status</button>
@@ -61,15 +56,15 @@
     </label>
     <button class="btn btn--primary" id="png-runtime-run" type="button">Run one local cycle</button>
   </div>
-  <pre class="png-runtime__output" id="png-runtime-output" aria-live="polite">Runtime status not loaded.</pre>
+  <pre class="png-runtime__output" id="png-runtime-output" aria-live="polite">Availability not loaded.</pre>
 </section>
 <div class="png-grid">
   <section class="panel png-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and actor come only from the authenticated request. Unknown fields,
       raw notice text or markup, personal data, and key values are rejected.</p>
     <label>Operation
-      <select id="png-operation">
+      <select id="png-operation" data-guided-api="/api/v1/privacy/notices">
         <option value="policy-set" data-method="PUT" data-path="/approval-policies/{policy_id}">Approval policy: set exact revision</option>
         <option value="policy-get" data-method="GET" data-path="/approval-policies/{policy_id}">Approval policy: get</option>
         <option value="release-create" data-method="PUT" data-path="/releases/{notice_id}/versions">Release: create content-free version</option>
@@ -97,7 +92,7 @@
     <label>Path and query values as JSON object
       <input class="input" id="png-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="png-body">{}</textarea>
     </label>
     <div class="png-warning" id="png-confirm-panel">
@@ -106,7 +101,7 @@
           publication-intent, rollback, withdrawal, or purge consequences.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="png-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="png-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>

@@ -83,14 +83,14 @@
     </a>
     <span class="topbar__controls">
       {% if can_halt %}
-      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: inspect or change the configured halt scope">
+      <a href="#" id="halt-pill" class="halt-pill" role="button" data-can-halt="true" aria-label="Emergency stop: stop or resume work">
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label" aria-live="polite">checking</span>
       </a>
       {% else %}
       <span id="halt-pill" class="halt-pill" data-can-halt="false" aria-disabled="true"
             aria-label="Emergency stop status. Halt permission is required to change it."
-            title="Read only: permission for the configured halt scope is required.">
+            title="You do not have permission to stop or resume this work.">
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label" aria-live="polite">checking</span>
       </span>
@@ -168,6 +168,7 @@
         <span class="nav-label">Find a page</span>
         <kbd aria-hidden="true">Ctrl K</kbd>
       </button>
+      {% set _group_labels = {'Operate': 'Work', 'Observe': 'Insights', 'Govern': 'Governance', 'Admin': 'Administration', 'Extend': 'Library'} %}
       {% set _path = request.url.path if request else '' %}
       {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
       {% set _active_path = '/chat' if _path == '/' else _path %}
@@ -188,7 +189,7 @@
         <div class="navgrp">
           <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
                   aria-expanded="true" aria-controls="navgrp-{{ loop.index0 }}">
-            <span class="navgrp__label">{{ _group.label }}</span>
+            <span class="navgrp__label">{{ _group_labels.get(_group.label, _group.label) }}</span>
             <svg class="navgrp__caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <ul class="navgrp__items" id="navgrp-{{ loop.index0 }}">
@@ -223,7 +224,7 @@
       <input type="search" id="navfinder-input" autocomplete="off" spellcheck="false"
              role="combobox" aria-autocomplete="list" aria-controls="navfinder-results"
              aria-expanded="false" aria-label="Filter navigation pages"
-             placeholder="Search pages and modules…" />
+             placeholder="Find a task, page, or setting…" />
       <kbd aria-hidden="true">Esc</kbd>
     </div>
     <p class="navfinder__count" id="navfinder-count" role="status" aria-live="polite" aria-atomic="true"></p>
@@ -235,9 +236,9 @@
             <a id="navfinder-option-{{ _navfinder_group_index }}-{{ loop.index0 }}"
                href="{{ _link.href }}" role="option" tabindex="-1"
                aria-selected="false" data-navfinder-target
-               data-search="{{ _link.label }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
+               data-search="{{ _link.label }} {{ _group_labels.get(_group.label, _group.label) }} {{ _group.label }} {{ _link.href }} {{ _link.aliases }}">
               <span class="navfinder__label">{{ _link.label }}</span>
-              <span class="navfinder__group">{{ _group.label }}</span>
+              <span class="navfinder__group">{{ _group_labels.get(_group.label, _group.label) }}</span>
             </a>
           </li>
         {% endfor %}
@@ -281,6 +282,8 @@
   {% include "_copilot.html" %}
   <script src="/static/lightwork-copilot.js"></script>
   <script src="/static/lightwork-ui.js"></script>
+  <link rel="stylesheet" href="/static/lightwork-guided-actions.css">
+  <script src="/static/lightwork-guided-actions.js" defer></script>
   <script src="/static/lightwork-navfinder.js" defer></script>
   <script src="/static/lightwork-voice.js" defer></script>
   {% block scripts_extra %}{% endblock %}

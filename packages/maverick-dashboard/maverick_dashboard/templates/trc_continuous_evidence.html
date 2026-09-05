@@ -92,7 +92,7 @@
       <h2>Governed operator workbench</h2>
       <p>The browser may submit only closed IDs, revisions, digests, states, and bounded counts. Tenant, principal, provider origin, asset scope, source selector, and credentials are server-owned.</p>
       <label>Operation
-        <select class="select" id="trc-operation">
+        <select class="select" id="trc-operation" data-guided-api="/api/v1/compliance/continuous-evidence">
           <option value="definitions" data-method="GET" data-path="/definitions">List collector definitions</option>
           <option value="definition-get" data-method="GET" data-path="/definitions/{definition_id}/versions/{version}">Get exact definition</option>
           <option value="definition-register" data-method="PUT" data-path="/definitions/{definition_id}/versions/{version}">Register pending definition</option>

@@ -83,7 +83,7 @@
   function idempotencyKey(value) {
     var selected = String(value || "").trim();
     if (!IDEMPOTENCY_PATTERN.test(selected)) {
-      throw failure("Idempotency key must be 8-192 safe characters.", "invalid_input");
+      throw failure("The request reference must contain 8 to 192 letters, numbers, or supported separators.", "invalid_input");
     }
     return selected;
   }
@@ -462,7 +462,7 @@
         readiness.textContent = "Not ready";
         statusMark.dataset.state = "failed";
         statusMark.textContent = "Closed";
-        readinessDetail.textContent = "The tenant composition is disabled, incomplete, or unavailable. All controls remain closed.";
+        readinessDetail.textContent = "Bulk actions are disabled, need setup, or are unavailable. Check the availability details before continuing.";
       } else if (!complete) {
         readiness.textContent = "Partially ready";
         statusMark.dataset.state = "partial";
@@ -472,7 +472,7 @@
         readiness.textContent = "Ready";
         statusMark.dataset.state = "ready";
         statusMark.textContent = "Ready";
-        readinessDetail.textContent = "Tenant runtime and every explicit executor report ready.";
+        readinessDetail.textContent = "Bulk actions are ready for this workspace.";
       }
       if (ready) { setCapabilityControls(status); }
     }
@@ -552,12 +552,12 @@
       if (jobs.length === 0) {
         var empty = document.createElement("p");
         empty.className = "cbj-empty";
-        empty.textContent = "No jobs matched the bounded query.";
+        empty.textContent = "No jobs match these filters.";
         jobList.appendChild(empty);
       }
       listCount.textContent = jobs.length + (jobs.length === 1 ? " job" : " jobs");
       listStatus.textContent = payload && payload.truncated
-        ? "Showing a bounded subset; refine the state filter."
+        ? "More jobs are available. Narrow the status filter to find them."
         : "Job register refreshed.";
     }
 
@@ -620,7 +620,7 @@
     }));
     document.getElementById("cbj-load-history").addEventListener("click", handle(async function () {
       var jobId = selectedJobId();
-      await runOperation("Load immutable history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
+      await runOperation("Load change history", function () { return request("/" + encodeURIComponent(jobId) + "/history?limit=100"); });
       makeDownloadAvailable(jobId);
     }));
     document.getElementById("cbj-run-job").addEventListener("click", handle(async function (_event, disableControls) {
@@ -699,7 +699,7 @@
       await refreshJobs();
     }, { deferDisable: true }));
     document.getElementById("cbj-verify-integrity").addEventListener("click", handle(function () {
-      return runOperation("Verify immutable event chain", function () { return request("/operations/integrity"); });
+      return runOperation("Verify audit history", function () { return request("/operations/integrity"); });
     }));
     document.getElementById("cbj-recover").addEventListener("click", handle(async function (_event, disableControls) {
       var limit = integer(document.getElementById("cbj-maintenance-limit").value, "Recovery limit", 1, 500);

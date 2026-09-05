@@ -2,9 +2,9 @@
 
 Mounted below ``/api/v1/security`` so the legal / privacy / compliance
 workspace page can drive the governed registers without the CLI. Every
-mutation is an "operate"-permission human action recorded with the caller's
-actor identity; nothing here transmits anything to an authority or external
-system — delivery stays with the operator-invoked GRC dispatcher.
+register mutation records the caller's identity. Authority filings remain human
+assertions; only the explicitly confirmed, administrator-only GRC dispatcher
+can deliver records to a configured external system.
 """
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from . import governance_schemas as schemas
-from .auth import require_permission
-from .model_risk_api import _actor, _call, _module, _record_call
+from .auth import require_global_permission, require_permission
+from .model_risk_api import _actor, _call, _human_principal, _module, _record_call
 
 router = APIRouter(prefix="/governance", tags=["governance"])
 
@@ -739,7 +739,7 @@ async def needs_attention_digest(request: Request) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
-# GRC sync visibility (delivery stays with the operator-run dispatcher)
+# GRC sync visibility and explicit dispatch
 # --------------------------------------------------------------------------
 @router.get("/grc-sync/status")
 async def grc_sync_status(request: Request) -> dict[str, Any]:
@@ -757,3 +757,11 @@ async def grc_sync_outbound(
     sync = _module("grc_sync", "grc_sync")
     rows = await _call(sync.list_outbound, limit=limit)
     return {"outbound": rows, "count": len(rows)}
+
+
+@router.post("/grc-sync/run")
+async def run_grc_sync(request: Request, body: schemas.GRCSyncRunIn) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    human = _human_principal(request)
+    sync = _module("grc_sync", "grc_sync")
+    return await _call(sync.run_sync, actor=human, limit=body.limit)

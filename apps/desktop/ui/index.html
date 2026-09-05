@@ -109,6 +109,10 @@
       button.primary { background: var(--accent); border-color: var(--accent); color: #1a1205; }
       button.primary:hover { background: #ffb734; }
       #copied { font-size: 0.78rem; color: var(--accent); margin-left: 0.2rem; opacity: 0; transition: opacity 0.2s; }
+      details { margin-top: 1rem; }
+      summary { cursor: pointer; }
+      summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+      #diagnostics { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 0.78rem; }
 
       @media (prefers-reduced-motion: reduce) {
         .ring .spin { animation: none; opacity: 0.85; }
@@ -123,7 +127,7 @@
         <div class="core">L</div>
       </div>
       <h1>Lightwork</h1>
-      <p class="tag">Self-hosted agent platform</p>
+      <p class="tag">Your Lightwork workspace</p>
 
       <p id="status" role="status" aria-live="polite">
         <span class="live"></span><span id="status-text">Starting&hellip;</span>
@@ -132,20 +136,22 @@
       <section id="trouble" role="alert">
         <h2>Couldn&rsquo;t reach the dashboard</h2>
         <p>
-          Lightwork tries to start the dashboard for you. If it never comes up,
-          the <code>maverick</code> command usually isn&rsquo;t installed yet, or
-          isn&rsquo;t on the PATH this app can see.
+          Lightwork is taking longer than expected to open. Try again to restart
+          a failed launch. If it still cannot start, review the startup details.
         </p>
-        <ol>
-          <li>Make sure Lightwork is installed (see the setup guide).</li>
-          <li>Open a terminal and run <code>maverick dashboard</code> &mdash; this
-            window connects automatically once it&rsquo;s up.</li>
-        </ol>
         <div class="row">
           <button class="primary" id="retry" type="button">Try again</button>
-          <button id="copy" type="button">Copy command</button>
-          <span id="copied" aria-live="polite">Copied</span>
         </div>
+        <details>
+          <summary>Startup details</summary>
+          <p>If Lightwork is missing, use the Lightwork installer to install it on this computer.</p>
+          <pre id="diagnostics">Select Refresh details to view the latest startup output.</pre>
+          <div class="row">
+          <button id="refresh-details" type="button">Refresh details</button>
+          <button id="copy" type="button">Copy details</button>
+          <span id="copied" aria-live="polite">Copied</span>
+          </div>
+        </details>
       </section>
     </main>
     <script src="app.js" defer></script>

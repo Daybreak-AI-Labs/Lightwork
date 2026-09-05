@@ -81,29 +81,29 @@
     <div>
       <p class="grcs-kicker">Technology risk and compliance</p>
       <h1 class="grcs-title" id="grcs-title">No-code GRC studio</h1>
-      <p class="grcs-lede">Design tenant-private GRC objects, forms, safe rules, collector bindings and report views as a closed declarative blueprint. Every release moves through versioned review, independent approval, publish and exact rollback authority.</p>
+      <p class="grcs-lede">Build governance, risk, and compliance forms, rules, evidence collection, and reports. Each version is reviewed and independently approved before publication, with a controlled rollback if needed.</p>
     </div>
     <div class="grcs-runtime" aria-labelledby="grcs-runtime-title">
-      <p class="grcs-kicker" id="grcs-runtime-title">Tenant runtime</p>
+      <p class="grcs-kicker" id="grcs-runtime-title">Availability</p>
       <div class="grcs-runtime-row"><strong id="grcs-readiness">Checking…</strong><span class="grcs-mark" id="grcs-status-mark" data-state="checking">Checking</span></div>
-      <p class="grcs-muted" id="grcs-readiness-detail" role="status" aria-live="polite">Reading store-free readiness before enabling controls.</p>
+      <p class="grcs-muted" id="grcs-readiness-detail" role="status" aria-live="polite">Checking availability before enabling actions.</p>
       <button class="btn" id="grcs-refresh-status" type="button">Refresh status</button>
     </div>
   </section>
 
   <aside class="grcs-boundary" aria-labelledby="grcs-boundary-title">
-    <p class="grcs-kicker">Closed authority boundary</p><h2 id="grcs-boundary-title">Configuration without executable surface area</h2>
+    <p class="grcs-kicker">Closed authority boundary</p><h2 id="grcs-boundary-title">Build with supported fields and rules</h2>
     <ul>
-      <li>The DSL carries opaque references, enumerated types, bounded literals and exact digests—never code, expressions, HTML, CSS, URLs, credentials or provider endpoints.</li>
-      <li>Author, reviewer and approver must be three distinct principals. Every lifecycle and active-pointer change uses exact revision and integrity compare-and-swap.</li>
-      <li>Questionnaire, collector and report projections are side-effect free until a server-owned target resolver and applier bind the exact published blueprint and target revision.</li>
+      <li>Use the supported record references, field types, values, and verification fingerprints. Scripts, page markup, URLs, credentials, and provider endpoints are not accepted.</li>
+      <li>The author, reviewer, and approver must be three different people. Lightwork checks the current version before any change or publication.</li>
+      <li>Previewing a questionnaire, collector, or report does not change other records. Applying it requires an approved published blueprint and a verified target version.</li>
       <li>Local composition does not imply live provider, customer, auditor or regulator acceptance.</li>
     </ul>
   </aside>
 
   <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-status-title">
-    <div class="grcs-head"><div><p class="grcs-kicker">Readiness first</p><h2 id="grcs-status-title">Server composition</h2></div></div>
-    <details><summary>Runtime composition details</summary><pre class="grcs-output" id="grcs-status-output" tabindex="0"></pre></details>
+    <div class="grcs-head"><div><p class="grcs-kicker">Readiness first</p><h2 id="grcs-status-title">Service availability</h2></div></div>
+    <details><summary>Technical details</summary><pre class="grcs-output" id="grcs-status-output" tabindex="0"></pre></details>
   </section>
 
   <fieldset class="grcs-fieldset" id="grcs-operations" disabled>
@@ -120,10 +120,10 @@
 
       <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-builder-title">
         <p class="grcs-kicker">Builder · author</p><h2 id="grcs-builder-title">Create or replace a complete blueprint</h2>
-        <p class="grcs-help">Use the guided composer to assemble objects, fields, forms, safe rules, collector bindings and reports. It emits the closed server schema; no scripting, URLs, templates or provider credentials are accepted.</p>
+        <p class="grcs-help">Use the builder to assemble objects, fields, forms, rules, evidence collectors, and reports. Scripting, URLs, templates, and provider credentials are not accepted.</p>
         <form class="grcs-form" id="grcs-builder-form" autocomplete="off" novalidate>
           <fieldset class="grcs-fieldset"{% if not studio_can_operate %} disabled aria-disabled="true"{% endif %}>
-            <div class="grcs-form-grid"><label>Mode<select class="select" name="mode"><option value="create">Create next version</option><option value="replace">Replace existing draft</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Blueprint name reference<input class="input" name="name_ref" maxlength="128" required></label><label>Description reference (optional)<input class="input" name="description_ref" maxlength="128"></label><label>Version / expected latest<input class="input" name="version" type="number" min="0" max="2147483647" value="0" required></label><label>Expected revision for replacement<input class="input" name="expected_revision" type="number" min="1" max="2147483647"></label><label>Expected integrity digest for replacement<input class="input" name="expected_integrity_sha256" minlength="64" maxlength="64"></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
+            <div class="grcs-form-grid"><label>Mode<select class="select" name="mode"><option value="create">Create next version</option><option value="replace">Replace existing draft</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Blueprint name reference<input class="input" name="name_ref" maxlength="128" required></label><label>Description reference (optional)<input class="input" name="description_ref" maxlength="128"></label><label>Version / expected latest<input class="input" name="version" type="number" min="0" max="2147483647" value="0" required></label><label>Current version for replacement<input class="input" name="expected_revision" type="number" min="1" max="2147483647"></label><label>Expected integrity digest for replacement<input class="input" name="expected_integrity_sha256" minlength="64" maxlength="64"></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
 
             <div class="grcs-composer" aria-label="Guided no-code blueprint composer">
               <details open><summary>1. Objects</summary><div class="grcs-composer-panel"><div class="grcs-form-grid"><label>Object ID<input class="input" id="grcs-object-id" maxlength="128"></label><label>Kind<select class="select" id="grcs-object-kind"><option>asset</option><option>assessment</option><option>control</option><option>evidence</option><option>issue</option><option>policy</option><option selected>risk</option><option>vendor</option><option>custom</option></select></label><label>Label reference<input class="input" id="grcs-object-label" maxlength="128"></label><label>Description reference (optional)<input class="input" id="grcs-object-description" maxlength="128"></label></div><button class="btn" id="grcs-add-object" type="button">Add object</button><div class="grcs-definition-list" id="grcs-object-list"></div></div></details>
@@ -140,7 +140,7 @@
             </div>
 
             <div class="grcs-mini-actions"><button class="btn" id="grcs-compose-blueprint" type="button">Generate closed blueprint</button><button class="btn" id="grcs-load-blueprint" type="button">Load advanced JSON into composer</button><button class="btn" id="grcs-reset-composer" type="button">Reset composer</button></div>
-            <details><summary>Advanced closed-schema JSON</summary><p class="grcs-help">Generated by the visual composer. Advanced operators may load a same-schema blueprint; the server still performs authoritative closed-schema validation.</p><label>Closed blueprint JSON<textarea class="input" name="blueprint_json" maxlength="1048576" required></textarea></label></details>
+            <details><summary>Technical details: blueprint JSON</summary><p class="grcs-help">The builder generates this JSON. You can also load a compatible blueprint; Lightwork validates it before saving.</p><label>Closed blueprint JSON<textarea class="input" name="blueprint_json" maxlength="1048576" required></textarea></label></details>
             <button class="btn btn--primary" type="submit">Validate and save draft</button>
           </fieldset>
         </form>
@@ -149,13 +149,13 @@
       <section class="grcs-card" aria-labelledby="grcs-lifecycle-title">
         <p class="grcs-kicker">Governed lifecycle</p><h2 id="grcs-lifecycle-title">Review, approve and publish</h2>
         <form class="grcs-form" id="grcs-lifecycle-form" autocomplete="off" novalidate>
-          <div class="grcs-form-grid"><label>Action<select class="select" name="action"><option value="submit">Submit</option><option value="review-accept">Accept review</option><option value="review-reject">Reject review</option><option value="approve">Approve</option><option value="publish">Publish</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Version<input class="input" name="version" type="number" min="1" required></label><label>Expected revision<input class="input" name="expected_revision" type="number" min="1" required></label><label>Expected version integrity<input class="input" name="expected_integrity_sha256" minlength="64" maxlength="64" required></label><label>Rationale / approval reference<input class="input" name="authority_ref" maxlength="128"></label><label>Expected active version<input class="input" name="expected_active_version" type="number" min="0" value="0"></label><label>Expected active digest<input class="input" name="expected_active_blueprint_sha256" minlength="64" maxlength="64"></label><label>Expected pointer revision<input class="input" name="expected_pointer_revision" type="number" min="0" value="0"></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
+          <div class="grcs-form-grid"><label>Action<select class="select" name="action"><option value="submit">Submit</option><option value="review-accept">Accept review</option><option value="review-reject">Reject review</option><option value="approve">Approve</option><option value="publish">Publish</option></select></label><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Version<input class="input" name="version" type="number" min="1" required></label><label>Current version<input class="input" name="expected_revision" type="number" min="1" required></label><label>Expected version integrity<input class="input" name="expected_integrity_sha256" minlength="64" maxlength="64" required></label><label>Rationale / approval reference<input class="input" name="authority_ref" maxlength="128"></label><label>Expected active version<input class="input" name="expected_active_version" type="number" min="0" value="0"></label><label>Expected active digest<input class="input" name="expected_active_blueprint_sha256" minlength="64" maxlength="64"></label><label>Expected pointer revision<input class="input" name="expected_pointer_revision" type="number" min="0" value="0"></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
           <button class="btn btn--primary" id="grcs-lifecycle-submit" type="submit">Run exact lifecycle transition</button>
         </form>
       </section>
 
       <section class="grcs-card" aria-labelledby="grcs-rollback-title">
-        <p class="grcs-kicker">Release recovery</p><h2 id="grcs-rollback-title">Rollback active authority</h2>
+        <p class="grcs-kicker">Release recovery</p><h2 id="grcs-rollback-title">Restore a previous release</h2>
         <form class="grcs-form" id="grcs-rollback-form" autocomplete="off" novalidate>
           <fieldset class="grcs-fieldset"{% if not studio_can_admin %} disabled aria-disabled="true"{% endif %}>
             <div class="grcs-form-grid"><label>Studio ID<input class="input" name="studio_id" maxlength="128" required></label><label>Target version<input class="input" name="target_version" type="number" min="1" required></label><label>Target blueprint digest<input class="input" name="expected_target_blueprint_sha256" minlength="64" maxlength="64" required></label><label>Current active version<input class="input" name="expected_active_version" type="number" min="1" required></label><label>Current active digest<input class="input" name="expected_active_blueprint_sha256" minlength="64" maxlength="64" required></label><label>Pointer revision<input class="input" name="expected_pointer_revision" type="number" min="1" required></label><label>Rationale reference<input class="input" name="rationale_ref" maxlength="128" required></label><label>Operation ID<input class="input" name="operation_id" maxlength="192" required></label></div>
@@ -190,7 +190,7 @@
       <section class="grcs-card grcs-card--wide" aria-labelledby="grcs-output-title"><p class="grcs-kicker">Governed output</p><h2 id="grcs-output-title">Current operation</h2><p class="grcs-muted" id="grcs-operation-status" role="status" aria-live="polite">No operation has run.</p><pre class="grcs-output" id="grcs-operation-output" tabindex="0"></pre></section>
     </div>
   </fieldset>
-  <noscript><p class="grcs-boundary">JavaScript is required for this bounded API-backed workbench.</p></noscript>
+  <noscript><p class="grcs-boundary">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-no-code-grc-studio.js" defer></script>{% endblock %}

@@ -12,7 +12,7 @@ const CANONICAL_REMOTE_URLS = new Set([
   "git@github.com:Daybreak-AI-Labs/Lightwork.git",
   "ssh://git@github.com/Daybreak-AI-Labs/Lightwork.git",
 ]);
-const VERIFIED_ROOT = "apps/installer-desktop";
+const VERIFIED_ROOTS = ["apps/installer-desktop", "apps/desktop-runtime"];
 const VERIFIED_FILES = [
   "deploy/desktop/install.sh",
   "deploy/desktop/install.ps1",
@@ -24,6 +24,7 @@ const GENERATED_DIRECTORIES = [
   "apps/installer-desktop/provenance",
   "apps/installer-desktop/src-tauri/gen",
   "apps/installer-desktop/src-tauri/target",
+  "apps/desktop-runtime/target",
 ];
 
 function fail(message) {
@@ -104,7 +105,7 @@ function parseTrackedBlobs(repositoryRoot, installRef) {
     "--full-tree",
     installRef,
     "--",
-    VERIFIED_ROOT,
+    ...VERIFIED_ROOTS,
     ...VERIFIED_FILES,
   ]);
   const tracked = new Map();
@@ -137,7 +138,7 @@ function parseTrackedBlobs(repositoryRoot, installRef) {
         .split("/")
         .some((component) => ["", ".", ".."].includes(component)) ||
       !(
-        repositoryPath.startsWith(`${VERIFIED_ROOT}/`) ||
+        VERIFIED_ROOTS.some((root) => repositoryPath.startsWith(`${root}/`)) ||
         VERIFIED_FILES.includes(repositoryPath)
       )
     ) {
@@ -183,7 +184,7 @@ function collectWorktreeFiles(repositoryRoot) {
     }
   }
 
-  visit(join(repositoryRoot, ...VERIFIED_ROOT.split("/")));
+  for (const root of VERIFIED_ROOTS) visit(join(repositoryRoot, ...root.split("/")));
   for (const repositoryPath of VERIFIED_FILES) {
     const absolutePath = join(repositoryRoot, ...repositoryPath.split("/"));
     const metadata = lstatSync(absolutePath);

@@ -58,10 +58,12 @@ from .api_schemas import (
     AiSystemIn,
     AnswerIn,
     AssessmentAnswerAiMetadataIn,
+    AssessmentAnswerIn,
     AssessmentAssignIn,
     AssessmentCommentIn,
     AssessmentDecideIn,
     AssessmentEvidenceIn,
+    AssessmentFollowupAnswerIn,
     AssessmentRefreshIn,
     AssessmentReviewIn,
     AttachmentOut,
@@ -115,6 +117,7 @@ from .api_schemas import (
     GoalEventsResponse,
     GoalIn,
     GoalOut,
+    GoalResumeIn,
     HaltIn,
     ImportRunIn,
     ImportRunOut,
@@ -4557,7 +4560,7 @@ async def get_assessment_session(
     tpl = template_for_saved_record(record)
     if tpl is not None:
         projection["question_text"] = {
-            q.id: {"text": q.text, "section": q.section} for q in tpl.questions
+            q.id: {"text": q.text, "section": q.section, "guidance": q.guidance} for q in tpl.questions
         }
     return projection
 
@@ -4579,6 +4582,61 @@ async def get_assessment_score_profile(request: Request, assessment_id: str) -> 
             status_code=503,
             detail="assessment score profile is unavailable",
         ) from exc
+
+
+@router.put("/assess/sessions/{assessment_id}/answers/{question_id}")
+async def put_assessment_answer(
+    request: Request, assessment_id: str, question_id: str, body: AssessmentAnswerIn,
+) -> dict:
+    """Save a respondent answer; the separate review decision remains required."""
+    require_permission(request, "operate")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        AssessmentTransitionError,
+        answer_saved_question,
+    )
+
+    try:
+        record = await run_in_threadpool(
+            answer_saved_question, assessment_id, question_id, body.answer,
+            note=body.note, answered_by=_request_actor(request), expected_revision=body.expected_revision,
+        )
+    except (AssessmentConflict, AssessmentTransitionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AssessmentStateError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return await get_assessment_session(request, assessment_id, show_all_details=True)
+
+
+@router.put("/assess/sessions/{assessment_id}/followups/{followup_id}/answer")
+async def put_assessment_followup_answer(
+    request: Request, assessment_id: str, followup_id: str, body: AssessmentFollowupAnswerIn,
+) -> dict:
+    require_permission(request, "operate")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        AssessmentTransitionError,
+        answer_followup,
+    )
+
+    try:
+        record = await run_in_threadpool(
+            answer_followup, assessment_id, followup_id, body.answer,
+            answered_by=_request_actor(request), expected_revision=body.expected_revision,
+        )
+    except (AssessmentConflict, AssessmentTransitionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AssessmentStateError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment or follow-up")
+    return await get_assessment_session(request, assessment_id, show_all_details=True)
 
 
 @router.put("/assess/sessions/{assessment_id}/answers/{question_id}/ai-metadata")
@@ -4955,8 +5013,8 @@ async def bulk_import_assessments(
     import io
 
     from maverick.assessment import (
-        TEMPLATES,
         AssessmentSession,
+        get_template,
         save_session,
     )
 
@@ -4981,12 +5039,12 @@ async def bulk_import_assessments(
         if len(created) >= _BULK_IMPORT_MAX_ROWS:
             skipped_over_cap += 1
             continue
-        if atype not in TEMPLATES:
-            errors.append(
-                {"row": i + 1, "subject": subject, "error": f"unknown template type '{atype}'"}
-            )
-            continue
         try:
+            if get_template(atype) is None:
+                errors.append(
+                    {"row": i + 1, "subject": subject, "error": f"unknown template type '{atype}'"}
+                )
+                continue
             session = AssessmentSession(type=atype, subject=subject[:300])
             await run_in_threadpool(save_session, session)
             created.append({"id": session.id, "subject": subject, "type": atype})
@@ -5224,6 +5282,13 @@ async def oauth_providers_endpoint(request: Request) -> dict:
     """The connectable provider presets + which are already connected (view)."""
     require_permission(request, "view")
     from maverick import oauth_providers, oauth_vault
+    from maverick.paths import current_tenant_id
+
+    # A browser consent round-trip must not finish under a different signed-in
+    # user or workspace. This is a comparison marker, never an authorization token.
+    connection_context = hashlib.sha256(
+        json.dumps([current_tenant_id() or "", _request_identity(request) or ""]).encode()
+    ).hexdigest()
 
     connected: list[str] = []
     status: dict[str, dict] = {}
@@ -5245,6 +5310,7 @@ async def oauth_providers_endpoint(request: Request) -> dict:
         "connected": connected,
         "status": status,
         "vault_enabled": oauth_vault.enabled(),
+        "connection_context": connection_context,
     }
 
 
@@ -13883,7 +13949,9 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
 
 
 @router.post("/goals/{goal_id}/resume", status_code=204)
-async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> None:
+async def resume_goal(
+    goal_id: int, request: Request, bg: BackgroundTasks, payload: GoalResumeIn | None = None
+) -> None:
     """Resume a blocked / cancelled goal.
 
     Capabilities-seat finding: the CLI has ``maverick resume`` but the
@@ -13903,11 +13971,18 @@ async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> No
             status_code=400,
             detail=f"goal is {g.status!r}; only blocked/cancelled/failed goals can resume",
         )
+    max_dollars = payload.max_dollars if payload is not None else None
+    if max_dollars is not None and max_dollars > DEFAULT_MAX_DOLLARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The spending limit for this attempt cannot exceed ${DEFAULT_MAX_DOLLARS:g}.",
+        )
     w.set_goal_status(goal_id, "pending", result=None)
     from maverick.runner import run_goal_in_background_async
 
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
+    budget_options = {"max_dollars": max_dollars} if max_dollars is not None else {}
     if user_id:
         bg.add_task(
             run_goal_in_background_async,
@@ -13915,12 +13990,14 @@ async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> No
             channel="api",
             user_id=user_id,
             allowed_suites=allowed_suites,
+            **budget_options,
         )
     else:
         bg.add_task(
             run_goal_in_background_async,
             goal_id,
             allowed_suites=allowed_suites,
+            **budget_options,
         )
 
 

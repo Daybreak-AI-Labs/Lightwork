@@ -169,6 +169,11 @@ function harness(file, functionName, args) {
     clearTimeout() {},
   };
   vm.createContext(context);
+  if (file === "consent_preferences.html") {
+    element("cp-policy-form").elements.purposes.value = '{"analytics":"consent"}';
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname,
+      "../../maverick_dashboard/static/lightwork-consent-policy-editor.js"), "utf8"), context);
+  }
   const source = instrument(extractScript(file, functionName), functionName, file);
   vm.runInContext(source, context, { filename: file });
   return {

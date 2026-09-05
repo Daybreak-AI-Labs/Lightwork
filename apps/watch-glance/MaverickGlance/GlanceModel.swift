@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import LightworkConnectionKit
 
 /// The fixed glance payload served by `GET /api/v1/glance`.
 struct Glance: Codable {
@@ -15,42 +17,29 @@ final class GlanceModel: ObservableObject {
     @Published var glance: Glance?
     @Published var error: String?
 
-    private var baseURL: URL? {
-        let raw = ProcessInfo.processInfo.environment["MAVERICK_GLANCE_URL"]
-            ?? UserDefaults.standard.string(forKey: "glance_url")
-            ?? "http://127.0.0.1:8765"
-        guard let url = URL(string: raw), Self.isSecureDashboardURL(url) else {
-            return nil
-        }
-        return url.appendingPathComponent("api/v1/glance")
-    }
+    let connectionStore = ConnectionStore(environmentURLKey: "MAVERICK_GLANCE_URL", defaultsURLKey: "glance_url")
+    private var generation = 0
+    private var lastConnection: DashboardConnection?
 
-    private static func isSecureDashboardURL(_ url: URL) -> Bool {
-        if url.scheme?.lowercased() == "https" {
-            return true
-        }
-        guard url.scheme?.lowercased() == "http",
-              let host = url.host?.lowercased() else {
-            return false
-        }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    func connectionChanged() {
+        generation += 1
+        glance = nil
+        error = nil
+        lastConnection = nil
     }
 
     func refresh() async {
-        guard let url = baseURL else {
-            error = "dashboard URL must use HTTPS unless it is localhost"
-            return
-        }
-        var request = URLRequest(url: url)
-        if let token = ProcessInfo.processInfo.environment["MAVERICK_DASHBOARD_TOKEN"]
-            ?? UserDefaults.standard.string(forKey: "dashboard_token") {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        generation += 1
+        let current = generation
         do {
-            let (data, _) = try await URLSession.shared.data(for: request)
+            let connection = try connectionStore.load()
+            if connection != lastConnection { glance = nil; lastConnection = connection }
+            let data = try await dashboardData(path: "api/v1/glance", connection: connection)
+            guard current == generation else { return }
             glance = try JSONDecoder().decode(Glance.self, from: data)
             error = nil
         } catch {
+            guard current == generation else { return }
             self.error = error.localizedDescription
         }
     }

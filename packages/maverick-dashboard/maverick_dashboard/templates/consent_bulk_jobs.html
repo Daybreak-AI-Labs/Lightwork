@@ -248,36 +248,36 @@
   <section class="cbj-hero cbj-glass" aria-labelledby="cbj-title">
     <div>
       <p class="cbj-kicker">Consent operations · CP-21 / CP-23</p>
-      <h1 class="cbj-title" id="cbj-title">Govern bulk change, not just volume.</h1>
-      <p class="cbj-lede">Create bounded receipt exports and consent mutations with credit reservation, immutable job history, explicit concurrency, recoverable leases, cancellable work, integrity verification, and retention controls.</p>
+      <h1 class="cbj-title" id="cbj-title">Manage bulk consent changes</h1>
+      <p class="cbj-lede">Export consent receipts or apply approved changes across many records. Track progress, cancel queued work, retry interrupted jobs, and keep an audit history.</p>
     </div>
     <div class="cbj-runtime cbj-glass" aria-labelledby="cbj-runtime-title">
-      <p class="cbj-kicker" id="cbj-runtime-title">Tenant runtime</p>
+      <p class="cbj-kicker" id="cbj-runtime-title">Availability</p>
       <div class="cbj-runtime-row">
         <strong id="cbj-readiness">Checking…</strong>
         <span class="cbj-status" id="cbj-status-mark" data-state="checking">Checking</span>
       </div>
-      <p class="cbj-muted" id="cbj-readiness-detail" role="status" aria-live="polite">Reading the store-free readiness endpoint before enabling any bulk control.</p>
+      <p class="cbj-muted" id="cbj-readiness-detail" role="status" aria-live="polite">Checking availability before enabling bulk actions.</p>
       <button class="btn" id="cbj-refresh-status" type="button">Refresh readiness</button>
     </div>
   </section>
 
   <aside class="cbj-boundary cbj-glass" aria-labelledby="cbj-boundary-title">
     <p class="cbj-kicker">Fail-closed authority boundary</p>
-    <h2 id="cbj-boundary-title">Tenant, principal, worker, storage, and executors stay server-owned</h2>
+    <h2 id="cbj-boundary-title">Use approved records and actions</h2>
     <ul>
       <li>The page accepts opaque profile and receipt identifiers—not raw identity values, credentials, provider configuration, database paths, or worker identities.</li>
       <li>Receipt exports use the existing consent authority. Each mutation runs only when its explicit core primitive is installed and reported ready.</li>
-      <li>Credits are seeded once on the first admitted runtime and never replenished by status checks. Grants require revision compare-and-swap and idempotency.</li>
-      <li>Interactive JSON responses stop at 64 KiB. Completed export artifacts use a browser-native same-origin download path.</li>
+      <li>Checking status does not replenish job credits. Credit changes require the current version and a unique request reference.</li>
+      <li>Large exports are delivered as downloads. On-screen responses are limited in size.</li>
     </ul>
   </aside>
 
   <section class="cbj-card cbj-card--wide cbj-glass" aria-labelledby="cbj-composition-title">
     <div class="cbj-head">
-      <div><p class="cbj-kicker">Readiness first</p><h2 id="cbj-composition-title">Production composition</h2></div>
+      <div><p class="cbj-kicker">Readiness first</p><h2 id="cbj-composition-title">Service availability</h2></div>
     </div>
-    <details><summary>Runtime and executor detail</summary><pre class="cbj-output" id="cbj-status-output" tabindex="0"></pre></details>
+    <details><summary>Technical details</summary><pre class="cbj-output" id="cbj-status-output" tabindex="0"></pre></details>
   </section>
 
   <fieldset class="cbj-fieldset" id="cbj-operations" disabled>
@@ -307,7 +307,7 @@
             <label>Items JSON<textarea name="items_json" maxlength="49152" spellcheck="false" required>[{"item_id":"export-1","profile_id":"profile-1","receipt_limit":100}]</textarea></label>
             <div class="cbj-form-grid">
               <label>Schedule (optional)<input class="input" name="scheduled_for" type="datetime-local"></label>
-              <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
+              <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
             </div>
             <button class="btn btn--primary" type="submit">Create export</button>
           </fieldset>
@@ -324,7 +324,7 @@
             <label>Items JSON<textarea name="items_json" maxlength="49152" spellcheck="false" required>[{"item_id":"edit-1","profile_id":"profile-1","expected_revision":1,"policy_id":"policy-1","policy_version":1,"context":{"jurisdiction":"us","country_code":"US","region_code":"","collection_point":"admin","asserted_source":"operator"},"choices":[{"purpose_id":"analytics","action":"deny","channel":"all","vendor_id":"all","expires_at":null}]}]</textarea></label>
             <div class="cbj-form-grid">
               <label>Schedule (optional)<input class="input" name="scheduled_for" type="datetime-local"></label>
-              <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
+              <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
             </div>
             <button class="btn btn--primary" type="submit">Create action</button>
           </fieldset>
@@ -336,7 +336,7 @@
         <form class="cbj-form" id="cbj-job-control-form" autocomplete="off" novalidate>
           <label>Job ID<input class="input" name="job_id" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}" required></label>
           <div class="cbj-form-grid">
-            <label>Expected revision<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1"></label>
+            <label>Current version<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1"></label>
             <label>Cancel idempotency key<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}"></label>
           </div>
           <div class="cbj-actions">
@@ -354,7 +354,7 @@
       </section>
 
       <section class="cbj-card cbj-glass" aria-labelledby="cbj-credit-title">
-        <p class="cbj-kicker">Capacity</p><h2 id="cbj-credit-title">Credit authority</h2>
+        <p class="cbj-kicker">Capacity</p><h2 id="cbj-credit-title">Job credits</h2>
         <p class="cbj-help" id="cbj-credit-detail">Credit detail has not been loaded.</p>
         <button class="btn" id="cbj-load-credits" type="button">Load credit detail</button>
         <form class="cbj-form" id="cbj-credit-form" autocomplete="off" novalidate>
@@ -363,7 +363,7 @@
               <label>Grant amount<input class="input" name="amount" type="number" min="1" max="1000000000" step="1" required></label>
               <label>Expected credit revision<input class="input" name="expected_revision" type="number" min="1" max="2147483647" step="1" required></label>
             </div>
-            <label>Idempotency key<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
+            <label>Request reference (reuse when retrying)<input class="input" name="idempotency_key" maxlength="192" pattern="[A-Za-z0-9][A-Za-z0-9_.:-]{7,191}" required></label>
             <button class="btn btn--primary" type="submit">Grant credits</button>
           </fieldset>
         </form>
@@ -394,7 +394,7 @@
       </section>
     </div>
   </fieldset>
-  <noscript><p class="cbj-boundary cbj-glass">JavaScript is required for this bounded API-backed workbench.</p></noscript>
+  <noscript><p class="cbj-boundary cbj-glass">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

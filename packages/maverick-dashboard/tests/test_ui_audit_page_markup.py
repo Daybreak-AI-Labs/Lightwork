@@ -37,5 +37,5 @@ def test_audit_page_exposes_read_only_unified_custody_status(monkeypatch, tmp_pa
     assert "Unified audit custody" in r.text
     assert "/api/v1/audit/unified/status" in r.text
     assert 'id="audit-custody-status" role="status" aria-live="polite"' in r.text
-    assert "off-host key custody, S3 Object Lock, SIEM interoperability" in r.text
+    assert "Independent production proof" in r.text
     assert "textContent" in r.text

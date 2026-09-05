@@ -1,0 +1,16 @@
+{% macro environment(value) -%}
+  {{ {'connected': 'Connected to this console', 'vpc': 'Private cloud with controlled updates', 'airgapped': 'Offline with manual file delivery'}.get(value, value|replace('_', ' ')|title) }}
+{%- endmacro %}
+
+{% macro feature(value) -%}
+  {{ {
+    'external_agents': 'External AI agents',
+    'fleet_governance': 'Policies for connected workers',
+    'fleet_memory': 'Shared memory for connected workers',
+    'siem_export': 'Security monitoring export',
+    'advanced_evolve': 'Advanced self-improvement',
+    'custom_pack_factory': 'Custom capability packs',
+    'multi_tenant': 'Multiple workspaces',
+    'fleet': 'Connected workers'
+  }.get(value, value|replace('_', ' ')|title) }}
+{%- endmacro %}

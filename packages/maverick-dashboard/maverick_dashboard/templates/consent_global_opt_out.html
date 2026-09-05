@@ -33,8 +33,8 @@
 
   <section class="goo-panel glass-surface goo-status" aria-labelledby="goo-status-title">
     <div>
-      <p class="eyebrow">Runtime status</p>
-      <h2 id="goo-status-title">Tenant composition</h2>
+      <p class="eyebrow">Availability</p>
+      <h2 id="goo-status-title">Service availability</h2>
       <p id="goo-runtime-status" role="status" aria-live="polite">
         Checking configured authority and privacy-rights intake…
       </p>
@@ -65,7 +65,7 @@
             <label for="goo-expected-revision">Expected record revision
               <input class="input" id="goo-expected-revision" name="expected_revision" type="number" min="0" max="2147483647" value="0" required>
             </label>
-            <label for="goo-idempotency-key">Idempotency key
+            <label for="goo-idempotency-key">Request reference (reuse when retrying)
               <input class="input" id="goo-idempotency-key" name="idempotency_key" minlength="8" maxlength="192" required>
             </label>
           </div>
@@ -125,7 +125,7 @@
           <label for="goo-configuration-id">Configuration ID
             <input class="input" id="goo-configuration-id" name="configuration_id" maxlength="64" required>
           </label>
-          <label for="goo-lifecycle-revision">Expected revision
+          <label for="goo-lifecycle-revision">Current version
             <input class="input" id="goo-lifecycle-revision" name="expected_revision" type="number" min="1" max="2147483647" required>
           </label>
           <label for="goo-lifecycle-key">Lifecycle idempotency key
@@ -164,7 +164,7 @@
     </section>
   </fieldset>
 
-  <noscript><p class="goo-boundary glass-surface">JavaScript is required for this bounded administrative workbench.</p></noscript>
+  <noscript><p class="goo-boundary glass-surface">Enable JavaScript to use these controls.</p></noscript>
 </div>
 {% endblock %}
 {% block scripts_extra %}

@@ -15,6 +15,19 @@ def test_list_providers_is_public_and_lists_presets():
     assert {"google", "slack", "github"} <= names
 
 
+def test_connection_context_changes_with_user_or_workspace(monkeypatch):
+    monkeypatch.setattr("maverick_dashboard.api._request_identity", lambda request: "user:alice")
+    monkeypatch.setattr("maverick.paths.current_tenant_id", lambda: "workspace-a")
+    first = client.get("/api/v1/oauth/providers").json()["connection_context"]
+    assert first == client.get("/api/v1/oauth/providers").json()["connection_context"]
+    monkeypatch.setattr("maverick_dashboard.api._request_identity", lambda request: "user:bob")
+    second = client.get("/api/v1/oauth/providers").json()["connection_context"]
+    monkeypatch.setattr("maverick.paths.current_tenant_id", lambda: "workspace-b")
+    third = client.get("/api/v1/oauth/providers").json()["connection_context"]
+    assert len({first, second, third}) == 3
+    assert all(len(value) == 64 and "user:" not in value for value in [first, second, third])
+
+
 def test_authorize_url_requires_vault(monkeypatch):
     monkeypatch.delenv("MAVERICK_OAUTH_VAULT", raising=False)
     monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: False)

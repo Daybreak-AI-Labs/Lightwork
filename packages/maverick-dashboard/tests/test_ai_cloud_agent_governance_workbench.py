@@ -88,7 +88,7 @@ def test_workbench_fails_closed_and_dom_does_not_create_html_sinks(environment) 
     finally:
         workbench._tenant_id = monkeypatch_target
     assert unavailable.status_code == 200
-    assert "Configuration authority unavailable" in unavailable.text
+    assert "Workspace setup unavailable" in unavailable.text
     template = (template_dir / "ai_cloud_agent_governance.html").read_text(encoding="utf-8")
     for unsafe in (".innerHTML", ".outerHTML", "insertAdjacentHTML", "eval("):
         assert unsafe not in template

@@ -1,5 +1,6 @@
 import SwiftUI
 import RealityKit
+import LightworkConnectionKit
 
 /// The volumetric window: goal spheres + parent links assembled from the
 /// server-laid-out forest. Pixel coordinates map to metres via `SCALE`;
@@ -12,6 +13,7 @@ private let RADIUS: Float = 0.012
 struct PlanTreeVolume: View {
     @StateObject private var model = PlanTreeModel()
     @State private var selected: GoalNode?
+    @State private var settingsShown = false
 
     var body: some View {
         RealityView { content in
@@ -52,6 +54,24 @@ struct PlanTreeVolume: View {
                 selected = model.forest?.nodes.first { $0.id == id }
             }
         })
+        .overlay(alignment: .top) {
+            VStack {
+                HStack {
+                    Button("Connection") { settingsShown.toggle() }
+                    Button("Refresh") { Task { await model.refresh() } }
+                }
+                .padding(12).glassBackgroundEffect()
+                if settingsShown {
+                    ConnectionSettingsView(store: model.connectionStore, onClose: { settingsShown = false }) {
+                        selected = nil
+                        model.connectionChanged()
+                        Task { await model.refresh() }
+                    }
+                    .frame(width: 420, height: 440)
+                    .glassBackgroundEffect()
+                }
+            }
+        }
         .overlay(alignment: .bottom) {
             if let node = selected {
                 VStack(spacing: 4) {
@@ -62,7 +82,11 @@ struct PlanTreeVolume: View {
                 .glassBackgroundEffect()
                 .padding(.bottom, 24)
             } else if let err = model.error {
-                Text(err).font(.caption).padding(12).glassBackgroundEffect()
+                VStack {
+                    Text("Could not load your plan. Check your dashboard connection and try again.")
+                    DisclosureGroup("Connection details") { Text(err) }
+                }
+                .font(.caption).padding(12).glassBackgroundEffect()
             }
         }
         .task { await model.refresh() }

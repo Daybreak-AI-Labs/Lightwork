@@ -6,7 +6,7 @@
 //! (`deploy/desktop/install.{ps1,sh}`) with `MAVERICK_NO_WIZARD=1`, and
 //! streams each output line to the UI as a Tauri event. No Python is
 //! required on the machine first -- the bootstrap installs it. When it
-//! finishes, the UI tells the user to run `maverick init`. The bundle is not
+//! finishes, the UI can open the dashboard for in-app setup. The bundle is not
 //! self-contained: cloning the private pinned commit requires valid GitHub
 //! authorization, and the resulting Python source remains readable.
 //!
@@ -20,6 +20,7 @@ use std::io::Write;
 use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
+use lightwork_desktop_runtime::{Dashboard, DASHBOARD_URL};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -910,14 +911,57 @@ fn force_exit_after_cleanup_failure(
     Ok(())
 }
 
+#[tauri::command]
+fn dashboard_diagnostics(state: State<'_, Dashboard>) -> Result<String, String> {
+    state.diagnostics()
+}
+
+#[tauri::command]
+async fn open_lightwork(
+    app: AppHandle,
+    install_state: State<'_, InstallState>,
+    dashboard: State<'_, Dashboard>,
+) -> Result<(), String> {
+    if install_state.is_active() {
+        return Err("Finish installation and cleanup before opening Lightwork.".into());
+    }
+    dashboard.start()?;
+    // Give the Python app time to start. An unconfigured installation still
+    // serves its onboarding page; no terminal wizard is needed here.
+    for _ in 0..30 {
+        if lightwork_desktop_runtime::listening() {
+            if let Some(window) = app.get_webview_window("dashboard") {
+                window.show().map_err(|error| error.to_string())?;
+                return window.set_focus().map_err(|error| error.to_string());
+            }
+            tauri::WebviewWindowBuilder::new(
+                &app,
+                "dashboard",
+                tauri::WebviewUrl::External(DASHBOARD_URL.parse().map_err(|_| "Invalid dashboard address.")?),
+            )
+            .title("Lightwork")
+            .inner_size(1280.0, 860.0)
+            .min_inner_size(640.0, 480.0)
+            .build()
+            .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    Err("Lightwork has not opened yet. Review startup details, then try again.".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(InstallState::default())
+        .manage(Dashboard::default())
         .invoke_handler(tauri::generate_handler![
             install,
             cancel_install,
-            force_exit_after_cleanup_failure
+            force_exit_after_cleanup_failure,
+            open_lightwork,
+            dashboard_diagnostics
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -933,8 +977,13 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("tauri runtime error");
+        .build(tauri::generate_context!())
+        .expect("tauri runtime error")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Dashboard>().stop_owned();
+            }
+        });
 }
 
 #[cfg(test)]

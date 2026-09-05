@@ -13,8 +13,8 @@
 <div class="wfx">
   {% from "_hero.html" import hero, state %}
   {% call hero('Your AI workforce', 'Workflows',
-               subtitle='Reusable, deterministic playbooks',
-               lede='Flow graphs, workflows, and agent playbooks you\'ve built
+               subtitle='Save a process and use it again',
+               lede='Workflows, templates, and specialist instructions you\'ve built
                      — schedule them, trigger them from events, or run them on
                      demand. Browse the full catalog on
                      <a href="/templates">Templates</a>.') %}
@@ -24,9 +24,9 @@
                ~ playbooks | length ~ ' playbooks',
              badge='ready' if (flows or templates or playbooks) else 'none yet',
              badge_class='ok' if (flows or templates or playbooks) else 'idle',
-             copy='Deterministic playbooks, not one-off runs — each executes
-                   the same steps every time, under your schedules, triggers,
-                   budgets, and approval gates.') }}
+             copy='Templates and playbooks guide the work. Flow approval steps
+                   pause a run for a human decision; playbook review instructions
+                   do not pause it automatically.') }}
   {% endcall %}
   <div class="wfx__head">
     <span style="display:flex;gap:var(--space-2);margin-inline-start:auto;">
@@ -37,14 +37,15 @@
 
   {% if flows_enabled %}
   <section class="wfx__section" aria-labelledby="wfx-flow-h">
-    <h2 id="wfx-flow-h">Flows <span style="font-weight:normal;color:var(--muted);font-size:var(--text-sm);">— visual graphs with branches, loops, approvals</span></h2>
+    <h2 id="wfx-flow-h">Flows <span style="font-weight:normal;color:var(--muted);font-size:var(--text-sm);">— connected steps with decisions, repetition, and approvals</span></h2>
     {% if flows %}
     <ul class="wfx__list" aria-label="Your flows">
       {% for f in flows %}
       <li class="mv-row">
         <div class="mv-row__main">
           <div class="mv-row__title">{{ f.name or f.id }}</div>
-          <div class="mv-row__sub">{{ f.id }} · {{ f.nodes }} step{{ '' if f.nodes == 1 else 's' }}{% if f.single_agent %} · single step{% endif %}</div>
+          <div class="mv-row__sub">{{ f.nodes }} step{{ '' if f.nodes == 1 else 's' }}</div>
+          <details><summary>Technical details</summary><p class="muted">Flow reference: <code>{{ f.id }}</code></p></details>
         </div>
         <div class="mv-row__actions">
           <a class="btn btn--ghost" href="/flows/designer/{{ f.id | urlencode }}">Edit</a>
@@ -68,7 +69,8 @@
       <li class="mv-row">
         <div class="mv-row__main">
           <div class="mv-row__title">{{ t.title or t.name }}</div>
-          <div class="mv-row__sub">{{ t.name }}{% if t.params %} · params: {{ t.params|join(', ') }}{% endif %}</div>
+          <div class="mv-row__sub">{% if t.params %}You'll be asked for: {{ t.params|join(', ') }}{% else %}Ready to use with your instructions{% endif %}</div>
+          <details><summary>Technical details</summary><p class="muted">Template reference: <code>{{ t.name }}</code></p></details>
         </div>
         <div class="mv-row__actions">
           <a class="btn btn--ghost" href="/workflow-builder?edit={{ t.name | urlencode }}">Edit</a>

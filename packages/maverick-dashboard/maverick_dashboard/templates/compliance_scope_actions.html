@@ -16,9 +16,7 @@
 </style>
 
 <h1>Compliance Scope Actions</h1>
-<p>Exact-tenant control plane that turns an authoritative finalized compliance
-  scope into reason-coded control and evidence-task intents through an
-  independently approved, versioned mapping catalog.</p>
+<p>Turn a finalized compliance scope into control and evidence tasks using an independently approved mapping. Review the reason for each proposed task before applying it.</p>
 <div class="csa-warning">
   <strong>No licensed framework text, raw evidence, free-text task descriptions,
     secret values, arbitrary code, built-in provider writes, network I/O, legal
@@ -37,15 +35,15 @@
                        mapping catalog -- have your compliance owner review the
                        catalog governance first.') }}
 {% else %}
-<p><button class="btn" id="csa-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="csa-load-status" type="button">Check availability</button></p>
 <div class="csa-grid">
   <section class="panel csa-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and actor come only from the authenticated request. Unknown fields,
       framework prose, raw evidence, key values, provider or target selectors,
       and code are rejected.</p>
     <label>Operation
-      <select id="csa-operation">
+      <select id="csa-operation" data-guided-api="/api/v1/compliance/scope-actions">
         <option value="catalog-create" data-method="PUT" data-path="/catalogs/{catalog_id}/versions">Catalog: create immutable mapping version</option>
         <option value="catalog-get" data-method="GET" data-path="/catalogs/{catalog_id}/versions/{version}">Catalog: get version</option>
         <option value="catalog-approve" data-method="POST" data-path="/catalogs/{catalog_id}/versions/{version}/approve">Catalog: independent approval</option>
@@ -61,10 +59,10 @@
         <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify tenant state</option>
       </select>
     </label>
-    <label>Path values as JSON object
+    <label>Record references (JSON)
       <input class="input" id="csa-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="csa-body">{}</textarea>
     </label>
     <div class="csa-warning" id="csa-confirm-panel">
@@ -73,7 +71,7 @@
           signed-export consequences and the exact CAS revision.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="csa-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="csa-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>

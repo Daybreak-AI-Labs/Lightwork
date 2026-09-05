@@ -16,8 +16,7 @@
 </style>
 
 <h1>Third-Party Lifecycle</h1>
-<p>Local, provider-neutral control plane for versioned conditional assessments,
-  lifecycle decisions, and governed offboarding.</p>
+<p>Manage vendor assessments, record lifecycle decisions, and plan offboarding. These records are maintained in Lightwork; external provider actions require separate setup.</p>
 <div class="tpl-warning">
   <strong>No network transport, provider writes, or live acceptance.</strong>
   Callback records are governed delivery intent only. Claim, fail, acknowledge,
@@ -31,14 +30,14 @@
                        and governed offboarding stay off until your vendor-risk
                        owner approves this control plane.') }}
 {% else %}
-<p><button class="btn" id="tpl-load-status" type="button">Load honest status</button></p>
+<p><button class="btn" id="tpl-load-status" type="button">Check availability</button></p>
 <div class="tpl-grid">
   <section class="panel tpl-stack">
-    <h2>Strict JSON operator workbench</h2>
+    <h2>Choose an action</h2>
     <p>Tenant and actor are taken only from the authenticated request. Do not put
       either field in JSON; unknown fields are rejected.</p>
     <label>Operation
-      <select id="tpl-operation">
+      <select id="tpl-operation" data-guided-api="/api/v1/third-party/lifecycle">
         <option value="template-create" data-method="PUT" data-path="/templates/{template_id}">Template: create version</option>
         <option value="template-get" data-method="GET" data-path="/templates/{template_id}/versions/{version}">Template: get version</option>
         <option value="template-approve" data-method="POST" data-path="/templates/{template_id}/versions/{version}/approve">Template: independent approval</option>
@@ -68,10 +67,10 @@
         <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify</option>
       </select>
     </label>
-    <label>Path values as JSON object
+    <label>Record references (JSON)
       <input class="input" id="tpl-path-values" value="{}" autocomplete="off">
     </label>
-    <label>Strict request body as JSON
+    <label>Action details (JSON)
       <textarea class="input" id="tpl-body">{}</textarea>
     </label>
     <div class="tpl-warning" id="tpl-confirm-panel">
@@ -80,7 +79,7 @@
           callback state, and understand this is a governed state change.</span>
       </label>
     </div>
-    <button class="btn btn--primary" id="tpl-submit" type="button">Run selected operation</button>
+    <button class="btn btn--primary" id="tpl-submit" type="button">Continue with selected action</button>
   </section>
   <section class="panel">
     <h2>Result</h2>
