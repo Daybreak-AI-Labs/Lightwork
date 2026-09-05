@@ -79,6 +79,7 @@ resource "aws_ecs_task_definition" "app" {
           { name = "MAVERICK_PG_DSN", valueFrom = aws_secretsmanager_secret.pg_dsn.arn },
           { name = "MAVERICK_DASHBOARD_TOKEN", valueFrom = aws_secretsmanager_secret.dashboard_token.arn },
           { name = "ANTHROPIC_API_KEY", valueFrom = aws_secretsmanager_secret.anthropic_api_key.arn },
+          { name = "MAVERICK_ENCRYPTION_KEY", valueFrom = aws_secretsmanager_secret.at_rest_key.arn },
         ],
         var.oidc_issuer == "" ? [] : [
           { name = "MAVERICK_OIDC_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn },
