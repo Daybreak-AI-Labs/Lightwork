@@ -2617,12 +2617,12 @@ async def overview(request: Request) -> HTMLResponse:
     # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
     owner = goal_owner_filter(request)
     if owner is None:
-        rows = w.conn.execute("SELECT status, COUNT(*) FROM goals GROUP BY status").fetchall()
+        rows = w.query("SELECT status, COUNT(*) FROM goals GROUP BY status")
     else:
-        rows = w.conn.execute(
+        rows = w.query(
             "SELECT status, COUNT(*) FROM goals WHERE owner = ? GROUP BY status",
             (owner,),
-        ).fetchall()
+        )
     by_status = {r[0]: int(r[1]) for r in rows}
     counts = {
         "total": sum(by_status.values()),
@@ -8780,7 +8780,7 @@ def _build_plan_tree(world, goal_id: int, depth_cap: int = 6) -> dict:
         return {}
 
     per_parent_cap = 50
-    rows = world.conn.execute(
+    rows = world.query(
         """
         WITH RECURSIVE descendants(id, parent_id, title, status, depth, created_at) AS (
           SELECT id, parent_id, title, status, 0, created_at
@@ -8811,7 +8811,7 @@ def _build_plan_tree(world, goal_id: int, depth_cap: int = 6) -> dict:
          ORDER BY d.depth ASC, d.created_at ASC, d.id ASC
         """,
         (goal_id, per_parent_cap, depth_cap),
-    ).fetchall()
+    )
 
     # This tree reads goals.title via raw SQL, so decrypt it the same way the
     # WorldModel accessors do when at-rest encryption seals the column.
@@ -9054,7 +9054,7 @@ async def cost_csv(request: Request, month: str | None = None) -> StreamingRespo
         # it via raw SQL, so decrypt it like the WorldModel accessors do.
         from maverick.world_model import _dec_field
 
-        for row in w.conn.execute(sql, params):
+        for row in w.query(sql, params):
             writer.writerow(
                 [
                     row["id"],
