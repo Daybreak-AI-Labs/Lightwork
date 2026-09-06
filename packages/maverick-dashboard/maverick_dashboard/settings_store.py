@@ -97,6 +97,14 @@ CAPABILITY_DEFAULTS = {
     "mobile_tools": False, "ros": False, "code_exec": False,
 }
 FEATURE_DEFAULTS = {
+    "workflow_readiness": True,
+    "project_reviews": False,
+    "outcome_measurement": False,
+    "guided_onboarding": True,
+    "action_center": True,
+    "draft_recovery": True,
+    "record_search": True,
+    "workspace_recovery": False,
     "skills": True,
     "world_model": True,
     "streaming": True,
@@ -125,6 +133,14 @@ CAPABILITY_INFO = {
                  "before shell commands run.",
 }
 FEATURE_INFO = {
+    "workflow_readiness": "Show available workflows, their supported boundaries, and the live or platform validation still required. Enablement never establishes customer acceptance.",
+    "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",
+    "outcome_measurement": "Plan a paired workflow pilot, record observed baseline and review effort, and compare current accepted outcomes. Unmeasured costs and unreviewed work remain explicit.",
+    "guided_onboarding": "Offer a guided path to a reviewed deliverable, privacy assessment, or accepted vendor case. Task creation alone never establishes success.",
+    "action_center": "Collect approvals, deliverable sign-offs, and assessment reviews in one personal list, with private read and snooze preferences. Overdue items remain visible.",
+    "draft_recovery": "Keep encrypted recovery copies of unfinished editor work, private to each account and workspace. Credentials and attachments are excluded; restoring never runs or publishes work.",
+    "record_search": "Find accessible vendors, evidence, assessments, decisions, tasks, and reports by name or reference. Searches use current metadata and disclose unavailable or partial sources.",
+    "workspace_recovery": "Let global administrators export signed local workspace snapshots, verify and test them, and restore only in isolated local recovery mode. External stores and shared administration are excluded.",
     "skills": "Agents can use saved procedures from the Skills library "
               "while working on a task.",
     "world_model": "The shared operating record: goals, episodes, approvals, "

@@ -964,7 +964,9 @@ def get_features() -> dict:
                       /api/v1/triggers editor and the /webhook/run route 404/403
                       and the builder panel hides.
 
-    All default on.
+    Draft recovery, record search, Action Center, guided onboarding and workflow
+    readiness default on. Workspace recovery, project reviews and outcome
+    measurement require explicit opt-in. The older switches default on.
     """
     cfg = load_config().get("features", {}) or {}
     return {
@@ -973,6 +975,14 @@ def get_features() -> dict:
         "streaming": bool(cfg.get("streaming", True)),
         "pack_editing": bool(cfg.get("pack_editing", True)),
         "role_editing": bool(cfg.get("role_editing", True)),
+        "draft_recovery": cfg.get("draft_recovery", True) is True,
+        "record_search": cfg.get("record_search", True) is True,
+        "workspace_recovery": cfg.get("workspace_recovery", False) is True,
+        "action_center": cfg.get("action_center", True) is True,
+        "guided_onboarding": cfg.get("guided_onboarding", True) is True,
+        "workflow_readiness": cfg.get("workflow_readiness", True) is True,
+        "project_reviews": cfg.get("project_reviews", False) is True,
+        "outcome_measurement": cfg.get("outcome_measurement", False) is True,
         "scheduling": bool(cfg.get("scheduling", True)),
         "triggers": bool(cfg.get("triggers", True)),
     }
@@ -2825,11 +2835,14 @@ def data_use_governance_enabled(cfg: dict | None = None) -> bool:
     Otherwise ``[data_use_governance] enable`` decides. OFF by default; never
     raises.
     """
-    v = env_flag("MAVERICK_DATA_USE_GOVERNANCE")
-    if v is not None:
-        return v
     try:
-        section = (cfg if cfg is not None else load_config()).get("data_use_governance", {})
+        loaded = cfg if cfg is not None else load_config()
+        if config_source_errors():
+            return False
+        v = env_flag("MAVERICK_DATA_USE_GOVERNANCE")
+        if v is not None:
+            return v
+        section = loaded.get("data_use_governance", {})
     except Exception:  # pragma: no cover -- config must never block
         return False
     return isinstance(section, dict) and section.get("enable") is True

@@ -19,6 +19,7 @@ from dataclasses import asdict
 
 from . import ai_vendor_risk as risk
 from . import vendor_management as vendors
+from . import vendor_onboarding_documents as documents
 from .file_lock import cross_process_lock
 from .governed_operations import (
     ServiceContext,
@@ -29,6 +30,7 @@ from .governed_operations import (
 )
 from .governed_records import GovernedRecordStore, RecordConflict
 from .paths import data_dir, tenant_scope
+from .vendor_onboarding_adapters import EvidenceDocument
 
 _CASES = GovernedRecordStore("vendor_onboarding", "VON", "vendor_onboarding_case")
 _LOCK = threading.RLock()
@@ -114,10 +116,14 @@ class VendorOnboardingService:
 
     @_scoped
     def intake(self, ctx, vendor_name, document_id, project, purpose, *,
-               freshness_days=365, renewal_of=None):
+               freshness_days=365, renewal_of=None, document_ids=None):
         self._permit(ctx, "intake", ctx.resource_owner)
         name = _text(vendor_name, "vendor_name", 256)
-        doc = _text(document_id, "document_id", 256)
+        ids = self._document_ids(document_ids if document_ids is not None else ([document_id] if document_id else []))
+        if document_id and document_id not in ids:
+            raise ValueError("primary document must be included in document_ids")
+        doc = ids[0] if ids else ""
+        uploads = []
         if not isinstance(project, str) or not _PROJECT.fullmatch(project):
             raise ValueError("project must be a literal Jira project key")
         if type(freshness_days) is not int or not 1 <= freshness_days <= 730:
@@ -128,6 +134,9 @@ class VendorOnboardingService:
                 raise ValueError("renewal requires a previously accepted case")
             if name != prior["vendor_name"]:
                 raise ValueError("renewal vendor identity changed")
+            uploads = list(prior.get("uploads") or [])
+        if len(ids) + len(uploads) > documents.MAX_DOCUMENTS:
+            raise ValueError("a case supports at most 8 evidence documents")
         vendor_id = vendors._vendor_id(name)
         vendor = vendors.get_vendor(vendor_id)
         if vendor is None:
@@ -144,6 +153,7 @@ class VendorOnboardingService:
             "id": _CASES.new_id(), "schema": "lightwork.vendor-onboarding.v1",
             "tenant": ctx.tenant, "owner": ctx.resource_owner,
             "vendor_id": vendor_id, "vendor_name": name, "document_id": doc,
+            "document_ids": ids, "uploads": uploads,
             "project": project, "purpose": _text(purpose, "purpose"),
             "freshness_days": freshness_days, "renewal_of": renewal_of,
             "stage": "intake", "evidence": None, "assessment": None,
@@ -156,6 +166,57 @@ class VendorOnboardingService:
             "integration_mode": {"documents": self.documents.mode, "tickets": self.tickets.mode},
         }, action="vendor_onboarding_intake", actor=ctx.actor, max_records=10000)
         return row
+
+    @staticmethod
+    def _document_ids(values):
+        if not isinstance(values, list) or len(values) > documents.MAX_DOCUMENTS:
+            raise ValueError("document_ids must be a list of at most 8 Drive file IDs")
+        cleaned = [_text(value, "document_id", 256) for value in values]
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("each evidence document must be selected once")
+        return sorted(cleaned)
+
+    @_scoped
+    def search_documents(self, ctx, query):
+        self._permit(ctx, "evidence.read", ctx.resource_owner)
+        return self.documents.search(ctx, query)
+
+    @_scoped
+    def set_documents(self, ctx, case_id, expected_revision, document_ids, upload_ids):
+        row = self._get(ctx, case_id, expected_revision)
+        self._editable(row)
+        self._permit(ctx, "evidence.read", case_id)
+        ids = self._document_ids(document_ids)
+        if not isinstance(upload_ids, list) or any(not isinstance(value, str) for value in upload_ids) or len(set(upload_ids)) != len(upload_ids):
+            raise ValueError("uploaded evidence references must be distinct")
+        uploads = {item["document_id"]: item for item in row.get("uploads", [])}
+        if set(upload_ids) - uploads.keys() or len(ids) + len(upload_ids) > documents.MAX_DOCUMENTS:
+            raise ValueError("select at most 8 documents belonging to this case")
+        return self._save(ctx, row, document_ids=ids, document_id=ids[0] if ids else "",
+                          uploads=[uploads[key] for key in sorted(upload_ids)], evidence=None,
+                          assessment=None, stage="intake", **self._invalidate(row))
+
+    @_scoped
+    def upload_document(self, ctx, case_id, expected_revision, *, content, name, mime, document_date):
+        row = self._get(ctx, case_id, expected_revision)
+        self._editable(row)
+        self._permit(ctx, "evidence.upload", case_id, human=True)
+        if len(row.get("document_ids", [row["document_id"]])) + len(row.get("uploads", [])) >= documents.MAX_DOCUMENTS:
+            raise ValueError("remove a document before adding more than 8")
+        filename = _text(name, "document name", 256)
+        if re.search(r"[\x00-\x1f/\\]", filename):
+            raise ValueError("document name must not contain a path or control characters")
+        if type(document_date) not in (int, float) or not math.isfinite(document_date):
+            raise ValueError("provide the document's actual date")
+        document = EvidenceDocument("upload-" + uuid.uuid4().hex, "1", document_date, content, mime)
+        result = documents.extract(document, source="upload", name=filename, now=self.clock(),
+                                   freshness_days=row["freshness_days"])
+        result.update(uploaded_by=ctx.actor, uploaded_at=self.clock(),
+                      verification_basis="retained_upload_snapshot; no provider readback")
+        # Failed extraction remains visible and must be removed or replaced;
+        # it never becomes a complete assessment through partial success.
+        return self._save(ctx, row, uploads=[*row.get("uploads", []), result], evidence=None,
+                          assessment=None, stage="intake", **self._invalidate(row))
 
     @_scoped
     def get(self, ctx, case_id):
@@ -176,43 +237,84 @@ class VendorOnboardingService:
         row = self._get(ctx, case_id, expected_revision)
         self._editable(row)
         self._permit(ctx, "evidence.read", case_id)
-        try:
-            document = self.documents.fetch(ctx, row["document_id"])
-            if (document.document_id != row["document_id"] or not document.version
-                    or not math.isfinite(document.modified_at) or document.modified_at > self.clock()
-                    or document.mime != "text/plain" or len(document.content) > 128 * 1024):
-                raise ValueError("unsupported or corrupted evidence metadata")
-            text = document.content.decode("utf-8", errors="strict")
-            if not text.strip():
-                state = "empty"
-                extracted = None
-            else:
-                extracted = risk.extract_answers_from_document(
-                    document.content, document.mime, source="gdrive",
-                    document_id=document.document_id, ref={"version": document.version},
-                )
-                state = "available"
-            evidence = dict(document.identity(), status=state, source="gdrive",
-                            content_sha256=hashlib.sha256(document.content).hexdigest(),
-                            collected_at=self.clock(), extracted=extracted,
-                            credential_ref=ctx.document_credential_ref,
-                            credential_version=self.documents.authority_version(ctx),
-                            fresh_until=document.modified_at + row["freshness_days"] * 86400)
-        except FileNotFoundError:
-            evidence = {"status": "missing", "source": "gdrive", "collected_at": self.clock()}
-        except (ValueError, UnicodeError):
-            evidence = {"status": "corrupted", "source": "gdrive", "collected_at": self.clock()}
-        except PermissionError:
-            raise
-        except Exception:
-            evidence = {"status": "unavailable", "source": "gdrive", "collected_at": self.clock()}
-        metrics = dict(row["metrics"], document_reads=row["metrics"]["document_reads"] + 1)
+        results = []
+        ids = row.get("document_ids", [row["document_id"]])
+        for document_id in ids:
+            result = {"document_id": document_id, "source": "gdrive", "collected_at": self.clock()}
+            try:
+                document = self.documents.fetch(ctx, document_id)
+                if document.document_id != document_id:
+                    raise ValueError("unsupported or corrupted evidence metadata")
+                result = documents.extract(document, source="gdrive", name=document_id,
+                                           now=self.clock(), freshness_days=row["freshness_days"])
+                result.update(credential_ref=ctx.document_credential_ref,
+                              credential_version=self.documents.authority_version(ctx))
+            except FileNotFoundError:
+                result["status"] = "missing"
+            except (ValueError, UnicodeError):
+                result["status"] = "corrupted"
+            except PermissionError:
+                raise
+            except Exception:
+                result["status"] = "unavailable"
+            results.append(result)
+        results.extend(dict(item, fresh_until=item["modified_at"] + row["freshness_days"] * 86400)
+                       for item in row.get("uploads", []))
+        evidence = self._evidence_set(results)
+        previous = row.get("evidence")
+        if row.get("renewal_of"):
+            previous = self._get(ctx, row["renewal_of"]).get("evidence")
+        evidence["changes"] = documents.document_diff(previous, evidence)
+        metrics = dict(row["metrics"], document_reads=row["metrics"]["document_reads"] + len(ids))
         exceptions = list(row["exceptions"])
         if evidence["status"] != "available":
             exceptions.append({"kind": "evidence_" + evidence["status"], "at": self.clock(),
                                "supersedes_case_revision": row["revision"]})
         return self._save(ctx, row, evidence=evidence, assessment=None, stage="evidence_collected",
                           metrics=metrics, exceptions=exceptions, **self._invalidate(row))
+
+    def _evidence_set(self, results):
+        results = sorted(results, key=lambda item: (item["source"], item["document_id"]))
+        failures = [item for item in results if item["status"] != "available"]
+        status = "missing" if not results else failures[0]["status"] if failures else "available"
+        if sum(item.get("byte_length", 0) for item in results) > documents.MAX_TOTAL_BYTES:
+            status = "extraction_limit"
+        if len(results) == 1:
+            evidence = dict(results[0])
+        else:
+            evidence = {"source": "evidence_set", "version": digest([dict(self._identity(item), source=item["source"]) for item in results]),
+                        "content_sha256": digest([{key: item.get(key) for key in ("source", "document_id", "version", "content_sha256")}
+                                                   for item in results]),
+                        "fresh_until": min((item.get("fresh_until", 0) for item in results), default=0)}
+        return dict(evidence, status=status, documents=results, collected_at=self.clock())
+
+    @staticmethod
+    def _identity(item):
+        return {key: item.get(key) for key in ("document_id", "version", "modified_at", "mime")}
+
+    def current_evidence_version(self, ctx, row, *, verify_bytes=False):
+        evidence = row["evidence"]
+        observed = []
+        items = sorted(evidence.get("documents") or [evidence],
+                       key=lambda item: (item.get("source", "gdrive"), item["document_id"]))
+        for item in items:
+            if item.get("source") == "upload":
+                current = next((upload for upload in row.get("uploads", []) if upload["document_id"] == item["document_id"]), None)
+                if current is None or current["content_sha256"] != item["content_sha256"] or self._identity(current) != self._identity(item):
+                    raise ValueError("uploaded evidence snapshot changed")
+                head = self._identity(current)
+            else:
+                if verify_bytes:
+                    document = self.documents.fetch(ctx, item["document_id"])
+                    head = document.identity()
+                    if hashlib.sha256(document.content).hexdigest() != item["content_sha256"]:
+                        raise ValueError("source evidence bytes changed")
+                else:
+                    head = self.documents.head(ctx, item["document_id"])
+                if head != self._identity(item):
+                    raise ValueError("source evidence version changed")
+            observed.append(dict(head, source=item.get("source", "gdrive")))
+        return observed[0]["version"] if len(observed) == 1 else digest(observed)
 
     def _draft(self, ctx, row, answers=None, marker=None):
         # Recover a risk record created before the saga's reference write failed.
@@ -224,7 +326,8 @@ class VendorOnboardingService:
             return risk.get_vendor_assessment(found[0]["id"])
         return risk.draft_vendor_assessment(
             row["vendor_name"], answers=answers,
-            document_results=[row["evidence"]["extracted"]], actor=actor, use_prior=False,
+            document_results=[item["extracted"] for item in row["evidence"].get("documents") or [row["evidence"]]],
+            actor=actor, use_prior=False,
         )
 
     @_scoped
@@ -304,17 +407,17 @@ class VendorOnboardingService:
             raise ValueError("domain assessment version changed")
         if evidence["fresh_until"] <= self.clock():
             raise ValueError("evidence freshness expired; renew evidence before execution")
-        head = self.documents.head(ctx, row["document_id"])
-        if head != {key: evidence[key] for key in ("document_id", "version", "modified_at", "mime")}:
-            raise ValueError("source evidence version changed")
+        source_version = self.current_evidence_version(ctx, row)
         vendor = vendors.get_vendor(row["vendor_id"])
         if not vendor or vendor["owner"] != ctx.resource_owner or vendor["status"] == "offboarded":
             raise PermissionError("vendor ownership or lifecycle changed")
-        return {"evidence_sha256": evidence["content_sha256"], "source_version": head["version"],
+        return {"evidence_sha256": evidence["content_sha256"], "source_version": source_version,
                 "assessment_id": assessment["id"], "assessment_revision": assessment["revision"],
                 "assessment_sha256": assessment["assessment_sha256"],
                 "vendor_revision": vendor["revision"],
-                "document_credential_version": self.documents.authority_version(ctx),
+                "document_credential_version": (self.documents.authority_version(ctx)
+                    if any(item.get("source") != "upload" for item in evidence.get("documents") or [evidence])
+                    else "not_applicable:retained_uploads"),
                 "ticket_credential_version": self.tickets.authority_version(ctx)}
 
     @_scoped
@@ -336,7 +439,7 @@ class VendorOnboardingService:
                 f"Assessment: {row['assessment']['id']} revision {row['assessment']['revision']}\n"
                 f"Assessment digest: {row['assessment']['assessment_sha256']}\n"
                 f"Risk: {row['assessment']['result']['risk_rating']}\n"
-                f"Evidence: gdrive:{row['document_id']} version {row['evidence']['version']}\n"
+                f"Evidence: {len(row['evidence'].get('documents') or [row['evidence']])} document(s), version {row['evidence']['version']}\n"
                 f"Evidence digest: {row['evidence']['content_sha256']}\n"
                 f"Renewal due (Unix seconds): {row['evidence']['fresh_until']}\n"
                 f"Human review: {row['review_history'][-1]['rationale']}"

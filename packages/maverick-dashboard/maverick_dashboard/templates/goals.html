@@ -6,7 +6,7 @@
      same glass family as the rest of the platform. The search JS rebuilds the
      same .g-row markup, so server- and client-rendered rows match. */
   .g-bar{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
-  .g-bar__search{ margin-inline-start: auto; min-width: 16rem; flex: 0 1 22rem; }
+  .g-bar__search{ margin-inline-start: auto; min-width: 0; max-width: 100%; flex: 1 1 16rem; }
   .g-list{ display: flex; flex-direction: column; gap: var(--space-2); }
   .g-row{ display: flex; align-items: center; gap: var(--space-3);
     border: 1px solid var(--glass-border, var(--border)); border-radius: var(--radius-lg);
@@ -21,6 +21,12 @@
   .g-row__actions a{ font-size: var(--text-sm); color: var(--muted); }
   .g-row__actions a:hover{ color: var(--brand-hi); }
   .g-row:hover .g-row__actions{ opacity: 1; }
+  @media(max-width:540px){
+    .g-row{flex-wrap:wrap}
+    .g-row__id{width:auto}
+    .g-row__main{flex-basis:100%;order:2}
+    .g-row__actions{margin-inline-start:auto;flex-wrap:wrap;min-width:0}
+  }
   .g-empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
     border: 1px dashed var(--glass-border, var(--border)); border-radius: var(--radius-lg);
     background: var(--glass-soft, var(--surface-1)); }

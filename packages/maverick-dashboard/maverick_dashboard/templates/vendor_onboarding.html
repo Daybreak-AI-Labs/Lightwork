@@ -47,14 +47,19 @@
         <h2 id="vo-intake-title">New request</h2>
         <form id="vo-intake">
           <label for="vo-vendor">Vendor name</label><input id="vo-vendor" required maxlength="200">
-          <label for="vo-document">Google Drive file ID</label><input id="vo-document" required maxlength="256">
+          <label for="vo-document-search">Find a Drive document by name</label><input id="vo-document-search" maxlength="200">
+          <label for="vo-document-target">Add search results to</label><select id="vo-document-target"><option value="new">New request</option><option value="selected">Selected request</option></select>
+          <button id="vo-search-documents" type="button">Search Drive</button>
+          <div id="vo-document-results" aria-live="polite"></div>
+          <div id="vo-new-documents" aria-live="polite">No Drive documents selected for the new request.</div>
+          <details><summary>Advanced: selected Drive file IDs</summary><label for="vo-document">Google Drive file IDs (one per line, optional)</label><textarea id="vo-document" maxlength="2056" rows="3"></textarea></details>
           <label for="vo-project">Jira project key</label><input id="vo-project" required maxlength="32">
           <label for="vo-purpose">Intended use</label><textarea id="vo-purpose" required maxlength="2000"></textarea>
           <label for="vo-freshness">Evidence validity in days</label><input id="vo-freshness" type="number" value="365" min="1" max="730" required>
           <label for="vo-renewal">Previous request ID (renewals only)</label><input id="vo-renewal" maxlength="128">
           <button type="submit">Create request</button>
         </form>
-        <p>Use a plain-text file from Google Drive (UTF-8). Other formats require a human-managed assessment.</p>
+        <p>Select up to eight Google Docs, UTF-8 text files, or supported digital PDFs. You can also create a request first and upload evidence below.</p>
       </section>
     </aside>
     <div>
@@ -68,6 +73,18 @@
           <button id="vo-renew" type="button" disabled>Start renewal request</button>
         </div>
         <h3>Evidence and source</h3><pre id="vo-evidence">No request selected.</pre>
+        <div id="vo-evidence-controls">
+          <p>Use Search Drive and choose “Selected request” to add another document.</p>
+          <div id="vo-selected-documents"></div>
+          <details><summary>Advanced: selected Drive file IDs</summary><label for="vo-case-documents">Selected Drive file IDs (one per line)</label><textarea id="vo-case-documents" maxlength="2056" rows="3" disabled></textarea>
+          <button id="vo-save-documents" type="button" disabled>Update selected documents</button></details>
+          <div id="vo-uploaded-documents"></div>
+          <label for="vo-upload">Upload evidence files</label><input id="vo-upload" type="file" multiple accept=".txt,.pdf,text/plain,application/pdf" disabled>
+          <label for="vo-document-date">Document date (your assertion, not verified by Drive)</label><input id="vo-document-date" type="date" disabled>
+          <button id="vo-upload-submit" type="button" disabled>Add uploaded evidence</button>
+          <p>Text and Google Docs exports: up to 1 MiB each. PDFs: up to 16 MiB each, 32 MiB per request. Digital PDF text extraction supports a restricted page-content format, without OCR or font-map interpretation. Unreadable or unsupported documents block assessment. Review quotations against the original document; extraction is not independent verification. Upload bytes are processed temporarily; retained evidence contains fingerprints and short redacted quotations. Replacing evidence clears the assessment and any pending action approval.</p>
+        </div>
+        <h3>Changes since previous evidence</h3><div id="vo-evidence-changes">Collect evidence to compare retained versions.</div>
         <h3>Assessment, source references and gaps</h3><div id="vo-assessment"></div>
       </section>
       <section class="vo-card" aria-labelledby="vo-review-title">

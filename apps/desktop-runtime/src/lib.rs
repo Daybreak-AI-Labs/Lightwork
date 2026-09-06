@@ -18,6 +18,8 @@ type Logs = Arc<Mutex<String>>;
 struct Control {
     child: Option<Child>,
     logs: Logs,
+    binary: Option<PathBuf>,
+    recovery: bool,
 }
 
 #[derive(Default)]
@@ -91,13 +93,20 @@ fn maverick_bin() -> OsString {
         .unwrap_or_else(|| exe.into())
 }
 
-fn spawn_dashboard(logs: &Logs) -> Result<Child, String> {
-    let mut command = Command::new(maverick_bin());
+fn spawn_dashboard(logs: &Logs, binary: Option<&Path>, recovery: bool) -> Result<Child, String> {
+    let mut command = Command::new(
+        binary
+            .map(|path| path.as_os_str().to_owned())
+            .unwrap_or_else(maverick_bin),
+    );
     command
         .args(["dashboard", "--host", "127.0.0.1", "--port", "8765"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if recovery {
+        command.arg("--recovery-mode");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -147,9 +156,41 @@ fn ensure_started(
 }
 
 impl Dashboard {
+    /// Customer packages pin their bundled runtime. A missing sidecar fails
+    /// visibly rather than falling through to PATH or an environment override.
+    pub fn with_binary(binary: PathBuf) -> Self {
+        Self(Mutex::new(Control {
+            binary: Some(binary),
+            ..Control::default()
+        }))
+    }
+
     pub fn start(&self) -> Result<String, String> {
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
-        ensure_started(&mut control, listening, spawn_dashboard)
+        let binary = control.binary.clone();
+        let recovery = control.recovery;
+        ensure_started(&mut control, listening, |logs| {
+            spawn_dashboard(logs, binary.as_deref(), recovery)
+        })
+    }
+
+    /// Restart only this app's owned process into a fixed local mode. A
+    /// separately managed dashboard is never stopped or reported as isolated.
+    pub fn switch_recovery_mode(&self, recovery: bool) -> Result<String, String> {
+        let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
+        reap(&mut control)?;
+        may_switch_mode(control.child.is_some(), listening())?;
+        stop_control(&mut control);
+        if listening() {
+            return Err("The previous workspace is still responding. Recovery has not started; retry after it closes.".into());
+        }
+        control.recovery = recovery;
+        let binary = control.binary.clone();
+        ensure_started(
+            &mut control,
+            || false,
+            |logs| spawn_dashboard(logs, binary.as_deref(), recovery),
+        )
     }
 
     pub fn diagnostics(&self) -> Result<String, String> {
@@ -169,11 +210,51 @@ impl Dashboard {
     /// An independently running dashboard is never placed in our owned state.
     pub fn stop_owned(&self) {
         if let Ok(mut control) = self.0.lock() {
-            if let Some(mut child) = control.child.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+            stop_control(&mut control);
+        }
+    }
+
+    /// Maintenance may pause only a process owned by this desktop instance.
+    pub fn pause_for_maintenance(&self) -> Result<(), String> {
+        let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
+        reap(&mut control)?;
+        may_switch_mode(control.child.is_some(), listening())?;
+        stop_control(&mut control);
+        if listening() {
+            return Err("Lightwork is still responding. Installation has not started; retry after it closes.".into());
+        }
+        Ok(())
+    }
+}
+
+fn may_switch_mode(owned: bool, responding: bool) -> Result<(), String> {
+    if responding && !owned {
+        return Err("This workspace is managed outside the desktop app. Its administrator must coordinate recovery; no process was stopped.".into());
+    }
+    Ok(())
+}
+
+fn stop_control(control: &mut Control) {
+    if let Some(mut child) = control.child.take() {
+        // A frozen one-file runtime owns an extraction/worker child.
+        // Kill only this still-live owned process tree before MSI
+        // replaces its files; killing just the bootloader leaves the
+        // dashboard and its file locks behind on Windows.
+        #[cfg(windows)]
+        if matches!(child.try_wait(), Ok(None)) {
+            use std::os::windows::process::CommandExt;
+            if let Some(system_root) = std::env::var_os("SystemRoot") {
+                let _ = Command::new(PathBuf::from(system_root).join("System32/taskkill.exe"))
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .creation_flags(0x0800_0000)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
             }
         }
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 
@@ -186,6 +267,32 @@ impl Drop for Dashboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_cannot_stop_an_independently_managed_workspace() {
+        assert!(may_switch_mode(false, true).is_err());
+        assert!(may_switch_mode(false, false).is_ok());
+        assert!(may_switch_mode(true, true).is_ok());
+    }
+
+    #[test]
+    fn missing_customer_runtime_cannot_fall_back_to_an_installed_cli() {
+        let missing = std::env::temp_dir().join("lightwork-no-such-customer-runtime.exe");
+        let logs = Logs::default();
+        assert!(spawn_dashboard(&logs, Some(&missing), false).is_err());
+        assert!(logs.lock().unwrap().contains("could not start"));
+    }
+
+    #[test]
+    fn customer_runtime_path_remains_pinned_across_retries() {
+        let path = PathBuf::from("customer-runtime/maverick.exe");
+        let dashboard = Dashboard::with_binary(path.clone());
+        let mut control = dashboard.0.lock().unwrap();
+        for _ in 0..2 {
+            let _ = ensure_started(&mut control, || false, |_| Err("missing".into()));
+            assert_eq!(control.binary.as_ref(), Some(&path));
+        }
+    }
 
     #[test]
     fn child_fixture() {

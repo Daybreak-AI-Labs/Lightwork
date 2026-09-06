@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from maverick.governed_records import RecordConflict
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from .auth import require_permission
 
@@ -18,7 +19,8 @@ class ClosedBody(BaseModel):
 
 class IntakeBody(ClosedBody):
     vendor_name: str = Field(min_length=1, max_length=200)
-    document_id: str = Field(min_length=1, max_length=256)
+    document_id: str = Field(default="", max_length=256)
+    document_ids: list[str] | None = Field(default=None, max_length=8)
     project: str = Field(min_length=1, max_length=32)
     purpose: str = Field(min_length=1, max_length=2000)
     freshness_days: int = Field(default=365, ge=1, le=730)
@@ -27,6 +29,11 @@ class IntakeBody(ClosedBody):
 
 class RevisionBody(ClosedBody):
     expected_revision: int = Field(ge=1)
+
+
+class DocumentsBody(RevisionBody):
+    document_ids: list[str] = Field(max_length=8)
+    upload_ids: list[str] = Field(default_factory=list, max_length=8)
 
 
 class CorrectionBody(ClosedBody):
@@ -86,6 +93,11 @@ def cases(request: Request):
     return {"cases": _call(_binding(request), "list")}
 
 
+@router.get("/documents")
+def search_documents(request: Request, query: str = Query(min_length=1, max_length=200)):
+    return _call(_binding(request), "search_documents", query)
+
+
 @router.post("/cases", status_code=201)
 def intake(request: Request, body: IntakeBody):
     return _call(_binding(request), "intake", **body.model_dump())
@@ -94,6 +106,32 @@ def intake(request: Request, body: IntakeBody):
 @router.get("/cases/{case_id}")
 def case(request: Request, case_id: str):
     return _call(_binding(request), "get", case_id)
+
+
+@router.post("/cases/{case_id}/documents")
+def set_documents(request: Request, case_id: str, body: DocumentsBody):
+    return _call(_binding(request), "set_documents", case_id, **body.model_dump())
+
+
+@router.post("/cases/{case_id}/upload")
+async def upload_document(request: Request, case_id: str,
+                          expected_revision: int = Query(ge=1), name: str = Query(min_length=1, max_length=256),
+                          document_date: float = Query(gt=0)):
+    from maverick.vendor_onboarding_adapters import MAX_PDF_BYTES, MAX_TEXT_BYTES
+
+    binding = _binding(request)
+    mime = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if mime not in {"text/plain", "application/pdf"}:
+        raise HTTPException(415, "Upload a UTF-8 text file or a supported digital PDF")
+    limit = MAX_PDF_BYTES if mime == "application/pdf" else MAX_TEXT_BYTES
+    chunks, length = [], 0
+    async for chunk in request.stream():
+        length += len(chunk)
+        if length > limit:
+            raise HTTPException(413, "Document exceeds the supported upload size")
+        chunks.append(chunk)
+    return await run_in_threadpool(_call, binding, "upload_document", case_id, expected_revision,
+                                   content=b"".join(chunks), name=name, mime=mime, document_date=document_date)
 
 
 @router.post("/cases/{case_id}/review")

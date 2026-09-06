@@ -30,7 +30,7 @@
       reconcile: ["executing", "reconciliation_required"].includes(op.state),
       accept: op.state === "verified" && !row.outcome, reject: op.state === "verified" && !row.outcome};
     for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || !enabled;
-    byId("intake").querySelectorAll("input,textarea,button").forEach(control => { control.disabled = busy; });
+    byId("intake").querySelectorAll("input,textarea,select,button").forEach(control => { control.disabled = busy; });
     byId("refresh").disabled = busy;
     byId("cases").querySelectorAll("button").forEach(button => {
       button.disabled = busy;
@@ -39,7 +39,10 @@
     byId("corrections").querySelectorAll("select,textarea").forEach(control => { control.disabled = busy || !allowed["review-approve"]; });
     byId("rationale").disabled = busy || !allowed["review-approve"];
     byId("acceptance-reason").disabled = busy || !allowed.accept;
+    byId("evidence-controls")?.querySelectorAll("input,textarea,button").forEach(control => { control.disabled = busy || !editable; });
   }
+  const evidenceDocuments = record => record.evidence?.documents || (record.evidence ? [record.evidence] : []);
+  const documentIds = value => String(value || "").split(/\r?\n/).map(id => id.trim()).filter(Boolean);
   function assessmentView(record) {
     byId("assessment").replaceChildren(); byId("corrections").replaceChildren();
     const assessment = record.assessment;
@@ -51,12 +54,19 @@
       const item = document.createElement("section"); item.className = "vo-question";
       element("h4", question.text, item);
       element("p", `Current answer: ${friendly(answer.answer)}`, item);
-      const source = record.evidence?.extracted?.answers?.[question.id];
-      for (const citation of source?.citations || []) {
-        element("blockquote", citation.quote, item);
-        element("small", `Source ${record.document_id}, version ${record.evidence.version}, characters ${citation.start}–${citation.end}`, item);
+      let citations = 0;
+      for (const document of evidenceDocuments(record)) {
+        const source = document.extracted?.answers?.[question.id];
+        for (const citation of source?.citations || []) {
+          citations++;
+          element("blockquote", citation.quote, item);
+          const location = citation.pages?.length ? `pages ${citation.pages.join(", ")}` : citation.paragraph ? `paragraph ${citation.paragraph}` : `characters ${citation.start}–${citation.end}`;
+          element("small", `${document.source === "upload" ? "Uploaded" : "Drive"} source ${document.name || record.document_id}, version ${document.version || record.evidence.version}, ${location}`, item);
+        }
+        if (source?.answer === "unknown") element("p", source.note, item);
       }
-      if (!source?.citations?.length) element("p", "Gap: no matching source passage. " + question.guidance, item);
+      if (answer.note) element("p", answer.note, item);
+      if (!citations) element("p", "Gap: no matching source passage. " + question.guidance, item);
       byId("assessment").append(item);
       const correction = document.createElement("div"); correction.className = "vo-question";
       const label = element("label", question.text, correction); label.htmlFor = `vo-answer-${question.id}`;
@@ -95,12 +105,15 @@
     if (typeof record.id !== "string" || !Number.isInteger(record.revision) || typeof record.vendor_name !== "string")
       throw new Error("Case response is incomplete; refresh requests before continuing.");
     const sameCase = selected?.id === record.id;
+    if (!sameCase && byId("document-date")) byId("document-date").value = "";
     const sameReview = sameCase && selected.revision === record.revision &&
       sameJSON(selected.assessment, record.assessment);
     if (!sameReview) {
       byId("rationale").value = "";
       byId("acceptance-reason").value = "";
       reviewedAt = performance.now();
+      if (byId("case-documents")) byId("case-documents").value = (record.document_ids || [record.document_id]).filter(Boolean).join("\n");
+      if (byId("upload")) byId("upload").value = "";
     }
     selected = record;
     show("case-title", record.vendor_name);
@@ -114,7 +127,43 @@
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
     }
     const evidence = record.evidence;
-    show("evidence", evidence ? `Status: ${friendly(evidence.status)}\nGoogle Drive file: ${record.document_id}\nVersion: ${evidence.version || "unverified"}\nLast modified: ${date(evidence.modified_at)}\nValid until: ${date(evidence.fresh_until)}\nContent fingerprint: ${evidence.content_sha256 || "unavailable"}` : "No evidence obtained.");
+    show("evidence", evidence ? `Overall status: ${friendly(evidence.status)}\n` + evidenceDocuments(record).map(document => `${document.source === "upload" ? "Uploaded" : "Drive"}: ${document.name || document.document_id || record.document_id}\nStatus: ${friendly(document.status || evidence.status)} · Version: ${document.version || "unverified"}\nDocument date: ${date(document.modified_at)} (${document.source === "upload" ? "uploader asserted" : "Drive modified time"})\nValid until: ${date(document.fresh_until)}\nContent fingerprint: ${document.content_sha256 || "unavailable"}`).join("\n\n") : "No evidence obtained. Add documents, then choose Obtain current evidence.");
+    if (byId("uploaded-documents")) {
+      byId("uploaded-documents").replaceChildren();
+      for (const uploaded of record.uploads || []) {
+        const row = document.createElement("div");
+        element("p", `${uploaded.name} · ${friendly(uploaded.status)} · ${date(uploaded.modified_at)}`, row);
+        const remove = element("button", `Remove ${uploaded.name}`, row); remove.type = "button";
+        remove.addEventListener("click", () => run(() => action("documents", {document_ids: record.document_ids || [], upload_ids: record.uploads.filter(item => item.document_id !== uploaded.document_id).map(item => item.document_id)})));
+        byId("uploaded-documents").append(row);
+      }
+    }
+    if (byId("selected-documents")) {
+      byId("selected-documents").replaceChildren();
+      for (const id of (record.document_ids || [record.document_id]).filter(Boolean)) {
+        const row = document.createElement("div");
+        element("p", `Drive document: ${id}`, row);
+        const remove = element("button", `Remove Drive document ${id}`, row); remove.type = "button";
+        remove.addEventListener("click", () => run(() => action("documents", {
+          document_ids: (selected.document_ids || [selected.document_id]).filter(value => value && value !== id),
+          upload_ids: (selected.uploads || []).map(item => item.document_id),
+        })));
+        byId("selected-documents").append(row);
+      }
+    }
+    if (byId("evidence-changes")) {
+      byId("evidence-changes").replaceChildren();
+      const changes = evidence?.changes;
+      element("p", changes?.comparison === "previous_review" ? "Compared with retained previous evidence. Review every changed claim." : "Initial evidence; no previous review to compare.", byId("evidence-changes"));
+      for (const document of changes?.documents || []) {
+        element("p", `${document.document_id}: ${friendly(document.change)} (${document.before_version || "none"} → ${document.after_version || "none"})`, byId("evidence-changes"));
+        for (const answer of document.answer_changes || []) {
+          element("p", `${friendly(answer.question_id)}: ${friendly(answer.before)} → ${friendly(answer.after)}`, byId("evidence-changes"));
+          for (const [label, citations] of [["Previous", answer.before_citations], ["Current", answer.after_citations]])
+            for (const citation of citations || []) element("blockquote", `${label}: ${citation.quote}`, byId("evidence-changes"));
+        }
+      }
+    }
     // Keep the review controls and unsaved corrections for this exact version.
     if (!sameReview) assessmentView(record);
     const payload = operation.payload;
@@ -172,12 +221,64 @@
     event.preventDefault();
     run(async () => {
       const record = await api("/cases", {vendor_name: byId("vendor").value.trim(),
-        document_id: byId("document").value.trim(), project: byId("project").value.trim(),
+        document_ids: documentIds(byId("document").value), project: byId("project").value.trim(),
         purpose: byId("purpose").value.trim(), freshness_days: Number(byId("freshness").value),
         renewal_of: byId("renewal").value.trim() || null});
       render(record); await refresh();
     });
   });
+  byId("search-documents")?.addEventListener("click", () => run(async () => {
+    const query = byId("document-search").value.trim();
+    if (!query) throw new Error("Enter a document name to search Drive.");
+    const result = await api("/documents?query=" + encodeURIComponent(query));
+    byId("document-results").replaceChildren();
+    for (const document of result.documents || []) {
+      const button = element("button", document.name, byId("document-results")); button.type = "button";
+      button.addEventListener("click", () => {
+        if (busy) return;
+        if (byId("document-target")?.value === "selected") {
+          if (!selected || selected.outcome || ["executing", "reconciliation_required", "verified"].includes(selected.operation?.state)) {
+            message("Select an editable request or start a renewal before adding evidence.", true); return;
+          }
+          const ids = (selected.document_ids || [selected.document_id]).filter(Boolean);
+          if (ids.includes(document.id)) { message("This document is already selected for the request."); return; }
+          ids.push(document.id);
+          if (ids.length + (selected.uploads || []).length > 8) { message("Select at most eight evidence documents.", true); return; }
+          run(() => action("documents", {document_ids: ids, upload_ids: (selected.uploads || []).map(item => item.document_id)}));
+          return;
+        }
+        const ids = documentIds(byId("document").value);
+        if (!ids.includes(document.id)) ids.push(document.id);
+        if (ids.length > 8) { message("Select at most eight evidence documents.", true); return; }
+        byId("document").value = ids.join("\n");
+        if (byId("new-documents")) byId("new-documents").textContent = `${ids.length} Drive document${ids.length === 1 ? "" : "s"} selected for the new request. Most recent: ${document.name}`;
+        message("Document selected for the new request.");
+      });
+    }
+    if (!result.documents?.length) element("p", "No supported documents found.", byId("document-results"));
+    if (result.has_more) element("p", "More documents match. Narrow your search.", byId("document-results"));
+  }, "Drive search completed."));
+  byId("save-documents")?.addEventListener("click", () => run(() => action("documents", {
+    document_ids: documentIds(byId("case-documents").value), upload_ids: (selected?.uploads || []).map(item => item.document_id),
+  })));
+  byId("upload-submit")?.addEventListener("click", () => run(async () => {
+    if (!selected) throw new Error("Select a request before adding evidence.");
+    const files = Array.from(byId("upload").files || []);
+    const documentDate = Date.parse(byId("document-date").value + "T00:00:00Z") / 1000;
+    if (!files.length || !Number.isFinite(documentDate)) throw new Error("Choose evidence files and enter their document date.");
+    if (files.length + (selected.document_ids || []).length + (selected.uploads || []).length > 8) throw new Error("A request supports at most eight evidence documents.");
+    for (const file of files) {
+      const mime = file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : file.name.toLowerCase().endsWith(".txt") ? "text/plain" : "";
+      if (!mime) throw new Error("Upload a .txt or supported digital .pdf file.");
+      if (file.size > (mime === "application/pdf" ? 16 : 1) * 1024 * 1024) throw new Error("The selected file exceeds the supported size.");
+      const query = new URLSearchParams({expected_revision:String(selected.revision),name:file.name,document_date:String(documentDate)});
+      const response = await fetch(base + "/cases/" + encodeURIComponent(selected.id) + "/upload?" + query, {method:"POST",credentials:"same-origin",headers:{"Content-Type":mime},body:file});
+      let result; try { result = await response.json(); } catch (_) { throw new Error("Upload response unavailable. Refresh the request before retrying."); }
+      if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Upload rejected. Check the file and document date.");
+      render(result);
+    }
+    await refresh();
+  }, "Files added. Review extraction status, then obtain current evidence to rebuild the assessment."));
   click("collect", () => action("collect-evidence"));
   click("assess", () => action("assess"));
   click("prepare", () => action("prepare-action"));
@@ -209,7 +310,16 @@
     if (!selected) throw new Error("Select the previous request first.");
     for (const [field, key] of [["vendor", "vendor_name"], ["document", "document_id"], ["project", "project"], ["purpose", "purpose"], ["freshness", "freshness_days"]])
       byId(field).value = selected[key];
+    byId("document").value = (selected.document_ids || [selected.document_id]).filter(Boolean).join("\n");
     byId("renewal").value = selected.id;
   }, "Renewal details copied. Review the new request fields, then choose Create request.", "document");
-  run(refresh, "Requests loaded. Select a request to begin.");
+  run(async () => {
+    await refresh();
+    const requested = new URLSearchParams(window.location.search).get("case");
+    if (requested) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");
+      render(await api("/cases/" + encodeURIComponent(requested)));
+      return "Linked request loaded. Review its evidence and current status.";
+    }
+  }, "Requests loaded. Select a request to begin.");
 })();

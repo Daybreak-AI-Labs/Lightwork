@@ -44,7 +44,7 @@
 <div class="gs">
   <div class="gs__head">
     <h1 class="page-title">Get started</h1>
-    <p class="gs__sub">Connect an AI service, create a workflow, and start your first task. Your progress updates as you go.</p>
+    <p class="gs__sub">Set up your workspace, choose a first workflow, and review its result. Your progress updates from recorded work.</p>
     <div class="gs__progress">
       <div class="gs__bar" role="progressbar" aria-label="Setup progress"
            aria-valuenow="{{ done_count }}" aria-valuemin="0" aria-valuemax="{{ total }}">
@@ -53,6 +53,26 @@
       <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">{{ done_count }} of {{ total }} done</p>
     </div>
   </div>
+
+  {% if guided %}
+  <section class="panel" aria-labelledby="guided-outcome-title" style="margin-bottom:var(--space-5)">
+    <h2 id="guided-outcome-title">Choose your first outcome</h2>
+    <p class="muted">Your current access: {{ guided.role_label|replace('_', ' ') }}. Choosing a path does not change your permissions.</p>
+    <form method="get" action="/start" style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:end;">
+      <label>What would you like to complete?<select class="input" name="use_case">
+        {% for key, plan in guided.plans.items() %}<option value="{{ key }}" {% if key == guided.selected_plan %}selected{% endif %}>{{ plan.label }}</option>{% endfor %}
+      </select></label><button class="btn" type="submit">Use this path</button>
+    </form>
+    <ol>
+      <li><p>{{ guided.plan.prepare }}</p>{% if can_operate %}<a href="{{ guided.plan.prepare_href }}">{{ guided.plan.prepare_label }}</a>{% else %}<p>An operator can prepare this workflow.</p>{% endif %}</li>
+      <li><p>{{ guided.plan.work }}</p>{% if can_operate %}<a href="{{ guided.plan.work_href }}">{{ guided.plan.work_label }}</a>{% else %}<p>An operator can carry out this work.</p>{% endif %}</li>
+      <li><p>{{ guided.plan.review }}</p>{% if can_operate %}<a href="{{ guided.plan.review_href }}">{{ guided.plan.review_label }}</a>{% else %}<p>An operator can record the review.</p>{% endif %}</li>
+    </ol>
+    <p role="status"><strong>{{ 'Reviewed outcome recorded' if guided.outcome.complete else 'Awaiting a reviewed outcome' }}.</strong> {{ guided.outcome.detail }}</p>
+    {% if guided.outcome.complete %}<p><a href="{{ guided.outcome.href }}">Open {{ guided.outcome.title }}</a></p>{% endif %}
+    <p class="muted">A recorded approval is specific to this result. It does not establish general accuracy, customer value, or provider acceptance for other tasks.</p>
+  </section>
+  {% endif %}
 
   {% if runtime_all_set %}
   <div class="mv-empty" style="margin-bottom: var(--space-5);">

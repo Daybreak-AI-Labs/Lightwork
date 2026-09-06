@@ -2061,7 +2061,8 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     privacy_discovery_scheduler = False
     if privacy_data_discovery and _q_confirm(
         "Enable the bounded built-in privacy discovery source adapters? "
-        "Each source still requires an exact tenant enrollment and deployment-held credential.",
+        "Each source requires an exact tenant enrollment and a saved connection or "
+        "deployment-managed credential; evidence keys can be generated in the app.",
         default=False,
     ):
         privacy_discovery_adapter_providers = _q_checkbox(
@@ -4234,6 +4235,46 @@ def pick_advanced() -> dict[str, Any]:
             "client; an edit is validated before it saves, so it can never "
             "weaken the safety envelope. Turn off to lock the agent roster.",
             default=True,
+        ),
+        "allow_draft_recovery": _q_confirm(
+            "Keep encrypted recovery copies of unfinished dashboard work? "
+            "Copies are private to each account and workspace. Credentials and "
+            "attachments are excluded; restoring never runs or publishes work.",
+            default=True,
+        ),
+        "allow_record_search": _q_confirm(
+            "Include business records in the app's page finder? Searches use "
+            "only metadata accessible to the signed-in account and workspace, "
+            "with visible coverage limits; document bodies are excluded.",
+            default=True,
+        ),
+        "allow_workspace_recovery": _q_confirm(
+            "Enable administrator workspace snapshots and isolated local restore? "
+            "Requires a separately kept recovery key. External stores and shared "
+            "administration need their own recovery procedures.",
+            default=False,
+        ),
+        "allow_action_center": _q_confirm(
+            "Enable the personal Action Center for approvals, sign-offs, and "
+            "assessment reviews, with private read and snooze preferences?",
+            default=True,
+        ),
+        "allow_guided_onboarding": _q_confirm(
+            "Offer a guided first workflow in the app, completed only when a "
+            "current result has a recorded human review?", default=True,
+        ),
+        "allow_workflow_readiness": _q_confirm(
+            "Show workflow readiness in the app, including implementation "
+            "limits and outstanding live or platform validation?", default=True,
+        ),
+        "allow_project_reviews": _q_confirm(
+            "Enable project team reviews of selected, fixed task results? "
+            "Assigned workspace reviewers cannot execute or sign off the live task.",
+            default=False,
+        ),
+        "allow_outcome_measurement": _q_confirm(
+            "Enable measured workflow pilots with paired baseline observations "
+            "and explicit accepted outcomes? No savings are assumed.", default=False,
         ),
         "allow_role_editing": _q_confirm(
             "Allow editing the core roles (orchestrator, coder, ...) from the "
@@ -7243,6 +7284,22 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_workflow_readiness") is False:
+        _feature_locks.append("workflow_readiness = false")
+    if advanced.get("allow_project_reviews") is True:
+        _feature_locks.append("project_reviews = true")
+    if advanced.get("allow_outcome_measurement") is True:
+        _feature_locks.append("outcome_measurement = true")
+    if advanced.get("allow_workspace_recovery") is True:
+        _feature_locks.append("workspace_recovery = true")
+    if advanced.get("allow_draft_recovery") is False:
+        _feature_locks.append("draft_recovery = false")
+    if advanced.get("allow_record_search") is False:
+        _feature_locks.append("record_search = false")
+    if advanced.get("allow_action_center") is False:
+        _feature_locks.append("action_center = false")
+    if advanced.get("allow_guided_onboarding") is False:
+        _feature_locks.append("guided_onboarding = false")
     if advanced.get("allow_pack_editing") is False:
         _feature_locks.append("pack_editing = false")
     if advanced.get("allow_role_editing") is False:

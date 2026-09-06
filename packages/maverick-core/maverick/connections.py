@@ -340,6 +340,37 @@ def _may_use(rec: dict, principal: str | None) -> bool:
     return principal is None and not owner
 
 
+def resolve_named(name: str, *, expected_revision: str, connector: str, origin: str) -> dict:
+    """Resolve one pinned connection for the current authenticated principal.
+
+    There is no environment or first-matching-connector fallback. Consumers
+    must call at each network request, not cache the returned credential.
+    """
+    from urllib.parse import urlsplit
+
+    def exact_origin(value):
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+                or parsed.port not in (None, 443)):
+            raise PermissionError("connection requires an exact HTTPS origin")
+        return "https://" + parsed.hostname.lower()
+
+    if not enabled() or not _NAME_RE.fullmatch(name) or not expected_revision:
+        raise PermissionError("named connection is unavailable")
+    principal = current_principal()
+    if not principal:
+        raise PermissionError("saved connection requires a named authenticated principal")
+    record = get_connection(name)
+    if not record or not _may_use(record, principal) or not record.get("token"):
+        raise PermissionError("named connection access is unavailable or denied")
+    if record.get("revision") != expected_revision:
+        raise ConnectionVersionConflict("saved connection changed; select its current version")
+    if record.get("connector") != connector or exact_origin(record.get("base_url", "")) != exact_origin(origin):
+        raise PermissionError("saved connection provider or origin does not match the enrolled source")
+    return record
+
+
 def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] | None:
     """(base_url, token) for the first connection credentialing ``connector``,
     or None. Used as a FALLBACK by the connector layer only when the env var is

@@ -1,6 +1,6 @@
 # AI vendor onboarding and evidence renewal
 
-This bounded workflow obtains a versioned Google Drive text file, builds an AI
+This bounded workflow obtains versioned Google Drive documents or uploaded evidence, builds an AI
 vendor diligence assessment, records human corrections and approval, creates a
 Jira Task, verifies it, and records a separate customer acceptance decision.
 A renewal creates a linked case, assessment and ticket while retaining the
@@ -43,8 +43,15 @@ The script exercises first onboarding, promotion and definition rollback of a
 renewal classifier, a linked renewal using a new document version, and a lost
 ticket-create response recovered through read-only reconciliation. The emitted
 JSON includes actual domain records and measured evaluation results. To create
-another synthetic request in the UI, use Drive file ID `security-paper` and Jira
-project key `VEND`; the evidence deliberately leaves diligence gaps.
+another synthetic request in the UI, search for `security-paper` or `native-policy`
+and use Jira project key `VEND`. The initial case combines a text file, a simulated
+native Google Docs export and an uploaded three-page PDF. The PDF's blank second
+page checks citation numbering. Conflicting training-data statements remain
+unknown until a reviewer resolves them. The renewal replaces the old upload,
+changes the native document version and retains previous/current cited claims.
+The report includes `document_intake` evidence for these checks. The authored
+documents under `scripts/acceptance/fixtures/vendor-documents` can also be uploaded
+through the UI. No actual Google export or Jira request occurs in this demo.
 
 ## Configuration and enrollment
 
@@ -77,9 +84,11 @@ enable = true
 Keep the installation's existing authentication, encryption, safety and egress
 policy. These settings do not enroll credentials or broaden connector grants.
 Unknown onboarding keys, malformed settings and unavailable configuration are
-rejected. Both credential references must be distinct and explicitly enrolled.
+rejected. The configured credential references must be distinct. Jira enrollment
+is required for task delivery; Drive enrollment is only required for Drive search
+and Drive evidence. An upload-only request does not read a Drive credential.
 
-Use the existing Connections management surface to enroll two tenant-local,
+Use the existing Connections management surface to enroll tenant-local,
 sealed records with the selected names: connector `gdrive` at the pinned HTTPS
 origin `https://www.googleapis.com`, and connector `jira` at the enrolled HTTPS
 origin used by the existing Jira integration. Both records must have the same
@@ -98,12 +107,49 @@ Current authority is checked again at sensitive service boundaries. The bounded
 dashboard composition binds approval and execution to the same named principal;
 it is not a general delegated or multi-reviewer approval engine.
 
+## In-app document intake
+
+Create a request with the vendor, intended use and Jira project. Search Drive by
+name and select a result for the new or currently selected request; IDs remain
+an optional advanced input. A request supports up to eight sources in any mix.
+For local files, select one or more `.txt` or `.pdf` files and enter their actual
+document date. That date is the uploader's assertion, explicitly separate from
+Drive metadata and upload time. Group files by date when their dates differ.
+Choose **Obtain current evidence**, inspect every source's extraction status,
+then **Build assessment**. A failed source blocks the whole assessment until it
+is removed or replaced. File removal is available beside each selected source.
+
+Native Google Docs use the provider's version-bracketed UTF-8 export and receive
+paragraph citations. Text files also receive paragraph citations. Supported PDF
+text receives citations to the rooted document pages, including blank pages in
+the numbering. PDF extraction is a strict bounded subset, not a full renderer:
+it has no OCR, encryption, object-stream, font-map, or XObject interpretation.
+Malformed/unsupported documents and empty extraction are visibly rejected; text
+that can be extracted still requires human comparison with the original.
+Embedded instructions and vendor claims never grant approval or establish facts.
+
+Limits are 1 MiB per text/Google Docs export, 16 MiB per PDF, 32 MiB per evidence
+set, and the existing parser's object/stream/expansion limits. Extraction that
+would omit text beyond the assessment character limit blocks assessment instead
+of treating a partial scan as complete. No new parser dependency or OCR service
+is installed. Raw upload bytes and complete extracted text remain transient;
+retained records contain content hashes, source versions, uploader/date provenance,
+parser limitations and short redacted quotations. Uploaded evidence is verified
+against its retained snapshot, never described as current provider readback.
+
+Replacing or removing evidence clears the assessment and pending action approval.
+Every Drive source is checked again before task execution, including secondary
+documents. Renewals retain the previous accepted case unchanged and show added,
+removed and changed documents plus previous/current cited answer suggestions.
+Copied uploads retain their original date; starting a renewal does not make old
+evidence fresh. Conflicting claims stay unknown and require a human resolution.
+
 ## Supported operations and decisions
 
 | Step | Supported behavior | Boundary |
 |---|---|---|
-| Intake | Vendor, intended use, Drive file ID, Jira project key, 1–730 day evidence validity, optional previous case | Tenant and resource owner come from validated context |
-| Evidence | Ordinary UTF-8 `text/plain` Drive file, at most 128 KiB; metadata before/after download; version, timestamp, hash and citations | Native Google Docs, PDF, binary files and multi-document synthesis require a human-managed path |
+| Intake | Vendor, intended use, Drive search/selection or case-scoped upload, Jira project key, 1–730 day evidence validity, optional previous case | Tenant and resource owner come from validated context |
+| Evidence | Up to eight UTF-8 text, native Google Docs exports and supported digital PDFs; version, source/date provenance, hash and page/paragraph citations | Unsupported extraction blocks assessment; uploads retain asserted dates and have no live provider readback |
 | Assessment | Existing AI vendor-risk questions, conservative source extraction, explicit unknowns, gaps and findings | Vendor assertions are not independent verification; no automatic compliance or model-quality determination |
 | Review | Typed answer/note corrections, reviewer, rationale, superseded assessment/evidence references, reported review time | A model context cannot approve; unresolved gaps may remain explicitly recorded |
 | External action | One exact Jira Task create, read-back and marker search using existing protocols | No update/delete/bulk action, automatic retry after ambiguity or automatic reversal |
@@ -167,10 +213,11 @@ For the runtime repairs, see [runtime accounting and recovery](runtime-accountin
 Restoration preserves the live Budget object and current limits; setup,
 cancellation, exceptions and final output refusal converge on lifecycle
 settlement. Checkpoint settlement metadata prevents ordinary replay charging.
-**The quota JSON ledger and checkpoint SQLite acknowledgement are separate
-stores:** a crash between those writes can conservatively double-charge history;
-hard loss can lose uncheckpointed provider usage. Crash-atomic provider billing
-is not implemented. See [evidence and transport boundaries](evidence-reliability-boundaries.md)
+The quota ledger atomically records cumulative usage with an idempotent receipt;
+resume consults that receipt if the separate checkpoint acknowledgement was
+lost. Hard loss can still lose unrecorded provider usage, and historical legacy
+usage without receipts requires reconciliation. Live provider billing acceptance
+remains separate. See [evidence and transport boundaries](evidence-reliability-boundaries.md)
 for strict scanner failure, explicit tenant erasure and event replay semantics.
 
 Goal signoff also retains its existing public `updated_at` float contract while

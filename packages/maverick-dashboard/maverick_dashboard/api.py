@@ -11597,23 +11597,27 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     """Persist a tenant override for ``name``. 403 if pack editing is disabled,
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
-    from maverick.domain_edit import resolved_view, write_override
+    from maverick.domain_edit import OverrideConflict, write_override
 
     try:
-        write_override(name, payload.model_dump(exclude_unset=True))
+        return write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
+                              expected_generation=payload.expected_generation, return_view=True)
+    except OverrideConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return resolved_view(name)
 
 
 @router.delete("/agents/{name}/override")
-async def delete_agent_override(request: Request, name: str) -> dict:
+async def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
-    from maverick.domain_edit import remove_override, resolved_view
+    from maverick.domain_edit import OverrideConflict, remove_override, resolved_view
 
     try:
-        removed = remove_override(name)
+        removed = remove_override(name, expected_generation=expected_generation)
+    except OverrideConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)

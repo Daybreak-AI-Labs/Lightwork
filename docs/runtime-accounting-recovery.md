@@ -1,5 +1,12 @@
 # Run accounting and recovery
 
+The in-app Billing page includes an owner-filtered usage reconciliation trail.
+It shows cumulative counters, acknowledged legacy credits, and retained daily
+increments for each durable receipt, with pagination. Receipt lookup failures
+remain visible. These internal quota counters are separate from episode-based
+statements and provider invoices; they cannot reconstruct unreported provider
+usage after an interruption.
+
 `run_goal` owns the lifecycle boundary for the existing goal and episode
 records. Completion, waiting for input, Shield refusal, budget exhaustion,
 setup/provider exceptions, and asyncio or dashboard cancellation close any
@@ -49,15 +56,35 @@ usage as unsettled because they carry no ledger acknowledgement.
 
 ## Limits and reconciliation
 
-The quota JSON ledger and SQLite checkpoint are separate stores. A process
-crash after the ledger write but before the checkpoint acknowledgement can
-charge historical usage again on resume. This is conservative overcounting,
-not a claim of transactional exactly-once billing. Operator reconciliation is
-required for that window and for legacy checkpoints whose prior settlement
-cannot be established. A hard process loss can also lose usage since the
-last persisted boundary; provider receipts remain necessary for reconciling
-unreturned or uncheckpointed usage. These tests do not prove live provider
-billing or crash-atomic settlement across stores.
+The quota ledger and SQLite checkpoint are separate stores. Durable runs now
+establish an opaque, principal-bound settlement identity in the world database
+before execution. The usage ledger atomically stores cumulative counters and
+their receipt in one versioned JSON document. A repeated or older delivery
+cannot add the same usage twice; only an increase is charged to the current
+UTC day. Resume reconciles its budget against the receipt before any paid
+continuation, including usage recorded after the last message checkpoint.
+An episode with an existing receipt and no resumable checkpoint cannot resume:
+its receipt does not contain tool counts, elapsed time, or execution state.
+Starting a new episode gives fresh work a distinct accounting identity without
+overwriting the old episode's usage.
+
+Existing unversioned ledgers remain readable and migrate on the first durable
+settlement. Existing billing and quota readers keep their original daily-total
+view. Ordinary retention deletes expired daily totals and receipt charge dates;
+minimal cumulative receipts remain to prevent charging old restored checkpoints
+again. A full tenant-state deletion removes those receipts as well. Do not
+roll back to an older binary after ledger migration: older readers cannot
+interpret the new envelope. Restore a consistent pre-upgrade state snapshot
+when performing a code rollback.
+
+Legacy checkpoints with an acknowledged marker import that credit once.
+Historical unacknowledged legacy usage still requires operator reconciliation:
+no migration can infer a missing receipt. A hard process loss can also lose
+usage since the last persisted boundary; provider receipts remain necessary
+for reconciling unreturned or uncheckpointed usage. Process-exit, replay,
+concurrency, tenant, retention, and lifecycle tests cover the new settlement
+boundary; they do not establish live provider invoice accuracy or recovery of
+usage that was never recorded.
 
 Resuming messages does not undo tools or establish whether a timed-out
 external mutation succeeded. The governed external-action operation and

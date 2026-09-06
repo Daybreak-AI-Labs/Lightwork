@@ -22,11 +22,12 @@
   .cx__actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;
     padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
   .cx__list { list-style: none; padding: 0; margin: 0; }
-  .cx__row { display: flex; align-items: baseline; gap: var(--space-3);
+  .cx__row { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; min-width: 0;
              border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3);
              margin-bottom: var(--space-2); }
-  .cx__row .name { font-weight: var(--font-semibold); }
-  .cx__row .meta { color: var(--muted); font-size: var(--text-sm); flex: 1; word-break: break-all; }
+  .cx__row .name { font-weight: var(--font-semibold); min-width: 0; overflow-wrap: anywhere; }
+  .cx__row .meta { color: var(--muted); font-size: var(--text-sm); flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+  .cx__row .cx__badge { max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
   .cx__badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
   .cx__badge.ok { color: var(--success, #16a34a); border-color: currentColor; }
   .cx__badge.no { color: var(--danger, #dc2626); border-color: currentColor; }
@@ -48,7 +49,7 @@
 
 <div class="cx">
   <div class="section-head"><h2>Add a connection</h2></div>
-  <form class="cx__form" id="cx-form" autocomplete="off">
+  <form class="cx__form" id="cx-form" autocomplete="off" data-draft-recovery="off">
     <div class="cx__fld">
       <label for="cx-preset">What are you connecting? <span class="sub">— pick one to prefill it</span></label>
       <select class="input" id="cx-preset">
@@ -63,7 +64,15 @@
     <div class="cx__fld">
       <label for="cx-token">API token / key <span class="sub">— sealed, never shown again</span></label>
       <input class="input" id="cx-token" type="password" placeholder="paste the token">
+      <p class="cx__sub" id="cx-credential-help"></p>
     </div>
+    <fieldset id="cx-aws" hidden><legend>AWS read credentials</legend>
+      <label for="cx-aws-access">Access key ID</label><input class="input" id="cx-aws-access" autocomplete="off" maxlength="128">
+      <label for="cx-aws-secret">Secret access key</label><input class="input" id="cx-aws-secret" type="password" autocomplete="off" maxlength="256">
+      <label for="cx-aws-region">AWS region</label><input class="input" id="cx-aws-region" placeholder="us-east-1" maxlength="63">
+      <label for="cx-aws-session">Session token (optional)</label><input class="input" id="cx-aws-session" type="password" autocomplete="off" maxlength="16384">
+      <p class="cx__sub">Use credentials authorized to read the selected bucket. Values are sealed and cleared after saving.</p>
+    </fieldset>
 
     <details class="advanced" id="cx-advanced">
       <summary>Advanced — connector name &amp; base URL
@@ -125,6 +134,12 @@
     { id: 'salesforce', label: 'Salesforce',  connector: 'salesforce', base: '', hint: 'https://<your-org>.my.salesforce.com' },
     { id: 'zendesk',    label: 'Zendesk',     connector: 'zendesk',    base: '', hint: 'https://<subdomain>.zendesk.com' },
     { id: 'jira',       label: 'Jira',        connector: 'jira',       base: '', hint: 'https://<site>.atlassian.net' },
+    { id: 'aws_s3', label: 'Privacy discovery: AWS S3', connector: 'aws_s3', base: '', hint: 'https://<bucket>.s3.<region>.amazonaws.com', discovery: true, help: 'Enter AWS fields below, or use the advanced token field for an existing structured credential.' },
+    { id: 'azure_blob', label: 'Privacy discovery: Azure Blob', connector: 'azure_blob', base: '', hint: 'https://<account>.blob.core.windows.net', discovery: true, help: 'Use an authorized Azure Storage bearer token. SAS query strings and account keys are not supported by this adapter.' },
+    { id: 'google_cloud_storage', label: 'Privacy discovery: Google Cloud Storage', connector: 'google_cloud_storage', base: 'https://storage.googleapis.com', discovery: true, help: 'Use an authorized Google Cloud Storage bearer token.' },
+    { id: 'snowflake_metadata', label: 'Privacy discovery: Snowflake metadata', connector: 'snowflake_metadata', base: '', hint: 'https://<account>.snowflakecomputing.com', discovery: true, help: 'Use an authorized bearer token for the SQL API. Discovery reads metadata within the selected warehouse, database and schema.' },
+    { id: 'servicenow_cmdb', label: 'Privacy discovery: ServiceNow CMDB', connector: 'servicenow_cmdb', base: '', hint: 'https://<instance>.service-now.com', discovery: true, help: 'Use a bearer token authorized to read the selected CMDB table.' },
+    { id: 'entra_assets', label: 'Privacy discovery: Microsoft Entra assets', connector: 'entra_assets', base: 'https://graph.microsoft.com', discovery: true, help: 'Use a Microsoft Graph bearer token with read permission for the selected device, application or service-principal resource.' },
   ];
   var preset = document.getElementById('cx-preset');
   var nameEl = document.getElementById('cx-name');
@@ -132,6 +147,14 @@
   var baseEl = document.getElementById('cx-base');
   var hintEl = document.getElementById('cx-hint');
   var advanced = document.getElementById('cx-advanced');
+  function discoveryPreset(connector) { return PRESETS.find(function (p) { return p.connector === connector && p.discovery; }); }
+  function credentialFields(connector) {
+    var selected = discoveryPreset(connector);
+    document.getElementById('cx-aws').hidden = connector !== 'aws_s3';
+    document.getElementById('cx-save-test').hidden = Boolean(selected);
+    document.getElementById('cx-credential-help').textContent = selected ? selected.help + ' Test exact source access from Privacy Data Discovery after saving the source.' : '';
+    ['access','secret','region','session'].forEach(function (name) { document.getElementById('cx-aws-' + name).value=''; });
+  }
   // Insert preset options before the trailing "Custom" entry.
   PRESETS.forEach(function (p) {
     var o = document.createElement('option'); o.value = p.id; o.textContent = p.label;
@@ -143,10 +166,11 @@
     var p = PRESETS.filter(function (x) { return x.id === preset.value; })[0];
     hintEl.textContent = '';
     if (!p) {                                   // Custom / none: reveal Advanced
-      if (preset.value === 'custom') { advanced.open = true; }
+      if (preset.value === 'custom') { advanced.open = true; credentialFields(''); }
       return;
     }
     connEl.value = p.connector;
+    credentialFields(p.connector);
     baseEl.value = p.base || '';
     if (p.hint) { baseEl.placeholder = p.hint; hintEl.textContent = 'Base URL is org-specific — e.g. ' + p.hint; advanced.open = true; }
     if (!nameEdited && !nameEl.value.trim()) { nameEl.value = p.id; }
@@ -169,14 +193,16 @@
         var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)') + ' · ' + scope);
         li.appendChild(meta);
         li.appendChild(el('span', 'cx__badge ' + (c.has_token ? 'ok' : 'no'), c.has_token ? 'configuration saved' : 'saved without token'));
-        var readinessText = c.last_test ? (c.last_test.authenticated ? 'readiness verified' : 'readiness failed') : 'readiness untested';
-        li.appendChild(el('span', 'cx__badge ' + (c.last_test && c.last_test.authenticated ? 'ok' : 'no'), readinessText));
+        var discovery = discoveryPreset(c.connector);
+        var readinessText = discovery ? 'Check source scope in Privacy Discovery' : c.last_test ? (c.last_test.authenticated ? 'readiness verified' : 'readiness failed') : 'readiness untested';
+        li.appendChild(el('span', 'cx__badge ' + (!discovery && c.last_test && c.last_test.authenticated ? 'ok' : 'no'), readinessText));
         var edit = el('button', 'btn btn--ghost', 'Edit / rotate');
         edit.type = 'button';
         edit.addEventListener('click', function () {
           editingName = c.name;
           nameEl.value = c.name;
           connEl.value = c.connector || '';
+          credentialFields(c.connector);
           baseEl.value = c.base_url || '';
           document.getElementById('cx-tenant-access').checked = c.access === 'tenant';
           document.getElementById('cx-principals').value = (c.allowed_principals || []).join('\n');
@@ -184,9 +210,10 @@
           advanced.open = true;
           say('Editing ' + c.name + '. Leave the token blank to keep it, or paste a replacement.');
         });
-        var test = el('button', 'btn btn--ghost', 'Test');
+        var test = el('button', 'btn btn--ghost', discoveryPreset(c.connector) ? 'Test source access' : 'Test');
         test.type = 'button';
         test.addEventListener('click', function () {
+          if (discoveryPreset(c.connector)) { window.location.href = '/privacy/data-discovery'; return; }
           test.textContent = 'Testing…';
           api('/api/v1/connections/' + encodeURIComponent(c.name) + '/test', { method: 'POST' })
             .then(function (r) { return r.json(); })
@@ -212,6 +239,16 @@
     var existing = currentByName[name];
     var body = { name: name };
     var token = document.getElementById('cx-token').value;
+    if (connEl.value === 'aws_s3') {
+      var access=document.getElementById('cx-aws-access').value.trim(), secret=document.getElementById('cx-aws-secret').value;
+      var region=document.getElementById('cx-aws-region').value.trim(), session=document.getElementById('cx-aws-session').value;
+      if (access || secret || region || session) {
+        if (!access || !secret || !region) throw new Error('AWS access key, secret key and region are required together.');
+        var aws={access_key_id:access,secret_access_key:secret,region:region};
+        if (session) aws.session_token=session;
+        token=JSON.stringify(aws);
+      }
+    }
     if (token || !existing) body.token = token;
     if (!existing || editingName === name) {
       body.connector = document.getElementById('cx-connector').value.trim();
@@ -225,7 +262,9 @@
 
   // Save, then (optionally) fire the reachability test for the just-saved one.
   function save(thenTest) {
-    var body = readBody();
+    var body;
+    try { body = readBody(); } catch (error) { say(error.message, true); return; }
+    if (discoveryPreset(body.connector || connEl.value)) thenTest=false;
     if (!body.name) { say('Give the connection a name.', true); return; }
     say(thenTest ? 'Saving & testing…' : 'Saving…');
     return api('/api/v1/connections', { method: 'POST', body: JSON.stringify(body) })
@@ -241,6 +280,7 @@
           return;
         }
         document.getElementById('cx-token').value = '';
+        credentialFields(body.connector || connEl.value);
         editingName = '';
         if (!thenTest) { say('Saved ✓'); load(); return; }
         return api('/api/v1/connections/' + encodeURIComponent(body.name) + '/test', { method: 'POST' })

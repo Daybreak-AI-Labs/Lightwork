@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Workflow pilots · Lightwork{% endblock %}
+{% block content %}
+<h1>Workflow pilots</h1>
+<p>Compare the same cases with and without AI. Plan the cases and acceptance criteria before work starts,
+  then record observed effort, corrections, cost evidence, and the current reviewed outcome.</p>
+<p>These are your recorded observations. Provider invoice accuracy, customer acceptance of the pilot itself,
+  and isolation from model training require separate evidence. <a href="/savings">View savings estimates</a>.</p>
+<style>
+  .op-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr));gap:var(--space-3); }
+  .op-grid label, .op-case label { display:flex;flex-direction:column;gap:var(--space-1); }
+  .op-case { margin-block:var(--space-3);padding:var(--space-3);border:1px solid var(--border);min-width:0; }
+  .op-case input,.op-case select,.op-grid input,.op-grid textarea { max-width:100%;width:100%;box-sizing:border-box; }
+  #op-report { overflow-wrap:anywhere; }
+  #op-cost-form,#op-cost-coverage-form { display:grid;gap:var(--space-3); }
+  #op-cost-form label,#op-cost-coverage-form label { display:flex;flex-direction:column;gap:var(--space-1);min-width:0; }
+  #op-cost-form label:has(input[type="checkbox"]),#op-cost-coverage-form label:has(input[type="checkbox"]) { flex-direction:row;align-items:flex-start; }
+  #op-cost-form input[type="checkbox"],#op-cost-coverage-form input[type="checkbox"] { flex:none;width:auto;margin-block-start:.3em; }
+  #op-cost-form .input,#op-cost-coverage-form .input { box-sizing:border-box;width:100%;max-width:100%;min-width:0; }
+</style>
+<div id="outcome-pilots" data-context="{{ pilot_context }}">
+  <p id="op-status" role="status" aria-live="polite"></p>
+  <div class="panel">
+    <h2>Your pilots</h2>
+    <label for="op-selected">Choose a pilot</label>
+    <select id="op-selected" class="input"><option value="">Choose a pilot</option></select>
+    <button type="button" class="btn" id="op-refresh">Refresh</button>
+    <button type="button" class="btn" id="op-export" disabled>Download current report</button>
+  </div>
+  <div id="op-report"></div>
+  <details class="panel" id="op-plan-details">
+    <summary>Plan a new pilot</summary>
+    <p>Prepare at least four pending tasks or vendor intake cases in the app. Each must be unstarted.
+      Choose representative cases before viewing results. Half will be assigned to a fixed evaluation group;
+      use the remaining cases to refine your process. The plan and group assignments cannot be edited after saving.</p>
+    <p><a href="/projects">Open projects</a> · <a href="/third-party/vendor-onboarding">Open vendor intake</a></p>
+    <details>
+      <summary>Prepare a task without starting it</summary>
+      <p>Save each case here, then choose it in the plan below. After freezing the plan,
+        open the task and choose Start this task. Preparation makes no provider calls.</p>
+      <form id="op-prepare">
+        <div class="op-grid">
+          <label>Task name<input name="title" class="input" required maxlength="200"></label>
+          <label>Specialist with a reviewed deliverable<select name="domain" id="op-specialist" class="input" required><option value="">Choose a specialist</option></select></label>
+          <label>Task instructions<textarea name="description" class="input" required maxlength="4000" rows="3"></textarea></label>
+        </div>
+        <button type="submit" class="btn">Save prepared task</button>
+        <p id="op-prepared" role="status" aria-live="polite"></p>
+      </form>
+    </details>
+    <p id="op-source-coverage" role="status"></p>
+    <form id="op-plan">
+      <div class="op-grid">
+        <label>Pilot name<input class="input" name="title" required maxlength="200"></label>
+        <label>Customer or team<input class="input" name="customer" required maxlength="200"></label>
+        <label>Workflow<textarea class="input" name="workflow" required maxlength="1000" rows="3"></textarea></label>
+        <label>Acceptance criteria<textarea class="input" name="criteria" required maxlength="4000" rows="3"></textarea></label>
+      </div>
+      <div id="op-planned-cases"></div>
+      <button type="button" class="btn" id="op-add-case">Add a case</button>
+      <button type="submit" class="btn primary">Save and freeze plan</button>
+    </form>
+  </details>
+</div>
+<script src="/static/lightwork-outcome-pilot-costs.js" defer></script>
+<script src="/static/lightwork-outcome-pilots.js" defer></script>
+{% endblock %}

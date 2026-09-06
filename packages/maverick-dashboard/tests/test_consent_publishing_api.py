@@ -514,3 +514,50 @@ def test_withdraw_route_requires_global_admin(
     )
     assert response.status_code == 403
     assert permissions == ["admin"]
+
+def test_catalog_search_and_versions_are_tenant_scoped_even_in_a_shared_database(tmp_path, monkeypatch):
+    from maverick import consent_publishing
+    from maverick_dashboard import consent_publishing_api
+    shared = consent_publishing.ConsentPublishingStore(tmp_path / "shared.sqlite3")
+    monkeypatch.setattr(consent_publishing_api, "_store", lambda ops, tenant: shared)
+    _property()
+    _content()
+    listing = _ok(client.get(API + "/catalog/purposes?q=ANALYT"))
+    assert listing["total"] == 1 and listing["items"][0]["resource_id"] == "analytics"
+    assert "payload" not in listing["items"][0]
+    version = _ok(client.get(API + "/catalog/purposes/analytics/versions/1"))
+    assert version["payload"]["title_key"] == "purpose.title"
+    assert _ok(client.get(API + "/catalog/properties"))["items"][0]["revision"] == 1
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-b")
+    assert _ok(client.get(API + "/catalog/purposes"))["items"] == []
+    assert _ok(client.get(API + "/catalog/properties"))["items"] == []
+    assert client.get(API + "/catalog/purposes/analytics/versions/1").status_code == 404
+
+
+def test_catalog_pagination_exposes_each_exact_version():
+    _content()
+    _ok(client.post(API + "/purposes/analytics/versions", json={
+        "version": 2, "expected_current_version": 1, "idempotency_key": "purpose-second",
+        "title_key": "purpose.title", "description_key": "purpose.description",
+        "lawful_basis": "consent", "required": False, "default_choice": "denied",
+    }), 201)
+    latest = _ok(client.get(API + "/catalog/purposes"))
+    assert [item["version"] for item in latest["items"]] == [2]
+    first = _ok(client.get(API + "/catalog/purposes?resource_id=analytics&limit=1"))
+    assert first["total"] == 2 and first["next_offset"] == 1
+    second = _ok(client.get(API + "/catalog/purposes?resource_id=analytics&limit=1&offset=1"))
+    assert second["items"][0]["version"] == 1 and second["next_offset"] is None
+    assert client.get(API + "/catalog/purposes?limit=51").status_code == 422
+    assert client.get(API + "/catalog/purposes/analytics/versions/0").status_code == 422
+
+def test_catalog_stale_workspace_and_permission_denials_happen_before_record_queries(monkeypatch):
+    from maverick_dashboard import consent_publishing_api
+    _property()
+    mismatch = client.get(API + "/catalog/properties", headers={"X-Lightwork-Expected-Tenant": "tenant-b"})
+    assert mismatch.status_code == 409
+    def deny(request, permission):
+        assert permission == "operate"
+        raise HTTPException(status_code=403, detail="not permitted")
+    monkeypatch.setattr(consent_publishing_api, "require_permission", deny)
+    monkeypatch.setattr(consent_publishing_api, "_authority", lambda: pytest.fail("authority read before permission check"))
+    assert client.get(API + "/catalog/properties").status_code == 403

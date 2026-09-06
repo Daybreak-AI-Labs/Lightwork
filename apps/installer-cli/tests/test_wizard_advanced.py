@@ -61,6 +61,22 @@ def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeyp
     assert tomllib.loads(cfg)["reflexion"]["enable"] is False
 
 
+def test_workspace_recovery_requires_explicit_opt_in(tmp_path, monkeypatch):
+    from maverick import config
+    from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_, default=False, **__: default)
+    monkeypatch.setattr(wizard, "_q_select", lambda *_, default=None, **__: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *_, default="", **__: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *_, **__: [])
+    assert wizard.pick_advanced()["allow_workspace_recovery"] is False
+    written = tomllib.loads(_write(tmp_path, monkeypatch, {"allow_workspace_recovery": True}))
+    monkeypatch.setattr(config, "load_config", lambda: written)
+    assert config.get_features()["workspace_recovery"] is True
+    written = tomllib.loads(_write(tmp_path, monkeypatch, {"allow_workspace_recovery": False}))
+    monkeypatch.setattr(config, "load_config", lambda: written)
+    assert config.get_features()["workspace_recovery"] is False
+
+
 def test_voice_declines_share_one_voice_table(tmp_path, monkeypatch):
     """voice_commands=False + voice_local_stt=False must merge into ONE
     [voice] table (two would be a duplicate-key TOML error). Both knobs are
@@ -1106,3 +1122,16 @@ def test_department_access_absent_writes_no_dashboard_section(tmp_path, monkeypa
     cfg = _write(tmp_path, monkeypatch, {"department_access": {}})
     assert "[dashboard.group_roles]" not in cfg
     assert "default_suites" not in cfg
+
+
+def test_customer_workflow_options_share_one_valid_features_table(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"allow_project_reviews": True,
+        "allow_outcome_measurement": True, "allow_workflow_readiness": False,
+        "allow_action_center": False, "allow_guided_onboarding": False})
+    features = tomllib.loads(cfg)["features"]
+    assert features["project_reviews"] is True
+    assert features["outcome_measurement"] is True
+    assert features["workflow_readiness"] is False
+    assert features["action_center"] is False
+    assert features["guided_onboarding"] is False
+    assert cfg.count("[features]") == 1

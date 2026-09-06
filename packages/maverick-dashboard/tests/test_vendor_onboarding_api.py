@@ -109,6 +109,62 @@ def test_http_rejects_forged_authority_unknown_steps_and_stale_versions(web):
     assert client.post(f"{BASE}/{row['id']}/assess", json={"expected_revision": row["revision"]}).status_code == 409
 
 
+def test_http_document_picker_and_case_upload_preserve_dates_and_require_new_assessment(web):
+    client, service, ctx, tickets = web
+    found = client.get("/api/v1/vendor-onboarding/documents", params={"query": "security"})
+    assert found.status_code == 200
+    assert found.json()["documents"][0]["id"] == "security-paper"
+    row = client.post(BASE, json={"vendor_name": "Synthetic upload", "document_ids": [],
+                                 "project": "VEND", "purpose": "Upload in the app"}).json()
+    result = client.post(f"{BASE}/{row['id']}/upload", params={"expected_revision": row["revision"],
+        "name": "policy.txt", "document_date": NOW - 100}, headers={"Content-Type": "text/plain"},
+        content=b"Model provenance is documented with provider and version.")
+    assert result.status_code == 200, result.text
+    uploaded = result.json()
+    assert uploaded["uploads"][0]["modified_at"] == NOW - 100
+    assert uploaded["uploads"][0]["date_basis"] == "uploader_asserted_document_date"
+    assert uploaded["assessment"] is None
+    assert client.post(f"{BASE}/{row['id']}/upload", params={"expected_revision": row["revision"],
+        "name": "policy.txt", "document_date": NOW - 100}, headers={"Content-Type": "text/plain"},
+        content=b"Stale request").status_code == 409
+    collected = _step(client, uploaded, "collect-evidence")
+    assert collected["evidence"]["source"] == "upload"
+    assert service.get(ctx, row["id"])["metrics"]["document_reads"] == 0
+    assert tickets.creates == 0
+
+
+@pytest.mark.parametrize("name,mime,content,status", [
+    ("policy.txt", "text/plain", b"x" * (1024 * 1024 + 1), 413),
+    ("policy.bin", "application/octet-stream", b"binary", 415),
+    ("../policy.txt", "text/plain", b"policy", 409),
+    ("policy.txt", "text/plain", b"\xff", 409),
+], ids=["oversized", "unsupported-mime", "path-name", "invalid-utf8"])
+def test_http_upload_rejects_unsupported_oversized_or_unsafe_input_without_mutating(web, name, mime, content, status):
+    client, service, ctx, tickets = web
+    row = _intake(client)
+    result = client.post(f"{BASE}/{row['id']}/upload", params={"expected_revision": row["revision"],
+        "name": name, "document_date": NOW - 100}, headers={"Content-Type": mime}, content=content)
+    assert result.status_code == status, result.text
+    assert service.get(ctx, row["id"]) == row
+    assert tickets.creates == 0
+
+
+def test_http_unreadable_pdf_is_visible_and_blocks_assessment(web):
+    client, *_ = web
+    row = _intake(client)
+    result = client.post(f"{BASE}/{row['id']}/upload", params={"expected_revision": row["revision"],
+        "name": "scanned.pdf", "document_date": NOW - 100}, headers={"Content-Type": "application/pdf"},
+        content=b"%PDF-1.4\nunsupported image-only test document")
+    assert result.status_code == 200
+    row = result.json()
+    assert row["uploads"][0]["status"] == "extraction_failed"
+    row = _step(client, row, "collect-evidence")
+    assert row["evidence"]["status"] == "extraction_failed"
+    assert client.post(f"{BASE}/{row['id']}/assess", json={"expected_revision": row["revision"]}).status_code == 409
+    row = _step(client, row, "documents", document_ids=["security-paper"], upload_ids=[])
+    assert row["uploads"] == []
+
+
 def test_http_requires_separate_explicit_approval_and_blocks_cross_origin(web):
     client, _, _, tickets = web
     row = _intake(client)
@@ -129,6 +185,25 @@ def test_stock_composition_rejects_anonymous_or_static_identity(web, monkeypatch
     response = client.get(BASE)
     assert response.status_code == 403
     assert "named authenticated" in response.text
+
+
+def test_stock_composition_allows_upload_only_but_drive_read_still_requires_enrollment(web, monkeypatch):
+    from maverick import connections
+    from maverick.paths import tenant_scope
+    from maverick.vendor_onboarding_adapters import GoogleDriveEvidence
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    monkeypatch.setattr(composition, "require_permission", lambda *args: None)
+    monkeypatch.setattr(composition, "caller_principal", lambda *args: "user:reviewer")
+    monkeypatch.setattr(connections, "enabled", lambda: True)
+    monkeypatch.setattr(connections, "get_connection", lambda name: {
+        "name": "jira", "owner": "user:reviewer", "connector": "jira", "revision": "1",
+    } if name == "jira" else None)
+    with tenant_scope(tenant="synthetic-a"):
+        context = composition._context(object())
+    assert context.credential_authority == "user:reviewer"
+    with pytest.raises(PermissionError, match="authority.*unavailable"):
+        GoogleDriveEvidence().search(context, "policy")
 
 
 def test_model_context_cannot_review(web, monkeypatch):

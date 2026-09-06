@@ -1,0 +1,78 @@
+# Real browser customer journeys
+
+This release gate runs installed Chromium against the real FastAPI dashboard,
+its controllers and private local stores. It is separate from the JSDOM unit
+suite. Run it against this checkout's isolated Python environment; install all
+eight workspace packages as described in `AGENTS.md` first.
+
+From the repository root in PowerShell:
+
+```powershell
+$env:PATH = (Resolve-Path '.venv/Scripts').Path + [IO.Path]::PathSeparator + $env:PATH
+Set-Location packages/maverick-dashboard/tests/browser
+npm ci --ignore-scripts
+npx playwright install chromium
+npm test
+```
+
+On Linux, activate the isolated virtual environment, change to this directory,
+and run the same npm commands (`npx playwright install --with-deps chromium`
+installs browser OS dependencies on a CI runner). CI runs this suite in
+`.github/workflows/ui-regressions.yml`; a failure blocks that job. Repository
+administrators must separately select the job in branch protection if required.
+
+The fixture binds only `127.0.0.1`, uses a new temporary home/configuration,
+clears inherited Lightwork configuration and provider-key environment aliases,
+and blocks outbound sockets before importing the product. Browser requests are
+restricted to that local origin. Two explicitly synthetic identities exercise
+real current permission checks; this is not an IdP login acceptance test.
+Drive evidence, ticket execution and privacy reads are local test adapters.
+Billing receipts are explicitly synthetic admissions. No model is run, no
+provider is contacted, and no customer data is used.
+
+Coverage includes:
+
+- A private flow recovery copy across independent browser contexts, explicit
+  keyboard confirmation, and competing edits without automatic execution.
+- A failed workflow recovery save, exact-operation retry, reload and restore.
+- Record search through the actual API and keyboard navigation to the task.
+- High contrast and dyslexia-friendly preferences at a short mobile height,
+  with keyboard focus returning after closing preferences and record search.
+- Authored PDF upload, evidence collection, assessment, separate human review
+  and approval, one local ticket effect and explicit local acceptance.
+- In-app connection creation, credential clearing/exclusion from drafts,
+  generated evidence keys, bounded source-access checks, key rotation and
+  deliberate source rebinding.
+- Project owner membership grant, captured result preview, explicit sharing,
+  colleague Action Center visibility and review without live task sign-off,
+  then removal of stale private output after an injected expired-session reply.
+- Held GRC delivery comparison, preserved note on a service interruption,
+  cleared private comparison and inputs on an HTML expired-session reply, and
+  fresh human confirmation after reload without another external write.
+- Exact historical consent selection into an unsaved next version, plus actual
+  server field-validation feedback that preserves the other inputs.
+- Recovery key download, real snapshot verification/export and temporary
+  restore drill. Live restore remains disabled in the ordinary dashboard.
+- Four held tasks, a frozen pilot, partial observations, preserved input after
+  failed save, exact admitted provider cost allocation and report export.
+- Ten new workspace surfaces at 320 and 1280 pixels with compact light
+  preferences; screenshots are attached for every route and width.
+- Native maintenance HTML/controller rendering with fixed synthetic Tauri IPC:
+  keyboard update review, required update authorization, single operation while
+  busy, failed verification, repair with unreadable recovery state, and exact
+  unfinished-operation and saved-log selection. These cases do not launch the desktop shell,
+  execute Windows Installer, or establish native IPC/installer acceptance.
+
+Results are in `test-results/results.json`, the HTML `browser-report`, and the
+configured browser output directory. The gate retains screenshots and traces
+on failure. On Windows, an ignored `.browser-runtime` folder in the repository
+holds the runner's temporary files to avoid managed-user-TEMP Chromium cleanup
+failures; override it with `LIGHTWORK_BROWSER_TEMP` if needed. Temporary fixture
+files are synthetic and must never be promoted into a real workspace.
+
+Screenshot inspection is a separate release-review step. Assertions catch
+horizontal clipping and uncaught JavaScript exceptions, but do not certify
+visual design, screen-reader behavior, browser compatibility, live provider
+acceptance, production deployment, actual invoice authenticity, or customer
+outcome measurements. The recovery drill verifies local archive and SQLite
+integrity; full live restore and desktop packaging have their own gates.
