@@ -7543,8 +7543,8 @@ async def voice_transcribe(
         raise HTTPException(
             status_code=503,
             detail=(
-                "local speech-to-text is still warming up "
-                "(first-run model download) — retry in a few seconds."
+                "Local speech-to-text is still preparing. "
+                "Retry shortly; model setup is available in Settings > Models."
             ),
             headers={"Retry-After": "5"},
         )
@@ -7597,10 +7597,9 @@ async def voice_transcribe(
         raise HTTPException(
             status_code=503,
             detail=(
-                "no speech-to-text backend available. Run `maverick voice "
-                "setup` for the built-in local engine (whisper.cpp), set "
-                "OPENAI_API_KEY / GROQ_API_KEY, or install faster-whisper "
-                "(python -m pip install -e './packages/maverick-core[voice]')."
+                "Speech-to-text is not ready. Open Settings > Models > Local voice setup "
+                "(/settings#settings-voice) to check or download the local model. "
+                "If a cloud speech provider is selected, check its provider settings."
             ),
         )
     return JSONResponse({"text": text.strip()})

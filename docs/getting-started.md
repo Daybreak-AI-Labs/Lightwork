@@ -153,9 +153,19 @@ pack's clamped envelope.)
 
 The dashboard's mic button and the `transcribe_audio` tool work with no
 provider key: the local Whisper engine ships with the dashboard package, and
-the checksum-verified model is fetched automatically when the dashboard
-first starts (skipped on egress-locked deployments, or with
-`[voice] auto_fetch_model = false`). The CLI covers the details:
+opening the app does not download model files by default. In **Settings > Models >
+Local voice setup**, a global administrator can review the configured model's
+source and size (about 148 MB for the default model), then check or download it.
+Progress survives a page reload; cancellation removes the unfinished download,
+and failures can be retried in the same screen. Existing files are not labelled
+verified until their exact size and checksum pass. Model verification does not
+prove the speech engine is loaded or that a microphone works.
+
+The installer asks explicitly whether to allow startup downloads. A saved
+`[voice] auto_fetch_model = true` or `MAVERICK_VOICE_AUTO_FETCH=1` still enables
+them; network policy is always enforced, including redirects. Managed custom
+model paths and a selected cloud speech backend retain their configuration;
+this setup screen does not silently replace them. The optional CLI is also available:
 
 ```bash
 maverick voice setup    # fetch the checksum-verified model (~148 MB)

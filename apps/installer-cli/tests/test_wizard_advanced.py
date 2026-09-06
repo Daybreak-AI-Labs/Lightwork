@@ -79,8 +79,7 @@ def test_workspace_recovery_requires_explicit_opt_in(tmp_path, monkeypatch):
 
 def test_voice_declines_share_one_voice_table(tmp_path, monkeypatch):
     """voice_commands=False + voice_local_stt=False must merge into ONE
-    [voice] table (two would be a duplicate-key TOML error). Both knobs are
-    default-on, so only declines write lines."""
+    [voice] table (two would be a duplicate-key TOML error)."""
     cfg = _write(tmp_path, monkeypatch, {
         "voice_commands": False, "voice_local_stt": False,
     })
@@ -96,12 +95,15 @@ def test_voice_local_stt_decline_writes_auto_fetch_off(tmp_path, monkeypatch):
     assert parsed["voice"] == {"auto_fetch_model": False}
 
 
-def test_voice_defaults_write_no_voice_table(tmp_path, monkeypatch):
-    # Default-on accepts (mic + built-in local STT) need no config at all.
+def test_voice_explicit_accept_persists_download_consent(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {
         "voice_commands": True, "voice_local_stt": True,
     })
-    assert "[voice]" not in cfg
+    assert tomllib.loads(cfg)["voice"] == {"auto_fetch_model": True}
+
+
+def test_voice_unanswered_choice_does_not_enable_download(tmp_path, monkeypatch):
+    assert "[voice]" not in _write(tmp_path, monkeypatch, {})
 
 
 def test_pg_rls_writes_world_model_section_with_prep_reminder(tmp_path, monkeypatch):

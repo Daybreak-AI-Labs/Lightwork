@@ -70,6 +70,14 @@ Coverage includes:
   Comparisons never authorize restoration or reconcile the changed records.
 - Four held tasks, a frozen pilot, partial observations, preserved input after
   failed save, exact admitted provider cost allocation and report export.
+- Optional voice setup through the real administrator API and worker: explicit
+  source/size consent, progress after reload, cancellation, failed download and
+  fresh-consent retry, verified publication, service interruption and HTML
+  sign-in expiry. The fixture substitutes a small synthetic catalog digest and
+  `_open_model_url` byte stream; screenshots therefore show a synthetic small
+  size. The real cancellation, size/hash checks and temporary-file publication
+  execute locally. No speech weights are downloaded or used for inference,
+  and neither microphone access nor transcription quality is tested.
 - Ten new workspace surfaces at 320 and 1280 pixels with compact light
   preferences; screenshots are attached for every route and width.
 - Native maintenance HTML/controller rendering with fixed synthetic Tauri IPC:

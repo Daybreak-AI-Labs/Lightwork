@@ -68,8 +68,12 @@ test('record search uses the actual API and keyboard opens the exact task at pho
 test('display preferences and keyboard dismissal remain usable in a short high-contrast viewport',async({page},info)=>{
   await page.setViewportSize({width:375,height:480});await page.goto('/goals');
   await page.locator('#prefs-menu > summary').click();await fits(page);
-  await page.locator('#theme-select').selectOption('hicontrast');await expect(page.locator('body')).toHaveClass(/theme-hicontrast/);
-  await page.locator('#prefs-menu > summary').click();await page.locator('#font-select').selectOption('dyslexic');
+  // Each preference navigates. Server-rendered body classes precede deferred
+  // keyboard handlers, so wait for the matching new document's DOM readiness.
+  await Promise.all([page.waitForURL(url=>url.searchParams.get('theme')==='hicontrast',{waitUntil:'domcontentloaded'}),page.locator('#theme-select').selectOption('hicontrast')]);
+  await expect(page.locator('body')).toHaveClass(/theme-hicontrast/);
+  await page.locator('#prefs-menu > summary').click();
+  await Promise.all([page.waitForURL(url=>url.searchParams.get('font')==='dyslexic',{waitUntil:'domcontentloaded'}),page.locator('#font-select').selectOption('dyslexic')]);
   await expect(page.locator('body')).toHaveClass(/font-dyslexic/);
   await page.locator('#prefs-menu > summary').click();await page.keyboard.press('Escape');
   await expect(page.locator('#prefs-menu')).not.toHaveAttribute('open','');await expect(page.locator('#prefs-menu > summary')).toBeFocused();

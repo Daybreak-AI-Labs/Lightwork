@@ -97,6 +97,7 @@ def build_app(directory):
         grc_sync,
         model_risk_assurance,
         privacy_data_discovery,
+        voice_models,
         world_model,
     )
     from maverick.file_lock import atomic_create_text, ensure_private_directory
@@ -113,6 +114,39 @@ def build_app(directory):
     from maverick_dashboard.vendor_onboarding_composition import WorkflowBinding
 
     config.reset_config_cache()
+    # Exercise the real setup worker/hash/publication logic with an explicitly
+    # synthetic local byte stream. These bytes are never used for inference.
+    voice_bytes = b"Synthetic browser voice model fixture; not speech weights.\n" * 1200
+    voice_filename = voice_models.KNOWN_MODELS["base"][0]
+    voice_models.KNOWN_MODELS["base"] = (voice_filename, hashlib.sha256(voice_bytes).hexdigest(), len(voice_bytes))
+    voice_downloads = []
+
+    class SyntheticVoiceDownload:
+        def __init__(self, attempt):
+            self.attempt = attempt
+            self.offset = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _maximum):
+            if self.attempt == 2 and self.offset >= 2048:
+                raise OSError("Synthetic voice download interruption")
+            time.sleep(0.07 if self.attempt == 1 else 0.001)
+            chunk = voice_bytes[self.offset:self.offset + 1024]
+            self.offset += len(chunk)
+            return chunk
+
+    def synthetic_voice_open(url, *, timeout):
+        if url != voice_models._BASE_URL + voice_filename or timeout > 2.0:
+            raise RuntimeError("Unexpected synthetic voice download request")
+        voice_downloads.append(url)
+        return SyntheticVoiceDownload(len(voice_downloads))
+
+    voice_models._open_model_url = synthetic_voice_open
     # A separately downloadable local custody copy for the synthetic rehearsal.
     # Tenant KEKs use the ordinary local derivation from this same fixture key.
     # The fresh rehearsal child cannot inherit this environment or key path.
@@ -212,7 +246,8 @@ def build_app(directory):
                 "project_id":project_id, "review_goal":review_goal,
                 "grc_delivery":held_delivery, "grc_writes":len(grc_writes),
                 "review_signoff":world.signoff_for(review_goal),
-                "ticket_creates":tickets.creates, "outbound_calls":"blocked"}
+                "ticket_creates":tickets.creates, "outbound_calls":"blocked",
+                "voice_download_attempts":len(voice_downloads), "voice_fixture":"synthetic bytes; no inference"}
 
     return dashboard.app
 

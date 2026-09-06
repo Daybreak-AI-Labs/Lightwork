@@ -2113,8 +2113,10 @@ here.
   (whisper.cpp wheels, a maverick-dashboard dependency — dashboard installs
   transcribe out of the box) or a local whisper.cpp binary, both loading the
   checksum-pinned GGML model managed by `voice_models.py`
-  (`maverick voice setup|status|transcribe`; auto-fetch ON by default and
-  OFF under the egress lock, override via `[voice] auto_fetch_model`;
+  (in-app Settings > Models setup with reviewed source/size, progress,
+  cancellation, checksum verification and retry; optional
+  `maverick voice setup|status|transcribe`; auto-fetch OFF unless explicitly
+  enabled via `[voice] auto_fetch_model` or the installer;
   deployment-wide routing via `[voice]
   stt_backend`, where `local` keeps audio on-machine even with keys set) —
   with **voice persona presets** (`[voice.personas]`:

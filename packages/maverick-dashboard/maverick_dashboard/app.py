@@ -623,25 +623,18 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_refresher)
     except Exception:  # pragma: no cover - never block startup
         log.exception("license auto-refresh not started")
-    # Voice warm-up: fetch/load the local STT model in the background so the
-    # first mic click transcribes instead of 503ing into browser fallback.
-    # A plain daemon thread, NOT run_in_threadpool: the first-run model
-    # download can take minutes and must never delay startup. Fail-open —
-    # requests degrade to the normal backend chain if warm-up loses.
+    # Load installed voice weights without delaying startup. Downloads require
+    # explicit persisted opt-in, or the separately reviewed Settings action.
     try:
-        from maverick.tools.voice import warm_up_local_stt
+        from .voice_setup_api import start_warmup
 
-        from .api import _voice_commands_enabled
-
-        if _voice_commands_enabled():
-            threading.Thread(
-                target=warm_up_local_stt,
-                name="voice-stt-warmup",
-                daemon=True,
-            ).start()
+        start_warmup(app)
     except Exception:  # pragma: no cover - never block startup
         log.exception("voice STT warm-up not started")
     yield
+    from .voice_setup_api import stop_setup
+
+    await run_in_threadpool(stop_setup, app)
     try:
         from maverick.entitlements import stop_refresher
 
@@ -957,8 +950,12 @@ from .in_app_routes import router as in_app_router  # noqa: E402
 app.include_router(in_app_router)
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
+from .voice_setup_api import VoiceSetup  # noqa: E402
+from .voice_setup_api import router as voice_setup_router  # noqa: E402
 
 app.include_router(recovery_router)
+app.include_router(voice_setup_router)
+app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
@@ -9419,6 +9416,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-facts.js")
 @app.get("/static/lightwork-consent-policy-editor.js")
 @app.get("/static/lightwork-setup.js")
+@app.get("/static/lightwork-voice-setup.js")
 @app.get("/static/lightwork-template-library.js")
 @app.get("/static/lightwork-guided-actions.js")
 @app.get("/static/lightwork-guided-actions.css")

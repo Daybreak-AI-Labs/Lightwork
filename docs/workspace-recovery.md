@@ -248,3 +248,43 @@ fixture key, prints measurements, and removes its state. It does not restore
 a real workspace or contact providers. API tests separately exercise the full
 isolated application lifespan. Customer CI starts the frozen recovery entry
 point after stopping its own normal runtime.
+
+## Application-reader fixture acceptance
+
+With the same installed Python environment, run:
+
+```sh
+python scripts/acceptance/workspace_application_recovery.py --output application-recovery.json
+python -m pytest -q packages/maverick-core/tests/test_workspace_application_recovery.py
+```
+
+The portable acceptance script uses separate source and fresh-target processes
+from that exact installation. The source creates an encrypted recovery draft,
+a real world-model goal and its artifact through their application producers.
+After saving an authenticated snapshot and separately retained key copy, it
+acknowledges three later changes: a draft revision, an artifact revision and a
+second goal. It removes its original synthetic encryption key before testing
+the retained copy.
+
+The successful target restores the snapshot and reads it through `DraftStore`
+and `WorldModel`, checking draft context/slot/revision, goal fields and ownership,
+and the artifact's goal reference, content and version. All three known writes
+before the snapshot must be recovered; all three acknowledged later writes must
+be absent from that selected snapshot. Missing custody and a wrong primary key
+must fail before application reads. Source files and retained custody must stay
+unchanged throughout the target runs. No server, scheduler, agent or provider
+is started.
+
+JSON output records the exact application and archive identities, the seven
+application checks, known write counts, the observed monotonic interval from
+snapshot completion to the last later acknowledgement, and both child-work and
+process-launch durations. The script verifies signed snapshot bindings and its
+synthetic HMAC reports before deleting the disposable signing keys. Temporary
+state must be cleaned before JSON is printed or the optional output file is
+replaced; a failed run preserves an existing output file.
+
+These are observed bounds for this controlled fixture, not production RTO/RPO,
+an assertion that snapshot age equals data loss, or proof of every application
+invariant. They do not authorize a live restore, merge historical content with
+current accounting or action history, or establish external-store or native
+installer recovery. The ordinary restore guards remain unchanged.

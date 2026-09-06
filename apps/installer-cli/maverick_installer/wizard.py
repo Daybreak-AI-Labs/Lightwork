@@ -3944,10 +3944,10 @@ def pick_advanced() -> dict[str, Any]:
             default=True,
         ),
         "voice_local_stt": _q_confirm(
-            "  Built-in local speech-to-text? Auto-fetch a checksum-verified "
+            "  Allow local speech model downloads? Fetch a checksum-verified "
             "Whisper model (~148 MB, at dashboard startup) so the mic works "
             "offline with no provider key — the engine ships with the "
-            "dashboard. ON by default (egress-locked deployments stay off).",
+            "dashboard. You can also set it up later in Settings > Models.",
             default=True,
         ),
         "attach_any_mime": _q_confirm(
@@ -7329,10 +7329,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("voice_commands") is False:
         # Default-on; only a decline needs a line.
         _voice_lines.append("dashboard_commands = false")
-    if advanced.get("voice_local_stt") is False:
-        # Built-in local STT model auto-fetch is default-on (egress-locked
-        # deployments already default off); only a decline needs a line.
-        _voice_lines.append("auto_fetch_model = false")
+    if isinstance(advanced.get("voice_local_stt"), bool):
+        # Persist the reviewed choice; absent configuration never downloads.
+        _voice_lines.append("auto_fetch_model = " + str(advanced["voice_local_stt"]).lower())
     if _voice_lines:
         # ONE [voice] table -- two would be a duplicate-key TOML error.
         lines.append("")
