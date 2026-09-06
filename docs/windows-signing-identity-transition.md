@@ -152,3 +152,49 @@ rollback. The [release-pair gate](windows-release-acceptance.md) currently cover
 same-identity pairs; it does not substitute for this transition-specific native
 acceptance. Recognized production certificates and actual release inputs remain
 release-owner dependencies.
+
+### Disposable hosted publisher-transition gate
+
+The Windows customer workflow also runs
+`apps/installer-msi/accept_signing_transition_fixture.py` after the same-identity
+acceptance. It copies the existing base and candidate MSIs, creates **two distinct
+self-signed fixture publishers**, signs and verifies those copied packages using
+Windows, and uses the existing compiled updater key for both policy signatures.
+The two native hashes come from the separately preserved outputs of the existing
+base/candidate builds; the gate does not build a third native executable. Source
+MSIs and native build outputs must remain unchanged.
+
+Only the exact GitHub-hosted Windows `build-and-accept` job can enter this mode.
+Its fixture certificate creation, trust enrollment and deletion reuse the existing
+guarded publisher helper. Cleanup is attempted for both exact recorded identities
+even after an earlier stage fails, and any cleanup failure fails acceptance.
+A 37-minute work deadline leaves time for bounded
+process-tree termination and both cleanups inside the 45-minute workflow step.
+Do not invoke this mode against a workstation or an installed user workspace.
+
+The real frozen application starts an isolated recovery server and exercises
+default-off refusal, invalid policy signatures, expired admission, and an
+otherwise valid signed policy naming a publisher that does not match the actual
+Windows-verified candidate MSI. The latter must fail before installation without
+leaving a startup block. The positive case uses the actual administrator API,
+verified MSI preparation, Windows Installer upgrade and exact retained rollback.
+Native versions, compiled updater key and actual executable hashes are checked
+at base, upgraded and rolled-back states. Synthetic files in two local workspaces
+must return to their pre-upgrade contents.
+
+After preparation, its first process exits and a separate retained helper must
+resume the same admitted operation with a renewed private authorization. This
+tests a process boundary **before MSI execution**; it is not a crash during an
+MSI transaction. The profile deliberately keeps one updater key and one frozen
+Python runtime while changing native package versions and actual publisher
+certificates. Distinct updater-key cryptographic tests remain separate; this
+profile does not establish a real installed key rotation or production release
+compatibility.
+
+The machine-readable result is
+`customer-artifacts/publisher-transition-acceptance.json`. The orchestrator rejects
+a zero exit without every required observation, exact envelope/artifact/native
+bindings, honest fixture labels and successful cleanup. Bounded scrubbed stage
+logs and the report are retained by the workflow. Adding this executable gate
+does not itself establish a passed run: record the exact hosted run and report
+before claiming distinct-publisher MSI acceptance.

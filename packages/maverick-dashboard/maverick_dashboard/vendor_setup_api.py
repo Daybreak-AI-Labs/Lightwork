@@ -13,8 +13,8 @@ from maverick.governed_records import RecordConflict
 from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import settings_store
-from .auth import caller_principal, require_global_permission
+from . import rbac, scim_groups, settings_store
+from .auth import caller_principal, require_global_permission, role_for_principal
 from .draft_api import context_for
 
 router = APIRouter(prefix="/api/v1/vendor-setup", tags=["vendor-setup"])
@@ -33,6 +33,15 @@ class BindingIn(Reviewed):
     document: str = Field(default="", max_length=64)
     ticket_revision: str = Field(min_length=1, max_length=64)
     document_revision: str = Field(default="", max_length=64)
+    resource_owner: str = Field(min_length=1, max_length=256)
+
+
+def _eligible_owner(tenant, principal):
+    return (current_tenant_id_strict() == tenant and isinstance(principal, str)
+        and principal.startswith("user:") and len(principal) > 5
+        and principal in rbac.list_tenant_roles(tenant)
+        and scim_groups.active_for_principal(principal) is not False
+        and "operate" in rbac.permissions_for(role_for_principal(principal)))
 
 
 def _configuration():
@@ -70,10 +79,17 @@ def overview(request: Request, response: Response):
     actor, fingerprint, loaded = _authority(request, response)
     try:
         record = setup.current()
+        ownership = setup.owner_policy()
         candidates = connections.list_connections(owner=actor) if connections.enabled() else []
         binding = record["binding"] if record else asdict(setup.VendorOnboardingSettings.from_config({"vendor_onboarding": dict(loaded.get("vendor_onboarding") or {}, enable=False)}))
+        binding = dict(binding, resource_owner=ownership["resource_owner"])
+        tenant = current_tenant_id_strict()
+        eligible_owners = [] if ownership["owner_locked"] else sorted(
+            principal for principal in rbac.list_tenant_roles(tenant) if _eligible_owner(tenant, principal))
         return {"context": context_for(request), "configuration": fingerprint,
             "revision": (record or {}).get("revision", 0), "binding": binding,
+            "owner_locked": ownership["owner_locked"], "owner_source": ownership["owner_source"],
+            "eligible_owners": eligible_owners,
             "principal": actor, "connections_enabled": connections.enabled(),
             "modules_enabled": all((loaded.get(key) or {}).get("enable") is True for key in setup.REQUIRED_MODULES),
             "connections": [{key: row[key] for key in ("name", "connector", "base_url", "revision", "has_token")} for row in candidates if row["connector"] in {"jira", "gdrive"}],
@@ -103,10 +119,12 @@ def enable(request: Request, response: Response, payload: Reviewed):
 @router.put("")
 def bind(request: Request, response: Response, payload: BindingIn):
     actor, _, _ = _authority(request, response, payload)
+    tenant = current_tenant_id_strict()
     try:
         setup.save(actor=actor, ticket=payload.ticket, document=payload.document,
             ticket_revision=payload.ticket_revision, document_revision=payload.document_revision,
-            expected_revision=payload.expected_revision)
+            expected_revision=payload.expected_revision, resource_owner=payload.resource_owner,
+            eligible_owner=lambda principal: _eligible_owner(tenant, principal))
     except (PermissionError, ValueError, RecordConflict) as exc:
         raise HTTPException(409, str(exc)) from exc
     except Exception as exc:

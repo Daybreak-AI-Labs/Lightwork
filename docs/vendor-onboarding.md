@@ -58,12 +58,21 @@ through the UI. No actual Google export or Jira request occurs in this demo.
 The workflow remains disabled by default. In the app, sign in as a named
 administrator, select a workspace, and open **AI vendor onboarding → Workspace
 setup**. Review **Enable vendor workflow**, create the required accounts in
-**Connections**, then select Jira and optional Drive and save workspace setup.
+**Connections**, then choose the initial **Vendor review owner**, select Jira and
+optional Drive, and save workspace setup. The initial owner must be a currently
+active named member of this workspace with permission to manage vendor reviews; manage
+that membership in **Users**. The app rechecks eligibility when saving, so a
+revoked or stale selection cannot become a new owner. It does not choose the
+saving administrator implicitly.
 The activation turns on the existing deployment-wide prerequisite modules;
 credential choices and the stable vendor review owner are saved only for the
 selected workspace, with version checks and audit history. Changing the selected
-credentials never silently changes the owner of earlier cases. This setup does
-not probe providers, grant colleagues access, or approve a workflow action.
+credentials never silently changes the owner of earlier cases. An existing saved,
+deployment-configured or historical owner is displayed as fixed; this is not an
+ownership-transfer action. The saving administrator remains the credential
+authority even when another member owns the vendor records. This setup does not
+probe providers, share connections, grant colleagues access, or approve a workflow
+action.
 
 Connections supports either manually supplied credentials or reviewed renewable
 authorization for Google Drive and Jira Cloud. Google Cloud Storage authorization

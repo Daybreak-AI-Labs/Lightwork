@@ -24,6 +24,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
     rbac.set_role("user:owner", "admin")
     rbac.set_role("user:other", "operator")
+    rbac.set_tenant_role("tenant-a", "user:owner", "admin")
+    rbac.set_tenant_role("tenant-a", "user:other", "operator")
     application = FastAPI()
     @application.middleware("http")
     async def identity(request: Request, call_next):
@@ -60,9 +62,9 @@ def credential(tenant="tenant-a", *, owner="user:owner", name="jira-customer"):
         return connections.set_connection(name, connector="jira", base_url="https://example.atlassian.net", token="synthetic-private-token", owner=owner)
 
 
-def bind(client, record):
+def bind(client, record, *, owner=None):
     status = client.get("/api/v1/vendor-setup").json()
-    return client.put("/api/v1/vendor-setup", json={**reviewed(status), "expected_revision": status["revision"], "ticket": record["name"], "ticket_revision": record["revision"]})
+    return client.put("/api/v1/vendor-setup", json={**reviewed(status), "expected_revision": status["revision"], "ticket": record["name"], "ticket_revision": record["revision"], "resource_owner": owner if owner is not None else status["binding"]["resource_owner"] or "user:owner"})
 
 
 def test_activation_and_upload_only_binding_are_real_and_tenant_private(client):
@@ -98,7 +100,7 @@ def test_stale_credentials_context_or_role_cannot_bind(client):
     with tenant_scope(tenant="tenant-a"):
         assert setup.current() is None
     status = client.get("/api/v1/vendor-setup").json()
-    payload = {**reviewed(status), "expected_revision": 0, "ticket": new["name"], "ticket_revision": new["revision"]}
+    payload = {**reviewed(status), "expected_revision": 0, "ticket": new["name"], "ticket_revision": new["revision"], "resource_owner": "user:owner"}
     assert client.put("/api/v1/vendor-setup", json=payload, headers={"X-Test-Tenant": "tenant-b"}).status_code == 409
     assert client.get("/api/v1/vendor-setup", headers={"X-Test-User": "other"}).status_code == 403
     assert client.get("/api/v1/vendor-setup", headers={"X-Test-Tenant": "tenant-b", "X-Lightwork-Setup-Context": status["context"]}).status_code == 409
@@ -115,7 +117,7 @@ def test_authority_generation_compare_and_swap_and_stable_resource_owner(client)
     changed = bind(client, credential_b)
     assert changed.status_code == 200
     assert changed.json()["binding"]["resource_owner"] == old["binding"]["resource_owner"]
-    stale = client.put("/api/v1/vendor-setup", json={**reviewed(old), "expected_revision": old["revision"], "ticket": credential_a["name"], "ticket_revision": credential_a["revision"]})
+    stale = client.put("/api/v1/vendor-setup", json={**reviewed(old), "expected_revision": old["revision"], "ticket": credential_a["name"], "ticket_revision": credential_a["revision"], "resource_owner": "user:owner"})
     assert stale.status_code == 409
 
 
@@ -126,3 +128,102 @@ def test_false_deployment_connection_override_and_unconfirmed_change_are_not_wai
     assert client.post("/api/v1/vendor-setup/enable", json={**reviewed(state), "confirm": False}).status_code == 422
     assert client.post("/api/v1/vendor-setup/enable", json=reviewed(state)).status_code == 409
     assert not config.dashboard_overrides_path().exists()
+
+
+def test_initial_owner_is_explicit_and_distinct_from_credential_authority(client):
+    activate(client)
+    record = credential()
+    status = client.get("/api/v1/vendor-setup").json()
+    response = client.put("/api/v1/vendor-setup", json={**reviewed(status), "expected_revision": 0,
+        "ticket": record["name"], "ticket_revision": record["revision"], "resource_owner": "user:other"})
+    assert response.status_code == 200, response.text
+    assert response.json()["binding"]["resource_owner"] == "user:other"
+    assert response.json()["owner_locked"] is True
+    with tenant_scope(tenant="tenant-a"):
+        assert connections.get_connection(record["name"])["owner"] == "user:owner"
+        assert not connections._may_use(connections.get_connection(record["name"]), "user:other")
+    created = client.post("/api/v1/vendor-onboarding/cases", json={"vendor_name": "Selected owner vendor", "project": "VEND", "purpose": "Synthetic selected ownership"})
+    assert created.status_code == 201, created.text
+    assert created.json()["owner"] == "user:other"
+    assert bind(client, record, owner="user:owner").status_code == 409
+    changed = bind(client, credential(name="jira-replacement"), owner="user:other")
+    assert changed.status_code == 200 and changed.json()["binding"]["resource_owner"] == "user:other"
+
+
+@pytest.mark.parametrize("invalid", ["foreign", "revoked", "inactive", "viewer", "service"])
+def test_initial_owner_must_still_be_an_active_eligible_workspace_member(client, monkeypatch, invalid):
+    activate(client)
+    record = credential()
+    status = client.get("/api/v1/vendor-setup").json()
+    assert status["eligible_owners"] == ["user:other", "user:owner"]
+    assert status["binding"]["resource_owner"] == "" and status["owner_locked"] is False
+    owner = "user:other"
+    if invalid == "foreign":
+        owner = "user:foreign"
+        rbac.set_tenant_role("tenant-b", owner, "operator")
+    elif invalid == "revoked":
+        rbac.remove_tenant_role("tenant-a", owner)
+    elif invalid == "inactive":
+        monkeypatch.setattr(api.scim_groups, "active_for_principal", lambda principal: principal != owner)
+    elif invalid == "viewer":
+        rbac.set_tenant_role("tenant-a", owner, "viewer")
+    else:
+        owner = "service:robot"
+        rbac.set_tenant_role("tenant-a", owner, "operator")
+    denied = client.put("/api/v1/vendor-setup", json={**reviewed(status), "expected_revision": 0,
+        "ticket": record["name"], "ticket_revision": record["revision"], "resource_owner": owner})
+    assert denied.status_code == 409, denied.text
+    assert owner not in client.get("/api/v1/vendor-setup").json()["eligible_owners"]
+    with tenant_scope(tenant="tenant-a"):
+        assert setup.current() is None
+
+
+def test_initial_owner_is_rechecked_after_credential_validation(client, monkeypatch):
+    from maverick import vendor_onboarding_adapters as adapters
+    activate(client)
+    record = credential()
+    resolve = adapters.resolve_connection
+    def revoke(*args, **kwargs):
+        result = resolve(*args, **kwargs)
+        rbac.remove_tenant_role("tenant-a", "user:other")
+        return result
+    monkeypatch.setattr(adapters, "resolve_connection", revoke)
+    denied = bind(client, record, owner="user:other")
+    assert denied.status_code == 409 and "access changed" in denied.text
+    with tenant_scope(tenant="tenant-a"):
+        assert setup.current() is None
+
+
+def test_initial_setup_has_no_implicit_actor_owner_default(client):
+    activate(client)
+    record = credential()
+    status = client.get("/api/v1/vendor-setup").json()
+    missing = client.put("/api/v1/vendor-setup", json={**reviewed(status), "expected_revision": 0,
+        "ticket": record["name"], "ticket_revision": record["revision"]})
+    assert missing.status_code == 422
+    with tenant_scope(tenant="tenant-a"):
+        assert setup.current() is None
+
+
+def test_historical_cases_keep_their_owner_when_configuration_is_missing(client):
+    from maverick_dashboard import settings_store
+    activate(client)
+    record = credential()
+    overlay = settings_store._load_overlay_for_update()
+    overlay["vendor_onboarding"].update(resource_owner="user:other", ticket_connection=record["name"])
+    settings_store._write(overlay)
+    config.reset_config_cache()
+    configured = client.get("/api/v1/vendor-setup").json()
+    assert configured["owner_locked"] and configured["owner_source"] == "configured"
+    created = client.post("/api/v1/vendor-onboarding/cases", json={"vendor_name": "Historical owner vendor", "project": "VEND", "purpose": "Preserve actual historical ownership"})
+    assert created.status_code == 201, created.text
+    overlay["vendor_onboarding"].pop("resource_owner")
+    settings_store._write(overlay)
+    config.reset_config_cache()
+    status = client.get("/api/v1/vendor-setup").json()
+    assert status["owner_locked"] and status["owner_source"] == "historical"
+    assert status["binding"]["resource_owner"] == "user:other"
+    assert bind(client, record, owner="user:owner").status_code == 409
+    saved = bind(client, record, owner="user:other")
+    assert saved.status_code == 200 and saved.json()["binding"]["resource_owner"] == "user:other"
+    assert client.get("/api/v1/vendor-onboarding/cases").json()["cases"][0]["id"] == created.json()["id"]

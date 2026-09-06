@@ -192,6 +192,7 @@ def test_journey_id_selectors_exist_in_actual_bundled_and_dashboard_pages(module
     parser = Page()
     for path in (root / "apps/desktop/ui/index.html", root / "apps/desktop/ui/maintenance.html",
                  root / "apps/desktop/ui/recovery.html",
+                 root / "packages/maverick-dashboard/maverick_dashboard/templates/support.html",
                  root / "packages/maverick-dashboard/maverick_dashboard/templates/workspace_recovery.html"):
         parser.feed(path.read_text(encoding="utf-8"))
     selectors = set(re.findall(r'["\']#([a-z][a-z0-9-]*)', Path(module.__file__).read_text(encoding="utf-8")))
@@ -262,3 +263,88 @@ def test_stop_quits_owned_native_window_before_closing_driver(modules, monkeypat
     assert calls.index("native-quit") < calls.index("driver-close")
     assert calls[-1] == "driver-close"
     assert journey.report["cleanup_errors"] == (["webview-session"] if close_fails else [])
+
+
+@pytest.mark.parametrize("failure", [None, "missing-package", "not-installed", "wrong-version", "extra-package",
+                                     "cohort-mismatch", "incomplete-build", "manifest-duplicate", "private-control",
+                                     "private-grant", "private-password", "download-changed", "unconfirmed-download"])
+def test_normal_support_journey_reviews_exact_cohort_and_download(tmp_path, modules, failure):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.workspace = Path(__file__).parents[2]
+    journey.directory, journey.downloads = tmp_path, tmp_path / "downloads"
+    journey.downloads.mkdir()
+    journey.password = "synthetic-private-passphrase"  # pragma: allowlist secret - noncredential redaction fixture
+    journey.report = {"checks": []}
+    cohort = module.tomllib.loads((journey.workspace / "release-cohort.toml").read_text(encoding="utf-8"))
+    journey.metadata = {"complete_release_cohort": failure != "incomplete-build", "cohort_version": cohort["version"], "packages": cohort["packages"]}
+    report = {"versions": {row["distribution"]: cohort["version"] for row in cohort["packages"]}, "config_redacted": {}}
+    if failure == "missing-package":
+        del report["versions"]["maverick-knowledge"]
+    elif failure == "not-installed":
+        report["versions"]["maverick-knowledge"] = "not installed"
+    elif failure == "wrong-version":
+        report["versions"]["maverick-installer"] = "99.0.0"
+    elif failure == "extra-package":
+        report["versions"]["unexpected"] = cohort["version"]
+    elif failure == "cohort-mismatch":
+        journey.metadata["cohort_version"] = "99.0.0"
+    elif failure == "manifest-duplicate":
+        journey.metadata["packages"] = [cohort["packages"][0]] * 8
+    elif failure == "private-grant":
+        report["config_redacted"]["fixture"] = "a" * 32 + ":" + "b" * 64
+    elif failure == "private-password":
+        report["config_redacted"]["fixture"] = journey.password
+    actions = []
+
+    class View:
+        def navigate(self, address):
+            actions.append(("navigate", address))
+
+        def click(self, selector):
+            actions.append(("click", selector))
+            if selector == "#support-download":
+                value = dict(report)
+                if failure == "download-changed":
+                    value["unexpected"] = "unreviewed"
+                (journey.downloads / ("Lightwork-support-" + "a" * 32 + ".json")).write_text(json.dumps(value), encoding="utf-8")
+
+        def wait(self, condition, **_kwargs):
+            result = condition()
+            assert result
+            return result
+
+        def property(self, selector, name):
+            if selector == "#support-result":
+                assert name == "hidden"
+                return False
+            assert selector == "#support-download" and name == "disabled"
+            return failure != "unconfirmed-download"
+
+        def text(self, selector):
+            return json.dumps(report) if selector == "#support-preview" else "The reviewed report was downloaded."
+
+        def call(self, method, path, payload):
+            assert method == "POST" and path.endswith("/elements")
+            assert payload["using"] == "css selector"
+            return [{"synthetic-private-control": True}] if failure == "private-control" else []
+
+        def screenshot(self, path):
+            actions.append(("screenshot", path.name))
+
+        session = "/session/synthetic"
+
+    journey.view = View()
+    if failure:
+        with pytest.raises(RuntimeError):
+            journey.normal_support()
+        assert not any(action[0] == "screenshot" for action in actions)
+        assert "normal-support-eight-package-inventory" not in journey.report["checks"]
+    else:
+        journey.normal_support()
+        assert actions == [("navigate", "http://127.0.0.1:8765/help"), ("click", "#support-prepare"),
+                           ("click", "#support-result details summary"), ("click", "#support-confirm"),
+                           ("click", "#support-download"), ("screenshot", "normal-support.png")]
+        assert journey.report["support_inventory"]["package_count"] == 8
+        assert journey.report["support_inventory"]["versions"] == report["versions"]
+        assert journey.report["checks"] == ["normal-support-eight-package-inventory"]

@@ -123,10 +123,16 @@ def inspect_signed_msi(path: Path, *, version: str, scratch: Path) -> dict:
         file_lock.atomic_create_text(script, _INSPECT)
     system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
     command = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    # Python preserves PowerShell 7's module paths when launching Windows
+    # PowerShell 5. Its incompatible Security module then prevents the actual
+    # signature cmdlet from loading. Use only OS modules in this child; retain
+    # the parent's environment and all Windows signature/product checks.
+    environment = {name: value for name, value in os.environ.items() if name.lower() != "psmodulepath"}
+    environment["PSModulePath"] = str(command.parent / "Modules")
     result = subprocess.run([str(command), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                              "-File", installer_path(script), "-Installer", installer_path(path)],
                             capture_output=True, text=True, timeout=120,
-                            creationflags=subprocess.CREATE_NO_WINDOW, check=False)
+                            creationflags=subprocess.CREATE_NO_WINDOW, check=False, env=environment)
     try:
         properties = json.loads(result.stdout) if result.returncode == 0 else {}
         if (properties.get("ProductVersion") != version

@@ -83,7 +83,7 @@ jobs:
         run: |
           & $env:CUSTOMER_BUILD_PYTHON scripts/install_release_cohort.py --verify-only
           if ($LASTEXITCODE -ne 0) { throw 'The test interpreter cannot import the full release cohort.' }
-          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py apps/installer-msi/test_acceptance_diagnostics.py apps/installer-msi/test_signed_rollback_fixture.py apps/installer-msi/test_native_webview_fixture.py apps/installer-msi/test_native_webview_journey.py apps/installer-msi/test_release_acceptance.py apps/installer-msi/test_release_pair_driver.py packages/maverick-core/tests/test_release_identity_transition.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
+          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py apps/installer-msi/test_acceptance_diagnostics.py apps/installer-msi/test_signed_rollback_fixture.py apps/installer-msi/test_signing_transition_fixture.py apps/installer-msi/test_native_webview_fixture.py apps/installer-msi/test_native_webview_journey.py apps/installer-msi/test_release_acceptance.py apps/installer-msi/test_release_pair_driver.py packages/maverick-core/tests/test_release_identity_transition.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
           if ($LASTEXITCODE -ne 0) { throw 'Packaging regression tests failed.' }
           node --test apps/desktop/tests/*.test.js
           if ($LASTEXITCODE -ne 0) { throw 'Maintenance UI tests failed.' }
@@ -135,12 +135,14 @@ jobs:
           if ($base.Count -ne 1) { throw 'Expected one base customer MSI.' }
           New-Item -ItemType Directory -Path customer-artifacts | Out-Null
           Copy-Item -LiteralPath $base[0].FullName -Destination customer-artifacts/Lightwork.msi
+          Copy-Item -LiteralPath 'apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/maverick-desktop.exe' -Destination (Join-Path $env:RUNNER_TEMP 'transition-base-native.exe')
           Copy-Item -LiteralPath (Join-Path $stage 'runtime-inventory.json') -Destination customer-artifacts/runtime-inventory.json
           Copy-Item -LiteralPath $env:CUSTOMER_PUBLIC_KEY -Destination customer-artifacts/updater.pub
           ./apps/installer-msi/build-customer.ps1 -Python $env:CUSTOMER_BUILD_PYTHON -Runtime "$env:GITHUB_WORKSPACE/dist/maverick.exe" -PublicKeyFile $env:CUSTOMER_PUBLIC_KEY -UpdateEndpoint $env:CUSTOMER_ENDPOINT -StageDirectory (Join-Path $env:RUNNER_TEMP 'customer-upgrade-fixture') -AcceptanceFixtureVersion $candidateVersion -InjectAcceptanceFailure
           $candidate = @(Get-ChildItem $bundleDir -Filter "*_$($candidateVersion)_x64_en-US.msi")
           if ($candidate.Count -ne 1) { throw 'Expected one labelled upgrade fixture MSI.' }
           Copy-Item -LiteralPath $candidate[0].FullName -Destination (Join-Path $env:RUNNER_TEMP 'upgrade-fixture.msi')
+          Copy-Item -LiteralPath 'apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/maverick-desktop.exe' -Destination (Join-Path $env:RUNNER_TEMP 'transition-next-native.exe')
       - name: Verify signatures reject changed installer bytes
         shell: pwsh
         run: |
@@ -173,6 +175,13 @@ jobs:
         run: |
           & $env:CUSTOMER_BUILD_PYTHON apps/installer-msi/accept_signed_rollback_fixture.py --workspace "$env:GITHUB_WORKSPACE" --runner "$env:RUNNER_TEMP"
           if ($LASTEXITCODE -ne 0) { throw 'Disposable signed rollback acceptance failed; see stage diagnostics.' }
+      - name: Accept a reviewed publisher transition with two disposable identities
+        if: github.event_name != 'workflow_dispatch' || !inputs.customer_release
+        timeout-minutes: 45
+        shell: pwsh
+        run: |
+          & $env:CUSTOMER_BUILD_PYTHON apps/installer-msi/accept_signing_transition_fixture.py --workspace "$env:GITHUB_WORKSPACE" --runner "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { throw 'Disposable publisher transition acceptance failed; see stage diagnostics.' }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-customer-unsigned-candidate

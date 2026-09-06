@@ -76,6 +76,11 @@ to sign the exact release-pair policy; neither a feed nor a repair offer can
 grant this authority. Admission expiry does not strand an already admitted
 interrupted pair. See the [signing transition procedure](../../docs/windows-signing-identity-transition.md)
 for preparation, customer controls and the distinct native acceptance boundary.
+The disposable hosted workflow has a separate two-publisher transition fixture
+that uses actual signed MSI upgrade/rollback and a pre-execution process-resume
+boundary. Its `publisher-transition-acceptance.json` must pass independently of
+the same-identity gate. It uses one updater key and unchanged frozen runtime
+bytes, and does not establish production certificate or migration acceptance.
 
 **Accounting changes prevent automatic rollback.** Before preparing rollback,
 and again before either MSI runs, the app compares the selected snapshot with

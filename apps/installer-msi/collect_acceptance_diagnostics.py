@@ -10,6 +10,7 @@ from pathlib import Path
 MAX_BYTES = 1024 * 1024
 MAX_FILES = 32
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
+MAX_IMAGES = 5
 PATTERNS = (
     "lightwork-msi-*.log",
     "rollback-signed-*/stages.json",
@@ -20,6 +21,8 @@ PATTERNS = (
     "rollback-signed-*/native-webview.log",
     "rollback-signed-*/completed-rollback.log",
     "rollback-signed-*/cleanup.log",
+    "identity-transition-*/stages.json",
+    "identity-transition-*/*.log",
     "native-webview-*/acceptance.json",
     "native-webview-*/driver.log",
     "native-webview-*/msi-*.log",
@@ -63,8 +66,11 @@ def collect(runner: Path, artifacts: Path, output: Path) -> dict:
     candidates = [(path, runner) for pattern in PATTERNS for path in runner.glob(pattern)]
     candidates += [(artifacts / name, artifacts) for name in (
         "acceptance.json", "completed-rollback-acceptance.json", "runtime-inventory.json",
+        "publisher-transition-acceptance.json",
     )]
-    for path, root in sorted(set(candidates), key=lambda item: (item[1] != artifacts, str(item[0]))):
+    # Reports and stage summaries must survive a large number of MSI logs.
+    for path, root in sorted(set(candidates), key=lambda item: (
+            item[1] != artifacts, item[0].suffix != ".json", str(item[0]))):
         if len(entries) >= MAX_FILES:
             break
         if not ordinary_file(path, root):
@@ -85,9 +91,9 @@ def collect(runner: Path, artifacts: Path, output: Path) -> dict:
         except OSError:
             entries.append({"source": path.relative_to(root).as_posix(), "unavailable": True})
     images = []
-    for name in ("first-owner.png", "signed-native-upgrade.png", "signed-native-rollback.png", "startup-support.png"):
+    for name in ("first-owner.png", "normal-support.png", "signed-native-upgrade.png", "signed-native-rollback.png", "startup-support.png"):
         for path in sorted(runner.glob("native-webview-*/" + name)):
-            if len(images) >= 4 or not ordinary_file(path, runner):
+            if len(images) >= MAX_IMAGES or not ordinary_file(path, runner):
                 continue
             try:
                 with path.open("rb") as source:
@@ -101,9 +107,9 @@ def collect(runner: Path, artifacts: Path, output: Path) -> dict:
                 (output / target).write_bytes(raw)
                 images.append({"file": target, "source": path.relative_to(runner).as_posix()})
     report = {"schema": "lightwork.acceptance-diagnostics.v1", "synthetic_fixtures_only": True,
-              "scope": "Allowlisted acceptance reports, scrubbed log tails and four synthetic native screenshots; no keys, state files, installers or archives.",
+              "scope": "Allowlisted acceptance reports, scrubbed log tails and five synthetic native screenshots; no keys, state files, installers or archives.",
               "maximum_files": MAX_FILES, "maximum_bytes_per_file": MAX_BYTES, "files": entries,
-              "images": images, "maximum_images": 4, "maximum_image_bytes": MAX_IMAGE_BYTES}
+              "images": images, "maximum_images": MAX_IMAGES, "maximum_image_bytes": MAX_IMAGE_BYTES}
     (output / "manifest.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
 

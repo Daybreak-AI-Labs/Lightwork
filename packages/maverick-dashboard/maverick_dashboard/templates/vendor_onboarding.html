@@ -47,9 +47,11 @@
     <p>Choose credentials in <a href="/connections">Connections</a>. This saves the workspace's vendor review owner and delivery connection. Provider access is checked by the existing evidence and delivery actions.</p>
     <p id="vs-owner"></p>
     <form id="vs-form">
+      <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" required disabled aria-describedby="vs-owner-help"></select>
+      <p id="vs-owner-help">For initial setup, choose an active workspace member who can manage vendor reviews. Manage workspace membership in <a href="/users">Users</a>. Existing ownership stays fixed. Choosing an owner grants no permissions or connection access.</p>
       <label for="vs-ticket">Jira connection</label><select id="vs-ticket" required disabled></select>
       <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" disabled></select>
-      <label><input type="checkbox" id="vs-confirm" style="display:inline;width:auto" disabled> I reviewed the connection choices and this setup change.</label>
+      <label><input type="checkbox" id="vs-confirm" style="display:inline;width:auto" disabled> I reviewed the owner, connection choices and this setup change.</label>
       <div class="vo-actions"><button id="vs-save" type="submit" disabled>Save workspace setup</button><button id="vs-enable" type="button" disabled>Enable vendor workflow</button><button id="vs-refresh" type="button">Refresh setup</button></div>
     </form>
     <p>Enable vendor workflow turns on Connections, vendor management, AI vendor risk, model assurance and evidence records for this installation. It grants no colleague access, starts no provider request, and approves no action.</p>

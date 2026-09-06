@@ -58,6 +58,7 @@ def test_native_captures_are_exact_allowlisted_and_bounded(tmp_path, monkeypatch
     native.mkdir(parents=True)
     header = b"\x89PNG\r\n\x1a\n"
     (native / "first-owner.png").write_bytes(header + b"fixture capture")
+    (native / "normal-support.png").write_bytes(header + b"reviewed bundle")
     (native / "signed-native-upgrade.png").write_bytes(header + b"x" * 100)
     (native / "signed-native-rollback.png").write_bytes(b"not a PNG")
     (native / "private-grant.png").write_bytes(header + b"PRIVATE")
@@ -65,7 +66,36 @@ def test_native_captures_are_exact_allowlisted_and_bounded(tmp_path, monkeypatch
     monkeypatch.setattr(diagnostics, "MAX_IMAGE_BYTES", 32)
     output = tmp_path / "output"
     report = diagnostics.collect(runner, tmp_path / "missing", output)
-    assert len(report["images"]) == 1
+    assert len(report["images"]) == 2
     assert report["images"][0]["source"] == "native-webview-fixture/first-owner.png"
     assert (output / report["images"][0]["file"]).read_bytes() == header + b"fixture capture"
-    assert sorted(path.suffix for path in output.iterdir()) == [".json", ".png"]
+    assert report["images"][1]["source"] == "native-webview-fixture/normal-support.png"
+    assert report["maximum_images"] == 5
+    assert sorted(path.suffix for path in output.iterdir()) == [".json", ".png", ".png"]
+
+
+def test_transition_reports_survive_log_volume_without_collecting_signing_inputs(tmp_path, monkeypatch):
+    runner = tmp_path / "runner"
+    transition = runner / "identity-transition-fixture"
+    transition.mkdir(parents=True)
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "publisher-transition-acceptance.json").write_text('{"phase":"complete"}')
+    (transition / "stages.json").write_text('{"phase":"transition-rollback"}')
+    (transition / "transition-rollback.log").write_text("Retained real transition failure")
+    (transition / "bridge.json").write_text("PRIVATE POLICY")
+    (transition / "bridge-policy.json.sig").write_text("PRIVATE SIGNATURE")
+    (transition / "fixture.key").write_text("PRIVATE KEY")
+    for index in range(10):
+        (runner / f"lightwork-msi-{index:02d}.log").write_text("old MSI output")
+    monkeypatch.setattr(diagnostics, "MAX_FILES", 3)
+    output = tmp_path / "output"
+    report = diagnostics.collect(runner, artifacts, output)
+    assert len(report["files"]) == 3
+    assert [row["source"] for row in report["files"]] == [
+        "publisher-transition-acceptance.json", "identity-transition-fixture/stages.json",
+        "identity-transition-fixture/transition-rollback.log",
+    ]
+    combined = "\n".join(path.read_text() for path in output.iterdir())
+    assert "Retained real transition failure" in combined
+    assert "PRIVATE" not in combined

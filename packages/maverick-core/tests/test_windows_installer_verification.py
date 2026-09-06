@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -69,3 +71,48 @@ def test_trusted_comment_and_wrong_key_cannot_be_substituted(tmp_path):
     other, _ = signed(path.read_bytes())
     with pytest.raises(verification.InstallerVerificationError):
         verification.verify_minisign(path, other, signature)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual Windows PowerShell signature cmdlet")
+def test_inspection_child_uses_windows_modules_when_parent_module_is_incompatible(tmp_path, monkeypatch):
+    # A Python child of PowerShell 7 inherits its module search path. Unlike a
+    # directly launched powershell.exe, this grandchild gets no compatibility
+    # adjustment from the parent shell. Exercise the real Windows cmdlet with
+    # an incompatible first-choice module, without installing or signing an MSI.
+    module_root = tmp_path / "parent-modules"
+    module = module_root / "Microsoft.PowerShell.Security"
+    module.mkdir(parents=True)
+    (module / "Microsoft.PowerShell.Security.psd1").write_text(
+        "@{ModuleVersion='7.0';PowerShellVersion='3.0';RootModule='incompatible.psm1';FunctionsToExport=@('Get-AuthenticodeSignature')}",
+        encoding="utf-8")
+    (module / "incompatible.psm1").write_text("throw 'The incompatible parent module must never load.'", encoding="utf-8")
+    system_root = Path(os.environ["SystemRoot"])
+    windows_modules = system_root / "System32/WindowsPowerShell/v1.0/Modules"
+    inherited = str(module_root) + os.pathsep + str(windows_modules)
+    monkeypatch.setenv("PSModulePath", inherited)
+    native_run = subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        # Only probe the cmdlet environment; the fixture below supplies public
+        # product metadata. Actual signed-MSI inspection remains a hosted gate.
+        probe = (
+            "$ErrorActionPreference='Stop';"
+            "$signature=Get-AuthenticodeSignature -LiteralPath "
+            "(Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe');"
+            "if($signature.Status -ne 'Valid'){throw 'The Windows binary signature is not valid.'};"
+            "@{ProductVersion='0.1.7';ProductCode='{12345678-1234-1234-1234-123456789ABC}';"
+            "UpgradeCode='{AB5BC260-7EC9-4B70-AF78-28F4067BC530}';"
+            "PublisherThumbprint=$signature.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress"
+        )
+        result = native_run([command[0], "-NoProfile", "-NonInteractive", "-Command", probe], **kwargs)
+        assert result.returncode == 0, result.stderr
+        assert os.environ["PSModulePath"] == inherited
+        assert [value for name, value in kwargs["env"].items() if name.lower() == "psmodulepath"] == [str(windows_modules)]
+        return result
+
+    monkeypatch.setattr(verification.subprocess, "run", run)
+    properties = verification.inspect_signed_msi(tmp_path / "not-executed.msi", version="0.1.7", scratch=tmp_path / "inspection")
+    assert len(calls) == 1
+    assert properties["ProductVersion"] == "0.1.7"

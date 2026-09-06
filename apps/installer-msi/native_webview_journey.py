@@ -18,6 +18,11 @@ import time
 import uuid
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
+
 from native_webview_driver import WebView, app_windows, menu
 from native_webview_fixture import (
     available_port,
@@ -40,6 +45,18 @@ def verified_driver_version(directory: Path, runtime_version: str, output: str) 
             or selected.split(".")[:3] != runtime_version.split(".")[:3]):
         raise RuntimeError("The signed WebView driver does not match its downloaded version and runtime build.")
     return selected
+
+
+def support_inventory(bundle: dict, metadata: dict, cohort: dict) -> dict:
+    source = [row["distribution"] for row in cohort["packages"]]
+    frozen = [row["distribution"] for row in metadata["packages"]]
+    version = cohort["version"]
+    if (len(source) != 8 or len(set(source)) != 8 or len(frozen) != 8
+            or set(source) != set(frozen) or metadata.get("complete_release_cohort") is not True
+            or metadata.get("cohort_version") != version
+            or bundle.get("versions") != dict.fromkeys(source, version)):
+        raise RuntimeError("The frozen support inventory must contain all eight exact release-cohort versions.")
+    return {"package_count": 8, "cohort_version": version, "versions": bundle["versions"]}
 
 
 class Journey:
@@ -188,6 +205,52 @@ class Journey:
         self.view.screenshot(self.directory / "first-owner.png")
         self.record("first-launch-and-named-owner", passed=True)
 
+    def normal_support(self):
+        self.record("normal-support-eight-package-inventory")
+        self.view.navigate("http://127.0.0.1:8765/help")
+        self.view.click("#support-prepare")
+        self.view.wait(lambda: self.view.property("#support-result", "hidden") is False)
+        if self.view.property("#support-download", "disabled") is not True:
+            raise RuntimeError("Normal support download did not require review and consent.")
+        self.view.click("#support-result details summary")
+        value = self.view.wait(lambda: self.view.text("#support-preview"))
+        if len(value.encode("utf-8")) > 2 * 1024 * 1024:
+            raise RuntimeError("The native support preview exceeds its supported size.")
+        report = json.loads(value)
+        cohort = tomllib.loads((self.workspace / "release-cohort.toml").read_text(encoding="utf-8"))
+        inventory = support_inventory(report, self.metadata, cohort)
+        if self.password in value or re.search(r"[0-9a-f]{32}:[0-9a-f]{64}", value):
+            raise RuntimeError("The native support preview exposed excluded private input.")
+        if self.view.call("POST", self.view.session + "/elements", {
+                "using": "css selector", "value": "#maintenance-authorization,#wrec-installation-code"}):
+            raise RuntimeError("Private maintenance inputs must not appear on the support page.")
+        before = set(self.downloads.glob("Lightwork-support-*.json"))
+        self.view.click("#support-confirm")
+        self.view.click("#support-download")
+        self.view.wait(lambda: "reviewed report was downloaded" in self.view.text("#support-status"))
+
+        def downloaded():
+            files = set(self.downloads.glob("Lightwork-support-*.json")) - before
+            if len(files) != 1:
+                return None
+            path = files.pop()
+            return path if re.fullmatch(r"Lightwork-support-[0-9a-f]{32}\.json", path.name) and path.stat().st_size else None
+
+        path = self.view.wait(downloaded)
+        if path.stat().st_size > 2 * 1024 * 1024:
+            raise RuntimeError("The native support download exceeds its supported size.")
+        text = path.read_text(encoding="utf-8")
+        if (json.loads(text) != report or self.password in text
+                or re.search(r"[0-9a-f]{32}:[0-9a-f]{64}", text)):
+            raise RuntimeError("The native support download differs from the reviewed redacted report.")
+        # The actual page verifies API-preview SHA256 against received bytes
+        # before saving. Record those saved bytes and compare their full JSON
+        # with the visible review without intercepting fetch or replacing IPC.
+        inventory["download_sha256"] = digest(path)
+        self.report["support_inventory"] = inventory
+        self.view.screenshot(self.directory / "normal-support.png")
+        self.record("normal-support-eight-package-inventory", passed=True)
+
     def transition(self, *, rollback=False):
         name = "signed-native-rollback" if rollback else "signed-native-upgrade"
         self.record(name)
@@ -298,6 +361,7 @@ class Journey:
             with hosts_mapping(hosts, self.directory.name), update_server(self.directory, self.base, self.candidate, self.metadata) as (requests, _port):
                 self.start()
                 self.first_owner()
+                self.normal_support()
                 tenant = self.state / "tenants/native-acceptance"
                 tenant.mkdir(parents=True, exist_ok=True)
                 marker = tenant / "native-acceptance-state.txt"

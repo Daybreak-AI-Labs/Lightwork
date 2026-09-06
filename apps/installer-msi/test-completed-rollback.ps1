@@ -5,11 +5,25 @@ param(
     [Parameter(Mandatory=$true)][string]$CandidateMsi,
     [Parameter(Mandatory=$true)][string]$PublicKeyFile,
     [Parameter(Mandatory=$true)][string]$Inventory,
-    [Parameter(Mandatory=$true)][string]$Report
+    [Parameter(Mandatory=$true)][string]$Report,
+    [string]$TransitionDirectory = ''
 )
 $ErrorActionPreference = 'Stop'
 if ($env:CI -ne 'true' -or -not $env:RUNNER_TEMP) { throw 'Completed rollback acceptance requires a disposable CI runner.' }
+if ($TransitionDirectory -and ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or
+    $env:RUNNER_OS -ne 'Windows' -or $env:GITHUB_JOB -ne 'build-and-accept')) {
+    throw 'Publisher transition acceptance requires the disposable GitHub-hosted acceptance job.'
+}
 $runnerRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+$transition = $null
+if ($TransitionDirectory) {
+    $transitionRoot = Get-Item -LiteralPath $TransitionDirectory
+    if (-not $transitionRoot.PSIsContainer -or $transitionRoot.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint) -or
+        -not $transitionRoot.FullName.StartsWith($runnerRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $transitionRoot.Name -notmatch '^identity-transition-[a-f0-9]{32}$') { throw 'Invalid disposable transition directory.' }
+    $TransitionDirectory = $transitionRoot.FullName
+    $transition = Get-Content -Raw -LiteralPath (Join-Path $TransitionDirectory 'bridge.json') | ConvertFrom-Json
+}
 $fixtureRoot = Join-Path $env:RUNNER_TEMP ('lw-rollback-' + [guid]::NewGuid().ToString('N'))
 $fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
 if (-not $fixtureRoot.StartsWith($runnerRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Acceptance fixture escaped RUNNER_TEMP.' }
@@ -28,6 +42,11 @@ Get-ChildItem Env: | Where-Object { $_.Name -match '^(MAVERICK_|LIGHTWORK_)' } |
 }
 $originalPath = $env:PATH
 $observed = [ordered]@{schema='lightwork.completed-upgrade-rollback-acceptance.v1'; clean_virtual_machine=$false; publicly_recognized_publisher=$false; synthetic_fixture_versions=$true; same_frozen_runtime_fixture=$true; native_webview_automated=$false}
+if ($transition) {
+    $observed.schema = 'lightwork.publisher-transition-acceptance.v1'
+    $observed.same_updater_key = $true
+    $observed.mid_msi_crash_tested = $false
+}
 $server = $null
 
 function Invoke-Msi([string]$package,[string]$action) {
@@ -78,6 +97,13 @@ function Assert-InstalledChannel([string]$ExpectedVersion) {
     $channel = Read-InstalledChannel
     if ($channel.version -cne $ExpectedVersion -or $channel.packaged_runtime -ne $true -or $channel.public_key -cne $expectedPublicKey) {
         throw "Installed native application does not match the expected customer version/channel: $ExpectedVersion"
+    }
+    if ($transition) {
+        $side = if ($ExpectedVersion -eq $transition.policy.from.version) { $transition.policy.from } else { $transition.policy.to }
+        if ($side.version -cne $ExpectedVersion -or
+            (Get-FileHash -LiteralPath (Join-Path $installPath 'maverick-desktop.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $side.native_sha256) {
+            throw 'Installed native bytes do not match the exact signed transition policy.'
+        }
     }
     return $channel.version
 }
@@ -136,14 +162,44 @@ function Stop-Recovery {
     $script:server = $null
 }
 
-function Authorization([string]$rollbackId='') {
+function Authorization([string]$rollbackId='', [string]$BridgeFile='') {
     $origin = 'http://127.0.0.1:8765'
     $bearer = 'Bearer ' + $env:MAVERICK_DASHBOARD_TOKEN
     $status = Invoke-RestMethod ($origin + '/api/v1/recovery/status') -TimeoutSec 15 -Headers @{Origin=$origin; Authorization=$bearer}
     $headers = @{Origin=$origin; Authorization=$bearer; 'X-Lightwork-Recovery-Context'=$status.context; 'X-Lightwork-Expected-Tenant'=$status.expected_tenant}
     $body = @{confirm=$true; confirm_all_workspaces=$true}
     if ($rollbackId) { $body.rollback_id=$rollbackId }
-    return Invoke-RestMethod ($origin + '/api/v1/recovery/installation/authorize') -TimeoutSec 30 -Method Post -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json)
+    if ($BridgeFile) {
+        if ($rollbackId) { throw 'A rollback must use the originally admitted transition.' }
+        $envelope = Get-Content -Raw -LiteralPath $BridgeFile
+        $review = Invoke-RestMethod ($origin + '/api/v1/recovery/installation/identity-transition') -TimeoutSec 30 -Method Post -Headers $headers -ContentType 'application/json' -Body (@{envelope=$envelope}|ConvertTo-Json -Compress)
+        if ($review.sha256 -notmatch '^[a-f0-9]{64}$' -or $review.publisher_os_trust_checked -ne $false) { throw 'The transition API returned invalid review evidence.' }
+        $body.identity_transition=$envelope
+        $body.transition_sha256=$review.sha256
+        $body.confirm_identity_transition=$true
+        $observed.reviewed_transition_sha256=$review.sha256
+    }
+    return Invoke-RestMethod ($origin + '/api/v1/recovery/installation/authorize') -TimeoutSec 30 -Method Post -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 12)
+}
+
+function Assert-TransitionReviewRefused([string]$BridgeFile, [string]$ExpectedReason) {
+    $origin = 'http://127.0.0.1:8765'
+    $headers = @{Origin=$origin; Authorization=('Bearer ' + $env:MAVERICK_DASHBOARD_TOKEN)}
+    $status = Invoke-RestMethod ($origin + '/api/v1/recovery/status') -TimeoutSec 15 -Headers $headers
+    $headers['X-Lightwork-Recovery-Context']=$status.context
+    $headers['X-Lightwork-Expected-Tenant']=$status.expected_tenant
+    $body = @{envelope=(Get-Content -Raw -LiteralPath $BridgeFile)} | ConvertTo-Json -Compress
+    $response = Invoke-RestMethod ($origin + '/api/v1/recovery/installation/identity-transition') -TimeoutSec 30 -Method Post -Headers $headers -ContentType 'application/json' -Body $body -SkipHttpErrorCheck -StatusCodeVariable httpStatus
+    if ($httpStatus -ne 409 -or $response.detail -notmatch $ExpectedReason) { throw 'A negative signing-transition case did not fail for the expected policy reason.' }
+}
+
+function Stage-Installers($grant, [string]$BridgeFile='') {
+    $details = Protocol $runtime 'inspect' @{authorization=$grant.authorization}
+    Copy-Item -LiteralPath $BaseMsi -Destination (Join-Path $details.directory 'old.msi')
+    Copy-Item -LiteralPath $CandidateMsi -Destination (Join-Path $details.directory 'new.msi')
+    $downloads = @{public_key=$expectedPublicKey;old=@{version=$metadata.version;runtime_sha256=$metadata.runtime.sha256;signature=(Get-Content -Raw -LiteralPath ($BaseMsi+'.sig')).Trim()};new=@{version=$newVersion;runtime_sha256=$metadata.runtime.sha256;signature=(Get-Content -Raw -LiteralPath ($CandidateMsi+'.sig')).Trim()}}
+    if ($BridgeFile) { $downloads.identity_transition=Get-Content -Raw -LiteralPath $BridgeFile | ConvertFrom-Json }
+    [IO.File]::WriteAllText((Join-Path $details.directory 'downloads.json'),($downloads | ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
 }
 
 function Execute-Retained([string]$helper,[string]$authorization) {
@@ -159,6 +215,20 @@ try {
     foreach ($package in @($BaseMsi,$CandidateMsi)) {
         if ((Get-AuthenticodeSignature -LiteralPath $package).Status -ne 'Valid') { throw 'Synthetic fixture publisher is not trusted on this disposable runner.' }
         if (-not (Test-Path -LiteralPath ($package + '.sig'))) { throw 'Fixture lacks its real updater signature.' }
+    }
+    if ($transition) {
+        $oldPublisher=(Get-AuthenticodeSignature -LiteralPath $BaseMsi).SignerCertificate.Thumbprint
+        $newPublisher=(Get-AuthenticodeSignature -LiteralPath $CandidateMsi).SignerCertificate.Thumbprint
+        if ($oldPublisher -eq $newPublisher -or $oldPublisher -cne $transition.policy.from.publisher_thumbprint -or
+            $newPublisher -cne $transition.policy.to.publisher_thumbprint -or
+            $transition.policy.from.public_key -cne $expectedPublicKey -or $transition.policy.to.public_key -cne $expectedPublicKey) {
+            throw 'The actual trusted MSI publishers and compiled updater key do not match the distinct-publisher fixture.'
+        }
+        $observed.old_publisher_thumbprint=$oldPublisher
+        $observed.new_publisher_thumbprint=$newPublisher
+        $observed.actual_distinct_publisher_trust='passed'
+        $observed.base_installer_sha256=(Get-FileHash -LiteralPath $BaseMsi -Algorithm SHA256).Hash.ToLowerInvariant()
+        $observed.candidate_installer_sha256=(Get-FileHash -LiteralPath $CandidateMsi -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $observed.phase = 'base-install'
     Write-Host 'Completed rollback acceptance: installing trusted base fixture.'
@@ -184,14 +254,45 @@ try {
     }
     if (-not $unauthenticated) { throw 'Installation recovery did not require its synthetic administrator bearer.' }
     $observed.authenticated_administrator_api='passed'
-    $grant = Authorization
+    $bridgeFile = ''
+    if ($transition) {
+        $bridgeFile = Join-Path $TransitionDirectory 'bridge.json'
+        Assert-TransitionReviewRefused $bridgeFile 'disabled'
+        $observed.default_off_refusal='passed'
+        Stop-Recovery
+        [IO.File]::WriteAllText((Join-Path $statePath 'config.toml'), "[client]`nid = 'acceptance'`n[features]`nworkspace_recovery = true`nsigning_identity_transition = true`n")
+        Start-Recovery
+        Assert-TransitionReviewRefused (Join-Path $TransitionDirectory 'tampered.json') 'signatures did not verify'
+        Assert-TransitionReviewRefused (Join-Path $TransitionDirectory 'expired.json') 'not currently open'
+        $observed.tampered_policy_refused='passed'
+        $observed.expired_admission_refused='passed'
+        $unrelated = Join-Path $TransitionDirectory 'unrelated.json'
+        $unrelatedGrant = Authorization '' $unrelated
+        Stop-Recovery
+        Stage-Installers $unrelatedGrant $unrelated
+        $unrelatedRejected = $false
+        try { Protocol $runtime 'prepare' @{authorization=$unrelatedGrant.authorization} | Out-Null } catch {
+            if ($_.Exception.Message -notmatch 'verified installer does not match the reviewed identity transition') { throw }
+            $unrelatedRejected = $true
+        }
+        if (-not $unrelatedRejected -or (Protocol $runtime 'status' @{}).incomplete) { throw 'Unrelated publisher admission was accepted or left a startup block.' }
+        Assert-InstalledChannel $metadata.version | Out-Null
+        $observed.unrelated_publisher_rejected_before_execution='passed'
+        Start-Recovery
+    }
+    $grant = Authorization '' $bridgeFile
     Stop-Recovery
-    $details = Protocol $runtime 'inspect' @{authorization=$grant.authorization}
-    Copy-Item -LiteralPath $BaseMsi -Destination (Join-Path $details.directory 'old.msi')
-    Copy-Item -LiteralPath $CandidateMsi -Destination (Join-Path $details.directory 'new.msi')
-    $downloads = @{public_key=(Get-Content -Raw -LiteralPath $PublicKeyFile).Trim();old=@{version=$metadata.version;runtime_sha256=$metadata.runtime.sha256;signature=(Get-Content -Raw -LiteralPath ($BaseMsi+'.sig')).Trim()};new=@{version=$newVersion;runtime_sha256=$metadata.runtime.sha256;signature=(Get-Content -Raw -LiteralPath ($CandidateMsi+'.sig')).Trim()}}
-    [IO.File]::WriteAllText((Join-Path $details.directory 'downloads.json'),($downloads | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
+    Stage-Installers $grant $bridgeFile
     $prepared = Protocol $runtime 'prepare' @{authorization=$grant.authorization}
+    if ($transition) {
+        # The prepare process has exited. Resume from a separately launched
+        # retained helper before executing; this does not simulate a mid-MSI crash.
+        if (-not (Protocol $runtime 'status' @{}).incomplete) { throw 'Prepared transition did not hold the normal-start block.' }
+        $resumed = Protocol $prepared.helper 'resume' @{id=$grant.id}
+        if ($resumed.id -cne $grant.id -or $resumed.authorization -eq $grant.authorization) { throw 'Resume did not renew the exact admitted operation.' }
+        $grant.authorization=$resumed.authorization
+        $observed.pre_execution_process_resume='passed'
+    }
     $result = Execute-Retained $prepared.helper $grant.authorization
     if ($result.status -ne 'upgraded') { throw 'No completed upgrade receipt.' }
     $observed.upgraded_native_version = Assert-InstalledChannel $newVersion
@@ -206,6 +307,11 @@ try {
     $result = Execute-Retained $prepared.helper $rollback.authorization
     if ($result.status -ne 'rolled_back') { throw 'No completed rollback receipt.' }
     $observed.rolled_back_native_version = Assert-InstalledChannel $metadata.version
+    if ($transition) {
+        $observed.old_native_sha256=$transition.policy.from.native_sha256
+        $observed.new_native_sha256=$transition.policy.to.native_sha256
+        $observed.exact_native_transition_and_return='passed'
+    }
     foreach ($tenant in @('acceptance','second')) {
         if ([IO.File]::ReadAllText((Join-Path $statePath ('tenants/'+$tenant+'/fixture-state.txt'))) -ne 'before-upgrade') { throw 'The complete local workspace snapshot was not restored.' }
     }

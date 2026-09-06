@@ -4,18 +4,21 @@
   var el = function (id) { return document.getElementById('vs-' + id); };
   if (!el('panel')) return;
   var state = null, context = null, busy = false, locked = false;
+  function ownerLabel(owner) { return owner.startsWith('user:') ? owner.slice(5) : owner; }
   function controls() {
     ['ticket', 'document', 'confirm'].forEach(function (id) { el(id).disabled = busy || locked || !state; });
+    el('resource-owner').disabled = busy || locked || !state || state.owner_locked;
     el('enable').disabled = busy || locked || !state || state.modules_enabled || !el('confirm').checked;
-    el('save').disabled = busy || locked || !state || !state.modules_enabled || !el('ticket').value || !el('confirm').checked;
+    el('save').disabled = busy || locked || !state || !state.modules_enabled || !el('resource-owner').value || !el('ticket').value || !el('confirm').checked;
     el('refresh').disabled = busy || locked;
   }
   function clear(message, lock) {
     state = null; locked = !!lock; el('ticket').replaceChildren(); el('document').replaceChildren();
+    el('resource-owner').replaceChildren();
     el('owner').textContent = ''; el('confirm').checked = false; el('status').textContent = message; controls();
   }
   function render(data) {
-    if (!data || !/^[a-f0-9]{64}$/.test(data.context) || !/^[a-f0-9]{64}$/.test(data.configuration) || !Array.isArray(data.connections) || !data.binding) throw new Error('Setup response was incomplete.');
+    if (!data || !/^[a-f0-9]{64}$/.test(data.context) || !/^[a-f0-9]{64}$/.test(data.configuration) || !Array.isArray(data.connections) || !data.binding || typeof data.owner_locked !== 'boolean' || !Array.isArray(data.eligible_owners) || data.eligible_owners.some(function (owner) { return typeof owner !== 'string' || !owner.startsWith('user:') || owner.length > 256; }) || typeof data.binding.resource_owner !== 'string' || (data.owner_locked && !data.binding.resource_owner)) throw new Error('Setup response was incomplete.');
     if (context && data.context !== context) { clear('Your account or workspace changed. Reload the page.', true); return; }
     state = data; context = data.context; el('confirm').checked = false;
     ['ticket', 'document'].forEach(function (name) {
@@ -26,8 +29,14 @@
       });
       select.value = data.binding[name + '_connection'] || '';
     });
-    el('owner').textContent = 'Vendor review owner: ' + (data.binding.resource_owner || data.principal);
-    el('status').textContent = data.modules_enabled ? (data.revision ? 'Workspace setup saved. Connection access and evidence still require verification.' : 'Modules enabled. Choose connections and save this workspace setup.') : 'Enable the workflow, then choose the saved connections for this workspace.';
+    var owners = el('resource-owner'), placeholder = document.createElement('option');
+    placeholder.value = ''; placeholder.textContent = 'Choose a workspace member'; owners.replaceChildren(placeholder);
+    (data.owner_locked ? [data.binding.resource_owner] : data.eligible_owners).forEach(function (owner) {
+      var option = document.createElement('option'); option.value = owner; option.textContent = ownerLabel(owner); owners.appendChild(option);
+    });
+    owners.value = data.binding.resource_owner;
+    el('owner').textContent = data.owner_locked ? 'Existing vendor review owner: ' + ownerLabel(data.binding.resource_owner) + '. This setup cannot transfer ownership.' : 'Choose the owner for this workspace’s vendor records. Your saved credentials remain under your authority.';
+    el('status').textContent = data.modules_enabled ? (data.revision ? 'Workspace setup saved. Connection access and evidence still require verification.' : 'Modules enabled. Choose the owner and connections, then save this workspace setup.') : 'Enable the workflow, then choose the owner and saved connections for this workspace.';
   }
   async function call(method, suffix, body) {
     if (busy || locked) return;
@@ -51,7 +60,7 @@
     event.preventDefault(); if (el('save').disabled) return;
     var ticket = state.connections.find(function (row) { return row.name === el('ticket').value; });
     var doc = state.connections.find(function (row) { return row.name === el('document').value; });
-    call('PUT', '', Object.assign(reviewed(), {ticket: ticket.name, ticket_revision: ticket.revision, document: doc ? doc.name : '', document_revision: doc ? doc.revision : '', expected_revision: state.revision}));
+    call('PUT', '', Object.assign(reviewed(), {ticket: ticket.name, ticket_revision: ticket.revision, document: doc ? doc.name : '', document_revision: doc ? doc.revision : '', expected_revision: state.revision, resource_owner: el('resource-owner').value}));
   });
   call('GET');
 }());
