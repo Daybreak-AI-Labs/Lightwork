@@ -21,9 +21,10 @@ $script:called=0
 function Start-Process {
     param($FilePath,$ArgumentList,[switch]$PassThru,$WindowStyle)
     $script:called++
+    $script:lastArguments=@($ArgumentList)
     if ($FilePath -notlike '*msiexec.exe') { throw 'Unexpected mocked executable.' }
     $index=[Array]::IndexOf($ArgumentList,'/L*v')
-    [IO.File]::WriteAllText($ArgumentList[$index+1].Trim('"'),$script:fixtureLog)
+    if ($index -ge 0) { [IO.File]::WriteAllText($ArgumentList[$index+1].Trim('"'),$script:fixtureLog) }
     $process=[pscustomobject]@{ExitCode=$script:fixtureExit}
     $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {param($timeout) return $true}
     return $process
@@ -34,6 +35,8 @@ if (-not $env:SystemRoot) { $env:SystemRoot=[IO.Path]::GetTempPath() }
 $env:RUNNER_TEMP=Join-Path ([IO.Path]::GetTempPath()) ('lw-acceptance-guards-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $env:RUNNER_TEMP | Out-Null
 try {
+    $fixturePackage=Join-Path $env:RUNNER_TEMP 'Lightwork fixture.msi'
+    [IO.File]::WriteAllText($fixturePackage,'Not an MSI: process calls are mocked.')
     [xml]$fragment=Get-Content -Raw -LiteralPath (Join-Path $ScriptDirectory 'acceptance-failure.wxs')
     $fault=$fragment.SelectSingleNode('//*[local-name()="CustomAction"]')
     $errorMessage=$fault.GetAttribute('Error')
@@ -51,12 +54,54 @@ try {
     )) {
         $script:fixtureExit=$case.code; $script:fixtureLog=$case.log
         $rejected=$false
-        try { Invoke-Msi 'fixture.msi' '/i' -ExpectFailure | Out-Null } catch { $rejected=$true }
+        try { Invoke-Msi $fixturePackage '/i' -ExpectFailure | Out-Null } catch { $rejected=$true }
         if (-not $rejected) { throw "Accepted an unproven injected failure: $($case.code), $($case.log)" }
     }
     $script:fixtureExit=1603; $script:fixtureLog=$valid
-    Invoke-Msi 'fixture.msi' '/i' -ExpectFailure | Out-Null
+    Invoke-Msi $fixturePackage '/i' -ExpectFailure | Out-Null
     if ($script:called -ne 8) { throw 'MSI guard checks did not exercise the real acceptance function.' }
+
+    # GitHub supplies GITHUB_WORKSPACE with backslashes, while workflow paths
+    # append /customer-artifacts/Lightwork.msi. MSI rejects that mixed path
+    # with error 1324/1619 even though PowerShell can access the same file.
+    $mixedPackage=$env:RUNNER_TEMP + '/Lightwork fixture.msi'
+    $script:fixtureExit=0
+    $pathCases=0
+    foreach ($source in @('test-customer.ps1','test-completed-rollback.ps1')) {
+        Import-Function (Join-Path $ScriptDirectory $source) 'Invoke-Msi'
+        Push-Location $env:RUNNER_TEMP
+        try {
+            foreach ($packageArgument in @($mixedPackage,'./Lightwork fixture.msi')) {
+                foreach ($msiAction in @('/i','/fa','/x')) {
+                    Invoke-Msi $packageArgument $msiAction | Out-Null
+                    if ($script:lastArguments[1] -cne ('"'+$fixturePackage+'"')) { throw "MSI package path was not normalized and quoted: $($script:lastArguments[1])" }
+                    if ($script:lastArguments[0] -ne $msiAction -or $script:lastArguments[2] -ne '/qn' -or $script:lastArguments[3] -ne '/norestart') { throw 'MSI path normalization changed maintenance arguments.' }
+                    if ($source -eq 'test-customer.ps1' -and ($script:lastArguments.Count -ne 6 -or $script:lastArguments[4] -ne '/L*v')) { throw 'Customer MSI logging arguments changed.' }
+                    $pathCases++
+                }
+            }
+            foreach ($invalidPackage in @('./missing.msi',$env:RUNNER_TEMP)) {
+                $before=$script:called;$rejected=$false
+                try { Invoke-Msi $invalidPackage '/i' | Out-Null } catch { $rejected=$true }
+                if (-not $rejected -or $script:called -ne $before) { throw 'Missing or directory package reached Windows Installer.' }
+                $pathCases++
+            }
+        } finally { Pop-Location }
+    }
+
+    # Execute the real outer catch/finally, replacing only its installer call.
+    # A cleanup failure must not replace the original acceptance error.
+    $tokens=$null;$errors=$null
+    $tree=[Management.Automation.Language.Parser]::ParseFile((Join-Path $ScriptDirectory 'test-customer.ps1'),[ref]$tokens,[ref]$errors)
+    $outer=@($tree.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]})
+    if ($outer.Count -ne 1 -or $outer[0].CatchClauses.Count -ne 1) { throw 'Expected one acceptance error-preservation boundary.' }
+    function Invoke-Msi { param($Package,$Action,[switch]$ExpectFailure) throw 'Synthetic cleanup failure' }
+    $Report=Join-Path $env:RUNNER_TEMP 'cleanup-report.json';$observed=@{synthetic=$true};$acceptanceError=$null
+    $originalPath=$env:PATH;$originalHome=$env:MAVERICK_HOME;$originalNoIndex=$env:PIP_NO_INDEX
+    $caught=$null
+    try { Invoke-Expression ("try { throw 'Synthetic original installation failure' } " + $outer[0].CatchClauses[0].Extent.Text + ' finally ' + $outer[0].Finally.Extent.Text) } catch { $caught=$_.Exception.Message }
+    if ($caught -ne 'Synthetic original installation failure') { throw "Cleanup hid the original acceptance error: $caught" }
+    if (-not (Test-Path -LiteralPath $Report)) { throw 'Failed acceptance did not retain its report.' }
 
     Import-Function (Join-Path $ScriptDirectory 'test-completed-rollback.ps1') 'Assert-InstalledChannel'
     function Read-InstalledChannel { return $script:fixtureChannel }
@@ -73,7 +118,7 @@ try {
         try { Assert-InstalledChannel '1.2.4' | Out-Null } catch { $rejected=$true }
         if (-not $rejected) { throw 'Accepted an incorrect installed native version/channel.' }
     }
-    Write-Output 'Acceptance guards: 8 MSI failure cases and 5 native channel cases passed.'
+    Write-Output "Acceptance guards: 8 MSI failure cases, $pathCases native package-path cases, original-error preservation and 5 native channel cases passed."
 } finally {
     # Only flat log files written by the mocked process above.
     Get-ChildItem -LiteralPath $env:RUNNER_TEMP -File | ForEach-Object { Remove-Item -LiteralPath $_.FullName }

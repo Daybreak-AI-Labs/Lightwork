@@ -258,4 +258,4 @@ def test_actual_powershell_acceptance_guards_reject_unproven_install_results():
         "-ScriptDirectory", str(MODULE.parent),
     ], capture_output=True, text=True, timeout=60, check=False)
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "8 MSI failure cases and 5 native channel cases passed" in completed.stdout
+    assert "8 MSI failure cases, 16 native package-path cases, original-error preservation and 5 native channel cases passed" in completed.stdout

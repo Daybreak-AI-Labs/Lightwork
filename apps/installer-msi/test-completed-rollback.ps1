@@ -31,6 +31,10 @@ $observed = [ordered]@{schema='lightwork.completed-upgrade-rollback-acceptance.v
 $server = $null
 
 function Invoke-Msi([string]$package,[string]$action) {
+    # Canonicalize PowerShell paths before passing them to Windows Installer.
+    $packageFile = Get-Item -LiteralPath $package -ErrorAction Stop
+    if ($packageFile.PSProvider.Name -ne 'FileSystem' -or $packageFile.PSIsContainer) { throw 'The MSI package must be an existing file.' }
+    $package = [IO.Path]::GetFullPath($packageFile.FullName)
     $arguments = @($action,('"' + $package + '"'),'/qn','/norestart',('INSTALLDIR="' + $installPath + '"'))
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/msiexec.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden
     if (-not $process.WaitForExit(240000)) { throw 'Fixture Windows Installer timed out.' }

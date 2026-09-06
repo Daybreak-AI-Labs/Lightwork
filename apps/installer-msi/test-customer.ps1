@@ -28,6 +28,11 @@ $marker = Join-Path $homePath 'customer-data-preserved.txt'
 [IO.File]::WriteAllText($marker, 'synthetic customer data must survive maintenance')
 
 function Invoke-Msi([string]$Package, [string]$Action, [string[]]$Properties = @(), [switch]$ExpectFailure) {
+    # MSI rejects mixed-separator paths that PowerShell accepts (1324/1619).
+    # Resolve relative paths against the shell location before native launch.
+    $packageFile = Get-Item -LiteralPath $Package -ErrorAction Stop
+    if ($packageFile.PSProvider.Name -ne 'FileSystem' -or $packageFile.PSIsContainer) { throw 'The MSI package must be an existing file.' }
+    $Package = [IO.Path]::GetFullPath($packageFile.FullName)
     $log = Join-Path $env:RUNNER_TEMP ('lightwork-msi-' + [guid]::NewGuid().ToString('N') + '.log')
     $arguments = @($Action, ('"' + $Package + '"'), '/qn', '/norestart', '/L*v', ('"' + $log + '"')) + $Properties
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/msiexec.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden
@@ -60,6 +65,7 @@ function Assert-Runtime {
     if ((Get-Content -Raw -LiteralPath $marker) -ne 'synthetic customer data must survive maintenance') { throw 'Maintenance changed workspace data.' }
 }
 
+$acceptanceError = $null
 try {
     Invoke-Msi $BaseMsi '/i' @('INSTALLDIR="' + $installPath + '"')
     # These are the only executable search locations used by the customer
@@ -125,11 +131,18 @@ try {
             $recovery.WaitForExit()
         }
     }
+} catch {
+    $acceptanceError = $_
+    throw
 } finally {
     $env:PATH = $originalPath
     $env:MAVERICK_HOME = $originalHome
     $env:PIP_NO_INDEX = $originalNoIndex
     $observed | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Report -Encoding utf8
-    Invoke-Msi $CandidateMsi '/x' -ExpectFailure:$false
-    Invoke-Msi $BaseMsi '/x' -ExpectFailure:$false
+    foreach ($package in @($CandidateMsi, $BaseMsi)) {
+        try { Invoke-Msi $package '/x' -ExpectFailure:$false } catch {
+            if (-not $acceptanceError) { throw }
+            Write-Warning "Cleanup also failed: $($_.Exception.Message)"
+        }
+    }
 }
