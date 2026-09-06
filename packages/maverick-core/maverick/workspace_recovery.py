@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import time
 import zipfile
@@ -27,6 +28,8 @@ MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
 MAX_SNAPSHOTS = 200
 MAX_COMPARISON_BYTES = 64 * 1024 * 1024
+MAX_CUSTODY_UPLOAD_BYTES = 4 * 1024 * 1024
+MAX_CUSTODY_REPORT_BYTES = 64 * 1024
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -386,6 +389,7 @@ def retire(identifier: str, expected_sha256: str) -> dict:
         (_store() / (identifier + ".json")).unlink(missing_ok=True)
         comparison_path.unlink(missing_ok=True)
         drill_path.unlink(missing_ok=True)
+        (_store() / (identifier + ".custody-test.json")).unlink(missing_ok=True)
         return {"retired": True, "id": identifier}
 
 
@@ -526,6 +530,168 @@ def export_drill_report(identifier: str, report_id: str, *, actor: str) -> bytes
         report = _read_drill(identifier, actor=actor)
         if report is None or not isinstance(report_id, str) or not hmac.compare_digest(str(report.get("report_id", "")), report_id):
             raise RecoveryError("The saved drill report changed. Load the selected snapshot's report again.")
+        return (json.dumps(report, allow_nan=False, indent=2) + "\n").encode("utf-8")
+
+
+def _custody_environment(directory: Path, tenant: str) -> dict[str, str]:
+    """A fresh child's settings never inherit operator credentials or aliases."""
+    allowed = {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
+               "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "LANG", "LC_ALL", "TZ"}
+    environment = {key: value for key, value in os.environ.items() if key.upper() in allowed}
+    home = file_lock.ensure_private_directory(directory / "home")
+    temporary = file_lock.ensure_private_directory(directory / "temporary")
+    profile = file_lock.ensure_private_directory(directory / "profile")
+    appdata = file_lock.ensure_private_directory(profile / "AppData")
+    file_lock.atomic_create_text(home / "config.toml", "# Isolated recovery rehearsal; no provider configuration.\n")
+    paths = [str(Path(sys.executable).parent)]
+    if os.name == "nt":
+        paths.append(str(Path(os.environ["SystemRoot"]) / "System32"))
+    environment.update(PATH=os.pathsep.join(paths), HOME=str(profile), USERPROFILE=str(profile),
+                       APPDATA=str(appdata), LOCALAPPDATA=str(appdata), TEMP=str(temporary), TMP=str(temporary),
+                       TMPDIR=str(temporary), MAVERICK_HOME=str(home), MAVERICK_CONFIG=str(home / "config.toml"),
+                       MAVERICK_CLIENT_ID=tenant, PYTHONUTF8="1", PYINSTALLER_RESET_ENVIRONMENT="1", NO_COLOR="1")
+    return environment
+
+
+def _validate_custody_result(result: dict) -> None:
+    flags = {"fresh_process": True, "coverage_complete": False, "live_workspace_changed": False, "external_stores_tested": False}
+    if (not isinstance(result, dict) or result.get("schema") != 1
+            or any(result.get(key) is not value for key, value in flags.items())
+            or result.get("key_source") != "uploaded-custody-copy"
+            or not isinstance(result.get("application_identity"), str)
+            or any(type(result.get(key)) is not int or not 0 <= result[key] <= 10_000_000
+                   for key in ("files_scanned", "sqlite_columns_scanned", "unexamined_files"))
+            or not isinstance(result.get("checks"), list) or not 1 <= len(result["checks"]) <= 20
+            or not isinstance(result.get("limits"), list) or not 1 <= len(result["limits"]) <= 20
+            or any(not isinstance(item, str) or not 1 <= len(item) <= 2000 for item in result["limits"])):
+        raise RecoveryError("The retained-key test report is malformed. Run a new temporary test.")
+    names = set()
+    totals = {"detected": 0, "verified": 0, "failed": 0, "unsupported": 0}
+    for row in result["checks"]:
+        if (not isinstance(row, dict) or not isinstance(row.get("format"), str) or not 1 <= len(row["format"]) <= 100
+                or row["format"] in names or set(row) != {"format", *totals}
+                or any(type(row.get(key)) is not int or not 0 <= row[key] <= 10_000_000 for key in totals)
+                or row["detected"] != row["verified"] + row["failed"] + row["unsupported"]):
+            raise RecoveryError("The retained-key test counts are malformed. Run a new temporary test.")
+        names.add(row["format"])
+        for key in totals:
+            totals[key] += row[key]
+    expected = ("failed" if totals["failed"] else "incomplete" if totals["unsupported"]
+                else "verified_supported_formats" if totals["verified"] else "no_encrypted_records")
+    if result.get("outcome") != expected:
+        raise RecoveryError("The retained-key test outcome is malformed. Run a new temporary test.")
+
+
+def test_key_custody(identifier: str, custody_path: Path | bytes, *, expected_sha256: str, actor: str) -> dict:
+    """Rehearse using only a separately supplied key copy in a fresh process."""
+    if not actor:
+        raise RecoveryError("A current administrator identity is required to test retained keys.")
+    with _locked():
+        selected = _inspect(identifier)
+        if selected["compatibility"] != "compatible" or selected["sha256"] != expected_sha256:
+            raise RecoveryError("The snapshot or application changed. Verify the selected snapshot again.")
+        if isinstance(custody_path, bytes):
+            custody = custody_path
+        else:
+            if not 0 < custody_path.stat().st_size <= MAX_CUSTODY_UPLOAD_BYTES:
+                raise RecoveryError("Select a separately retained encryption-key ZIP of at most 4 MiB.")
+            custody = file_lock.atomic_read_bytes(custody_path)
+        if not 0 < len(custody) <= MAX_CUSTODY_UPLOAD_BYTES:
+            raise RecoveryError("The retained key copy exceeds the upload limit.")
+        started = time.perf_counter()
+        identity = application_identity()
+        tenant = current_tenant_id_strict()
+        with backup._temporary_directory(prefix="lw-custody-") as temporary:
+            directory = file_lock.ensure_private_directory(Path(temporary))
+            environment = _custody_environment(directory, tenant)
+            file_lock.atomic_create_bytes(directory / "snapshot.tgz", file_lock.atomic_read_bytes(_archive(identifier)))
+            file_lock.atomic_create_bytes(directory / "custody.zip", custody)
+            file_lock.atomic_create_text(directory / "recovery.key", _key().hex())
+            request = {"schema": 1, "tenant": tenant, "archive_sha256": selected["sha256"],
+                       "custody_sha256": hashlib.sha256(custody).hexdigest(),
+                       "application_identity": identity, "application_version": version()}
+            file_lock.atomic_create_text(directory / "request.json", json.dumps(request))
+            command = ([sys.executable, "--recovery-rehearsal-worker", str(directory)] if getattr(sys, "frozen", False)
+                       else [sys.executable, "-m", "maverick.recovery_rehearsal", str(directory)])
+            try:
+                completed = subprocess.run(command, cwd=directory, env=environment, stdin=subprocess.DEVNULL,
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90,
+                                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except subprocess.TimeoutExpired as exc:
+                raise RecoveryError("The temporary retained-key test exceeded its time limit. Previous evidence was kept.") from exc
+            path = directory / "result.json"
+            if completed.returncode or not path.is_file() or path.stat().st_size > MAX_CUSTODY_REPORT_BYTES:
+                raise RecoveryError("The temporary test could not verify this snapshot and retained key copy. Previous evidence was kept.")
+            try:
+                result = json.loads(file_lock.atomic_read_text(path))
+            except (ValueError, RecursionError) as exc:
+                raise RecoveryError("The temporary retained-key test returned an unreadable report. Previous evidence was kept.") from exc
+            _validate_custody_result(result)
+            if result["application_identity"] != identity:
+                raise RecoveryError("The temporary test used a different application build. Previous evidence was kept.")
+        # Successful cleanup is part of completion; retain no uploaded keys.
+        if backup._sha256(_archive(identifier)) != expected_sha256 or application_identity() != identity:
+            raise RecoveryError("The snapshot or application changed during the temporary test. Previous evidence was kept.")
+        report = {**result, "kind": "workspace-custody-test", "report_id": secrets.token_hex(16),
+                  "snapshot": identifier, "archive_sha256": selected["sha256"], "custody_sha256": request["custody_sha256"],
+                  "snapshot_created_at": selected["created_at"], "target": target(), "tenant": tenant, "actor": actor,
+                  "application_version": version(), "completed_at": time.time(), "elapsed_seconds": round(time.perf_counter() - started, 6),
+                  "restore_authorized": False}
+        signed = backup._authenticate_for_write(report, _key())
+        encoded = json.dumps(signed, allow_nan=False)
+        if len(encoded.encode("utf-8")) > MAX_CUSTODY_REPORT_BYTES:
+            raise RecoveryError("The retained-key report exceeds its evidence size limit. Previous evidence was kept.")
+        file_lock.atomic_write_text(_store() / (identifier + ".custody-test.json"), encoded)
+        return {**{key: value for key, value in report.items() if key != "actor"}, "state": "recorded", "current_build_matches": True}
+
+
+def _read_custody_test(identifier: str, *, actor: str) -> dict | None:
+    archive = _archive(identifier)
+    path = _store() / (identifier + ".custody-test.json")
+    if not path.exists():
+        return None
+    try:
+        if path.stat().st_size > MAX_CUSTODY_REPORT_BYTES:
+            raise RecoveryError("The saved retained-key report exceeds its evidence size limit.")
+        report = json.loads(file_lock.atomic_read_text(path))
+        if not isinstance(report, dict):
+            raise RecoveryError("The retained-key test report is malformed. Run a new temporary test.")
+        with backup.recovery_scope(_root(), current_tenant_id_strict(), _key()):
+            backup._verify_authentication(report, allow_unsigned=False, label="retained-key test report")
+    except (OSError, ValueError, RecursionError, backup.BackupError) as exc:
+        raise RecoveryError("The signed retained-key test is unavailable. Run a new temporary test.") from exc
+    _validate_custody_result(report)
+    if (any(not isinstance(report.get(field), str) or len(report[field]) != 64
+            or any(char not in "0123456789abcdef" for char in report[field])
+            for field in ("archive_sha256", "custody_sha256"))
+            or not isinstance(report.get("application_version"), str)
+            or type(report.get("completed_at")) not in {int, float} or report["completed_at"] <= 0
+            or type(report.get("snapshot_created_at")) not in {int, float} or report["snapshot_created_at"] <= 0
+            or type(report.get("elapsed_seconds")) not in {int, float} or report["elapsed_seconds"] < 0):
+        raise RecoveryError("The retained-key test metadata is malformed. Run a new temporary test.")
+    if (report.get("kind") != "workspace-custody-test" or not isinstance(report.get("report_id"), str)
+            or not _ID.fullmatch(report["report_id"]) or report.get("target") != target()
+            or report.get("tenant") != current_tenant_id_strict() or not actor or report.get("actor") != actor
+            or report.get("snapshot") != identifier or report.get("archive_sha256") != backup._sha256(archive)
+            or report.get("restore_authorized") is not False):
+        raise RecoveryError("The snapshot, account or retained-key report changed. Run a new temporary test.")
+    return report
+
+
+def custody_test_report(identifier: str, *, actor: str) -> dict:
+    with _locked():
+        report = _read_custody_test(identifier, actor=actor)
+        if report is None:
+            return {"state": "not_recorded", "snapshot": identifier}
+        return {**{key: value for key, value in report.items() if key not in {"authentication", "actor"}},
+                "state": "recorded", "current_build_matches": report["application_identity"] == application_identity()}
+
+
+def export_custody_test(identifier: str, report_id: str, *, actor: str) -> bytes:
+    with _locked():
+        report = _read_custody_test(identifier, actor=actor)
+        if report is None or not isinstance(report_id, str) or not _ID.fullmatch(report_id) or not hmac.compare_digest(report["report_id"], report_id):
+            raise RecoveryError("The retained-key test changed. Load the selected snapshot's evidence again.")
         return (json.dumps(report, allow_nan=False, indent=2) + "\n").encode("utf-8")
 
 

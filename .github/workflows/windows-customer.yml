@@ -134,7 +134,7 @@ jobs:
         run: |
           Set-Item -LiteralPath Env:TAURI_SIGNING_PRIVATE_KEY -Value (Get-Content -Raw -LiteralPath $env:ACCEPTANCE_PRIVATE_KEY)
           try {
-            node apps/installer-desktop/node_modules/@tauri-apps/cli/tauri.js signer sign customer-artifacts/Lightwork.msi
+            node apps/installer-desktop/node_modules/@tauri-apps/cli/tauri.js signer sign --password "" customer-artifacts/Lightwork.msi
             if ($LASTEXITCODE -ne 0) { throw 'Synthetic updater signing failed.' }
           } finally { Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue }
           cargo build --locked --manifest-path apps/installer-msi/verify-update/Cargo.toml
@@ -177,7 +177,7 @@ jobs:
             foreach ($package in @($base,$next)) {
               & $signTool.FullName sign /fd SHA256 /sha1 $thumbprint $package
               if ($LASTEXITCODE -ne 0) { throw 'Disposable publisher signing failed.' }
-              node apps/installer-desktop/node_modules/@tauri-apps/cli/tauri.js signer sign $package
+              node apps/installer-desktop/node_modules/@tauri-apps/cli/tauri.js signer sign --password "" $package
               if ($LASTEXITCODE -ne 0) { throw 'Disposable updater signing failed.' }
             }
             Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue

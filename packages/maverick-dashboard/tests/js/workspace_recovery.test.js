@@ -405,3 +405,146 @@ for (const status of [401, 403]) test(`HTML ${status} clears retained drill meta
   for (const button of h.dom.window.document.querySelectorAll('#workspace-recovery button')) assert.equal(button.disabled, true);
   h.dom.window.close();
 });
+
+const custodyBytes = Buffer.from('synthetic custody zip fixture');
+const custodyHash = require('node:crypto').createHash('sha256').update(custodyBytes).digest('hex');
+function custodyReport(overrides = {}) {
+  return { schema: 1, kind: 'workspace-custody-test', state: 'recorded', report_id: 'e'.repeat(32), snapshot: 'snapshot-a',
+    archive_sha256: 'a'.repeat(64), custody_sha256: custodyHash, target: 'target-a', tenant: 'acme', application_version: '1.0.0', application_identity: 'source-sha256:' + 'b'.repeat(64),
+    completed_at: 1700003600, snapshot_created_at: 1700000000, elapsed_seconds: 1.5, outcome: 'verified_supported_formats',
+    checks: [{ format: 'Binary at-rest v1', detected: 2, verified: 2, failed: 0, unsupported: 0 }],
+    files_scanned: 3, sqlite_columns_scanned: 0, unexamined_files: 0, fresh_process: true, key_source: 'uploaded-custody-copy',
+    coverage_complete: false, restore_authorized: false, live_workspace_changed: false, external_stores_tested: false,
+    limits: ['Custom formats were not tested.'], current_build_matches: true, ...overrides };
+}
+function chooseCustody(h, size) {
+  const input = h.get('custody-file'), file = new h.dom.window.File([custodyBytes], 'separately-retained.zip', { type: 'application/zip' });
+  file.arrayBuffer = async () => custodyBytes.buffer.slice(custodyBytes.byteOffset, custodyBytes.byteOffset + custodyBytes.byteLength);
+  if (size !== undefined) Object.defineProperty(file, 'size', { value: size });
+  let value = 'synthetic-file-selection';
+  Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
+  Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
+  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: require('node:crypto').webcrypto.subtle });
+  input.dispatchEvent(new h.dom.window.Event('change'));
+  return file;
+}
+function confirmCustody(h) { h.get('custody-confirm').checked = true; h.get('custody-confirm').dispatchEvent(new h.dom.window.Event('change')); }
+async function settleCustody() { for (let i = 0; i < 5; i++) await tick(); }
+
+test('custody rehearsal requires a user file and fresh consent, binds inspected snapshot and uploaded bytes, and never autoexports keys', async () => {
+  const h = await harness(async url => url.endsWith('/inspect') ? { id: 'snapshot-a', sha256: 'a'.repeat(64) } : url.endsWith('/custody-test') ? custodyReport() : {}, { live_restore_available: false });
+  h.select();
+  assert.equal(h.get('custody-test').disabled, true);
+  const file = chooseCustody(h); assert.equal(h.get('custody-test').disabled, true);
+  confirmCustody(h); assert.equal(h.get('custody-test').disabled, false);
+  h.get('custody-test').click(); h.get('custody-test').click(); await settleCustody();
+  const calls = h.calls.filter(call => call.url.endsWith('/custody-test'));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.body, file);
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/octet-stream');
+  assert.equal(calls[0].init.headers['X-Lightwork-Confirm-Custody-Test'], 'true');
+  assert.equal(calls[0].init.headers['X-Lightwork-Snapshot-SHA256'], 'a'.repeat(64));
+  assert.equal(calls[0].init.headers['X-Lightwork-Recovery-Context'], 'account-context');
+  assert.equal(h.calls.some(call => /encryption-keys|\/(prepare|restore|authorize)$/.test(call.url)), false);
+  assert.equal(h.get('custody-file').value, ''); assert.equal(h.get('custody-confirm').checked, false);
+  assert.equal(h.get('custody-report').hidden, false); assert.equal(h.get('prepare').disabled, true);
+  h.dom.window.close();
+});
+
+test('oversized custody uploads and programmatic unconfirmed clicks never inspect or upload and clear the chosen file', async () => {
+  const h = await harness(async () => ({})); h.select(); chooseCustody(h);
+  h.get('custody-test').dispatchEvent(new h.dom.window.Event('click')); await settleCustody();
+  assert.equal(h.calls.some(call => /inspect|custody-test/.test(call.url)), false);
+  chooseCustody(h, 4 * 1024 * 1024 + 1); confirmCustody(h);
+  h.get('custody-test').click(); await settleCustody();
+  assert.equal(h.calls.some(call => /inspect|custody-test/.test(call.url)), false);
+  assert.equal(h.get('custody-file').value, ''); assert.match(h.get('status').textContent, /4 MiB/);
+  h.dom.window.close();
+});
+
+test('custody results reject wrong upload/archive/workspace binding and unproven authority claims', async () => {
+  for (const invalid of [{ custody_sha256: 'f'.repeat(64) }, { archive_sha256: 'f'.repeat(64) }, { target: 'elsewhere' },
+    { tenant: 'other-tenant' }, { fresh_process: false }, { restore_authorized: true }, { coverage_complete: true },
+    { key_source: 'host-keys' }, { outcome: 'no_encrypted_records' }, { checks: [{ format: 'v1', detected: 1, verified: 2, failed: 0, unsupported: 0 }] }]) {
+    const h = await harness(async url => url.endsWith('/inspect') ? { id: 'snapshot-a', sha256: 'a'.repeat(64) } : url.endsWith('/custody-test') ? custodyReport(invalid) : {});
+    h.select(); chooseCustody(h); confirmCustody(h); h.get('custody-test').click(); await settleCustody();
+    assert.equal(h.get('custody-report').hidden, true);
+    assert.equal(h.get('custody-report-download').disabled, true);
+    assert.equal(h.get('custody-file').value, '');
+    assert.match(h.get('status').textContent, /could not be verified/i); h.dom.window.close();
+  }
+});
+
+test('changing the snapshot during custody inspection stops the upload; changing the file discards a late result', async () => {
+  let complete;
+  const h = await harness(async url => url.endsWith('/inspect') ? new Promise(resolve => { complete = resolve; }) : custodyReport());
+  h.select(); chooseCustody(h); confirmCustody(h); h.get('custody-test').click(); await settleCustody();
+  h.select(); complete({ id: 'snapshot-a', sha256: 'a'.repeat(64) }); await settleCustody();
+  assert.equal(h.calls.some(call => call.url.endsWith('/custody-test')), false);
+  h.dom.window.fetch = async url => url.endsWith('/inspect') ? { ok: true, status: 200, json: async () => ({ id: 'snapshot-a', sha256: 'a'.repeat(64) }) }
+    : new Promise(resolve => { complete = () => resolve({ ok: true, status: 200, json: async () => custodyReport() }); });
+  chooseCustody(h); confirmCustody(h); h.get('custody-test').click(); await settleCustody();
+  chooseCustody(h); complete(); await settleCustody();
+  assert.equal(h.get('custody-report').hidden, true); assert.equal(h.get('custody-file').value, '');
+  h.dom.window.close();
+});
+
+test('historical custody reports load without file or autorun, retain explicit incomplete/failed outcomes, and render metadata as text', async () => {
+  for (const outcome of ['verified_supported_formats', 'incomplete', 'failed', 'no_encrypted_records']) {
+    const counts = outcome === 'no_encrypted_records' ? { detected: 0, verified: 0, failed: 0, unsupported: 0 }
+      : { detected: 2, verified: outcome === 'verified_supported_formats' ? 2 : 1, failed: outcome === 'failed' ? 1 : 0, unsupported: outcome === 'incomplete' ? 1 : 0 };
+    const row = custodyReport({ outcome, current_build_matches: false, limits: ['<img src=x>'], checks: [{ format: '<script>format</script>', ...counts }] });
+    const h = await harness(async url => url.endsWith('/custody-test/report') ? row : {}, { live_restore_available: false });
+    h.select(); assert.equal(h.calls.some(call => call.url.includes('/custody-test')), false);
+    h.get('custody-report-load').click(); await settleCustody();
+    assert.equal(h.get('custody-report').hidden, false);
+    assert.equal(h.get('custody-checks').querySelector('script'), null);
+    assert.equal(h.get('custody-limits').querySelector('img'), null);
+    assert.match(h.get('custody-build').textContent, /different.*build/i);
+    if (outcome === 'failed') { assert.match(h.get('custody-status').textContent, /Verification failed/); assert.doesNotMatch(h.get('custody-status').textContent, /formats verified/); }
+    if (outcome === 'incomplete') assert.match(h.get('custody-status').textContent, /incomplete/);
+    if (outcome === 'no_encrypted_records') assert.match(h.get('custody-status').textContent, /No encrypted records tested/);
+    assert.equal(h.calls.some(call => call.url.endsWith('/custody-test')), false);
+    let filename = '';
+    h.dom.window.URL.createObjectURL = () => 'blob:synthetic-custody'; h.dom.window.URL.revokeObjectURL = () => {};
+    h.dom.window.HTMLAnchorElement.prototype.click = function () { filename = this.download; };
+    h.get('custody-report-download').click(); await settleCustody();
+    assert.match(filename, /retained-key-test.*\.json$/);
+    assert.deepEqual(JSON.parse(h.calls.find(call => call.url.endsWith('/custody-test/report/download')).init.body), { report_id: row.report_id });
+    h.dom.window.close();
+  }
+});
+
+test('custody 503 clears sensitive file and confirmation, retains safe snapshot, and invalidates historical download', async () => {
+  const h = await harness(async url => url.endsWith('/custody-test/report') ? custodyReport() : {});
+  h.select(); h.get('custody-report-load').click(); await settleCustody();
+  chooseCustody(h); confirmCustody(h);
+  h.dom.window.fetch = async () => ({ ok: false, status: 503, json: async () => ({ detail: 'Synthetic storage interruption' }) });
+  h.get('custody-test').click(); await settleCustody();
+  assert.equal(h.get('custody-file').value, ''); assert.equal(h.get('custody-confirm').checked, false);
+  assert.equal(h.get('snapshot').value, 'snapshot-a'); assert.equal(h.get('custody-report-download').disabled, true);
+  h.dom.window.close();
+});
+
+for (const status of [401, 403]) test(`HTML ${status} clears uploaded custody material and all report metadata before parsing`, async () => {
+  const h = await harness(async url => url.endsWith('/custody-test/report') ? custodyReport() : {});
+  h.select(); chooseCustody(h); h.get('custody-report-load').click(); await settleCustody();
+  let parsed = 0;
+  h.dom.window.fetch = async () => ({ ok: false, status, json: async () => { parsed++; throw new Error('HTML denial'); } });
+  h.get('custody-report-download').click(); await settleCustody();
+  assert.equal(parsed, 0); assert.equal(h.get('custody-file').value, '');
+  assert.equal(h.get('custody-identity').textContent, ''); assert.equal(h.get('custody-checks').textContent, '');
+  for (const button of h.dom.window.document.querySelectorAll('#workspace-recovery button')) assert.equal(button.disabled, true);
+  h.dom.window.close();
+});
+
+test('a late custody report download is suppressed after snapshot reselection', async () => {
+  const h = await harness(async url => url.endsWith('/custody-test/report') ? custodyReport() : {});
+  h.select(); h.get('custody-report-load').click(); await settleCustody();
+  let complete, downloads = 0;
+  h.dom.window.URL.createObjectURL = () => { downloads++; return 'blob:synthetic-custody'; };
+  h.dom.window.fetch = async () => ({ ok: true, status: 200, blob: () => new Promise(resolve => { complete = resolve; }) });
+  h.get('custody-report-download').click(); await settleCustody();
+  h.select(); complete(new h.dom.window.Blob(['{}'])); await settleCustody();
+  assert.equal(downloads, 0); assert.equal(h.get('custody-report-download').disabled, true); h.dom.window.close();
+});

@@ -37,6 +37,22 @@
     <details><summary>Retire a local snapshot</summary><p>Export and verify an external copy first if retention is required. This deletes only the selected local archive. Snapshots retained for a current or recent restore cannot be removed.</p><label class="wrec-confirm"><input id="wrec-retire-confirm" type="checkbox">I have reviewed retention and want to delete this local archive.</label><button id="wrec-retire" type="button" disabled>Retire selected local snapshot</button></details>
     <details><summary>Import a saved snapshot</summary><label for="wrec-file">Lightwork snapshot archive</label><input id="wrec-file" type="file" accept=".tgz,.gz,application/gzip"><button id="wrec-import" type="button" disabled>Import and verify</button><p>Maximum archive size: 256 MiB compressed and 1 GiB expanded. Only a snapshot signed with the configured recovery key and bound to this workspace can be imported.</p></details>
   </section>
+  <section><h2>Test separately retained encryption keys</h2>
+    <p>Select a snapshot above, then choose the local encryption-key ZIP you previously kept separately. This tests recognized encrypted formats in a fresh temporary process using your uploaded copy. It does not install shared keys, change the live workspace or authorize recovery.</p>
+    <label for="wrec-custody-file">Previously saved encryption-key ZIP</label><input id="wrec-custody-file" type="file" accept=".zip,application/zip" aria-describedby="wrec-custody-help" data-draft-recovery="off">
+    <p id="wrec-custody-help">Maximum 4 MiB. This file contains sensitive keys that may unlock several workspaces. It is used only for this temporary test; choose your separately retained copy. Environment and remote key-service custody need their own reviewed procedure.</p>
+    <label class="wrec-confirm"><input id="wrec-custody-confirm" type="checkbox">I authorize using this sensitive custody copy only to test the selected snapshot in a temporary workspace.</label>
+    <div class="wrec-actions"><button id="wrec-custody-test" type="button" disabled>Test retained keys in a temporary workspace</button><button id="wrec-custody-report-load" type="button" disabled>View last retained-key test</button></div>
+    <p id="wrec-custody-status" role="status" aria-live="polite"></p>
+    <div id="wrec-custody-report" hidden>
+      <p id="wrec-custody-summary"></p><p id="wrec-custody-build"></p>
+      <ul id="wrec-custody-checks"></ul><p id="wrec-custody-coverage"></p>
+      <p>Verification applies only to the recognized formats listed here. Unknown or custom encryption, application business rules and external systems are not verified. This historical temporary-test duration is not a recovery-time or data-loss guarantee.</p>
+      <ul id="wrec-custody-limits"></ul>
+      <details><summary>Retained-key test verification details</summary><p id="wrec-custody-identity"></p></details>
+      <button id="wrec-custody-report-download" type="button" disabled>Download signed retained-key test</button>
+    </div>
+  </section>
   <section><h2>Review differences before recovery</h2>
     <p>Compare the selected snapshot with the current workspace. This helps an administrator review why recovery may be refused. It does not change files, reconcile spending or external actions, or authorize a restore.</p>
     <button id="wrec-compare" type="button" disabled>Compare with current workspace</button>

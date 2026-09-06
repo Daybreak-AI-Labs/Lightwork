@@ -168,6 +168,49 @@ not preserve deleted snapshots or installers.
 
 ## Boundaries
 
+### Test separately retained encryption keys
+
+Select a saved snapshot and open **Test separately retained encryption keys**.
+Choose the encryption-key ZIP previously saved in your separate custody location,
+review the confirmation, and start the temporary test. The app does not download
+its current keys automatically or install the uploaded keys into a live workspace.
+The upload is limited to 4 MiB and admitted under the current administrator and
+workspace context. It is bound to the exact inspected snapshot.
+
+A fresh application process restores the authenticated snapshot into a private
+temporary target. It verifies the custody ZIP's signature, workspace, complete
+member set, key names, sizes and hashes before using its primary and rotation
+keys. The child receives fresh home/config/profile/temp directories, no inherited
+`MAVERICK_*` or `LIGHTWORK_*` deployment overrides or provider credentials, and
+does not load archived provider configuration. Local encrypted envelopes and the
+explicitly supported world-database columns are checked with the uploaded custody
+copy. Missing keys do not trigger key generation. External key services are not
+contacted.
+
+The result separates verified, failed and unsupported records for each tested
+format. Unmarked plaintext is not a decryption success. **Supported formats
+verified** means those checks passed; custom formats, other stores and business
+invariants remain outside coverage. **No encrypted records tested** is not proof
+that a key copy can recover encrypted data. A wrong or incomplete copy can produce
+a failed or incomplete report without altering live state.
+
+The latest signed report for each snapshot remains available through **View last
+retained-key test** and its explicit download. It binds the snapshot and custody
+fingerprints, original application build, time, measurement and format counts.
+Keys, decrypted contents and raw worker errors are not included. Historical
+reports retain their original timestamps and identify a different current build.
+Their elapsed time measures this temporary rehearsal, not production recovery
+time, and snapshot age is not measured data loss. They never authorize live
+restoration or clear accounting, action-history or database reconciliation.
+
+Uploaded files and restored temporary targets are discarded after the child
+finishes. A process failure, timeout or failed cleanup does not replace earlier
+test evidence. Expired sessions, changed selection and interrupted requests clear
+the browser's uploaded-file reference and invalidate its confirmation/download;
+an administrator can explicitly retrieve an already completed report after reload.
+
+### Other recovery requirements
+
 - Shared administration/configuration, other tenants and keys outside the
   selected tenant are excluded. Shared key restoration requires its custodian's
   reviewed procedure; this UI never overwrites shared keys.

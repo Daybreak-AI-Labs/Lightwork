@@ -83,7 +83,7 @@ def environment(directory):
         "MAVERICK_TENANT":"browser-workspace", "MAVERICK_CLIENT_ID":"browser-client",
         "MAVERICK_PROFILE":"standard", "MAVERICK_ENTERPRISE":"0",
         "MAVERICK_ENCRYPT_AT_REST":"1", "MAVERICK_ENCRYPTION_KEY":secrets.token_hex(32),
-        "MAVERICK_KMS_KEK":secrets.token_hex(32), "MAVERICK_CONNECTIONS":"1",
+        "MAVERICK_CONNECTIONS":"1",
         "MAVERICK_DASHBOARD_ADMINS":"user:browser-reviewer"})
 
 
@@ -93,11 +93,13 @@ def build_app(directory):
     from maverick import (
         config,
         connections,
+        crypto_at_rest,
         grc_sync,
         model_risk_assurance,
         privacy_data_discovery,
         world_model,
     )
+    from maverick.file_lock import atomic_create_text, ensure_private_directory
     from maverick.governed_operations import ServiceContext
     from maverick.paths import tenant_scope
     from maverick.vendor_onboarding import VendorOnboardingService
@@ -111,6 +113,13 @@ def build_app(directory):
     from maverick_dashboard.vendor_onboarding_composition import WorkflowBinding
 
     config.reset_config_cache()
+    # A separately downloadable local custody copy for the synthetic rehearsal.
+    # Tenant KEKs use the ordinary local derivation from this same fixture key.
+    # The fresh rehearsal child cannot inherit this environment or key path.
+    if directory.resolve() not in crypto_at_rest._KEY_PATH.resolve().parents:
+        raise RuntimeError("Browser fixture key path escaped its temporary home")
+    ensure_private_directory(crypto_at_rest._KEY_PATH.parent)
+    atomic_create_text(crypto_at_rest._KEY_PATH, os.environ["MAVERICK_ENCRYPTION_KEY"])
     tenant, principal = "browser-workspace", "user:browser-reviewer"
     # Keep the real fixture database inside the named workspace's snapshot
     # scope so ordinary domain mutations exercise database recovery guards.

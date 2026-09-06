@@ -189,6 +189,72 @@ test('workspace recovery creates a real local snapshot and retains signed tempor
   await expect(page.locator('#wrec-prepare')).toBeDisabled();await fits(page);
 });
 
+test('separately retained keys rehearse recognized encrypted records in a fresh process without installing shared keys',async({page,request},info)=>{
+  test.setTimeout(90000);
+  await page.goto('/flows/designer');
+  const draftContext=await page.locator('meta[name="lightwork-draft-context"]').getAttribute('content');
+  const slot=require('node:crypto').createHash('sha256').update('custody-browser-rehearsal').digest('hex');
+  await ok(await request.put('/api/v1/drafts/'+slot,{headers:{'X-Lightwork-Draft-Context':draftContext},data:{
+    expected_revision:0,operation_id:'custody-browser-draft',payload:{brief:'Synthetic retained-key rehearsal task'}}}));
+  await page.setViewportSize({width:320,height:1000});await page.goto('/workspace/recovery');
+  await expect(page.locator('#wrec-refresh')).toBeEnabled();
+  if(await page.locator('#wrec-key-create').isEnabled()){
+    const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();await key;
+  }
+  await page.locator('#wrec-create').click();await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
+  const snapshot=await page.locator('#wrec-snapshot').inputValue();
+  await page.getByText('Keep a separate copy of local encryption keys',{exact:true}).click();
+  await page.locator('#wrec-encryption-confirm').check();
+  const escrow=page.waitForEvent('download');await page.locator('#wrec-encryption-download').click();
+  const custodyBytes=require('node:fs').readFileSync(await (await escrow).path());
+  const upload={name:'separately-retained.zip',mimeType:'application/zip',buffer:custodyBytes};
+  let starts=0,exportedAgain=0,startHeaders;
+  page.on('request',r=>{
+    if(r.url().endsWith('/custody-test')){starts++;startHeaders=r.headers();}
+    if(r.url().includes('/encryption-keys/download'))exportedAgain++;
+  });
+  await page.locator('#wrec-custody-file').setInputFiles(upload);
+  await expect(page.locator('#wrec-custody-test')).toBeDisabled();expect(starts).toBe(0);
+  await page.locator('#wrec-custody-confirm').check();
+  const completed=page.waitForResponse(r=>r.url().endsWith('/custody-test'));
+  await page.locator('#wrec-custody-test').click();const report=await ok(await completed);
+  await expect(page.locator('#wrec-custody-report')).toBeVisible();
+  expect(starts).toBe(1);expect(exportedAgain).toBe(0);
+  expect(startHeaders['x-lightwork-confirm-custody-test']).toBe('true');expect(startHeaders['x-lightwork-snapshot-sha256']).toBe(report.archive_sha256);
+  expect(report.custody_sha256).toBe(require('node:crypto').createHash('sha256').update(custodyBytes).digest('hex'));
+  expect(report.snapshot).toBe(snapshot);expect(report.fresh_process).toBe(true);expect(report.key_source).toBe('uploaded-custody-copy');
+  expect(report.checks.reduce((sum,row)=>sum+row.verified,0)).toBeGreaterThan(0);
+  expect(report.checks.reduce((sum,row)=>sum+row.failed,0)).toBe(0);
+  expect(report.coverage_complete).toBe(false);expect(report.restore_authorized).toBe(false);expect(report.live_workspace_changed).toBe(false);expect(report.external_stores_tested).toBe(false);
+  await expect(page.locator('#wrec-custody-file')).toHaveValue('');await expect(page.locator('#wrec-custody-confirm')).not.toBeChecked();
+  await expect(page.locator('#wrec-prepare')).toBeDisabled();
+  await page.reload();await expect(page.locator('#wrec-snapshot')).toBeEnabled();await page.locator('#wrec-snapshot').selectOption(snapshot);
+  await expect(page.locator('#wrec-custody-report-download')).toBeDisabled();
+  await page.locator('#wrec-custody-report-load').click();await expect(page.locator('#wrec-custody-report')).toBeVisible();expect(starts).toBe(1);
+  const signed=page.waitForEvent('download');await page.locator('#wrec-custody-report-download').click();
+  const saved=JSON.parse(require('node:fs').readFileSync(await (await signed).path(),'utf8'));
+  expect(saved.report_id).toBe(report.report_id);expect(saved.authentication).toBeTruthy();expect(saved.custody_sha256).toBe(report.custody_sha256);
+  await page.getByText('Retained-key test verification details',{exact:true}).click();
+  const width=await page.locator('#wrec-custody-report').evaluate(el=>({client:el.clientWidth,scroll:el.scrollWidth}));expect(width.scroll).toBeLessThanOrEqual(width.client+1);
+  await page.locator('#wrec-custody-status').scrollIntoViewIfNeeded();await info.attach('retained-key-rehearsal-320',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
+  await page.setViewportSize({width:1280,height:1200});await page.locator('#wrec-custody-status').scrollIntoViewIfNeeded();
+  expect(await page.locator('#wrec-custody-report').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBeTruthy();await fits(page);
+  await info.attach('retained-key-rehearsal-1280',{body:await page.screenshot(),contentType:'image/png'});
+  await page.setViewportSize({width:320,height:1000});
+  await page.locator('#wrec-custody-file').setInputFiles({name:'damaged-custody.zip',mimeType:'application/zip',buffer:Buffer.from('Synthetic invalid retained-key copy')});
+  await page.locator('#wrec-custody-confirm').check();
+  const refused=page.waitForResponse(r=>r.url().endsWith('/custody-test'));
+  await page.locator('#wrec-custody-test').click();expect((await refused).status()).toBe(409);
+  await expect(page.locator('#wrec-custody-file')).toHaveValue('');await expect(page.locator('#wrec-custody-report-download')).toBeDisabled();
+  await expect(page.locator('#wrec-snapshot')).toHaveValue(snapshot);
+  await page.locator('#wrec-custody-report-load').click();await expect(page.locator('#wrec-custody-report')).toBeVisible();
+  await expect(page.locator('#wrec-custody-identity')).toContainText(report.report_id);
+  await page.route('**/api/v1/recovery/snapshots/*/custody-test/report/download',route=>route.fulfill({status:401,contentType:'text/html',body:'<p>Synthetic sign-in expiry</p>'}));
+  await page.locator('#wrec-custody-report-download').click();await expect(page.locator('#wrec-status')).toContainText('reload this page');
+  await expect(page.locator('#wrec-custody-identity')).toBeEmpty();await expect(page.locator('#wrec-custody-checks')).toBeEmpty();
+  await expect(page.locator('#wrec-custody-test')).toBeDisabled();await expect(page.locator('#wrec-custody-report-load')).toBeDisabled();
+});
+
 test('recovery comparison pages real protected differences, downloads captured evidence and clears interrupted or expired access',async({page,request},info)=>{
   test.setTimeout(60000);
   await page.goto('/flows/designer');

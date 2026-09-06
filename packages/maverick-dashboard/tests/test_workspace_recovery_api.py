@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -132,6 +134,62 @@ def test_recovery_page_and_assets_render_from_real_routes():
         response = client.get("/static/lightwork-workspace-recovery." + suffix)
         assert response.status_code == 200
         assert response.content
+
+
+def test_retained_key_upload_requires_review_identity_and_bounded_stream(monkeypatch):
+    client = api_client()
+    headers, identifier = setup_snapshot(client)
+    endpoint = "/api/v1/recovery/snapshots/" + identifier + "/custody-test"
+    sha = recovery_api.recovery.inspect(identifier)["sha256"]
+    admitted = {**headers, "Content-Type": "application/octet-stream",
+                "X-Lightwork-Confirm-Custody-Test": "true", "X-Lightwork-Snapshot-SHA256": sha}
+    calls = []
+    def test_copy(selected, payload, **kwargs):
+        assert isinstance(payload, bytes)
+        calls.append((selected, payload, kwargs))
+        return {"state": "recorded", "fixture": "admission-only"}
+    monkeypatch.setattr(recovery_api.recovery, "test_key_custody", test_copy)
+    def no_upload_directory(*_, **__):
+        raise AssertionError("The API must not retain a second plaintext key ZIP outside worker cleanup")
+    monkeypatch.setattr(recovery_api, "tempfile", SimpleNamespace(TemporaryDirectory=no_upload_directory))
+    assert client.post(endpoint, content=b"fixture").status_code == 409
+    assert client.post(endpoint, headers=headers, content=b"fixture").status_code == 400
+    assert client.post(endpoint, headers={**admitted, "X-Lightwork-Confirm-Custody-Test": "false"}, content=b"fixture").status_code == 400
+    assert client.post(endpoint, headers={**admitted, "Content-Type": "application/zip"}, content=b"fixture").status_code == 415
+    assert client.post(endpoint, headers={**admitted, "X-Lightwork-Snapshot-SHA256": "0" * 64}, content=b"fixture").status_code == 409
+    assert client.post(endpoint, headers=admitted, content=b"").status_code == 400
+    monkeypatch.setattr(recovery_api.recovery, "MAX_CUSTODY_UPLOAD_BYTES", 4)
+    assert client.post(endpoint, headers=admitted, content=iter([b"123", b"456"])).status_code == 413
+    assert not calls
+    result = client.post(endpoint, headers=admitted, content=b"keys")
+    assert result.status_code == 200 and result.headers["cache-control"] == "private, no-store"
+    assert len(calls) == 1 and calls[0][0] == identifier and calls[0][1] == b"keys"
+    assert calls[0][2] == {"expected_sha256": sha, "actor": headers["X-Lightwork-Recovery-Context"]}
+    def deny(*_):
+        raise HTTPException(403, "admin removed")
+    monkeypatch.setattr(recovery_api, "require_global_permission", deny)
+    assert client.post(endpoint, headers=admitted, content=b"keys").status_code == 403
+    assert len(calls) == 1
+
+
+def test_retained_key_report_routes_require_current_context_and_strict_request(monkeypatch):
+    client = api_client()
+    headers, identifier = setup_snapshot(client)
+    endpoint = "/api/v1/recovery/snapshots/" + identifier + "/custody-test/report"
+    assert client.post(endpoint, json={}).status_code == 409
+    assert client.post(endpoint, headers=headers, json={"install_keys": True}).status_code == 422
+    absent = client.post(endpoint, headers=headers, json={})
+    assert absent.status_code == 200 and absent.json() == {"state": "not_recorded", "snapshot": identifier}
+    assert absent.headers["cache-control"] == "private, no-store"
+    report = {"report_id": "a" * 32}
+    assert client.post(endpoint + "/download", json=report).status_code == 409
+    assert client.post(endpoint + "/download", headers=headers, json={**report, "waive_restore_guard": True}).status_code == 422
+    assert client.post(endpoint + "/download", headers=headers, json=report).status_code == 409
+    def deny(*_):
+        raise HTTPException(403, "admin removed")
+    monkeypatch.setattr(recovery_api, "require_global_permission", deny)
+    assert client.post(endpoint, headers=headers, json={}).status_code == 403
+    assert client.post(endpoint + "/download", headers=headers, json=report).status_code == 403
 
 
 def test_disabled_feature_refuses_recovery_api(monkeypatch):

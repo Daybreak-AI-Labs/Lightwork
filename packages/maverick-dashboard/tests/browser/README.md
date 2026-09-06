@@ -58,6 +58,12 @@ Coverage includes:
   restore drill, followed by explicit historical report retrieval after reload,
   signed evidence download, interrupted retrieval and HTML permission expiry.
   Live restore remains disabled in the ordinary dashboard.
+- A separately downloaded synthetic encryption-key custody copy, explicit
+  upload and consent, fresh-process verification of recognized encrypted
+  records, signed historical report after reload, refusal of a damaged custody
+  upload, preserved previous evidence and HTML sign-in-expiry cleanup. The
+  fixture uses a local at-rest key and its ordinary local tenant-KEK derivation;
+  this does not establish remote KMS or complete application recovery.
 - Captured recovery comparisons over more than 50 real encrypted drafts and a
   protected database change, exact report paging and signed JSON download,
   retained safe inputs on interruption and cleared private state on HTML 401.

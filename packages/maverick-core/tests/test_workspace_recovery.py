@@ -3,8 +3,12 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import subprocess
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from maverick import backup, client, config, crypto_at_rest, file_lock, quotas
@@ -258,6 +262,138 @@ def test_live_restore_requires_real_isolated_mode():
     snapshot = ready_snapshot()
     with pytest.raises(recovery.RecoveryError, match="local recovery mode"):
         recovery.prepare_restore(snapshot["id"], isolated=False, actor="admin-a")
+
+
+def custody_worker_fixture(monkeypatch):
+    """Protocol-only fixture; actual fresh-process decryption is tested separately."""
+    directories = []
+    def execute(command, **kwargs):
+        directory = Path(command[-1])
+        directories.append(directory)
+        assert kwargs["cwd"] == directory and kwargs["stdin"] == subprocess.DEVNULL
+        assert kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
+        assert kwargs["timeout"] == 90
+        assert file_lock.private_path_is_restricted(directory)
+        environment = kwargs["env"]
+        assert environment["MAVERICK_HOME"] == str(directory / "home")
+        assert not any(name.startswith("LIGHTWORK_") or name.endswith("_API_KEY") for name in environment)
+        assert "MAVERICK_ENCRYPTION_KEY" not in environment and "MAVERICK_KMS_KEK" not in environment
+        request = json.loads((directory / "request.json").read_text())
+        assert backup._sha256(directory / "snapshot.tgz") == request["archive_sha256"]
+        assert backup._sha256(directory / "custody.zip") == request["custody_sha256"]
+        result = {"schema": 1, "application_identity": request["application_identity"],
+                  "checks": [{"format": "binary-v1", "detected": 1, "verified": 1, "failed": 0, "unsupported": 0}],
+                  "files_scanned": 1, "sqlite_columns_scanned": 0, "unexamined_files": 0,
+                  "outcome": "verified_supported_formats", "fresh_process": True, "key_source": "uploaded-custody-copy",
+                  "coverage_complete": False, "live_workspace_changed": False, "external_stores_tested": False,
+                  "limits": ["Protocol fixture only; not a decryption acceptance result."]}
+        file_lock.atomic_create_text(directory / "result.json", json.dumps(result))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(recovery.subprocess, "run", execute)
+    return directories
+
+
+@pytest.mark.parametrize("memory_upload", [False, True])
+def test_custody_report_bound_to_snapshot_actor_and_historical_build(tmp_path, monkeypatch, isolated_workspace, memory_upload):
+    monkeypatch.setenv("LIGHTWORK_ENCRYPTION_KEY", "inherited-fixture-must-not-be-used")
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "inherited-fixture-must-not-be-used")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "inherited-fixture-must-not-be-used")
+    snapshot = ready_snapshot()
+    upload = tmp_path / "uploaded.zip"
+    upload.write_bytes(b"protocol-only-worker-fixture")
+    directories = custody_worker_fixture(monkeypatch)
+    report = recovery.test_key_custody(snapshot["id"], upload.read_bytes() if memory_upload else upload,
+                                      expected_sha256=snapshot["sha256"], actor="admin-a")
+    assert report["restore_authorized"] is False and report["current_build_matches"] is True
+    assert report["coverage_complete"] is False
+    assert len(directories) == 1 and not directories[0].exists()
+    assert (isolated_workspace / "record.json").read_text() == '{"value":"original"}'
+    assert not (recovery._store() / "review.json").exists()
+    saved = recovery.custody_test_report(snapshot["id"], actor="admin-a")
+    assert saved["report_id"] == report["report_id"] and saved["completed_at"] == report["completed_at"]
+    payload = json.loads(recovery.export_custody_test(snapshot["id"], report["report_id"], actor="admin-a"))
+    with backup.recovery_scope(recovery._root(), "acme", recovery._key()):
+        backup._verify_authentication(payload, allow_unsigned=False, label="test custody")
+    with pytest.raises(recovery.RecoveryError, match="account"):
+        recovery.custody_test_report(snapshot["id"], actor="admin-b")
+    monkeypatch.setattr(recovery, "application_identity", lambda: "different-build")
+    assert recovery.custody_test_report(snapshot["id"], actor="admin-a")["current_build_matches"] is False
+    assert json.loads(recovery.export_custody_test(snapshot["id"], report["report_id"], actor="admin-a"))["completed_at"] == report["completed_at"]
+
+
+@pytest.mark.parametrize("failure", ["timeout", "exit", "malformed", "forged_counts"])
+def test_custody_failure_keeps_previous_report_and_cleans_private_job(tmp_path, monkeypatch, failure):
+    snapshot = ready_snapshot()
+    upload = tmp_path / "uploaded.zip"
+    upload.write_bytes(b"protocol-only-worker-fixture")
+    directories = custody_worker_fixture(monkeypatch)
+    initial = recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    previous = (recovery._store() / (snapshot["id"] + ".custody-test.json")).read_bytes()
+    execute = recovery.subprocess.run
+    def fail(command, **kwargs):
+        directory = Path(command[-1])
+        if failure == "timeout":
+            directories.append(directory)
+            raise subprocess.TimeoutExpired(command, 90)
+        result = execute(command, **kwargs)
+        if failure == "exit":
+            return SimpleNamespace(returncode=1)
+        path = directory / "result.json"
+        if failure == "malformed":
+            path.write_text("[]")
+        else:
+            value = json.loads(path.read_text())
+            value["checks"][0]["verified"] = 5
+            path.write_text(json.dumps(value))
+        return result
+    monkeypatch.setattr(recovery.subprocess, "run", fail)
+    with pytest.raises(recovery.RecoveryError):
+        recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    assert len(directories) == 2 and not any(path.exists() for path in directories)
+    assert (recovery._store() / (snapshot["id"] + ".custody-test.json")).read_bytes() == previous
+    assert recovery.custody_test_report(snapshot["id"], actor="admin-a")["report_id"] == initial["report_id"]
+
+
+def test_custody_changed_snapshot_replacement_and_retirement(tmp_path, monkeypatch):
+    snapshot = ready_snapshot()
+    upload = tmp_path / "uploaded.zip"
+    upload.write_bytes(b"protocol-only-worker-fixture")
+    directories = custody_worker_fixture(monkeypatch)
+    with pytest.raises(recovery.RecoveryError, match="snapshot"):
+        recovery.test_key_custody(snapshot["id"], upload, expected_sha256="0" * 64, actor="admin-a")
+    assert not directories
+    assert recovery.custody_test_report(snapshot["id"], actor="admin-a")["state"] == "not_recorded"
+    first = recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    with pytest.raises(recovery.RecoveryError, match="changed"):
+        recovery.export_custody_test(snapshot["id"], first["report_id"], actor="admin-a")
+    report_path = recovery._store() / (snapshot["id"] + ".custody-test.json")
+    recovery.retire(snapshot["id"], snapshot["sha256"])
+    assert not report_path.exists()
+
+
+def test_custody_cleanup_failure_cannot_replace_previous_evidence(tmp_path, monkeypatch):
+    snapshot = ready_snapshot()
+    upload = tmp_path / "uploaded.zip"
+    upload.write_bytes(b"protocol-only-worker-fixture")
+    custody_worker_fixture(monkeypatch)
+    recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    path = recovery._store() / (snapshot["id"] + ".custody-test.json")
+    previous = path.read_bytes()
+    temporary = backup._temporary_directory
+
+    @contextmanager
+    def refused_cleanup(*args, **kwargs):
+        with temporary(*args, **kwargs) as directory:
+            yield directory
+        # The fixture removes its real files, then reproduces cleanup refusal.
+        if kwargs.get("prefix") == "lw-custody-":
+            raise OSError("synthetic cleanup refusal")
+
+    monkeypatch.setattr(backup, "_temporary_directory", refused_cleanup)
+    with pytest.raises(OSError, match="cleanup refusal"):
+        recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    assert path.read_bytes() == previous
 
 
 @pytest.mark.parametrize("field,value", [("items", None), ("snapshot", []), ("total_changes", "0")])

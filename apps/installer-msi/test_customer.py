@@ -5,11 +5,13 @@ import base64
 import importlib.util
 import json
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 MODULE = Path(__file__).with_name("stage_customer.py")
 spec = importlib.util.spec_from_file_location("stage_customer", MODULE)
@@ -30,6 +32,23 @@ def test_direct_desktop_native_build_has_a_valid_windows_icon():
     for icon in icons:
         assert icon.is_file()
         assert icon.read_bytes()[:4] == b"\x00\x00\x01\x00", "Expected an ICO resource"
+
+
+def test_synthetic_workflow_signing_explicitly_supplies_the_empty_key_password():
+    workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
+    commands = []
+    for step in workflow["jobs"]["build-and-accept"]["steps"]:
+        for line in step.get("run", "").splitlines():
+            if re.match(r"\s*node\s+\S+\s+signer\s+sign\s", line):
+                commands.append(shlex.split(line))
+    assert len(commands) == 2, "Both synthetic MSI signing paths must be covered"
+    for arguments in commands:
+        # Tauri generates --ci keys with an empty password, but signer sign
+        # still prompts when the password argument is absent, even in CI.
+        assert "--password" in arguments, "Headless signing must never prompt for the fixture key password"
+        index = arguments.index("--password")
+        assert arguments[index + 1] == "", "Use the generated test key's exact empty password"
+        assert index + 2 < len(arguments), "The signature must still target its MSI argument"
 
 
 @pytest.mark.parametrize("url", [

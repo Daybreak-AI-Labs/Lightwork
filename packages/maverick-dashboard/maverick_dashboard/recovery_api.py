@@ -249,6 +249,46 @@ async def download_drill_report(request: Request, identifier: str, body: ReportI
         "Cache-Control": "private, no-store"})
 
 
+@router.post("/api/v1/recovery/snapshots/{identifier}/custody-test")
+async def test_retained_keys(request: Request, identifier: str):
+    actor = _admit(request, mutation=True)
+    if request.headers.get("X-Lightwork-Confirm-Custody-Test") != "true":
+        raise HTTPException(400, "Explicitly confirm testing this separately retained key copy in a temporary workspace.")
+    if request.headers.get("Content-Type", "").split(";")[0] != "application/octet-stream":
+        raise HTTPException(415, "Select the separately retained Lightwork encryption-key ZIP.")
+    expected = request.headers.get("X-Lightwork-Snapshot-SHA256", "")
+    selected = await _call(recovery.inspect, identifier)
+    if len(expected) != 64 or any(char not in "0123456789abcdef" for char in expected) or not hmac.compare_digest(expected, selected["sha256"]):
+        raise HTTPException(409, "The selected snapshot changed. Verify it again before testing retained keys.")
+    # Only the core creates a private on-disk copy; its cleanup must finish
+    # before it signs and retains a completed report.
+    upload = bytearray()
+    async for chunk in request.stream():
+        if len(upload) + len(chunk) > recovery.MAX_CUSTODY_UPLOAD_BYTES:
+            raise HTTPException(413, "The retained-key ZIP exceeds the 4 MiB upload limit.")
+        upload.extend(chunk)
+    if not upload:
+        raise HTTPException(400, "Select the separately retained encryption-key ZIP before starting the test.")
+    result = await _call(recovery.test_key_custody, identifier, bytes(upload), expected_sha256=expected, actor=actor)
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/custody-test/report")
+async def retained_key_test_report(request: Request, identifier: str, body: CompareStartIn):
+    actor = _admit(request, mutation=True)
+    result = await _call(recovery.custody_test_report, identifier, actor=actor)
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/custody-test/report/download")
+async def download_retained_key_test(request: Request, identifier: str, body: ReportIn):
+    actor = _admit(request, mutation=True)
+    payload = await _call(recovery.export_custody_test, identifier, body.report_id, actor=actor)
+    return Response(payload, media_type="application/json", headers={
+        "Content-Disposition": 'attachment; filename="Lightwork-retained-key-test-' + identifier + '.json"',
+        "Cache-Control": "private, no-store"})
+
+
 @router.post("/api/v1/recovery/snapshots/{identifier}/retire")
 async def retire_snapshot(request: Request, identifier: str, body: RetireIn):
     _admit(request, mutation=True)
