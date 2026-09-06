@@ -31,8 +31,12 @@ test('discovery uses sealed connection references and explicitly rebinds a rotat
   await source.getByRole('button',{name:'Save source settings'}).click();
   await expect(source.locator('[name="expected_revision"]')).toHaveValue('1');
   const before=await (await request.get('/api/v1/privacy/data-discovery/sources/browser-cmdb')).json();
-  const response=page.waitForResponse(r=>r.url().endsWith('/test-access'));
-  await page.locator('#pdd-test-source').click();const access=await (await response).json();
+  const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/v1/privacy/data-discovery/sources/browser-cmdb/test-access');
+  await page.locator('#pdd-test-source').click();expect((await response).status()).toBe(200);
+  // Assert the exact payload consumed by the app. Chromium can discard its
+  // inspector-side response body even after the bounded reader renders it.
+  await expect(page.locator('#pdd-status')).toContainText('Saved source access checked');
+  const access=JSON.parse(await page.locator('#pdd-result').textContent());
   expect(access.access).toBe('readable');expect(access.raw_data_returned).toBe(false);expect(access.report_created).toBe(false);
   expect(JSON.stringify(access)).not.toContain('never-return-this-value');
   await page.locator('#pdd-key-picker').selectOption({index:1});await key.getByRole('button',{name:'Create or rotate evidence key'}).click();
