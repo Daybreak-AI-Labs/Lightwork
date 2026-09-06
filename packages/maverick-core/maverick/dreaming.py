@@ -1270,7 +1270,13 @@ def benchmark_regressed() -> bool:
         from . import continuous_benchmark as _cb
         history = _cb.load_history(_cb._store_path())
         names = {str(h.get("name")) for h in history if h.get("name")}
-        return any(_cb.detect_regression(history, n) for n in names)
+        # detect_regression returns a report dict (always truthy), not a
+        # bool -- `any(...)` over the dicts themselves was true whenever ANY
+        # tracked benchmark had history, regardless of its verdict, so every
+        # newly distilled skill was quarantined the moment one benchmark had
+        # ever run. Read the actual verdict field instead.
+        return any(bool(_cb.detect_regression(history, n).get("regressed"))
+                  for n in names)
     except Exception:  # pragma: no cover -- canary never blocks a dream
         return False
 

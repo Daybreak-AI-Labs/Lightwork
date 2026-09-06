@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -213,6 +214,26 @@ def decay_weights(
     return {n: _weight_from_stat(stats.get(n), min_uses, floor) for n in names}
 
 
+def _wilson_upper_bound(successes: float, n: int, z: float = 1.96) -> float:
+    """Upper endpoint of the Wilson score interval for a binomial proportion.
+
+    Same formula as ``maverick.self_harness._wilson_upper_bound`` (duplicated
+    rather than imported to avoid a skill -> self_harness layering
+    dependency); kept here so eviction has an honest confidence bound instead
+    of the raw point estimate. At small ``n`` the point estimate is nearly
+    meaningless: 1 win in 5 uses (0.2) and 0 wins in 5 uses (0.0) both have a
+    Wilson upper bound well above 0.2, i.e. the data doesn't yet rule out the
+    skill being fine."""
+    if n <= 0:
+        return 1.0
+    phat = max(0.0, min(1.0, successes / n))
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    centre = phat + z2 / (2 * n)
+    margin = z * math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n)
+    return min(1.0, (centre + margin) / denom)
+
+
 def evictable(
     *,
     path: Path | None = None,
@@ -222,9 +243,14 @@ def evictable(
     """Names of skills that have had a fair trial and rarely help.
 
     A skill is evictable when it's been used at least ``min_uses`` times,
-    has a decided outcome, and its win rate is at or below ``max_win_rate``.
-    Callers (e.g. a maintenance command) decide whether to actually delete;
-    this function only identifies candidates and never mutates state.
+    has a decided outcome, and the Wilson-score UPPER bound on its true win
+    rate is at or below ``max_win_rate`` -- i.e. even the most favorable
+    plausible reading of the evidence still says "rarely helps". The raw
+    point estimate (``wins / decided``) is not enough at small n: 1 win in 5
+    uses has a 95% upper bound near 0.62, so a "≤ 0.2" point-estimate rule
+    would evict a skill the data hasn't actually convicted yet. Callers (e.g.
+    a maintenance command) decide whether to actually delete; this function
+    only identifies candidates and never mutates state.
     """
     try:
         with _lock:
@@ -234,7 +260,8 @@ def evictable(
     out: list[str] = []
     for name, st in stats.items():
         decided = st.wins + st.losses
-        if st.uses >= min_uses and decided > 0 and (st.wins / decided) <= max_win_rate:
+        if (st.uses >= min_uses and decided > 0
+                and _wilson_upper_bound(st.wins, decided) <= max_win_rate):
             out.append(name)
     return out
 

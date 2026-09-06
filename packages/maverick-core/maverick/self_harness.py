@@ -262,6 +262,39 @@ def _scope_contexts(domain: str | None = None,
     return out
 
 
+def _rescreen_block(block: str) -> str:
+    """Re-apply the addendum write-time safety screen to every bullet in a
+    STORED block, at RECALL time.
+
+    Recall previously trusted write-time screening alone: a block loaded
+    directly from the store -- a legacy ``addenda.json`` that predates the
+    proposal guard, or a world-DB row written by any path that bypassed
+    :func:`_apply_addendum` -- never passed back through the screen, so a
+    stale or tampered line rode straight into every future prompt for the
+    model. Mirrors the exact per-line re-screen already used before a line
+    crosses models in transfer (see ``_screen_addendum_line`` callers): the
+    same ``_sanitize_line`` (control-char strip, whitespace collapse, secret
+    scrub) + ``_erodes_policy`` check, per bullet. A bullet that fails is
+    dropped; the header (a static constant, never user data) is preserved
+    verbatim when at least one bullet survives, and everything reads as
+    empty when none do."""
+    header: str | None = None
+    bullets: list[str] = []
+    for raw in (block or "").splitlines():
+        ln = raw.strip()
+        if not ln:
+            continue
+        if ln.startswith("- "):
+            bullets.append(ln[2:].strip())
+        elif header is None:
+            header = ln
+    screened = [s for s in (_screen_addendum_line(b) for b in bullets) if s]
+    if not screened:
+        return ""
+    rendered = "\n".join(f"- {s}" for s in screened)
+    return f"{header}\n{rendered}" if header else rendered
+
+
 def recall_addendum(model_id: str | None, path: Path | None = None, *,
                     domain: str | None = None,
                     tools: list[str] | tuple[str, ...] | None = None,
@@ -276,13 +309,14 @@ def recall_addendum(model_id: str | None, path: Path | None = None, *,
     the same model); when ``tools`` are given, guidance mined scoped to each tool
     the run has on hand is appended (so a ``web_fetch`` lesson rides only runs
     that can call ``web_fetch`` -- #7 component profiles). With none (the default)
-    this is exactly the model-wide block, byte-for-byte unchanged."""
+    this is exactly the model-wide block, MODULO the recall-time re-screen
+    (see :func:`_rescreen_block`) every contributing block passes through."""
     if not model_id or not enabled():
         return ""
     store = load_addenda(path)
-    block = store.get(str(model_id), "")
+    block = _rescreen_block(store.get(str(model_id), ""))
     for ctx in _scope_contexts(domain, tools, role):
-        scoped = store.get(_scoped_key(str(model_id), ctx), "")
+        scoped = _rescreen_block(store.get(_scoped_key(str(model_id), ctx), ""))
         if scoped:
             block = (block + "\n" + scoped) if block else scoped
     return block

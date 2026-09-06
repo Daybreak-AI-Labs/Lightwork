@@ -35,6 +35,25 @@ def _enrich(label: str):
     except Exception as e:  # pragma: no cover -- enrichment never blocks a run
         log.debug("%s skipped: %s", label, e)
 
+def _skill_distillation_frozen() -> bool:
+    """Whether calibration has frozen learning (the verifier drifted and no
+    longer discriminates correct from incorrect).
+
+    ``dreaming._consolidate_learning`` already refuses to distill skills or
+    synthesize insights while frozen; the per-run local distillation below
+    fed the same success/failure labels straight into a saved, recallable
+    skill with no such check, making the interlock a no-op for the busiest
+    distillation path. Extracted so the gate is unit-testable without
+    invoking the whole goal-execution loop. Fail-open: any error (missing
+    calibration module, bad state) reads as not frozen, same as every other
+    enrichment gate here."""
+    try:
+        from .calibration import learning_frozen
+        return bool(learning_frozen())
+    except Exception:  # pragma: no cover -- interlock absent = not frozen
+        return False
+
+
 # The "skill distill disabled" opt-in hint is a standing setting, not a
 # per-goal event -- show it at most once per process (see run_goal).
 _WARNED_DISTILL_DISABLED = False
@@ -1959,7 +1978,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # needed. No-op when explicitly disabled; never raises into the run.
         with _enrich("local skill distillation"):
             from .skill import distillation_local as _sdl
-            if _sdl.enabled():
+            if _sdl.enabled() and not _skill_distillation_frozen():
                 trajectories = [
                     {"goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}

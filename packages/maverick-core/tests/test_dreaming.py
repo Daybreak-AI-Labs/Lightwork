@@ -455,7 +455,11 @@ class TestSkillRetirement:
         return store, stats
 
     def test_decayed_skill_is_retired_reversibly(self, tmp_path):
-        store, stats = self._seed(tmp_path, wins=1, losses=9)
+        # n=20 so the Wilson upper bound on the observed 1/20 win rate
+        # (~0.24) actually clears the 0.25 threshold -- retirement now gates
+        # on a confidence bound, not the raw point estimate, so a thin
+        # sample (e.g. 1 win in 5) is deliberately NOT enough evidence.
+        store, stats = self._seed(tmp_path, wins=1, losses=19)
         retired = dreaming.retire_stale_skills(
             store, min_uses=5, below=0.25, stats_path=stats,
         )
@@ -516,6 +520,29 @@ class TestBenchmarkCanary:
         import maverick.continuous_benchmark as cb
         monkeypatch.setattr(cb, "load_history", lambda p: [])
         assert dreaming.benchmark_regressed() is False
+
+    def test_stable_history_reads_as_green(self, monkeypatch):
+        # Real detect_regression() call (no monkeypatch of benchmark_regressed
+        # itself): detect_regression returns a REPORT DICT, which is always
+        # truthy -- `any(detect_regression(...) for ...)` would read this as
+        # regressing just because a tracked benchmark has history at all,
+        # even when its own "regressed" field is False.
+        import maverick.continuous_benchmark as cb
+        history: list = []
+        for _ in range(5):
+            cb.record_result(history, "swe", 0.80)
+        cb.record_result(history, "swe", 0.79)  # well within threshold
+        monkeypatch.setattr(cb, "load_history", lambda p: history)
+        assert dreaming.benchmark_regressed() is False
+
+    def test_real_regression_is_detected(self, monkeypatch):
+        import maverick.continuous_benchmark as cb
+        history: list = []
+        for _ in range(5):
+            cb.record_result(history, "swe", 0.80)
+        cb.record_result(history, "swe", 0.50)  # a real, large drop
+        monkeypatch.setattr(cb, "load_history", lambda p: history)
+        assert dreaming.benchmark_regressed() is True
 
 
 class TestRehearsal:

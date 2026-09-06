@@ -125,3 +125,44 @@ def test_skill_distillation_local_gate(monkeypatch, enabled):
     import maverick.skill.distillation_local as sdl
     monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1" if enabled else "0")
     assert sdl.enabled() is enabled
+
+
+def test_skill_distillation_frozen_reflects_calibration(monkeypatch):
+    """orchestrator._skill_distillation_frozen() gates per-run local skill
+    distillation on calibration.learning_frozen() -- the same interlock
+    dreaming._consolidate_learning already enforces. Without this, the
+    busiest distillation path (every run, not just the nightly dream cycle)
+    bypassed the freeze entirely."""
+    import maverick.calibration as calibration
+    import maverick.orchestrator as orchestrator
+
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+    assert orchestrator._skill_distillation_frozen() is True
+
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    assert orchestrator._skill_distillation_frozen() is False
+
+
+def test_skill_distillation_frozen_fails_open(monkeypatch):
+    import maverick.calibration as calibration
+    import maverick.orchestrator as orchestrator
+
+    def _boom():
+        raise RuntimeError("calibration unavailable")
+
+    monkeypatch.setattr(calibration, "learning_frozen", _boom)
+    assert orchestrator._skill_distillation_frozen() is False
+
+
+def test_run_goal_impl_checks_the_freeze_before_distilling():
+    """Guard against the gate rotting back out of the call site: the actual
+    per-run distillation block in ``_run_goal_impl`` must call
+    ``_skill_distillation_frozen()`` before ``distill_and_save_gated``."""
+    import inspect
+
+    import maverick.orchestrator as orchestrator
+
+    src = inspect.getsource(orchestrator._run_goal_impl)
+    frozen_idx = src.index("_skill_distillation_frozen()")
+    distill_idx = src.index("distill_and_save_gated(")
+    assert frozen_idx < distill_idx
