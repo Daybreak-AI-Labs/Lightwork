@@ -199,11 +199,62 @@ class Journey:
         self.view.click('input[name="confirm"]')
         # Enter activates the real submit button and verifies keyboard use.
         self.view.keyboard('button[type="submit"]', "\ue007")
-        self.view.wait(lambda: self.view.call("GET", self.view.session + "/url").endswith("/start"))
-        if not (self.state / "dashboard-owner.json").is_file():
+        try:
+            observed = self.view.wait(self.owner_progress)
+        except (OSError, RuntimeError, KeyError):
+            self.report["owner_setup"] = self.owner_diagnostic()
+            self.record("first-launch-and-named-owner")
+            raise RuntimeError("Native first-owner setup did not finish; bounded owner_setup diagnostics were retained.") from None
+        self.report["owner_setup"] = observed
+        if observed["form_rejected"]:
+            self.record("first-launch-and-named-owner")
+            raise RuntimeError("Native first-owner form was rejected (" + observed["rejection"] + "); bounded owner_setup diagnostics were retained.")
+        if not observed["claim_exists"]:
             raise RuntimeError("Native first-owner setup did not create its protected claim.")
         self.view.screenshot(self.directory / "first-owner.png")
         self.record("first-launch-and-named-owner", passed=True)
+
+    def owner_diagnostic(self):
+        # Classify in the browser: raw alert text, URLs, inputs and cookies must
+        # never leave the page or enter driver/CI artifacts for this diagnostic.
+        script = """
+const path = ['/start','/auth/local-owner','/auth/local-login'].includes(location.pathname)
+  ? location.pathname : 'other';
+const alert = path.startsWith('/auth/local-') ? document.querySelector('[role="alert"]') : null;
+const text = alert ? (alert.textContent || '').trim().slice(0, 2048) : '';
+const reasons = {
+  'Open this Lightwork page before submitting the form.': 'origin_rejected',
+  "Open owner setup on this computer's loopback address.": 'loopback_required',
+  'Owner setup does not accept remote or forwarded requests.': 'forwarded_request_rejected',
+  'An owner has already been claimed. Sign in to complete or continue setup.': 'already_claimed',
+  'Local owner authority is unavailable.': 'authority_unavailable',
+  'Authentication policy is unavailable.': 'policy_unavailable',
+  'Check the submitted form values.': 'invalid_form',
+  'The email or passphrase was not accepted.': 'credentials_rejected'
+};
+return {ready: document.readyState === 'complete', path, form_rejected: !!alert,
+  rejection: alert ? (reasons[text] || 'unclassified_form_rejection') : 'none'};
+"""
+        fallback = {"ready": False, "path": "unavailable", "form_rejected": False, "rejection": "unavailable"}
+        try:
+            result = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": []})
+            if (not isinstance(result, dict) or set(result) != {"ready", "path", "form_rejected", "rejection"}
+                    or type(result["ready"]) is not bool or type(result["form_rejected"]) is not bool
+                    or not isinstance(result["path"], str) or not isinstance(result["rejection"], str)
+                    or result["path"] not in {"/start", "/auth/local-owner", "/auth/local-login", "other"}
+                    or result["rejection"] not in {"none", "origin_rejected", "loopback_required", "forwarded_request_rejected",
+                        "already_claimed", "authority_unavailable", "policy_unavailable", "invalid_form", "credentials_rejected",
+                        "unclassified_form_rejection"}):
+                result = fallback
+        except (OSError, RuntimeError, KeyError):
+            result = fallback
+        return {**result, "claim_exists": (self.state / "dashboard-owner.json").is_file()}
+
+    def owner_progress(self):
+        observed = self.owner_diagnostic()
+        if observed["ready"] and (observed["path"] == "/start" or observed["form_rejected"]):
+            return observed
+        return None
 
     def normal_support(self):
         self.record("normal-support-eight-package-inventory")

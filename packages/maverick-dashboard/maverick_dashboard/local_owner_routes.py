@@ -35,7 +35,10 @@ def _form(*, setup: bool, message="", status=200):
     body += '<p><a href="/auth/local-login">Continue an existing owner setup or sign in</a></p>' if setup else '<p>For company sign-in, use your organization’s configured login method.</p>'
     response = _page(title, body, status)
     response.headers["Cache-Control"] = "no-store"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    # Native browser form submissions need their same-origin Origin header.
+    # no-referrer makes Chromium send Origin: null and defeats the CSRF check.
+    # External sites still receive no referrer under this policy.
+    response.headers["Referrer-Policy"] = "same-origin"
     return response
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import shutil
 import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
@@ -16,6 +17,106 @@ def modules(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).parent))
     return (importlib.import_module("native_webview_journey"),
             importlib.import_module("native_webview_driver"))
+
+
+@pytest.mark.parametrize("mode", ["rejected", "accepted", "missing-claim", "timeout", "malformed"])
+def test_first_owner_keeps_acceptance_and_records_only_bounded_diagnostics(tmp_path, modules, mode):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = journey.state = tmp_path
+    journey.password = "synthetic-private-form-value"  # pragma: allowlist secret - noncredential redaction fixture
+    journey.report = {"checks": []}
+    if mode == "accepted":
+        (tmp_path / "dashboard-owner.json").write_text("synthetic claim", encoding="utf-8")
+    screenshots, observations = [], []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, method, path, payload=None):
+            if method == "GET":
+                return "http://127.0.0.1:8765/start"
+            assert path.endswith("/execute/sync") and payload["args"] == []
+            observations.append(True)
+            if mode == "malformed":
+                return {"private": journey.password}
+            return {"ready": mode != "timeout", "path": "/auth/local-owner" if mode == "rejected" else "/start",
+                    "form_rejected": mode == "rejected", "rejection": "origin_rejected" if mode == "rejected" else "none"}
+
+        def wait(self, condition, **_kwargs):
+            value = condition()
+            if value:
+                return value
+            raise RuntimeError("synthetic private driver error " + journey.password)
+
+        def navigate(self, _address):
+            pass
+
+        def click(self, _selector):
+            pass
+
+        def fill(self, _selector, _value):
+            pass
+
+        def keyboard(self, _selector, _value):
+            pass
+
+        def screenshot(self, path):
+            screenshots.append(path)
+
+    journey.view = View()
+    if mode == "accepted":
+        journey.first_owner()
+        assert journey.report["checks"] == ["first-launch-and-named-owner"] and len(screenshots) == 1
+    else:
+        with pytest.raises(RuntimeError) as error:
+            journey.first_owner()
+        assert journey.password not in str(error.value)
+        assert screenshots == [] and journey.report["checks"] == []
+    diagnostic = journey.report["owner_setup"]
+    assert set(diagnostic) == {"ready", "path", "form_rejected", "rejection", "claim_exists"}
+    assert diagnostic["claim_exists"] == (mode == "accepted")
+    assert journey.password not in json.dumps(journey.report)
+    if mode == "rejected":
+        assert diagnostic["rejection"] == "origin_rejected" and len(observations) == 1
+    if mode == "malformed":
+        assert diagnostic["path"] == "unavailable"
+
+
+def test_owner_diagnostic_executes_real_js_without_exporting_private_page_data(tmp_path, modules):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed only for the actual browser-script contract check")
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.state = tmp_path
+    scripts = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, payload):
+            scripts.append(payload["script"])
+            return None
+
+    journey.view = View()
+    journey.owner_diagnostic()
+    source = """
+const assert = require('node:assert/strict');
+const inspect = new Function(SCRIPT);
+global.location = {pathname:'/auth/local-owner', search:'?private-query', hash:'#private-fragment'};
+global.document = {readyState:'complete', get cookie(){throw Error('cookie access forbidden')},
+  querySelector(selector){assert.equal(selector,'[role="alert"]');return {textContent:message}}};
+let message = 'Open this Lightwork page before submitting the form.';
+assert.equal(inspect().rejection,'origin_rejected');
+message = 'private input should never leave the page';
+assert.equal(inspect().rejection,'unclassified_form_rejection');
+assert.equal(JSON.stringify(inspect()).includes('private'),false);
+location.pathname = '/private-path';
+assert.deepEqual(inspect(),{ready:true,path:'other',form_rejected:false,rejection:'none'});
+""".replace("SCRIPT", json.dumps(scripts[0]))
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
 
 
 def test_startup_probe_restores_runtime_and_preserves_primary_failure(tmp_path, modules):

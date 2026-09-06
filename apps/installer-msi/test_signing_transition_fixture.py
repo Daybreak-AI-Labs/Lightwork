@@ -153,17 +153,27 @@ def powershell(tmp_path, source, **environment):
              "PROBE_ROOT": str(tmp_path), **environment}, capture_output=True, text=True, timeout=30, check=False)
 
 
-def test_transition_driver_parse_and_exact_host_guard_do_not_execute_native_work(tmp_path):
+@pytest.mark.parametrize("error_view", ["ConciseView", "NormalView"])
+@pytest.mark.parametrize("rendering", ["PlainText", "Ansi"])
+def test_transition_driver_parse_and_exact_host_guard_do_not_execute_native_work(tmp_path, error_view, rendering):
     result = powershell(tmp_path, """
+    $ErrorView=$env:TEST_ERROR_VIEW
+    $PSStyle.OutputRendering=$env:TEST_RENDERING
     $errors=$null
     [Management.Automation.Language.Parser]::ParseFile($env:TRANSITION_DRIVER,[ref]$null,[ref]$errors)|Out-Null
     if($errors.Count){throw ($errors|Out-String)}
     function Get-Item {throw 'UNEXPECTED FILE OR TRUST READ'}
     function Start-Process {throw 'UNEXPECTED NATIVE EXECUTION'}
-    & $env:TRANSITION_DRIVER -BaseMsi unused -CandidateMsi unused -PublicKeyFile unused -Inventory unused -Report unused -TransitionDirectory $env:PROBE_ROOT
-    """, CI="true", RUNNER_TEMP=str(tmp_path), GITHUB_ACTIONS="false")
-    assert result.returncode != 0
-    assert "disposable GitHub-hosted acceptance job" in result.stderr
+    try {
+        & $env:TRANSITION_DRIVER -BaseMsi unused -CandidateMsi unused -PublicKeyFile unused -Inventory unused -Report unused -TransitionDirectory $env:PROBE_ROOT
+    } catch {
+        # Compare the real exception, not host-width/ANSI-dependent ErrorView.
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit 1
+    }
+    """, CI="true", RUNNER_TEMP=str(tmp_path), GITHUB_ACTIONS="false", TEST_ERROR_VIEW=error_view, TEST_RENDERING=rendering)
+    assert result.returncode == 1
+    assert result.stderr.strip() == "Publisher transition acceptance requires the disposable GitHub-hosted acceptance job."
     assert "UNEXPECTED" not in result.stderr
 
 

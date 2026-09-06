@@ -125,13 +125,16 @@ def test_actual_http_enrollment_cookie_and_fresh_login():
     from maverick_dashboard.app import app
     with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 53210),
                     headers={"Origin": "http://127.0.0.1:8765"}, follow_redirects=False) as client:
-        assert client.get("/auth/local-owner").status_code == 200
+        form = client.get("/auth/local-owner")
+        assert form.status_code == 200
+        assert form.headers["referrer-policy"] == "same-origin"
         response = client.post("/auth/local-owner", data={"email": "owner@example.com", "password": PASSPHRASE, "confirm": "yes"})
         assert response.status_code == 303, response.text
         assert "mvk_session=" in response.headers["set-cookie"]
         assert client.get("/api/v1/features/modules").status_code == 200
         client.cookies.clear()
         assert client.get("/api/v1/features/modules").status_code == 401
+        assert client.get("/auth/local-login").headers["referrer-policy"] == "same-origin"
         response = client.post("/auth/local-login", data={"email": "owner@example.com", "password": PASSPHRASE})
         assert response.status_code == 303, response.text
 
