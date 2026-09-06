@@ -39,8 +39,10 @@ def test_direct_desktop_native_build_has_a_valid_windows_icon():
 def test_synthetic_workflow_signing_explicitly_supplies_the_empty_key_password():
     workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
     commands = []
-    for step in workflow["jobs"]["build-and-accept"]["steps"]:
-        for line in step.get("run", "").splitlines():
+    sources = [step.get("run", "") for step in workflow["jobs"]["build-and-accept"]["steps"]]
+    sources.append(MODULE.with_name("fixture-publisher.ps1").read_text(encoding="utf-8"))
+    for source in sources:
+        for line in source.splitlines():
             if re.match(r"\s*node\s+\S+\s+signer\s+sign\s", line):
                 commands.append(shlex.split(line))
     assert len(commands) == 2, "Both synthetic MSI signing paths must be covered"

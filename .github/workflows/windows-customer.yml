@@ -83,7 +83,7 @@ jobs:
         run: |
           & $env:CUSTOMER_BUILD_PYTHON scripts/install_release_cohort.py --verify-only
           if ($LASTEXITCODE -ne 0) { throw 'The test interpreter cannot import the full release cohort.' }
-          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
+          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py apps/installer-msi/test_acceptance_diagnostics.py apps/installer-msi/test_signed_rollback_fixture.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
           if ($LASTEXITCODE -ne 0) { throw 'Packaging regression tests failed.' }
           node --test apps/desktop/tests/*.test.js
           if ($LASTEXITCODE -ne 0) { throw 'Maintenance UI tests failed.' }
@@ -168,51 +168,28 @@ jobs:
           ./apps/installer-msi/test-customer.ps1 -BaseMsi "$env:GITHUB_WORKSPACE/customer-artifacts/Lightwork.msi" -CandidateMsi (Join-Path $env:RUNNER_TEMP 'upgrade-fixture.msi') -Inventory customer-artifacts/runtime-inventory.json -InstallDirectory (Join-Path $env:RUNNER_TEMP 'installed-lightwork') -Report "$env:GITHUB_WORKSPACE/customer-artifacts/acceptance.json"
       - name: Accept completed-upgrade rollback with a disposable trusted fixture publisher
         if: github.event_name != 'workflow_dispatch' || !inputs.customer_release
+        timeout-minutes: 50
         shell: pwsh
         run: |
-          # Trust exists only on this disposable runner. These signed copies
-          # never enter customer-artifacts or the protected release signer.
-          $fixture = Join-Path $env:RUNNER_TEMP ('rollback-signed-' + [guid]::NewGuid().ToString('N'))
-          New-Item -ItemType Directory -Path $fixture | Out-Null
-          $base = Join-Path $fixture 'base.msi'
-          $next = Join-Path $fixture 'next.msi'
-          Copy-Item -LiteralPath customer-artifacts/Lightwork.msi -Destination $base
-          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'upgrade-fixture.msi') -Destination $next
-          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Lightwork disposable CI fixture' -CertStoreLocation 'Cert:\CurrentUser\My' -NotAfter (Get-Date).AddDays(2) -KeyExportPolicy NonExportable
-          $thumbprint = $certificate.Thumbprint
-          try {
-            $publicCertificate = Join-Path $fixture 'fixture.cer'
-            Export-Certificate -Cert $certificate -FilePath $publicCertificate | Out-Null
-            Import-Certificate -FilePath $publicCertificate -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-            Import-Certificate -FilePath $publicCertificate -CertStoreLocation 'Cert:\CurrentUser\TrustedPublisher' | Out-Null
-            $signTool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
-            if (-not $signTool) { throw 'Windows SDK signing tool unavailable for fixture acceptance.' }
-            Set-Item -LiteralPath Env:TAURI_SIGNING_PRIVATE_KEY -Value (Get-Content -Raw -LiteralPath $env:ACCEPTANCE_PRIVATE_KEY)
-            foreach ($package in @($base,$next)) {
-              & $signTool.FullName sign /fd SHA256 /sha1 $thumbprint $package
-              if ($LASTEXITCODE -ne 0) { throw 'Disposable publisher signing failed.' }
-              node apps/installer-desktop/node_modules/@tauri-apps/cli/tauri.js signer sign --password "" $package
-              if ($LASTEXITCODE -ne 0) { throw 'Disposable updater signing failed.' }
-            }
-            Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
-            ./apps/installer-msi/test-completed-rollback.ps1 -BaseMsi $base -CandidateMsi $next -PublicKeyFile "$env:ACCEPTANCE_PRIVATE_KEY.pub" -Inventory customer-artifacts/runtime-inventory.json -Report "$env:GITHUB_WORKSPACE/customer-artifacts/completed-rollback-acceptance.json"
-          } finally {
-            Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath ('Cert:\CurrentUser\Root\' + $thumbprint) -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath ('Cert:\CurrentUser\TrustedPublisher\' + $thumbprint) -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath ('Cert:\CurrentUser\My\' + $thumbprint) -DeleteKey -ErrorAction SilentlyContinue
-          }
+          & $env:CUSTOMER_BUILD_PYTHON apps/installer-msi/accept_signed_rollback_fixture.py --workspace "$env:GITHUB_WORKSPACE" --runner "$env:RUNNER_TEMP"
+          if ($LASTEXITCODE -ne 0) { throw 'Disposable signed rollback acceptance failed; see stage diagnostics.' }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-customer-unsigned-candidate
           path: customer-artifacts/*
           if-no-files-found: error
           retention-days: 14
+      - name: Collect bounded failure diagnostics from disposable acceptance fixtures
+        if: always() && env.CUSTOMER_BUILD_PYTHON != ''
+        shell: pwsh
+        run: |
+          & $env:CUSTOMER_BUILD_PYTHON apps/installer-msi/collect_acceptance_diagnostics.py --runner "$env:RUNNER_TEMP" --artifacts customer-artifacts --output acceptance-diagnostics
+          if ($LASTEXITCODE -ne 0) { throw 'Acceptance diagnostic collection failed.' }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: windows-customer-install-logs
-          path: ${{ runner.temp }}/lightwork-msi-*.log
+          path: acceptance-diagnostics/*
           if-no-files-found: ignore
           retention-days: 14
 

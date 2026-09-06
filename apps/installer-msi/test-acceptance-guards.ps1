@@ -103,6 +103,29 @@ try {
     if ($caught -ne 'Synthetic original installation failure') { throw "Cleanup hid the original acceptance error: $caught" }
     if (-not (Test-Path -LiteralPath $Report)) { throw 'Failed acceptance did not retain its report.' }
 
+    # Every completed-rollback phase shares this boundary. Even simultaneous
+    # stop/uninstall failures must retain the original error, both uninstall
+    # attempts, environment restoration and the partial phase report.
+    $tree=[Management.Automation.Language.Parser]::ParseFile((Join-Path $ScriptDirectory 'test-completed-rollback.ps1'),[ref]$tokens,[ref]$errors)
+    $outer=@($tree.EndBlock.Statements | Where-Object {$_ -is [Management.Automation.Language.TryStatementAst]})
+    if ($outer.Count -ne 1 -or $outer[0].CatchClauses.Count -ne 1) { throw 'Expected completed rollback error-preservation boundary.' }
+    function Stop-Recovery { throw 'Synthetic owned-process cleanup failure' }
+    function Invoke-Msi { param($Package,$Action) $script:cleanupAttempts++; throw 'Synthetic uninstall failure' }
+    $originalEnvironment=@{}
+    Get-ChildItem Env: | Where-Object { $_.Name -match '^(MAVERICK_|LIGHTWORK_)' } | ForEach-Object { $originalEnvironment[$_.Name]=$_.Value }
+    foreach ($phase in @('base-install','start-recovery','maintenance-prepare','maintenance-execute','complete')) {
+        $script:cleanupAttempts=0;$acceptanceError=$null;$observed=@{phase=$phase};$caught=$null
+        $env:LIGHTWORK_ACCEPTANCE_GUARD_ONLY='temporary fixture value'
+        try { Invoke-Expression ("try { throw 'Synthetic original acceptance failure' } " + $outer[0].CatchClauses[0].Extent.Text + ' finally ' + $outer[0].Finally.Extent.Text) } catch { $caught=$_.Exception.Message }
+        if ($caught -ne 'Synthetic original acceptance failure' -or $script:cleanupAttempts -ne 2) { throw 'Completed rollback cleanup hid the original error or skipped a resource.' }
+        $retained=Get-Content -Raw -LiteralPath $Report | ConvertFrom-Json
+        if ($retained.phase -ne $phase -or $retained.cleanup_failures -ne 3 -or -not $retained.acceptance_failed) { throw 'Completed rollback partial evidence was not retained.' }
+        if (Test-Path Env:LIGHTWORK_ACCEPTANCE_GUARD_ONLY) { throw 'Acceptance fixture environment was not restored.' }
+    }
+    $script:cleanupAttempts=0;$acceptanceError=$null;$observed=@{phase='complete'};$caught=$null
+    try { Invoke-Expression ('try { } ' + $outer[0].CatchClauses[0].Extent.Text + ' finally ' + $outer[0].Finally.Extent.Text) } catch { $caught=$_.Exception.Message }
+    if ($caught -ne 'Synthetic owned-process cleanup failure' -or $script:cleanupAttempts -ne 2) { throw 'Failed cleanup was reported as successful acceptance.' }
+
     Import-Function (Join-Path $ScriptDirectory 'test-completed-rollback.ps1') 'Assert-InstalledChannel'
     function Read-InstalledChannel { return $script:fixtureChannel }
     $expectedPublicKey='fixture-public-key'

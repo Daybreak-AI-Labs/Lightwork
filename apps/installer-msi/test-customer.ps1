@@ -96,31 +96,31 @@ try {
     try {
         $responding = $false
         for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            try { $page = Invoke-WebRequest 'http://127.0.0.1:8765/livez' -UseBasicParsing; $responding = $page.StatusCode -eq 200; if ($responding) { break } } catch { }
+            try { $page = Invoke-WebRequest 'http://127.0.0.1:8765/livez' -UseBasicParsing -TimeoutSec 3; $responding = $page.StatusCode -eq 200; if ($responding) { break } } catch { }
             if ($dashboard.HasExited) { throw "Packaged dashboard exited; inspect $stderr" }
             Start-Sleep -Seconds 1
         }
         if (-not $responding) { throw 'Packaged dashboard never became live.' }
-        $page = Invoke-WebRequest 'http://127.0.0.1:8765/start' -UseBasicParsing
+        $page = Invoke-WebRequest 'http://127.0.0.1:8765/start' -UseBasicParsing -TimeoutSec 15
         if ($page.StatusCode -ne 200 -or $page.Content -notmatch 'Lightwork') { throw 'Packaged setup page did not render.' }
         $observed.packaged_dashboard_setup = 'passed'
     } finally {
         if (-not $dashboard.HasExited) {
             & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $dashboard.Id /T /F | Out-Null
-            $dashboard.WaitForExit()
+            if (-not $dashboard.WaitForExit(15000)) { throw 'The owned dashboard process did not stop.' }
         }
     }
     $recovery = Start-Process -FilePath $runtimePath -ArgumentList @('dashboard', '--host', '127.0.0.1', '--port', '8765', '--recovery-mode') -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $homePath 'recovery-output.log') -RedirectStandardError (Join-Path $homePath 'recovery-error.log')
     try {
         $responding = $false
         for ($attempt = 0; $attempt -lt 60; $attempt++) {
-            try { $page = Invoke-WebRequest 'http://127.0.0.1:8765/livez' -UseBasicParsing; $responding = $page.StatusCode -eq 200; if ($responding) { break } } catch { }
+            try { $page = Invoke-WebRequest 'http://127.0.0.1:8765/livez' -UseBasicParsing -TimeoutSec 3; $responding = $page.StatusCode -eq 200; if ($responding) { break } } catch { }
             if ($recovery.HasExited) { throw 'Packaged recovery process exited before becoming live.' }
             Start-Sleep -Seconds 1
         }
         if (-not $responding) { throw 'Packaged recovery process never became live.' }
         $blocked = $false
-        try { Invoke-WebRequest 'http://127.0.0.1:8765/start' -UseBasicParsing | Out-Null } catch {
+        try { Invoke-WebRequest 'http://127.0.0.1:8765/start' -UseBasicParsing -TimeoutSec 15 | Out-Null } catch {
             $blocked = $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 503
         }
         if (-not $blocked) { throw 'Packaged recovery mode did not block ordinary application work.' }
@@ -128,7 +128,7 @@ try {
     } finally {
         if (-not $recovery.HasExited) {
             & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $recovery.Id /T /F | Out-Null
-            $recovery.WaitForExit()
+            if (-not $recovery.WaitForExit(15000)) { throw 'The owned recovery process did not stop.' }
         }
     }
 } catch {
@@ -138,11 +138,13 @@ try {
     $env:PATH = $originalPath
     $env:MAVERICK_HOME = $originalHome
     $env:PIP_NO_INDEX = $originalNoIndex
-    $observed | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Report -Encoding utf8
+    $cleanupErrors = @()
+    try { $observed | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Report -Encoding utf8 } catch { $cleanupErrors += $_; Write-Warning 'Acceptance report could not be saved.' }
     foreach ($package in @($CandidateMsi, $BaseMsi)) {
         try { Invoke-Msi $package '/x' -ExpectFailure:$false } catch {
-            if (-not $acceptanceError) { throw }
-            Write-Warning "Cleanup also failed: $($_.Exception.Message)"
+            $cleanupErrors += $_
+            Write-Warning 'Fixture uninstall cleanup failed; installer log retained.'
         }
     }
+    if (-not $acceptanceError -and $cleanupErrors.Count) { throw $cleanupErrors[0] }
 }

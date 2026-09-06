@@ -35,10 +35,11 @@ function Invoke-Msi([string]$package,[string]$action) {
     $packageFile = Get-Item -LiteralPath $package -ErrorAction Stop
     if ($packageFile.PSProvider.Name -ne 'FileSystem' -or $packageFile.PSIsContainer) { throw 'The MSI package must be an existing file.' }
     $package = [IO.Path]::GetFullPath($packageFile.FullName)
-    $arguments = @($action,('"' + $package + '"'),'/qn','/norestart',('INSTALLDIR="' + $installPath + '"'))
+    $log = Join-Path $env:RUNNER_TEMP ('lightwork-msi-' + [guid]::NewGuid().ToString('N') + '.log')
+    $arguments = @($action,('"' + $package + '"'),'/qn','/norestart','/L*v',('"' + $log + '"'),('INSTALLDIR="' + $installPath + '"'))
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/msiexec.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden
-    if (-not $process.WaitForExit(240000)) { throw 'Fixture Windows Installer timed out.' }
-    if ($process.ExitCode -notin @(0,3010) -and -not ($action -eq '/x' -and $process.ExitCode -in @(1605,1614))) { throw "Fixture Windows Installer failed: $($process.ExitCode)" }
+    if (-not $process.WaitForExit(240000)) { throw "Fixture Windows Installer timed out; log: $log" }
+    if ($process.ExitCode -notin @(0,3010) -and -not ($action -eq '/x' -and $process.ExitCode -in @(1605,1614))) { throw "Fixture Windows Installer failed: $($process.ExitCode); log: $log" }
 }
 
 function Read-InstalledChannel {
@@ -58,6 +59,8 @@ function Assert-InstalledChannel([string]$ExpectedVersion) {
 }
 
 function Protocol([string]$binary,[string]$step,[hashtable]$payload) {
+    Write-Host "Completed rollback acceptance: maintenance $step started."
+    $observed.phase = 'maintenance-' + $step
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $binary
     $info.ArgumentList.Add('installation-maintenance')
@@ -74,21 +77,28 @@ function Protocol([string]$binary,[string]$step,[hashtable]$payload) {
     $stderr = $process.StandardError.ReadToEndAsync()
     $process.StandardInput.Write(($payload | ConvertTo-Json -Compress -Depth 8))
     $process.StandardInput.Close()
-    if (-not $process.WaitForExit(1900000)) {
+    # Execution includes bounded Windows Installer work; preparation/status
+    # must fail promptly instead of inheriting the installer's long deadline.
+    $timeout = if ($step -eq 'execute') { 1900000 } else { 180000 }
+    if (-not $process.WaitForExit($timeout)) {
         & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $process.Id /T /F | Out-Null
         throw 'Frozen maintenance protocol timed out; only its owned CI process tree was stopped.'
     }
     $output = $stdout.GetAwaiter().GetResult()
     $errorOutput = $stderr.GetAwaiter().GetResult()
     if ($process.ExitCode -ne 0) { throw "Frozen maintenance $step failed: $errorOutput" }
+    Write-Host "Completed rollback acceptance: maintenance $step finished."
     return ($output | ConvertFrom-Json)
 }
 
 function Start-Recovery {
+    $observed.phase = 'start-recovery'
+    Write-Host 'Completed rollback acceptance: starting isolated recovery.'
     $script:server = Start-Process -FilePath (Join-Path $installPath 'maverick.exe') -ArgumentList @('dashboard','--host','127.0.0.1','--port','8765','--recovery-mode') -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $fixtureRoot 'recovery-out.log') -RedirectStandardError (Join-Path $fixtureRoot 'recovery-error.log')
-    for ($attempt=0; $attempt -lt 90; $attempt++) {
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($deadline.Elapsed.TotalSeconds -lt 90) {
         if ($script:server.HasExited) { throw 'Fixture recovery server exited before becoming live.' }
-        try { if ((Invoke-WebRequest 'http://127.0.0.1:8765/livez').StatusCode -eq 200) { return } } catch { }
+        try { if ((Invoke-WebRequest 'http://127.0.0.1:8765/livez' -TimeoutSec 3).StatusCode -eq 200) { return } } catch { }
         Start-Sleep -Milliseconds 500
     }
     throw 'Fixture recovery server never became live.'
@@ -97,7 +107,7 @@ function Start-Recovery {
 function Stop-Recovery {
     if ($script:server -and -not $script:server.HasExited) {
         & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $script:server.Id /T /F | Out-Null
-        $script:server.WaitForExit()
+        if (-not $script:server.WaitForExit(15000)) { throw 'The owned recovery process did not stop.' }
     }
     $script:server = $null
 }
@@ -105,26 +115,29 @@ function Stop-Recovery {
 function Authorization([string]$rollbackId='') {
     $origin = 'http://127.0.0.1:8765'
     $bearer = 'Bearer ' + $env:MAVERICK_DASHBOARD_TOKEN
-    $status = Invoke-RestMethod ($origin + '/api/v1/recovery/status') -Headers @{Origin=$origin; Authorization=$bearer}
+    $status = Invoke-RestMethod ($origin + '/api/v1/recovery/status') -TimeoutSec 15 -Headers @{Origin=$origin; Authorization=$bearer}
     $headers = @{Origin=$origin; Authorization=$bearer; 'X-Lightwork-Recovery-Context'=$status.context; 'X-Lightwork-Expected-Tenant'=$status.expected_tenant}
     $body = @{confirm=$true; confirm_all_workspaces=$true}
     if ($rollbackId) { $body.rollback_id=$rollbackId }
-    return Invoke-RestMethod ($origin + '/api/v1/recovery/installation/authorize') -Method Post -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json)
+    return Invoke-RestMethod ($origin + '/api/v1/recovery/installation/authorize') -TimeoutSec 30 -Method Post -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json)
 }
 
 function Execute-Retained([string]$helper,[string]$authorization) {
     # A real finished sentinel process stands in for the native shell's exited
     # parent. Suppressing result UI changes no grant/signature/restore checks.
     $sentinel = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/ping.exe') -ArgumentList @('127.0.0.1','-n','1') -PassThru -WindowStyle Hidden
-    $sentinel.WaitForExit()
+    if (-not $sentinel.WaitForExit(10000)) { throw 'The owned maintenance parent fixture did not exit.' }
     return Protocol $helper 'execute' @{authorization=$authorization;parent_pid=$sentinel.Id;open_result=$false}
 }
 
+$acceptanceError = $null
 try {
     foreach ($package in @($BaseMsi,$CandidateMsi)) {
         if ((Get-AuthenticodeSignature -LiteralPath $package).Status -ne 'Valid') { throw 'Synthetic fixture publisher is not trusted on this disposable runner.' }
         if (-not (Test-Path -LiteralPath ($package + '.sig'))) { throw 'Fixture lacks its real updater signature.' }
     }
+    $observed.phase = 'base-install'
+    Write-Host 'Completed rollback acceptance: installing trusted base fixture.'
     Invoke-Msi $BaseMsi '/i'
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
     $env:MAVERICK_HOME = $statePath
@@ -142,7 +155,7 @@ try {
     if ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant() -ne $metadata.runtime.sha256) { throw 'Installed base runtime differs from the fixture inventory.' }
     Start-Recovery
     $unauthenticated = $false
-    try { Invoke-RestMethod 'http://127.0.0.1:8765/api/v1/recovery/installation' -Headers @{Origin='http://127.0.0.1:8765'} | Out-Null } catch {
+    try { Invoke-RestMethod 'http://127.0.0.1:8765/api/v1/recovery/installation' -TimeoutSec 15 -Headers @{Origin='http://127.0.0.1:8765'} | Out-Null } catch {
         $unauthenticated = $_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401
     }
     if (-not $unauthenticated) { throw 'Installation recovery did not require its synthetic administrator bearer.' }
@@ -180,12 +193,23 @@ try {
     $observed.all_local_workspaces_restored='passed'
     $observed.developer_tools_absent_from_runtime_path='passed'
     $observed.runtime_bytes_unchanged='passed'
+    $observed.phase='complete'
+} catch {
+    $acceptanceError = $_
+    $observed.acceptance_failed = $true
+    throw
 } finally {
-    Stop-Recovery
+    $cleanupErrors = @()
+    # Preserve the acceptance phase before cleanup can time out or be cancelled.
+    try { $observed | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Report -Encoding utf8 } catch { $cleanupErrors += $_; Write-Warning 'Interim acceptance report could not be saved.' }
+    try { Stop-Recovery } catch { $cleanupErrors += $_; Write-Warning 'Owned recovery process cleanup failed.' }
     $env:PATH = $originalPath
-    Invoke-Msi $CandidateMsi '/x'
-    Invoke-Msi $BaseMsi '/x'
+    foreach ($package in @($CandidateMsi, $BaseMsi)) {
+        try { Invoke-Msi $package '/x' } catch { $cleanupErrors += $_; Write-Warning 'Fixture uninstall cleanup failed; installer log retained.' }
+    }
     Get-ChildItem Env: | Where-Object { $_.Name -match '^(MAVERICK_|LIGHTWORK_)' } | ForEach-Object { Remove-Item -LiteralPath ('Env:' + $_.Name) }
     foreach ($name in $originalEnvironment.Keys) { Set-Item -LiteralPath ('Env:' + $name) -Value $originalEnvironment[$name] }
-    $observed | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Report -Encoding utf8
+    $observed.cleanup_failures = $cleanupErrors.Count
+    try { $observed | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $Report -Encoding utf8 } catch { $cleanupErrors += $_; Write-Warning 'Acceptance report could not be saved.' }
+    if (-not $acceptanceError -and $cleanupErrors.Count) { throw $cleanupErrors[0] }
 }
