@@ -56,17 +56,23 @@ jobs:
         shell: pwsh
         run: |
           $venv = Join-Path $env:RUNNER_TEMP 'customer-build-python'
-          python -m venv $venv
+          & (Join-Path $env:pythonLocation 'python.exe') -I -m venv $venv
           if ($LASTEXITCODE -ne 0) { throw 'Build environment creation failed.' }
+          $buildPython = (Resolve-Path -LiteralPath (Join-Path $venv 'Scripts/python.exe')).Path
+          & $buildPython -c "import sys; print('Customer build interpreter:', sys.executable)"
+          if ($LASTEXITCODE -ne 0) { throw 'Build interpreter validation failed.' }
+          "CUSTOMER_BUILD_PYTHON=$buildPython" >> $env:GITHUB_ENV
           (Join-Path $venv 'Scripts') >> $env:GITHUB_PATH
       - name: Install reviewed build dependencies without signing credentials
         shell: pwsh
         run: |
-          python -I -m pip install --upgrade 'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' 'packaging==26.3' 'pyinstaller==6.22.2' 'pytest==9.1.1' 'pyyaml==6.0.3'
+          & $env:CUSTOMER_BUILD_PYTHON -I -m pip install --upgrade 'pip==26.2.1' 'setuptools==84.0.0' 'wheel==0.48.0' 'packaging==26.3' 'pyinstaller==6.22.2' 'pytest==9.1.1' 'pyyaml==6.0.3'
           if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
-          python scripts/install_release_cohort.py --target-python python --core-extra release-runtime
+          # Omit --target-python: the helper preserves this exact sys.executable.
+          # A bare child "python" can escape a Windows venv despite its PATH.
+          & $env:CUSTOMER_BUILD_PYTHON scripts/install_release_cohort.py --core-extra release-runtime
           if ($LASTEXITCODE -ne 0) { throw 'Complete release cohort installation failed.' }
-          python scripts/verify_constraint_closure.py
+          & $env:CUSTOMER_BUILD_PYTHON scripts/verify_constraint_closure.py
           if ($LASTEXITCODE -ne 0) { throw 'Dependency closure failed.' }
           corepack enable
           corepack prepare pnpm@10.11.1 --activate
@@ -75,7 +81,9 @@ jobs:
       - name: Test packaging and maintenance source contracts
         shell: pwsh
         run: |
-          python -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
+          & $env:CUSTOMER_BUILD_PYTHON scripts/install_release_cohort.py --verify-only
+          if ($LASTEXITCODE -ne 0) { throw 'The test interpreter cannot import the full release cohort.' }
+          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
           if ($LASTEXITCODE -ne 0) { throw 'Packaging regression tests failed.' }
           node --test apps/desktop/tests/*.test.js
           if ($LASTEXITCODE -ne 0) { throw 'Maintenance UI tests failed.' }
@@ -87,7 +95,9 @@ jobs:
         shell: pwsh
         working-directory: build
         run: |
-          python -m PyInstaller --clean --noconfirm --distpath ../dist maverick.spec
+          & $env:CUSTOMER_BUILD_PYTHON ../scripts/install_release_cohort.py --verify-only
+          if ($LASTEXITCODE -ne 0) { throw 'The freeze interpreter cannot import the full release cohort.' }
+          & $env:CUSTOMER_BUILD_PYTHON -m PyInstaller --clean --noconfirm --distpath ../dist maverick.spec
           if ($LASTEXITCODE -ne 0) { throw 'Frozen runtime build failed.' }
       - name: Select immutable customer channel or synthetic acceptance identity
         shell: pwsh
@@ -115,7 +125,7 @@ jobs:
         shell: pwsh
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'customer-stage'
-          ./apps/installer-msi/build-customer.ps1 -Runtime "$env:GITHUB_WORKSPACE/dist/maverick.exe" -PublicKeyFile $env:CUSTOMER_PUBLIC_KEY -UpdateEndpoint $env:CUSTOMER_ENDPOINT -StageDirectory $stage
+          ./apps/installer-msi/build-customer.ps1 -Python $env:CUSTOMER_BUILD_PYTHON -Runtime "$env:GITHUB_WORKSPACE/dist/maverick.exe" -PublicKeyFile $env:CUSTOMER_PUBLIC_KEY -UpdateEndpoint $env:CUSTOMER_ENDPOINT -StageDirectory $stage
           $inventory = Get-Content -Raw (Join-Path $stage 'runtime-inventory.json') | ConvertFrom-Json
           $version = $inventory.version
           $parts = $version.Split('.')
@@ -127,7 +137,7 @@ jobs:
           Copy-Item -LiteralPath $base[0].FullName -Destination customer-artifacts/Lightwork.msi
           Copy-Item -LiteralPath (Join-Path $stage 'runtime-inventory.json') -Destination customer-artifacts/runtime-inventory.json
           Copy-Item -LiteralPath $env:CUSTOMER_PUBLIC_KEY -Destination customer-artifacts/updater.pub
-          ./apps/installer-msi/build-customer.ps1 -Runtime "$env:GITHUB_WORKSPACE/dist/maverick.exe" -PublicKeyFile $env:CUSTOMER_PUBLIC_KEY -UpdateEndpoint $env:CUSTOMER_ENDPOINT -StageDirectory (Join-Path $env:RUNNER_TEMP 'customer-upgrade-fixture') -AcceptanceFixtureVersion $candidateVersion -InjectAcceptanceFailure
+          ./apps/installer-msi/build-customer.ps1 -Python $env:CUSTOMER_BUILD_PYTHON -Runtime "$env:GITHUB_WORKSPACE/dist/maverick.exe" -PublicKeyFile $env:CUSTOMER_PUBLIC_KEY -UpdateEndpoint $env:CUSTOMER_ENDPOINT -StageDirectory (Join-Path $env:RUNNER_TEMP 'customer-upgrade-fixture') -AcceptanceFixtureVersion $candidateVersion -InjectAcceptanceFailure
           $candidate = @(Get-ChildItem $bundleDir -Filter "*_$($candidateVersion)_x64_en-US.msi")
           if ($candidate.Count -ne 1) { throw 'Expected one labelled upgrade fixture MSI.' }
           Copy-Item -LiteralPath $candidate[0].FullName -Destination (Join-Path $env:RUNNER_TEMP 'upgrade-fixture.msi')

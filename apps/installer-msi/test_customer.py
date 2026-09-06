@@ -4,10 +4,12 @@ import ast
 import base64
 import importlib.util
 import json
+import os
 import re
 import shlex
 import shutil
 import subprocess
+import venv
 from pathlib import Path
 
 import pytest
@@ -71,11 +73,70 @@ def test_windows_customer_jobs_use_the_reviewed_windows_python_build():
 def test_windows_packaging_installs_its_yaml_test_dependency():
     workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["build-and-accept"]["steps"]
-    test_index = next(index for index, step in enumerate(steps) if "python -m pytest" in step.get("run", ""))
+    test_index = next(index for index, step in enumerate(steps) if "-m pytest" in step.get("run", ""))
     installers = [line for step in steps[:test_index] for line in step.get("run", "").splitlines()
                   if "-m pip install" in line]
     # PIP_CONSTRAINT restricts a package if installed; it never installs it.
     assert any("pyyaml==6.0.3" in shlex.split(line.lower()) for line in installers)
+
+
+def test_windows_build_reuses_the_exact_verified_interpreter():
+    workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["build-and-accept"]["steps"]
+    commands = "\n".join(step.get("run", "") for step in steps)
+    assert '"CUSTOMER_BUILD_PYTHON=$buildPython" >> $env:GITHUB_ENV' in commands
+    assert "--target-python python" not in commands
+    for marker in (" -I -m pip install", " scripts/install_release_cohort.py", " scripts/verify_constraint_closure.py",
+                   " -m pytest", " -m PyInstaller"):
+        matches = [line for line in commands.splitlines() if marker in line]
+        assert matches and all(line.lstrip().startswith("& $env:CUSTOMER_BUILD_PYTHON ") for line in matches), marker
+    assert commands.count("scripts/install_release_cohort.py --verify-only") >= 2
+    builds = [line for line in commands.splitlines() if "./apps/installer-msi/build-customer.ps1 " in line]
+    assert len(builds) == 2 and all("-Python $env:CUSTOMER_BUILD_PYTHON" in line for line in builds)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows bare-child Python resolves outside the venv")
+def test_windows_cohort_workflow_keeps_a_target_only_import_in_its_child(tmp_path):
+    workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["build-and-accept"]["steps"]
+    command = next(line.strip() for step in steps for line in step.get("run", "").splitlines()
+                   if "scripts/install_release_cohort.py" in line)
+    words = shlex.split(command)
+    script_index = words.index("scripts/install_release_cohort.py")
+    arguments = words[script_index + 1:]
+    # Seed pip from bundled ensurepip without network access. Python 3.10 has
+    # no tomllib, so the real cohort helper needs pip's vendored TOML parser.
+    # The fixture module remains local to this environment, never the base.
+    target = tmp_path / "isolated Python"
+    venv.EnvBuilder(with_pip=True).create(target)
+    python = target / "Scripts/python.exe"
+    # Fail before running the helper if this prerequisite is unavailable;
+    # never let its fallback attempt a network bootstrap inside this test.
+    subprocess.run([str(python), "-I", "-c", "from pip._vendor import tomli; assert callable(tomli.loads)"],
+                   check=True, capture_output=True)
+    purelib = subprocess.check_output([str(python), "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"], text=True).strip()
+    module = "lightwork_target_only_marker"
+    (Path(purelib) / (module + ".py")).write_text("MARKER = 'only-in-requested-venv'\n", encoding="utf-8")
+    probe = f"import json,sys,{module}; print(json.dumps([sys.executable,{module}.MARKER,{module}.__file__]))"
+    wrapper = '''import importlib.util, json, subprocess, sys
+spec = importlib.util.spec_from_file_location("cohort_install_probe", sys.argv[1])
+helper = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = helper
+spec.loader.exec_module(helper)
+def verify(python, version, packages):
+    assert len(packages) == 8
+    subprocess.run([python, "-c", sys.argv[3]], check=True)
+helper.verify_installed = verify
+raise SystemExit(helper.main(json.loads(sys.argv[2]) + ["--verify-only"]))
+'''
+    env = os.environ.copy()
+    env["PATH"] = str(python.parent) + os.pathsep + env.get("PATH", "")
+    result = subprocess.run([str(python), "-c", wrapper, str(stage.ROOT / "scripts/install_release_cohort.py"),
+        json.dumps(arguments), probe], env=env, cwd=tmp_path, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    executable, marker, module_path = json.loads(result.stdout.strip())
+    assert Path(executable).resolve() == python.resolve()
+    assert marker == "only-in-requested-venv" and Path(module_path).is_relative_to(target)
 
 
 @pytest.mark.parametrize("url", [
