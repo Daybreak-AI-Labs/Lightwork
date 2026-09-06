@@ -160,6 +160,8 @@ jobs:
           & $verify "$env:ACCEPTANCE_PRIVATE_KEY.pub" customer-artifacts/Lightwork.msi.sig $tampered
           if ($LASTEXITCODE -eq 0) { throw 'Tampered installer was accepted.' }
           Remove-Item -LiteralPath customer-artifacts/Lightwork.msi.sig
+          # Rejection is expected; GitHub's PowerShell wrapper returns LASTEXITCODE.
+          $global:LASTEXITCODE = 0
       - name: Install repair upgrade and transaction rollback with developer tools absent from PATH
         shell: pwsh
         run: |
