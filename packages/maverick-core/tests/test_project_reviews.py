@@ -78,6 +78,66 @@ def respond(service, packet, **changes):
     return service.respond(packet["id"], **payload)
 
 
+def test_capacity_keeps_revocation_bounded_idempotent_and_authoritative(setup):
+    from maverick.project_reviews import _seal
+
+    _, project, _, _, service, team = setup
+    packet, _ = send(setup)
+    owner = service("user:owner")
+
+    def accumulated(record):
+        # Valid repeated-grant history at the production ordinary-operation cap.
+        record["operations"].update({f"grant-{n:04d}": "a" * 64 for n in range(1999)})
+        record["history"] *= 2000
+        _seal(record)
+
+    full = owner.teams.update(team["id"], accumulated, expected_revision=team["revision"],
+                              action="capacity_fixture", actor="user:owner")
+    request = dict(member="user:reviewer", allowed=False,
+                   expected_revision=full["revision"], request_id="revoke-at-capacity")
+    revoked = owner.set_member(project, **request)
+    assert revoked["members"] == []
+    assert len(revoked["history"]) == 2001
+    assert owner.set_member(project, **request)["revision"] == revoked["revision"]
+    with pytest.raises(ProjectReviewDenied):
+        service("user:reviewer").get(packet["id"])
+    # Arbitrary repeated removals cannot grow the reserved terminal capacity.
+    unchanged = owner.set_member(project, **{**request, "expected_revision": revoked["revision"],
+                                              "request_id": "already-removed-person"})
+    assert unchanged["revision"] == revoked["revision"]
+    with pytest.raises(ValueError, match="history reached"):
+        owner.set_member(project, member="user:third", allowed=True,
+                         expected_revision=revoked["revision"], request_id="grant-after-capacity")
+
+
+@pytest.mark.parametrize("action,actor,status", [
+    ("cancel", "user:owner", "cancelled"),
+    ("approve", "user:reviewer", "approved"),
+    ("request_changes", "user:reviewer", "changes_requested"),
+])
+def test_discussion_capacity_reserves_one_terminal_response(setup, action, actor, status):
+    from maverick.project_reviews import _seal
+
+    _, _, _, _, service, _ = setup
+    packet, _ = send(setup)
+    owner = service("user:owner")
+    packet = respond(owner, packet, action="comment", request_id="first-comment")
+
+    def accumulated(record):
+        record["history"].extend([record["history"][-1].copy() for _ in range(498)])
+        _seal(record)
+
+    full = owner.packets.update(packet["id"], accumulated, expected_revision=packet["revision"],
+                                action="capacity_fixture", actor="user:owner")
+    with pytest.raises(ValueError, match="history reached"):
+        respond(owner, full, action="comment", request_id="excess-comment")
+    closed = respond(service(actor), full, action=action, request_id="terminal-at-capacity")
+    assert closed["status"] == status and len(closed["history"]) == 501
+    assert respond(service(actor), full, action=action, request_id="terminal-at-capacity")["revision"] == closed["revision"]
+    with pytest.raises(RecordConflict):
+        respond(service(actor), closed, action=action, request_id="another-terminal-attempt")
+
+
 def test_packet_is_exact_immutable_review_and_never_live_goal_signoff(setup):
     world, project, goal, _, service, _ = setup
     packet, payload = send(setup)

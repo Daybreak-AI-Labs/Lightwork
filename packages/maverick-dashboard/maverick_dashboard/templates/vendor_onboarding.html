@@ -27,6 +27,10 @@
   #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0}
   #vo-cases button[aria-current="true"] {border-color:var(--accent); background:var(--surface-2)}
   #vo-case-reference {overflow-wrap:anywhere; color:var(--muted)}
+  #vo-upload-review pre {max-height:24rem;min-width:0}
+  .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
+  .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
+  #vendor-onboarding:has(#vo-upload-review:not([hidden])) #vo-message {position:static}
   @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
 </style>
 {% endblock %}
@@ -36,6 +40,21 @@
   {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
   <p>Bring in evidence, review the assessment, and approve a verified Jira task. Renewals retain the previous evidence and decisions.</p>
   <p id="vo-message" role="status" aria-live="polite"></p>
+  {% if not offline_demo %}
+  <details class="vo-card" id="vs-panel" open>
+    <summary>Workspace setup</summary>
+    <p id="vs-status" role="status" aria-live="polite">Loading setup…</p>
+    <p>Choose credentials in <a href="/connections">Connections</a>. This saves the workspace's vendor review owner and delivery connection. Provider access is checked by the existing evidence and delivery actions.</p>
+    <p id="vs-owner"></p>
+    <form id="vs-form">
+      <label for="vs-ticket">Jira connection</label><select id="vs-ticket" required disabled></select>
+      <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" disabled></select>
+      <label><input type="checkbox" id="vs-confirm" style="display:inline;width:auto" disabled> I reviewed the connection choices and this setup change.</label>
+      <div class="vo-actions"><button id="vs-save" type="submit" disabled>Save workspace setup</button><button id="vs-enable" type="button" disabled>Enable vendor workflow</button><button id="vs-refresh" type="button">Refresh setup</button></div>
+    </form>
+    <p>Enable vendor workflow turns on Connections, vendor management, AI vendor risk, model assurance and evidence records for this installation. It grants no colleague access, starts no provider request, and approves no action.</p>
+  </details>
+  {% endif %}
   <div class="vo-layout">
     <aside>
       <section class="vo-card" aria-labelledby="vo-list-title">
@@ -79,10 +98,25 @@
           <details><summary>Advanced: selected Drive file IDs</summary><label for="vo-case-documents">Selected Drive file IDs (one per line)</label><textarea id="vo-case-documents" maxlength="2056" rows="3" disabled></textarea>
           <button id="vo-save-documents" type="button" disabled>Update selected documents</button></details>
           <div id="vo-uploaded-documents"></div>
-          <label for="vo-upload">Upload evidence files</label><input id="vo-upload" type="file" multiple accept=".txt,.pdf,text/plain,application/pdf" disabled>
+          <label for="vo-upload">Choose an evidence file</label><input id="vo-upload" type="file" accept=".txt,.pdf,.docx,.xlsx" disabled>
           <label for="vo-document-date">Document date (your assertion, not verified by Drive)</label><input id="vo-document-date" type="date" disabled>
-          <button id="vo-upload-submit" type="button" disabled>Add uploaded evidence</button>
-          <p>Text and Google Docs exports: up to 1 MiB each. PDFs: up to 16 MiB each, 32 MiB per request. Digital PDF text extraction supports a restricted page-content format, without OCR or font-map interpretation. Unreadable or unsupported documents block assessment. Review quotations against the original document; extraction is not independent verification. Upload bytes are processed temporarily; retained evidence contains fingerprints and short redacted quotations. Replacing evidence clears the assessment and any pending action approval.</p>
+          <button id="vo-upload-submit" type="button" disabled>Preview evidence text</button>
+          <p>Add one file at a time: text up to 1 MiB, Word or Excel up to 8 MiB, PDF up to 16 MiB; 8 documents and 32 MiB per request. Review up to 120,000 characters against your original before adding evidence. Word body paragraphs and tables, and visible Excel cells are supported. Images, charts and document layout are not interpreted. Files with macros, external links or unsafe content are refused.</p>
+          <section id="vo-upload-review" hidden aria-labelledby="vo-upload-review-title" data-draft-recovery="off">
+            <h4 id="vo-upload-review-title">Review text before adding evidence</h4>
+            <p id="vo-upload-summary" role="status"></p>
+            <ul id="vo-upload-limits"></ul>
+            <pre id="vo-upload-text" tabindex="0" aria-label="Text to compare against the original file"></pre>
+            <details><summary>Source and extraction details</summary><pre id="vo-upload-fingerprints"></pre></details>
+            <div id="vo-upload-fallback" hidden>
+              <p>Lightwork could not read this PDF using its local text reader. No OCR was performed. You can select a supported text or Word copy, or transcribe the relevant content below while comparing it with your original PDF. Clearly note any omitted or unreadable sections. The resulting evidence will be labeled user-supplied transcription, with no verified PDF page locations.</p>
+              <label for="vo-upload-transcription">Your transcription and any omissions</label><textarea id="vo-upload-transcription" rows="8" maxlength="120000" data-draft-recovery="off"></textarea>
+              <button id="vo-upload-transcribe" type="button">Preview my transcription</button>
+            </div>
+            <label class="vo-upload-confirm-label"><input id="vo-upload-confirm" type="checkbox"> <span>I compared this text with the original, reviewed the stated limits and any omissions, and want to add it as evidence.</span></label>
+            <button id="vo-upload-accept" type="button" disabled>Add reviewed evidence</button>
+          </section>
+          <p>Extraction and transcription are not independent verification. Upload bytes and full text are processed temporarily; retained evidence contains source fingerprints, extraction limits and short redacted quotations. Replacing evidence clears the assessment and any pending action approval.</p>
         </div>
         <h3>Changes since previous evidence</h3><div id="vo-evidence-changes">Collect evidence to compare retained versions.</div>
         <h3>Assessment, source references and gaps</h3><div id="vo-assessment"></div>
@@ -125,4 +159,5 @@
   </div>
 </section>
 <script src="/static/lightwork-vendor-onboarding.js" defer></script>
+{% if not offline_demo %}<script src="/static/lightwork-vendor-setup.js" defer></script>{% endif %}
 {% endblock %}

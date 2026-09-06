@@ -10954,6 +10954,26 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Vendor management",
         "requires": (),
     },
+    "connections": {
+        "label": "Saved connections",
+        "requires": (),
+    },
+    "evidence_graph": {
+        "label": "Evidence records",
+        "requires": (),
+    },
+    "model_risk_assurance": {
+        "label": "Model assurance",
+        "requires": ("evidence_graph",),
+    },
+    "ai_vendor_risk": {
+        "label": "AI vendor risk",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "vendor_onboarding": {
+        "label": "AI vendor onboarding",
+        "requires": ("connections", "vendor_management", "evidence_graph", "model_risk_assurance", "ai_vendor_risk"),
+    },
 }
 
 

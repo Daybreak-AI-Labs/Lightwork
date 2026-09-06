@@ -22,7 +22,13 @@ def recovery(tmp_path):
     "tenants/second/usage/ledger.json", "provider_spend.json",
     "llm_gateway_team_budget/team_budget.json", "mcp_sidecar/call_budget.json",
     "budget_receipts.jsonl", "budget_receipts.jsonl.head", "budget_receipts.required",
-    "tenant_registry.json",
+    "tenant_registry.json", "provider_spend.json.required", "dashboard-owner.json",
+    "draft-recovery/account/retention.index", "tenants/second/draft-recovery/account/retention.index",
+    "provider_accounting_reviews/review.record", "tenants/second/provider_accounting_reviews/review.record",
+    "connections/connections.sealed", "connections/oauth-setup.sealed",
+    "tenants/second/connections/connections.sealed", "tenants/second/connections/oauth-setup.sealed",
+    "pilot_learning_exclusions/record", "tenants/second/pilot_learning_exclusions/record",
+    "task-file-recovery/task/record", "tenants/second/task-file-recovery/task/record",
 ])
 @pytest.mark.parametrize("mutation", ["changed", "added", "deleted"])
 def test_guard_refuses_every_irreversible_accounting_path_without_changing_live_state(recovery, name, mutation):

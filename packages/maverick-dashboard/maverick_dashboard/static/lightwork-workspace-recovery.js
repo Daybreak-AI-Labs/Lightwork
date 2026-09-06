@@ -7,6 +7,7 @@
   var comparison = null, comparisonContext = null, comparisonGeneration = 0;
   var drillEvidence = null, drillContext = null, drillGeneration = 0;
   var custodyEvidence = null, custodyContext = null, custodyGeneration = 0;
+  var identityTransition = null;
   var accessMessage = "Your recovery access is unavailable. Sign in with an authorized account and reload this page before continuing.";
   function say(text) { get("status").textContent = text; }
   function controls() {
@@ -30,6 +31,10 @@
     get("restore").disabled = !ready || !review || !get("confirm").checked;
     get("installation-authorize").disabled = !ready || !state.live_restore_available || !get("installation-confirm").checked;
     get("installation-rollback").disabled = get("installation-authorize").disabled || !get("installation-point").value;
+    get("installation-transition-file").disabled = !ready || !state.live_restore_available;
+    get("installation-transition-review").disabled = !ready || !state.live_restore_available || !get("installation-transition-file").files.length;
+    get("installation-transition-confirm").disabled = !ready || !identityTransition;
+    if (get("installation-transition-file").files.length && (!identityTransition || !get("installation-transition-confirm").checked)) get("installation-authorize").disabled = true;
     get("installation-retire-point").disabled = !ready || !installationPoints.some(function (row) { return row.can_retire; });
     var retiring = installationPoints.find(function (row) { return row.id === get("installation-retire-point").value; });
     get("installation-retire").disabled = !ready || !retiring || !retiring.can_retire || !get("installation-retire-confirm").checked;
@@ -42,8 +47,10 @@
   function clearReview() { review = null; get("review").hidden = true; get("review-text").textContent = ""; get("confirm").checked = false; }
   function clearConfirmations() {
     clearReview();
+    clearIdentityTransition();
     root.querySelectorAll('input[type="checkbox"]').forEach(function (input) { input.checked = false; });
   }
+  function clearIdentityTransition() { identityTransition = null; get("installation-transition-details").textContent = ""; get("installation-transition-confirm").checked = false; }
   function clearComparison() {
     comparison = null; comparisonContext = null; comparisonGeneration++;
     get("comparison-report").hidden = true;
@@ -58,7 +65,7 @@
   function clearCustodyReport() {
     custodyEvidence = null; custodyContext = null; custodyGeneration++;
     get("custody-report").hidden = true;
-    ["custody-status", "custody-summary", "custody-build", "custody-checks", "custody-coverage", "custody-limits", "custody-identity"].forEach(function (id) { get(id).replaceChildren(); });
+    ["custody-status", "custody-summary", "custody-build", "custody-totals", "custody-checks", "custody-coverage", "custody-limits", "custody-identity"].forEach(function (id) { get(id).replaceChildren(); });
   }
   function clearEvidence() { clearComparison(); clearDrillReport(); clearCustodyReport(); clearCustodyUpload(); }
   function clearPrivateState() {
@@ -108,7 +115,7 @@
     get("installation-retire-confirm").checked = false;
     get("installation-retire-point").replaceChildren();
     var result = await request("status");
-    if (state && result.context !== state.context) { clearReview(); get("installation-code").value = ""; get("installation-confirm").checked = false; }
+    if (state && result.context !== state.context) { clearReview(); clearIdentityTransition(); get("installation-transition-file").value = ""; get("installation-code").value = ""; get("installation-confirm").checked = false; }
     state = result;
     get("identity").textContent = "Workspace: " + result.tenant + " · Lightwork " + result.application_version;
     var last = result.last_restore;
@@ -310,7 +317,8 @@
     custodyEvidence = row; custodyContext = context;
     var outcomes = { verified_supported_formats: "Recognized supported formats verified", incomplete: "Test incomplete", failed: "Verification failed", no_encrypted_records: "No encrypted records tested" };
     get("custody-status").textContent = outcomes[row.outcome] + ". Review the exact coverage below; no live restore has been authorized.";
-    get("custody-summary").textContent = "Completed " + new Date(row.completed_at * 1000).toLocaleString() + " in " + row.elapsed_seconds + " seconds using the uploaded custody copy in a fresh temporary process. Snapshot created "
+    var duration = row.elapsed_seconds < 0.1 ? "less than 0.1" : row.elapsed_seconds.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    get("custody-summary").textContent = "Completed " + new Date(row.completed_at * 1000).toLocaleString() + " in " + duration + " seconds using your uploaded key copy in a fresh temporary process. Snapshot created "
       + new Date(row.snapshot_created_at * 1000).toLocaleString() + " (" + snapshotAge(row.completed_at - row.snapshot_created_at) + " old when tested).";
     get("custody-build").textContent = row.current_build_matches ? "The tested application build matches this app. This saved result does not prove current recovery readiness."
       : "This historical test used a different application build (Lightwork " + row.application_version + "). It does not prove readiness for this app.";
@@ -318,6 +326,8 @@
       "world-text-v1": "Supported workspace database text (v1)", "world-text-v2": "Supported workspace database text (rotated-key v2)",
       "world-text-tenant-local": "Supported workspace database text (local tenant key)", "unrecognized-encryption": "Unrecognized encryption", "scan-limit": "Scan limits reached" };
     list("custody-checks", row.checks.map(function (item) { return (formats[item.format] || item.format) + ": " + item.detected + " detected; " + item.verified + " verified; " + item.failed + " failed; " + item.unsupported + " unsupported."; }));
+    var totals = row.checks.reduce(function (sum, item) { sum.verified += item.verified; sum.failed += item.failed; sum.unsupported += item.unsupported; return sum; }, { verified: 0, failed: 0, unsupported: 0 });
+    get("custody-totals").textContent = totals.verified + " recognized encrypted records verified; " + totals.failed + " failed; " + totals.unsupported + " unsupported. " + row.unexamined_files + " files were not examined. Review the limits below even when no failures were found.";
     get("custody-coverage").textContent = row.files_scanned + " files and " + row.sqlite_columns_scanned + " SQLite columns scanned; " + row.unexamined_files + " files not examined. Coverage is limited to the recognized formats reported above.";
     list("custody-limits", row.limits);
     get("custody-identity").textContent = "Snapshot: " + row.snapshot + ". Archive SHA-256: " + row.archive_sha256 + ". Uploaded custody copy SHA-256: " + row.custody_sha256 + ". Report: " + row.report_id + ". Tested application build: " + row.application_identity + ".";
@@ -383,12 +393,31 @@
     get("installation-code").value = "";
     var body = { confirm: true, confirm_all_workspaces: true };
     if (rollback) { if (!get("installation-point").value) return; body.rollback_id = get("installation-point").value; }
+    else if (get("installation-transition-file").files.length) {
+      if (!identityTransition || !get("installation-transition-confirm").checked || identityTransition.context !== state.context) return;
+      body.identity_transition = identityTransition.envelope; body.transition_sha256 = identityTransition.sha256; body.confirm_identity_transition = true;
+    }
     var result = await request("installation/authorize", body);
     if (typeof result.authorization !== "string" || !/^[0-9a-f]{32}:[0-9a-f]{64}$/.test(result.authorization)) throw new Error("The maintenance authorization was incomplete. Review again.");
     get("installation-code").value = result.authorization;
     get("installation-result").textContent = "Authorization ready for 15 minutes. Continue in the desktop app's Install & updates controls and confirm the exact " + (rollback ? "rollback" : "update") + ".";
     get("installation-confirm").checked = false;
+    clearIdentityTransition(); get("installation-transition-file").value = "";
   }
+  on("installation-transition-review", async function () {
+    clearIdentityTransition(); get("installation-code").value = "";
+    var file = get("installation-transition-file").files[0], binding = state.context;
+    if (!file || file.size > 65536) throw new Error("Choose a signed bridge JSON file no larger than 64 KiB.");
+    var envelope = await file.text();
+    var result = await request("installation/identity-transition", { envelope: envelope });
+    if (file !== get("installation-transition-file").files[0] || state.context !== binding || !/^[a-f0-9]{64}$/.test(result.sha256 || "")) throw new Error("The signing transition review changed. Select and verify it again.");
+    identityTransition = { envelope: envelope, sha256: result.sha256, context: binding };
+    get("installation-transition-details").textContent = "Verified signatures for " + result.from_version + " → " + result.to_version +
+      "\nPublisher: " + result.from_publisher + " → " + result.to_publisher + "\nUpdate key fingerprints: " + result.from_key_sha256 + " → " + result.to_key_sha256 +
+      "\nNew admissions end: " + new Date(result.expires_at * 1000).toISOString() + ". Rollback is limited to the exact retained pair and compatible unchanged protected state. Windows verifies each installer's publisher trust before execution.";
+  });
+  get("installation-transition-file").addEventListener("change", function () { clearIdentityTransition(); get("installation-code").value = ""; controls(); });
+  get("installation-transition-confirm").addEventListener("change", controls);
   on("installation-authorize", function () { return authorizeInstallation(false); });
   on("installation-rollback", function () { return authorizeInstallation(true); });
   get("installation-confirm").addEventListener("change", controls);

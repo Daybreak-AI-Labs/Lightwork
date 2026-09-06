@@ -194,8 +194,9 @@ test('separately retained keys rehearse recognized encrypted records in a fresh 
   await page.goto('/flows/designer');
   const draftContext=await page.locator('meta[name="lightwork-draft-context"]').getAttribute('content');
   const slot=require('node:crypto').createHash('sha256').update('custody-browser-rehearsal').digest('hex');
+  const current=await ok(await request.get('/api/v1/drafts/'+slot,{headers:{'X-Lightwork-Draft-Context':draftContext}}));
   await ok(await request.put('/api/v1/drafts/'+slot,{headers:{'X-Lightwork-Draft-Context':draftContext},data:{
-    expected_revision:0,operation_id:'custody-browser-draft',payload:{brief:'Synthetic retained-key rehearsal task'}}}));
+    expected_revision:current.revision,operation_id:'custody-browser-draft',payload:{brief:'Synthetic retained-key rehearsal task'}}}));
   await page.setViewportSize({width:320,height:1000});await page.goto('/workspace/recovery');
   await expect(page.locator('#wrec-refresh')).toBeEnabled();
   if(await page.locator('#wrec-key-create').isEnabled()){
@@ -234,7 +235,7 @@ test('separately retained keys rehearse recognized encrypted records in a fresh 
   const signed=page.waitForEvent('download');await page.locator('#wrec-custody-report-download').click();
   const saved=JSON.parse(require('node:fs').readFileSync(await (await signed).path(),'utf8'));
   expect(saved.report_id).toBe(report.report_id);expect(saved.authentication).toBeTruthy();expect(saved.custody_sha256).toBe(report.custody_sha256);
-  await page.getByText('Retained-key test verification details',{exact:true}).click();
+  await page.getByText('Format counts and verification details',{exact:true}).click();
   const width=await page.locator('#wrec-custody-report').evaluate(el=>({client:el.clientWidth,scroll:el.scrollWidth}));expect(width.scroll).toBeLessThanOrEqual(width.client+1);
   await page.locator('#wrec-custody-status').scrollIntoViewIfNeeded();await info.attach('retained-key-rehearsal-320',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
   await page.setViewportSize({width:1280,height:1200});await page.locator('#wrec-custody-status').scrollIntoViewIfNeeded();
@@ -270,8 +271,9 @@ test('recovery comparison pages real protected differences, downloads captured e
   const snapshot=await page.locator('#wrec-snapshot').inputValue();
   for(let index=0;index<55;index++){
     const slot=require('node:crypto').createHash('sha256').update('recovery-comparison-fixture-'+index).digest('hex');
+    const current=await ok(await request.get('/api/v1/drafts/'+slot,{headers:{'X-Lightwork-Draft-Context':draftContext}}));
     const response=await request.put('/api/v1/drafts/'+slot,{headers:{'X-Lightwork-Draft-Context':draftContext},data:{
-      expected_revision:0,operation_id:'browser-comparison-operation-'+index,payload:{brief:'Synthetic comparison draft body '+index}
+      expected_revision:current.revision,operation_id:'browser-comparison-operation-'+index,payload:{brief:'Synthetic comparison draft body '+index}
     }});
     expect(response.status()).toBe(200);
   }

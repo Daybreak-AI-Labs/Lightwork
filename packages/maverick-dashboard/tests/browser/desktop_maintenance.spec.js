@@ -86,3 +86,18 @@ test('desktop unfinished finalization keeps the exact reviewed operation selecta
   expect(await page.evaluate(()=>window.__maintenanceCalls.at(-1))).toEqual({command:'desktop_maintenance_logs',args:{id:'synthetic-point'}});
   await fits(page);
 });
+
+test('desktop proposed signing transition downloads exact review material without granting installation',async({page})=>{
+  await page.setViewportSize({width:320,height:740});
+  const envelope=JSON.parse(fs.readFileSync(path.resolve(__dirname,'../../../maverick-core/tests/fixtures/tauri_identity_bridge.json'),'utf8')).envelope;
+  await openMaintenance(page,{status:{version:'1.0.0',updates_configured:true},review:{review:'synthetic-bridge-review',version:'1.0.1',identity_transition:envelope,notes:'Signing transition fixture only; no installer execution.'}});
+  await page.locator('#check-update').click();
+  await expect(page.locator('#identity-transition-notice')).toBeVisible();
+  await expect(page.locator('#install-update')).toBeDisabled();
+  const pending=page.waitForEvent('download');await page.locator('#save-identity-transition').focus();await page.keyboard.press('Enter');
+  const download=await pending;
+  expect(download.suggestedFilename()).toBe('lightwork-signing-transition.json');
+  expect(JSON.parse(fs.readFileSync(await download.path(),'utf8'))).toEqual(envelope);
+  expect(await page.evaluate(()=>window.__maintenanceCalls.map(call=>call.command))).toEqual(['maintenance_status','check_desktop_update']);
+  await expect(page.locator('#install-update')).toBeDisabled();await fits(page);
+});

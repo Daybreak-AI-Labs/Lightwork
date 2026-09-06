@@ -40,7 +40,7 @@ test("an uncertain send preserves input and exact retry identity while refusing 
 test("same packet refresh keeps an unsaved review comment; changed packet version resets the decision",async t=>{
   let revision=1;const ui=await fixture({principal:"user:reviewer",intercept:call=>call.url.pathname.includes("/packets/")?{...packet,revision}:undefined});t.after(()=>ui.window.close());
   ui.el("inbox").querySelector("button").click();await ui.settle();ui.change("response-note","A correction still being written.");ui.change("action","approve");await ui.click("refresh");assert.equal(ui.el("response-note").value,"A correction still being written.");assert.equal(ui.el("action").value,"approve");
-  revision=2;await ui.click("refresh");assert.equal(ui.el("response-note").value,"");assert.equal(ui.el("action").value,"comment");assert.equal(ui.el("result").querySelector("img"),null);
+  revision=2;await ui.click("refresh");assert.equal(ui.el("response-note").value,"A correction still being written.");assert.equal(ui.el("action").value,"comment");assert.equal(ui.el("result").querySelector("img"),null);assert.match(ui.el("status").textContent,/check it against the current result/i);
 });
 test("stale packets cannot be approved in the UI and revoked packet reads clear prior content",async t=>{
   let revoked=false;const ui=await fixture({principal:"user:reviewer",intercept:call=>call.url.pathname.includes("/packets/")?(revoked?new Response('{"detail":"Access revoked"}',{status:404}):{...packet,stale:true}):undefined});t.after(()=>ui.window.close());
@@ -53,6 +53,27 @@ test("failed refresh authorization clears prior packet and project content",asyn
   denied=true;await ui.click("refresh");assert.equal(ui.el("inbox").textContent,"");assert.equal(ui.el("result").textContent,"");assert.equal(ui.el("preview-text").textContent,"");assert.equal(ui.el("owner").hidden,true);assert.equal(ui.el("packet").hidden,true);assert.equal(ui.el("response-button").disabled,true);
   assert.equal(ui.calls.every(call=>call.cache==="no-store"),true);
 });
+
+for(const code of [401,403])test(`HTML ${code} on a write erases private review state and locks controls`,async t=>{
+  let denied=false;const ui=await fixture({intercept:call=>denied&&call.method==='POST'?new Response('<h1>Sign in</h1>',{status:code,headers:{'Content-Type':'text/html'}}):undefined});t.after(()=>ui.window.close());
+  await preview(ui);ui.el('inbox').querySelector('button').click();await ui.settle();ui.change('response-note','Sensitive unfinished review');denied=true;ui.submit('respond');await ui.settle();
+  for(const id of ['inbox','result','preview-text','history','packet-note'])assert.equal(ui.el(id).textContent,'',id);
+  assert.equal(ui.el('note').value,'');assert.equal(ui.el('response-note').value,'');assert.equal(ui.el('project').options.length,0);
+  assert.equal(ui.el('refresh').disabled,true);assert.equal(ui.el('response-button').disabled,true);assert.match(ui.el('status').textContent,/sign in|access.*changed/i);
+});
+
+test('unfinished review notes warn before leaving and a cancelled packet switch retains the original draft',async t=>{
+  const ui=await fixture({principal:'user:reviewer',intercept:call=>call.url.pathname==='/api/v1/project-reviews'?{context:'context-one',principal:'user:reviewer',projects:[],items:[{...packet,title:'First'},{...packet,id:'PRP-two',title:'Second'}],counts:{total:2,pending:2,overdue:0},total:2,offset:0,limit:50,has_more:false}:call.url.pathname.endsWith('PRP-two')?{...packet,id:'PRP-two'}:undefined});t.after(()=>ui.window.close());ui.el('inbox').querySelector('button').click();await ui.settle();
+  ui.change('response-note','Keep this reasoning');const event=new ui.window.Event('beforeunload',{cancelable:true});ui.window.dispatchEvent(event);assert.equal(event.defaultPrevented,true);
+  ui.window.confirm=()=>false;const before=ui.calls.length;ui.el('inbox').querySelectorAll('button')[1].click();await ui.settle();
+  assert.equal(ui.el('response-note').value,'Keep this reasoning');assert.equal(ui.calls.length,before);
+  ui.window.confirm=()=>true;ui.el('inbox').querySelectorAll('button')[1].click();await ui.settle();assert.equal(ui.el('response-note').value,'');
+  const discarded=new ui.window.Event('beforeunload',{cancelable:true});ui.window.dispatchEvent(discarded);assert.equal(discarded.defaultPrevented,false);
+});
+
+test('an acknowledged review comment no longer triggers the unfinished-note warning',async t=>{const ui=await fixture({principal:'user:reviewer'});t.after(()=>ui.window.close());ui.el('inbox').querySelector('button').click();await ui.settle();ui.change('response-note','Reviewed the limitations.');ui.submit('respond');await ui.settle();const event=new ui.window.Event('beforeunload',{cancelable:true});ui.window.dispatchEvent(event);assert.equal(event.defaultPrevented,false);});
+
+test('an interrupted packet refresh keeps the unfinished comment for an explicit retry without leaving a writable stale review',async t=>{let failed=false;const ui=await fixture({principal:'user:reviewer',intercept:call=>failed&&call.url.pathname.includes('/packets/')?new Response('{"detail":"Synthetic interruption"}',{status:503}):undefined});t.after(()=>ui.window.close());ui.el('inbox').querySelector('button').click();await ui.settle();ui.change('response-note','Keep the reasoning in progress');failed=true;await ui.click('refresh');assert.equal(ui.el('packet').hidden,true);assert.equal(ui.el('response-button').disabled,true);const writes=ui.calls.filter(call=>call.method==='POST').length;ui.submit('respond');await ui.settle();assert.equal(ui.calls.filter(call=>call.method==='POST').length,writes);failed=false;await ui.click('refresh');assert.equal(ui.el('packet').hidden,false);assert.equal(ui.el('response-note').value,'Keep the reasoning in progress');assert.equal(ui.el('response-button').disabled,false);});
 
 test("packet fragments read only the exact permitted record after the context checked inbox",async t=>{
   const identifier="PRP-"+"c".repeat(32);

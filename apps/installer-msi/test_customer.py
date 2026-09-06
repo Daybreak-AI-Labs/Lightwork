@@ -21,6 +21,66 @@ stage = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(stage)
 
 
+@pytest.fixture(scope="module")
+def native_channel_gui_fixture(tmp_path_factory):
+    """A real GUI-subsystem process, without creating a window or installing MSI."""
+    compiler = Path(os.environ.get("SystemRoot", "C:/Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    if os.name != "nt" or not compiler.is_file() or not shutil.which("pwsh"):
+        pytest.skip("Windows C# compiler and PowerShell 7 required for the native pipe regression")
+    root = tmp_path_factory.mktemp("native-channel-gui")
+    source = root / "Channel.cs"
+    source.write_text('''using System;
+using System.Threading;
+class Channel {
+    static int Main(string[] args) {
+        if (args.Length != 1 || args[0] != "--maintenance-channel") return 9;
+        string mode = Environment.GetEnvironmentVariable("CHANNEL_QUERY_FIXTURE_MODE");
+        if (mode == "timeout") { Thread.Sleep(10000); return 0; }
+        Thread.Sleep(200);
+        if (mode == "failure") { Console.Error.Write("Synthetic channel failure"); return 7; }
+        Console.Error.Write(new string('x', 131072));
+        Console.WriteLine("{\\"version\\":\\"1.2.3\\",\\"packaged_runtime\\":true}");
+        return 0;
+    }
+}
+''', encoding="utf-8")
+    compiled = subprocess.run([str(compiler), "/nologo", "/target:winexe",
+                               "/out:" + str(root / "maverick-desktop.exe"), str(source)],
+                              capture_output=True, text=True, timeout=30, check=False)
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    probe = root / "read-channel.ps1"
+    probe.write_text('''param([string]$Source,[string]$InstallDirectory,[int]$TimeoutMilliseconds)
+$ErrorActionPreference='Stop'
+$tokens=$null; $errors=$null
+$tree=[Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$errors)
+if ($errors.Count) { throw 'Acceptance script did not parse.' }
+$function=@($tree.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Read-InstalledChannel'},$true))
+if ($function.Count -ne 1) { throw 'Expected exactly one native query function.' }
+Invoke-Expression $function[0].Extent.Text
+$installPath=$InstallDirectory
+Read-InstalledChannel -TimeoutMilliseconds $TimeoutMilliseconds | ConvertTo-Json -Compress
+''', encoding="utf-8")
+    return root, probe
+
+
+@pytest.mark.parametrize("mode", ["success", "failure", "timeout"])
+def test_native_channel_waits_for_gui_process_and_drains_both_pipes(native_channel_gui_fixture, mode):
+    root, probe = native_channel_gui_fixture
+    env = dict(os.environ, CHANNEL_QUERY_FIXTURE_MODE=mode)
+    result = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(probe),
+                             "-Source", str(MODULE.with_name("test-completed-rollback.ps1")),
+                             "-InstallDirectory", str(root), "-TimeoutMilliseconds", "300" if mode == "timeout" else "10000"],
+                            capture_output=True, text=True, encoding="utf-8", timeout=20, env=env, check=False)
+    if mode == "success":
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"version": "1.2.3", "packaged_runtime": True}
+    else:
+        assert result.returncode != 0
+        assert ("timed out" if mode == "timeout" else "failed (7)") in result.stderr
+        if mode == "failure":
+            assert "Synthetic channel failure" in result.stderr
+
+
 def public_key():
     raw = base64.b64encode(b"Ed" + b"\x00" * 40).decode()
     return base64.b64encode(f"untrusted comment: test-only key\n{raw}\n".encode()).decode()

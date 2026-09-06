@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from . import outcome_pilot_sources, outcome_pilots
-from .auth import caller_principal, require_permission
+from .auth import caller_principal, require_global_permission, require_permission
 from .draft_api import context_for
 
 router = APIRouter(tags=["outcome-pilots"])
@@ -35,6 +35,17 @@ class PlanIn(StrictIn):
     workflow: str = Field(..., min_length=1, max_length=1000)
     criteria: str = Field(..., min_length=1, max_length=4000)
     cases: list[CaseIn] = Field(..., min_length=4, max_length=100)
+    learning_mode: Literal["observational", "exclude_local_learning"] = "observational"
+    prior_exposure_statement: str = Field(default="", max_length=2000)
+
+
+class IndependentReviewIn(StrictIn):
+    expected_revision: int = Field(..., ge=1)
+    operation_id: str = Field(..., min_length=16, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    evidence_version: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    decision: Literal["accepted_local_scope", "needs_more_evidence"]
+    notes: str = Field(..., min_length=20, max_length=4000)
+    confirm: bool
 
 
 class ObservationIn(StrictIn):
@@ -162,4 +173,28 @@ async def observation(request: Request, response: Response, pilot_id: str, case_
     response.headers["Cache-Control"] = "private, no-store"
     record = await _call(outcome_pilots.observe, pilot_id, case_id, body.model_dump(), context=context,
         actor=caller_principal(request) or "local:dashboard", resolve=_resolver(request))
+    return {"id": record["id"], "revision": record["revision"], "context": context}
+
+
+@router.get("/api/v1/outcome-pilots/independent-review/{pilot_id}")
+async def independent_packet(request: Request, response: Response, pilot_id: str):
+    context = _context(request)
+    require_global_permission(request, "admin")
+    actor = caller_principal(request) or ""
+    record = await _call(outcome_pilots.STORE.get, pilot_id)
+    if record is None or not actor.startswith("user:") or actor == record["actor"]:
+        raise HTTPException(403, "A different named global administrator must review this pilot.")
+    for case in record["cases"]:
+        await _call(outcome_pilot_sources.resolve, request, case["kind"], case["reference"])
+    response.headers["Cache-Control"] = "private, no-store"
+    return {**await _call(outcome_pilots.report, record, resolve=_resolver(request)), "context": context}
+
+
+@router.post("/api/v1/outcome-pilots/independent-review/{pilot_id}")
+async def independent_decision(request: Request, response: Response, pilot_id: str, body: IndependentReviewIn):
+    context = _context(request, mutation=True)
+    require_global_permission(request, "admin")
+    record = await _call(outcome_pilots.independent_review, pilot_id, body.model_dump(),
+                         actor=caller_principal(request) or "", resolve=_resolver(request))
+    response.headers["Cache-Control"] = "private, no-store"
     return {"id": record["id"], "revision": record["revision"], "context": context}

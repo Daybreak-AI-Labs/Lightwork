@@ -101,11 +101,39 @@ history, with at most 1,000 review operations per pilot.
 
 ## Evaluation evidence boundary
 
-The frozen evaluation assignment does not establish that cases were excluded
-from model training, prior exposure, or the configured learning pipeline. The
-report therefore sets `holdout_exposure_verified` and
-`provider_invoice_verified` to false. It does not claim a controlled held-out
-customer experiment until those conditions are established separately.
+Plans default to **Observe results only**. A named account can instead choose
+**Exclude evaluation tasks from local learning** before freezing a goal-only
+plan and record what is known about prior exposure. This selection is part of
+the immutable plan. Vendor intake cases do not support this exclusion mode.
+The existing Outcome measurement setting and installer step still control
+access to the feature; the exclusion is an explicit per-plan choice.
+
+Each selected holdout receives a durable, tenant-bound exclusion receipt tied
+to its goal, frozen inputs and plan version. Automatic goal-bound trajectory
+capture, donation, training ingest, local distillation, semantic indexing,
+dream replay, goal-derived user notes and guarded learning writes consult this
+policy. Canonical child goals inherit their parent's exclusion. Existing
+business records remain readable; legacy learning corpus rows retaining their
+goal identity are filtered on the supported ingestion paths. Unreadable policy
+blocks optional learning rather than permitting capture. A partially prepared
+plan retains its assignments and exclusion markers; its report does not claim
+that exclusion is established until publication finishes and sources are
+rechecked. Retry the same creation reference to finish an interrupted plan.
+
+The report distinguishes an enforced local exclusion from the author's prior
+exposure statement. A different named global administrator can open the pilot
+reference in **Independent learning review**, reauthorize all source tasks,
+review the exact current evidence and record a decision with explicit
+confirmation. That review retains its actor, evidence version and history;
+changed inputs or policy evidence make it stale. This is an attributed review,
+not an independent measurement of what a model previously saw.
+
+The local policy does not erase prior learning, control provider training,
+inspect external datasets or cover manually copied/relabelled material that
+has lost its goal identity. It is not a general information-flow guarantee.
+The report therefore continues to set `holdout_exposure_verified` and
+`provider_invoice_verified` to false. A controlled held-out customer experiment
+still requires evidence for those separate conditions.
 
 Limits: 100 cases per plan, 1,000 pilots per workspace store, 5,000 observation
 operations per pilot (also subject to governed record size limits), 2,000

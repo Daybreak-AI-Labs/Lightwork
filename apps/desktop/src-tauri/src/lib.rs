@@ -31,6 +31,44 @@ fn dashboard_diagnostics(state: tauri::State<'_, Dashboard>) -> Result<String, S
 }
 
 #[tauri::command]
+fn startup_support_report(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Dashboard>,
+) -> Result<serde_json::Value, String> {
+    startup_report_for_url(
+        &window
+            .url()
+            .map_err(|_| "The startup window is unavailable.")?,
+        &state,
+    )
+}
+
+fn startup_report_for_url(
+    url: &tauri::Url,
+    state: &Dashboard,
+) -> Result<serde_json::Value, String> {
+    if *url != bundled_splash_url() {
+        return Err("Open the app's startup screen to prepare startup diagnostics.".into());
+    }
+    let facts = state.startup_support()?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "The system clock is unavailable.")?
+        .as_millis();
+    Ok(serde_json::json!({
+        "schema": "lightwork.startup-support.v1",
+        "correlation_id": format!("startup-{timestamp:x}"),
+        "generated_at_unix_ms": timestamp,
+        "desktop_version": env!("CARGO_PKG_VERSION"),
+        "platform": std::env::consts::OS,
+        "packaged_runtime_available": facts.packaged_runtime_available,
+        "process_state": facts.process_state,
+        "recovery_mode": facts.recovery_mode,
+        "scope": "Startup facts only. Configuration, account data, paths and startup logs are excluded. Full diagnostics are available from Help after sign-in."
+    }))
+}
+
+#[tauri::command]
 fn switch_recovery_mode(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, Dashboard>,
@@ -133,6 +171,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             retry_dashboard,
             dashboard_diagnostics,
+            startup_support_report,
             switch_recovery_mode,
             updates::maintenance_status,
             updates::check_desktop_update,
@@ -224,6 +263,22 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_report_is_allowlisted_and_available_only_from_bundled_splash() {
+        let dashboard = Dashboard::default();
+        let report = startup_report_for_url(&bundled_splash_url(), &dashboard).unwrap();
+        assert_eq!(report["schema"], "lightwork.startup-support.v1");
+        assert_eq!(report["process_state"], "not_started");
+        assert_eq!(report.as_object().unwrap().len(), 9);
+        for url in [
+            DASHBOARD_URL.parse().unwrap(),
+            "https://example.test/".parse().unwrap(),
+            bundled_page_url("maintenance.html"),
+        ] {
+            assert!(startup_report_for_url(&url, &dashboard).is_err());
+        }
+    }
 
     #[test]
     fn reconnect_returns_a_failed_dashboard_to_bundled_controls_before_launch() {

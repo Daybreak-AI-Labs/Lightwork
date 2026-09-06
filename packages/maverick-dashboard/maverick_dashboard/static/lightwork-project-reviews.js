@@ -2,7 +2,11 @@
   "use strict";
   const root=document.getElementById("pr-root"); if(!root)return;
   const el=id=>document.getElementById("pr-"+id),base="/api/v1/project-reviews";
-  let model=null,setup=null,preview=null,packet=null,busy=false,offset=0;
+  let model=null,setup=null,preview=null,packet=null,busy=false,offset=0,expired=false,packetUnavailable=false;
+  let savedRequestNote="",savedResponseNote="";
+  const responseDirty=()=>el("response-note").value!==savedResponseNote;
+  const hasDraft=()=>responseDirty()||el("note").value!==savedRequestNote;
+  window.addEventListener("beforeunload",event=>{if(!expired&&hasDraft()){event.preventDefault();event.returnValue="";}});
   const refs={};
   function reference(name){if(!refs[name])refs[name]=crypto.randomUUID();return refs[name];}
   function resetReference(name){delete refs[name];}
@@ -10,14 +14,16 @@
   function choices(select,rows,placeholder){select.replaceChildren(node("option",placeholder));select.firstChild.value="";rows.forEach(row=>{const option=node("option",row.label);option.value=String(row.value);select.append(option);});}
   async function api(path,options={}){
     const response=await fetch(base+path,{...options,credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/json","X-Lightwork-Review-Context":root.dataset.context}});
+    if([401,403].includes(response.status)){expired=true;invalidateView();throw new Error("Your sign-in or access changed. Sign in again and reload project reviews.");}
     const raw=await response.text();if(new TextEncoder().encode(raw).byteLength>2*1024*1024)throw new Error("Review response is too large. Narrow the workspace inventory.");
     let data;try{data=JSON.parse(raw);}catch(_){throw new Error("The review service returned an unreadable response.");}
     if(!response.ok){const error=new Error(typeof data.detail==="string"?data.detail:"The review could not be saved. Check the required fields and reload if the version changed.");error.status=response.status;throw error;}
     return data;
   }
   function permissions(){
+    if(expired){root.querySelectorAll("button,input,textarea,select").forEach(item=>item.disabled=true);return;}
     el("previous").disabled=busy||!offset;el("next").disabled=busy||!model?.has_more;
-    el("response-button").disabled=busy||!packet?.can_respond;
+    el("response-button").disabled=busy||packetUnavailable||!packet?.can_respond;
     el("send-button").disabled=busy||!preview||!setup;
     const canDecide=packet&&packet.reviewer===model?.principal&&packet.status==="pending"&&!packet.stale;
     const canCancel=packet&&packet.owner===model?.principal&&packet.status==="pending";
@@ -25,7 +31,7 @@
     if(el("action").selectedOptions[0]?.disabled)el("action").value="comment";
   }
   async function action(work){
-    if(busy)return;busy=true;
+    if(busy||expired)return;busy=true;
     const controls=Array.from(root.querySelectorAll("button,input,textarea,select"));const previous=controls.map(item=>item.disabled);controls.forEach(item=>item.disabled=true);
     try{await work();}catch(error){el("status").textContent=error.message||"The action could not be completed. Your input has been kept.";}
     finally{controls.forEach((item,index)=>item.disabled=previous[index]);busy=false;permissions();}
@@ -38,12 +44,15 @@
   }
   async function refresh(){
     let next;try{next=await api("?"+new URLSearchParams({offset:String(offset),limit:"50",q:el("search").value}));}catch(error){if([401,403,404,409].includes(error.status))invalidateView();throw error;}
-    if(next.context!==root.dataset.context){invalidateView();throw new Error("Your account or workspace changed. Reload this page.");}
+    if(next.context!==root.dataset.context){expired=true;invalidateView();throw new Error("Your account or workspace changed. Reload this page.");}
     model=next;renderInbox();const selected=el("project").value;choices(el("project"),model.projects.map(row=>({value:row.id,label:row.name})),"Choose your project");
     el("project").value=model.projects.some(row=>String(row.id)===selected)?selected:"";el("owner").hidden=!model.projects.length;
     el("status").textContent="Review list refreshed. Only packets you can currently access are shown.";
   }
-  function invalidateView(){model=null;packet=null;setup=null;preview=null;el("inbox").replaceChildren();el("members").replaceChildren();el("counts").textContent="";el("page").textContent="";el("result").textContent="";el("preview-text").textContent="";el("response-note").value="";el("note").value="";el("packet").hidden=true;el("owner").hidden=true;el("setup").hidden=true;el("preview-panel").hidden=true;Object.keys(refs).forEach(key=>delete refs[key]);}
+  function invalidateView(){model=null;packet=null;setup=null;preview=null;
+    for(const id of ["inbox","members","counts","page","result","preview-text","preview-title","packet-title","packet-summary","packet-note","stale","history","owner-task","project","member","reviewer","goal"])el(id).replaceChildren();
+    el("response-note").value="";el("note").value="";el("due").value="";savedRequestNote="";savedResponseNote="";
+    el("packet").hidden=true;el("owner").hidden=true;el("setup").hidden=true;el("preview-panel").hidden=true;Object.keys(refs).forEach(key=>delete refs[key]);permissions();}
   function clearPreview(){preview=null;el("preview-panel").hidden=true;el("preview-text").textContent="";resetReference("send");permissions();}
   async function loadProject(){
     setup=null;clearPreview();el("setup").hidden=true;if(!el("project").value)return;
@@ -60,6 +69,7 @@
     await api("/projects/"+el("project").value+"/members",{method:"PUT",body:JSON.stringify({member,allowed,expected_revision:setup.team.revision,request_id:reference("membership")})});resetReference("membership");
   }
   function renderPacket(){
+    packetUnavailable=false;
     el("packet").hidden=false;el("packet-title").textContent=packet.snapshot.title;
     el("packet-summary").textContent=packet.project_name+" · "+packet.status.replace(/_/g," ")+" · reviewer "+packet.reviewer+" · due "+new Date(packet.due_at*1000).toLocaleString();
     el("stale").textContent=packet.stale?"The source task changed after this result was captured. Ask the owner for a fresh packet before making a decision.":"You are reviewing the captured result shown below.";
@@ -70,11 +80,13 @@
   }
   async function openPacket(id){
     const previous=packet;
+    if(previous&&previous.id!==id&&responseDirty()&&!window.confirm("Discard your unfinished review comment and open another review?"))return;
     // Clear prior content before reauthorization so revoked data does not
     // remain presented as the newly selected packet after a failed read.
-    packet=null;el("packet").hidden=true;el("result").textContent="";
+    packetUnavailable=true;el("packet").hidden=true;el("result").textContent="";
     packet=await api("/packets/"+encodeURIComponent(id));renderPacket();
-    if(!previous||previous.id!==packet.id||previous.revision!==packet.revision||previous.source_version!==packet.source_version){el("response-note").value="";el("action").value="comment";resetReference("response");}
+    if(!previous||previous.id!==packet.id){el("response-note").value="";savedResponseNote="";el("action").value="comment";resetReference("response");}
+    else if(previous.revision!==packet.revision||previous.source_version!==packet.source_version){el("action").value="comment";resetReference("response");el("status").textContent="This review changed. Your unfinished comment is kept; check it against the current result before saving. The response is reset to Add comment.";}
     el("packet-title").focus();
   }
   el("refresh").addEventListener("click",()=>action(async()=>{await refresh();if(packet)await openPacket(packet.id);}));
@@ -94,14 +106,14 @@
     const payload={goal_id:preview.snapshot.goal_id,reviewer:el("reviewer").value,note:el("note").value,due_at:new Date(el("due").value).getTime()/1000,source_version:preview.source_version,expected_team_revision:setup.team.revision,request_id:reference("send")};
     if(!payload.reviewer||!payload.note.trim()||!Number.isFinite(payload.due_at))throw new Error("Choose a reviewer, future due date and review note.");
     if(!window.confirm("Share exactly the captured result shown above with "+payload.reviewer+"?"))return;
-    const saved=await api("/projects/"+el("project").value+"/packets",{method:"POST",body:JSON.stringify(payload)});resetReference("send");await refresh();packet=saved;renderPacket();el("status").textContent="Review packet sent. No task was run or signed off.";
+    const saved=await api("/projects/"+el("project").value+"/packets",{method:"POST",body:JSON.stringify(payload)});savedRequestNote=el("note").value;resetReference("send");await refresh();packet=saved;renderPacket();el("status").textContent="Review packet sent. No task was run or signed off.";
   });});
   el("respond").addEventListener("submit",event=>{event.preventDefault();action(async()=>{
-    if(!packet)throw new Error("Open a review packet first.");const kind=el("action").value,note=el("response-note").value;
+    if(!packet||packetUnavailable)throw new Error("Open a current review packet first.");const kind=el("action").value,note=el("response-note").value;
     if(!note.trim())throw new Error("Add a review comment before saving.");
     if(kind!=="comment"&&!window.confirm("Save this "+kind.replace(/_/g," ")+" decision for the captured result? The live task will remain unchanged."))return;
     const saved=await api("/packets/"+encodeURIComponent(packet.id)+"/responses",{method:"POST",body:JSON.stringify({action:kind,note,expected_revision:packet.revision,source_version:packet.source_version,request_id:reference("response")})});
-    packet=saved;resetReference("response");renderPacket();el("response-note").value="";await refresh();el("status").textContent="Review response saved. The owner decides the live task's next step.";
+    packet=saved;resetReference("response");renderPacket();el("response-note").value="";savedResponseNote="";await refresh();el("status").textContent="Review response saved. The owner decides the live task's next step.";
   });});
   action(async()=>{await refresh();const parameters=new URLSearchParams(location.hash.slice(1)),initial=parameters.get("project");if(initial&&/^\d{1,16}$/.test(initial)&&model.projects.some(row=>String(row.id)===initial)){el("project").value=initial;await loadProject();}const selected=parameters.get("packet");if(selected&&/^PRP-[0-9a-f]{32}$/.test(selected))await openPacket(selected);});
 })();

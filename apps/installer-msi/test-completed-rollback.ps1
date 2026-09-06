@@ -43,11 +43,35 @@ function Invoke-Msi([string]$package,[string]$action) {
 }
 
 function Read-InstalledChannel {
+    param([ValidateRange(100,30000)][int]$TimeoutMilliseconds=30000)
     # This fixed native query exits before WebView or dashboard initialization.
-    $desktop = Join-Path $installPath 'maverick-desktop.exe'
-    $output = & $desktop --maintenance-channel
-    if ($LASTEXITCODE -ne 0) { throw 'The installed native channel query failed.' }
-    return (($output -join "`n") | ConvertFrom-Json)
+    # PowerShell does not reliably wait for a GUI-subsystem executable invoked
+    # with &, so it can close the output pipe while the application is writing.
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = Join-Path $installPath 'maverick-desktop.exe'
+    $info.ArgumentList.Add('--maintenance-channel')
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $info
+    try {
+        if (-not $process.Start()) { throw 'The installed native channel query did not start.' }
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+            $process.Kill($true)
+            $process.WaitForExit(5000) | Out-Null
+            throw 'The installed native channel query timed out; its owned process tree was stopped.'
+        }
+        $output = $stdout.GetAwaiter().GetResult()
+        $errorOutput = $stderr.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "The installed native channel query failed ($($process.ExitCode)): $($errorOutput.Substring(0,[Math]::Min(1000,$errorOutput.Length)))"
+        }
+        return ($output | ConvertFrom-Json)
+    } finally { $process.Dispose() }
 }
 
 function Assert-InstalledChannel([string]$ExpectedVersion) {

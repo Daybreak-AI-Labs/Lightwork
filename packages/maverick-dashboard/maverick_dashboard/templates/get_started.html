@@ -86,6 +86,13 @@
   </div>
   {% endif %}
 
+  {% if local_owner_setup_available %}
+  <section class="panel" aria-labelledby="local-owner-title">
+    <h2 id="local-owner-title">Set up named sign-in</h2>
+    <p>Create the local owner before inviting colleagues or recording named vendor and project reviews. You will review the change from anonymous local administration to named sign-in.</p>
+    <a class="btn btn--primary" href="/auth/local-owner">Set up the local owner</a>
+  </section>
+  {% endif %}
   {% if needs_initial_settings %}
   <section class="panel" aria-labelledby="initial-settings-title" style="margin-bottom:var(--space-5)">
     <h2 id="initial-settings-title">Set up Lightwork</h2>

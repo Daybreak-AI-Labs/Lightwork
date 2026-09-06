@@ -89,6 +89,36 @@ test('a lost save response retries the exact operation before saving later edits
   await ui.recovery.save();assert.equal(ui.data.revision,2);assert.equal(ui.data.payload.brief,'later edits');ui.dom.window.close();
 });
 
+test('storage retirement reviews current counts and sends the exact context/version without changing the editor',async()=>{
+  const ui=await fixture({initial:'keep my work'}),calls=[];
+  const summary={context:'account-workspace',version:'a'.repeat(64),capacity:2,saved:1,discarded:1,available:0};
+  let confirmed='';ui.w.mvConfirm=async(message)=>{confirmed=message;return true;};
+  ui.w.fetch=async(url,options)=>{calls.push({url,...options});return {ok:true,status:200,json:async()=>options.method==='POST'?{...summary,version:'b'.repeat(64),discarded:0,available:1,retired:1}:summary};};
+  await ui.click('Refresh storage summary');
+  assert.match(ui.recovery.panel.textContent,/1 saved recovery copies, 1 discarded copies/);
+  assert.equal(calls.length,1);assert.equal(ui.button('Free discarded recovery space').disabled,false);
+  await ui.click('Free discarded recovery space');
+  assert.match(confirmed,/1 already discarded/);
+  assert.equal(calls[1].url,'/api/v1/drafts/storage/retire');
+  assert.equal(calls[1].headers['X-Lightwork-Draft-Context'],'account-workspace');
+  assert.deepEqual(JSON.parse(calls[1].body),{expected_version:summary.version});
+  assert.equal(ui.input.value,'keep my work');assert.equal(ui.writes.length,0);
+  assert.equal(ui.button('Free discarded recovery space').disabled,true);
+  ui.dom.window.close();
+});
+
+test('storage denial and stale confirmation invalidate retirement until a fresh summary is reviewed',async()=>{
+  for(const status of [403,409]){
+    const ui=await fixture(),calls=[];
+    ui.w.fetch=async(url,options)=>{calls.push({url,...options});return options.method==='POST'?{ok:false,status,json:async()=>{if(status===403)throw new Error('HTML denial');return {detail:'Recovery storage changed.'};}}:{ok:true,status:200,json:async()=>({context:'account-workspace',version:'a'.repeat(64),capacity:1,saved:0,discarded:1,available:0})};};
+    await ui.click('Refresh storage summary');await ui.click('Free discarded recovery space');
+    assert.equal(ui.button('Free discarded recovery space').disabled,true);
+    assert.match(ui.recovery.panel.textContent,status===403?/Your access changed/:/Recovery storage changed/);
+    assert.doesNotMatch(ui.recovery.panel.textContent,/1 discarded copies/);
+    assert.equal(calls.length,2);ui.dom.window.close();
+  }
+});
+
 test('guided recovery keeps raw request references and separate resource drafts without submitting',async()=>{
   const dom=new JSDOM('<form id="resource"><select id="kind" name="kind"><option value="first" data-guided-endpoint="/first">First</option><option value="second" data-guided-endpoint="/second">Second</option></select><label>Details<textarea name="payload" data-guided-selector="kind">{"expected_revision":7,"idempotency_key":"exact-request"}</textarea></label><input type="password" name="password" value="not-stored"><button>Save</button></form>',{url:'https://lightwork.test/resource',runScripts:'outside-only'});
   const w=dom.window,d=w.document,adapters=[];let submits=0;

@@ -20,7 +20,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import unquote
 
-from . import backup, config, control_plane_lease, file_lock, paths, workspace_recovery
+from . import (
+    backup,
+    config,
+    control_plane_lease,
+    file_lock,
+    paths,
+    release_identity_transition,
+    workspace_recovery,
+)
 from .windows_installer_verification import inspect_signed_msi, verify_minisign
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
@@ -165,7 +173,7 @@ def _runtime() -> Path:
     return Path(sys.executable).absolute()
 
 
-def _native_channel(runtime: Path) -> dict:
+def _native_channel(runtime: Path, *, expected_version: str | None = None) -> dict:
     native = runtime.parent / "maverick-desktop.exe"
     digest = backup._sha256(native)
     result = subprocess.run([str(native), "--maintenance-channel"], capture_output=True, text=True,
@@ -175,7 +183,7 @@ def _native_channel(runtime: Path) -> dict:
         channel = json.loads(result.stdout) if result.returncode == 0 and len(result.stdout) <= 16384 else {}
         public_key = channel.get("public_key")
         if (not isinstance(public_key, str) or not public_key or len(public_key) > 4096
-                or channel.get("version") != workspace_recovery.version()
+                or channel.get("version") != (expected_version or workspace_recovery.version())
                 or channel.get("packaged_runtime") is not True or backup._sha256(native) != digest):
             raise ValueError("unbound channel")
     except (TypeError, ValueError) as exc:
@@ -189,8 +197,49 @@ def _admit_local() -> None:
         raise MaintenanceError(" ".join(reasons))
 
 
+def _transition_source(record):
+    return {"version": record["old_version"], "runtime_sha256": record["old_runtime_sha256"],
+            "native_sha256": record["native_sha256"], "public_key": record["public_key"]}
+
+
+def _verified_transition(value, record, *, admit=True):
+    if admit and not config.signing_identity_transition_enabled():
+        raise MaintenanceError("Signing identity transitions are disabled. A global administrator must enable this trust capability in Settings before reviewing a bridge release.")
+    try:
+        return release_identity_transition.verify(value, installed=_transition_source(record), admit=admit)
+    except release_identity_transition.IdentityTransitionError as exc:
+        raise MaintenanceError(str(exc)) from exc
+
+
+def review_identity_transition(value, *, isolated: bool) -> dict:
+    if not isolated:
+        raise MaintenanceError("Review signing identity transitions in the isolated Workspace recovery mode.")
+    runtime = _runtime()
+    source = {"old_version": workspace_recovery.version(), "old_runtime_sha256": backup._sha256(runtime),
+              **_native_channel(runtime)}
+    return release_identity_transition.summary(_verified_transition(value, source))
+
+
+def _check_transition_installers(record, old, new, *, admit=False):
+    envelope = record.get("identity_transition")
+    if envelope is None:
+        if old.get("publisher_thumbprint") != new.get("publisher_thumbprint"):
+            raise MaintenanceError("The installer publisher changed. Review an authenticated exact-release identity transition in Workspace recovery first.")
+        return
+    if release_identity_transition.digest(envelope) != record.get("transition_sha256"):
+        raise MaintenanceError("The reviewed signing identity transition changed.")
+    if not admit and not record.get("transition_admitted_at"):
+        raise MaintenanceError("This signing identity transition has no completed admission receipt.")
+    verified = _verified_transition(envelope, record, admit=admit)
+    try:
+        release_identity_transition.verify_installers(verified, old=old, new=new)
+    except release_identity_transition.IdentityTransitionError as exc:
+        raise MaintenanceError(str(exc)) from exc
+
+
 def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
-              rollback_id: str | None = None) -> dict:
+              rollback_id: str | None = None, identity_transition=None, transition_sha256: str | None = None,
+              confirm_identity_transition: bool = False) -> dict:
     if not isolated or confirm_all_workspaces is not True or not actor:
         raise MaintenanceError("A global administrator must explicitly review all local workspaces in recovery mode.")
     runtime = _runtime()
@@ -198,10 +247,13 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
         assert_normal_start_allowed()
         _admit_local()
         if rollback_id:
+            if identity_transition is not None or transition_sha256 is not None:
+                raise MaintenanceError("Rollback uses only its originally admitted exact identity pair.")
             directory = _directory(rollback_id)
             record = _read(directory / "record.json")
             if record.get("status") != "upgraded" or backup._sha256(runtime) != record.get("new_runtime_sha256"):
                 raise MaintenanceError("Rollback requires the matching completed upgrade on this computer.")
+            _verify_runtime(record, "new")
         else:
             if _usable_point_count() >= MAX_TICKETS:
                 raise MaintenanceError("The installation recovery store is full. Review and retire unused authorizations or obsolete recovery points in Workspace recovery.")
@@ -210,6 +262,15 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
             record = {"schema": 1, "target": _target(), "id": identifier, "status": "authorized",
                       "old_version": workspace_recovery.version(), "old_runtime_sha256": backup._sha256(runtime),
                       "installed_runtime": str(runtime), "created_at": time.time(), **_native_channel(runtime)}
+            if identity_transition is not None:
+                if confirm_identity_transition is not True:
+                    raise MaintenanceError("Explicitly confirm the reviewed change to installation signing trust.")
+                envelope = _verified_transition(identity_transition, record)
+                if release_identity_transition.digest(envelope) != transition_sha256:
+                    raise MaintenanceError("Review and confirm the exact signing identity transition before authorizing it.")
+                record.update(identity_transition=envelope, transition_sha256=transition_sha256)
+            elif transition_sha256 is not None:
+                raise MaintenanceError("The reviewed signing identity transition is missing.")
         nonce = secrets.token_hex(32)
         record.update(actor=actor, operation="rollback" if rollback_id else "upgrade",
                       grant_hash=hashlib.sha256(nonce.encode()).hexdigest(), expires_at=time.time() + 900)
@@ -237,7 +298,8 @@ def inspect_grant(token: str) -> dict:
     with _locked():
         directory, record = _grant(token)
         return {"id": record["id"], "directory": str(directory), "old_version": record["old_version"],
-                "operation": record["operation"], "helper": str(directory / "maverick.exe")}
+                "operation": record["operation"], "helper": str(directory / "maverick.exe"),
+                "identity_transition": record.get("identity_transition")}
 
 
 def _installer(directory: Path, metadata: dict, label: str) -> dict:
@@ -277,12 +339,13 @@ def prepare(token: str) -> dict:
             metadata = json.loads(file_lock.atomic_read_text(metadata_path))
             if not hmac.compare_digest(str(metadata.get("public_key", "")), record["public_key"]):
                 raise MaintenanceError("The staged verification key does not match the installed native application.")
+            if metadata.get("identity_transition") != record.get("identity_transition"):
+                raise MaintenanceError("The staged signing identity transition does not match the administrator's review.")
             if backup._sha256(Path(record["installed_runtime"]).parent / "maverick-desktop.exe") != record["native_sha256"]:
                 raise MaintenanceError("The native application changed after authorization.")
             old = _installer(directory, metadata, "old")
             new = _installer(directory, metadata, "new")
-            if old.get("publisher_thumbprint") != new.get("publisher_thumbprint"):
-                raise MaintenanceError("The installer publisher changed. Certificate rotation requires a coordinated administrator release procedure.")
+            _check_transition_installers(record, old, new, admit=True)
             if old["version"] != record["old_version"] or tuple(map(int, new["version"].split("."))) <= tuple(map(int, old["version"].split("."))):
                 raise MaintenanceError("The retained installers do not match the reviewed upgrade.")
             for release in (old, new):
@@ -299,9 +362,13 @@ def prepare(token: str) -> dict:
             record.update(old=old, new=new,
                           new_runtime_sha256=new["runtime_sha256"],
                           before=_snapshot(directory, "before", current))
+            if record.get("identity_transition") is not None:
+                record["transition_admitted_at"] = time.time()
         else:
             if record["status"] != "upgraded" or current != record["new_runtime_sha256"]:
                 raise MaintenanceError("The installed application no longer matches this completed upgrade.")
+            _verify_runtime(record, "new")
+            _check_transition_installers(record, record["old"], record["new"])
             with _scope():
                 archive = directory / "before.tgz"
                 if backup._sha256(archive) != record["before"]["sha256"]:
@@ -334,6 +401,16 @@ def _verify_runtime(record: dict, label: str) -> None:
     path = Path(record["installed_runtime"])
     if not path.is_file() or backup._sha256(path) != record[label + "_runtime_sha256"]:
         raise MaintenanceError("The installed application does not match the verified release. Workspace restoration has not been marked complete.")
+    if record.get("identity_transition") is not None:
+        side = record["identity_transition"]["policy"]["from" if label == "old" else "to"]
+        native = _native_channel(path, expected_version=side["version"])
+        if any(native.get(name) != side[name] for name in ("native_sha256", "public_key")):
+            raise MaintenanceError("The installed desktop signing identity does not match the reviewed release. Recovery remains blocked.")
+    else:
+        native = _native_channel(path, expected_version=record[label]["version"])
+        if (native.get("public_key") != record["public_key"]
+                or label == "old" and native.get("native_sha256") != record["native_sha256"]):
+            raise MaintenanceError("The installed desktop signing identity changed without an admitted bridge. Recovery remains blocked; obtain the administrator's reviewed transition release.")
 
 
 def _verify_completed_state(directory: Path, record: dict, outcome: str) -> None:
@@ -376,10 +453,13 @@ def execute(token: str) -> dict:
         _write(directory / "record.json", record)
         try:
             metadata = {"public_key": record["public_key"], "old": record["old"], "new": record["new"]}
+            installers = {}
             for label in ("old", "new"):
                 verified = _installer(directory, metadata, label)
                 if verified["sha256"] != record[label]["sha256"]:
                     raise MaintenanceError("A retained installer changed after review.")
+                installers[label] = verified
+            _check_transition_installers(record, installers["old"], installers["new"])
             if record.get("finalization") in {"upgraded", "rolled_back"}:
                 outcome = record["finalization"]
                 _verify_completed_state(directory, record, outcome)

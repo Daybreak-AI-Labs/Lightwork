@@ -10,6 +10,7 @@ function render(invoke) {
     "repair-install", "install-update", "update-review", "update-version", "update-notes", "back",
     "maintenance-authorization", "maintenance-incomplete", "maintenance-recovery-result", "rollback-install", "resume-maintenance",
     "maintenance-logs", "maintenance-log-point",
+    "identity-transition-notice", "save-identity-transition",
   ].map(id => [id, { textContent: "", value: "", hidden: false, disabled: false, handlers: {},
     addEventListener(name, handler) { this.handlers[name] = handler; } }]));
   const context = { document: { getElementById: id => elements[id] },
@@ -77,4 +78,27 @@ test("double clicks cannot queue another maintenance operation", async () => {
   assert.equal(checks, 1);
   finish(null);
   await pending;
+});
+
+test("identity transition is disclosed but cannot install without the separately reviewed authorization", async () => {
+  const calls = [];
+  const elements = render(async command => {
+    calls.push(command);
+    if (command === "maintenance_status") return { version:"1.0.0",updates_configured:true };
+    return { review:"bridge-1",version:"1.0.1",repair:false,identity_transition:{policy:{id:"synthetic-pending-review"}} };
+  });
+  await settle();await elements["check-update"].handlers.click();
+  assert.equal(elements["identity-transition-notice"].hidden,false);
+  assert.equal(elements["save-identity-transition"].hidden,false);
+  assert.equal(elements["install-update"].disabled,true);
+  await elements["install-update"].handlers.click();
+  assert.deepEqual(calls,["maintenance_status","check_desktop_update"]);
+});
+
+test("repair cannot turn transition metadata into a trust-adopting installation", async () => {
+  const elements = render(async command => command === "maintenance_status" ? {version:"1.0.0",updates_configured:true} :
+    {review:"bad-repair",version:"1.0.0",repair:true,identity_transition:{policy:{}}});
+  await settle();await elements["repair-install"].handlers.click();
+  assert.equal(elements["install-update"].disabled,true);
+  assert.equal(elements["update-review"].hidden,true);
 });

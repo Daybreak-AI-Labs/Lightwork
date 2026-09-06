@@ -25,8 +25,10 @@ def test_get_features_defaults_preserve_opt_in_customer_workflows(monkeypatch, t
         "skills": True, "world_model": True, "streaming": True,
         "pack_editing": True, "role_editing": True, "scheduling": True,
         "triggers": True, "action_center": True, "draft_recovery": True,
+        "support_center": True,
         "guided_onboarding": True, "record_search": True, "workspace_recovery": False,
         "workflow_readiness": True, "project_reviews": False, "outcome_measurement": False,
+        "signing_identity_transition": False,
     }
 
 
@@ -36,6 +38,7 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "[features]\nskills = false\nworld_model = false\nstreaming = false\n"
         "pack_editing = false\nrole_editing = false\nscheduling = false\n"
         "triggers = false\naction_center = false\ndraft_recovery = false\n"
+        "support_center = false\n"
         "guided_onboarding = false\nrecord_search = false\nworkspace_recovery = false\n"
         "workflow_readiness = false\nproject_reviews = true\noutcome_measurement = true\n"
     )
@@ -45,8 +48,10 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "skills": False, "world_model": False, "streaming": False,
         "pack_editing": False, "role_editing": False, "scheduling": False,
         "triggers": False, "action_center": False, "draft_recovery": False,
+        "support_center": False,
         "guided_onboarding": False, "record_search": False, "workspace_recovery": False,
         "workflow_readiness": False, "project_reviews": True, "outcome_measurement": True,
+        "signing_identity_transition": False,
     }
 
 

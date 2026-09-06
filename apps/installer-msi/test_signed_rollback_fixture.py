@@ -32,7 +32,7 @@ def test_failed_native_exit_cannot_be_reported_as_acceptance(tmp_path, capsys):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Hosted Windows fixture orchestration")
-@pytest.mark.parametrize("failure", ["create", "trust", "sign-base", "sign-next", "completed-rollback", "cleanup", None])
+@pytest.mark.parametrize("failure", ["create", "trust", "sign-base", "sign-next", "native-webview", "completed-rollback", "cleanup", None])
 def test_each_stage_failure_keeps_original_error_and_attempts_exact_cleanup(tmp_path, monkeypatch, failure):
     workspace = tmp_path / "workspace"
     runner = tmp_path / "runner"

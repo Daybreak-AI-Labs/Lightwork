@@ -16,6 +16,9 @@ def settings() -> VendorOnboardingSettings:
     loaded = config.load_config()
     if config.config_source_errors(include_tenant=True):
         raise ValueError("vendor onboarding configuration is unavailable")
+    from maverick.vendor_onboarding_setup import settings as workspace_settings
+    if current_tenant_id_strict():
+        return workspace_settings(loaded)
     return VendorOnboardingSettings.from_config(loaded)
 
 

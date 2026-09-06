@@ -38,6 +38,45 @@
     var restore = button('Restore recovery copy', restoreCopy), keep = button('Keep current draft', keepCurrent);
     var discard = button('Discard recovery copy', discardCopy), retry = button('Retry recovery', retryRecovery);
     panel.append(status, actions, preview); options.host.prepend(panel);
+    var storage = doc.createElement('details'), storageTitle = doc.createElement('summary'), storageStatus = doc.createElement('p');
+    var storageRefresh = doc.createElement('button'), storageRetire = doc.createElement('button'), storageSnapshot = null, storageBusy = false;
+    storageTitle.textContent = 'Manage recovery storage'; storageStatus.setAttribute('role', 'status');
+    storageRefresh.type = storageRetire.type = 'button'; storageRefresh.className = storageRetire.className = 'btn btn--ghost';
+    storageRefresh.textContent = 'Refresh storage summary'; storageRetire.textContent = 'Free discarded recovery space'; storageRetire.disabled = true;
+    storage.append(storageTitle, storageStatus, storageRefresh, storageRetire); panel.append(storage);
+    function storageControls() { storageRefresh.disabled = storageBusy; storageRetire.disabled = storageBusy || !storageSnapshot || !storageSnapshot.discarded; }
+    async function storageCall(body) {
+      var response = await root.fetch('/api/v1/drafts/storage' + (body ? '/retire' : ''), {method:body ? 'POST' : 'GET', cache:'no-store',
+        headers:{'Content-Type':'application/json','X-Lightwork-Draft-Context':context}, ...(body ? {body:JSON.stringify(body)} : {})});
+      if (response.status === 401 || response.status === 403) throw new Error('Your access changed. Sign in again before managing recovery storage.');
+      var data; try { data = await response.json(); } catch (_error) { throw new Error('Recovery storage could not confirm this request. Refresh the summary before trying again.'); }
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Recovery storage is unavailable.');
+      if (!data || data.context !== context || !/^[0-9a-f]{64}$/.test(data.version) ||
+          !['capacity','saved','discarded','available'].every(function (key) { return Number.isInteger(data[key]) && data[key] >= 0; }) ||
+          data.saved + data.discarded + data.available !== data.capacity) throw new Error('The recovery storage summary could not be verified.');
+      return data;
+    }
+    function showStorage(data, prefix) {
+      storageSnapshot = data;
+      storageStatus.textContent = (prefix || '') + data.saved + ' saved recovery copies, ' + data.discarded + ' discarded copies, and ' + data.available + ' available spaces. Only already discarded copies can be retired here.';
+    }
+    async function refreshStorage() {
+      if (storageBusy || disposed) return;
+      storageBusy = true; storageSnapshot = null; storageControls();
+      try { showStorage(await storageCall()); } catch (error) { storageStatus.textContent = error.message; }
+      finally { storageBusy = false; storageControls(); }
+    }
+    async function retireStorage() {
+      if (storageBusy || !storageSnapshot || !storageSnapshot.discarded || disposed) return;
+      var selected = storageSnapshot; storageBusy = true; storageControls();
+      try {
+        if (!(await confirmed('Free space from ' + selected.discarded + ' already discarded recovery copies? Open editors will check their saved version before saving again.'))) return;
+        showStorage(await storageCall({expected_version:selected.version}), 'Discarded recovery space freed. ');
+      } catch (error) { storageSnapshot = null; storageStatus.textContent = error.message; }
+      finally { storageBusy = false; storageControls(); }
+    }
+    storage.addEventListener('toggle', function () { if (storage.open) refreshStorage(); });
+    storageRefresh.addEventListener('click', refreshStorage); storageRetire.addEventListener('click', retireStorage);
     var slot, revision = 0, remote = null, blocked = false, initialized = false, timer, running = false;
     var changed = false, disposed = false, lastSaved = JSON.stringify(options.read()), pendingOperation = null, failed = false;
     function read() { var value = options.read(); assertSafe(value); return JSON.parse(JSON.stringify(value)); }

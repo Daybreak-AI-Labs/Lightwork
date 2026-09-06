@@ -218,6 +218,65 @@ class VendorOnboardingService:
         return self._save(ctx, row, uploads=[*row.get("uploads", []), result], evidence=None,
                           assessment=None, stage="intake", **self._invalidate(row))
 
+    def _upload_preview(self, ctx, case_id, expected_revision, *, content, name, mime,
+                        document_date, transcription=None, expires_at=None):
+        from .config import vendor_reviewed_uploads_enabled
+
+        if not vendor_reviewed_uploads_enabled():
+            raise PermissionError("Reviewed evidence uploads are disabled by this deployment")
+        row = self._get(ctx, case_id, expected_revision)
+        self._editable(row)
+        self._permit(ctx, "evidence.upload", case_id, human=True)
+        if len(row.get("document_ids", [])) + len(row.get("uploads", [])) >= documents.MAX_DOCUMENTS:
+            raise ValueError("Remove a document before adding more than 8")
+        if len(content) + sum(item.get("byte_length", 0) for item in row.get("uploads", [])) > documents.MAX_TOTAL_BYTES:
+            raise ValueError("Uploaded evidence exceeds the 32 MiB request limit; remove a file before continuing")
+        filename = _text(name, "document name", 256)
+        if re.search(r"[\x00-\x1f/\\]", filename):
+            raise ValueError("Document name must not contain a path or control characters")
+        if type(document_date) not in (int, float) or not math.isfinite(document_date):
+            raise ValueError("Provide the document's actual date")
+        now = self.clock()
+        expires_at = now + 600 if expires_at is None else expires_at
+        if type(expires_at) not in (int, float) or not math.isfinite(expires_at) or not now < expires_at <= now + 600:
+            raise ValueError("Evidence preview expired; review the selected file again")
+        identity = digest({"bytes": hashlib.sha256(content).hexdigest(), "name": filename,
+                           "mime": mime, "document_date": document_date, "transcription": transcription})
+        document = EvidenceDocument("upload-" + identity[:32], "1", document_date, content, mime)
+        if any(item["document_id"] == document.document_id for item in row.get("uploads", [])):
+            raise ValueError("This reviewed file is already attached to the request")
+        preview = {}
+        result = documents.extract(document, source="upload", name=filename, now=now,
+                                   freshness_days=row["freshness_days"], transcription=transcription, preview=preview)
+        binding = digest({"context": asdict(ctx), "case_id": case_id, "revision": expected_revision,
+                          "source": identity, "text": preview["text"], "expires_at": expires_at,
+                          "extraction": result["extraction"]})
+        return row, result, dict(preview, name=filename, mime=mime, source_sha256=result["content_sha256"],
+            text_sha256=hashlib.sha256(preview["text"].encode("utf-8")).hexdigest(),
+            status=result["status"], extraction=result["extraction"], review_digest=binding,
+            expires_at=expires_at, case_id=case_id, expected_revision=expected_revision,
+            review_required=True, saved=False)
+
+    @_scoped
+    def preview_upload(self, ctx, case_id, expected_revision, **kwargs):
+        """Transient review only: no case mutation, provider call or full-text retention."""
+        return self._upload_preview(ctx, case_id, expected_revision, **kwargs)[2]
+
+    @_scoped
+    def upload_reviewed(self, ctx, case_id, expected_revision, *, confirm, review_digest, **kwargs):
+        if confirm is not True:
+            raise ValueError("Confirm that you reviewed the extracted text against the original file")
+        row, result, preview = self._upload_preview(ctx, case_id, expected_revision, **kwargs)
+        if not isinstance(review_digest, str) or review_digest != preview["review_digest"]:
+            raise ValueError("The file, text, account or request changed; review the evidence again")
+        if result["status"] != "available":
+            raise ValueError("No supported text is ready; use the transcription option or select another file")
+        result.update(uploaded_by=ctx.actor, uploaded_at=self.clock(), reviewed_by=ctx.actor,
+                      reviewed_at=self.clock(), review_basis="uploader_attested_original_comparison",
+                      verification_basis="retained_upload_snapshot; no provider readback")
+        return self._save(ctx, row, uploads=[*row.get("uploads", []), result], evidence=None,
+                          assessment=None, stage="intake", **self._invalidate(row))
+
     @_scoped
     def get(self, ctx, case_id):
         return self._get(ctx, case_id)

@@ -85,3 +85,23 @@ test("filters reset pagination and empty partial coverage does not claim the que
   assert.match(ui.d.getElementById("ac-items").textContent,/incomplete or unavailable/);
   ui.dom.window.close();
 });
+
+for (const code of [401,403]) test(`HTML ${code} clears private actions before parsing and locks the expired view`,async()=>{
+  let parsed=false;const ui=await setup([value(),()=>({ok:false,status:code,json:async()=>{parsed=true;throw new Error('HTML');}})]);
+  ui.button('Mark read').click();await tick();
+  assert.equal(parsed,false);assert.equal(ui.d.getElementById('ac-items').textContent,'');
+  assert.equal(ui.d.getElementById('ac-summary').textContent,'');assert.equal(ui.button('Refresh').disabled,true);
+  ui.d.getElementById('ac-filters').dispatchEvent(new ui.w.Event('submit',{cancelable:true}));await tick();assert.equal(ui.calls.length,2);
+  assert.match(ui.d.getElementById('ac-status').textContent,/sign in|access.*changed/i);ui.w.close();
+});
+
+test('keyboard position follows the acknowledged updated preference control',async()=>{
+  const updated=value();updated.items[0].read=true;
+  const ui=await setup([value(),{revision:4},updated]);const button=ui.button('Mark read');button.focus();button.click();await tick();await tick();
+  assert.equal(ui.d.activeElement,ui.button('Mark unread'));ui.w.close();
+});
+
+test('removing the final filtered item focuses the empty result status',async()=>{
+  const ui=await setup([value(),{revision:4},value({items:[],total:0})]);ui.button('Mark read').focus();ui.button('Mark read').click();await tick();await tick();
+  assert.equal(ui.d.activeElement,ui.d.getElementById('ac-status'));ui.w.close();
+});

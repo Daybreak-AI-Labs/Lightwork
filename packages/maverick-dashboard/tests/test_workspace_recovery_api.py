@@ -42,6 +42,47 @@ def api_client():
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def test_identity_transition_review_and_grant_preserve_admin_context_and_explicit_binding(monkeypatch):
+    client = api_client()
+    headers = context(client)
+    endpoint = "/api/v1/recovery/installation/identity-transition"
+    calls = []
+    def review(value, *, isolated):
+        calls.append((value, isolated))
+        if not isolated:
+            raise recovery_api.installation_recovery.MaintenanceError("isolated recovery is required")
+        return {"sha256": "a" * 64, "publisher_os_trust_checked": False}
+    monkeypatch.setattr(recovery_api.installation_recovery, "review_identity_transition", review)
+    assert client.post(endpoint, json={"envelope": "synthetic-public-envelope"}).status_code == 409
+    assert calls == []
+    assert client.post(endpoint, headers=headers, json={"envelope": "synthetic-public-envelope"}).status_code == 409
+    assert calls == [("synthetic-public-envelope", False)]
+    monkeypatch.setattr(recovery_api, "isolated", lambda app: True)
+    response = client.post(endpoint, headers=headers, json={"envelope": "synthetic-public-envelope"})
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json()["publisher_os_trust_checked"] is False
+    grants = []
+    def authorize(**kwargs):
+        grants.append(kwargs)
+        if kwargs.get("confirm_identity_transition") is not True:
+            raise recovery_api.installation_recovery.MaintenanceError("explicit trust review required")
+        return {"authorization": "synthetic-test-only"}
+    monkeypatch.setattr(recovery_api.installation_recovery, "authorize", authorize)
+    body = {"confirm": True, "confirm_all_workspaces": True, "identity_transition": "synthetic-public-envelope", "transition_sha256": "a" * 64}
+    assert client.post("/api/v1/recovery/installation/authorize", headers=headers, json=body).status_code == 409
+    body["confirm_identity_transition"] = True
+    assert client.post("/api/v1/recovery/installation/authorize", headers=headers, json=body).status_code == 200
+    assert grants[-1]["identity_transition"] == body["identity_transition"]
+    assert grants[-1]["transition_sha256"] == "a" * 64 and grants[-1]["isolated"] is True
+    def deny(*args):
+        raise HTTPException(403, "global admin required")
+    monkeypatch.setattr(recovery_api, "require_global_permission", deny)
+    before = len(calls)
+    assert client.post(endpoint, headers=headers, json={"envelope": "synthetic-public-envelope"}).status_code == 403
+    assert len(calls) == before
+
+
 def context(client):
     response = client.get("/api/v1/recovery/status")
     assert response.status_code == 200, response.text

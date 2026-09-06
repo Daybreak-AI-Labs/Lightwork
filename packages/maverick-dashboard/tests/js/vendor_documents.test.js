@@ -57,44 +57,116 @@ test("Drive picker selects supported documents without hand-entered IDs for new 
   assert.match(ui.el("selected-documents").textContent,/Remove Drive document/);
 });
 
-test("multiple uploads use each acknowledged version, lock controls, and require an explicit document date", async t=>{
+function preview(call, extra={}) {
+  const body=JSON.parse(call.body);
+  return {case_id:call.url.pathname.split('/').at(-2),expected_revision:body.expected_revision,name:body.name,mime:body.mime,
+    text:body.transcription||'Synthetic extracted text',status:'available',review_digest:'a'.repeat(64),source_sha256:'b'.repeat(64),
+    text_sha256:'c'.repeat(64),expires_at:Date.now()/1000+600,saved:false,review_required:true,extraction:{method:'utf8_decode',limits:[]},...extra};
+}
+function choose(ui,name,text='Synthetic content') {
+  Object.defineProperty(ui.el('upload'),'files',{value:[new ui.window.File([text],name)],configurable:true});
+  ui.el('upload').dispatchEvent(new ui.window.Event('change'));
+}
+async function accept(ui) {
+  ui.el('upload-confirm').checked=true;ui.el('upload-confirm').dispatchEvent(new ui.window.Event('change'));
+  await ui.click('upload-accept');
+}
+
+test("each upload requires preview and explicit comparison, locks controls, and uses the acknowledged revision", async t=>{
   const records=[record()]; let release;
-  const blocked = new Promise(resolve=>{release=resolve;}); let uploads=0;
+  const blocked = new Promise(resolve=>{release=resolve;}); let uploads=0,previews=0;
   const ui=await fixture(records,async call=>{
-    if (!call.url.pathname.endsWith("/upload")) return;
+    if (call.url.pathname.endsWith('/upload-preview')) {
+      previews++;if(previews===1)await blocked;
+      return response(preview(call));
+    }
+    if (!call.url.pathname.endsWith("/upload-reviewed")) return;
     uploads++;
-    assert.equal(call.url.searchParams.get("expected_revision"),String(uploads));
-    assert.equal(call.url.searchParams.get("document_date"),String(Date.parse("2026-09-01T00:00:00Z")/1000));
+    const body=JSON.parse(call.body);
+    assert.equal(body.expected_revision,uploads);assert.equal(body.confirm,true);
+    assert.equal(body.document_date,Date.parse("2026-09-01T00:00:00Z")/1000);
     assert.equal(call.credentials,"same-origin");
-    if (uploads===1) await blocked;
     records[0]=record("one",{revision:uploads+1,uploads:Array.from({length:uploads},(_,i)=>({document_id:`u${i}`,name:`Policy ${i}`,status:"available",modified_at:1}))});
     return response(records[0]);
   }); t.after(()=>ui.dom.window.close());
   await ui.load("one");
-  Object.defineProperty(ui.el("upload"),"files",{value:[new ui.window.File(["text"],"one.txt"),new ui.window.File(["%PDF"],"two.pdf")],configurable:true});
+  choose(ui,'one.txt');
   await ui.click("upload-submit"); assert.equal(uploads,0); assert.match(ui.el("message").textContent,/document date/);
   ui.el("document-date").value="2026-09-01";
   ui.el("upload-submit").click(); await tick();
   assert.equal(ui.el("upload-submit").disabled,true); assert.equal(ui.el("save-documents").disabled,true);
   ui.el("upload-submit").click(); release(); await ui.settle();
-  assert.equal(uploads,2); assert.match(ui.el("message").textContent,/Files added/);
+  assert.equal(uploads,0); assert.equal(previews,1);assert.equal(ui.el('upload-accept').disabled,true);
+  await accept(ui); assert.equal(uploads,1);
+  choose(ui,'two.pdf');await ui.click('upload-submit');assert.equal(uploads,1);
+  await accept(ui);assert.equal(uploads,2);assert.match(ui.el('message').textContent,/Reviewed evidence added/);
   assert.equal(ui.el("assess").disabled,true);
 });
 
-test("a failed second upload retains the first acknowledgement and makes the failure visible", async t=>{
+test("a failed second preview retains the first acknowledgement and other work", async t=>{
   const records=[record()]; let uploads=0;
   const ui=await fixture(records,call=>{
-    if (!call.url.pathname.endsWith("/upload")) return;
+    if (call.url.pathname.endsWith('/upload-preview')) {
+      if(uploads===1)return response({detail:'Document was rejected by extraction limits'},413);
+      return response(preview(call));
+    }
+    if (!call.url.pathname.endsWith("/upload-reviewed")) return;
     uploads++;
-    if (uploads===2) return response({detail:"Document was rejected by extraction limits"},413);
     records[0]=record("one",{revision:2,uploads:[{document_id:"uploaded",name:"first.txt",status:"available",modified_at:1}]});
     return response(records[0]);
   }); t.after(()=>ui.dom.window.close()); await ui.load("one");
-  Object.defineProperty(ui.el("upload"),"files",{value:[new ui.window.File(["a"],"first.txt"),new ui.window.File(["b"],"second.pdf")]});
+  choose(ui,'first.txt');
   ui.el("document-date").value="2026-09-01"; await ui.click("upload-submit");
-  assert.equal(uploads,2); assert.match(ui.el("uploaded-documents").textContent,/first.txt/);
+  await accept(ui);choose(ui,'second.pdf');ui.el('purpose').value='Preserve the new-request work';await ui.click('upload-submit');
+  assert.equal(uploads,1); assert.match(ui.el("uploaded-documents").textContent,/first.txt/);
+  assert.equal(ui.el('purpose').value,'Preserve the new-request work');
   assert.equal(ui.el("message").getAttribute("role"),"alert"); assert.match(ui.el("message").textContent,/extraction limits/);
   assert.equal(ui.el("upload-submit").disabled,false);
+});
+
+for(const status of [401,403])test(`HTML ${status} clears private preview and upload inputs before parsing and locks retries`,async t=>{
+  let parse=0,deny=false;
+  const ui=await fixture([record()],call=>{
+    if(call.url.pathname.endsWith('/upload-preview'))return response(preview(call));
+    if(call.url.pathname.endsWith('/upload-reviewed')&&deny)return {status,ok:false,async json(){parse++;throw Error('HTML sign-in');}};
+  });t.after(()=>ui.dom.window.close());await ui.load('one');choose(ui,'one.txt');ui.el('document-date').value='2026-09-01';
+  await ui.click('upload-submit');assert.match(ui.el('upload-text').textContent,/Synthetic/);deny=true;await accept(ui);
+  assert.equal(parse,0);assert.equal(ui.el('upload-text').textContent,'');assert.equal(ui.el('upload').value,'');
+  assert.equal(ui.el('upload-confirm').checked,false);assert.equal(ui.el('upload-submit').disabled,true);
+});
+
+test('503 invalidates confirmation while preserving safe transcription and unrelated form inputs',async t=>{
+  const ui=await fixture([record()],call=>{
+    if(call.url.pathname.endsWith('/upload-preview'))return response(preview(call,{extraction:{method:'human_transcription',limits:[]}}));
+    if(call.url.pathname.endsWith('/upload-reviewed'))return response({detail:'Service temporarily unavailable'},503);
+  });t.after(()=>ui.dom.window.close());await ui.load('one');choose(ui,'scan.pdf');ui.el('document-date').value='2026-09-01';
+  ui.el('upload-transcription').value='My private transcription';ui.el('purpose').value='Other unfinished work';
+  await ui.click('upload-transcribe');await accept(ui);
+  assert.equal(ui.el('upload-transcription').value,'My private transcription');assert.equal(ui.el('purpose').value,'Other unfinished work');
+  assert.equal(ui.el('upload-text').textContent,'');assert.equal(ui.el('upload-confirm').checked,false);assert.equal(ui.el('upload-accept').disabled,true);
+});
+
+test('a late preview cannot attach to a newly selected file',async t=>{
+  let release,received;const pending=new Promise(resolve=>{release=resolve;});
+  const ui=await fixture([record()],async call=>{
+    if(call.url.pathname.endsWith('/upload-preview')){received=call;await pending;return response(preview(call));}
+  });t.after(()=>ui.dom.window.close());await ui.load('one');choose(ui,'one.txt');ui.el('document-date').value='2026-09-01';ui.el('upload-submit').click();
+  for(let i=0;i<30&&!received;i++)await tick();assert.ok(received);
+  choose(ui,'different.txt');release();await ui.settle();
+  assert.equal(ui.el('upload-review').hidden,true);assert.equal(ui.el('upload-accept').disabled,true);
+  assert.equal(ui.calls.filter(call=>call.url.pathname.endsWith('/upload-reviewed')).length,0);
+});
+
+test('editing a transcription after preview retains editable text and requires a new exact preview',async t=>{
+  const ui=await fixture([record()],call=>{
+    if(call.url.pathname.endsWith('/upload-preview'))return response(preview(call,{extraction:{method:'human_transcription',limits:[]}}));
+  });t.after(()=>ui.dom.window.close());await ui.load('one');choose(ui,'scan.pdf');ui.el('document-date').value='2026-09-01';
+  ui.el('upload-transcription').value='First human transcription';await ui.click('upload-transcribe');
+  assert.equal(ui.el('upload-fallback').hidden,false);
+  ui.el('upload-confirm').checked=true;ui.el('upload-transcription').value='Corrected human transcription';
+  ui.el('upload-transcription').dispatchEvent(new ui.window.Event('input'));
+  assert.equal(ui.el('upload-confirm').checked,false);assert.equal(ui.el('upload-accept').disabled,true);
+  assert.match(ui.el('upload-text').textContent,/Preview it again/);assert.equal(ui.el('upload-transcription').value,'Corrected human transcription');
 });
 
 test("citation view distinguishes PDF pages, uploaded source dates and conflicting renewal claims", async t=>{

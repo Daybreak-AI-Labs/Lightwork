@@ -35,6 +35,8 @@
   <section id="update-review" aria-labelledby="update-version" hidden>
     <h2 id="update-version"></h2>
     <pre id="update-notes"></pre>
+    <p id="identity-transition-notice" hidden>This release proposes a change to installation signing trust. A global administrator must enable Signing identity transition in Settings, review the dual-signed exact-release file in Workspace recovery mode, and explicitly authorize this change. Downloaded metadata alone does not establish trust.</p>
+    <button id="save-identity-transition" type="button" hidden>Save signing identity review file</button>
     <p>Finish active work before continuing. For an update, authorize protection of all local workspaces from <strong>Workspace recovery mode</strong> in the app menu, then paste that private authorization below. Lightwork verifies both installers and captures the paused pre-upgrade state before installation.</p>
     <button id="install-update" class="primary" type="button" disabled>Install and restart</button>
   </section>

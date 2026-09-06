@@ -105,6 +105,7 @@ pub struct ReviewedUpdate {
     current_version: String,
     notes: String,
     repair: bool,
+    identity_transition: Option<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -152,6 +153,17 @@ pub async fn check_desktop_update(
             .await
             .map_err(|e| e.to_string())?;
         if let Some(update) = update {
+            let transition = update
+                .raw_json
+                .get("identity_transition")
+                .filter(|value| !value.is_null())
+                .cloned();
+            if transition
+                .as_ref()
+                .is_some_and(|value| repair || value.to_string().len() > 65536)
+            {
+                return Err("A signing identity transition requires a bounded, reviewed protected upgrade; it cannot use repair.".into());
+            }
             // Signatures are mandatory, independently of HTTPS. Refuse unsafe
             // metadata URLs before any artifact download as defense in depth.
             if update.download_url.scheme() != "https"
@@ -178,6 +190,7 @@ pub async fn check_desktop_update(
                     .take(16_000)
                     .collect(),
                 repair,
+                identity_transition: transition,
             };
             *state
                 .pending
@@ -237,6 +250,14 @@ pub async fn install_desktop_update(
             {
                 return Err("The authorization does not match the reviewed installation.".into());
             }
+            let transition = update
+                .raw_json
+                .get("identity_transition")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if details["identity_transition"] != transition {
+                return Err("The offered signing identity transition differs from the administrator's exact review.".into());
+            }
             let old = app.updater_builder()
                 .endpoints(version_endpoints(&app, &update.current_version)?).map_err(|e| e.to_string())?
                 .version_comparator(|current, release| release.version == current)
@@ -256,7 +277,8 @@ pub async fn install_desktop_update(
                 .and_then(|v| v.get("pubkey"))
                 .and_then(|v| v.as_str())
                 .ok_or("The release verification key is missing.")?;
-            let mut metadata = serde_json::json!({"public_key": key});
+            let mut metadata =
+                serde_json::json!({"public_key": key, "identity_transition": transition});
             for (name, release) in [("old", &old), ("new", &update)] {
                 if release.download_url.scheme() != "https"
                     || !release.download_url.username().is_empty()

@@ -360,7 +360,8 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
                 rows.append((score, g.id, g.title or "", g.result or ""))
         lines: list[str] = []
         for score, gid, title, raw_result in rows:
-            if gid == goal.id or score < 0.10:
+            from .pilot_learning import excluded
+            if gid == goal.id or score < 0.10 or excluded(gid):
                 continue
             safe_title = _sanitize_persisted_prompt_text(
                 title,
@@ -402,6 +403,9 @@ def _record_skill_outcome(ctx: Any, *, success: bool) -> None:
     track record decay its future recall rank. Fully fail-safe — stats are an
     optimization, never a correctness dependency, so any error is swallowed.
     """
+    from .pilot_learning import current_excluded
+    if current_excluded():
+        return
     try:
         names = sorted(getattr(ctx, "skills_used", None) or ())
         if names:
@@ -1302,6 +1306,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         goal = rebound_goal
         _quota_settlement.goal = goal
 
+    from .task_file_recovery import begin_capture
+    begin_capture(world, goal_id)
+
     # Department attribution: persist the domain this run executes as so
     # success-side learning (dreaming, budget priors) attributes exactly
     # instead of lexically; a resume without an explicit domain inherits the
@@ -2016,7 +2023,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             from .skill import distillation_local as _sdl
             if _sdl.enabled():
                 trajectories = [
-                    {"goal": g.title, "success": True, "tools": [],
+                    {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
                     for g in world.list_goals(status="done", limit=10, order="desc")
                 ]
@@ -2071,7 +2078,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 log.warning("failed to clear agent-bus namespace", exc_info=True)
 
 
-async def run_goal(
+async def _run_goal_accounted(
     llm: LLM,
     world: WorldModel,
     budget: Budget,
@@ -2143,6 +2150,26 @@ async def run_goal(
                     checkpoint.Checkpointer(world).clear(goal_id)
             except Exception:  # pragma: no cover -- completion is durable
                 log.warning("checkpoint cleanup failed", exc_info=True)
+
+
+async def run_goal(
+    llm: LLM, world: WorldModel, budget: Budget, goal_id: int,
+    sandbox: Any | None = None, max_depth: int = 3,
+    conversation_id: int | None = None, channel: str | None = None,
+    user_id: str | None = None, capability: Any | None = None,
+    orchestrator_model_override: str | None = None, resume: bool = False,
+    resume_episode_id: int | None = None, domain: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+) -> str:
+    """Hold task execution authority until all finalization work has stopped."""
+    from .task_file_recovery import run_scope
+    sandbox = sandbox or LocalBackend()
+    with run_scope(world, goal_id, sandbox):
+        return await _run_goal_accounted(
+            llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
+            channel, user_id, capability, orchestrator_model_override, resume,
+            resume_episode_id, domain, allowed_suites,
+        )
 
 
 def run_goal_sync(*args, **kwargs) -> str:

@@ -30,7 +30,7 @@ def accounting_installation(tmp_path, monkeypatch):
     monkeypatch.setattr(maintenance, "blockers", list)
     monkeypatch.setattr(maintenance.workspace_recovery, "version", lambda: "1.0.0")
     monkeypatch.setattr(maintenance, "_runtime", lambda: selected_runtime[0])
-    monkeypatch.setattr(maintenance, "_native_channel", lambda _: {"native_sha256": _digest(b"native-fixture"), "public_key": "fixture-only"})
+    monkeypatch.setattr(maintenance, "_native_channel", lambda _, **kwargs: {"native_sha256": _digest(b"native-fixture"), "public_key": "fixture-only"})
     monkeypatch.setattr(quotas, "_quota_config", lambda: {"enforce": True, "max_dollars_per_day": 20.0, "max_tokens_per_day": 0})
     monkeypatch.setattr(quotas, "_today", lambda: "2026-09-06")
     control_plane_lease.release()

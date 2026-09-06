@@ -71,11 +71,19 @@ test('owner shares an exact captured result and assigned colleague reviews it wi
     await review.goto('/action-center');await expect(review.locator('#content')).toContainText('Browser captured result');
     await review.goto('/project-reviews#packet='+packet.id);await expect(review.locator('#pr-result')).toContainText('Synthetic captured deliverable');
     await review.locator('#pr-action').selectOption('approve');await review.locator('#pr-response-note').fill('Synthetic colleague reviewed the captured result and limitations.');
+    // Native leave-page protection must retain the actual unfinished note.
+    review.removeAllListeners('dialog');const leaving=review.waitForEvent('dialog');const navigation=review.locator('a[href="/"]').first().click({noWaitAfter:true});
+    const warning=await leaving;expect(warning.type()).toBe('beforeunload');await warning.dismiss();await navigation;await expect(review).toHaveURL(/\/project-reviews#packet=/);
+    review.on('dialog',dialog=>dialog.accept());await expect(review.locator('#pr-response-note')).toHaveValue('Synthetic colleague reviewed the captured result and limitations.');
+    // Another permitted actor changes the packet while this comment is dirty.
+    await page.locator('#pr-response-note').fill('Owner added a clarification while the colleague was reviewing.');await page.locator('#pr-response-button').click();await expect(page.locator('#pr-status')).toContainText('Review response saved');
+    await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('Your unfinished comment is kept');await expect(review.locator('#pr-response-note')).toHaveValue('Synthetic colleague reviewed the captured result and limitations.');await expect(review.locator('#pr-action')).toHaveValue('comment');
+    await review.locator('#pr-action').selectOption('approve');
     await review.locator('#pr-response-button').click();await expect(review.locator('#pr-status')).toContainText('Review response saved');
     await expect(review.locator('#pr-packet-summary')).toContainText('approved');await fits(review);
-    await info.attach('assigned-colleague-review',{body:await review.screenshot(),contentType:'image/png'});
-    await review.route('**/api/v1/project-reviews**',route=>route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({detail:'Synthetic session expired'})}));
-    await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('Synthetic session expired');
+    const reviewImage=info.outputPath('assigned-colleague-review-320.png');await review.screenshot({path:reviewImage});await info.attach('assigned-colleague-review',{path:reviewImage,contentType:'image/png'});
+    await review.route('**/api/v1/project-reviews**',route=>route.fulfill({status:401,contentType:'text/html',body:'<h1>Synthetic session expired</h1>'}));
+    await review.locator('#pr-refresh').click();await expect(review.locator('#pr-status')).toContainText('sign-in or access changed');
     await expect(review.locator('#pr-packet')).not.toBeVisible();await expect(review.locator('#pr-result')).toHaveText('');await expect(review.locator('#pr-inbox')).toHaveText('');
   } finally {await reviewer.close();}
   const final=await (await request.get('/__browser_fixture')).json();expect(final.review_signoff).toBeNull();

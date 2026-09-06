@@ -1345,8 +1345,11 @@ def _accounting_file(relative: str, path: Path) -> bool:
         # same action again. Cover workspace and whole-home paths.
         bool({"usage", "llm_gateway_team_budget", "mcp_sidecar", "grc_sync_outbound",
               "grc_outbound_sync_states", "grc_outbound_sync_events", "vendor_onboarding",
-              "discovery_containment_actions"}.intersection(lowered[:-1]))
-        or name in {"provider_spend.json", "tenant_registry.json"}
+              "discovery_containment_actions", "provider_accounting_reviews", "pilot_learning_exclusions",
+              "task-file-recovery"}.intersection(lowered[:-1]))
+        or name in {"provider_spend.json", "provider_spend.json.required", "tenant_registry.json", "dashboard-owner.json"}
+        or (name == "retention.index" and "draft-recovery" in lowered)
+        or (name in {"connections.sealed", "oauth-setup.sealed"} and "connections" in lowered)
         or name.startswith("budget_receipts.")
     )
 

@@ -37,7 +37,7 @@
 {% from "_hero.html" import hero, state %}
 {% call hero('Integrations', 'Connections',
              subtitle='Connect the services you use',
-             lede='Connect a tool once — pick what it is and paste its API
+             lede='Connect an account with provider consent, or save a tool’s API
                    token. Your workflows can then refer to the saved connection
                    by name.') %}
   {{ state('Current state', 'Sealed credential vault',
@@ -48,7 +48,8 @@
 {% endcall %}
 
 <div class="cx">
-  <div class="section-head"><h2>Add a connection</h2></div>
+  {% include "_connection_setup.html" %}
+  <div class="section-head"><h2>Add a connection with an API token</h2></div>
   <form class="cx__form" id="cx-form" autocomplete="off" data-draft-recovery="off">
     <div class="cx__fld">
       <label for="cx-preset">What are you connecting? <span class="sub">— pick one to prefill it</span></label>
@@ -119,6 +120,15 @@
   var list = document.getElementById('cx-list');
   var currentByName = {};
   var editingName = '';
+  var accessLost = document.getElementById('connection-setup')?.dataset.accessDenied === 'true';
+  function clearAccess() {
+    accessLost = true; currentByName = {}; editingName = ''; list.replaceChildren();
+    document.getElementById('cx-empty').hidden = true;
+    document.getElementById('cx-form').querySelectorAll('input,textarea,select,button').forEach(function (control) { if (control.type === 'checkbox') control.checked = false; else if (control.tagName !== 'BUTTON') control.value = ''; control.disabled = true; });
+    say('Your connection access changed. Sign in again and reload Connections.', true);
+  }
+  document.addEventListener('lightwork:connection-access-lost', clearAccess);
+  document.addEventListener('lightwork:connection-saved', function () { if (!accessLost) load(); });
   function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
   {% include "_dash_helpers.js" %}
 
@@ -177,10 +187,12 @@
   });
 
   function load() {
+    if (accessLost) { clearAccess(); return; }
     api('/api/v1/connections').then(function (r) {
       if (r.status === 403) { say('Connections are turned off — an administrator can enable them in Settings.', true); return { connections: [] }; }
       return r.ok ? r.json() : { connections: [] };
     }).then(function (j) {
+      if (accessLost) return;
       var conns = j.connections || [];
       currentByName = {};
       conns.forEach(function (c) { currentByName[c.name] = c; });
@@ -199,6 +211,7 @@
         var edit = el('button', 'btn btn--ghost', 'Edit / rotate');
         edit.type = 'button';
         edit.addEventListener('click', function () {
+          if (accessLost) return;
           editingName = c.name;
           nameEl.value = c.name;
           connEl.value = c.connector || '';
@@ -213,6 +226,7 @@
         var test = el('button', 'btn btn--ghost', discoveryPreset(c.connector) ? 'Test source access' : 'Test');
         test.type = 'button';
         test.addEventListener('click', function () {
+          if (accessLost) return;
           if (discoveryPreset(c.connector)) { window.location.href = '/privacy/data-discovery'; return; }
           test.textContent = 'Testing…';
           api('/api/v1/connections/' + encodeURIComponent(c.name) + '/test', { method: 'POST' })
@@ -224,7 +238,9 @@
         del.type = 'button';
         del.setAttribute('aria-label', 'Delete connection ' + c.name);
         del.addEventListener('click', async function () {
+          if (accessLost) return;
           if (!(await mvConfirm('Delete connection “' + c.name + '”?', { okText: 'Delete' }))) return;
+          if (accessLost) return;
           api('/api/v1/connections/' + encodeURIComponent(c.name), { method: 'DELETE' })
             .then(function () { load(); });
         });
@@ -262,6 +278,7 @@
 
   // Save, then (optionally) fire the reachability test for the just-saved one.
   function save(thenTest) {
+    if (accessLost) return;
     var body;
     try { body = readBody(); } catch (error) { say(error.message, true); return; }
     if (discoveryPreset(body.connector || connEl.value)) thenTest=false;
@@ -270,6 +287,7 @@
     return api('/api/v1/connections', { method: 'POST', body: JSON.stringify(body) })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
       .then(function (res) {
+        if (accessLost) return;
         if (!res.ok) {
           if (res.status === 409) {
             say('This connection changed in another tab. The current record was reloaded; review it before saving again.', true);

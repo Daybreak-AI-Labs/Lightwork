@@ -140,3 +140,88 @@ def test_retry_cannot_rebind_its_expected_revision(isolated):
     store.save(SLOT, {"brief": "same draft"}, expected_revision=0, operation_id="request-one")
     with pytest.raises(DraftConflict):
         store.save(SLOT, {"brief": "same draft"}, expected_revision=1, operation_id="request-one")
+
+
+def test_retirement_reclaims_capacity_and_keeps_saved_copy_and_old_tabs_fenced(isolated, monkeypatch):
+    from maverick_dashboard import draft_store
+    monkeypatch.setattr(draft_store, "MAX_RECORDS", 2)
+    store = DraftStore(CONTEXT, directory=isolated)
+    discarded = store.save(SLOT, None, expected_revision=0, operation_id="discarded")
+    active_slot, new_slot = "a" * 64, "b" * 64
+    active = store.save(active_slot, {"brief": "keep this"}, expected_revision=0, operation_id="active")
+    with pytest.raises(ValueError, match="Manage recovery storage"):
+        store.save(new_slot, {}, expected_revision=0, operation_id="full")
+    inventory = store.inventory()
+    assert inventory["discarded"] == 1 and inventory["saved"] == 1 and inventory["available"] == 0
+    assert "keep this" not in json.dumps(inventory)
+    retired = store.retire_discarded(expected_version=inventory["version"])
+    assert retired["retired"] == 1 and retired["available"] == 1
+    assert store.read(active_slot) == active
+    assert crypto_at_rest.is_sealed((isolated / "retention.index").read_bytes())
+    reopened = DraftStore(CONTEXT, directory=isolated)
+    for revision in (0, discarded["revision"]):
+        with pytest.raises(DraftConflict):
+            reopened.save(SLOT, {"brief": "stale"}, expected_revision=revision, operation_id="stale")
+    fresh = reopened.read(new_slot)
+    assert fresh["revision"] > discarded["revision"]
+    assert reopened.save(new_slot, {}, expected_revision=fresh["revision"], operation_id="fresh")["payload"] == {}
+    # A saved draft predating retirement keeps normal +1 CAS and exact retry
+    # when it is later discarded, despite having a lower revision than the floor.
+    later = reopened.save(active_slot, None, expected_revision=active["revision"], operation_id="later-discard")
+    assert later["revision"] == active["revision"] + 1
+    assert reopened.save(active_slot, None, expected_revision=active["revision"], operation_id="later-discard") == later
+
+
+def test_retirement_refuses_changed_inventory_and_survives_interrupted_cleanup(isolated, monkeypatch):
+    from pathlib import Path
+    store = DraftStore(CONTEXT, directory=isolated)
+    store.save(SLOT, None, expected_revision=0, operation_id="discarded")
+    before = store.inventory()
+    store.save("b" * 64, {"brief": "new saved copy"}, expected_revision=0, operation_id="new-copy")
+    with pytest.raises(DraftConflict, match="storage changed"):
+        store.retire_discarded(expected_version=before["version"])
+    original_unlink = Path.unlink
+    def fail_cleanup(path, *args, **kwargs):
+        if path.name == SLOT + ".draft":
+            raise OSError("synthetic cleanup interruption")
+        return original_unlink(path, *args, **kwargs)
+    with monkeypatch.context() as cleanup:
+        cleanup.setattr(Path, "unlink", fail_cleanup)
+        with pytest.raises(OSError, match="interruption"):
+            store.retire_discarded(expected_version=store.inventory()["version"])
+    reopened = DraftStore(CONTEXT, directory=isolated)
+    with pytest.raises(DraftConflict):
+        reopened.save(SLOT, {"brief": "resurrect"}, expected_revision=1, operation_id="old-tab")
+    assert reopened.retire_discarded(expected_version=reopened.inventory()["version"])["retired"] == 1
+    assert reopened.read("b" * 64)["payload"] == {"brief": "new saved copy"}
+
+
+def test_retention_index_cannot_be_rebound_or_read_as_plaintext(isolated):
+    store = DraftStore(CONTEXT, directory=isolated)
+    store.save(SLOT, None, expected_revision=0, operation_id="discarded")
+    store.retire_discarded(expected_version=store.inventory()["version"])
+    with pytest.raises(ValueError, match="retention history"):
+        DraftStore("b" * 64, directory=isolated).read(SLOT)
+    (isolated / "retention.index").write_text("{}")
+    with pytest.raises(ValueError, match="retention history"):
+        store.save(SLOT, {}, expected_revision=0, operation_id="new")
+
+
+def test_storage_api_requires_context_and_exact_reviewed_inventory(isolated, monkeypatch):
+    monkeypatch.setattr(draft_api, "_authorization_principal", lambda request: "user:alice")
+    monkeypatch.setattr(draft_api, "current_tenant_id_strict", lambda: "workspace-a")
+    monkeypatch.setattr(draft_api, "require_permission", lambda *args: None)
+    context = hashlib.sha256(json.dumps(["workspace-a", "principal", "user:alice"], separators=(",", ":")).encode()).hexdigest()
+    store = DraftStore(context)
+    store.save(SLOT, None, expected_revision=0, operation_id="discarded")
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+    assert client.get("/api/v1/drafts/storage").status_code == 409
+    headers = {"X-Lightwork-Draft-Context": context}
+    response = client.get("/api/v1/drafts/storage", headers=headers)
+    assert response.status_code == 200 and response.headers["cache-control"] == "private, no-store"
+    version = response.json()["version"]
+    assert client.post("/api/v1/drafts/storage/retire", headers=headers, json={"expected_version": "0" * 64}).status_code == 409
+    response = client.post("/api/v1/drafts/storage/retire", headers=headers, json={"expected_version": version})
+    assert response.status_code == 200 and response.json()["retired"] == 1
+    monkeypatch.setattr(draft_api, "current_tenant_id_strict", lambda: "workspace-b")
+    assert client.get("/api/v1/drafts/storage", headers=headers).status_code == 409

@@ -35,6 +35,8 @@ enable = true
 enable = true
 [model_risk_assurance]
 enable = true
+[ai_business_intake]
+enable = true
 [evidence_graph]
 enable = true
 [flows]
@@ -68,6 +70,8 @@ enable = true
 enable = false
 [voice]
 auto_fetch_model = false
+[budget.provider_caps]
+browser-spend = 20.0
 '''
 
 
@@ -84,7 +88,21 @@ def environment(directory):
         "MAVERICK_PROFILE":"standard", "MAVERICK_ENTERPRISE":"0",
         "MAVERICK_ENCRYPT_AT_REST":"1", "MAVERICK_ENCRYPTION_KEY":secrets.token_hex(32),
         "MAVERICK_CONNECTIONS":"1",
-        "MAVERICK_DASHBOARD_ADMINS":"user:browser-reviewer"})
+        "MAVERICK_DASHBOARD_ADMINS":"user:browser-reviewer,user:browser-learning-reviewer"})
+
+
+def fake_connection_authorization(module):
+    calls = []
+
+    def local_connection_token(provider, form):
+        if provider != "google":
+            raise AssertionError("Synthetic account fixture permits only Google authorization")
+        calls.append(form.get("grant_type"))
+        return {"access_token":"synthetic-browser-access", "refresh_token":"synthetic-browser-refresh",
+                "expires_in":3600, "token_type":"Bearer"}
+
+    module._post_token = local_connection_token
+    return calls
 
 
 def build_app(directory):
@@ -92,6 +110,7 @@ def build_app(directory):
     from maverick import ai_cost_roi as billing
     from maverick import (
         config,
+        connection_oauth,
         connections,
         crypto_at_rest,
         grc_sync,
@@ -166,6 +185,7 @@ def build_app(directory):
         b"Synthetic acceptance material. We do not train on customer data. Data is encrypted at rest and in transit.")})
     tickets = FakeJiraTickets()
     grc_writes = []
+    connection_exchanges = fake_connection_authorization(connection_oauth)
 
     def local_grc_writer(operation, path, payload):
         del operation, path
@@ -234,7 +254,7 @@ def build_app(directory):
     @dashboard.app.middleware("http")
     async def fixture_principal(request: Request, call_next):
         subject = request.headers.get("X-Browser-Principal", "browser-reviewer")
-        if subject not in {"browser-reviewer", "browser-colleague"}:
+        if subject not in {"browser-reviewer", "browser-colleague", "browser-learning-reviewer"}:
             from fastapi.responses import JSONResponse
             return JSONResponse({"detail":"Unknown synthetic browser principal"}, status_code=403)
         request.state.principal = SimpleNamespace(principal="user:" + subject, sub=subject)
@@ -247,8 +267,22 @@ def build_app(directory):
                 "grc_delivery":held_delivery, "grc_writes":len(grc_writes),
                 "review_signoff":world.signoff_for(review_goal),
                 "ticket_creates":tickets.creates, "outbound_calls":"blocked",
-                "voice_download_attempts":len(voice_downloads), "voice_fixture":"synthetic bytes; no inference"}
+                "voice_download_attempts":len(voice_downloads), "voice_fixture":"synthetic bytes; no inference",
+                "connection_exchanges":len(connection_exchanges), "connection_fixture":"synthetic token exchange; no provider consent"}
 
+    @dashboard.app.post("/__browser_fixture/spending", include_in_schema=False)
+    async def fixture_spending():
+        from maverick import provider_cost_cap
+        with tenant_scope(tenant=tenant):
+            hold = provider_cost_cap.reserve("browser-spend", 3, request_id="browser-cost-review")
+            provider_cost_cap.reserve("browser-spend", 2, request_id="browser-other-running-call")
+            provider_cost_cap.settle(hold, None)
+        return {"synthetic": True, "provider_calls": 0}
+
+    from fixture_pilot_learning import install as install_pilot_learning_fixture
+    install_pilot_learning_fixture(dashboard.app, world, tenant, principal)
+    from fixture_task_files import install as install_task_file_fixture
+    install_task_file_fixture(dashboard.app, world, tenant, principal)
     return dashboard.app
 
 

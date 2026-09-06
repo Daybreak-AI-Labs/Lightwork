@@ -64,6 +64,103 @@ def test_plan_freezes_groups_and_exact_retries_do_not_reallocate(records):
     assert pilots.get(record["id"], "alice")["criteria"] == plan()["criteria"]
 
 
+def protected_plan():
+    return {**plan(), "learning_mode": "exclude_local_learning",
+            "prior_exposure_statement": "Fresh task inputs checked against the local corpus; provider prior exposure remains unverified."}
+
+
+def test_protected_plan_binds_exclusions_to_only_frozen_holdout_goals(records):
+    from maverick import pilot_learning
+    record = pilots.create(protected_plan(), context="alice", actor="user:alice", resolve=lambda k, r: records[r])
+    assert record["state"] == "frozen"
+    for case in record["cases"]:
+        assert pilot_learning.excluded(int(case["reference"])) is (case["allocation"] == "holdout")
+    report = pilots.report(record, resolve=lambda k, r: records[r])
+    assert report["learning_policy"]["automatic_local_exclusion_enforced"] is True
+    assert report["holdout_exposure_verified"] is False
+    assert report["learning_policy"]["provider_training_verified"] is False
+    held = next(case for case in record["cases"] if case["allocation"] == "holdout")
+    records[held["reference"]]["input_version"] = "changed"
+    assert not pilots.report(record, resolve=lambda k, r: records[r])["learning_policy"]["automatic_local_exclusion_enforced"]
+
+
+def test_protected_preparation_resumes_exact_plan_after_interrupted_policy_publication(records, monkeypatch):
+    from maverick import pilot_learning
+    original = pilot_learning.protect
+    failed = []
+    def interrupt(*args, **kwargs):
+        saved = original(*args, **kwargs)
+        if not failed:
+            failed.append(True)
+            raise OSError("synthetic interruption after exclusion publication")
+        return saved
+    monkeypatch.setattr(pilot_learning, "protect", interrupt)
+    with pytest.raises(OSError):
+        pilots.create(protected_plan(), context="alice", actor="user:alice", resolve=lambda k, r: records[r])
+    pending = pilots.STORE.list()[0]
+    assert pending["state"] == "preparing"
+    assert not pilots.report(pending, resolve=lambda k, r: records[r])["learning_policy"]["automatic_local_exclusion_enforced"]
+    resumed = pilots.create(protected_plan(), context="alice", actor="user:alice", resolve=lambda k, r: records[r])
+    assert resumed["state"] == "frozen" and resumed["plan_version"] == pending["plan_version"]
+    assert [case["allocation"] for case in resumed["cases"]] == [case["allocation"] for case in pending["cases"]]
+
+
+@pytest.mark.parametrize("change,actor", [({"prior_exposure_statement": ""}, "user:alice"), ({}, "local:dashboard"),
+    ({"cases": [{"kind": "vendor", "reference": str(i), "label": "Vendor"} for i in range(4)]}, "user:alice")])
+def test_unsupported_protected_plan_cannot_claim_local_exclusion(records, change, actor):
+    with pytest.raises(ValueError):
+        pilots.create({**protected_plan(), **change}, context="alice", actor=actor, resolve=lambda k, r: records[r])
+    assert pilots.listing("alice")["items"] == []
+
+
+def test_independent_policy_review_requires_different_named_actor_current_evidence_and_confirmation(records):
+    record = pilots.create(protected_plan(), context="alice", actor="user:alice", resolve=lambda k, r: records[r])
+    report = pilots.report(record, resolve=lambda k, r: records[r])
+    body = {"expected_revision": record["revision"], "operation_id": "independent-review-operation",
+            "evidence_version": report["learning_policy"]["evidence_version"], "decision": "accepted_local_scope",
+            "notes": "Checked frozen task exclusions and the owner's prior-exposure limits.", "confirm": True}
+    with pytest.raises(PermissionError):
+        pilots.independent_review(record["id"], body, actor="user:alice", resolve=lambda k, r: records[r])
+    with pytest.raises(ValueError, match="confirm"):
+        pilots.independent_review(record["id"], {**body, "confirm": False}, actor="user:bob", resolve=lambda k, r: records[r])
+    saved = pilots.independent_review(record["id"], body, actor="user:bob", resolve=lambda k, r: records[r])
+    assert pilots.report(saved, resolve=lambda k, r: records[r])["learning_policy"]["independent_review"]["current"]
+    assert pilots.independent_review(record["id"], body, actor="user:bob", resolve=lambda k, r: records[r])["revision"] == saved["revision"]
+    records["1"]["version"] = "changed-source"
+    assert not pilots.report(saved, resolve=lambda k, r: records[r])["learning_policy"]["independent_review"]["current"]
+    with pytest.raises(RecordConflict):
+        pilots.independent_review(record["id"], {**body, "operation_id": "different-review-operation", "expected_revision": saved["revision"]}, actor="user:bob", resolve=lambda k, r: records[r])
+
+
+def test_independent_review_api_requires_global_admin_and_reauthorizes_every_source(records, monkeypatch):
+    from fastapi import HTTPException
+    record = pilots.create(protected_plan(), context="alice", actor="user:alice", resolve=lambda k, r: records[r])
+    monkeypatch.setattr(api, "context_for", lambda request: "bob")
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:bob")
+    monkeypatch.setattr(api, "require_permission", lambda *a: None)
+    monkeypatch.setattr(api, "_resolver", lambda request: lambda k, r: records[r])
+    monkeypatch.setattr(sources, "resolve", lambda request, k, r: records[r])
+    route = "/api/v1/outcome-pilots/independent-review/" + record["id"]
+    client = TestClient(app, headers={"Origin": "http://testserver", "X-Lightwork-Pilot-Context": "bob"})
+    def denied(*_a):
+        raise HTTPException(403, "Global administrator required")
+    monkeypatch.setattr(api, "require_global_permission", denied)
+    assert client.get(route).status_code == 403
+    monkeypatch.setattr(api, "require_global_permission", lambda *a: None)
+    packet = client.get(route)
+    assert packet.status_code == 200 and packet.json()["context"] == "bob"
+    body = {"expected_revision": record["revision"], "operation_id": "actual-api-review-operation",
+            "evidence_version": packet.json()["learning_policy"]["evidence_version"], "decision": "accepted_local_scope",
+            "notes": "Independent local policy evidence checked; provider limitations retained.", "confirm": True}
+    assert client.post(route, json=body).status_code == 200
+    def source_revoked(*_a):
+        raise PermissionError("Revoked source")
+    monkeypatch.setattr(sources, "resolve", source_revoked)
+    assert client.get(route).status_code == 403
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
+    assert client.get(route).status_code == 403
+
+
 @pytest.mark.parametrize("problem", ["started", "duplicate"])
 def test_plan_refuses_post_outcome_selection_or_repeated_case(records, problem):
     body = plan()

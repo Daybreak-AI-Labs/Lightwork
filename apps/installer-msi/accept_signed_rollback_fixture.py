@@ -85,6 +85,9 @@ def accept(workspace: Path, runner: Path) -> None:
             "-PublicKeyFile", os.environ["ACCEPTANCE_PRIVATE_KEY"] + ".pub",
             "-Inventory", str(workspace / "customer-artifacts/runtime-inventory.json"),
             "-Report", str(workspace / "customer-artifacts/completed-rollback-acceptance.json")], 2400)
+        stage("native-webview", [sys.executable, str(workspace / "apps/installer-msi/native_webview_journey.py"),
+            "--workspace", str(workspace), "--runner", str(runner), "--base", str(fixture / "base.msi"),
+            "--candidate", str(fixture / "next.msi")], 1200)
         observed["acceptance_passed"] = True
     except BaseException as error:
         primary = error
@@ -95,12 +98,18 @@ def accept(workspace: Path, runner: Path) -> None:
             if (fixture / "publisher-thumbprint.txt").is_file():
                 stage("cleanup", command + ["-Phase", "cleanup"], 60)
             observed["cleanup_passed"] = True
-        except Exception:
+        except Exception as cleanup_error:
             observed["cleanup_passed"] = False
             if primary is None:
+                primary = cleanup_error
                 raise
         finally:
-            record()
+            try:
+                record()
+            except Exception:
+                if primary is None:
+                    raise
+                print("The final stage report could not be saved; retaining the original acceptance error.", file=sys.stderr)
 
 
 def main() -> None:

@@ -36,7 +36,7 @@ class EvidenceDocument:
                 "modified_at": self.modified_at, "mime": self.mime}
 
 
-def resolve_connection(ctx: ServiceContext, *, document: bool = False) -> dict:
+def resolve_connection(ctx: ServiceContext, *, document: bool = False, refresh: bool = True) -> dict:
     """Resolve the *named* tenant connection; never choose another credential."""
     from . import connections
 
@@ -59,6 +59,10 @@ def resolve_connection(ctx: ServiceContext, *, document: bool = False) -> dict:
         raise PermissionError("connector requires a pinned HTTPS origin")
     if document and base != "https://www.googleapis.com":
         raise PermissionError("Drive requires the Google API origin")
+    if refresh and record.get("oauth"):
+        from .connection_oauth import renew
+        with tenant_scope(tenant=ctx.tenant):
+            record = renew(record, actor=ctx.actor)
     return dict(record, base_url=base)
 
 
@@ -78,7 +82,7 @@ class GoogleDriveEvidence:
 
     @_scoped
     def authority_version(self, ctx):
-        return resolve_connection(ctx, document=True)["revision"]
+        return resolve_connection(ctx, document=True, refresh=False)["revision"]
 
     @_scoped
     def head(self, ctx, document_id):
@@ -175,7 +179,7 @@ class JiraTickets:
     provider_idempotency = False
 
     def authority_version(self, ctx):
-        return resolve_connection(ctx)["revision"]
+        return resolve_connection(ctx, refresh=False)["revision"]
 
     @_scoped
     def _request(self, ctx, method, path, *, expected_credential_version=None, **kwargs):
@@ -185,7 +189,11 @@ class JiraTickets:
         credential = resolve_connection(ctx)
         if expected_credential_version is not None and credential["revision"] != expected_credential_version:
             raise PermissionError("approved Jira credential generation changed")
-        url = credential["base_url"] + path
+        prefix = str((credential.get("oauth") or {}).get("api_prefix") or "")
+        if prefix and (credential["base_url"] != "https://api.atlassian.com"
+                       or not re.fullmatch(r"/ex/jira/[0-9a-f-]{36}", prefix)):
+            raise PermissionError("Jira account destination is invalid")
+        url = credential["base_url"] + prefix + path
         if enterprise_egress_denial(url, tool="jira"):
             raise PermissionError("Jira egress is not permitted")
         with safe_client(url, timeout=30) as client:

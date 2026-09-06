@@ -43,7 +43,9 @@ whole-installation authority and matching application/state restoration:
    only its owned recovery server, and acquires a fresh control-plane lock.
 3. The frozen runtime independently verifies both Minisign signatures against
    the installed native application's compiled key, valid Authenticode trust,
-   identical publisher thumbprints, product identity and exact versions. It
+   identical publisher thumbprints, product identity and exact versions. An
+   explicitly admitted [dual-signed identity bridge](../../docs/windows-signing-identity-transition.md)
+   may instead bind one exact reviewed publisher/key transition. It
    retains the old runtime and native recovery UI outside MSI ownership and
    captures an authenticated whole-home snapshot before installing.
 4. To undo a completed protected upgrade, authorize that specific recovery point
@@ -60,13 +62,20 @@ whole-installation authority and matching application/state restoration:
    can be cleared; it does not blindly re-run the installers.
 
 External stores, independent workers, remote key services, settings outside the
-local data home, certificate/key rotation, network installation paths and MSI
+local data home, unbridged certificate/key rotation, network installation paths and MSI
 argument paths of 240 characters or longer require coordinated administration.
 Payload files within a supported home retain extended Windows path support.
 Local maintenance snapshots are limited to 8 GiB expanded and 200 workspaces;
 there are 20 usable recovery points with explicit administrator retirement.
 An unprotected earlier upgrade has no retrospective rollback snapshot. This
 candidate protocol still needs actual native MSI and customer acceptance below.
+
+Signing transitions are a separate default-off global setting and administrator
+review in recovery mode. They require the existing trusted key and proposed key
+to sign the exact release-pair policy; neither a feed nor a repair offer can
+grant this authority. Admission expiry does not strand an already admitted
+interrupted pair. See the [signing transition procedure](../../docs/windows-signing-identity-transition.md)
+for preparation, customer controls and the distinct native acceptance boundary.
 
 **Accounting changes prevent automatic rollback.** Before preparing rollback,
 and again before either MSI runs, the app compares the selected snapshot with
@@ -217,3 +226,10 @@ for initial installation to establish the offline dependency claim separately
 from provider-dependent functionality. Exercise two independently versioned
 production runtimes and their actual state formats for the rollback gate;
 synthetic fixture versions alone cannot establish production migration safety.
+
+The separate [real release-pair acceptance gate](../../docs/windows-release-acceptance.md)
+pins an immutable previous release and an actual signed candidate with different
+frozen runtime hashes. It preserves original metadata, runs real application
+state readers and refuses relabeled fixture evidence. Its protected disposable
+Windows runner and original prior-release inputs must be supplied by the release
+owner; adding the gate does not establish a passed production upgrade or rollback.

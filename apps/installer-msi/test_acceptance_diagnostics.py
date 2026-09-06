@@ -50,3 +50,22 @@ def test_collect_bounds_log_tails_and_scrubs_embedded_credentials(tmp_path, monk
     assert (output / report["files"][0]["file"]).read_text().endswith("recent failure")
     assert diagnostics.scrub("https://example.test/file?signature=private&key=private") == "https://example.test/file?[REDACTED]"
     assert "private" not in diagnostics.scrub("-----BEGIN PRIVATE KEY-----\nprivate\n-----END PRIVATE KEY-----")  # pragma: allowlist secret - synthetic redaction fixture
+
+
+def test_native_captures_are_exact_allowlisted_and_bounded(tmp_path, monkeypatch):
+    runner = tmp_path / "runner"
+    native = runner / "native-webview-fixture"
+    native.mkdir(parents=True)
+    header = b"\x89PNG\r\n\x1a\n"
+    (native / "first-owner.png").write_bytes(header + b"fixture capture")
+    (native / "signed-native-upgrade.png").write_bytes(header + b"x" * 100)
+    (native / "signed-native-rollback.png").write_bytes(b"not a PNG")
+    (native / "private-grant.png").write_bytes(header + b"PRIVATE")
+    (native / "tls.key").write_bytes(b"PRIVATE")
+    monkeypatch.setattr(diagnostics, "MAX_IMAGE_BYTES", 32)
+    output = tmp_path / "output"
+    report = diagnostics.collect(runner, tmp_path / "missing", output)
+    assert len(report["images"]) == 1
+    assert report["images"][0]["source"] == "native-webview-fixture/first-owner.png"
+    assert (output / report["images"][0]["file"]).read_bytes() == header + b"fixture capture"
+    assert sorted(path.suffix for path in output.iterdir()) == [".json", ".png"]

@@ -116,6 +116,64 @@ def test_case_scoped_pdf_upload_clears_approval_and_cannot_inherit_new_upload_ti
         svc.set_documents(ctx, other["id"], other["revision"], [], [uploaded["document_id"]])
 
 
+def test_reviewed_upload_is_transient_bound_to_actor_revision_and_explicit_consent(setup, monkeypatch):
+    svc, ctx, _, tickets, denied = setup
+    row = svc.intake(ctx, "Reviewed upload", "", "VEND", "Review file")
+    args = dict(content=TEXT, name="Synthetic.txt", mime="text/plain", document_date=NOW - 100)
+    preview = svc.preview_upload(ctx, row["id"], row["revision"], **args)
+    assert preview["text"] == TEXT.decode() and preview["saved"] is False
+    assert svc.get(ctx, row["id"])["revision"] == row["revision"]
+    assert svc.get(ctx, row["id"])["uploads"] == []
+    commit = dict(args, expires_at=preview["expires_at"], review_digest=preview["review_digest"], confirm=True)
+    with pytest.raises(ValueError, match="account or request changed"):
+        svc.upload_reviewed(replace(ctx, actor="different-reviewer"), row["id"], row["revision"], **commit)
+    with pytest.raises(ValueError, match="Confirm"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **dict(commit, confirm=False))
+    with pytest.raises(ValueError, match="account or request changed"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **dict(commit, content=b"Changed text"))
+    with pytest.raises(ValueError, match="expired"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **dict(commit, expires_at=NOW))
+    with pytest.raises(KeyError):
+        svc.upload_reviewed(replace(ctx, tenant="another-customer"), row["id"], row["revision"], **commit)
+    denied.add("evidence.upload")
+    with pytest.raises(PermissionError):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **commit)
+    denied.clear()
+    saved = svc.upload_reviewed(ctx, row["id"], row["revision"], **commit)
+    assert saved["uploads"][0]["reviewed_by"] == ctx.actor
+    assert saved["assessment"] is None and tickets.creates == 0
+    with pytest.raises(RecordConflict):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **commit)
+    monkeypatch.setattr(config, "vendor_reviewed_uploads_enabled", lambda: False)
+    with pytest.raises(PermissionError, match="disabled"):
+        svc.preview_upload(ctx, saved["id"], saved["revision"], **args)
+
+
+def test_pdf_transcription_keeps_source_bytes_separate_and_never_invents_pdf_locations(setup):
+    import hashlib
+
+    svc, ctx, _, _, _ = setup
+    row = svc.intake(ctx, "Transcribed upload", "", "VEND", "Review unreadable PDF")
+    original = b"%PDF-1.4\nunsupported scanned synthetic fixture"
+    args = dict(content=original, name="Scan.pdf", mime="application/pdf", document_date=NOW - 100)
+    refused = svc.preview_upload(ctx, row["id"], row["revision"], **args)
+    assert refused["status"] == "extraction_failed" and refused["can_transcribe"]
+    with pytest.raises(ValueError, match="No supported text"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **args, confirm=True,
+                            review_digest=refused["review_digest"], expires_at=refused["expires_at"])
+    args["transcription"] = "Model provenance is documented with provider and version."
+    preview = svc.preview_upload(ctx, row["id"], row["revision"], **args)
+    saved = svc.upload_reviewed(ctx, row["id"], row["revision"], **args, confirm=True,
+                               review_digest=preview["review_digest"], expires_at=preview["expires_at"])
+    upload = saved["uploads"][0]
+    citation = upload["extracted"]["answers"]["aiv_provenance"]["citations"][0]
+    assert citation["document_sha256"] == hashlib.sha256(original).hexdigest()
+    assert citation["extracted_text_sha256"] == hashlib.sha256(args["transcription"].encode()).hexdigest()
+    assert citation["text_origin"] == "human_transcription" and citation["transcription_paragraph"] == 1
+    assert "pages" not in citation
+    assert upload["extraction"]["method"] == "human_transcription"
+
+
 def test_uploaded_only_case_preserves_evidence_for_renewal_and_rechecks_snapshot(setup, monkeypatch):
     from maverick.vendor_evidence_evolution import EvidenceRenewalEvolution
 

@@ -72,3 +72,34 @@ def test_repeated_same_release_is_idempotent_and_conflict_preserves_latest(tmp_p
         module.write_feed(tmp_path, url)
     assert (tmp_path / "latest.json").read_bytes() == latest
     assert (tmp_path / "versions" / "0.1.7.json").read_bytes() == immutable
+
+
+def test_bridge_feed_requires_old_key_cross_signature_and_exact_target_without_replacing_previous_feed(tmp_path, monkeypatch):
+    from maverick import release_identity_transition as bridge
+    root = Path(__file__).resolve().parents[2]
+    fixture = json.loads((root / "packages/maverick-core/tests/fixtures/tauri_identity_bridge.json").read_text(encoding="utf-8"))
+    envelope = fixture["envelope"]
+    target = envelope["policy"]["to"]
+    monkeypatch.setattr(bridge.time, "time", lambda: envelope["policy"]["issued_at"] + 1)
+    source = {**inventory(), "version": target["version"], "runtime": {"sha256": target["runtime_sha256"]}}
+    (tmp_path / "runtime-inventory.json").write_text(json.dumps(source), encoding="utf-8")
+    (tmp_path / "Lightwork.msi.sig").write_text(fixture["artifact_signature"], encoding="utf-8")
+    (tmp_path / "Lightwork.msi").write_bytes(base64.b64decode(fixture["payload_base64"]))
+    (tmp_path / "updater.pub").write_text(target["public_key"], encoding="utf-8")
+    policy = tmp_path / "bridge.json"
+    policy.write_text(json.dumps(envelope), encoding="utf-8")
+    old_key = tmp_path / "old.pub"
+    old_key.write_text(envelope["policy"]["from"]["public_key"], encoding="utf-8")
+    native = tmp_path / "maverick-desktop.exe"
+    native.write_bytes(b"new-native")
+    url = "https://updates.example.test/{version}/Lightwork.msi"
+    options = {"identity_transition": policy, "transition_source_key": old_key, "transition_target_native": native}
+    module.write_feed(tmp_path, url, **options)
+    before = (tmp_path / "latest.json").read_bytes()
+    assert json.loads(before)["identity_transition"] == envelope
+    module.write_feed(tmp_path, url, **options)
+    assert (tmp_path / "latest.json").read_bytes() == before
+    native.write_bytes(b"wrong-native")
+    with pytest.raises(ValueError, match="target release"):
+        module.write_feed(tmp_path, url, **options)
+    assert (tmp_path / "latest.json").read_bytes() == before

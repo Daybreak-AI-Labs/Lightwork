@@ -53,13 +53,38 @@ def feed(inventory: dict, signature: str, url_template: str) -> dict:
             "platforms": {"windows-x86_64": {"signature": signature, "url": url}}}
 
 
-def write_feed(directory: Path, url_template: str) -> None:
+def write_feed(directory: Path, url_template: str, *, identity_transition: Path | None = None,
+               transition_source_key: Path | None = None, transition_target_native: Path | None = None) -> None:
     """Check immutable identity before changing the visible latest pointer."""
     inventory = json.loads((directory / "runtime-inventory.json").read_text(encoding="utf-8"))
     signature = (directory / "Lightwork.msi.sig").read_text(encoding="utf-8").strip()
     content = feed(inventory, signature, url_template)
     digest = hashlib.sha256((directory / "Lightwork.msi").read_bytes()).hexdigest()
     content["installer_sha256"] = digest
+    if identity_transition is not None:
+        from maverick import release_identity_transition as bridge
+        from maverick.windows_installer_verification import verify_minisign
+
+        if transition_source_key is None or transition_target_native is None:
+            raise ValueError("A bridge feed requires the retained source public key and exact built target native executable")
+        if identity_transition.stat().st_size > bridge.MAX_ENVELOPE_BYTES or transition_source_key.stat().st_size > 4096:
+            raise ValueError("The bridge policy or source key exceeds its size limit")
+        envelope = bridge.parse(identity_transition.read_text(encoding="utf-8"))
+        installed = {**envelope["policy"]["from"], "public_key": transition_source_key.read_text(encoding="utf-8").strip()}
+        envelope = bridge.verify(envelope, installed=installed)
+        target = envelope["policy"]["to"]
+        if (target["version"] != content["version"] or target["runtime_sha256"] != content["runtime_sha256"]
+                or envelope["policy"]["new_installer_sha256"] != digest
+                or target["native_sha256"] != hashlib.sha256(transition_target_native.read_bytes()).hexdigest()
+                or target["public_key"] != (directory / "updater.pub").read_text(encoding="utf-8").strip()):
+            raise ValueError("The bridge policy does not match the exact staged target release")
+        # A bridge offer on the old channel must remain downloadable by the
+        # installed old key. The target build itself compiles the reviewed new
+        # key; its ordinary new channel carries a separately signed manifest.
+        verify_minisign(directory / "Lightwork.msi", installed["public_key"], signature)
+        content["identity_transition"] = envelope
+    elif transition_source_key is not None or transition_target_native is not None:
+        raise ValueError("Select the signed identity transition before its verification inputs")
     versions = directory / "versions"
     versions.mkdir(exist_ok=True)
     # Publish this immutable address alongside latest.json. Repair and retained
@@ -94,8 +119,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--installer-url-template", required=True)
+    parser.add_argument("--identity-transition", type=Path)
+    parser.add_argument("--transition-source-key", type=Path)
+    parser.add_argument("--transition-target-native", type=Path)
     args = parser.parse_args()
-    write_feed(args.directory, args.installer_url_template)
+    write_feed(args.directory, args.installer_url_template, identity_transition=args.identity_transition,
+               transition_source_key=args.transition_source_key, transition_target_native=args.transition_target_native)
 
 
 if __name__ == "__main__":

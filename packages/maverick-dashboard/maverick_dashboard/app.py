@@ -948,12 +948,16 @@ app.include_router(project_reviews_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+from .provider_spending_api import router as provider_spending_router  # noqa: E402
 from .recovery_api import router as recovery_router  # noqa: E402
 from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
+from .support_api import router as support_router  # noqa: E402
 from .voice_setup_api import VoiceSetup  # noqa: E402
 from .voice_setup_api import router as voice_setup_router  # noqa: E402
 
 app.include_router(recovery_router)
+app.include_router(provider_spending_router)
+app.include_router(support_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
@@ -1048,6 +1052,14 @@ from .vendor_onboarding_page import create_vendor_onboarding_page_router  # noqa
 
 attach_vendor_onboarding_composition(app)
 app.include_router(vendor_onboarding_router, prefix="/api/v1")
+from .task_file_recovery_api import router as task_file_recovery_router  # noqa: E402
+from .vendor_setup_api import router as vendor_setup_router  # noqa: E402
+
+app.include_router(vendor_setup_router)
+app.include_router(task_file_recovery_router)
+from .connection_setup_api import router as connection_setup_router  # noqa: E402
+
+app.include_router(connection_setup_router)
 app.include_router(create_vendor_onboarding_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .cortex_api import router as cortex_router  # noqa: E402
@@ -1141,6 +1153,9 @@ app.include_router(oidc_login_router)
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
 from .invite_routes import router as invite_router  # noqa: E402
+from .local_owner_routes import router as local_owner_router  # noqa: E402
+
+app.include_router(local_owner_router)
 
 app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
@@ -1335,6 +1350,8 @@ _AUTH_EXEMPT = {
     "/auth/callback",
     "/auth/logout",
     "/auth/error",
+    "/auth/local-owner",
+    "/auth/local-login",
     # The brand logo is a public, non-sensitive image; the public share view
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
@@ -2044,6 +2061,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 f"/auth/login?return_to={quote(return_to, safe='')}",
                 status_code=302,
             )
+        from .local_owner import claimed as local_owner_claimed
+        if local_owner_claimed() and request.url.path not in {"/auth/local-owner", "/auth/local-login"}:
+            return RedirectResponse("/auth/local-login", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {
@@ -8753,6 +8773,7 @@ async def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         "chat_goal.html",
         {
             "goal": g,
+            "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
             "deliverable": contract,
             "rendered": rendered,
             "signoff": signoff,
@@ -9417,10 +9438,16 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-consent-policy-editor.js")
 @app.get("/static/lightwork-setup.js")
 @app.get("/static/lightwork-voice-setup.js")
+@app.get("/static/lightwork-vendor-setup.js")
+@app.get("/static/lightwork-task-file-recovery.js")
+@app.get("/static/lightwork-connection-setup.js")
 @app.get("/static/lightwork-template-library.js")
 @app.get("/static/lightwork-guided-actions.js")
+@app.get("/static/lightwork-ai-business-intake.js")
 @app.get("/static/lightwork-guided-actions.css")
 @app.get("/static/lightwork-draft-recovery.js")
+@app.get("/static/lightwork-support.js")
+@app.get("/static/lightwork-support.css")
 @app.get("/static/lightwork-record-search.js")
 @app.get("/static/lightwork-record-search.css")
 @app.get("/static/lightwork-grc-recovery.js")
@@ -9987,6 +10014,8 @@ async def get_started_page(request: Request, use_case: str = "deliverable") -> H
         reviewed_outcome=guided["outcome"] if guided else None,
     )
     state["guided"] = guided
+    from .local_owner import available as local_owner_available
+    state["local_owner_setup_available"] = local_owner_available(request)
     return templates.TemplateResponse(
         request,
         "get_started.html",

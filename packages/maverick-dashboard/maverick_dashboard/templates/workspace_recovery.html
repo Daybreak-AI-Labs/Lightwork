@@ -4,6 +4,7 @@
 {% block content %}
 <div class="wrec" id="workspace-recovery">
   <h1>Workspace recovery</h1>
+  <p><a href="/provider-spending">Review or repair provider spending</a> while preserving recorded costs and unresolved reservations.</p>
   <p>Keep a signed copy of this workspace, check its contents, and test that it can be restored.</p>
   {% if recovery_mode %}
   <div class="wrec-notice"><strong>Local recovery mode</strong><p>Ordinary work and background jobs are disabled. To resume after recovery, use the desktop menu: Workspace recovery mode → Close recovery and return to work.</p></div>
@@ -46,10 +47,10 @@
     <p id="wrec-custody-status" role="status" aria-live="polite"></p>
     <div id="wrec-custody-report" hidden>
       <p id="wrec-custody-summary"></p><p id="wrec-custody-build"></p>
-      <ul id="wrec-custody-checks"></ul><p id="wrec-custody-coverage"></p>
+      <p id="wrec-custody-totals"></p>
       <p>Verification applies only to the recognized formats listed here. Unknown or custom encryption, application business rules and external systems are not verified. This historical temporary-test duration is not a recovery-time or data-loss guarantee.</p>
       <ul id="wrec-custody-limits"></ul>
-      <details><summary>Retained-key test verification details</summary><p id="wrec-custody-identity"></p></details>
+      <details><summary>Format counts and verification details</summary><ul id="wrec-custody-checks"></ul><p id="wrec-custody-coverage"></p><p id="wrec-custody-identity"></p></details>
       <button id="wrec-custody-report-download" type="button" disabled>Download signed retained-key test</button>
     </div>
   </section>
@@ -74,6 +75,13 @@
   <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
     <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>
     <label class="wrec-confirm"><input id="wrec-installation-confirm" type="checkbox">I am authorized to pause and recover all local workspaces and shared administration on this computer.</label>
+    <details><summary>Review a signing identity transition</summary>
+      <p>Ordinary updates keep the same signing identities. A publisher or update-key change requires the default-off Signing identity transition setting, a dual-signed exact-release bridge, and your separate approval. Save the proposed review file from Install &amp; updates, then select it here. No new identity is trusted merely by selecting a file.</p>
+      <label for="wrec-installation-transition-file">Signed bridge review file</label><input id="wrec-installation-transition-file" type="file" accept="application/json,.json">
+      <button id="wrec-installation-transition-review" type="button" disabled>Verify signing transition for review</button>
+      <p id="wrec-installation-transition-details" role="status" style="overflow-wrap:anywhere;white-space:pre-line"></p>
+      <label class="wrec-confirm"><input id="wrec-installation-transition-confirm" type="checkbox">I reviewed the exact publisher and update-key change, its admission window and retained-pair rollback limits, and authorize this change in installation trust.</label>
+    </details>
     <button id="wrec-installation-authorize" type="button" disabled>Authorize protected update</button>
     <label for="wrec-installation-point">Completed upgrade recovery point</label><select id="wrec-installation-point"><option value="">Choose a completed upgrade</option></select>
     <button id="wrec-installation-rollback" type="button" disabled>Authorize return to this release and snapshot</button>

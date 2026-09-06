@@ -55,8 +55,25 @@ through the UI. No actual Google export or Jira request occurs in this demo.
 
 ## Configuration and enrollment
 
-The installer asks whether to enable the workflow and for its resource owner.
-It remains disabled by default. For an existing installation, explicitly add:
+The workflow remains disabled by default. In the app, sign in as a named
+administrator, select a workspace, and open **AI vendor onboarding → Workspace
+setup**. Review **Enable vendor workflow**, create the required accounts in
+**Connections**, then select Jira and optional Drive and save workspace setup.
+The activation turns on the existing deployment-wide prerequisite modules;
+credential choices and the stable vendor review owner are saved only for the
+selected workspace, with version checks and audit history. Changing the selected
+credentials never silently changes the owner of earlier cases. This setup does
+not probe providers, grant colleagues access, or approve a workflow action.
+
+Connections supports either manually supplied credentials or reviewed renewable
+authorization for Google Drive and Jira Cloud. Google Cloud Storage authorization
+also works with the privacy discovery source picker. See
+[renewable accounts](named-account-authorization.md) for app registration,
+provider consent, reconnect behavior and the supported boundaries.
+
+The installer also asks whether to enable the workflow and for its resource
+owner. Deployment-managed configuration remains supported as the fallback when
+no workspace binding has been saved:
 
 ```toml
 [vendor_onboarding]
@@ -64,6 +81,7 @@ enable = true
 resource_owner = "procurement"
 document_connection = "gdrive"
 ticket_connection = "jira"
+reviewed_uploads = true # Local preview, Office extraction and explicit PDF transcription
 
 [vendor_management]
 enable = true
@@ -112,9 +130,14 @@ it is not a general delegated or multi-reviewer approval engine.
 Create a request with the vendor, intended use and Jira project. Search Drive by
 name and select a result for the new or currently selected request; IDs remain
 an optional advanced input. A request supports up to eight sources in any mix.
-For local files, select one or more `.txt` or `.pdf` files and enter their actual
-document date. That date is the uploader's assertion, explicitly separate from
-Drive metadata and upload time. Group files by date when their dates differ.
+For local files, choose one `.txt`, `.pdf`, `.docx` or `.xlsx` file and enter its actual
+document date. Choose **Preview evidence text**, compare the text and stated limits
+against your original, then explicitly confirm **Add reviewed evidence**. Repeat
+for additional files. A preview changes no case record and expires after ten
+minutes. File, transcription, account or request-version changes require a new
+review. The document date is the uploader's assertion, separate from Drive
+metadata and upload time. The installer includes this capability choice;
+`vendor_onboarding.reviewed_uploads=false` disables the reviewed-upload path.
 Choose **Obtain current evidence**, inspect every source's extraction status,
 then **Build assessment**. A failed source blocks the whole assessment until it
 is removed or replaced. File removal is available beside each selected source.
@@ -128,8 +151,29 @@ Malformed/unsupported documents and empty extraction are visibly rejected; text
 that can be extracted still requires human comparison with the original.
 Embedded instructions and vendor claims never grant approval or establish facts.
 
-Limits are 1 MiB per text/Google Docs export, 16 MiB per PDF, 32 MiB per evidence
-set, and the existing parser's object/stream/expansion limits. Extraction that
+Word uploads extract body paragraphs and tables, with paragraph citations. Excel
+uploads read visible worksheet cells and cite sheet names and cell coordinates;
+unused shared strings and hidden sheets, rows and columns are excluded. Headers,
+footers, images, charts, comments, styling and rendered layout are outside this
+scope. Cached formula values are not recomputed; dates are not formatted. Macros,
+external links, embedded active content, Word fields/tracked changes and unsafe
+or oversized ZIP/XML packages are refused. The reader never launches Office or
+follows document links. Drive search still supports text, Google Docs and the
+existing PDF subset; download Office files and choose them locally for review.
+
+An unreadable image-only or unsupported PDF offers an in-app transcription field.
+The user supplies text, states omissions, previews it and explicitly confirms the
+original comparison. This is **human transcription, not OCR**. Evidence retains
+the original PDF-byte hash and a separate supplied-text hash. Quotations refer
+to transcription paragraphs, never verified PDF page positions. No local OCR
+engine or remote conversion service is installed or invoked by this path. A supported copy
+or transcription permits the existing assessment review; it does not establish
+that omitted content, business claims or legal conclusions are verified.
+
+Limits are 1 MiB per text/Google Docs export, 8 MiB per Office upload, 16 MiB per
+PDF, 32 MiB per evidence set and 120,000 characters per reviewed upload. Office
+packages are bounded to 256 entries, 16 MiB expanded, 4 MiB per part, a 200:1
+compression ratio, 32 sheets and 10,000 extracted paragraphs/cells. Extraction that
 would omit text beyond the assessment character limit blocks assessment instead
 of treating a partial scan as complete. No new parser dependency or OCR service
 is installed. Raw upload bytes and complete extracted text remain transient;
@@ -149,7 +193,7 @@ evidence fresh. Conflicting claims stay unknown and require a human resolution.
 | Step | Supported behavior | Boundary |
 |---|---|---|
 | Intake | Vendor, intended use, Drive search/selection or case-scoped upload, Jira project key, 1–730 day evidence validity, optional previous case | Tenant and resource owner come from validated context |
-| Evidence | Up to eight UTF-8 text, native Google Docs exports and supported digital PDFs; version, source/date provenance, hash and page/paragraph citations | Unsupported extraction blocks assessment; uploads retain asserted dates and have no live provider readback |
+| Evidence | Up to eight text, Google Docs, supported PDFs and reviewed local Word/Excel files; explicit PDF transcription fallback; source/date hashes and truthful page/paragraph/cell references | No OCR or full Office/PDF renderer; unsupported extraction blocks assessment; uploads and transcription have no live provider readback |
 | Assessment | Existing AI vendor-risk questions, conservative source extraction, explicit unknowns, gaps and findings | Vendor assertions are not independent verification; no automatic compliance or model-quality determination |
 | Review | Typed answer/note corrections, reviewer, rationale, superseded assessment/evidence references, reported review time | A model context cannot approve; unresolved gaps may remain explicitly recorded |
 | External action | One exact Jira Task create, read-back and marker search using existing protocols | No update/delete/bulk action, automatic retry after ambiguity or automatic reversal |

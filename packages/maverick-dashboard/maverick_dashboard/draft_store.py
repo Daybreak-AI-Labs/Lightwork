@@ -26,6 +26,8 @@ _SLOT = re.compile(r"[0-9a-f]{64}\Z")
 _SECRET = re.compile(r"(?:^|_)(?:password|passwd|passphrase|secret|credentials|api_key|apikey|token|client_secret|private_key|authorization|cookie)(?:$|_)", re.IGNORECASE)
 _ASSIGNMENT = re.compile(r"\b(?:password|passwd|api[_ -]?key|client[_ -]?secret|access[_ -]?token|authorization)\s*[=:]\s*\S+", re.IGNORECASE)
 MAX_BYTES = 1024 * 1024
+MAX_RECORDS = 2000
+MAX_REVISION = 2**31 - 1
 
 
 class DraftConflict(ValueError):
@@ -82,9 +84,29 @@ class DraftStore:
             raise ValueError("invalid draft slot")
         return self.directory / (slot + ".draft")
 
-    def _read(self, path: Path, slot: str) -> dict:
+    def _floor(self) -> int:
+        path = self.directory / "retention.index"
         if not path.exists():
-            return {"context": self.context, "slot": slot, "revision": 0, "payload": None, "updated_at": None}
+            return 0
+        if path.stat().st_size > 4096:
+            raise ValueError("Recovery retention history could not be verified.")
+        raw = atomic_read_bytes(path)
+        if len(raw) > 4096 or not is_sealed(raw):
+            raise ValueError("Recovery retention history could not be verified.")
+        record = json.loads(unseal(raw))
+        if (not isinstance(record, dict) or record.get("context") != self.context
+                or record.get("schema") != "lightwork.draft-retention.v1"
+                or type(record.get("revision_floor")) is not int
+                or not 1 <= record["revision_floor"] <= MAX_REVISION):
+            raise ValueError("Recovery retention history could not be verified.")
+        return record["revision_floor"]
+
+    def _read(self, path: Path, slot: str, *, floor: int | None = None) -> dict:
+        if floor is None:
+            floor = self._floor()
+        empty = {"context": self.context, "slot": slot, "revision": floor, "payload": None, "updated_at": None}
+        if not path.exists():
+            return empty
         if path.stat().st_size > MAX_BYTES * 2:
             raise ValueError("Recovery copy is too large to read safely.")
         raw = atomic_read_bytes(path)
@@ -92,8 +114,14 @@ class DraftStore:
             raise ValueError("Recovery copy encryption could not be verified.")
         result = json.loads(unseal(raw))
         if (not isinstance(result, dict) or result.get("context") != self.context or result.get("slot") != slot
-                or not isinstance(result.get("revision"), int) or result["revision"] < 1):
+                or type(result.get("revision")) is not int or not 1 <= result["revision"] <= MAX_REVISION
+                or "payload" not in result):
             raise ValueError("Recovery copy binding could not be verified.")
+        # An interrupted retirement may leave old tombstones on disk. The
+        # durable floor takes effect before deletion, so stale tabs remain
+        # unable to resurrect them even if cleanup has not completed.
+        if result["payload"] is None and result["revision"] < floor and result.get("retention_floor", 0) < floor:
+            return empty
         return result
 
     @staticmethod
@@ -105,6 +133,53 @@ class DraftStore:
         ensure_private_directory(self.directory)
         with _LOCK, cross_process_lock(self.directory / "index", strict=True):
             return self._public(self._read(path, slot))
+
+    def _inventory(self) -> tuple[dict, list[tuple[Path, dict]]]:
+        floor = self._floor()
+        records = []
+        for path in self.directory.glob("*.draft"):
+            if len(records) >= MAX_RECORDS:
+                raise ValueError("Recovery storage exceeds its supported inventory size.")
+            slot = path.stem
+            self._path(slot)
+            records.append((path, self._read(path, slot, floor=floor)))
+        records.sort(key=lambda row: row[1]["slot"])
+        entries = [{"slot": row["slot"], "revision": row["revision"],
+                    "saved": row["payload"] is not None, "updated_at": row["updated_at"]}
+                   for _path, row in records]
+        version = hashlib.sha256(json.dumps([self.context, floor, entries], sort_keys=True,
+                                           separators=(",", ":")).encode()).hexdigest()
+        discarded = sum(not entry["saved"] for entry in entries)
+        return ({"context": self.context, "version": version, "capacity": MAX_RECORDS,
+                 "saved": len(entries) - discarded, "discarded": discarded,
+                 "available": MAX_RECORDS - len(entries), "records": entries}, records)
+
+    def inventory(self) -> dict:
+        """Private metadata only; never return another editor's draft content."""
+        ensure_private_directory(self.directory)
+        with _LOCK, cross_process_lock(self.directory / "index", strict=True):
+            return self._inventory()[0]
+
+    def retire_discarded(self, *, expected_version: str) -> dict:
+        """Reclaim only discarded copies while durably fencing every old tab."""
+        ensure_private_directory(self.directory)
+        with _LOCK, cross_process_lock(self.directory / "index", strict=True):
+            inventory, records = self._inventory()
+            if not hmac.compare_digest(expected_version, inventory["version"]):
+                raise DraftConflict("Recovery storage changed. Review the current storage summary before freeing space.")
+            discarded = [(path, row) for path, row in records if row["payload"] is None]
+            if not discarded:
+                return {**inventory, "retired": 0}
+            floor = max(self._floor(), *(row["revision"] for _path, row in discarded)) + 1
+            if floor >= MAX_REVISION:
+                raise ValueError("Recovery revision capacity is exhausted. Existing copies have been kept.")
+            record = {"schema": "lightwork.draft-retention.v1", "context": self.context, "revision_floor": floor}
+            atomic_write_bytes(self.directory / "retention.index", seal(json.dumps(record).encode()))
+            # Publication precedes deletion. If deletion fails or this process
+            # exits, the encrypted floor still rejects old revisions.
+            for path, _row in discarded:
+                path.unlink()
+            return {**self._inventory()[0], "retired": len(discarded)}
 
     def save(self, slot: str, payload: dict | None, *, expected_revision: int, operation_id: str) -> dict:
         encoded = validate_payload(payload)
@@ -119,9 +194,12 @@ class DraftStore:
                 return self._public(record)
             if record["revision"] != expected_revision:
                 raise DraftConflict("A newer recovery copy exists. Review it before replacing it.")
-            if not path.exists() and len(list(self.directory.glob("*.draft"))) >= 2000:
-                raise ValueError("Recovery storage has reached its limit. Ask your administrator to archive old recovery records.")
+            if not path.exists() and len(list(self.directory.glob("*.draft"))) >= MAX_RECORDS:
+                raise ValueError("Recovery storage is full. Open Manage recovery storage to free space from discarded copies.")
+            if record["revision"] >= MAX_REVISION:
+                raise ValueError("Recovery revision capacity is exhausted. This copy has been kept.")
             record = {"context": self.context, "slot": slot, "revision": record["revision"] + 1,
-                      "payload": payload, "updated_at": time.time(), "operation_id": operation_id, "payload_sha256": digest}
+                      "payload": payload, "updated_at": time.time(), "operation_id": operation_id,
+                      "payload_sha256": digest, "retention_floor": self._floor()}
             atomic_write_bytes(path, seal(json.dumps(record, ensure_ascii=False, allow_nan=False).encode("utf-8")))
             return self._public(record)

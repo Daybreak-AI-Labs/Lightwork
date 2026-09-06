@@ -25,6 +25,11 @@ class DraftIn(BaseModel):
     payload: dict | None
 
 
+class RetireDraftsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
 def context_for(request: Request) -> str:
     principal = _authorization_principal(request)
     mode = "principal"
@@ -66,6 +71,20 @@ async def _call(function, *args, **kwargs):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Recovery storage is unavailable. Your current editor contents have been kept.") from exc
+
+
+@router.get("/storage")
+async def draft_storage(request: Request, response: Response) -> dict:
+    response.headers["Cache-Control"] = "private, no-store"
+    store = _store(request)
+    return await _call(store.inventory)
+
+
+@router.post("/storage/retire")
+async def retire_draft_storage(request: Request, body: RetireDraftsIn, response: Response) -> dict:
+    response.headers["Cache-Control"] = "private, no-store"
+    store = _store(request)
+    return await _call(store.retire_discarded, expected_version=body.expected_version)
 
 
 @router.get("/{slot}")

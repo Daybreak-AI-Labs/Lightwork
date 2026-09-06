@@ -33,7 +33,7 @@ def installation(tmp_path, monkeypatch):
     (installed / "maverick-desktop.exe").write_bytes(b"native-ui-fixture")
     active = [runtime]
     monkeypatch.setattr(maintenance, "_runtime", lambda: active[0])
-    monkeypatch.setattr(maintenance, "_native_channel", lambda runtime: {"native_sha256": digest(b"native-ui-fixture"), "public_key": "fixture-only"})
+    monkeypatch.setattr(maintenance, "_native_channel", lambda runtime, **kwargs: {"native_sha256": digest(b"native-ui-fixture"), "public_key": "fixture-only"})
     (home / "config.toml").write_text("# local configuration\n")
     for tenant in ("alpha", "beta"):
         root = home / "tenants" / tenant

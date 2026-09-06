@@ -39,7 +39,7 @@ test('pending allocation uses shared busy protection and blocks duplicate writes
 });
 
 test('financial access loss clears provider details; stale coverage stays explicit',async t=>{
-  let denied=false;const ui=await fixture(call=>denied&&call.url.pathname.endsWith('/provider-costs')?new Response('{"detail":"Billing access revoked"}',{status:403}):undefined);t.after(ui.close);const form=await select(ui);denied=true;[...form.querySelectorAll('button')].find(e=>e.textContent==='Find billing receipts').click();await ui.settle();assert.equal(ui.d.getElementById('op-provider-costs').textContent.includes('synthetic-account'),false);assert.equal(ui.d.getElementById('op-cost-form'),null);
+  let denied=false;const ui=await fixture(call=>denied&&call.url.pathname.endsWith('/provider-costs')?new Response('{"detail":"Billing access revoked"}',{status:403}):undefined);t.after(ui.close);const form=await select(ui);denied=true;[...form.querySelectorAll('button')].find(e=>e.textContent==='Find billing receipts').click();await ui.settle();assert.equal(ui.d.getElementById('op-report').textContent,'');assert.equal(ui.d.body.textContent.includes('synthetic-account'),false);assert.equal(ui.d.getElementById('op-cost-form'),null);assert.equal(ui.d.getElementById('op-export').disabled,true);
   const partial=await fixture(call=>call.url.pathname.endsWith('/OPL-test')?{...report(),provider_costs:{...report().provider_costs,status:'partial',allocations:[{status:'source_unavailable'}]}}:undefined);t.after(partial.close);assert.match(partial.d.getElementById('op-provider-costs').textContent,/coverage is partial/);assert.match(partial.d.getElementById('op-provider-costs').textContent,/Unknown costs are not zero/);
 });
 

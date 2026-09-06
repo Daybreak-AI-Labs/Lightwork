@@ -1,6 +1,7 @@
 """Real dashboard routing through the offline vendor application service."""
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 from html.parser import HTMLParser
 
@@ -63,6 +64,38 @@ def _step(client, row, step, **extra):
                          json={"expected_revision": row["revision"], **extra})
     assert result.status_code == 200, result.text
     return result.json()
+
+
+def test_reviewed_file_preview_is_private_nonmutating_and_requires_exact_confirmation(web):
+    client, service, ctx, tickets = web
+    row = _intake(client)
+    body = dict(expected_revision=row["revision"], name="Synthetic.txt", mime="text/plain",
+                document_date=NOW - 100, content_base64=base64.b64encode(b"Model provenance is documented with provider and version.").decode())
+    response = client.post(f"{BASE}/{row['id']}/upload-preview", json=body)
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    preview = response.json()
+    assert preview["saved"] is False and preview["text"]
+    assert service.get(ctx, row["id"])["uploads"] == []
+    result = client.post(f"{BASE}/{row['id']}/upload-reviewed", json=body)
+    assert result.status_code == 409
+    committed = dict(body, confirm=True, review_digest=preview["review_digest"], expires_at=preview["expires_at"])
+    result = client.post(f"{BASE}/{row['id']}/upload-reviewed", json=committed)
+    assert result.status_code == 200, result.text
+    assert result.json()["uploads"][0]["reviewed_by"] == ctx.actor
+    assert tickets.creates == 0
+    assert client.post(f"{BASE}/{row['id']}/upload-reviewed", json=committed).status_code == 409
+
+
+def test_preview_validation_does_not_echo_private_document_fields(web):
+    client, *_ = web
+    row = _intake(client)
+    response = client.post(f"{BASE}/{row['id']}/upload-preview", json={
+        "expected_revision": row["revision"], "name": "Synthetic.txt", "mime": "text/plain",
+        "document_date": NOW - 100, "content_base64": "PRIVATE INVALID CONTENT", "transcription": "private supplied text",
+    })
+    assert response.status_code == 422
+    assert "PRIVATE" not in response.text and "private supplied" not in response.text
 
 
 def test_http_workflow_review_correction_external_confirmation_and_acceptance(web):

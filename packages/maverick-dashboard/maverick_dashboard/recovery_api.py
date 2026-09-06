@@ -72,6 +72,14 @@ class RetireIn(ConfirmIn):
 class InstallationIn(ConfirmIn):
     confirm_all_workspaces: bool = Field(strict=True)
     rollback_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    identity_transition: str | None = Field(default=None, max_length=65536)
+    transition_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    confirm_identity_transition: bool = Field(default=False, strict=True)
+
+
+class IdentityTransitionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    envelope: str = Field(max_length=65536)
 
 
 class CompareStartIn(BaseModel):
@@ -99,7 +107,18 @@ async def authorize_installation(request: Request, body: InstallationIn):
     actor = _admit(request, mutation=True)
     _confirm(body)
     result = await _call(installation_recovery.authorize, actor=actor, isolated=isolated(request.app),
-                         confirm_all_workspaces=body.confirm_all_workspaces, rollback_id=body.rollback_id)
+                         confirm_all_workspaces=body.confirm_all_workspaces, rollback_id=body.rollback_id,
+                         **({"identity_transition": body.identity_transition, "transition_sha256": body.transition_sha256,
+                             "confirm_identity_transition": body.confirm_identity_transition}
+                            if body.identity_transition is not None or body.transition_sha256 is not None else {}))
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/installation/identity-transition")
+async def review_installation_identity(request: Request, body: IdentityTransitionIn):
+    _admit(request, mutation=True)
+    result = await _call(installation_recovery.review_identity_transition, body.envelope,
+                         isolated=isolated(request.app))
     return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
 
 

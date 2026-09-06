@@ -929,6 +929,16 @@ def get_capabilities() -> dict:
     }
 
 
+def signing_identity_transition_enabled() -> bool:
+    """Whole-installation trust admission requires a healthy global opt-in."""
+    try:
+        features = load_global_config().get("features") or {}
+        return (not config_source_errors(include_tenant=False) and isinstance(features, dict)
+                and features.get("signing_identity_transition") is True)
+    except Exception:
+        return False
+
+
 def get_features() -> dict:
     """Return the [features] section. These toggle agent-facing behaviors that
     are otherwise always on:
@@ -976,8 +986,10 @@ def get_features() -> dict:
         "pack_editing": bool(cfg.get("pack_editing", True)),
         "role_editing": bool(cfg.get("role_editing", True)),
         "draft_recovery": cfg.get("draft_recovery", True) is True,
+        "support_center": cfg.get("support_center", True) is True,
         "record_search": cfg.get("record_search", True) is True,
         "workspace_recovery": cfg.get("workspace_recovery", False) is True,
+        "signing_identity_transition": signing_identity_transition_enabled(),
         "action_center": cfg.get("action_center", True) is True,
         "guided_onboarding": cfg.get("guided_onboarding", True) is True,
         "workflow_readiness": cfg.get("workflow_readiness", True) is True,
@@ -2824,6 +2836,13 @@ def get_deployment() -> dict:
     """
     cfg = load_config().get("deployment", {}) or {}
     return {"type": str(cfg.get("type", "")).strip()}
+
+
+def vendor_reviewed_uploads_enabled(cfg: dict | None = None) -> bool:
+    """Local preview and reviewed Office/transcription upload, within onboarding."""
+    current = load_global_config() if cfg is None else cfg
+    section = current.get("vendor_onboarding") or {}
+    return section.get("reviewed_uploads", True) is True
 
 
 def data_use_governance_enabled(cfg: dict | None = None) -> bool:

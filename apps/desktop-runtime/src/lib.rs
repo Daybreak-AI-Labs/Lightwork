@@ -25,6 +25,14 @@ struct Control {
 #[derive(Default)]
 pub struct Dashboard(Mutex<Control>);
 
+/// Allowlisted startup facts; deliberately excludes logs, paths and config.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StartupSupport {
+    pub packaged_runtime_available: Option<bool>,
+    pub process_state: &'static str,
+    pub recovery_mode: bool,
+}
+
 pub fn listening() -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
     TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok()
@@ -156,6 +164,23 @@ fn ensure_started(
 }
 
 impl Dashboard {
+    pub fn startup_support(&self) -> Result<StartupSupport, String> {
+        let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
+        let process_state = match control.child.as_mut() {
+            Some(child) => match child.try_wait() {
+                Ok(None) => "running",
+                Ok(Some(_)) => "exited",
+                Err(_) => "unavailable",
+            },
+            None => "not_started",
+        };
+        Ok(StartupSupport {
+            packaged_runtime_available: control.binary.as_ref().map(|path| path.is_file()),
+            process_state,
+            recovery_mode: control.recovery,
+        })
+    }
+
     /// Customer packages pin their bundled runtime. A missing sidecar fails
     /// visibly rather than falling through to PATH or an environment override.
     pub fn with_binary(binary: PathBuf) -> Self {
@@ -267,6 +292,34 @@ impl Drop for Dashboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_support_excludes_private_logs_and_reports_pinned_runtime_state() {
+        let dashboard = Dashboard::with_binary(
+            std::env::temp_dir().join("lightwork-missing-startup-test-runtime.exe"),
+        );
+        {
+            let mut control = dashboard.0.lock().unwrap();
+            record(&control.logs, "private fixture token and customer path");
+            control.recovery = true;
+        }
+        assert_eq!(
+            dashboard.startup_support().unwrap(),
+            StartupSupport {
+                packaged_runtime_available: Some(false),
+                process_state: "not_started",
+                recovery_mode: true,
+            }
+        );
+        assert_eq!(
+            Dashboard::default()
+                .startup_support()
+                .unwrap()
+                .packaged_runtime_available,
+            None
+        );
+        assert!(!format!("{:?}", dashboard.startup_support().unwrap()).contains("private"));
+    }
 
     #[test]
     fn recovery_cannot_stop_an_independently_managed_workspace() {

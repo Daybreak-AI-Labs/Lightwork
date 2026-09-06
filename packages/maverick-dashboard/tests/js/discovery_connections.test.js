@@ -5,10 +5,10 @@ const {JSDOM}=require("jsdom");
 const folder=path.resolve(__dirname,"../../maverick_dashboard/templates");
 const template=fs.readFileSync(path.join(folder,"connections.html"),"utf8");
 const script=template.match(/<script>([\s\S]*?)<\/script>/)[1].replace('{% include "_dash_helpers.js" %}',fs.readFileSync(path.join(folder,"_dash_helpers.js"),"utf8"));
-async function fixture(records=[]) {
+async function fixture(records=[],intercept=()=>undefined) {
   const dom=new JSDOM(template.replace(/<script>[\s\S]*?<\/script>/,""),{url:"https://lightwork.example/connections",runScripts:"outside-only"});
   const {window}=dom,calls=[];window.mvConfirm=async()=>true;
-  window.fetch=async(url,options={})=>{calls.push({url,...options});return new Response(JSON.stringify(options.method==="POST"?{revision:"b".repeat(32)}:{connections:records}),{headers:{"Content-Type":"application/json"}});};
+  window.fetch=async(url,options={})=>{calls.push({url,...options});const result=await intercept(url,options);if(result!==undefined)return result;return new Response(JSON.stringify(options.method==="POST"?{revision:"b".repeat(32)}:{connections:records}),{headers:{"Content-Type":"application/json"}});};
   const el=id=>window.document.getElementById("cx-"+id);
   async function settle(){for(let i=0;i<15;i++)await new Promise(done=>setImmediate(done));}
   function change(id,value){el(id).value=value;el(id).dispatchEvent(new window.Event("change",{bubbles:true}));}
@@ -41,3 +41,5 @@ test("editing a discovery connection preserves its sealed token and revision and
   ui.el("form").dispatchEvent(new ui.window.Event("submit",{cancelable:true,bubbles:true}));await ui.settle();
   const body=JSON.parse(ui.calls.find(call=>call.method==="POST").body);assert.equal(body.expected_revision,record.revision);assert.equal(Object.hasOwn(body,"token"),false);
 });
+
+test('account-setup denial clears the legacy secret form and a late connection list cannot restore private rows',async t=>{let held=false,release;const record={name:'private',connector:'slack',has_token:true,revision:'a'.repeat(32)};const ui=await fixture([record],(url,options)=>held&&!options.method?new Promise(resolve=>release=resolve):undefined);t.after(()=>ui.window.close());ui.el('token').value='synthetic-unsaved-token';held=true;ui.window.document.dispatchEvent(new ui.window.Event('lightwork:connection-saved'));await ui.settle();ui.window.document.dispatchEvent(new ui.window.Event('lightwork:connection-access-lost'));release(new Response(JSON.stringify({connections:[record]})));await ui.settle();assert.equal(ui.el('list').textContent,'');assert.equal(ui.el('token').value,'');assert.equal(ui.el('token').disabled,true);ui.el('form').dispatchEvent(new ui.window.Event('submit',{cancelable:true,bubbles:true}));await ui.settle();assert.equal(ui.calls.some(call=>call.method==='POST'),false);});

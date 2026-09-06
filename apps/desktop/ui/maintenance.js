@@ -6,6 +6,7 @@
   var recoveryAvailable = true;
   var review = null;
   var repairReview = false;
+  var identityTransition = null;
   function invoke(command, args) {
     if (!window.__TAURI__ || !window.__TAURI__.core) return Promise.reject(new Error("Open this page in Lightwork Desktop."));
     return window.__TAURI__.core.invoke(command, args);
@@ -19,6 +20,7 @@
     get("resume-maintenance").disabled = busy || !get("maintenance-incomplete").value;
     get("maintenance-logs").disabled = busy || !get("maintenance-log-point").value;
     get("back").disabled = busy;
+    get("save-identity-transition").disabled = busy || !identityTransition;
   }
   function status(text) { get("maintenance-status").textContent = text; }
   function failure(error) {
@@ -29,6 +31,8 @@
     if (busy || !configured || (!repair && !recoveryAvailable)) return;
     busy = true;
     review = null;
+    identityTransition = null;
+    get("identity-transition-notice").hidden = true; get("save-identity-transition").hidden = true;
     get("update-review").hidden = true;
     controls();
     status(repair ? "Finding a verified copy of your installed version…" : "Checking for updates…");
@@ -38,6 +42,11 @@
         if (typeof result.review !== "string" || typeof result.version !== "string") throw new Error("The update response was incomplete. Check again.");
         review = result.review;
         repairReview = result.repair === true;
+        if (result.identity_transition != null) {
+          if (repairReview || typeof result.identity_transition !== "object" || JSON.stringify(result.identity_transition).length > 65536) throw new Error("The proposed signing transition is incomplete or too large. Contact your administrator.");
+          identityTransition = result.identity_transition;
+          get("identity-transition-notice").hidden = false; get("save-identity-transition").hidden = false;
+        }
         get("update-version").textContent = (result.repair ? "Repair version " : "Install version ") + result.version;
         get("update-notes").textContent = result.notes || "No release notes were supplied.";
         get("install-update").textContent = result.repair ? "Repair and restart" : "Install and restart";
@@ -46,11 +55,17 @@
       } else {
         status(repair ? "A verified repair package for this version is not available. Contact your administrator." : "No newer version is available on your update channel.");
       }
-    } catch (error) { failure(error); }
+    } catch (error) { review = null; identityTransition = null; get("update-review").hidden = true; failure(error); }
     finally { busy = false; controls(); }
   }
   get("check-update").addEventListener("click", function () { return check(false); });
   get("repair-install").addEventListener("click", function () { return check(true); });
+  get("save-identity-transition").addEventListener("click", function () {
+    if (busy || !identityTransition) return;
+    var url = URL.createObjectURL(new Blob([JSON.stringify(identityTransition, null, 2)], { type: "application/json" }));
+    var link = document.createElement("a"); link.href = url; link.download = "lightwork-signing-transition.json"; link.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
   get("install-update").addEventListener("click", async function () {
     if (busy || !review || get("install-update").disabled) return;
     var selected = review;

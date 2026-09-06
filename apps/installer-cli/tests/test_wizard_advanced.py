@@ -89,6 +89,15 @@ def test_voice_declines_share_one_voice_table(tmp_path, monkeypatch):
     assert parsed["voice"]["auto_fetch_model"] is False
 
 
+def test_support_report_opt_out_reaches_runtime_feature_gate(tmp_path, monkeypatch):
+    from maverick import config
+    written = _write(tmp_path, monkeypatch, {"allow_support_center": False})
+    assert tomllib.loads(written)["features"]["support_center"] is False
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    assert config.get_features()["support_center"] is False
+
+
 def test_voice_local_stt_decline_writes_auto_fetch_off(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"voice_local_stt": False})
     parsed = tomllib.loads(cfg)
@@ -805,6 +814,19 @@ def test_document_access_derives_signed_audit_dependency(tmp_path, monkeypatch):
     assert parsed["incident_attachment_metadata"]["enable"] is True
 
 
+def test_vendor_reviewed_upload_choice_reaches_closed_runtime_configuration(tmp_path, monkeypatch):
+    from maverick.config import vendor_reviewed_uploads_enabled
+    from maverick.vendor_onboarding_config import VendorOnboardingSettings
+
+    for allowed in (True, False):
+        parsed = tomllib.loads(_write(tmp_path, monkeypatch, {}, security_suite={
+            "vendor_onboarding": True, "vendor_onboarding_owner": "procurement",
+            "vendor_reviewed_uploads": allowed,
+        }))
+        assert VendorOnboardingSettings.from_config(parsed).reviewed_uploads is allowed
+        assert vendor_reviewed_uploads_enabled(parsed) is allowed
+
+
 def test_anonymous_logs_writes_and_is_read(tmp_path, monkeypatch):
     """Rule-6 loop: the wizard's anonymous-mode toggle writes [privacy]
     anonymous, and the kernel reads it back as anon_enabled() -- the PII-scrub
@@ -1137,3 +1159,12 @@ def test_customer_workflow_options_share_one_valid_features_table(tmp_path, monk
     assert features["action_center"] is False
     assert features["guided_onboarding"] is False
     assert cfg.count("[features]") == 1
+
+
+def test_signing_identity_admission_is_an_explicit_installer_opt_in(tmp_path, monkeypatch):
+    enabled = _write(tmp_path, monkeypatch, {"allow_signing_identity_transition": True, "allow_workspace_recovery": True})
+    features = tomllib.loads(enabled)["features"]
+    assert features["signing_identity_transition"] is True
+    assert features["workspace_recovery"] is True
+    disabled = _write(tmp_path, monkeypatch, {"allow_signing_identity_transition": False})
+    assert tomllib.loads(disabled).get("features", {}).get("signing_identity_transition", False) is False

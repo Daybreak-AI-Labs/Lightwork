@@ -223,9 +223,15 @@ class ProjectReviews:
                     "history": [],
                 }
             )
-            if len(record["operations"]) >= 2000:
-                raise ValueError("Project membership history reached its supported limit")
             members = set(record["members"])
+            if len(record["operations"]) >= 2000:
+                if allowed:
+                    raise ValueError("Project membership history reached its supported limit")
+                if member not in members:
+                    return self._public(record)
+                # Once ordinary capacity is exhausted, grants remain closed.
+                # Each of the at most100 remaining members can be revoked once;
+                # preserve every receipt instead of pruning replay protection.
             if allowed:
                 if len(members) >= 100 and member not in members:
                     raise ValueError("A project supports at most 100 review team members")
@@ -491,7 +497,7 @@ class ProjectReviews:
                 )
             if action in {"approve", "request_changes"} and self._stale(current):
                 raise RecordConflict("Source task changed; ask its owner to send a fresh result")
-            if len(current["history"]) >= 500:
+            if action == "comment" and len(current["history"]) >= 500:
                 raise ValueError("Review history reached its supported limit")
 
             def mutate(record):

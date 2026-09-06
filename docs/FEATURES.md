@@ -9,6 +9,14 @@ here.
 > `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
 > `maverick <verb>`.
 
+- **First named local owner** — `maverick_dashboard.local_owner` and
+  `local_owner_routes` let a fresh loopback-only installation create its first
+  administrator inside Start. A salted local passphrase reopens the existing
+  signed invite session; the claim closes anonymous access before role setup.
+  Managed sign-in, existing identities, deployment invite policy, current roles,
+  and SCIM revocation remain authoritative. The installer exposes
+  `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
+
 ## Agent kernel & orchestration
 
 - **Recursive multi-agent swarm** — orchestrator decomposes a goal and spawns
@@ -33,6 +41,14 @@ here.
   guarantee for regulated deployments. Shell-driven mutations are out of
   scope (the audit trail records those commands); default off, wizard step
   under *Workspace journal*.
+- **Reviewed task-file recovery in the app** (`task_file_recovery.py`, the
+  existing `workspace.journal` plus `journal_strict` controls) — a named task
+  owner can enable capture with an administrator, review exact changes and
+  restore the latest captured local file-tool originals from the task page.
+  Encrypted originals bind the real runtime folder; stopped-task checks,
+  process leases, path protection, per-file drift checks and retained requests
+  guard review and interrupted retry. No shell or external-action rollback is
+  claimed. See [task-file recovery](task-file-recovery.md) for limits.
 - **Loop-guard suppression tier** — the long-standing repeated-identical-call
   nudge (`MAVERICK_LOOP_GUARD_THRESHOLD`) now also covers byte-identical
   *successes* (a poll loop whose output never changes is burning budget on
@@ -2078,6 +2094,14 @@ here.
   conditions have a **structured builder** (key / op / value dropdowns over a
   data-key datalist) with a raw-text advanced mode for `and`/`or`.
 
+- **Renewable named accounts** (`connection_oauth`, gated on Connections and the
+  OAuth vault) — sealed per-owner app registration and reviewed provider consent
+  in Connections for Google Drive, Google Cloud Storage discovery and Jira
+  Cloud. Server-held PKCE/state binds the current workspace, account, app and
+  connection versions; renewal preserves the reviewed generation, while a lost
+  rotating-token response requires reconnecting. Vendor/discovery adapters consume
+  the actual named records. External provider registration/consent and live
+  customer acceptance remain separate; see [account authorization](named-account-authorization.md).
 - **Named connections** (`maverick.connections`, gated on `[connections]`) —
   store a connector's base URL + API token under a name, sealed at rest with
   the tenant KMS key like the OAuth vault; a connector resolves a saved
@@ -3615,9 +3639,15 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   Capability.permits; CI `python -m maverick.capability_fuzzer` exits 1 on
   any leak. Run against the real implementation: **0 leaks in ~2000 probes**.
 - **Provider-level cost caps** (`provider_cost_cap.py`, `[budget.provider_caps]`)
-  — per-provider dollar ceilings across ALL runs per UTC day/month (the
-  Budget caps one run; this caps the provider), atomic ledger, enforce()
-  raising ProviderCapExceeded for the LLM path.
+  — provider-period capacity is reserved atomically for each physical LLM call,
+  including hedges, alongside run budgets and principal quotas. Settlement
+  uses response-local usage; crash holds never expire, unknown final charges
+  and unreadable configured accounting block admission. Local files use a
+  required-state marker; shared PostgreSQL uses transactional counters and
+  receipts with no local fallback. Prices remain estimates of external billing.
+  Global administrators can review exact receipts and isolated complete local
+  accounting repair in [Provider spending](provider-spending.md), reached from
+  Workspace recovery; no provider call is automatically retried.
 - **Supply-chain pinning** (`supply_chain.py`) — pin the deployment's Python
   dependency tree (`write_pins` → 0600 JSON), verify drift/missing/unpinned
   (`verify`/`render` PASS-FAIL), opt-in startup warning via
@@ -5102,8 +5132,12 @@ tested without spawning py-spy.
   transport requests, sealed evidence-key rotation and explicit source probes.
   See [privacy discovery setup](privacy-discovery-setup.md).
 - **Governed document intake** (`vendor_onboarding_documents`): bounded native
-  document/PDF/text evidence, citations, multiple sources, contradictory facts,
-  exact source versions and renewal differences. Live provider and customer
+  Google Docs/PDF/text evidence and reviewed local Word/Excel uploads, with
+  explicit human transcription for unreadable PDFs (no OCR). Transient previews
+  require original comparison before adding evidence; retained hashes and
+  paragraph/page/cell references distinguish extracted and user-supplied text.
+  Multiple sources, contradictory facts, exact source versions and renewal
+  differences remain governed. Live provider and customer
   acceptance remain deployment-specific. See [vendor onboarding](vendor-onboarding.md).
 - **Held GRC reconciliation** (`grc_sync`): capture the attempted payload and
   target; compare a remote record read-only; confirm a fresh exact match or
@@ -5116,6 +5150,24 @@ tested without spawning py-spy.
   signed snapshot custody/inspection, measured temporary restore and controlled
   restoration in an isolated local control plane. External/shared stores and
   encryption-key dependencies remain explicit. See [workspace recovery](workspace-recovery.md).
+- **Reviewed signing identity bridges** (`release_identity_transition`,
+  `installation_recovery`): default-off global Settings/wizard control, dual
+  updater-key proof, exact publisher/release/hash binding and separate in-app
+  administrator admission. Retained exact-pair resume survives admission expiry;
+  Windows publisher checks and accounting/replay drift refusals remain. Real
+  rotated-publisher installation acceptance is separate. See
+  [signing transitions](windows-signing-identity-transition.md).
+- **Help and diagnostic controls** (`maverick_dashboard.support_api`,
+  `support_center`): `/help` provides in-app status, troubleshooting guidance
+  and reviewed diagnostic exports. Discarded authoring-copy retirement removes
+  retained payloads while preserving their monotonic revision floor. See
+  [help and diagnostics](help-and-diagnostics.md).
+- **Provider spending recovery** (`provider_spending_recovery`): in-app
+  administrator review of unavailable accounting and unresolved reservations,
+  exact-receipt reconciliation and bounded diagnostics. Local corrupt-state
+  repair requires isolated recovery and complete reviewed authoritative totals;
+  unknown costs are not refunded automatically. See
+  [provider spending](provider-spending.md).
 - **Durable usage receipts** (`quotas`, `checkpoint`, `orchestrator`): cumulative
   atomic ledger receipts, lost-ack reconciliation, safe missing-checkpoint
   refusal and a private Billing trail. These are internal quota records, not
@@ -5125,7 +5177,11 @@ tested without spawning py-spy.
   effort/review/rework/corrections and compare current paired observations.
   Every planned case remains in the acceptance denominator. Recorded runtime
   prices, reported full costs, actual provider evidence and controlled held-out
-  acceptance remain separate. See [workflow pilots](workflow-pilots.md).
+  acceptance remain separate. Goal-only plans can explicitly exclude holdouts
+  and their child goals from supported automatic local learning paths, retain
+  prior-exposure statements, and request a different named administrator's
+  evidence-bound review. This does not verify prior or provider exposure.
+  See [workflow pilots](workflow-pilots.md).
 - **Workflow readiness** (`workflow_readiness`): an in-app inventory labels
   available/bounded workflows, live validation requirements, previews,
   experimental features, prototypes and the Windows release candidate.

@@ -83,7 +83,7 @@ jobs:
         run: |
           & $env:CUSTOMER_BUILD_PYTHON scripts/install_release_cohort.py --verify-only
           if ($LASTEXITCODE -ne 0) { throw 'The test interpreter cannot import the full release cohort.' }
-          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py apps/installer-msi/test_acceptance_diagnostics.py apps/installer-msi/test_signed_rollback_fixture.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
+          & $env:CUSTOMER_BUILD_PYTHON -m pytest -q apps/installer-msi/test_customer.py apps/installer-msi/test_customer_feed.py apps/installer-msi/test_wxs.py apps/installer-msi/test_acceptance_diagnostics.py apps/installer-msi/test_signed_rollback_fixture.py apps/installer-msi/test_native_webview_fixture.py apps/installer-msi/test_native_webview_journey.py apps/installer-msi/test_release_acceptance.py apps/installer-msi/test_release_pair_driver.py packages/maverick-core/tests/test_release_identity_transition.py packages/maverick-core/tests/test_installation_recovery.py packages/maverick-core/tests/test_installation_recovery_deployment.py packages/maverick-core/tests/test_installation_recovery_retirement.py packages/maverick-core/tests/test_installation_accounting_recovery.py packages/maverick-core/tests/test_backup_accounting_guard.py packages/maverick-core/tests/test_windows_installer_verification.py
           if ($LASTEXITCODE -ne 0) { throw 'Packaging regression tests failed.' }
           node --test apps/desktop/tests/*.test.js
           if ($LASTEXITCODE -ne 0) { throw 'Maintenance UI tests failed.' }
@@ -168,7 +168,7 @@ jobs:
           ./apps/installer-msi/test-customer.ps1 -BaseMsi "$env:GITHUB_WORKSPACE/customer-artifacts/Lightwork.msi" -CandidateMsi (Join-Path $env:RUNNER_TEMP 'upgrade-fixture.msi') -Inventory customer-artifacts/runtime-inventory.json -InstallDirectory (Join-Path $env:RUNNER_TEMP 'installed-lightwork') -Report "$env:GITHUB_WORKSPACE/customer-artifacts/acceptance.json"
       - name: Accept completed-upgrade rollback with a disposable trusted fixture publisher
         if: github.event_name != 'workflow_dispatch' || !inputs.customer_release
-        timeout-minutes: 50
+        timeout-minutes: 70
         shell: pwsh
         run: |
           & $env:CUSTOMER_BUILD_PYTHON apps/installer-msi/accept_signed_rollback_fixture.py --workspace "$env:GITHUB_WORKSPACE" --runner "$env:RUNNER_TEMP"

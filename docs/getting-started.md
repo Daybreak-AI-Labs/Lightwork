@@ -33,6 +33,31 @@ maverick init
 
 ## First run
 
+In the desktop app, open **Start → Set up named sign-in** before inviting a
+team. On a fresh local installation, the owner chooses an email label and a
+local passphrase. This closes anonymous administrator access and opens the
+existing **Users** invitation controls. The email is a local identity label;
+Lightwork does not verify that mailbox. Keep invitation links private.
+
+The owner can sign in again on this computer at `/auth/local-login`. Invitees
+use their single-use invitation and its expiring session; an administrator can
+issue a new invitation when needed. In **Workspaces**, create and select the
+workspace, then grant each colleague workspace permissions and department
+access in **Users**. Project reviewers receive only explicitly shared captured
+results; reviewing one does not authorize execution of the underlying task.
+
+First-owner setup accepts only direct loopback requests on the running
+computer, before any role assignments or managed sign-in configuration. The
+installer asks whether to allow it (`[dashboard] local_owner_setup`, default
+`true`; `MAVERICK_LOCAL_OWNER_SETUP=0` disables enrollment). Explicit deployment
+policies disabling invites or configuring managed sign-in remain authoritative.
+The private `dashboard-owner.json` claim is recovery authority: a damaged or
+incomplete claim keeps anonymous access closed, and restore cannot silently
+replace it with a different owner. Login never restores a demoted or removed
+owner's privileges.
+
+The source-install command-line workflow remains available:
+
 ```bash
 maverick init
 maverick preflight

@@ -1,11 +1,13 @@
 """Transport validation for the tenant-private vendor onboarding service."""
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from maverick.governed_records import RecordConflict
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .auth import require_permission
@@ -34,6 +36,17 @@ class RevisionBody(ClosedBody):
 class DocumentsBody(RevisionBody):
     document_ids: list[str] = Field(max_length=8)
     upload_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
+class UploadPreviewBody(RevisionBody):
+    name: str = Field(min_length=1, max_length=256)
+    mime: str = Field(min_length=1, max_length=255)
+    document_date: float = Field(gt=0)
+    content_base64: str = Field(min_length=1, max_length=22_369_624)
+    transcription: str | None = Field(default=None, max_length=120_000)
+    expires_at: float | None = None
+    review_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    confirm: Literal[True] | None = None
 
 
 class CorrectionBody(ClosedBody):
@@ -137,6 +150,40 @@ async def upload_document(request: Request, case_id: str,
 @router.post("/cases/{case_id}/review")
 def review(request: Request, case_id: str, body: ReviewBody):
     return _call(_binding(request), "review", case_id, **body.model_dump())
+
+
+async def _reviewed_upload(request, case_id, *, save):
+    binding = _binding(request)
+    chunks, length = [], 0
+    async for chunk in request.stream():
+        length += len(chunk)
+        if length > 23 * 1024 * 1024:
+            raise HTTPException(413, "Evidence upload exceeds the supported size")
+        chunks.append(chunk)
+    try:
+        body = UploadPreviewBody.model_validate_json(b"".join(chunks))
+        content = base64.b64decode(body.content_base64, validate=True)
+    except (ValidationError, ValueError, binascii.Error) as exc:
+        # Validation errors must not echo document bytes or supplied transcription.
+        raise HTTPException(422, "Check the selected file, document date and evidence review fields") from exc
+    arguments = body.model_dump(exclude={"content_base64", "expected_revision", "confirm", "review_digest"})
+    if save:
+        arguments.update(confirm=body.confirm, review_digest=body.review_digest)
+    result = await run_in_threadpool(_call, binding, "upload_reviewed" if save else "preview_upload",
+                                    case_id, body.expected_revision, content=content, **arguments)
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/cases/{case_id}/upload-preview")
+async def preview_upload(request: Request, case_id: str):
+    return await _reviewed_upload(request, case_id, save=False)
+
+
+@router.post("/cases/{case_id}/upload-reviewed")
+async def save_reviewed_upload(request: Request, case_id: str):
+    return await _reviewed_upload(request, case_id, save=True)
 
 
 @router.post("/cases/{case_id}/approve-action")

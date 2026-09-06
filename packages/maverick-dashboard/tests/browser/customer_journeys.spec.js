@@ -95,7 +95,10 @@ test('vendor PDF intake exposes source status, explicit human review, and confir
   await page.locator('#vo-upload').setInputFiles(path.resolve(__dirname,'../../../..','scripts/acceptance/fixtures/vendor-documents/northstar-policy.pdf'));
   await page.locator('#vo-document-date').fill(new Date(Date.now()-86400000).toISOString().slice(0,10));
   await page.locator('#vo-upload-submit').click();
-  await expect(page.locator('#vo-message')).toContainText('Files added');
+  await expect(page.locator('#vo-message')).toContainText('Preview ready');
+  await page.locator('#vo-upload-confirm').check();
+  await page.locator('#vo-upload-accept').click();
+  await expect(page.locator('#vo-message')).toContainText('Reviewed evidence added');
   await page.locator('#vo-collect').click();
   await expect(page.locator('#vo-message')).toContainText('Saved');
   await page.locator('#vo-assess').click();

@@ -515,6 +515,14 @@ test('historical custody reports load without file or autorun, retain explicit i
   }
 });
 
+test('recovery summary keeps failed and unsupported coverage visible outside the closed technical details',async()=>{
+  const report=custodyReport({outcome:'failed',elapsed_seconds:0.855624,unexamined_files:2,checks:[{format:'raw-v1',detected:3,verified:2,failed:1,unsupported:0},{format:'raw-v2',detected:2,verified:1,failed:0,unsupported:1}]});
+  const h=await harness(async()=>report);h.select();h.get('custody-report-load').click();await settleCustody();
+  assert.match(h.get('custody-totals').textContent,/3 recognized encrypted records verified; 1 failed; 1 unsupported/);
+  assert.match(h.get('custody-totals').textContent,/2 files were not examined/);assert.equal(h.get('custody-totals').closest('details'),null);
+  assert.equal(h.get('custody-checks').closest('details').open,false);assert.match(h.get('custody-summary').textContent,/0.9 seconds/);assert.doesNotMatch(h.get('custody-summary').textContent,/0.855624/);h.dom.window.close();
+});
+
 test('custody 503 clears sensitive file and confirmation, retains safe snapshot, and invalidates historical download', async () => {
   const h = await harness(async url => url.endsWith('/custody-test/report') ? custodyReport() : {});
   h.select(); h.get('custody-report-load').click(); await settleCustody();
@@ -547,4 +555,65 @@ test('a late custody report download is suppressed after snapshot reselection', 
   h.get('custody-report-download').click(); await settleCustody();
   h.select(); complete(new h.dom.window.Blob(['{}'])); await settleCustody();
   assert.equal(downloads, 0); assert.equal(h.get('custody-report-download').disabled, true); h.dom.window.close();
+});
+
+function transitionSummary() {
+  return { sha256: 'a'.repeat(64), from_version: '1.0.0', to_version: '1.0.1',
+    from_publisher: '<img src=x>', to_publisher: 'B'.repeat(40), from_key_sha256: 'c'.repeat(64),
+    to_key_sha256: 'd'.repeat(64), expires_at: 2000000000, publisher_os_trust_checked: false };
+}
+function chooseTransition(h, size = 20) {
+  const input = h.get('installation-transition-file'), file = new h.dom.window.File(['{"synthetic":true}'], 'bridge.json');
+  file.text = async () => '{"synthetic":true}';
+  Object.defineProperty(file, 'size', { value: size });
+  let value = 'synthetic-bridge-selection';
+  Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
+  Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
+  input.dispatchEvent(new h.dom.window.Event('change')); return file;
+}
+function confirmInstallation(h, transition = false) {
+  const id = transition ? 'installation-transition-confirm' : 'installation-confirm';
+  h.get(id).checked = true; h.get(id).dispatchEvent(new h.dom.window.Event('change'));
+}
+test('signing transition grant binds verified uploaded bytes and requires separate fresh consent', async () => {
+  const h = await harness(async url => url.endsWith('/identity-transition') ? transitionSummary() : url.endsWith('/authorize') ? { authorization: 'a'.repeat(32) + ':' + 'b'.repeat(64) } : {});
+  chooseTransition(h); confirmInstallation(h);
+  assert.equal(h.get('installation-authorize').disabled, true);
+  h.get('installation-authorize').dispatchEvent(new h.dom.window.Event('click')); await tick();
+  assert.equal(h.calls.some(call => call.url.endsWith('/authorize')), false);
+  h.get('installation-transition-review').click(); await settleCustody();
+  assert.equal(h.get('installation-authorize').disabled, true);
+  assert.equal(h.get('installation-transition-details').querySelector('img'), null);
+  assert.match(h.get('installation-transition-details').textContent, /Windows verifies each installer/);
+  confirmInstallation(h, true); h.get('installation-authorize').click(); await settleCustody();
+  const call = h.calls.find(call => call.url.endsWith('/authorize'));
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, confirm_all_workspaces: true,
+    identity_transition: '{"synthetic":true}', transition_sha256: 'a'.repeat(64), confirm_identity_transition: true });
+  assert.equal(call.init.headers['X-Lightwork-Recovery-Context'], 'account-context');
+  assert.equal(h.get('installation-transition-file').value, '');
+  assert.equal(h.get('installation-transition-confirm').checked, false); h.dom.window.close();
+});
+test('oversized bridge is not uploaded and a changed file cannot use a late transition review', async () => {
+  let complete;
+  const h = await harness(async url => url.endsWith('/identity-transition') ? new Promise(resolve => { complete = resolve; }) : {});
+  chooseTransition(h, 65537); h.get('installation-transition-review').click(); await settleCustody();
+  assert.equal(h.calls.some(call => call.url.endsWith('/identity-transition')), false);
+  assert.match(h.get('status').textContent, /64 KiB/);
+  chooseTransition(h); h.get('installation-transition-review').click(); await settleCustody();
+  chooseTransition(h); complete(transitionSummary()); await settleCustody();
+  assert.equal(h.get('installation-transition-details').textContent, '');
+  assert.equal(h.get('installation-transition-confirm').disabled, true);
+  assert.equal(h.get('installation-authorize').disabled, true); h.dom.window.close();
+});
+for (const status of [401, 403]) test(`HTML ${status} revokes bridge review before parsing and clears selected material`, async () => {
+  const h = await harness(async url => url.endsWith('/identity-transition') ? transitionSummary() : {});
+  chooseTransition(h); h.get('installation-transition-review').click(); await settleCustody();
+  confirmInstallation(h); confirmInstallation(h, true);
+  let parsed = 0;
+  h.dom.window.fetch = async () => ({ ok: false, status, json: async () => { parsed++; throw new Error('HTML denial'); } });
+  h.get('installation-authorize').click(); await settleCustody();
+  assert.equal(parsed, 0); assert.equal(h.get('installation-transition-file').value, '');
+  assert.equal(h.get('installation-transition-details').textContent, '');
+  assert.equal(h.get('installation-transition-confirm').checked, false);
+  assert.equal(h.get('installation-authorize').disabled, true); h.dom.window.close();
 });

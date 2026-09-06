@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const {JSDOM} = require('jsdom');
 const script = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/static/lightwork-outcome-pilots.js'),'utf8');
+const template = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboard/templates/outcome_pilots.html'),'utf8').replace(/{%[\s\S]*?%}/g,'').replace('{{ pilot_context }}','alice');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function report() {
   return {context:'alice',id:'OPL-test',title:'<script>bad</script>',customer:'Example',workflow:'Review',criteria:'Good evidence',revision:2,
@@ -12,7 +13,7 @@ function report() {
       source:{href:'/chat/goal/1',version:'a'.repeat(64),accepted:false,runtime_cost_usd:null}}]};
 }
 async function setup(next) {
-  const dom = new JSDOM(`<div id="outcome-pilots" data-context="alice"><p id="op-status"></p><select id="op-selected"></select><button id="op-refresh">Refresh</button><button id="op-export">Export</button><div id="op-report"></div><details id="op-plan-details"><p id="op-source-coverage"></p><form id="op-plan"><input name="title" required><input name="customer" required><textarea name="workflow" required></textarea><textarea name="criteria" required></textarea><div id="op-planned-cases"></div><button id="op-add-case" type="button">Add case</button><button type="submit">Freeze</button></form></details></div>`,{url:'https://lightwork.test',runScripts:'outside-only'});
+  const dom = new JSDOM(template,{url:'https://lightwork.test',runScripts:'outside-only'});
   const w=dom.window,d=w.document,calls=[];
   w.fetch=async(url,options)=>{
     calls.push({url,options});
@@ -74,4 +75,36 @@ test('pending save disables fields and duplicate submissions',async()=>{
   assert.equal(ui.calls.length,5);
   assert.equal(ui.d.getElementById('outcome-pilots').getAttribute('aria-busy'),'false');
   ui.dom.window.close();
+});
+
+test('protected plan sends an explicit learning mode and attributed prior-exposure statement',async()=>{
+  const ui=await setup([{context:'alice',id:'OPL-test',revision:2},{context:'alice',items:[{id:'OPL-test',title:'Pilot',cases:4}]},report()]);
+  const form=ui.d.getElementById('op-plan');
+  for(const name of ['title','customer','workflow','criteria'])form.elements[name].value='Representative pilot '+name;
+  [...ui.d.querySelectorAll('#op-planned-cases select')].forEach((select,index)=>{select.value='goal:'+(index+1);});
+  ui.d.getElementById('op-learning-mode').value='exclude_local_learning';
+  form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  assert.equal(ui.calls.length,2);assert.match(ui.d.getElementById('op-status').textContent,/prior-exposure/);
+  ui.d.getElementById('op-prior-exposure').value='Checked local source history; provider prior exposure is unverified.';
+  form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();await tick();
+  const body=JSON.parse(ui.calls[2].options.body);assert.equal(body.learning_mode,'exclude_local_learning');assert.match(body.prior_exposure_statement,/provider prior exposure/);
+  assert.equal(body.cases.length,4);ui.dom.window.close();
+});
+
+test('independent review binds exact evidence and needs a separate confirmation',async()=>{
+  const packet={...report(),learning_policy:{prior_exposure_statement:'Local inputs checked; external training unknown.',automatic_local_exclusion_enforced:true,evidence_version:'c'.repeat(64)}};
+  const ui=await setup([packet,{context:'alice',id:'OPL-test',revision:3}]);
+  ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
+  const form=ui.d.querySelector('#op-independent-report form');form.querySelector('textarea').value='Independent policy receipts and their limits checked.';
+  form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();assert.equal(ui.calls.length,3);
+  form.querySelector('input[type="checkbox"]').checked=true;form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  const body=JSON.parse(ui.calls[3].options.body);assert.equal(body.confirm,true);assert.equal(body.evidence_version,'c'.repeat(64));assert.equal(body.expected_revision,2);
+  assert.match(ui.calls[3].url,/independent-review\/OPL-test$/);ui.dom.window.close();
+});
+
+test('HTML access loss during independent review clears private report, prepared inputs and picker labels',async()=>{
+  const ui=await setup([report(),()=>({ok:false,status:403,json:async()=>{throw new SyntaxError('HTML');}})]);await open(ui);
+  ui.d.getElementById('op-prior-exposure').value='Private trial notes';ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
+  assert.equal(ui.d.getElementById('op-report').textContent,'');assert.equal(ui.d.getElementById('op-prior-exposure').value,'');assert.equal(ui.d.getElementById('op-selected').options.length,0);
+  assert.equal(ui.d.getElementById('op-review-load').disabled,true);ui.dom.window.close();
 });
