@@ -1340,21 +1340,23 @@ def _accounting_file(relative: str, path: Path) -> bool:
     if name.endswith(".lock"):
         return False
     return (
-        bool({"usage", "llm_gateway_team_budget", "mcp_sidecar"}.intersection(lowered[:-1]))
+        # Claims and completed/unconfirmed external-action records are replay
+        # authority: a valid older JSON record (or its absence) can permit the
+        # same action again. Cover workspace and whole-home paths.
+        bool({"usage", "llm_gateway_team_budget", "mcp_sidecar", "grc_sync_outbound",
+              "grc_outbound_sync_states", "grc_outbound_sync_events", "vendor_onboarding",
+              "discovery_containment_actions"}.intersection(lowered[:-1]))
         or name in {"provider_spend.json", "tenant_registry.json"}
         or name.startswith("budget_receipts.")
     )
 
 
-def assert_accounting_unchanged(tarball: str | Path) -> None:
-    """Refuse automated live recovery that could rewind spend or reservations.
+def compare_backup(tarball: str | Path) -> dict[str, Any]:
+    """Compare authenticated payload metadata with consistent live file copies.
 
-    Call within the selected recovery scope after stopping normal work, before
-    writing a live restore or replacing application binaries. Both sides use
-    the same online SQLite snapshot representation, so WAL checkpointing alone
-    is not drift. All databases are protected conservatively: an older binary
-    cannot safely interpret or merge newer accounting/checkpoint schemas.
-    Snapshot creation, export and isolated drills do not invoke this guard.
+    This is evidence, never a restore authorization or a semantic/schema merge.
+    No file payloads are returned. Live copies are individually consistent;
+    callers must separately establish quiescence for any subsequent mutation.
     """
     with _verified_archive(tarball) as stream:
         manifest, _ = _read_manifest_stream(stream, allow_unsigned=False)
@@ -1374,22 +1376,42 @@ def assert_accounting_unchanged(tarball: str | Path) -> None:
                 name for name in live
                 if _accounting_file(name, current / Path(*PurePosixPath(name).parts))
             }
-            changed = sorted(name for name in protected if expected.get(name) != (
-                (live[name]["sha256"], live[name]["size"]) if name in live else None
-            ))
-            if changed:
-                raise BackupError(
-                    "Automatic restore is unavailable because spending, reservations, budget controls "
-                    "or database state differs from the selected snapshot. Administrator accounting "
-                    "reconciliation is required before restoring; newer records must not be erased "
-                    "or passed to an older incompatible reader. Retain the current accounting "
-                    "and export the snapshot for administrator review. Protected files: " + ", ".join(changed[:5])
-                )
+            archived = {name: {"sha256": digest, "size": size}
+                        for name, (digest, size) in expected.items()}
+            changes = [{"path": name, "change": "added" if name not in archived else "deleted" if name not in live else "changed",
+                        "protected": name in protected, "snapshot": archived.get(name), "current": live.get(name)}
+                       for name in sorted(set(archived) | set(live)) if archived.get(name) != live.get(name)]
+            return {"items": changes, "total_changes": len(changes),
+                    "protected_changes": sum(row["protected"] for row in changes),
+                    "protected_file_count": len(protected), "snapshot_file_count": len(archived), "live_file_count": len(live),
+                    "snapshot_state_sha256": hashlib.sha256(json.dumps(archived, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                    "live_state_sha256": hashlib.sha256(json.dumps(live, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+
+
+def assert_accounting_unchanged(tarball: str | Path) -> None:
+    """Refuse recovery that could rewind spending or protected action history.
+
+    Call under the recovery scope after stopping normal work, before replacing
+    live files or application binaries. Comparison evidence cannot waive this.
+    """
+    comparison = compare_backup(tarball)
+    changed = [row["path"] for row in comparison["items"] if row["protected"]]
+    if changed:
+        raise BackupError(
+            "Automatic restore is unavailable because spending, reservations, budget controls, "
+            "database state or external-action history differs from the selected snapshot. "
+            "Administrator accounting and external-action reconciliation is required before "
+            "restoring; newer records must not be erased or passed to an older incompatible "
+            "reader, and completed or unconfirmed actions must not be repeated. "
+            "Retain the current accounting and action history, and "
+            "export the snapshot for administrator review. Protected files: " + ", ".join(changed[:5])
+        )
 
 
 __all__ = [
     "BackupError",
     "assert_accounting_unchanged",
+    "compare_backup",
     "create_backup",
     "restore_backup",
     "read_manifest",

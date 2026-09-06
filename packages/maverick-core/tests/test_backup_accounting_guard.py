@@ -78,6 +78,43 @@ def test_unchanged_accounting_allows_non_database_documents_and_lock_file_change
     assert (root / "document.txt").read_text() == "after"
 
 
+def test_comparison_reports_complete_metadata_without_changing_or_exposing_payloads(recovery):
+    root, archive = recovery
+    file_lock.ensure_private_directory(root / "usage")
+    file_lock.atomic_write_text(root / "usage" / "ledger.json", "prior accounting payload")
+    file_lock.atomic_write_text(root / "deleted.txt", "prior document payload")
+    _database(root / "custom.lock", "prior database payload")
+    backup.create_backup(archive)
+    file_lock.atomic_write_text(root / "usage" / "ledger.json", "current accounting payload")
+    (root / "deleted.txt").unlink()
+    file_lock.atomic_write_text(root / "added.txt", "current document payload")
+    _database(root / "custom.lock", "current database payload")
+    result = backup.compare_backup(archive)
+    rows = {row["path"]: row for row in result["items"]}
+    assert result["total_changes"] == 4 and result["protected_changes"] == 2
+    assert rows["usage/ledger.json"]["change"] == "changed"
+    assert rows["usage/ledger.json"]["protected"] is True
+    assert rows["custom.lock"]["protected"] is True
+    assert rows["deleted.txt"]["current"] is None
+    assert rows["added.txt"]["snapshot"] is None
+    assert all(set(row["current"] or row["snapshot"]) == {"sha256", "size"} for row in rows.values())
+    assert "payload" not in str(result)
+    assert (root / "usage" / "ledger.json").read_text() == "current accounting payload"
+    with pytest.raises(backup.BackupError, match="reconciliation"):
+        backup.assert_accounting_unchanged(archive)
+
+
+def test_comparison_fingerprint_includes_a_file_named_authentication(recovery):
+    root, archive = recovery
+    file_lock.atomic_write_text(root / "authentication", "one")
+    backup.create_backup(archive)
+    before = backup.compare_backup(archive)
+    file_lock.atomic_write_text(root / "authentication", "two")
+    after = backup.compare_backup(archive)
+    assert before["snapshot_state_sha256"] == after["snapshot_state_sha256"]
+    assert before["live_state_sha256"] != after["live_state_sha256"]
+
+
 def test_sqlite_wal_checkpoint_without_logical_changes_does_not_block(recovery):
     root, archive = recovery
     connection = sqlite3.connect(root / "custom.store")

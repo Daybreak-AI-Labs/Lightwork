@@ -23,6 +23,20 @@ administrator navigation.
    checks hashes and sizes, and runs SQLite integrity checks. It reports
    elapsed time and leaves the live workspace unchanged.
 
+The latest successful temporary restore test for each snapshot is retained as
+a signed report. After reloading the page, select that snapshot and view or
+download its saved test result. The report records the exact archive, workspace,
+operator, application build, time, restored file count and elapsed duration.
+Running a new drill replaces that snapshot's previous local result; download a
+copy first if your retention policy requires it. Retiring the snapshot also
+removes its local drill report.
+
+A saved result describes the archive and build tested at that time. The app
+shows when the current build differs. Later workspace changes do not rewrite
+the historical timestamp or prove current readiness. File and SQLite checks
+do not establish decryption of every application record, a consistent business
+state across files, external recovery, or permission to replace live state.
+
 Imports are limited to 256 MiB compressed, 1 GiB expanded and 100,000 archive
 members. Symlinks, junctions, hardlinks, unsafe paths, duplicate members and
 inconsistent payloads are refused. At most 200 local archives are retained.
@@ -53,7 +67,8 @@ files. Changes since the safety snapshot invalidate the review. Concurrent or
 repeated requests cannot reuse it.
 
 Automatic restore is refused if spending, in-flight holds, provider/team/MCP
-budgets, signed budget receipt sidecars, tenant controls or any SQLite database
+budgets, signed budget receipt sidecars, tenant controls, protected external-action
+history or any SQLite database
 differs from the selected snapshot. The comparison catches new and removed
 files as well as changed contents. It uses consistent SQLite snapshots, but
 deliberately also blocks unrelated database changes: it does not guess which
@@ -63,6 +78,38 @@ schema bypass or automatic merging of newer ledgers. Export and temporary
 restore drills remain available for that review. Refusal during preparation
 creates no restore review or extra safety snapshot and leaves current state
 intact; a later refusal preserves the existing review and evidence.
+
+The external-action guard covers the proven local stores `grc_sync_outbound`,
+`grc_outbound_sync_states`, `grc_outbound_sync_events`, `vendor_onboarding`
+and `discovery_containment_actions`. These records prevent repeated deliveries,
+ticket creation and containment operations after successful or uncertain results.
+The guard does not discover every plugin or custom store's action authority.
+Unknown formats or lost current authority require a reviewed recovery contract
+and external reconciliation; a matching comparison is not universal restore clearance.
+
+Before deciding how to recover, select **Compare with current workspace**.
+The app verifies the entire selected archive and compares its file metadata
+with current files, including consistent individual SQLite copies. The report
+lists added, changed and deleted files, identifies changes covered by the
+accounting, external-action and database guard, and includes every page of differences. It shows
+file names, sizes and fingerprints; it does not disclose file contents.
+
+Download the signed comparison to retain the evidence with your recovery
+review. The app keeps only the latest comparison for each saved snapshot;
+comparing again replaces that snapshot's previous report. Reports are bound to
+the exact snapshot, workspace, signed-in administrator and application build.
+A replaced report, changed snapshot or different account/build requires a new
+comparison. Retiring a snapshot also removes its local comparison.
+
+This is a captured observation. Current files can change after capture, and a
+download retains the original timestamp and fingerprints. Neither unchanged
+files nor a signed report establish business invariants, compatible storage
+schemas, provider charges or the outcome of external actions. Comparison
+never approves a restore, clears a recovery block, resets budgets or merges
+old and new records. The existing isolated preparation and execution checks
+remain required. Unknown or lost authority requires verified reconciliation;
+safe automatic reconciliation of mixed user data and execution authority is
+still outside this candidate's supported restore path.
 
 Restore saves originals in a private authenticated transaction journal and
 checks restored files before committing. Failed checks roll back the file set;
@@ -95,13 +142,13 @@ acceptance remain separate Windows release gates. Signing-key or publisher
 certificate rotation and remote stores or independently managed workers require
 a coordinated recovery procedure and are not supported by this local path.
 
-The same accounting/database guard applies before preparing a completed-upgrade
+The same accounting, external-action and database guard applies before preparing a completed-upgrade
 rollback and again before any installer executes. A preparation refusal does
 not create a startup block, so the current application remains usable. If
-accounting changes after installation recovery was prepared, no MSI runs and
+protected state changes after installation recovery was prepared, no MSI runs and
 the existing recovery block remains. That interruption requires administrator
 reconciliation; this candidate does not automatically roll back a release after
-protected accounting or database state changes.
+protected accounting, external-action or database state changes.
 
 At most 20 usable installation points are retained. In **Workspace recovery**,
 open **Retire an unused authorization or obsolete recovery point**, select an

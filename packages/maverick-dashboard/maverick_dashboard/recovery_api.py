@@ -74,6 +74,20 @@ class InstallationIn(ConfirmIn):
     rollback_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
+class CompareStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    report_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
+class ComparisonIn(ReportIn):
+    offset: int = Field(default=0, ge=0, le=backup.MAX_ARCHIVE_MEMBERS * 2, strict=True)
+    limit: int = Field(default=50, ge=1, le=100, strict=True)
+
+
 @router.get("/api/v1/recovery/installation")
 async def installation_status(request: Request):
     _admit(request)
@@ -188,11 +202,51 @@ async def download_snapshot(request: Request, identifier: str):
     return FileResponse(path, media_type="application/gzip", filename="Lightwork-snapshot-" + identifier + ".tgz", headers={"Cache-Control": "private, no-store"})
 
 
+@router.post("/api/v1/recovery/snapshots/{identifier}/compare")
+async def compare_snapshot(request: Request, identifier: str, body: CompareStartIn):
+    actor = _admit(request, mutation=True)
+    result = await _call(recovery.compare_snapshot, identifier, actor=actor, isolated=isolated(request.app))
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/comparison")
+async def comparison_page(request: Request, identifier: str, body: ComparisonIn):
+    actor = _admit(request, mutation=True)
+    result = await _call(recovery.comparison_page, identifier, body.report_id, actor=actor, offset=body.offset, limit=body.limit)
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/comparison/download")
+async def download_comparison(request: Request, identifier: str, body: ReportIn):
+    actor = _admit(request, mutation=True)
+    payload = await _call(recovery.export_comparison, identifier, body.report_id, actor=actor)
+    return Response(payload, media_type="application/json", headers={
+        "Content-Disposition": 'attachment; filename="Lightwork-recovery-comparison-' + identifier + '.json"',
+        "Cache-Control": "private, no-store"})
+
+
 @router.post("/api/v1/recovery/snapshots/{identifier}/drill")
 async def drill_snapshot(request: Request, identifier: str, body: ConfirmIn):
-    _admit(request, mutation=True)
+    actor = _admit(request, mutation=True)
     _confirm(body)
-    return await _call(recovery.drill, identifier)
+    result = await _call(recovery.drill, identifier, actor=actor)
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/drill/report")
+async def saved_drill_report(request: Request, identifier: str, body: CompareStartIn):
+    actor = _admit(request, mutation=True)
+    result = await _call(recovery.drill_report, identifier, actor=actor)
+    return Response(json.dumps(result), media_type="application/json", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/drill/report/download")
+async def download_drill_report(request: Request, identifier: str, body: ReportIn):
+    actor = _admit(request, mutation=True)
+    payload = await _call(recovery.export_drill_report, identifier, body.report_id, actor=actor)
+    return Response(payload, media_type="application/json", headers={
+        "Content-Disposition": 'attachment; filename="Lightwork-restore-drill-' + identifier + '.json"',
+        "Cache-Control": "private, no-store"})
 
 
 @router.post("/api/v1/recovery/snapshots/{identifier}/retire")

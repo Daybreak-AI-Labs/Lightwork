@@ -38,6 +38,76 @@ test('consent picker reviews exact prior versions and prepares an unsaved next v
   expect(published).toBe(0);await fits(page);
 });
 
+test('explicit consent publication resolves through an enrolled public client, rejects stale withdrawal and preserves history',async({page,request},info)=>{
+  const API='/api/v1/consent/publishing',origin='https://browser-publish.example.test',notice='a'.repeat(64),property='browser-publish-web';
+  await ok(await request.put(API+'/properties/'+property,{data:{kind:'web',consent_group_id:'browser-publish-group',expected_revision:0,
+    idempotency_key:'browser-publish-property',web_domains:['browser-publish.example.test'],origin_allowlist:[origin]}}));
+  async function version(resource,data){return ok(await request.post(API+'/'+resource+'/versions',{data:{version:1,expected_current_version:0,
+    idempotency_key:'browser-publish-'+resource.replaceAll('/','-'),...data}}));}
+  await version('purposes/browser-publish-analytics',{title_key:'purpose.title',description_key:'purpose.description',lawful_basis:'consent',required:false,default_choice:'denied'});
+  await version('notices/browser-publish-notice',{title_key:'notice.title',body_key:'notice.body',document_sha256:notice});
+  await version('translations/browser-publish-copy/en-US',{messages:{'purpose.title':'Synthetic analytics','purpose.description':'Measure synthetic service performance',
+    'notice.title':'Synthetic privacy notice','notice.body':'Choose whether this fixture may use analytics.','template.title':'Synthetic privacy choices',
+    'template.body':'Control this local test configuration.','action.accept':'Accept all','action.reject':'Reject all','action.manage':'Manage preferences',
+    'action.save':'Save choices','brand.display_name':'Synthetic fixture','brand.heading':'Synthetic privacy','brand.description':'Local browser acceptance only.'}});
+  await version('themes/browser-publish-brand',{display_name_key:'brand.display_name',heading_key:'brand.heading',description_key:'brand.description',
+    primary_color:'174b3f',primary_text_color:'ffffff',surface_color:'ffffff',text_color:'16211d'});
+  await version('templates/browser-publish-banner',{surface:'banner',title_key:'template.title',body_key:'template.body',theme_token_id:'browser-publish-brand',theme_token_version:1,
+    actions:{accept_all:'action.accept',reject_all:'action.reject',manage_preferences:'action.manage',save_preferences:'action.save'}});
+  await version('rule-groups/browser-publish-rules',{rules:[{rule_id:'global',priority:1,locales:['en-US'],default_locale:'en-US',consent_mode:'opt_in',
+    purposes:[{id:'browser-publish-analytics',version:1}],notice:{id:'browser-publish-notice',version:1},template:{id:'browser-publish-banner',version:1},
+    translation_catalog_id:'browser-publish-copy',translation_versions:{'en-US':1}}]});
+  await ok(await request.post('/api/v1/consent/policies',{data:{policy_id:'browser-publish-policy',version:1,
+    purposes:{'browser-publish-analytics':'consent'},notice_sha256:notice,effective_at:Date.now()/1000-60}}));
+  await page.setViewportSize({width:375,height:900});await page.goto('/consent/publishing');
+  const promotion=page.locator('#cpp-promotion');
+  async function selectProperty(form){
+    const picker=form.locator('.cpp-picker').filter({has:page.getByText('Find a saved website or app',{exact:true})});
+    await picker.locator('summary').first().click();await picker.getByRole('searchbox').fill(property);await picker.getByRole('searchbox').press('Enter');
+    await expect(picker.getByRole('status')).toContainText('1 matching');
+    await picker.getByRole('listbox',{name:'Matching saved records'}).selectOption({index:0});
+    await picker.getByRole('button',{name:'Use selected property',exact:true}).click();
+  }
+  await selectProperty(promotion);
+  const rulePicker=promotion.locator('.cpp-picker').filter({has:page.getByText('Choose a saved rule group and version',{exact:true})});
+  await rulePicker.locator('summary').first().click();await rulePicker.getByRole('searchbox').fill('browser-publish-rules');await rulePicker.getByRole('searchbox').press('Enter');
+  await expect(rulePicker.getByRole('status')).toContainText('1 matching');await rulePicker.getByRole('listbox',{name:'Matching saved records'}).selectOption({index:0});
+  await rulePicker.getByRole('combobox',{name:'Saved version'}).selectOption({label:'Version 1 · latest'});
+  await rulePicker.getByRole('button',{name:'Use selected version',exact:true}).click();
+  await promotion.locator('[name="idempotency_key"]').fill('browser-explicit-publication');
+  let publishes=0;page.on('request',req=>{if(req.url().endsWith('/publish'))publishes++;});
+  await promotion.getByRole('button',{name:'Preview exact bundle',exact:true}).click();
+  await expect(page.locator('#cpp-status')).toHaveText('Exact unpublished bundle previewed.');
+  const preview=JSON.parse(await page.locator('#cpp-result').textContent());expect(preview.bundle_sha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(publishes).toBe(0);expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(0);
+  await promotion.getByRole('button',{name:'Publish',exact:true}).click();await expect(page.locator('#cpp-status')).toHaveText('Publication promoted.');
+  const published=JSON.parse(await page.locator('#cpp-result').textContent());expect(publishes).toBe(1);expect(published.bundle_sha256).toBe(preview.bundle_sha256);
+  const enrolled=await ok(await request.post('/api/v1/consent/public-clients',{data:{property_id:property,client_kind:'browser',browser_origin:origin,
+    jurisdiction:'global',country_code:'US',region_code:'',default_locale:'en-US',rule_group_id:'browser-publish-rules',rule_group_version:1,
+    policy_id:'browser-publish-policy',policy_version:1}}));
+  const publicHeaders={Origin:origin,Authorization:'ConsentPublic '+enrolled.client_credential};
+  expect((await request.get('/api/v1/public/consent/configuration')).status()).toBe(401);
+  expect((await request.get('/api/v1/public/consent/configuration',{headers:{...publicHeaders,Origin:'https://other.example.test'}})).status()).toBe(401);
+  const resolved=await ok(await request.get('/api/v1/public/consent/configuration',{headers:publicHeaders}));
+  expect(resolved.allowed).toBe(true);expect(resolved.publication.publication_id).toBe(published.publication_id);
+  expect(resolved.policy_id).toBe('browser-publish-policy');
+  await promotion.getByRole('button',{name:'Load history',exact:true}).click();await expect(page.locator('#cpp-status')).toHaveText('Immutable publication history loaded.');
+  expect(JSON.parse(await page.locator('#cpp-result').textContent()).items).toHaveLength(1);
+  const withdrawal=page.locator('#cpp-withdraw');await selectProperty(withdrawal);
+  await withdrawal.locator('[name="expected_publication_revision"]').fill('0');await withdrawal.locator('[name="idempotency_key"]').fill('browser-stale-withdrawal');
+  await page.locator('#cpp-withdraw-confirm').check();const rejected=page.waitForResponse(response=>response.url().endsWith('/withdraw'));
+  await withdrawal.getByRole('button',{name:'Withdraw active publication',exact:true}).click();expect((await rejected).status()).toBe(409);
+  await expect(page.locator('#cpp-status')).toContainText('revision');await expect(withdrawal.locator('[name="expected_publication_revision"]')).toHaveValue('0');
+  expect((await ok(await request.get(API+'/properties/'+property+'/history'))).items).toHaveLength(1);
+  await withdrawal.locator('[name="expected_publication_revision"]').fill('1');await withdrawal.locator('[name="idempotency_key"]').fill('browser-confirmed-withdrawal');
+  await page.locator('#cpp-withdraw-confirm').uncheck();await page.locator('#cpp-withdraw-confirm').check();
+  await withdrawal.getByRole('button',{name:'Withdraw active publication',exact:true}).click();await expect(page.locator('#cpp-status')).toContainText('Active publication withdrawn');
+  const withdrawn=JSON.parse(await page.locator('#cpp-result').textContent());expect(withdrawn.action).toBe('withdraw');expect(withdrawn.source_publication_id).toBe(published.publication_id);
+  expect((await request.get('/api/v1/public/consent/configuration',{headers:publicHeaders})).status()).toBe(409);
+  const history=await ok(await request.get(API+'/properties/'+property+'/history'));expect(history.items.map(item=>item.action)).toEqual(['withdraw','publish']);
+  await page.locator('#cpp-status').scrollIntoViewIfNeeded();await info.attach('consent-published-and-withdrawn',{body:await page.screenshot(),contentType:'image/png'});await fits(page);
+});
+
 test('a failed recovery save retries the exact operation and survives a page reload',async({page})=>{
   await page.goto('/workflow-builder');const recovery=page.locator('.draft-recovery');
   await expect(recovery).toContainText('Draft recovery is ready');
@@ -75,7 +145,7 @@ test('real field validation marks the rejected input and preserves the other enr
   await page.setViewportSize({width:320,height:800});await fits(page);
 });
 
-test('workspace recovery creates a real local snapshot, downloads it and drills without live restore',async({page})=>{
+test('workspace recovery creates a real local snapshot and retains signed temporary restore evidence after reload',async({page},info)=>{
   await page.setViewportSize({width:375,height:812});await page.goto('/workspace/recovery');
   await expect(page.locator('#wrec-key-create')).toBeEnabled();
   const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();
@@ -87,7 +157,94 @@ test('workspace recovery creates a real local snapshot, downloads it and drills 
   expect((await archive).suggestedFilename()).toMatch(/^Lightwork-snapshot-.+\.tgz$/);
   await page.locator('#wrec-drill').click();await expect(page.locator('#wrec-status')).toContainText('Local restore test passed');
   await expect(page.locator('#wrec-result')).toContainText('Your live workspace was not changed');
+  const snapshot=await page.locator('#wrec-snapshot').inputValue();
+  let reportLoads=0;page.on('request',r=>{if(r.url().endsWith('/drill/report'))reportLoads++;});
+  await page.reload();await expect(page.locator('#wrec-snapshot')).toBeEnabled();
+  await page.locator('#wrec-snapshot').selectOption(snapshot);
+  expect(reportLoads).toBe(0);await expect(page.locator('#wrec-drill-report-download')).toBeDisabled();
+  await page.locator('#wrec-drill-report-load').click();await expect(page.locator('#wrec-drill-report')).toBeVisible();
+  await expect(page.locator('#wrec-drill-report-build')).toContainText('tested application build matches');
+  await expect(page.locator('#wrec-drill-report-summary')).toContainText('old when tested');
+  const saved=page.waitForEvent('download');await page.locator('#wrec-drill-report-download').click();
+  const download=await saved;expect(download.suggestedFilename()).toMatch(/^Lightwork-restore-test-[a-f0-9]{32}\.json$/);
+  const report=JSON.parse(require('node:fs').readFileSync(await download.path(),'utf8'));
+  expect(report.authentication).toBeTruthy();expect(report.snapshot).toBe(snapshot);
+  expect(report.restored).toBe(true);expect(report.post_restore_verified).toBe(true);expect(report.restore_authorized).toBe(false);
+  expect(report.live_workspace_changed).toBe(false);expect(report.external_stores_tested).toBe(false);
+  expect(report.file_count).toBeGreaterThan(0);expect(report.archive_sha256).toMatch(/^[a-f0-9]{64}$/);
+  await page.setViewportSize({width:320,height:1000});await page.locator('#wrec-drill-report-load').scrollIntoViewIfNeeded();
+  const widths=await page.locator('#wrec-drill-report').evaluate(el=>({client:el.clientWidth,scroll:el.scrollWidth}));
+  expect(widths.scroll).toBeLessThanOrEqual(widths.client+1);
+  await info.attach('recovery-retained-restore-test-320',{body:await page.screenshot(),contentType:'image/png'});
+  const interrupted=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Synthetic retained report interruption'})});
+  await page.route('**/api/v1/recovery/snapshots/*/drill/report',interrupted);
+  await page.locator('#wrec-drill-report-load').click();await expect(page.locator('#wrec-status')).toContainText('retained report interruption');
+  await expect(page.locator('#wrec-drill-report')).toBeHidden();await expect(page.locator('#wrec-snapshot')).toHaveValue(snapshot);
+  await page.unroute('**/api/v1/recovery/snapshots/*/drill/report',interrupted);
+  await page.locator('#wrec-drill-report-load').click();await expect(page.locator('#wrec-drill-report')).toBeVisible();
+  await page.route('**/api/v1/recovery/snapshots/*/drill/report/download',route=>route.fulfill({status:403,contentType:'text/html',body:'<p>Synthetic permission expiry</p>'}));
+  await page.locator('#wrec-drill-report-download').click();await expect(page.locator('#wrec-status')).toContainText('reload this page');
+  await expect(page.locator('#wrec-drill-report-summary')).toBeEmpty();await expect(page.locator('#wrec-identity')).toBeEmpty();
+  await expect(page.locator('#wrec-drill-report-download')).toBeDisabled();await expect(page.locator('#wrec-drill-report-load')).toBeDisabled();
   await expect(page.locator('#wrec-prepare')).toBeDisabled();await fits(page);
+});
+
+test('recovery comparison pages real protected differences, downloads captured evidence and clears interrupted or expired access',async({page,request},info)=>{
+  test.setTimeout(60000);
+  await page.goto('/flows/designer');
+  const draftContext=await page.locator('meta[name="lightwork-draft-context"]').getAttribute('content');
+  expect(draftContext).toBeTruthy();
+  await page.setViewportSize({width:320,height:900});await page.goto('/workspace/recovery');
+  await expect(page.locator('#wrec-status')).toContainText('Review coverage');
+  if(await page.locator('#wrec-key-create').isEnabled()){
+    const key=page.waitForEvent('download');await page.locator('#wrec-key-create').click();await key;
+  }
+  await expect(page.locator('#wrec-create')).toBeEnabled();await page.locator('#wrec-create').click();
+  await expect(page.locator('#wrec-status')).toContainText('Snapshot created and verified');
+  const snapshot=await page.locator('#wrec-snapshot').inputValue();
+  for(let index=0;index<55;index++){
+    const slot=require('node:crypto').createHash('sha256').update('recovery-comparison-fixture-'+index).digest('hex');
+    const response=await request.put('/api/v1/drafts/'+slot,{headers:{'X-Lightwork-Draft-Context':draftContext},data:{
+      expected_revision:0,operation_id:'browser-comparison-operation-'+index,payload:{brief:'Synthetic comparison draft body '+index}
+    }});
+    expect(response.status()).toBe(200);
+  }
+  expect((await request.post('/api/v1/facts',{data:{key:'browser_recovery_comparison',value:'Synthetic database content must not enter the report'}})).status()).toBe(204);
+  let restoreRequests=0;page.on('request',req=>{if(/\/recovery\/(restore|.*\/prepare|installation\/authorize)$/.test(new URL(req.url()).pathname))restoreRequests++;});
+  await page.locator('#wrec-compare').press('Enter');
+  await expect(page.locator('#wrec-comparison-report')).toBeVisible();
+  await expect(page.locator('#wrec-comparison-items > li')).toHaveCount(50);
+  await expect(page.locator('#wrec-comparison-next')).toBeEnabled();
+  await expect(page.locator('#wrec-prepare')).toBeDisabled();
+  expect(await page.locator('#wrec-comparison-report').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBeTruthy();await fits(page);
+  await page.locator('#wrec-comparison-summary').scrollIntoViewIfNeeded();
+  await info.attach('recovery-captured-comparison-320',{body:await page.screenshot(),contentType:'image/png'});
+  await page.locator('#wrec-comparison-next').click();
+  await expect(page.locator('#wrec-comparison-previous')).toBeEnabled();
+  const downloading=page.waitForEvent('download');await page.locator('#wrec-comparison-download').click();
+  const download=await downloading;expect(download.suggestedFilename()).toMatch(/^Lightwork-recovery-comparison-.+\.json$/);
+  const report=JSON.parse(await require('node:fs/promises').readFile(await download.path(),'utf8'));
+  expect(report.total_changes).toBeGreaterThan(50);expect(report.protected_changes).toBeGreaterThan(0);
+  expect(report.items.some(item=>item.protected&&item.path.endsWith('world.db'))).toBeTruthy();
+  expect(report.authentication).toBeTruthy();expect(report.restore_authorized).toBe(false);expect(report.snapshot.id).toBe(snapshot);
+  expect(JSON.stringify(report)).not.toContain('Synthetic database content must not enter the report');
+  expect(JSON.stringify(report)).not.toContain('Synthetic comparison draft body');
+  const interrupted=route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Synthetic comparison storage interruption'})});
+  await page.getByText('Use an existing recovery key',{exact:true}).click();
+  await page.locator('#wrec-key-input').fill('Synthetic pending recovery key');
+  await page.route('**/api/v1/recovery/snapshots/*/comparison',interrupted);
+  await page.locator('#wrec-comparison-previous').click();
+  await expect(page.locator('#wrec-status')).toContainText('Synthetic comparison storage interruption');
+  await expect(page.locator('#wrec-key-input')).toHaveValue('Synthetic pending recovery key');
+  await expect(page.locator('#wrec-snapshot')).toHaveValue(snapshot);
+  await expect(page.locator('#wrec-comparison-report')).toBeHidden();await expect(page.locator('#wrec-comparison-download')).toBeDisabled();
+  await page.unroute('**/api/v1/recovery/snapshots/*/comparison',interrupted);
+  await page.locator('#wrec-compare').click();await expect(page.locator('#wrec-comparison-report')).toBeVisible();
+  await page.route('**/api/v1/recovery/snapshots/*/comparison',route=>route.fulfill({status:401,contentType:'text/html',body:'<p>Synthetic expired sign-in</p>'}));
+  await page.locator('#wrec-comparison-next').click();await expect(page.locator('#wrec-status')).toContainText('reload');
+  await expect(page.locator('#wrec-key-input')).toHaveValue('');await expect(page.locator('#wrec-comparison-items')).toBeEmpty();
+  await expect(page.locator('#wrec-identity')).toBeEmpty();await expect(page.locator('#wrec-compare')).toBeDisabled();
+  expect(restoreRequests).toBe(0);await fits(page);
 });
 
 test('pilot preparation freezes four unrun tasks and preserves an observation after failed save',async({page},info)=>{

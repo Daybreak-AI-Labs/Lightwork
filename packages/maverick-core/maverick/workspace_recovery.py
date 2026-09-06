@@ -26,6 +26,7 @@ from .paths import current_tenant_id_strict, data_dir
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
 MAX_SNAPSHOTS = 200
+MAX_COMPARISON_BYTES = 64 * 1024 * 1024
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -245,6 +246,86 @@ def inspect(identifier: str) -> dict:
         return _inspect(identifier)
 
 
+def _comparison_path(identifier: str) -> Path:
+    _archive(identifier)  # Validate the server-resolved snapshot identity.
+    return _store() / (identifier + ".comparison.json")
+
+
+def _comparison_page(report: dict, *, offset: int, limit: int) -> dict:
+    if type(offset) is not int or not 0 <= offset <= backup.MAX_ARCHIVE_MEMBERS * 2 or type(limit) is not int or not 1 <= limit <= 100:
+        raise RecoveryError("The comparison page is outside the supported bounds.")
+    return {**{key: value for key, value in report.items() if key not in {"items", "authentication", "actor"}},
+            "items": report["items"][offset:offset + limit], "offset": offset, "limit": limit,
+            "has_more": offset + limit < report["total_changes"]}
+
+
+def compare_snapshot(identifier: str, *, actor: str, isolated: bool) -> dict:
+    """Keep the latest signed comparison per snapshot; never change live state."""
+    if not actor:
+        raise RecoveryError("A current administrator identity is required for comparison.")
+    with _locked():
+        selected = _inspect(identifier)
+        with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
+            comparison = backup.compare_backup(_archive(identifier))
+        if backup._sha256(_archive(identifier)) != selected["sha256"]:
+            raise RecoveryError("The snapshot changed during comparison. Verify it again.")
+        report = {"schema": 1, "kind": "workspace-recovery-comparison", "report_id": secrets.token_hex(16),
+                  "target": target(), "tenant": current_tenant_id_strict(), "actor": actor,
+                  "snapshot": {key: selected[key] for key in ("id", "sha256", "application_version", "compatibility")},
+                  "application_version": version(), "application_identity": application_identity(),
+                  "compared_at": time.time(), "isolated": isolated is True, "restore_authorized": False,
+                  "consistency": "per-file and SQLite online snapshots; live state can change after capture",
+                  "coverage": "local file metadata only; no payload, business-invariant, schema-compatibility or external-effect validation",
+                  **comparison}
+        signed = backup._authenticate_for_write(report, _key())
+        encoded = json.dumps(signed, ensure_ascii=False, allow_nan=False)
+        if len(encoded.encode("utf-8")) > MAX_COMPARISON_BYTES:
+            raise RecoveryError("The comparison exceeds the in-app evidence size limit. Existing comparison evidence was retained.")
+        file_lock.atomic_write_text(_comparison_path(identifier), encoded)
+        return _comparison_page(signed, offset=0, limit=50)
+
+
+def _read_comparison(identifier: str, report_id: str, *, actor: str) -> dict:
+    path = _comparison_path(identifier)
+    try:
+        if path.stat().st_size > MAX_COMPARISON_BYTES:
+            raise RecoveryError("The saved comparison exceeds the evidence size limit.")
+        report = json.loads(file_lock.atomic_read_text(path))
+        if not isinstance(report, dict):
+            raise RecoveryError("The saved comparison is malformed. Compare the snapshot again.")
+        with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
+            backup._verify_authentication(report, allow_unsigned=False, label="recovery comparison")
+    except (OSError, ValueError, RecursionError, backup.BackupError) as exc:
+        raise RecoveryError("The signed comparison is unavailable. Compare the snapshot again.") from exc
+    if (not isinstance(report.get("snapshot"), dict) or not isinstance(report.get("items"), list)
+            or type(report.get("total_changes")) is not int or report["total_changes"] != len(report["items"])
+            or type(report.get("protected_changes")) is not int or not 0 <= report["protected_changes"] <= report["total_changes"]
+            or any(not isinstance(item, dict) or not isinstance(item.get("path"), str)
+                   or item.get("change") not in ("added", "changed", "deleted") or type(item.get("protected")) is not bool
+                   for item in report["items"])):
+        raise RecoveryError("The saved comparison is malformed. Compare the snapshot again.")
+    if (report.get("schema") != 1 or report.get("kind") != "workspace-recovery-comparison"
+            or not isinstance(report_id, str) or not _ID.fullmatch(report_id) or not hmac.compare_digest(str(report.get("report_id", "")), report_id)
+            or report.get("target") != target() or report.get("tenant") != current_tenant_id_strict()
+            or not actor or report.get("actor") != actor or report.get("application_identity") != application_identity()
+            or report.get("restore_authorized") is not False
+            or report.get("snapshot", {}).get("id") != identifier
+            or report.get("snapshot", {}).get("sha256") != backup._sha256(_archive(identifier))):
+        raise RecoveryError("The snapshot, account, build or comparison changed. Compare it again.")
+    return report
+
+
+def comparison_page(identifier: str, report_id: str, *, actor: str, offset: int = 0, limit: int = 50) -> dict:
+    with _locked():
+        return _comparison_page(_read_comparison(identifier, report_id, actor=actor), offset=offset, limit=limit)
+
+
+def export_comparison(identifier: str, report_id: str, *, actor: str) -> bytes:
+    with _locked():
+        report = _read_comparison(identifier, report_id, actor=actor)
+        return (json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + "\n").encode("utf-8")
+
+
 def _create(kind: str) -> dict:
     if len(list(_store().glob("*.tgz"))) >= MAX_SNAPSHOTS:
         raise RecoveryError("The local snapshot limit is reached. Export and retire snapshots under your retention policy first.")
@@ -299,8 +380,12 @@ def retire(identifier: str, expected_sha256: str) -> dict:
                     backup._verify_authentication(record, allow_unsigned=False, label="recovery retention record")
                 if identifier in {record.get("snapshot"), record.get("safety_snapshot")}:
                     raise RecoveryError("This snapshot is retained for the current or most recent restore.")
+        comparison_path = _comparison_path(identifier)
+        drill_path = _store() / (identifier + ".drill.json")
         _archive(identifier).unlink()
         (_store() / (identifier + ".json")).unlink(missing_ok=True)
+        comparison_path.unlink(missing_ok=True)
+        drill_path.unlink(missing_ok=True)
         return {"retired": True, "id": identifier}
 
 
@@ -363,7 +448,9 @@ def status() -> dict:
             "live_restore_available": False}
 
 
-def drill(identifier: str) -> dict:
+def drill(identifier: str, *, actor: str = "local-operator") -> dict:
+    if not actor:
+        raise RecoveryError("A current operator identity is required for a restore drill.")
     with _locked():
         selected = _inspect(identifier)
         if selected["compatibility"] != "compatible":
@@ -373,12 +460,73 @@ def drill(identifier: str) -> dict:
             destination = file_lock.ensure_private_directory(Path(temporary) / "workspace")
             with backup.recovery_scope(destination, current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
                 backup.restore_backup(_archive(identifier), replace_existing=True)
-            report = {"snapshot": identifier, "archive_sha256": selected["sha256"],
+            report = {"schema": 1, "kind": "workspace-restore-drill", "report_id": secrets.token_hex(16),
+                      "snapshot": identifier, "archive_sha256": selected["sha256"],
+                      "snapshot_created_at": selected["created_at"], "target": target(),
+                      "tenant": current_tenant_id_strict(), "actor": actor,
+                      "application_version": version(), "application_identity": application_identity(),
+                      "completed_at": time.time(), "restore_authorized": False,
                       "file_count": selected["file_count"], "restored": True, "post_restore_verified": True,
                       "elapsed_seconds": round(time.perf_counter() - started, 6),
-                      "live_workspace_changed": False, "external_stores_tested": False}
-        file_lock.atomic_write_text(_store() / "last-drill.json", json.dumps(report))
+                      "live_workspace_changed": False, "external_stores_tested": False,
+                      "verification_scope": "archived file hashes, sizes and SQLite integrity; no application decryption, cross-file business invariants or external-system acceptance"}
+        if backup._sha256(_archive(identifier)) != selected["sha256"]:
+            raise RecoveryError("The snapshot changed during the restore drill. Verify it again.")
+        signed = backup._authenticate_for_write(report, _key())
+        encoded = json.dumps(signed, allow_nan=False)
+        file_lock.atomic_write_text(_store() / (identifier + ".drill.json"), encoded)
+        file_lock.atomic_write_text(_store() / "last-drill.json", encoded)
         return report
+
+
+def _read_drill(identifier: str, *, actor: str) -> dict | None:
+    archive = _archive(identifier)
+    path = _store() / (identifier + ".drill.json")
+    if not path.exists():
+        return None
+    try:
+        if path.stat().st_size > 64 * 1024:
+            raise RecoveryError("The saved drill report exceeds its evidence size limit.")
+        report = json.loads(file_lock.atomic_read_text(path))
+        if not isinstance(report, dict):
+            raise RecoveryError("The saved drill report is malformed. Run a new temporary restore drill.")
+        with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
+            backup._verify_authentication(report, allow_unsigned=False, label="restore drill report")
+    except (OSError, ValueError, RecursionError, backup.BackupError) as exc:
+        raise RecoveryError("The signed drill report is unavailable. Run a new temporary restore drill.") from exc
+    if (any(not isinstance(report.get(field), str) or not report[field]
+            for field in ("report_id", "application_identity", "application_version", "verification_scope"))
+            or not _ID.fullmatch(report["report_id"])
+            or type(report.get("snapshot_created_at")) not in {int, float} or report["snapshot_created_at"] <= 0
+            or type(report.get("completed_at")) not in {int, float} or report["completed_at"] <= 0
+            or type(report.get("elapsed_seconds")) not in {int, float} or report["elapsed_seconds"] < 0
+            or type(report.get("file_count")) is not int or report["file_count"] < 0
+            or report.get("restored") is not True or report.get("post_restore_verified") is not True
+            or report.get("live_workspace_changed") is not False or report.get("external_stores_tested") is not False):
+        raise RecoveryError("The saved drill report is malformed. Run a new temporary restore drill.")
+    if (report.get("schema") != 1 or report.get("kind") != "workspace-restore-drill"
+            or report.get("target") != target() or report.get("tenant") != current_tenant_id_strict()
+            or not actor or report.get("actor") != actor or report.get("snapshot") != identifier
+            or report.get("archive_sha256") != backup._sha256(archive) or report.get("restore_authorized") is not False):
+        raise RecoveryError("The snapshot, account or drill report changed. Run a new temporary restore drill.")
+    return report
+
+
+def drill_report(identifier: str, *, actor: str) -> dict:
+    with _locked():
+        report = _read_drill(identifier, actor=actor)
+        if report is None:
+            return {"state": "not_recorded", "snapshot": identifier}
+        return {**{key: value for key, value in report.items() if key not in {"authentication", "actor"}},
+                "state": "recorded", "current_build_matches": report["application_identity"] == application_identity()}
+
+
+def export_drill_report(identifier: str, report_id: str, *, actor: str) -> bytes:
+    with _locked():
+        report = _read_drill(identifier, actor=actor)
+        if report is None or not isinstance(report_id, str) or not hmac.compare_digest(str(report.get("report_id", "")), report_id):
+            raise RecoveryError("The saved drill report changed. Load the selected snapshot's report again.")
+        return (json.dumps(report, allow_nan=False, indent=2) + "\n").encode("utf-8")
 
 
 def prepare_restore(identifier: str, *, isolated: bool, actor: str) -> dict:

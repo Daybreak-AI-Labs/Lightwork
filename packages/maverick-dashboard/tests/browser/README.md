@@ -51,8 +51,17 @@ Coverage includes:
   fresh human confirmation after reload without another external write.
 - Exact historical consent selection into an unsaved next version, plus actual
   server field-validation feedback that preserves the other inputs.
+- Explicit preview and consent publication, real public HTTP configuration
+  resolution through an API-enrolled synthetic client and policy, origin and
+  credential denial, stale-revision rejection, withdrawal and immutable history.
 - Recovery key download, real snapshot verification/export and temporary
-  restore drill. Live restore remains disabled in the ordinary dashboard.
+  restore drill, followed by explicit historical report retrieval after reload,
+  signed evidence download, interrupted retrieval and HTML permission expiry.
+  Live restore remains disabled in the ordinary dashboard.
+- Captured recovery comparisons over more than 50 real encrypted drafts and a
+  protected database change, exact report paging and signed JSON download,
+  retained safe inputs on interruption and cleared private state on HTML 401.
+  Comparisons never authorize restoration or reconcile the changed records.
 - Four held tasks, a frozen pilot, partial observations, preserved input after
   failed save, exact admitted provider cost allocation and report export.
 - Ten new workspace surfaces at 320 and 1280 pixels with compact light

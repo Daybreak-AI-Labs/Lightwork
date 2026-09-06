@@ -22,6 +22,16 @@ def public_key():
     return base64.b64encode(f"untrusted comment: test-only key\n{raw}\n".encode()).decode()
 
 
+def test_direct_desktop_native_build_has_a_valid_windows_icon():
+    manifest_dir = stage.ROOT / "apps/desktop/src-tauri"
+    config = json.loads((manifest_dir / "tauri.conf.json").read_text(encoding="utf-8"))
+    icons = [manifest_dir / name for name in config["bundle"]["icon"] if name.lower().endswith(".ico")]
+    assert icons, "Direct cargo tests need a Windows icon before customer staging runs"
+    for icon in icons:
+        assert icon.is_file()
+        assert icon.read_bytes()[:4] == b"\x00\x00\x01\x00", "Expected an ICO resource"
+
+
 @pytest.mark.parametrize("url", [
     "http://updates.example.test/latest.json", "file:///tmp/update", "https://user@example.test/u",
     "https://example.test/u#fragment", "https:///missing", "javascript:alert(1)",

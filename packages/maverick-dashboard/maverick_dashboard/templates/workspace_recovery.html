@@ -26,16 +26,37 @@
     <label for="wrec-snapshot">Saved snapshot</label><select id="wrec-snapshot" disabled><option value="">Choose a snapshot</option></select>
     <div class="wrec-actions"><button id="wrec-inspect" type="button" disabled>Verify snapshot</button><button id="wrec-download" type="button" disabled>Export snapshot</button><button id="wrec-drill" type="button" disabled>Test restore in a temporary workspace</button></div>
     <p id="wrec-result" role="status" aria-live="polite"></p><p>Restore checks verify file hashes, sizes and local SQLite integrity. They do not certify application-level decryption, cross-file business invariants or external systems.</p>
+    <button id="wrec-drill-report-load" type="button" disabled>View last restore test</button>
+    <p id="wrec-drill-report-status" role="status" aria-live="polite"></p>
+    <div id="wrec-drill-report" hidden>
+      <p id="wrec-drill-report-summary"></p><p id="wrec-drill-report-build"></p>
+      <p>This is a saved test of the selected snapshot in a temporary workspace. It did not change your live workspace or test external services. It does not certify application-level decryption, cross-file business rules or current readiness, and does not authorize a live restore.</p>
+      <details><summary>Restore test verification details</summary><p id="wrec-drill-report-identity"></p><p id="wrec-drill-report-scope"></p></details>
+      <button id="wrec-drill-report-download" type="button" disabled>Download signed restore test</button>
+    </div>
     <details><summary>Retire a local snapshot</summary><p>Export and verify an external copy first if retention is required. This deletes only the selected local archive. Snapshots retained for a current or recent restore cannot be removed.</p><label class="wrec-confirm"><input id="wrec-retire-confirm" type="checkbox">I have reviewed retention and want to delete this local archive.</label><button id="wrec-retire" type="button" disabled>Retire selected local snapshot</button></details>
     <details><summary>Import a saved snapshot</summary><label for="wrec-file">Lightwork snapshot archive</label><input id="wrec-file" type="file" accept=".tgz,.gz,application/gzip"><button id="wrec-import" type="button" disabled>Import and verify</button><p>Maximum archive size: 256 MiB compressed and 1 GiB expanded. Only a snapshot signed with the configured recovery key and bound to this workspace can be imported.</p></details>
   </section>
+  <section><h2>Review differences before recovery</h2>
+    <p>Compare the selected snapshot with the current workspace. This helps an administrator review why recovery may be refused. It does not change files, reconcile spending or external actions, or authorize a restore.</p>
+    <button id="wrec-compare" type="button" disabled>Compare with current workspace</button>
+    <p id="wrec-comparison-status" role="status" aria-live="polite"></p>
+    <div id="wrec-comparison-report" hidden>
+      <p id="wrec-comparison-summary"></p>
+      <p>This is captured evidence: the workspace may have changed since the comparison. It shows file differences, without file contents, business-level verification or external service effects. Protected differences require administrator reconciliation; downloading this report does not clear the recovery guard.</p>
+      <div class="wrec-actions"><button id="wrec-comparison-previous" type="button" disabled>Previous differences</button><button id="wrec-comparison-next" type="button" disabled>Next differences</button></div>
+      <details><summary>Comparison verification details</summary><p id="wrec-comparison-identity"></p></details>
+      <button id="wrec-comparison-download" type="button" disabled>Download signed comparison</button>
+      <ul id="wrec-comparison-items"></ul>
+    </div>
+  </section>
   <section><h2>Restore this workspace</h2><p>Restoring replaces workspace files with the selected snapshot and removes files created afterwards. A verified safety snapshot is kept first. Other workspaces, shared administration and external stores are excluded. The exact application build must match the snapshot; a different build requires a reviewed compatibility procedure.</p>
-    <p>Live restore is refused if spending records, budget holds or database files differ from the snapshot. An administrator must reconcile that history first. You can still export the snapshot and test it in a temporary workspace.</p>
+    <p>Live restore is refused if spending records, budget holds, protected external-action history or database files differ from the snapshot. An administrator must reconcile that history first. You can still export the snapshot and test it in a temporary workspace.</p>
     <button id="wrec-prepare" type="button" disabled>Prepare restore and safety snapshot</button>
     <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</label><button id="wrec-restore" type="button" disabled>Restore reviewed snapshot</button></div>
   </section>
   <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
-    <p>A completed update can be rolled back here only when accounting and database files still match its original snapshot. New spending, budget holds or database changes require coordinated reconciliation before returning to the old release.</p>
+    <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>
     <label class="wrec-confirm"><input id="wrec-installation-confirm" type="checkbox">I am authorized to pause and recover all local workspaces and shared administration on this computer.</label>
     <button id="wrec-installation-authorize" type="button" disabled>Authorize protected update</button>
     <label for="wrec-installation-point">Completed upgrade recovery point</label><select id="wrec-installation-point"><option value="">Choose a completed upgrade</option></select>

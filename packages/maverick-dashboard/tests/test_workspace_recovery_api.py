@@ -57,6 +57,74 @@ def setup_snapshot(client):
     return headers, result.json()["id"]
 
 
+def test_comparison_routes_are_read_only_private_and_context_bound(workspace):
+    client = api_client()
+    headers, identifier = setup_snapshot(client)
+    (workspace / "record.json").write_text("changed private document")
+    endpoint = "/api/v1/recovery/snapshots/" + identifier
+    assert client.post(endpoint + "/compare", json={}).status_code == 409
+    assert client.post(endpoint + "/compare", headers=headers, json={"waive_guard": True}).status_code == 422
+    compared = client.post(endpoint + "/compare", headers=headers, json={})
+    assert compared.status_code == 200, compared.text
+    assert compared.headers["cache-control"] == "private, no-store"
+    report = compared.json()
+    assert report["restore_authorized"] is False and report["isolated"] is False
+    assert any(row["path"] == "record.json" and row["change"] == "changed" for row in report["items"])
+    assert "changed private document" not in compared.text
+    page = client.post(endpoint + "/comparison", headers=headers, json={"report_id": report["report_id"], "offset": 0, "limit": 1})
+    assert page.status_code == 200 and len(page.json()["items"]) == 1
+    assert client.post(endpoint + "/comparison", headers=headers, json={"report_id": report["report_id"], "offset": True}).status_code == 422
+    assert client.post(endpoint + "/comparison/download", json={"report_id": report["report_id"]}).status_code == 409
+    downloaded = client.post(endpoint + "/comparison/download", headers=headers, json={"report_id": report["report_id"]})
+    assert downloaded.status_code == 200 and downloaded.headers["cache-control"] == "private, no-store"
+    assert downloaded.headers["content-disposition"].endswith(identifier + '.json"')
+    assert downloaded.json()["authentication"]["algorithm"] == "HMAC-SHA256"
+    assert downloaded.json()["restore_authorized"] is False
+    assert (workspace / "record.json").read_text() == "changed private document"
+    assert not (workspace / "backups" / "recovery" / "review.json").exists()
+
+
+def test_comparison_routes_reject_other_actor_and_admin_revocation(monkeypatch):
+    client = api_client()
+    headers, identifier = setup_snapshot(client)
+    endpoint = "/api/v1/recovery/snapshots/" + identifier
+    report = client.post(endpoint + "/compare", headers=headers, json={}).json()
+    monkeypatch.setattr(recovery_api, "_authorization_principal", lambda _: "another-admin")
+    other_headers = context(client)
+    assert other_headers["X-Lightwork-Recovery-Context"] != headers["X-Lightwork-Recovery-Context"]
+    assert client.post(endpoint + "/comparison", headers=other_headers, json={"report_id": report["report_id"]}).status_code == 409
+    def deny(*_):
+        raise HTTPException(403, "global admin required")
+    monkeypatch.setattr(recovery_api, "require_global_permission", deny)
+    assert client.post(endpoint + "/compare", headers=other_headers, json={}).status_code == 403
+    assert client.post(endpoint + "/comparison/download", headers=other_headers, json={"report_id": report["report_id"]}).status_code == 403
+
+
+def test_drill_report_survives_a_fresh_client_and_requires_current_context(workspace):
+    first = api_client()
+    headers, identifier = setup_snapshot(first)
+    endpoint = "/api/v1/recovery/snapshots/" + identifier
+    absent = first.post(endpoint + "/drill/report", headers=headers, json={})
+    assert absent.status_code == 200 and absent.json()["state"] == "not_recorded"
+    result = first.post(endpoint + "/drill", headers=headers, json={"confirm": True})
+    assert result.status_code == 200, result.text
+    report_id = result.json()["report_id"]
+    (workspace / "record.json").write_text("newer live work")
+    second = api_client()
+    fresh_headers = context(second)
+    loaded = second.post(endpoint + "/drill/report", headers=fresh_headers, json={})
+    assert loaded.status_code == 200 and loaded.headers["cache-control"] == "private, no-store"
+    assert loaded.json()["report_id"] == report_id and loaded.json()["current_build_matches"] is True
+    assert loaded.json()["restore_authorized"] is False
+    assert loaded.json()["completed_at"] == result.json()["completed_at"]
+    assert second.post(endpoint + "/drill/report/download", json={"report_id": report_id}).status_code == 409
+    downloaded = second.post(endpoint + "/drill/report/download", headers=fresh_headers, json={"report_id": report_id})
+    assert downloaded.status_code == 200 and downloaded.headers["cache-control"] == "private, no-store"
+    assert downloaded.json()["authentication"]["algorithm"] == "HMAC-SHA256"
+    assert downloaded.json()["archive_sha256"] == result.json()["archive_sha256"]
+    assert (workspace / "record.json").read_text() == "newer live work"
+
+
 def test_recovery_page_and_assets_render_from_real_routes():
     client = api_client()
     assert client.get("/workspace/recovery").status_code == 200

@@ -7,7 +7,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from maverick import backup, client, config, crypto_at_rest, quotas
+from maverick import backup, client, config, crypto_at_rest, file_lock, quotas
 from maverick import workspace_recovery as recovery
 from maverick.paths import data_dir, tenant_scope
 
@@ -40,6 +40,89 @@ def isolated_workspace(monkeypatch, tmp_path):
 def ready_snapshot():
     recovery.configure_key()
     return recovery.create()
+
+
+def test_signed_comparison_is_paged_bound_and_does_not_authorize_restore(isolated_workspace):
+    snapshot = ready_snapshot()
+    quotas.UsageLedger().record("buyer", 35, 0, 0)
+    for number in range(60):
+        (isolated_workspace / f"added-{number:03d}.txt").write_text("private content")
+    report = recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=True)
+    assert report["total_changes"] == 62 and report["protected_changes"] == 1
+    assert report["restore_authorized"] is False and report["isolated"] is True
+    assert len(report["items"]) == 50 and report["has_more"] is True
+    page = recovery.comparison_page(snapshot["id"], report["report_id"], actor="admin-one", offset=50)
+    assert len(page["items"]) == 12 and page["has_more"] is False
+    assert next(row for row in page["items"] if row["path"] == "usage/ledger.json.lock")["protected"] is False
+    payload = recovery.export_comparison(snapshot["id"], report["report_id"], actor="admin-one")
+    document = json.loads(payload)
+    with backup.recovery_scope(recovery._root(), "acme", recovery._key()):
+        backup._verify_authentication(document, allow_unsigned=False, label="test comparison")
+    assert len(document["items"]) == 62 and b"private content" not in payload
+    assert not (recovery._store() / "review.json").exists()
+    assert quotas.UsageLedger().usage("buyer")["dollars"] == 35
+    with pytest.raises(backup.BackupError, match="reconciliation"):
+        recovery.prepare_restore(snapshot["id"], isolated=True, actor="admin-one")
+    assert len(recovery.list_snapshots()) == 1
+
+
+def test_comparison_rejects_other_actor_replaced_report_and_modified_snapshot(isolated_workspace):
+    snapshot = ready_snapshot()
+    first = recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=False)
+    with pytest.raises(recovery.RecoveryError, match="account"):
+        recovery.export_comparison(snapshot["id"], first["report_id"], actor="admin-two")
+    second = recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=False)
+    with pytest.raises(recovery.RecoveryError, match="comparison changed"):
+        recovery.comparison_page(snapshot["id"], first["report_id"], actor="admin-one")
+    (isolated_workspace / "record.json").write_text("new current content")
+    # Download remains explicitly historical evidence; it never refreshes its
+    # timestamp/fingerprint or turns the previous observation into authority.
+    saved = json.loads(recovery.export_comparison(snapshot["id"], second["report_id"], actor="admin-one"))
+    assert saved["compared_at"] == second["compared_at"]
+    assert saved["live_state_sha256"] == second["live_state_sha256"]
+    assert saved["restore_authorized"] is False
+    with recovery._archive(snapshot["id"]).open("ab") as stream:
+        stream.write(b"changed archive bytes")
+    with pytest.raises(recovery.RecoveryError, match="snapshot"):
+        recovery.export_comparison(snapshot["id"], second["report_id"], actor="admin-one")
+
+
+def test_comparison_refuses_tampering_wrong_build_and_oversize_without_losing_evidence(monkeypatch):
+    snapshot = ready_snapshot()
+    first = recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=False)
+    path = recovery._comparison_path(snapshot["id"])
+    before = path.read_bytes()
+    monkeypatch.setattr(recovery, "MAX_COMPARISON_BYTES", 1)
+    with pytest.raises(recovery.RecoveryError, match="size limit"):
+        recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=False)
+    assert path.read_bytes() == before
+    monkeypatch.setattr(recovery, "MAX_COMPARISON_BYTES", 64 * 1024 * 1024)
+    monkeypatch.setattr(recovery, "application_identity", lambda: "another-build")
+    with pytest.raises(recovery.RecoveryError, match="build"):
+        recovery.export_comparison(snapshot["id"], first["report_id"], actor="admin-one")
+    monkeypatch.setattr(recovery, "application_identity", lambda: "test-build-one")
+    report = json.loads(before)
+    report["restore_authorized"] = True
+    path.write_text(json.dumps(report))
+    with pytest.raises(recovery.RecoveryError, match="signed comparison"):
+        recovery.export_comparison(snapshot["id"], first["report_id"], actor="admin-one")
+
+
+def test_retiring_snapshot_removes_its_comparison():
+    snapshot = ready_snapshot()
+    recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=False)
+    comparison = recovery._comparison_path(snapshot["id"])
+    recovery.retire(snapshot["id"], snapshot["sha256"])
+    assert not comparison.exists()
+
+
+@pytest.mark.parametrize("tampered", ["[]", '{"nested":' * 1500 + "null" + "}" * 1500])
+def test_malformed_comparison_remains_a_recoverable_error(tampered):
+    snapshot = ready_snapshot()
+    report = recovery.compare_snapshot(snapshot["id"], actor="admin-one", isolated=False)
+    recovery._comparison_path(snapshot["id"]).write_text(tampered)
+    with pytest.raises(recovery.RecoveryError, match="comparison"):
+        recovery.export_comparison(snapshot["id"], report["report_id"], actor="admin-one")
 
 
 def test_setup_key_is_not_in_archive_and_cannot_accidentally_rotate():
@@ -107,6 +190,53 @@ def test_drill_checks_real_restore_without_changing_live_data(isolated_workspace
     assert record.read_text() == "changed"
 
 
+def test_drill_retains_signed_historical_evidence_without_claiming_current_readiness(isolated_workspace, monkeypatch):
+    snapshot = ready_snapshot()
+    assert recovery.drill_report(snapshot["id"], actor="admin-one")["state"] == "not_recorded"
+    performed = recovery.drill(snapshot["id"], actor="admin-one")
+    loaded = recovery.drill_report(snapshot["id"], actor="admin-one")
+    assert loaded["report_id"] == performed["report_id"] and loaded["current_build_matches"] is True
+    assert loaded["completed_at"] == performed["completed_at"]
+    assert loaded["snapshot_created_at"] == snapshot["created_at"]
+    (isolated_workspace / "record.json").write_text("new current work")
+    monkeypatch.setattr(recovery, "application_identity", lambda: "later-build")
+    historical = recovery.drill_report(snapshot["id"], actor="admin-one")
+    assert historical["current_build_matches"] is False
+    assert historical["restore_authorized"] is False
+    assert historical["completed_at"] == performed["completed_at"]
+    payload = recovery.export_drill_report(snapshot["id"], performed["report_id"], actor="admin-one")
+    signed = json.loads(payload)
+    with backup.recovery_scope(recovery._root(), "acme", recovery._key()):
+        backup._verify_authentication(signed, allow_unsigned=False, label="test drill report")
+    assert signed["application_identity"] == "test-build-one"
+    assert signed["external_stores_tested"] is False and "decryption" in signed["verification_scope"]
+    assert (isolated_workspace / "record.json").read_text() == "new current work"
+    assert not (recovery._store() / "review.json").exists()
+
+
+def test_drill_evidence_rejects_other_actor_tampering_and_superseded_report():
+    snapshot = ready_snapshot()
+    first = recovery.drill(snapshot["id"], actor="admin-one")
+    with pytest.raises(recovery.RecoveryError, match="account"):
+        recovery.drill_report(snapshot["id"], actor="admin-two")
+    recovery.drill(snapshot["id"], actor="admin-one")
+    with pytest.raises(recovery.RecoveryError, match="report changed"):
+        recovery.export_drill_report(snapshot["id"], first["report_id"], actor="admin-one")
+    path = recovery._store() / (snapshot["id"] + ".drill.json")
+    path.write_text('{"nested":' * 1500 + "null" + "}" * 1500)
+    with pytest.raises(recovery.RecoveryError, match="signed drill report"):
+        recovery.drill_report(snapshot["id"], actor="admin-one")
+
+
+def test_retiring_snapshot_also_retires_its_drill_evidence():
+    snapshot = ready_snapshot()
+    recovery.drill(snapshot["id"])
+    path = recovery._store() / (snapshot["id"] + ".drill.json")
+    assert path.exists()
+    recovery.retire(snapshot["id"], snapshot["sha256"])
+    assert not path.exists()
+
+
 def test_encrypted_draft_survives_restore_with_its_separately_custodied_key(isolated_workspace, monkeypatch):
     monkeypatch.setattr(crypto_at_rest, "per_tenant_at_rest", lambda: False)
     monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
@@ -128,6 +258,34 @@ def test_live_restore_requires_real_isolated_mode():
     snapshot = ready_snapshot()
     with pytest.raises(recovery.RecoveryError, match="local recovery mode"):
         recovery.prepare_restore(snapshot["id"], isolated=False, actor="admin-a")
+
+
+@pytest.mark.parametrize("field,value", [("items", None), ("snapshot", []), ("total_changes", "0")])
+def test_signed_comparison_schema_errors_are_recoverable(field, value):
+    snapshot = ready_snapshot()
+    report = recovery.compare_snapshot(snapshot["id"], actor="admin-a", isolated=False)
+    path = recovery._comparison_path(snapshot["id"])
+    saved = json.loads(file_lock.atomic_read_text(path))
+    saved[field] = value
+    file_lock.atomic_write_text(path, json.dumps(backup._authenticate_for_write(saved, recovery._key())))
+    with pytest.raises(recovery.RecoveryError, match="malformed"):
+        recovery.comparison_page(snapshot["id"], report["report_id"], actor="admin-a")
+    with pytest.raises(recovery.RecoveryError, match="malformed"):
+        recovery.export_comparison(snapshot["id"], report["report_id"], actor="admin-a")
+
+
+@pytest.mark.parametrize("field", ["application_identity", "report_id", "completed_at", "verification_scope"])
+def test_signed_drill_missing_required_metadata_is_recoverable(field):
+    snapshot = ready_snapshot()
+    report = recovery.drill(snapshot["id"], actor="admin-a")
+    path = recovery._store() / (snapshot["id"] + ".drill.json")
+    saved = json.loads(file_lock.atomic_read_text(path))
+    saved.pop(field)
+    file_lock.atomic_write_text(path, json.dumps(backup._authenticate_for_write(saved, recovery._key())))
+    with pytest.raises(recovery.RecoveryError, match="malformed"):
+        recovery.drill_report(snapshot["id"], actor="admin-a")
+    with pytest.raises(recovery.RecoveryError, match="malformed"):
+        recovery.export_drill_report(snapshot["id"], report["report_id"], actor="admin-a")
 
 
 def test_old_snapshot_cannot_refund_newer_usage_or_create_restore_review(monkeypatch):

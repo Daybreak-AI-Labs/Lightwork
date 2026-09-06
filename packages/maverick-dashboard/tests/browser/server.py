@@ -62,6 +62,8 @@ enable = true
 [consent_preferences.publishing]
 enable = true
 require_signed_publications = true
+[consent_preferences.public_api]
+enable = true
 [enterprise]
 enable = false
 [voice]
@@ -109,9 +111,12 @@ def build_app(directory):
     from maverick_dashboard.vendor_onboarding_composition import WorkflowBinding
 
     config.reset_config_cache()
-    world_model.DEFAULT_DB = directory / "world.db"
-    dashboard._world_cache.clear()
     tenant, principal = "browser-workspace", "user:browser-reviewer"
+    # Keep the real fixture database inside the named workspace's snapshot
+    # scope so ordinary domain mutations exercise database recovery guards.
+    world_model.DEFAULT_DB = directory / "tenants" / tenant / "world.db"
+    world_model.DEFAULT_DB.parent.mkdir(parents=True, exist_ok=True)
+    dashboard._world_cache.clear()
     context = ServiceContext(tenant, principal, "procurement", principal, "jira", human=True)
     documents = FakeGoogleDriveEvidence({(tenant, "browser-policy"): EvidenceDocument(
         "browser-policy", "v1", time.time() - 86400,
