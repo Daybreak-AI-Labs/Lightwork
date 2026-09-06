@@ -273,7 +273,9 @@ def custody_worker_fixture(monkeypatch):
         assert kwargs["cwd"] == directory and kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
         assert kwargs["timeout"] == 90
-        assert file_lock.private_path_is_restricted(directory)
+        assert file_lock.private_path_is_restricted(directory, 0o700)
+        for filename in ("request.json", "snapshot.tgz", "custody.zip", "recovery.key"):
+            assert file_lock.private_path_is_restricted(directory / filename, 0o600)
         environment = kwargs["env"]
         assert environment["MAVERICK_HOME"] == str(directory / "home")
         assert not any(name.startswith("LIGHTWORK_") or name.endswith("_API_KEY") for name in environment)
@@ -291,6 +293,29 @@ def custody_worker_fixture(monkeypatch):
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(recovery.subprocess, "run", execute)
     return directories
+
+
+def test_custody_permission_checks_distinguish_directories_from_files(tmp_path, monkeypatch):
+    # Windows verifies owner-only ACLs without POSIX execute bits. Enforce the
+    # caller's mode contract too so a directory checked as a 0600 file cannot
+    # silently pass here and fail only on Linux.
+    restricted = file_lock.private_path_is_restricted
+    checked = set()
+
+    def check_mode(path, mode=0o600):
+        kind = "directory" if Path(path).is_dir() else "file"
+        assert mode == (0o700 if kind == "directory" else 0o600)
+        checked.add(kind)
+        return restricted(path, mode)
+
+    monkeypatch.setattr(file_lock, "private_path_is_restricted", check_mode)
+    snapshot = ready_snapshot()
+    upload = tmp_path / "uploaded.zip"
+    upload.write_bytes(b"protocol-only-worker-fixture")
+    directories = custody_worker_fixture(monkeypatch)
+    recovery.test_key_custody(snapshot["id"], upload, expected_sha256=snapshot["sha256"], actor="admin-a")
+    assert checked == {"directory", "file"}
+    assert len(directories) == 1 and not directories[0].exists()
 
 
 @pytest.mark.parametrize("memory_upload", [False, True])

@@ -51,6 +51,33 @@ def test_synthetic_workflow_signing_explicitly_supplies_the_empty_key_password()
         assert index + 2 < len(arguments), "The signature must still target its MSI argument"
 
 
+def test_windows_customer_jobs_use_the_reviewed_windows_python_build():
+    workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
+    # actions/python-versions release 3.12.10-14343898437 provides win32-x64.
+    # Later 3.12 security-only pins (including 3.12.13) have no Windows build;
+    # matching the Python series alone does not make setup-python installable.
+    checked = []
+    for name, job in workflow["jobs"].items():
+        if not job.get("runs-on", "").startswith("windows-"):
+            continue
+        steps = [step for step in job["steps"] if step.get("uses", "").startswith("actions/setup-python@")]
+        assert len(steps) == 1, f"{name} needs the reviewed Windows Python build"
+        assert steps[0]["with"]["python-version"] == "3.12.10", f"{name} must pin an available Windows binary"
+        assert steps[0]["with"].get("architecture") == "x64", f"{name} must match the packaged runtime architecture"
+        checked.append(name)
+    assert set(checked) == {"build-and-accept", "sign-customer-candidate"}
+
+
+def test_windows_packaging_installs_its_yaml_test_dependency():
+    workflow = yaml.safe_load((stage.ROOT / ".github/workflows/windows-customer.yml").read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["build-and-accept"]["steps"]
+    test_index = next(index for index, step in enumerate(steps) if "python -m pytest" in step.get("run", ""))
+    installers = [line for step in steps[:test_index] for line in step.get("run", "").splitlines()
+                  if "-m pip install" in line]
+    # PIP_CONSTRAINT restricts a package if installed; it never installs it.
+    assert any("pyyaml==6.0.3" in shlex.split(line.lower()) for line in installers)
+
+
 @pytest.mark.parametrize("url", [
     "http://updates.example.test/latest.json", "file:///tmp/update", "https://user@example.test/u",
     "https://example.test/u#fragment", "https:///missing", "javascript:alert(1)",
