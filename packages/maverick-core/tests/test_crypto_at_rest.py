@@ -476,10 +476,13 @@ def test_world_db_seals_messages(monkeypatch, tmp_path):
     gid = wm.create_goal("g", "d")
 
     # A legacy plaintext message (encryption EXPLICITLY off — under the secure
-    # default an unset flag means sealed) is searchable via FTS.
+    # default an unset flag means sealed) is stored as plaintext.
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     wm.append_message(gid, "user", "findable plaintext token")
-    assert any("findable" in m["content"] for m in wm.search_messages("findable"))
+    raw_plain = sqlite3.connect(str(db)).execute(
+        "SELECT content FROM messages WHERE role = 'user'"
+    ).fetchone()[0]
+    assert raw_plain == "findable plaintext token"
 
     # With encryption on, new message content is sealed on disk.
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
@@ -488,12 +491,6 @@ def test_world_db_seals_messages(monkeypatch, tmp_path):
         "SELECT content FROM messages WHERE role = 'assistant'"
     ).fetchone()[0]
     assert raw.startswith("MVKAR1:") and "123-45-6789" not in raw
-
-    # Search can't match ciphertext, so the encrypted message is not returned;
-    # the legacy plaintext message still is, and comes back decrypted.
-    hits = {m["content"] for m in wm.search_messages("findable")}
-    assert "findable plaintext token" in hits
-    assert all("123-45-6789" not in c for c in hits)
 
 
 @requires_crypto

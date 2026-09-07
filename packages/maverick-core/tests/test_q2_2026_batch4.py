@@ -338,28 +338,20 @@ def test_postgres_goal_child_reads_join_tenant_scoped_goals(monkeypatch):
     from maverick.paths import reset_tenant, set_tenant
 
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
-    # Pin the SQL-LIKE search path: under the secure default sealing is on and
-    # search_messages switches to fetch-then-decrypt, emitting different SQL.
-    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     token = set_tenant("tenant-a")
     try:
         cursor = _CapturingCursor()
         world = _postgres_model_with_cursor(cursor)
         world.goal_events(42)
-        world.search_messages("secret")
         world.list_attachments(42)
     finally:
         reset_tenant(token)
 
     events_sql, events_params = cursor.calls[0]
-    messages_sql, messages_params = cursor.calls[1]
-    attachments_sql, attachments_params = cursor.calls[2]
+    attachments_sql, attachments_params = cursor.calls[1]
     assert "FROM goal_events ge JOIN goals g ON g.id = ge.goal_id" in events_sql
     assert "g.tenant_id = %s" in events_sql
     assert events_params == (42, 0, "tenant-a", 200)
-    assert "FROM messages m JOIN goals g ON g.id = m.goal_id" in messages_sql
-    assert "g.tenant_id = %s" in messages_sql
-    assert messages_params == ("secret", "tenant-a", 10)
     assert "FROM attachments a JOIN goals g ON g.id = a.goal_id" in attachments_sql
     assert "g.tenant_id = %s" in attachments_sql
     assert attachments_params == (42, "tenant-a")

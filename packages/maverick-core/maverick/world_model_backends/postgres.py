@@ -4417,6 +4417,21 @@ class PostgresWorldModel:
     # ----- messages (goal-scoped log + full-text search) -----
 
     def append_message(self, goal_id: int, role: str, content: str) -> None:
+        # W1-53: idx_pg_messages_fts (a GIN index on to_tsvector(content), see
+        # SCHEMA above) is built and maintained on every insert here, INCLUDING
+        # ciphertext once at_rest_enabled() is on (the default) -- the same
+        # ciphertext-indexing cost the SQLite messages_fts drop targets.
+        # search_messages(), the index's one reader, has been removed (zero
+        # production callers -- only its own definition and tests referenced
+        # it, confirmed by grep). The index itself could not be dropped in the
+        # same pass: migration_governance.py's additive-only policy for NEW
+        # migrations (old replicas must keep reading the old schema during a
+        # rolling deploy) refuses DROP INDEX, and SCHEMA is immutable once
+        # released (fingerprinted as the governance ladder's version 1) --
+        # editing it, even to remove this one statement, trips the checksum
+        # guard. Routed to INFRA_AND_POLICY_DECISIONS.md: dropping it needs
+        # either a policy exception or a different technical approach.
+        #
         # Gate on the parent goal being in the active tenant (see start_episode);
         # a cross-tenant write silently no-ops, like set_goal_status.
         frag, fparams = _tenant_scope()
@@ -4434,61 +4449,6 @@ class PostgresWorldModel:
                     "VALUES(%s, %s, %s, %s)",
                     (goal_id, role, _seal(content), time.time()),
                 )
-
-    def search_messages(self, query: str, limit: int = 10) -> list[dict]:
-        """Full-text search over message content, most-recent first.
-
-        With at-rest encryption off, uses Postgres FTS (plainto_tsquery, which
-        parses arbitrary natural-language input safely). With encryption on,
-        content is ciphertext so FTS can't match -- it then scans a bounded
-        window of recent messages and substring-matches on the decrypted text
-        (scan-then-decrypt), mirroring how the SQLite backend degrades."""
-        if not query or not query.strip():
-            return []
-        cols = ["id", "goal_id", "role", "content", "ts"]
-        select_cols = [f"m.{c}" for c in cols]
-        frag, fparams = _tenant_scope("g.tenant_id")
-        table = "messages m"
-        if frag:
-            table += " JOIN goals g ON g.id = m.goal_id"
-        cap = max(1, int(limit))
-        from ..crypto_at_rest import at_rest_enabled
-        if at_rest_enabled():
-            sql = f"SELECT {', '.join(select_cols)} FROM {table}"
-            params: list = []
-            if frag:
-                sql += " WHERE " + frag
-                params += fparams
-            sql += " ORDER BY m.ts DESC LIMIT %s"
-            params.append(max(cap * 50, 500))  # bounded scan window
-            with self._tx() as cur:
-                cur.execute(sql, tuple(params))
-                rows = cur.fetchall()
-            ql = query.strip().lower()
-            out: list[dict] = []
-            for r in rows:
-                content = _unseal(r[3]) or ""
-                if ql in content.lower():
-                    d = dict(zip(cols, r, strict=False))
-                    d["content"] = content
-                    out.append(d)
-                    if len(out) >= cap:
-                        break
-            return out
-        sql = (
-            f"SELECT {', '.join(select_cols)} FROM {table} "
-            "WHERE to_tsvector('english', m.content) @@ plainto_tsquery('english', %s)"
-        )
-        params = [query]
-        if frag:
-            sql += " AND " + frag
-            params += fparams
-        sql += " ORDER BY m.ts DESC LIMIT %s"
-        params.append(cap)
-        with self._tx() as cur:
-            cur.execute(sql, tuple(params))
-            rows = cur.fetchall()
-        return [dict(zip(cols, r, strict=False)) for r in rows]
 
     # ----- attachments -----
 

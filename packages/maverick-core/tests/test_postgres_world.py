@@ -528,17 +528,26 @@ def test_prune_conversations_keeps_fresh(world):
 
 # ---------- #469: messages, attachments, dedup, pruning (final batch) ----------
 
-def test_append_and_search_messages(world):
-    g = world.create_goal("searchable")
+def test_append_message(world, monkeypatch):
+    # W1-53: search_messages was removed (zero production callers on either
+    # backend; its FTS index/GIN index remain in the schema only because the
+    # additive-only migration policy blocks dropping them -- see
+    # append_message's own comment). append_message itself is still the only
+    # thing under test here. Encryption off so the raw column is plaintext
+    # (this test isn't about sealing -- test_at_rest_encryption_seals_columns_
+    # and_round_trips covers that).
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    g = world.create_goal("has-messages")
     world.append_message(g, "user", "the quick brown fox jumps")
     world.append_message(g, "assistant", "a lazy dog sleeps soundly")
-    hits = world.search_messages("brown fox")
-    assert any("quick brown fox" in h["content"] for h in hits)
-    # Natural-language input with FTS-operator chars must not raise.
-    assert world.search_messages('"unbalanced -quote*') == [] or isinstance(
-        world.search_messages('"unbalanced -quote*'), list
-    )
-    assert world.search_messages("") == []
+    with world._tx() as cur:
+        cur.execute(
+            "SELECT role, content FROM messages WHERE goal_id = %s ORDER BY id",
+            (g,),
+        )
+        rows = cur.fetchall()
+    assert [r[0] for r in rows] == ["user", "assistant"]
+    assert rows[0][1] == "the quick brown fox jumps"
 
 
 def test_attachments_add_and_list(world):

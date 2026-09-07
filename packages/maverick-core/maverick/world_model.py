@@ -3266,35 +3266,27 @@ class WorldModel:
 
     # ----- messages -----
     def append_message(self, goal_id: int, role: str, content: str) -> None:
+        # W1-53: this trigger the messages_fts virtual table (SCHEMA, applied
+        # via executescript above) into tokenizing every inserted row, INCLUDING
+        # ciphertext once at_rest_enabled() is on (the default) -- >100% storage
+        # overhead measured on 300 messages, for an index that can then only
+        # ever match legacy pre-encryption plaintext. search_messages(), the
+        # index's one reader, has been removed (zero production callers; only
+        # its own definition and tests referenced it -- grep confirmed). The
+        # trigger/table themselves could not be removed in the same pass:
+        # migration_governance.py's additive-only policy for NEW migrations
+        # (old replicas must keep reading the old schema during a rolling
+        # deploy) refuses any DROP TABLE/TRIGGER/INDEX, and SCHEMA itself
+        # (fingerprinted as the governance ladder's version 1) is immutable
+        # once released -- editing it, even to add this comment inline, trips
+        # the same checksum guard. Routed to INFRA_AND_POLICY_DECISIONS.md:
+        # removing the schema objects needs either a policy exception or a
+        # different technical approach (e.g. a new table name), not a code fix.
         with self._writing() as conn:
             conn.execute(
                 "INSERT INTO messages(goal_id, role, content, ts) VALUES(?, ?, ?, ?)",
                 (goal_id, role, _enc_field(content), time.time()),
             )
-
-    def search_messages(self, query: str, limit: int = 10) -> list[dict]:
-        # Quote the user text as a single FTS5 string literal (escaping
-        # embedded quotes). Passing it raw let an unbalanced quote / leading
-        # `*` / `NEAR` / `-` raise sqlite3.OperationalError: fts5 syntax error
-        # and crash the search on ordinary natural-language input.
-        if not query or not query.strip():
-            return []
-        fts_query = '"' + query.replace('"', '""') + '"'
-        rows = self._read_all(
-            "SELECT m.* FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid "
-            "WHERE messages_fts MATCH ? ORDER BY m.ts DESC LIMIT ?",
-            (fts_query, limit),
-        )
-        # Decrypt content for any matched rows. Under at-rest encryption the FTS
-        # index holds ciphertext, so a plaintext query only matches legacy
-        # plaintext rows (search over encrypted messages is disabled); those rows
-        # are returned decrypted, and pre-encryption plaintext passes through.
-        out: list[dict] = []
-        for r in rows:
-            d = dict(r)
-            d["content"] = _dec_field(d.get("content"))
-            out.append(d)
-        return out
 
     # ----- conversations (multi-turn per channel user) -----
     def get_or_create_conversation(self, channel: str, user_id: str) -> Conversation:
