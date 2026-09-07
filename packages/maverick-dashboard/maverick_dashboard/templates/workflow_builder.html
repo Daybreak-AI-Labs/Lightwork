@@ -488,6 +488,55 @@
     // then strand the first editor even though its preview still exists.
     var templateWorkspaceStarted = false;
     var playbookWorkspaceStarted = false;
+    var recovery = null;
+    var pbEditingName = null;
+    var pbEditGeneration = null;
+    function recoveryFields() {
+      return Array.from(document.querySelectorAll('.wf input[id],.wf textarea[id],.wf select[id]')).filter(function (field) {
+        return /^(wf-|pb-|sched-|trig-)/.test(field.id) && !/^(file|password|hidden|submit|button)$/.test(field.type) && !/secret|password|token|confirm/i.test(field.id);
+      });
+    }
+    function recoveryPayload() {
+      var fields = {};
+      recoveryFields().forEach(function (field) { fields[field.id] = field.type === 'checkbox' ? field.checked : field.value; });
+      var steps = Array.from(pbSteps.querySelectorAll('.pb-step')).map(function (row) {
+        var step = {}; ['name','inst','tools','gate'].forEach(function (key) { step[key] = row.querySelector('.pb-step__' + key).value; }); return step;
+      });
+      return {format:1, fields:fields, steps:steps, mode:mode, template_started:templateWorkspaceStarted, playbook_started:playbookWorkspaceStarted,
+        template_name:wfEditingName, template_generation:wfEditGeneration, template_wall:wfEditWall,
+        agent_name:pbEditingName, agent_generation:pbEditGeneration, agent_preserve:pbEditPreserve};
+    }
+    function restoreRecovery(payload) {
+      if (!payload || payload.format !== 1 || !payload.fields || !Array.isArray(payload.steps) || !['template','playbook'].includes(payload.mode)) throw new Error('This recovery copy is not a supported workflow draft.');
+      if (!payload.steps.every(function (step) { return step && ['name','inst','tools','gate'].every(function (key) { return typeof step[key] === 'string'; }); }) ||
+          !Object.values(payload.fields).every(function (value) { return typeof value === 'string' || typeof value === 'boolean'; }) ||
+          (payload.template_name && !Number.isInteger(payload.template_generation)) ||
+          (payload.agent_name && !/^[0-9a-f]{64}$/.test(payload.agent_generation || ''))) throw new Error('This recovery copy has incomplete fields or saved-version information. Current work was kept.');
+      // The original tokens remain bound to these edits. Save must reject a
+      // changed resource; restoring never upgrades an unreviewed write token.
+      wfEditingName = payload.template_name; wfEditGeneration = payload.template_generation; wfEditWall = payload.template_wall;
+      pbEditingName = payload.agent_name; pbEditGeneration = payload.agent_generation; pbEditPreserve = payload.agent_preserve;
+      recoveryFields().forEach(function (field) {
+        if (!Object.prototype.hasOwnProperty.call(payload.fields, field.id)) return;
+        if (field.type === 'checkbox') field.checked = payload.fields[field.id] === true;
+        else field.value = payload.fields[field.id];
+      });
+      pbSteps.textContent = '';
+      payload.steps.forEach(function (step) {
+        addStep(); var row = pbSteps.lastElementChild;
+        ['name','inst','tools','gate'].forEach(function (key) { row.querySelector('.pb-step__' + key).value = step[key] || ''; });
+        paintGate(row);
+      });
+      renumber(); renderToolSelections();
+      templateWorkspaceStarted = !!payload.template_started; playbookWorkspaceStarted = !!payload.playbook_started;
+      setForm(payload.mode); schedulePbLint();
+      setStatus('Recovered for review. Re-select any attachment. Save will check whether the original workflow or agent changed.');
+    }
+    function initializeRecovery() {
+      if (!window.mvDraftRecovery || recovery) return;
+      recovery = window.mvDraftRecovery.create({key:'workflow-builder:' + window.location.search,
+        host:document.querySelector('.wf'), read:recoveryPayload, restore:restoreRecovery});
+    }
     var existingNames = null;
     var pbLintTimer = null;
     // shared saved box
@@ -652,6 +701,7 @@
       elSteps.value = d.body || '';
       elParams.value = (d.params || []).join(', ');
       elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : 5;
+      if (recovery) recovery.changed();
       if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
       preview.hidden = false; pbPreview.hidden = true; savedBox.hidden = true;
       if (shouldScroll !== false) {
@@ -722,6 +772,7 @@
         setStatus('');
         wfEditingName = data.name;   // subsequent saves overwrite this one
         wfEditGeneration = data.generation;
+        if (recovery) recovery.changed();
         savedMsg.textContent = 'Saved “' + (data.title || data.name) + '” as a reusable workflow'
           + ((data.params && data.params.length) ? ' (parameters: ' + data.params.join(', ') + ').' : '.');
         showSaved('/templates', 'Open Templates');
@@ -1123,6 +1174,7 @@
 
     function renderPlaybook(d, shouldScroll) {
       playbookWorkspaceStarted = true;
+      if (recovery) recovery.changed();
       pbName.value = d.name || '';
       pbDesc.value = d.description || '';
       pbPersona.value = d.persona || '';
@@ -1163,7 +1215,9 @@
     // builder can't show (set by ?edit_agent=) so saving doesn't drop them.
     var pbEditPreserve = null;
     function playbookPayload() {
-      return Object.assign(collectPlaybook(), pbEditPreserve || {});
+      return Object.assign(collectPlaybook(), pbEditPreserve || {}, {
+        expected_generation:pbEditingName === pbName.value.trim() ? pbEditGeneration : 'new'
+      });
     }
 
     // --- live governance feedback (reuses the agent-override lint endpoint) ---
@@ -1242,6 +1296,11 @@
         });
         var data = await resp.json().catch(function () { return {}; });
         if (!resp.ok) { setStatus(data.detail || ('Save failed: ' + resp.status), true); return; }
+        if (data.name !== name || !/^[0-9a-f]{64}$/.test(data.generation || '')) {
+          setStatus('The saved agent could not be confirmed. Your edits were kept; reload before another save.', true); return;
+        }
+        pbEditingName = name; pbEditGeneration = data.generation;
+        if (recovery) recovery.changed();
         setStatus('');
         var warns = data.warnings || [];
         savedMsg.textContent = 'Saved “' + (data.name || name) + '” as an agent playbook'
@@ -1508,6 +1567,7 @@
     if (PB_EDIT && PB_EDIT.name && PACK_EDITING) {
       setForm('playbook');
       pbEditPreserve = PB_EDIT.preserve || null;
+      pbEditingName = PB_EDIT.name; pbEditGeneration = PB_EDIT.generation;
       renderPlaybook(PB_EDIT);
       setStatus('Editing agent “' + PB_EDIT.name + '” — change the persona, tools, or steps, then Save to overwrite.');
     } else if (PB_EDIT_DENIED) {
@@ -1527,6 +1587,9 @@
       showTriggers({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
     }
     receiveAuthoringHandoff(!!(PB_EDIT || PB_EDIT_DENIED || WF_EDIT || WF_PREFILL));
+    initializeRecovery();
+    window.addEventListener('lightwork:drafts-ready', initializeRecovery);
+    document.querySelector('.wf').addEventListener('click', function (event) { if (recovery && !event.target.closest('.draft-recovery')) recovery.changed(); });
   })();
   </script>
 {% endblock %}

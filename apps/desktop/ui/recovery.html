@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workspace recovery · Lightwork</title>
+<style>:root{color-scheme:dark;font-family:system-ui;background:#0b0e14;color:#e8ebf2}main{max-width:42rem;padding:2rem;margin:3rem auto}p{line-height:1.6}button{font:inherit;padding:.8rem 1rem;background:#24324b;color:inherit;border:1px solid #7182a0;border-radius:.5rem;margin:.3rem}button:focus-visible{outline:3px solid #f5a623}button:disabled{opacity:.5}#details{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}</style></head>
+<body><main><h1>Workspace recovery mode</h1>
+<p>Finish active work and save your changes first. Opening recovery closes the local workspace started by this app and starts a separate recovery session with ordinary work and background jobs disabled.</p>
+<p>Enable Workspace recovery in Settings and select the workspace before continuing. Separately managed services and external stores require their own coordinated recovery process.</p>
+<button id="enter-recovery" type="button">Close local work and open recovery</button>
+<button id="leave-recovery" type="button">Close recovery and return to work</button>
+<p id="status" role="status" aria-live="polite">No workspace has been restarted.</p>
+<details><summary>Troubleshooting details</summary><pre id="details">No errors recorded.</pre></details>
+</main><script src="recovery.js" defer></script></body></html>

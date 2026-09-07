@@ -128,6 +128,9 @@ class TrajectoryStore:
         # not rely on every current and future producer remembering to gate.
         if self.path is None or not enabled():
             return False
+        from .pilot_learning import excluded
+        if excluded(step.goal_id):
+            return False
         from .learning_guard import learning_write_allowed
         if not learning_write_allowed("trajectory_capture"):
             return False
@@ -185,6 +188,9 @@ class TrajectoryStore:
             if not isinstance(d, dict):
                 continue
             if goal_id is not None and d.get("goal_id") != goal_id:
+                continue
+            from .pilot_learning import excluded
+            if excluded(d.get("goal_id")):
                 continue
             yield TrajectoryStep(**{k: d.get(k) for k in TrajectoryStep.__dataclass_fields__})
 
