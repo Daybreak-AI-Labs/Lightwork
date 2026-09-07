@@ -322,6 +322,19 @@ def guarded_urlopen(url_or_req, *, timeout: float, allow_http: bool = False):
         _PinnedHTTPHandler,
         _PinnedHTTPSHandler,
         _RevalidatingRedirectHandler(allow_http=allow_http),
+        # No proxying: build_opener's default ProxyHandler reads
+        # HTTP_PROXY/HTTPS_PROXY and rewrites the connection target to the
+        # proxy host -- which the pinned connect() then validates instead of
+        # the actual destination, so a proxy on any private/loopback address
+        # (nearly always true for a corporate proxy) makes every guarded
+        # fetch fail with a "blocked address" error for the PROXY, not the
+        # target. The destination was already validated by _check_url_allowed
+        # above and is re-validated on each redirect hop; the proxy is an
+        # operator-configured hop this guard does not need to police. This
+        # explicit empty ProxyHandler replaces build_opener's default one
+        # (matching _ssrf.safe_client, whose explicit-transport httpx.Client
+        # likewise never consults HTTP_PROXY/HTTPS_PROXY).
+        urllib.request.ProxyHandler({}),
     )
     return opener.open(url_or_req, timeout=timeout)  # noqa: S310 (scheme+host checked, redirects revalidated, IP pinned)
 
