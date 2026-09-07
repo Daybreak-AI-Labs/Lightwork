@@ -32,7 +32,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture(records = [], intercept = null) {
+function fixture(records = [], intercept = null, search = "") {
   const document = { elements: new Map(), activeElement: null };
   let now = 2000;
   class Element {
@@ -96,7 +96,7 @@ function fixture(records = [], intercept = null) {
   };
   vm.runInNewContext(fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
-  ), { document, fetch, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
+  ), { document, fetch, window: {location: {search}}, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {
       await new Promise(resolve => setImmediate(resolve));
@@ -128,6 +128,23 @@ test("initial and refreshed lists describe reads accurately and expose selection
   assert.match(ui.byId("message").textContent, /^Requests refreshed/);
   assert.equal(ui.byId("rationale").value, "Current review draft");
   assert.equal(ui.calls.every(call => call.method === "GET"), true);
+});
+
+test("a linked vendor request reads the exact authorized case without mutating it", async () => {
+  const ui = fixture([record("requested"), record("another")], null, "?case=requested");
+  await ui.settle();
+  assert.match(ui.byId("message").textContent, /Linked request loaded/);
+  assert.equal(ui.caseButton("requested").getAttribute("aria-current"), "true");
+  assert.equal(ui.calls.length, 2);
+  assert.ok(ui.calls.every(call => call.method === "GET"));
+});
+
+test("a linked request that is no longer accessible reports failure without selecting another", async () => {
+  const ui = fixture([record("another")], null, "?case=missing");
+  await ui.settle();
+  assert.match(ui.byId("message").textContent, /Not found/);
+  assert.equal(ui.byId("review-approve").disabled, true);
+  assert.ok(ui.calls.every(call => call.method === "GET"));
 });
 
 test("switching cases clears decision drafts and updates current-request context", async () => {

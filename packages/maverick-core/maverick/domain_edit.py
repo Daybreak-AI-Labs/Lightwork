@@ -18,6 +18,8 @@ literals, so an override round-trips back through the loader.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 from pathlib import Path
@@ -38,7 +40,12 @@ from .domain import (
     suite_for,
     user_dir,
 )
-from .file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
+from .file_lock import (
+    atomic_read_bytes,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+)
 
 # Scalars vs arrays serialize the same way (json.dumps), but we emit them in a
 # stable, readable order; ``models`` and ``workflow`` become TOML tables.
@@ -180,7 +187,17 @@ def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
-def write_override(name: str, patch: dict, directory: str | Path | None = None) -> str:
+class OverrideConflict(ValueError):
+    """The agent changed after the editor loaded it."""
+
+
+def _override_generation(name: str, path: Path) -> str:
+    content = atomic_read_bytes(path) if path.exists() else b""
+    return hashlib.sha256(name.encode() + b"\0" + content).hexdigest()
+
+
+def write_override(name: str, patch: dict, directory: str | Path | None = None, *,
+                   expected_generation: str | None = None, return_view: bool = False) -> str | dict:
     """Validate then persist a tenant override for ``name``. Raises
     ``ValueError`` (with the lint errors) rather than writing an override that
     would weaken the safety envelope. Returns the path written."""
@@ -201,7 +218,13 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None) 
     # replacement also replaces a planted final-component symlink rather than
     # following it to an attacker-selected target.
     with cross_process_lock(path, strict=True):
+        if expected_generation == "new":
+            if path.exists() or name in available_domains():
+                raise OverrideConflict("An agent with this name already exists. Open its latest version or choose a new name.")
+        elif expected_generation is not None and not hmac.compare_digest(expected_generation, _override_generation(name, path)):
+            raise OverrideConflict("This agent changed after you opened it. Reload the latest version before applying your edits.")
         atomic_write_text(path, content, mode=0o600)
+        view = _resolved_view(name, directory) if return_view else None
     # The pack's capability surface may have changed. If it already has a
     # governance assessment, re-draft it so drift flips an accepted review back
     # to needs-review (best-effort; only touches the default user dir).
@@ -211,7 +234,7 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None) 
             assessments.refresh_on_change("agent", name)
         except Exception:  # pragma: no cover -- never let assessment break a save
             pass
-    return str(path)
+    return view if return_view else str(path)
 
 
 def read_override(name: str, directory: str | Path | None = None) -> dict:
@@ -222,13 +245,15 @@ def read_override(name: str, directory: str | Path | None = None) -> dict:
     return _load_raw_domains(d).get(name, {})
 
 
-def remove_override(name: str, directory: str | Path | None = None) -> bool:
+def remove_override(name: str, directory: str | Path | None = None, *, expected_generation: str | None = None) -> bool:
     """Delete a tenant override, reverting to the built-in pack. Returns whether
     a file was removed."""
     name = _validated_override_name(name)
     d = Path(directory) if directory else user_dir()
     path = d / f"{name}.toml"
     with cross_process_lock(path, strict=True):
+        if expected_generation is not None and not hmac.compare_digest(expected_generation, _override_generation(name, path)):
+            raise OverrideConflict("This agent changed after you opened it. Reload its latest version before resetting it.")
         if path.is_file():
             path.unlink()
             return True
@@ -248,6 +273,16 @@ def _output_dict(out) -> dict:
 
 
 def resolved_view(name: str, directory: str | Path | None = None) -> dict | None:
+    try:
+        name = _validated_override_name(name)
+    except ValueError:
+        return None
+    d = ensure_private_directory(Path(directory) if directory else user_dir())
+    with cross_process_lock(d / f"{name}.toml", strict=True):
+        return _resolved_view(name, directory)
+
+
+def _resolved_view(name: str, directory: str | Path | None = None) -> dict | None:
     """The merged pack the agent actually runs, plus provenance and lint -- the
     payload the editor renders. ``None`` if no such pack exists.
 
@@ -260,6 +295,7 @@ def resolved_view(name: str, directory: str | Path | None = None) -> dict | None
     errors, warnings = lint_profile(prof)
     return {
         "name": prof.name,
+        "generation": _override_generation(name, (Path(directory) if directory else user_dir()) / f"{name}.toml"),
         "suite": suite_for(name),
         "description": prof.description,
         "persona": prof.persona,
