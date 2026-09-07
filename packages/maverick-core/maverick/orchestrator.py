@@ -366,7 +366,8 @@ def _maybe_recall_prior_work(world, goal, shield) -> str | None:
                 rows.append((score, g.id, g.title or "", g.result or ""))
         lines: list[str] = []
         for score, gid, title, raw_result in rows:
-            if gid == goal.id or score < 0.10:
+            from .pilot_learning import excluded
+            if gid == goal.id or score < 0.10 or excluded(gid):
                 continue
             safe_title = _sanitize_persisted_prompt_text(
                 title,
@@ -408,6 +409,9 @@ def _record_skill_outcome(ctx: Any, *, success: bool) -> None:
     track record decay its future recall rank. Fully fail-safe — stats are an
     optimization, never a correctness dependency, so any error is swallowed.
     """
+    from .pilot_learning import current_excluded
+    if current_excluded():
+        return
     try:
         names = sorted(getattr(ctx, "skills_used", None) or ())
         if names:
@@ -1027,6 +1031,50 @@ class _QuotaUsageSettlement:
         self.recorded = False
         self.world: WorldModel | None = None
         self.episode_id: int | None = None
+        self.scope: str | None = None
+
+    def bind_checkpoint(self) -> None:
+        from . import checkpoint
+
+        if checkpoint.enabled():
+            self.scope = checkpoint.Checkpointer(self.world).settlement_scope(
+                self.goal.id, self.episode_id, self.principal,
+            )
+
+    def reconcile_snapshot(self, snapshot: dict) -> dict:
+        """Restore accounted usage even when the checkpoint ack was lost."""
+        from .checkpoint import restore_budget
+        from .quotas import UsageLedger
+
+        # Validate the original evidence before the receipt supplies a newer
+        # accounting floor; reconciliation must never repair corrupt history.
+        if not {"dollars", "input_tokens", "output_tokens"}.issubset(snapshot):
+            raise ValueError("checkpoint budget accounting is incomplete")
+        restore_budget(snapshot)
+        if not self.scope:
+            return snapshot
+        receipt = UsageLedger().settlement(self.scope, self.principal)
+        if receipt is None:
+            return snapshot
+        recovered = dict(snapshot)
+        settled = dict(snapshot.get("_settled", {}))
+        for field, ledger_field in (("dollars", "dollars"), ("input_tokens", "in_tokens"),
+                                    ("output_tokens", "out_tokens")):
+            total = receipt["total"][ledger_field]
+            recovered[field] = max(snapshot[field], total)
+            settled[field] = max(settled.get(field, 0), total)
+        recovered["_settled"] = settled
+        return recovered
+
+    def require_unspent_scope(self) -> None:
+        """A receipt alone cannot restore wall time, tools, or execution state."""
+        from .quotas import UsageLedger
+
+        if self.scope and UsageLedger().settlement(self.scope, self.principal) is not None:
+            raise ValueError(
+                "This episode has recorded usage but no resumable checkpoint. "
+                "Start a new episode instead of resuming this episode."
+            )
 
     def record(self) -> None:
         """Charge current spend and release the run's reservation exactly once."""
@@ -1036,12 +1084,20 @@ class _QuotaUsageSettlement:
         try:
             from . import quotas
             prior = getattr(self.budget, "_checkpoint_settled", {})
+            options = {}
+            if self.scope:
+                options = {"settlement_id": self.scope, "already_settled": {
+                    "dollars": prior.get("dollars", 0),
+                    "in_tokens": prior.get("input_tokens", 0),
+                    "out_tokens": prior.get("output_tokens", 0),
+                }}
             acknowledged = quotas.record_usage(
                 self.principal,
-                max(0.0, self.budget.dollars - prior.get("dollars", 0)),
-                max(0, self.budget.input_tokens - prior.get("input_tokens", 0)),
-                max(0, self.budget.output_tokens - prior.get("output_tokens", 0)),
+                max(0.0, self.budget.dollars - (0 if self.scope else prior.get("dollars", 0))),
+                max(0, self.budget.input_tokens - (0 if self.scope else prior.get("input_tokens", 0))),
+                max(0, self.budget.output_tokens - (0 if self.scope else prior.get("output_tokens", 0))),
                 reservation_id=getattr(self.budget, "_tenant_reservation_id", None),
+                **options,
             )
             if self.world is not None and self.episode_id is not None:
                 from . import checkpoint
@@ -1256,6 +1312,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         goal = rebound_goal
         _quota_settlement.goal = goal
 
+    from .task_file_recovery import begin_capture
+    begin_capture(world, goal_id)
+
     # Department attribution: persist the domain this run executes as so
     # success-side learning (dreaming, budget priors) attributes exactly
     # instead of lexically; a resume without an explicit domain inherits the
@@ -1357,9 +1416,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     raise ValueError("checkpoint episode does not belong to this goal")
     if episode_id is None:
         episode_id = world.start_episode(goal_id)
-    _lifecycle.episode_id = episode_id
     _quota_settlement.world = world
     _quota_settlement.episode_id = episode_id
+    _quota_settlement.bind_checkpoint()
     # Restore before briefing/planning can spend, and before any model or
     # tool call. Agent restoration is idempotent on this same Budget object.
     if resume or resume_episode_id is not None:
@@ -1369,7 +1428,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 goal_id, resume_agent_id, episode_id=episode_id, required=True,
             )
             if saved is not None:
-                _ckpt_mod.restore_budget(saved.budget, into=budget)
+                _ckpt_mod.restore_budget(_quota_settlement.reconcile_snapshot(saved.budget), into=budget)
+            else:
+                _quota_settlement.require_unspent_scope()
+    _lifecycle.episode_id = episode_id
     blackboard = Blackboard()
     blackboard.attach_world(world, goal_id)  # persist every post for live streaming
     # Replayable trace (opt-in via MAVERICK_TRACE_DIR): write this run's events
@@ -1967,7 +2029,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             from .skill import distillation_local as _sdl
             if _sdl.enabled():
                 trajectories = [
-                    {"goal": g.title, "success": True, "tools": [],
+                    {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
                     for g in world.list_goals(status="done", limit=10, order="desc")
                 ]
@@ -2022,7 +2084,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 log.warning("failed to clear agent-bus namespace", exc_info=True)
 
 
-async def run_goal(
+async def _run_goal_accounted(
     llm: LLM,
     world: WorldModel,
     budget: Budget,
@@ -2094,6 +2156,26 @@ async def run_goal(
                     checkpoint.Checkpointer(world).clear(goal_id)
             except Exception:  # pragma: no cover -- completion is durable
                 log.warning("checkpoint cleanup failed", exc_info=True)
+
+
+async def run_goal(
+    llm: LLM, world: WorldModel, budget: Budget, goal_id: int,
+    sandbox: Any | None = None, max_depth: int = 3,
+    conversation_id: int | None = None, channel: str | None = None,
+    user_id: str | None = None, capability: Any | None = None,
+    orchestrator_model_override: str | None = None, resume: bool = False,
+    resume_episode_id: int | None = None, domain: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+) -> str:
+    """Hold task execution authority until all finalization work has stopped."""
+    from .task_file_recovery import run_scope
+    sandbox = sandbox or LocalBackend()
+    with run_scope(world, goal_id, sandbox):
+        return await _run_goal_accounted(
+            llm, world, budget, goal_id, sandbox, max_depth, conversation_id,
+            channel, user_id, capability, orchestrator_model_override, resume,
+            resume_episode_id, domain, allowed_suites,
+        )
 
 
 def run_goal_sync(*args, **kwargs) -> str:

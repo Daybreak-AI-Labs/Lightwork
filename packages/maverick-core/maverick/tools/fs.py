@@ -106,6 +106,13 @@ def read_text_contained(sandbox, target: Path, *, errors: str = "strict") -> str
 
 
 def write_text_contained(sandbox, target: Path, content: str) -> None:
+    from ..task_file_recovery import capture, mutation_gate
+    with mutation_gate():
+        protected = capture(Path(sandbox.workdir).resolve(), target)
+        _write_text_contained(sandbox, target, content, legacy_journal=not protected)
+
+
+def _write_text_contained(sandbox, target: Path, content: str, *, legacy_journal=True) -> None:
     """Write ``content`` to an already-resolved ``target`` through a descriptor
     verified inside ``sandbox.workdir`` (TOCTOU-safe).
 
@@ -136,7 +143,8 @@ def write_text_contained(sandbox, target: Path, content: str) -> None:
     # unless [workspace] journal is on; strict mode raises ValueError, which
     # every caller already maps to the standard tool ERROR contract.
     from ..workspace_journal import record_pre_image
-    record_pre_image(workdir, target)
+    if legacy_journal:
+        record_pre_image(workdir, target)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd = _open_contained(workdir, target, os.O_WRONLY | os.O_CREAT)
     # fdopen takes ownership of fd; close fd ourselves only if it (or ftruncate)

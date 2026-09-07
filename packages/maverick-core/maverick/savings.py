@@ -1,7 +1,7 @@
-"""Savings report: money saved vs the typical human cost, from REAL work.
+"""Assumption-based savings estimates from completed task counts.
 
 The number a buyer asks for first: "what did this save me?" The platform
-already records everything needed -- completed episodes (with actual $ spend)
+records completed episodes (with recorded runtime pricing)
 in the world model, attributed to departments -- but the human side of the
 comparison is the CLIENT's number, not ours. This module joins the two:
 
@@ -10,13 +10,15 @@ comparison is the CLIENT's number, not ours. This module joins the two:
     hourly rate, human hours one comparable deliverable takes, with optional
     per-department overrides (legal != support).
   * Real throughput/spend from :mod:`maverick.workforce_value` (read-only,
-    fail-open): deliverables completed and actual agent cost per department.
+    fail-open): completed tasks and recorded runtime cost per department.
 
   savings = (deliverables x hours_per_task x hourly_rate) - agent_cost
 
 Descriptive only -- it never tunes anything (cost pressure must not defund
 safety); pure read path, no LLM, no new state. Fail-open: with no run history
-the report says zero, never an error, and it never invents a number.
+the report says zero. Customer acceptance, observed baseline effort, human
+review/rework and provider invoice reconciliation are separate evidence;
+this arithmetic alone does not establish realized savings.
 """
 from __future__ import annotations
 
