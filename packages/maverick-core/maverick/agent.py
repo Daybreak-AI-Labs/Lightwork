@@ -3262,6 +3262,27 @@ class Agent:
         except Exception as e:  # pragma: no cover -- observability never blocks
             log.debug("live-spend mirror skipped: %s", e)
 
+    def _goal_cancelled(self) -> bool:
+        """Whether an operator cancelled this goal (POST /goals/{id}/cancel).
+
+        The global killswitch/budget checks above stop every run; this is
+        the goal-scoped analogue -- without it, nothing in the loop ever
+        read goal status, so the dashboard Cancel button flipped the row to
+        'cancelled' but the swarm kept spending until FINAL, max_steps, or
+        the budget cap (#W1-23). `get_goal` is a single indexed
+        primary-key read at the same cadence as the untimed killswitch.check()
+        /budget.check() calls beside it, so no throttling here. Fails open
+        (a transient world-read error must not itself stop the run).
+        """
+        if self.ctx.goal_id is None:
+            return False
+        try:
+            goal = self.ctx.world.get_goal(self.ctx.goal_id)
+        except Exception as e:  # pragma: no cover -- a stop check must not crash the run
+            log.debug("goal-cancelled check skipped: %s", e)
+            return False
+        return goal is not None and goal.status == "cancelled"
+
     # Poll interval (seconds) for the killswitch while an LLM generation is
     # in flight — small enough to feel responsive, large enough to be free.
     _HALT_POLL_SECONDS = 1.0
@@ -3447,6 +3468,9 @@ class Agent:
             except BudgetExceeded as e:
                 bb.post(self.name, "error", f"budget exceeded: {e}")
                 return AgentResult(error=f"budget exceeded: {e}", role=self.role, name=self.name)
+            if self._goal_cancelled():
+                bb.post(self.name, "error", "cancelled via dashboard")
+                return AgentResult(error="cancelled via dashboard", role=self.role, name=self.name)
 
             # Long-horizon review checkpoint (opt-in [safety] review_checkpoint):
             # at the root, fire a human-review heartbeat every N dollars / M tool
@@ -4189,6 +4213,11 @@ class Agent:
                 return AgentResult(
                     error=f"halted: {e}", role=self.role, name=self.name,
                 )
+            if self._goal_cancelled():
+                bb.post(self.name, "error", "cancelled via dashboard")
+                return AgentResult(
+                    error="cancelled via dashboard", role=self.role, name=self.name,
+                )
 
             # Frontier-loop optimization: when the model emits 2+ tool
             # calls in one turn and EVERY one is parallel-safe (pure,
@@ -4316,6 +4345,14 @@ class Agent:
                         bb.post(self.name, "error", f"halted: {e}")
                         return AgentResult(
                             error=f"halted: {e}", role=self.role, name=self.name,
+                        )
+                    if self._goal_cancelled():
+                        _answer_pending_tool_uses(
+                            "ERROR: tool not executed (goal cancelled)"
+                        )
+                        bb.post(self.name, "error", "cancelled via dashboard")
+                        return AgentResult(
+                            error="cancelled via dashboard", role=self.role, name=self.name,
                         )
                     # #612: record_tool_call() calls check() and can raise
                     # mid-turn; answer pending tool_use blocks, then re-raise
