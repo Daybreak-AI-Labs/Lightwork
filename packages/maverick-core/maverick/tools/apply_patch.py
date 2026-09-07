@@ -75,10 +75,17 @@ def _files_in_patch(text: str) -> list[str]:
 def _is_safe_path(rel: str, workdir: Path) -> bool:
     try:
         target = (workdir / rel).resolve()
-        target.relative_to(workdir)
-        return True
+        rel_to_workdir = target.relative_to(workdir)
     except ValueError:
         return False
+    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): a patch
+    # targeting `.git/config` (or any path under `.git/`) can plant a
+    # core.fsmonitor hook or filter smudge/clean command that a later
+    # host-side git call would execute. `write_file` and friends already
+    # refuse this (fs.py); apply_patch's own path check must too.
+    if ".git" in rel_to_workdir.parts:
+        return False
+    return True
 
 
 def _make_run(sandbox):

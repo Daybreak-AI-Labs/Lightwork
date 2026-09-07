@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .budget import Budget, BudgetExceeded
+from .git_safety import git_env_without_user_config, git_metadata_may_execute_filters
 from .llm import LLM, model_for_role
 
 log = logging.getLogger(__name__)
@@ -152,13 +153,29 @@ def get_diff(workdir: Path, *, max_bytes: int = 100_000) -> str:
     Used to assemble the reviewer's input. We don't call into the
     sandbox here because the reviewer is checking AGENT output -- it's
     a one-shot reviewer not a tool the agent uses.
+
+    `workdir` is the agent's own working directory, which the agent can
+    write freely (including `.git/config`), so a repo-local
+    `core.fsmonitor` hook or filter smudge command would otherwise
+    execute on the host with this process's full environment (provider
+    API keys included) -- refuse when such metadata is present, and run
+    under a scrubbed environment either way. See
+    PLATFORM_IMPROVEMENT_AUDIT.md W2-1 / W2-2.
     """
     if not (workdir / ".git").exists():
         return ""
+    if git_metadata_may_execute_filters(workdir):
+        log.warning(
+            "reviewer.get_diff skipped: unsafe git filter/fsmonitor metadata in %s",
+            workdir,
+        )
+        return ""
     try:
         proc = subprocess.run(
-            ["git", "-C", str(workdir), "-c", "diff.external=", "-c", "diff.textconv=false", "diff", "--no-ext-diff", "--no-textconv", "HEAD"],
+            ["git", "-C", str(workdir), "-c", "diff.external=", "-c", "diff.textconv=false",
+             "-c", "core.hooksPath=/dev/null", "diff", "--no-ext-diff", "--no-textconv", "HEAD"],
             capture_output=True, text=True, timeout=10,
+            env=git_env_without_user_config(),
         )
         diff = proc.stdout or ""
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
