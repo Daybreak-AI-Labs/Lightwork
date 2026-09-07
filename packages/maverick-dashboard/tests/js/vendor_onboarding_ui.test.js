@@ -12,6 +12,17 @@ function record(id, overrides = {}) {
     id, revision: 1, vendor_name: `Vendor ${id}`, document_id: `document-${id}`,
     project: "VEND", purpose: "Support replies", freshness_days: 365,
     stage: "assessment_ready", outcome: null,
+    work_item: {
+      process: { id: "supplier-evidence-onboarding", version: 1, sha256: "a".repeat(64) },
+      supported_deployment: { topology: "single_persistent_application_replica" },
+      acceptance_contract: {
+        technical: { effect: "one Jira Task matches the exact approved payload" },
+        business: { decision: "an authorized person accepts or rejects the verified deliverable" },
+      },
+      out_of_scope: ["procurement approval or payment", "multi-replica application operation"],
+      lifecycle: "Ready", next_action: "review_assessment",
+      technical_effect: "not_verified", business_outcome: "pending",
+    },
     evidence: { status: "available", version: "v1", extracted: { answers: {} } },
     assessment: {
       status: "pending", result: { answered: 1, total: 1, risk_rating: "low" },
@@ -70,7 +81,7 @@ function fixture(records = [], intercept = null, search = "") {
   };
   const root = add("vendor-onboarding", "section");
   root.dataset.apiBase = "/api/v1/vendor-onboarding";
-  const ids = ["message", "case-title", "case-reference", "status", "evidence", "assessment",
+  const ids = ["message", "case-title", "case-reference", "status", "scope", "evidence", "assessment",
     "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases"];
   ids.forEach(id => add(`vo-${id}`, "div", root));
   const intake = add("vo-intake", "form", root);
@@ -162,6 +173,15 @@ test("switching cases clears decision drafts and updates current-request context
   assert.match(ui.byId("case-reference").textContent, /Initial request · two/);
   assert.equal(ui.caseButton("two").getAttribute("aria-current"), "true");
   assert.equal(ui.caseButton("one").getAttribute("aria-current"), "false");
+});
+
+test("the selected case explains the promised outcome and support boundary", async () => {
+  const ui = fixture([record("one")]);
+  await ui.settle(); await ui.load("one");
+  assert.match(ui.byId("scope").textContent, /one Jira Task matches the exact approved payload/);
+  assert.match(ui.byId("scope").textContent, /authorized person accepts or rejects/);
+  assert.match(ui.byId("scope").textContent, /procurement approval or payment/);
+  assert.match(ui.byId("scope").textContent, /single persistent application replica/);
 });
 
 test("refreshing or reselecting an unchanged case preserves corrections and submits them for approval", async () => {
@@ -302,6 +322,19 @@ test("a failed refresh leaves review drafts intact and reports the error", async
   assert.match(ui.byId("message").textContent, /Case refresh temporarily unavailable/);
   assert.equal(ui.byId("message").getAttribute("role"), "alert");
   assert.equal(ui.byId("refresh").disabled, false);
+});
+
+test("structured API failures show customer text without exposing transport details", async () => {
+  let failRefresh = false;
+  const ui = fixture([record("one")], call => failRefresh && call.url.endsWith("/cases/one")
+    ? response({ detail: { schema: "lightwork.error.v1", code: "revision_conflict",
+      message: "This request changed. Reload it before deciding.", retryable: false,
+      next_action: "Reload the request." } }, 409) : undefined);
+  await ui.settle(); await ui.load("one");
+  failRefresh = true;
+  await ui.click("refresh");
+  assert.match(ui.byId("message").textContent, /This request changed/);
+  assert.doesNotMatch(ui.byId("message").textContent, /revision_conflict|lightwork\.error/);
 });
 
 test("stages gate human review, execution, reconciliation and acceptance separately", async () => {

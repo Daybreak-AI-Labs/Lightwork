@@ -97,7 +97,13 @@
     let data;
     try { data = await response.json(); } catch (_) { throw new Error("Server response unavailable; reload the case before retrying."); }
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Server response unavailable; reload the case before retrying.");
-    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Request was rejected; check fields and reload the case.");
+    if (!response.ok) {
+      const detail = data.detail;
+      const error = new Error(typeof detail === "string" ? detail :
+        typeof detail?.message === "string" ? detail.message : "Request was rejected; check fields and reload the case.");
+      if (detail && typeof detail === "object" && typeof detail.code === "string") error.code = detail.code;
+      throw error;
+    }
     return data;
   }
   function sameJSON(left, right) {
@@ -134,6 +140,13 @@
       "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : "pending")]) {
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
     }
+    const work = record.work_item || {};
+    const topology = friendly(work.supported_deployment?.topology || "support boundary unavailable");
+    const excluded = Array.isArray(work.out_of_scope) && work.out_of_scope.length
+      ? work.out_of_scope.join("; ") : "No exclusions were supplied; refresh before relying on this request.";
+    show("scope", `Technical result: ${work.acceptance_contract?.technical?.effect || "Not specified"}.\n` +
+      `Business completion: ${work.acceptance_contract?.business?.decision || "Not specified"}.\n` +
+      `Supported deployment: ${topology}.\nNot included: ${excluded}.`);
     const evidence = record.evidence;
     show("evidence", evidence ? `Overall status: ${friendly(evidence.status)}\n` + evidenceDocuments(record).map(document => `${document.source === "upload" ? "Uploaded" : "Drive"}: ${document.name || document.document_id || record.document_id}\nStatus: ${friendly(document.status || evidence.status)} · Version: ${document.version || "unverified"}\nDocument date: ${date(document.modified_at)} (${document.source === "upload" ? "uploader asserted" : "Drive modified time"})\nValid until: ${date(document.fresh_until)}\nContent fingerprint: ${document.content_sha256 || "unavailable"}`).join("\n\n") : "No evidence obtained. Add documents, then choose Obtain current evidence.");
     if (byId("uploaded-documents")) {

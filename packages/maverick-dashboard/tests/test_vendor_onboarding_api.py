@@ -74,10 +74,78 @@ def test_http_blank_purpose_does_not_leave_a_registered_vendor(web):
     response = client.post(BASE, json={"vendor_name": "Rejected HTTP intake vendor",
         "document_id": "security-paper", "project": "VEND", "purpose": "   "})
     assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "schema": "lightwork.error.v1", "code": "workflow_rejected",
+        "message": "purpose must be a nonempty string of at most 4000 characters",
+        "retryable": False,
+        "next_action": "Review the current case state and correct the requested action.",
+    }
     with tenant_scope(tenant=ctx.tenant):
         assert vendor_management.list_vendors() == []
     assert service.list(ctx) == []
     assert tickets.creates == 0
+
+
+def test_http_case_exposes_pinned_work_item_contract(web):
+    client, *_ = web
+    row = _intake(client)
+    assert row["journey_contract"] == row["work_item"]["process"]
+    assert row["work_item"]["schema"] == "lightwork.contract.work-item.v1"
+    assert row["work_item"]["objective"] == "Draft replies"
+    assert row["work_item"]["technical_effect"] == "not_verified"
+    assert row["work_item"]["business_outcome"] == "pending"
+    reopened = client.get(f"{BASE}/{row['id']}")
+    assert reopened.status_code == 200
+    assert reopened.json()["work_item"] == row["work_item"]
+    listed = client.get(BASE).json()["cases"]
+    assert listed[0]["work_item"] == row["work_item"]
+
+
+def test_http_contract_and_revision_failures_have_stable_error_codes(web):
+    from maverick import vendor_onboarding
+    from maverick.paths import tenant_scope
+
+    client, _, ctx, _ = web
+    row = _intake(client)
+    changed = _step(client, row, "collect-evidence")
+    stale = client.post(f"{BASE}/{row['id']}/assess", json={"expected_revision": row["revision"]})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "revision_conflict"
+    assert stale.json()["detail"]["retryable"] is False
+    assert "Reload" in stale.json()["detail"]["next_action"]
+
+    with tenant_scope(tenant=ctx.tenant):
+        vendor_onboarding._CASES.update(
+            row["id"], lambda value: value.update(schema="lightwork.vendor-onboarding.v999"),
+            expected_revision=changed["revision"], action="test_unknown_schema_fixture", actor=ctx.actor,
+        )
+    unsupported = client.get(f"{BASE}/{row['id']}")
+    assert unsupported.status_code == 409
+    assert unsupported.json()["detail"]["code"] == "unsupported_record_version"
+    assert unsupported.json()["detail"]["schema"] == "lightwork.error.v1"
+    assert unsupported.json()["detail"]["retryable"] is False
+
+
+def test_http_platform_contract_error_is_stable_and_provider_failure_is_redacted(web, monkeypatch):
+    from maverick.platform_contracts import PlatformContractError
+
+    client, service, *_ = web
+    monkeypatch.setattr(service, "get", lambda *args: (_ for _ in ()).throw(
+        PlatformContractError("work item lifecycle is unsupported", code="invalid_transition")
+    ))
+    incompatible = client.get(f"{BASE}/VON-incompatible")
+    assert incompatible.status_code == 409
+    assert incompatible.json()["detail"]["code"] == "invalid_transition"
+    assert incompatible.json()["detail"]["message"] == "work item lifecycle is unsupported"
+
+    monkeypatch.setattr(service, "get", lambda *args: (_ for _ in ()).throw(
+        RuntimeError("provider payload included api_key=plaintext-secret-value")
+    ))
+    unavailable = client.get(f"{BASE}/VON-unavailable")
+    assert unavailable.status_code == 503
+    assert unavailable.json()["detail"]["code"] == "operation_unavailable"
+    assert "plaintext-secret-value" not in unavailable.text
+    assert "RuntimeError" not in unavailable.text
 
 
 def test_reviewed_file_preview_is_private_nonmutating_and_requires_exact_confirmation(web):
@@ -271,6 +339,7 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert response.status_code == 200, response.text
     assert "Human review" in response.text
     assert "Approve this exact Jira task" in response.text
+    assert "What this request delivers" in response.text
     assert "no-store" in response.headers["cache-control"]
     asset = client.get("/static/lightwork-vendor-onboarding.js")
     assert asset.status_code == 200

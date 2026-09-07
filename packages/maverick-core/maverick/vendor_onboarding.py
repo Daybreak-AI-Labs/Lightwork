@@ -8,6 +8,7 @@ require read-only reconciliation, including after a lost receipt or restart.
 """
 from __future__ import annotations
 
+import copy
 import functools
 import hashlib
 import math
@@ -30,12 +31,69 @@ from .governed_operations import (
 )
 from .governed_records import GovernedRecordStore, RecordConflict
 from .paths import data_dir, tenant_scope
+from .platform_contracts import build_contract
 from .vendor_onboarding_adapters import EvidenceDocument
 
 _CASES = GovernedRecordStore("vendor_onboarding", "VON", "vendor_onboarding_case")
 _LOCK = threading.RLock()
 _PROJECT = re.compile(r"[A-Z][A-Z0-9_]{1,31}\Z")
 _CLOSED_OPERATION = {"executing", "reconciliation_required", "verified"}
+CASE_SCHEMA = "lightwork.vendor-onboarding.v1"
+
+_JOURNEY_CONTRACT_V1 = {
+    "id": "supplier-evidence-onboarding",
+    "version": 1,
+    "supported_deployment": {
+        "topology": "single_persistent_application_replica",
+        "workers": "tenant_and_credential_scoped",
+        "external_systems": ["Google Drive evidence", "Jira Task delivery"],
+    },
+    "technical_acceptance": {
+        "effect": "one Jira Task matches the exact approved payload",
+        "evidence": "fresh authoritative Jira readback under the bound credential version",
+    },
+    "business_acceptance": {
+        "decision": "an authenticated authorized human explicitly accepts or rejects the verified deliverable",
+        "accepted_value": True,
+    },
+    "renewal": "accepted cases retain the evidence freshness deadline and require current source and ticket checks",
+    "out_of_scope": [
+        "procurement approval, payment, contracting, or ERP provisioning",
+        "production release or authorization of the reviewed vendor or model",
+        "multi-replica application operation",
+    ],
+}
+JOURNEY_CONTRACT_V1_REF = {
+    "id": _JOURNEY_CONTRACT_V1["id"],
+    "version": _JOURNEY_CONTRACT_V1["version"],
+    "sha256": digest(_JOURNEY_CONTRACT_V1),
+}
+CURRENT_JOURNEY_CONTRACT_REF = dict(JOURNEY_CONTRACT_V1_REF)
+_JOURNEY_CONTRACTS = {
+    (_JOURNEY_CONTRACT_V1["id"], _JOURNEY_CONTRACT_V1["version"]): _JOURNEY_CONTRACT_V1,
+}
+_WORK_ITEM_STATE = {
+    "intake": ("Draft", "obtain_evidence"),
+    "evidence_collected": ("Ready", "build_assessment"),
+    "pending_review": ("Awaiting approval", "review_assessment"),
+    "review_approved": ("Ready", "prepare_action"),
+    "review_rejected": ("Failed", "correct_or_close"),
+    "action_pending_approval": ("Awaiting approval", "approve_action"),
+    "action_approved": ("Ready", "execute_action"),
+    "executing": ("Running", "wait_or_reconcile"),
+    "reconciliation_required": ("Needs reconciliation", "reconcile"),
+    "execution_completed": ("Verified", "accept_or_reject"),
+    "accepted": ("Accepted", "check_renewal"),
+    "customer_rejected": ("Failed", "closed"),
+}
+
+
+class VendorOnboardingContractError(ValueError):
+    """A persisted record cannot be interpreted under a supported contract."""
+
+    def __init__(self, message, *, code):
+        super().__init__(message)
+        self.code = code
 
 
 def _text(value, name, limit=4000):
@@ -92,16 +150,119 @@ class VendorOnboardingService:
         if expected_revision is not None:
             if type(expected_revision) is not int or row["revision"] != expected_revision:
                 raise RecordConflict("vendor onboarding case revision changed")
-        return row
+        return self._present(row)
+
+    @staticmethod
+    def _contract(row):
+        if row.get("schema") != CASE_SCHEMA:
+            raise VendorOnboardingContractError(
+                "unsupported vendor onboarding schema", code="unsupported_record_version",
+            )
+        stored = row.get("journey_contract")
+        binding = "explicit_at_intake"
+        if stored is None:
+            stored = JOURNEY_CONTRACT_V1_REF
+            binding = "legacy_schema_default"
+        if (not isinstance(stored, dict) or set(stored) != {"id", "version", "sha256"}
+                or not isinstance(stored.get("id"), str) or type(stored.get("version")) is not int
+                or not isinstance(stored.get("sha256"), str)):
+            raise VendorOnboardingContractError(
+                "invalid journey contract reference", code="invalid_contract_reference",
+            )
+        contract = _JOURNEY_CONTRACTS.get((stored["id"], stored["version"]))
+        if contract is None:
+            raise VendorOnboardingContractError(
+                "unsupported journey contract", code="unsupported_contract_version",
+            )
+        expected = {"id": contract["id"], "version": contract["version"],
+                    "sha256": digest(contract)}
+        if stored != expected:
+            raise VendorOnboardingContractError(
+                "journey contract digest mismatch", code="contract_integrity_failed",
+            )
+        return copy.deepcopy(contract), copy.deepcopy(expected), binding
+
+    def _present(self, row):
+        contract, reference, binding = self._contract(row)
+        try:
+            lifecycle, next_action = _WORK_ITEM_STATE[row["stage"]]
+        except KeyError as exc:
+            raise VendorOnboardingContractError(
+                "unsupported vendor onboarding lifecycle state", code="unsupported_lifecycle_state",
+            ) from exc
+        operation = row.get("operation") or {}
+        outcome = row.get("outcome") or {}
+        technical = ("verified" if operation.get("state") == "verified" else
+                     "indeterminate" if operation.get("state") in {"executing", "reconciliation_required"}
+                     else "not_verified")
+        business = ("accepted" if outcome.get("accepted") is True else
+                    "rejected" if outcome.get("accepted") is False else "pending")
+        preconditions = operation.get("preconditions") or {}
+        credential_versions = {
+            name: str(preconditions[name]) for name in (
+                "document_credential_version", "ticket_credential_version",
+            ) if preconditions.get(name) is not None
+        }
+        measured_cost = (row.get("metrics") or {}).get("execution_cost_usd")
+        cost = ({"state": "exact", "currency": "USD", "amount": str(measured_cost)}
+                if type(measured_cost) in (int, float) and math.isfinite(measured_cost)
+                else {"state": "unknown", "reason": "provider_billing_unmeasured"})
+        freshness = (row.get("evidence") or {}).get("fresh_until")
+        idempotency = ({"state": "bound", "key": operation["id"]}
+                       if operation.get("id") else
+                       {"state": "unknown", "reason": "action_not_prepared"})
+        work_item = build_contract(
+            "work-item", contract_id=row["id"], tenant_id=row["tenant"],
+            owner_id=row["owner"], purpose=row["purpose"],
+            created_at=row.get("created_at", row["started_at"]),
+            updated_at=row.get("updated_at", row["started_at"]), revision=row["revision"],
+            fields={
+                "requester": row.get("requested_by") or row["owner"],
+                "objective": row["purpose"], "process": reference,
+                "contract_binding": binding,
+                "supported_deployment": contract["supported_deployment"],
+                "acceptance_contract": {
+                    "technical": contract["technical_acceptance"],
+                    "business": contract["business_acceptance"],
+                },
+                "out_of_scope": contract["out_of_scope"],
+                "lifecycle": lifecycle, "next_action": next_action,
+                "technical_effect": technical, "business_outcome": business,
+                "target_scope": {"provider": "jira", "project": row["project"]},
+                "deployment_profile": contract["supported_deployment"],
+                "admission_id": row["id"],
+                "acceptance_contract_ref": reference,
+                "parent_work_item_id": row.get("renewal_of"),
+            },
+            provenance={"record_schema": row["schema"], "record_revision": row["revision"]},
+            policy_snapshot_ref=reference,
+            authority_versions={"journey_contract": f"{reference['id']}:{reference['version']}"},
+            credential_versions=credential_versions,
+            idempotency=idempotency,
+            budget={"state": "unknown", "reason": "workflow_budget_not_configured"},
+            cost=cost,
+            fresh_until=(freshness if freshness is not None else
+                         {"state": "unknown", "reason": "evidence_not_collected"}),
+            human_intervention={
+                "required": True, "review_count": len(row.get("review_history") or []),
+                "acceptance_state": business,
+            },
+            uncertainty={"state": "bounded" if technical == "verified" else "unknown",
+                         "basis": "authoritative_readback" if technical == "verified"
+                                  else "technical_effect_not_verified"},
+            causal_status={"state": "not_applicable", "basis": "operational_workflow"},
+        )
+        return dict(row, journey_contract=reference, work_item=work_item)
 
     def _save(self, ctx, row, **changes):
+        self._contract(row)
         result = _CASES.update(
             row["id"], lambda value: value.update(changes),
             expected_revision=row["revision"], action="vendor_onboarding_changed", actor=ctx.actor,
         )
         if result is None:
             raise KeyError("vendor onboarding case disappeared")
-        return result
+        return self._present(result)
 
     def _editable(self, row):
         if ((row.get("operation") or {}).get("state") in _CLOSED_OPERATION
@@ -150,23 +311,26 @@ class VendorOnboardingService:
                 vendor = vendors.get_vendor(vendor_id)
         if vendor is None or vendor["owner"] != ctx.resource_owner:
             raise PermissionError("vendor belongs to a different resource owner")
+        started_at = self.clock()
         row = _CASES.create({
-            "id": _CASES.new_id(), "schema": "lightwork.vendor-onboarding.v1",
+            "id": _CASES.new_id(), "schema": CASE_SCHEMA,
             "tenant": ctx.tenant, "owner": ctx.resource_owner,
+            "requested_by": ctx.actor,
+            "journey_contract": copy.deepcopy(CURRENT_JOURNEY_CONTRACT_REF),
             "vendor_id": vendor_id, "vendor_name": name, "document_id": doc,
             "document_ids": ids, "uploads": uploads,
             "project": project, "purpose": validated_purpose,
             "freshness_days": freshness_days, "renewal_of": renewal_of,
             "stage": "intake", "evidence": None, "assessment": None,
             "review_history": [], "operation": None, "operation_history": [],
-            "exceptions": [], "outcome": None, "started_at": self.clock(),
+            "exceptions": [], "outcome": None, "started_at": started_at,
             "metrics": {"execution_cost_usd": 0.0 if self.documents.mode == "offline_synthetic"
                         and self.tickets.mode == "offline_synthetic" else None,
                         "cost_basis": "no model calls; provider billing unmeasured",
                         "human_review_seconds": 0.0, "document_reads": 0},
             "integration_mode": {"documents": self.documents.mode, "tickets": self.tickets.mode},
         }, action="vendor_onboarding_intake", actor=ctx.actor, max_records=10000)
-        return row
+        return self._present(row)
 
     @staticmethod
     def _document_ids(values):
@@ -288,7 +452,7 @@ class VendorOnboardingService:
         rows = _CASES.list(limit=10001)
         if len(rows) > 10000:
             raise RuntimeError("case capacity exceeded; list completeness unavailable")
-        return [row for row in rows if row.get("tenant") == ctx.tenant
+        return [self._present(row) for row in rows if row.get("tenant") == ctx.tenant
                 and row.get("owner") == ctx.resource_owner
                 and self.authorize(ctx, "read", row["id"]) is True]
 
@@ -641,6 +805,7 @@ class VendorOnboardingService:
         outcome = {"accepted": accepted, "reviewer": ctx.actor, "rationale": why,
                    "accepted_at": self.clock(), "execution_completed": True,
                    "validation": "verified_external_record", "released": False,
+                   "journey_contract": copy.deepcopy(row["journey_contract"]),
                    "external_confirmation": observed,
                    "assessment_id": row["assessment"]["id"],
                    "assessment_sha256": row["assessment"]["assessment_sha256"],

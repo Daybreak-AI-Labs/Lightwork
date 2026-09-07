@@ -7,6 +7,8 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from maverick.governed_records import RecordConflict
+from maverick.platform_contracts import PlatformContractError
+from maverick.vendor_onboarding import VendorOnboardingContractError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -70,19 +72,30 @@ class AcceptanceBody(RevisionBody):
     rationale: str = Field(min_length=1, max_length=4000)
 
 
+def _error(status, code, message, *, retryable=False, next_action):
+    return HTTPException(status, {
+        "schema": "lightwork.error.v1", "code": code, "message": message,
+        "retryable": retryable, "next_action": next_action,
+    })
+
+
 def _binding(request: Request):
     require_permission(request, "operate")
     factory = getattr(request.app.state, "vendor_onboarding_binding_factory", None)
     if not callable(factory):
-        raise HTTPException(503, "Vendor onboarding composition is unavailable")
+        raise _error(503, "composition_unavailable", "Vendor onboarding is unavailable for this workspace.",
+                     retryable=True, next_action="Refresh setup, then try again.")
     try:
         return factory(request)
     except HTTPException:
         raise
     except (PermissionError, ValueError) as exc:
-        raise HTTPException(403 if isinstance(exc, PermissionError) else 409, str(exc)) from exc
+        raise _error(403 if isinstance(exc, PermissionError) else 409,
+                     "permission_denied" if isinstance(exc, PermissionError) else "workspace_binding_rejected",
+                     str(exc), next_action="Review workspace access and saved connections.") from exc
     except Exception as exc:
-        raise HTTPException(503, "Vendor onboarding authority is unavailable") from exc
+        raise _error(503, "authority_unavailable", "Vendor onboarding authority is unavailable.",
+                     retryable=True, next_action="Refresh setup before retrying.") from exc
 
 
 def _call(binding, operation: str, *args, **kwargs):
@@ -91,14 +104,27 @@ def _call(binding, operation: str, *args, **kwargs):
     except HTTPException:
         raise
     except PermissionError as exc:
-        raise HTTPException(403, str(exc)) from exc
+        raise _error(403, "permission_denied", str(exc),
+                     next_action="Ask a workspace administrator to review your role and connection access.") from exc
     except KeyError as exc:
-        raise HTTPException(404, "Vendor case or referenced record was not found") from exc
-    except (ValueError, RecordConflict) as exc:
-        raise HTTPException(409, str(exc)) from exc
+        raise _error(404, "record_not_found", "Vendor case or referenced record was not found.",
+                     next_action="Refresh requests and select an accessible case.") from exc
+    except VendorOnboardingContractError as exc:
+        raise _error(409, exc.code, str(exc),
+                     next_action="Do not retry this change; update or repair the case contract first.") from exc
+    except PlatformContractError as exc:
+        raise _error(409, exc.code, str(exc),
+                     next_action="Reload this case; repair its incompatible work record before continuing.") from exc
+    except RecordConflict as exc:
+        raise _error(409, "revision_conflict", str(exc),
+                     next_action="Reload the current case, review changes, and submit again.") from exc
+    except ValueError as exc:
+        raise _error(409, "workflow_rejected", str(exc),
+                     next_action="Review the current case state and correct the requested action.") from exc
     except Exception as exc:
         # Never expose provider payloads, credential values or storage paths.
-        raise HTTPException(503, "Operation unavailable; reload case status before retrying") from exc
+        raise _error(503, "operation_unavailable", "Operation unavailable; reload case status before retrying.",
+                     retryable=True, next_action="Reload case status before deciding whether to retry.") from exc
 
 
 @router.get("/cases")
@@ -135,13 +161,16 @@ async def upload_document(request: Request, case_id: str,
     binding = _binding(request)
     mime = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
     if mime not in {"text/plain", "application/pdf"}:
-        raise HTTPException(415, "Upload a UTF-8 text file or a supported digital PDF")
+        raise _error(415, "unsupported_media_type",
+                     "Upload a UTF-8 text file or a supported digital PDF.",
+                     next_action="Choose a plain-text or digital PDF evidence file.")
     limit = MAX_PDF_BYTES if mime == "application/pdf" else MAX_TEXT_BYTES
     chunks, length = [], 0
     async for chunk in request.stream():
         length += len(chunk)
         if length > limit:
-            raise HTTPException(413, "Document exceeds the supported upload size")
+            raise _error(413, "upload_too_large", "Document exceeds the supported upload size.",
+                         next_action="Choose a smaller evidence file and upload it again.")
         chunks.append(chunk)
     return await run_in_threadpool(_call, binding, "upload_document", case_id, expected_revision,
                                    content=b"".join(chunks), name=name, mime=mime, document_date=document_date)
@@ -158,14 +187,17 @@ async def _reviewed_upload(request, case_id, *, save):
     async for chunk in request.stream():
         length += len(chunk)
         if length > 23 * 1024 * 1024:
-            raise HTTPException(413, "Evidence upload exceeds the supported size")
+            raise _error(413, "upload_too_large", "Evidence upload exceeds the supported size.",
+                         next_action="Choose a smaller evidence file and review it again.")
         chunks.append(chunk)
     try:
         body = UploadPreviewBody.model_validate_json(b"".join(chunks))
         content = base64.b64decode(body.content_base64, validate=True)
     except (ValidationError, ValueError, binascii.Error) as exc:
         # Validation errors must not echo document bytes or supplied transcription.
-        raise HTTPException(422, "Check the selected file, document date and evidence review fields") from exc
+        raise _error(422, "invalid_upload_review",
+                     "Check the selected file, document date and evidence review fields.",
+                     next_action="Correct the highlighted evidence fields and review the file again.") from exc
     arguments = body.model_dump(exclude={"content_base64", "expected_revision", "confirm", "review_digest"})
     if save:
         arguments.update(confirm=body.confirm, review_digest=body.review_digest)
@@ -197,7 +229,8 @@ def execute(request: Request, case_id: str, body: ApprovalBody):
     binding = _binding(request)
     current = _call(binding, "get", case_id)
     if current["revision"] != body.expected_revision:
-        raise HTTPException(409, "Case changed; reload the exact approved action")
+        raise _error(409, "revision_conflict", "Case changed after the action was reviewed.",
+                     next_action="Reload the exact approved action before executing it.")
     return _call(binding, "execute", case_id)
 
 
@@ -216,7 +249,8 @@ def check_renewal(request: Request, case_id: str, body: RevisionBody):
     binding = _binding(request)
     current = _call(binding, "get", case_id)
     if current["revision"] != body.expected_revision:
-        raise HTTPException(409, "Case changed; reload before checking renewal")
+        raise _error(409, "revision_conflict", "Case changed before the renewal check.",
+                     next_action="Reload the case before checking renewal.")
     return _call(binding, "check_renewal", case_id)
 
 

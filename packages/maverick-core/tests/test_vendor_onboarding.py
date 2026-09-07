@@ -80,6 +80,92 @@ def test_invalid_intake_purpose_does_not_register_vendor(setup, purpose):
     assert tickets.creates == 0
 
 
+def test_journey_contract_is_pinned_and_legacy_records_keep_v1(setup, monkeypatch):
+    from maverick import vendor_onboarding
+
+    svc, ctx, *_ = setup
+    admitted = svc.intake(ctx, "Synthetic pinned contract", "security-paper", "VEND",
+                          "Evaluate a limited support assistant")
+    contract = admitted["journey_contract"]
+    assert contract == vendor_onboarding.CURRENT_JOURNEY_CONTRACT_REF
+    assert admitted["work_item"]["process"] == contract
+    assert admitted["work_item"]["objective"] == "Evaluate a limited support assistant"
+    assert admitted["work_item"]["supported_deployment"]["topology"] == "single_persistent_application_replica"
+    assert admitted["work_item"]["technical_effect"] == "not_verified"
+    assert admitted["work_item"]["business_outcome"] == "pending"
+
+    legacy = svc.intake(ctx, "Synthetic legacy contract", "security-paper", "VEND", "Legacy request")
+    with tenant_scope(tenant=ctx.tenant):
+        stored = vendor_onboarding._CASES.update(
+            legacy["id"], lambda value: value.pop("journey_contract"),
+            expected_revision=legacy["revision"], action="test_legacy_fixture", actor=ctx.actor,
+        )
+
+    future = dict(contract, version=contract["version"] + 1, sha256="f" * 64)
+    monkeypatch.setattr(vendor_onboarding, "CURRENT_JOURNEY_CONTRACT_REF", future)
+    reopened = svc.get(ctx, admitted["id"])
+    assert reopened["journey_contract"] == contract
+    assert reopened["work_item"]["process"] == contract
+
+    reopened_legacy = svc.get(ctx, legacy["id"])
+    assert reopened_legacy["revision"] == stored["revision"]
+    assert reopened_legacy["journey_contract"] == vendor_onboarding.JOURNEY_CONTRACT_V1_REF
+    assert reopened_legacy["work_item"]["contract_binding"] == "legacy_schema_default"
+    assert next(row for row in svc.list(ctx) if row["id"] == legacy["id"])["work_item"] == reopened_legacy["work_item"]
+
+
+def test_unknown_case_or_journey_contract_cannot_reach_mutation(setup):
+    from maverick import vendor_onboarding
+
+    svc, ctx, _, tickets, _ = setup
+    row = svc.intake(ctx, "Synthetic unsupported contract", "security-paper", "VEND", "Rejected mutation")
+    with tenant_scope(tenant=ctx.tenant):
+        unsupported = vendor_onboarding._CASES.update(
+            row["id"], lambda value: value.update(schema="lightwork.vendor-onboarding.v999"),
+            expected_revision=row["revision"], action="test_unknown_schema_fixture", actor=ctx.actor,
+        )
+    with pytest.raises(ValueError, match="unsupported vendor onboarding schema"):
+        svc.set_documents(ctx, row["id"], unsupported["revision"], [], [])
+    with tenant_scope(tenant=ctx.tenant):
+        assert vendor_onboarding._CASES.get(row["id"]) == unsupported
+    assert tickets.creates == 0
+
+    with tenant_scope(tenant=ctx.tenant):
+        supported_schema = vendor_onboarding._CASES.update(
+            row["id"], lambda value: value.update(
+                schema="lightwork.vendor-onboarding.v1",
+                journey_contract={"id": "supplier-evidence-onboarding", "version": 999, "sha256": "0" * 64},
+            ), expected_revision=unsupported["revision"], action="test_unknown_contract_fixture", actor=ctx.actor,
+        )
+    with pytest.raises(ValueError, match="unsupported journey contract"):
+        svc.set_documents(ctx, row["id"], supported_schema["revision"], [], [])
+    with tenant_scope(tenant=ctx.tenant):
+        assert vendor_onboarding._CASES.get(row["id"]) == supported_schema
+    assert tickets.creates == 0
+
+
+@pytest.mark.parametrize(("stage", "lifecycle", "next_action"), [
+    ("intake", "Draft", "obtain_evidence"),
+    ("evidence_collected", "Ready", "build_assessment"),
+    ("pending_review", "Awaiting approval", "review_assessment"),
+    ("review_approved", "Ready", "prepare_action"),
+    ("review_rejected", "Failed", "correct_or_close"),
+    ("action_pending_approval", "Awaiting approval", "approve_action"),
+    ("action_approved", "Ready", "execute_action"),
+    ("executing", "Running", "wait_or_reconcile"),
+    ("reconciliation_required", "Needs reconciliation", "reconcile"),
+    ("execution_completed", "Verified", "accept_or_reject"),
+    ("accepted", "Accepted", "check_renewal"),
+    ("customer_rejected", "Failed", "closed"),
+])
+def test_every_case_stage_has_an_explicit_work_item_state(setup, stage, lifecycle, next_action):
+    svc, ctx, *_ = setup
+    row = svc.intake(ctx, "Synthetic state map", "security-paper", "VEND", "Map state")
+    projected = svc._present(dict(row, stage=stage))
+    assert projected["work_item"]["lifecycle"] == lifecycle
+    assert projected["work_item"]["next_action"] == next_action
+
+
 def test_multiple_documents_conflicts_and_secondary_version_guard(setup):
     svc, ctx, docs, tickets, _ = setup
     docs.documents[(ctx.tenant, "policy")] = EvidenceDocument("policy", "1", NOW - 100,
@@ -248,6 +334,9 @@ def test_complete_workflow_keeps_execution_acceptance_and_release_separate(setup
     assert row["stage"] == "execution_completed"
     assert row["operation"]["external_confirmation"]["verified"] is True
     assert row["outcome"] is None
+    assert row["work_item"]["lifecycle"] == "Verified"
+    assert row["work_item"]["technical_effect"] == "verified"
+    assert row["work_item"]["business_outcome"] == "pending"
     duplicate = svc.execute(ctx, row["id"])
     assert duplicate["revision"] == row["revision"]
     assert tickets.creates == 1
@@ -256,6 +345,9 @@ def test_complete_workflow_keeps_execution_acceptance_and_release_separate(setup
     assert row["outcome"]["released"] is False
     assert row["metrics"]["human_review_seconds"] == 12.5
     assert row["outcome"]["execution_cost_usd"] == 0.0
+    assert row["outcome"]["journey_contract"] == row["journey_contract"]
+    assert row["work_item"]["lifecycle"] == "Accepted"
+    assert row["work_item"]["business_outcome"] == "accepted"
     renewal = svc.intake(ctx, "Synthetic Acme AI", "security-paper", "VEND", "Annual renewal",
                          renewal_of=row["id"])
     assert renewal["renewal_of"] == row["id"]
@@ -396,7 +488,14 @@ def test_tenant_scope_ignores_ambient_and_never_pools_customer_data(setup):
 
 
 def test_stale_revision_cannot_overwrite_review(setup):
-    svc, ctx, *_ = setup
+    svc, ctx, _, tickets, _ = setup
     row = reviewed(svc, ctx)
+    assert row["revision"] == 4
+    prepared = svc.prepare_action(ctx, row["id"], row["revision"])
+    assert prepared["revision"] == 5
+    question = next(iter(row["assessment"]["answers"]))
     with pytest.raises(RecordConflict):
-        svc.prepare_action(ctx, row["id"], row["revision"] - 1)
+        svc.review(ctx, row["id"], row["revision"], "approved", "Conflicting correction",
+                   corrections={question: {"answer": "unknown", "note": "Stale writer"}})
+    assert svc.get(ctx, row["id"])["revision"] == 5
+    assert tickets.creates == 0
