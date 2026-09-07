@@ -26,7 +26,7 @@ def test_default_config_is_not_air_gapped():
 
 def test_fully_local_with_deny_all_is_clean():
     cfg = {"models": _all_local_models(), "egress": {"deny": ["*"]},
-           "sandbox": {"backend": "docker"}}
+           "sandbox": {"backend": "docker"}, "enterprise": {"mode": True}}
     rep = audit(config=cfg)
     assert rep["clean"] is True and rep["violations"] == []
 
@@ -95,7 +95,8 @@ def test_kubernetes_without_networkpolicy_assertion_is_flagged():
 def test_kubernetes_with_deny_all_networkpolicy_assertion_is_clean():
     # The only k8s config that actually runs air-gapped (deny-all NetworkPolicy
     # applied out-of-band + allow_network=true) must pass.
-    base = {"models": _all_local_models(), "egress": {"deny": ["*"]}}
+    base = {"models": _all_local_models(), "egress": {"deny": ["*"]},
+            "enterprise": {"mode": True}}
     rep = audit(config={**base, "sandbox": {
         "backend": "kubernetes", "allow_network": True,
         "network_policy": "deny-all"}})
@@ -119,7 +120,8 @@ def test_local_provider_loopback_endpoint_stays_clean():
     # A genuinely loopback local endpoint is proven local and stays clean.
     cfg = {"models": _all_local_models(),
            "providers": {"ollama": {"base_url": "http://127.0.0.1:11434/v1"}},
-           "egress": {"deny": ["*"]}, "sandbox": {"backend": "docker"}}
+           "egress": {"deny": ["*"]}, "sandbox": {"backend": "docker"},
+           "enterprise": {"mode": True}}
     rep = audit(config=cfg)
     assert rep["clean"] is True and rep["violations"] == []
 
@@ -150,6 +152,43 @@ def test_flags_outbound_webhook_telemetry_sink():
     rep = audit(config=cfg)
     assert rep["clean"] is False
     assert any("webhooks" in v.lower() for v in rep["violations"])
+
+
+def test_deny_all_egress_without_enterprise_mode_is_flagged():
+    # W2-90: the runtime egress guard (egress_guard.py, wrapping httpx/requests
+    # across ~80 connectors and every provider SDK) only enforces default-deny
+    # when enterprise mode is on -- enterprise.egress_permitted() returns True
+    # unconditionally otherwise, whatever [egress] says. A config with
+    # [egress] deny=["*"] and no [enterprise] section used to certify clean
+    # while every connector could still reach the internet.
+    from maverick import enterprise
+    assert enterprise.egress_permitted("https://evil.example.com") is True, (
+        "sanity check: the runtime guard permits egress with enterprise mode off"
+    )
+    cfg = {"models": _all_local_models(), "egress": {"deny": ["*"]},
+           "sandbox": {"backend": "docker"}}
+    rep = audit(config=cfg)
+    assert rep["clean"] is False
+    assert any("[enterprise] mode is not enabled" in v for v in rep["violations"])
+
+
+def test_enterprise_mode_true_clears_the_egress_flag():
+    cfg = {"models": _all_local_models(), "egress": {"deny": ["*"]},
+           "sandbox": {"backend": "docker"}, "enterprise": {"mode": True}}
+    rep = audit(config=cfg)
+    assert not any("[enterprise] mode is not enabled" in v for v in rep["violations"])
+
+
+def test_nonempty_allowed_hosts_is_flagged_even_with_enterprise_mode_on():
+    # allowed_hosts is a deliberate egress exception -- incompatible with
+    # air-gapped, whether or not enterprise mode is otherwise engaged.
+    cfg = {"models": _all_local_models(), "egress": {"deny": ["*"]},
+           "sandbox": {"backend": "docker"},
+           "enterprise": {"mode": True, "allowed_hosts": ["api.example.com"]}}
+    rep = audit(config=cfg)
+    assert rep["clean"] is False
+    assert any("allowed_hosts" in v and "api.example.com" in v
+               for v in rep["violations"])
 
 
 def test_cli_airgap_check_fails_when_dirty(monkeypatch):
