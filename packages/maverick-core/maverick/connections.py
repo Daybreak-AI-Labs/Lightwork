@@ -47,10 +47,16 @@ class ConnectionStoreUnavailable(RuntimeError):
     """The sealed connection registry could not be authenticated or read safely."""
 
 
-def enabled() -> bool:
+def deployment_override() -> bool | None:
     from .config import env_flag
-    if env_flag("MAVERICK_CONNECTIONS"):
-        return True
+    override = env_flag("MAVERICK_CONNECTIONS")
+    return override if override is not None else env_flag("LIGHTWORK_CONNECTIONS")
+
+
+def enabled() -> bool:
+    override = deployment_override()
+    if override is not None:
+        return override
     try:
         from .config import load_config
         return bool((load_config().get("connections") or {}).get("enable", False))
@@ -223,6 +229,12 @@ def set_connection(name: str, *, connector: str | None = None,
                 raise ConnectionVersionConflict(
                     "connection changed since it was read"
                 )
+        existing_oauth = (existing or {}).get("oauth")
+        if existing_oauth and token is None:
+            if ((connector is not None and normalize_name(connector) != existing["connector"])
+                    or (base_url is not None and str(base_url).strip().rstrip("/") != existing["base_url"])
+                    or (owner_value is not None and owner_value != existing["owner"])):
+                raise ValueError("Reconnect this account before changing its provider, destination or owner.")
         rec = {
             "name": slug,
             "connector": (
@@ -259,6 +271,8 @@ def set_connection(name: str, *, connector: str | None = None,
             # A new generation invalidates every prior readiness assertion.
             "revision": uuid.uuid4().hex,
         }
+        if existing_oauth and token is None:
+            rec["oauth"] = dict(existing_oauth)
         data[slug] = rec
         _save(data)
     return _public(rec)
@@ -289,7 +303,8 @@ def _public(rec: dict) -> dict:
     whether one is set."""
     access = str(rec.get("access") or ("owner" if rec.get("owner") else "tenant"))
     last_test = rec.get("last_test") if isinstance(rec.get("last_test"), dict) else None
-    return {
+    from .connection_oauth import public_status
+    result = {
         "name": rec.get("name", ""), "connector": rec.get("connector", ""),
         "base_url": rec.get("base_url", ""), "has_token": bool(rec.get("token")),
         "created": float(rec.get("created") or 0.0), "owner": rec.get("owner", ""),
@@ -298,6 +313,10 @@ def _public(rec: dict) -> dict:
         "revision": str(rec.get("revision") or ""),
         "last_test": dict(last_test) if last_test is not None else None,
     }
+    status = public_status(rec)
+    if status is not None:
+        result["oauth"] = status
+    return result
 
 
 def list_connections(owner: str | None = None) -> list[dict]:
@@ -340,6 +359,38 @@ def _may_use(rec: dict, principal: str | None) -> bool:
     return principal is None and not owner
 
 
+def resolve_named(name: str, *, expected_revision: str, connector: str, origin: str) -> dict:
+    """Resolve one pinned connection for the current authenticated principal.
+
+    There is no environment or first-matching-connector fallback. Consumers
+    must call at each network request, not cache the returned credential.
+    """
+    from urllib.parse import urlsplit
+
+    def exact_origin(value):
+        parsed = urlsplit(value)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+                or parsed.port not in (None, 443)):
+            raise PermissionError("connection requires an exact HTTPS origin")
+        return "https://" + parsed.hostname.lower()
+
+    if not enabled() or not _NAME_RE.fullmatch(name) or not expected_revision:
+        raise PermissionError("named connection is unavailable")
+    principal = current_principal()
+    if not principal:
+        raise PermissionError("saved connection requires a named authenticated principal")
+    record = get_connection(name)
+    if not record or not _may_use(record, principal) or not record.get("token"):
+        raise PermissionError("named connection access is unavailable or denied")
+    if record.get("revision") != expected_revision:
+        raise ConnectionVersionConflict("saved connection changed; select its current version")
+    if record.get("connector") != connector or exact_origin(record.get("base_url", "")) != exact_origin(origin):
+        raise PermissionError("saved connection provider or origin does not match the enrolled source")
+    from .connection_oauth import renew
+    return renew(record, actor=principal)
+
+
 def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] | None:
     """(base_url, token) for the first connection credentialing ``connector``,
     or None. Used as a FALLBACK by the connector layer only when the env var is
@@ -364,7 +415,13 @@ def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] 
                     and _may_use(r, caller)), None)
     if not rec or not rec.get("token"):
         return None
-    return (str(rec.get("base_url") or ""), str(rec.get("token")))
+    if rec.get("oauth"):
+        from .connection_oauth import renew
+        rec = renew(rec, actor=caller)
+    prefix = str((rec.get("oauth") or {}).get("api_prefix") or "")
+    if prefix and (rec.get("base_url") != "https://api.atlassian.com" or not re.fullmatch(r"/ex/jira/[0-9a-f-]{36}", prefix)):
+        raise PermissionError("Saved account destination is invalid")
+    return (str(rec.get("base_url") or "") + prefix, str(rec.get("token")))
 
 
 def record_test_result(

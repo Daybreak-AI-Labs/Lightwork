@@ -28,7 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "app", "msi", "nsis", "deb", "appimage"],
-    "icon": ["icons/icon.png"],
+    "icon": ["icons/icon.png", "../../installer-desktop/src-tauri/icons/icon.ico"],
     "category": "DeveloperTool",
     "shortDescription": "Lightwork dashboard desktop shell",
     "longDescription": "Native window for the local Lightwork dashboard: launches `maverick dashboard` if it is not already running and embeds http://127.0.0.1:8765."

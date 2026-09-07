@@ -1,7 +1,7 @@
 """Existing Google Drive / Jira protocols with explicit credential authority.
 
-Only ordinary UTF-8 Drive files and Jira Task creation/readback/search are
-supported. No ambient environment credentials, retries, or live acceptance are
+UTF-8 files, digital PDFs, native Google Docs exports and Jira Task
+creation/readback/search are supported. No ambient credentials or live acceptance are
 implied. Fake providers keep externally observable state independently of cases.
 """
 from __future__ import annotations
@@ -16,6 +16,11 @@ from urllib.parse import quote, urlsplit
 from .governed_operations import ServiceContext, digest
 from .paths import tenant_scope
 
+GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
+SUPPORTED_DRIVE_MIMES = frozenset({"text/plain", "application/pdf", GOOGLE_DOC_MIME})
+MAX_TEXT_BYTES = 1024 * 1024
+MAX_PDF_BYTES = 16 * 1024 * 1024
+
 
 @dataclass(frozen=True)
 class EvidenceDocument:
@@ -24,13 +29,14 @@ class EvidenceDocument:
     modified_at: float
     content: bytes
     mime: str = "text/plain"
+    export_mime: str | None = None
 
     def identity(self) -> dict:
         return {"document_id": self.document_id, "version": self.version,
                 "modified_at": self.modified_at, "mime": self.mime}
 
 
-def resolve_connection(ctx: ServiceContext, *, document: bool = False) -> dict:
+def resolve_connection(ctx: ServiceContext, *, document: bool = False, refresh: bool = True) -> dict:
     """Resolve the *named* tenant connection; never choose another credential."""
     from . import connections
 
@@ -53,6 +59,10 @@ def resolve_connection(ctx: ServiceContext, *, document: bool = False) -> dict:
         raise PermissionError("connector requires a pinned HTTPS origin")
     if document and base != "https://www.googleapis.com":
         raise PermissionError("Drive requires the Google API origin")
+    if refresh and record.get("oauth"):
+        from .connection_oauth import renew
+        with tenant_scope(tenant=ctx.tenant):
+            record = renew(record, actor=ctx.actor)
     return dict(record, base_url=base)
 
 
@@ -72,7 +82,7 @@ class GoogleDriveEvidence:
 
     @_scoped
     def authority_version(self, ctx):
-        return resolve_connection(ctx, document=True)["revision"]
+        return resolve_connection(ctx, document=True, refresh=False)["revision"]
 
     @_scoped
     def head(self, ctx, document_id):
@@ -87,13 +97,34 @@ class GoogleDriveEvidence:
             raise FileNotFoundError("Drive evidence is missing")
         if status != 200 or not isinstance(row, dict):
             raise RuntimeError("Drive evidence verification unavailable")
-        if row.get("trashed") or row.get("mimeType") != "text/plain":
-            raise ValueError("only untrashed text/plain Drive evidence is supported")
+        if row.get("trashed") or row.get("mimeType") not in SUPPORTED_DRIVE_MIMES:
+            raise ValueError("supported Drive evidence: UTF-8 text, digital PDF, and Google Docs")
         if not row.get("version") or row.get("id") != document_id:
             raise ValueError("Drive evidence metadata is incomplete")
         modified = datetime.fromisoformat(row["modifiedTime"].replace("Z", "+00:00"))
         return {"document_id": document_id, "version": str(row["version"]),
-                "modified_at": modified.timestamp(), "mime": "text/plain"}
+                "modified_at": modified.timestamp(), "mime": row["mimeType"]}
+
+    @_scoped
+    def search(self, ctx, query, *, limit=20):
+        from . import doc_discovery
+
+        if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
+            raise ValueError("enter a document name of up to 200 characters")
+        credential = resolve_connection(ctx, document=True)
+        term = query.strip().replace("\\", "\\\\").replace("'", "\\'")
+        kinds = " or ".join(f"mimeType = '{mime}'" for mime in sorted(SUPPORTED_DRIVE_MIMES))
+        status, data = doc_discovery._get(f"{credential['base_url']}/drive/v3/files", credential["token"], {
+            "q": f"trashed = false and name contains '{term}' and ({kinds})",
+            "pageSize": min(20, limit), "fields": "files(id,name,mimeType),nextPageToken",
+            "orderBy": "modifiedTime desc",
+        })
+        if status != 200 or not isinstance(data, dict) or not isinstance(data.get("files"), list):
+            raise RuntimeError("Drive document search is unavailable")
+        return {"documents": [{"id": str(row["id"]), "name": str(row.get("name") or row["id"])[:256],
+                               "mime": row["mimeType"]} for row in data["files"][:20]
+                              if isinstance(row, dict) and row.get("id") and row.get("mimeType") in SUPPORTED_DRIVE_MIMES],
+                "has_more": bool(data.get("nextPageToken"))}
 
     @_scoped
     def fetch(self, ctx, document_id):
@@ -101,12 +132,23 @@ class GoogleDriveEvidence:
 
         before = self.head(ctx, document_id)
         credential = resolve_connection(ctx, document=True)
-        data, _ = doc_discovery._fetch_gdrive(
-            credential["base_url"], credential["token"], {}, document_id, 128 * 1024,
-        )
+        export_mime = None
+        if before["mime"] == GOOGLE_DOC_MIME:
+            # Native Docs have no stable page numbering in their text export.
+            # Cite paragraphs in this exact version; do not fabricate PDF pages.
+            url = f"{credential['base_url']}/drive/v3/files/{quote(document_id, safe='')}/export?mimeType=text%2Fplain"
+            data, _ = doc_discovery._download(url, credential["token"], MAX_TEXT_BYTES)
+            export_mime = "text/plain"
+        else:
+            data, _ = doc_discovery._fetch_gdrive(
+                credential["base_url"], credential["token"], {}, document_id,
+                MAX_PDF_BYTES if before["mime"] == "application/pdf" else MAX_TEXT_BYTES,
+            )
+        if resolve_connection(ctx, document=True)["revision"] != credential["revision"]:
+            raise PermissionError("Drive credential changed during download")
         if before != self.head(ctx, document_id):
             raise ValueError("Drive evidence changed during download")
-        return EvidenceDocument(content=data, **before)
+        return EvidenceDocument(content=data, export_mime=export_mime, **before)
 
 
 def jira_body(payload: dict) -> dict:
@@ -137,7 +179,7 @@ class JiraTickets:
     provider_idempotency = False
 
     def authority_version(self, ctx):
-        return resolve_connection(ctx)["revision"]
+        return resolve_connection(ctx, refresh=False)["revision"]
 
     @_scoped
     def _request(self, ctx, method, path, *, expected_credential_version=None, **kwargs):
@@ -147,7 +189,11 @@ class JiraTickets:
         credential = resolve_connection(ctx)
         if expected_credential_version is not None and credential["revision"] != expected_credential_version:
             raise PermissionError("approved Jira credential generation changed")
-        url = credential["base_url"] + path
+        prefix = str((credential.get("oauth") or {}).get("api_prefix") or "")
+        if prefix and (credential["base_url"] != "https://api.atlassian.com"
+                       or not re.fullmatch(r"/ex/jira/[0-9a-f-]{36}", prefix)):
+            raise PermissionError("Jira account destination is invalid")
+        url = credential["base_url"] + prefix + path
         if enterprise_egress_denial(url, tool="jira"):
             raise PermissionError("Jira egress is not permitted")
         with safe_client(url, timeout=30) as client:
@@ -227,6 +273,12 @@ class FakeGoogleDriveEvidence:
 
     def head(self, ctx, document_id):
         return self.fetch(ctx, document_id).identity()
+
+    def search(self, ctx, query, *, limit=20):
+        matches = [{"id": key, "name": key, "mime": value.mime}
+                   for (tenant, key), value in sorted(self.documents.items())
+                   if tenant == ctx.tenant and query.lower() in key.lower()]
+        return {"documents": matches[:limit], "has_more": len(matches) > limit}
 
 
 class FakeJiraTickets:

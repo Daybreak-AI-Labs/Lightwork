@@ -16,6 +16,9 @@ def settings() -> VendorOnboardingSettings:
     loaded = config.load_config()
     if config.config_source_errors(include_tenant=True):
         raise ValueError("vendor onboarding configuration is unavailable")
+    from maverick.vendor_onboarding_setup import settings as workspace_settings
+    if current_tenant_id_strict():
+        return workspace_settings(loaded)
     return VendorOnboardingSettings.from_config(loaded)
 
 
@@ -31,14 +34,14 @@ def _context(request: Request) -> ServiceContext:
     if not enrolled.enable:
         raise HTTPException(409, "Vendor onboarding is disabled")
     with tenant_scope(tenant=tenant):
-        credentials = [connections.get_connection(name) for name in (
-            enrolled.document_connection, enrolled.ticket_connection,
-        )]
-    if any(not record for record in credentials):
-        raise HTTPException(503, "Enroll the Google Drive and Jira connections")
-    authority = credentials[0].get("owner")
-    if not authority or credentials[1].get("owner") != authority:
-        raise HTTPException(403, "Connection ownership must share one enrolled authority")
+        ticket = connections.get_connection(enrolled.ticket_connection)
+    if not ticket:
+        raise HTTPException(503, "Enroll the Jira connection for reviewed task delivery")
+    authority = ticket.get("owner")
+    if not authority:
+        raise HTTPException(403, "Jira connection requires an enrolled authority")
+    # Upload-only requests have no Drive dependency. The Drive adapter resolves
+    # its named enrollment, same authority and grants at every search/read.
     return ServiceContext(
         tenant=tenant, actor=actor, resource_owner=enrolled.resource_owner,
         credential_authority=authority, credential_ref=enrolled.ticket_connection,
