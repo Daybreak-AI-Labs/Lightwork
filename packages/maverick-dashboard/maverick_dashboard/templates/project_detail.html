@@ -4,6 +4,7 @@
   <p class="muted" style="margin-bottom: var(--space-2);"><a href="/projects">← Projects</a></p>
   <h1 class="page-title">{{ project.name or 'Untitled project' }}</h1>
   {% if project.description %}<p class="page-subtitle">{{ project.description }}</p>{% endif %}
+  <p><a href="/project-reviews#project={{ project.id }}">Manage team reviews and share a selected result</a> · <a href="/settings">Enable team reviews in Settings</a></p>
 
   <div class="panel">
     <p class="muted" style="margin: 0;">

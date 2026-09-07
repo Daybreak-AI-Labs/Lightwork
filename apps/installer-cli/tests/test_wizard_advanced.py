@@ -61,10 +61,25 @@ def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeyp
     assert tomllib.loads(cfg)["reflexion"]["enable"] is False
 
 
+def test_workspace_recovery_requires_explicit_opt_in(tmp_path, monkeypatch):
+    from maverick import config
+    from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *_, default=False, **__: default)
+    monkeypatch.setattr(wizard, "_q_select", lambda *_, default=None, **__: default)
+    monkeypatch.setattr(wizard, "_q_text", lambda *_, default="", **__: default)
+    monkeypatch.setattr(wizard, "_q_checkbox", lambda *_, **__: [])
+    assert wizard.pick_advanced()["allow_workspace_recovery"] is False
+    written = tomllib.loads(_write(tmp_path, monkeypatch, {"allow_workspace_recovery": True}))
+    monkeypatch.setattr(config, "load_config", lambda: written)
+    assert config.get_features()["workspace_recovery"] is True
+    written = tomllib.loads(_write(tmp_path, monkeypatch, {"allow_workspace_recovery": False}))
+    monkeypatch.setattr(config, "load_config", lambda: written)
+    assert config.get_features()["workspace_recovery"] is False
+
+
 def test_voice_declines_share_one_voice_table(tmp_path, monkeypatch):
     """voice_commands=False + voice_local_stt=False must merge into ONE
-    [voice] table (two would be a duplicate-key TOML error). Both knobs are
-    default-on, so only declines write lines."""
+    [voice] table (two would be a duplicate-key TOML error)."""
     cfg = _write(tmp_path, monkeypatch, {
         "voice_commands": False, "voice_local_stt": False,
     })
@@ -74,18 +89,30 @@ def test_voice_declines_share_one_voice_table(tmp_path, monkeypatch):
     assert parsed["voice"]["auto_fetch_model"] is False
 
 
+def test_support_report_opt_out_reaches_runtime_feature_gate(tmp_path, monkeypatch):
+    from maverick import config
+    written = _write(tmp_path, monkeypatch, {"allow_support_center": False})
+    assert tomllib.loads(written)["features"]["support_center"] is False
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    assert config.get_features()["support_center"] is False
+
+
 def test_voice_local_stt_decline_writes_auto_fetch_off(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"voice_local_stt": False})
     parsed = tomllib.loads(cfg)
     assert parsed["voice"] == {"auto_fetch_model": False}
 
 
-def test_voice_defaults_write_no_voice_table(tmp_path, monkeypatch):
-    # Default-on accepts (mic + built-in local STT) need no config at all.
+def test_voice_explicit_accept_persists_download_consent(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {
         "voice_commands": True, "voice_local_stt": True,
     })
-    assert "[voice]" not in cfg
+    assert tomllib.loads(cfg)["voice"] == {"auto_fetch_model": True}
+
+
+def test_voice_unanswered_choice_does_not_enable_download(tmp_path, monkeypatch):
+    assert "[voice]" not in _write(tmp_path, monkeypatch, {})
 
 
 def test_pg_rls_writes_world_model_section_with_prep_reminder(tmp_path, monkeypatch):
@@ -787,6 +814,19 @@ def test_document_access_derives_signed_audit_dependency(tmp_path, monkeypatch):
     assert parsed["incident_attachment_metadata"]["enable"] is True
 
 
+def test_vendor_reviewed_upload_choice_reaches_closed_runtime_configuration(tmp_path, monkeypatch):
+    from maverick.config import vendor_reviewed_uploads_enabled
+    from maverick.vendor_onboarding_config import VendorOnboardingSettings
+
+    for allowed in (True, False):
+        parsed = tomllib.loads(_write(tmp_path, monkeypatch, {}, security_suite={
+            "vendor_onboarding": True, "vendor_onboarding_owner": "procurement",
+            "vendor_reviewed_uploads": allowed,
+        }))
+        assert VendorOnboardingSettings.from_config(parsed).reviewed_uploads is allowed
+        assert vendor_reviewed_uploads_enabled(parsed) is allowed
+
+
 def test_anonymous_logs_writes_and_is_read(tmp_path, monkeypatch):
     """Rule-6 loop: the wizard's anonymous-mode toggle writes [privacy]
     anonymous, and the kernel reads it back as anon_enabled() -- the PII-scrub
@@ -1106,3 +1146,25 @@ def test_department_access_absent_writes_no_dashboard_section(tmp_path, monkeypa
     cfg = _write(tmp_path, monkeypatch, {"department_access": {}})
     assert "[dashboard.group_roles]" not in cfg
     assert "default_suites" not in cfg
+
+
+def test_customer_workflow_options_share_one_valid_features_table(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"allow_project_reviews": True,
+        "allow_outcome_measurement": True, "allow_workflow_readiness": False,
+        "allow_action_center": False, "allow_guided_onboarding": False})
+    features = tomllib.loads(cfg)["features"]
+    assert features["project_reviews"] is True
+    assert features["outcome_measurement"] is True
+    assert features["workflow_readiness"] is False
+    assert features["action_center"] is False
+    assert features["guided_onboarding"] is False
+    assert cfg.count("[features]") == 1
+
+
+def test_signing_identity_admission_is_an_explicit_installer_opt_in(tmp_path, monkeypatch):
+    enabled = _write(tmp_path, monkeypatch, {"allow_signing_identity_transition": True, "allow_workspace_recovery": True})
+    features = tomllib.loads(enabled)["features"]
+    assert features["signing_identity_transition"] is True
+    assert features["workspace_recovery"] is True
+    disabled = _write(tmp_path, monkeypatch, {"allow_signing_identity_transition": False})
+    assert tomllib.loads(disabled).get("features", {}).get("signing_identity_transition", False) is False

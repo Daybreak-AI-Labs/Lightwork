@@ -1514,6 +1514,57 @@ def test_ai_business_intake_http_resume_and_submit(monkeypatch):
     assert calls[0][1]["actor"] == "local:dashboard"
 
 
+def test_guided_intake_contract_uses_current_core_answers_and_context(monkeypatch):
+    from maverick import ai_business_intake as intake
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(intake, "enabled", lambda: True)
+    base = "/api/v1/security/assurance/ai-business-intake"
+    response = client.get(base + "/form")
+    form = _ok(response)
+    assert response.headers["Cache-Control"] == "no-store"
+    assert form["can_edit"] is True
+    assert len(form["context"]) == 64
+    assert {field["path"] for field in form["fields"] if field["required"]} == set(intake._REQUIRED_LEAVES)
+    for field in form["fields"]:
+        for choice in field.get("choices") or []:
+            parts = field["path"].split(".")
+            value = [choice] if field["kind"] == "multiple" else choice
+            patch = {parts[0]: {parts[1]: value}} if len(parts) == 2 else {parts[0]: value}
+            assert intake._normalize_patch(patch)
+    calls = []
+    monkeypatch.setattr(intake, "start_intake", lambda **kwargs: calls.append(kwargs) or {"id": "unused"})
+    monkeypatch.setenv("MAVERICK_TENANT", "beta")
+    denied = client.post(base + "/drafts", headers={"X-Lightwork-Intake-Context": form["context"]},
+                         json={"idempotency_key": "stable-ref", "initial": {"use_case_name": "Test"}})
+    assert denied.status_code == 409
+    assert calls == []
+
+
+def test_guided_intake_list_is_paged_and_permissions_remain_authoritative(monkeypatch):
+    from maverick import ai_business_intake as intake
+    from maverick_dashboard import auth
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(intake, "enabled", lambda: True)
+    monkeypatch.setattr(intake, "list_intakes", lambda: [
+        {"id": "ABI-first", "use_case_name": "Support assistant", "status": "draft"},
+        {"id": "ABI-second", "use_case_name": "Support review", "status": "pending_review"},
+        {"id": "ABI-third", "use_case_name": "Other", "status": "draft"},
+    ])
+    base = "/api/v1/security/assurance/ai-business-intake"
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission: permission == "view")
+    form = _ok(client.get(base + "/form"))
+    assert form["can_edit"] is False
+    headers = {"X-Lightwork-Intake-Context": form["context"]}
+    first = _ok(client.get(base + "/drafts?limit=1&q=support", headers=headers))
+    second = _ok(client.get(base + "/drafts?limit=1&q=support&offset=1", headers=headers))
+    assert first["count"] == 2 and first["has_more"] is True
+    assert second["intakes"][0]["id"] == "ABI-second" and second["has_more"] is False
+    assert first["context"] == form["context"]
+    assert client.post(base + "/drafts", headers=headers, json={"idempotency_key": "test"}).status_code == 403
+
+
 def test_ai_cost_roi_http_batch_reports_and_assumptions(monkeypatch):
     from maverick import ai_cost_roi as cost
 
