@@ -203,6 +203,55 @@ def test_list_episodes_and_total_spend(world):
     assert totals["runs"] >= 1
 
 
+def test_total_spend_accepts_owner_kwarg(world):
+    """PLATFORM_IMPROVEMENT_AUDIT.md W1-48: total_spend(owner=...) used to
+    raise TypeError on this backend -- it took no owner argument at all,
+    while the SQLite backend (and /api/v1/spend, external-agent spend
+    records) call it with one."""
+    token = uuid.uuid4().hex
+    alice = f"user:spend-alice:{token}"
+    bob = f"user:spend-bob:{token}"
+
+    alice_gid = world.create_goal("alice spend", owner=alice)
+    world.end_episode(world.start_episode(alice_gid), "done", "success",
+                      cost_dollars=2.0, input_tokens=10, output_tokens=5)
+    bob_gid = world.create_goal("bob spend", owner=bob)
+    world.end_episode(world.start_episode(bob_gid), "done", "success",
+                      cost_dollars=9.0, input_tokens=20, output_tokens=8)
+
+    alice_totals = world.total_spend(owner=alice)
+    assert alice_totals["dollars"] == 2.0
+    assert alice_totals["runs"] == 1
+
+    bob_totals = world.total_spend(owner=bob)
+    assert bob_totals["dollars"] == 9.0
+
+    # None is still the deployment-wide admin view (unfiltered by owner).
+    admin_totals = world.total_spend()
+    assert admin_totals["dollars"] >= 11.0
+
+
+def test_create_goal_accepts_domain_and_project_id(world):
+    """PLATFORM_IMPROVEMENT_AUDIT.md W1-47: create_goal(domain=..., project_id=...)
+    used to raise TypeError on this backend -- checkpoint sub-goal spawning
+    and the finance CLI pass both kwargs, matching the SQLite signature."""
+    project_id = world.create_project("Q3 rollout", owner="admin@corp.test")
+    gid = world.create_goal(
+        "spawn under a domain and project",
+        domain="finance",
+        project_id=project_id,
+    )
+    assert isinstance(gid, int)
+    with world._tx() as cur:
+        cur.execute("SELECT domain, project_id FROM goals WHERE id = %s", (gid,))
+        domain, stored_project_id = cur.fetchone()
+    assert domain == "finance"
+    assert stored_project_id == project_id
+    # project_status_counts (an existing read path) sees the goal as scoped
+    # to the project, proving the write actually took.
+    assert world.project_status_counts(project_id).get("pending") == 1
+
+
 def test_list_episodes_owner_scope_matches_sqlite(world):
     import uuid
 

@@ -1357,7 +1357,16 @@ class PostgresWorldModel:
         *,
         owner: str = "",
         execution_principal: str = "",
+        domain: str = "",
+        project_id: int | None = None,
     ) -> int:
+        # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-47): `domain` and
+        # `project_id` mirror the SQLite backend's create_goal signature. Both
+        # columns already exist on Postgres (migrations above) and were
+        # settable after creation via set_goal_domain/set_goal_project, but a
+        # caller that passes them AT creation (checkpoint sub-goal spawning,
+        # the finance CLI) got a TypeError on this backend instead of a
+        # created goal.
         if execution_principal is None:
             execution_principal = ""
         if not isinstance(execution_principal, str):
@@ -1372,8 +1381,9 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, owner, execution_principal, tenant_id) "
-                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s) RETURNING id",
+                "created_at, updated_at, owner, execution_principal, domain, "
+                "project_id, tenant_id) "
+                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     parent_id,
                     _seal(title),
@@ -1382,6 +1392,8 @@ class PostgresWorldModel:
                     now,
                     owner,
                     execution_principal,
+                    domain or "",
+                    project_id,
                     tenant,
                 ),
             )
@@ -2616,10 +2628,17 @@ class PostgresWorldModel:
             )
             return cur.fetchone() is not None
 
-    def total_spend(self) -> dict[str, float]:
+    def total_spend(self, owner: str | None = None) -> dict[str, float]:
+        """Aggregate spend. ``owner`` scopes to one principal's runs (join to
+        the owning goal), matching the SQLite backend's signature; ``None``
+        is the deployment-wide admin / auth-off view. (Sept 2026 fix,
+        PLATFORM_IMPROVEMENT_AUDIT.md W1-48: this backend previously took no
+        ``owner`` argument at all, so any owner-scoped caller -- ``/api/v1/spend``,
+        external-agent spend records -- raised TypeError on Postgres.)
+        """
         frag, params = _tenant_scope("g.tenant_id")
         table = "episodes e"
-        if frag:
+        if frag or owner is not None:
             table += " JOIN goals g ON g.id = e.goal_id"
         sql = (
             "SELECT COALESCE(SUM(e.cost_dollars), 0), COALESCE(SUM(e.input_tokens), 0), "
@@ -2628,6 +2647,9 @@ class PostgresWorldModel:
         )
         if frag:
             sql += " AND " + frag
+        if owner is not None:
+            sql += " AND g.owner = %s"
+            params = (*params, owner)
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             row = cur.fetchone()
