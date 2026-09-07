@@ -1,9 +1,13 @@
 """Kubernetes sandbox backend.
 
-Spawns a transient ``kubectl run --rm -i --restart=Never`` pod per
-``exec()`` call, mounts the workspace via an emptyDir + ``kubectl
-cp`` (or, when ``workdir`` is None, runs without a mount), captures
-stdout/stderr/exit-code, and deletes the pod on exit.
+Spawns a transient pod per ``exec()`` call: the pod is started detached
+(running ``sleep``) with an emptyDir volume mounted at ``/workspace``, the
+host ``workdir`` is streamed in via ``kubectl cp``, the command runs via
+``kubectl exec``, any files it wrote are streamed back out via ``kubectl
+cp``, and the pod is deleted on exit -- so exec() semantics (a workspace
+that persists across calls, host-visible after each command) match the
+other container backends (Docker, Podman, Devcontainer) despite Kubernetes
+having no host bind-mount primitive.
 
 Why kubectl-driven instead of the official Python client?
   - The Python client adds 50+ MB of generated code + grpcio + a
@@ -20,13 +24,17 @@ Config::
     image = "python:3.12-slim"
     namespace = "default"
     context = "minikube"        # optional kubeconfig context
-    workdir = "/workspaces/repo"
+    workdir = "/home/me/maverick-workspace"   # HOST directory (like every
+                                               # other backend); streamed
+                                               # into the pod's /workspace
     timeout = 120
     allow_network = false        # adds NetworkPolicy-deny annotation hint
 
 Loud-fallback: missing kubectl binary or ``kubectl version`` failure
 raises ``RuntimeError`` at construction so the wizard's smoke test
-catches it before the agent runs.
+catches it before the agent runs. The container image must have ``tar``
+(``kubectl cp`` streams a tarball over ``kubectl exec``) -- true of every
+common base image (python/node/ubuntu/alpine slim variants all ship it).
 """
 from __future__ import annotations
 
@@ -41,6 +49,12 @@ from pathlib import Path
 from .local import ExecResult, scrub_env
 
 log = logging.getLogger(__name__)
+
+# The in-pod absolute path the host workdir is streamed into. Hard-coded
+# (not user-configurable) exactly like DockerBackend's container-side
+# "/workspace" mount point -- only the HOST side is configurable, via
+# ``[sandbox] workdir``.
+_POD_WORKDIR = "/workspace"
 
 # Deny-all NetworkPolicy the operator applies once per namespace so pods get no
 # egress (and no ingress). Surfaced when allow_network=false, since a transient
@@ -62,7 +76,13 @@ class KubernetesBackend:
     image: str = "python:3.12-slim"
     namespace: str = "default"
     context: str | None = None
-    workdir: Path = Path("/workspaces/repo")
+    # The HOST directory commands run against -- same contract as every
+    # other backend's ``workdir`` (Docker's bind-mount source, Podman's,
+    # Devcontainer's ``project_dir``): file tools resolve model-supplied
+    # paths against it, and it's what this backend streams into/out of the
+    # pod via ``kubectl cp``. Defaults to cwd so direct construction (tests,
+    # ad-hoc scripts) doesn't require passing one explicitly.
+    workdir: Path = field(default_factory=Path.cwd)
     timeout: float = 120.0
     allow_network: bool = False
     extra_kubectl_args: list[str] = field(default_factory=list)
@@ -72,9 +92,17 @@ class KubernetesBackend:
     run_as_user: int = 1000
     memory: str | None = "4g"
     cpus: str | None = None
+    # Fixed budgets for the pod-lifecycle steps `exec()` now performs beyond
+    # running the command itself: waiting for the pod to become Ready before
+    # `kubectl cp`/`kubectl exec` can reach it, and each `kubectl cp` leg.
+    # Not exposed as [sandbox] config -- these bound internal plumbing, not a
+    # user-facing capability (contrast ``timeout``, which bounds the command).
+    pod_ready_timeout: float = 60.0
+    transfer_timeout: float = 120.0
 
     def __post_init__(self) -> None:
-        self.workdir = Path(self.workdir)
+        self.workdir = Path(self.workdir).expanduser()
+        self.workdir.mkdir(parents=True, exist_ok=True)
         self._verify_kubectl()
 
     def _pod_overrides(self, container_name: str) -> dict:
@@ -101,6 +129,9 @@ class KubernetesBackend:
                 "allowPrivilegeEscalation": False,
                 "capabilities": {"drop": ["ALL"]},
             },
+            # The workspace volume (below) -- kubectl cp streams the host
+            # workdir in here before the command runs, and back out after.
+            "volumeMounts": [{"name": "workspace", "mountPath": _POD_WORKDIR}],
         }
         if limits:
             container["resources"] = {"limits": limits, "requests": limits}
@@ -111,6 +142,11 @@ class KubernetesBackend:
                     "runAsUser": int(self.run_as_user),
                 },
                 "containers": [container],
+                # emptyDir: node-local scratch space for the copied-in
+                # workspace: it needs no PVC/StorageClass and is deleted
+                # with the pod, matching the "transient per-exec pod"
+                # design (nothing to provision or clean up cluster-side).
+                "volumes": [{"name": "workspace", "emptyDir": {}}],
             }
         }
 
@@ -154,14 +190,142 @@ class KubernetesBackend:
         except Exception:
             pass
 
+    def _start_and_wait(self, pod_name: str) -> ExecResult | None:
+        """Start the pod detached (long-lived ``sleep``, not ``--rm -i``) and
+        block until it's Ready. Returns None on success, else an ExecResult
+        describing the failure.
+
+        A detached start is required so there's a running container for
+        `kubectl cp` to stream into *before* the real command runs --
+        `kubectl run --rm -i` (the old one-shot approach) runs the command
+        immediately and tears the pod down, leaving no window to copy
+        anything in.
+        """
+        # Long enough to outlive the command timeout plus both cp legs; the
+        # pod is force-deleted explicitly once exec() is done with it, so
+        # this is just a backstop against an orphaned sleep outliving us.
+        sleep_budget = int(self.timeout) + int(2 * self.transfer_timeout) + 60
+        run_args = [
+            *self._kubectl_prefix(),
+            "run", pod_name,
+            "--restart=Never", "--quiet",
+            f"--image={self.image}",
+            "--overrides", json.dumps(self._pod_overrides(pod_name)),
+            "--",
+            "sleep", str(sleep_budget),
+        ]
+        try:
+            proc = subprocess.run(
+                run_args, capture_output=True, text=True,
+                timeout=self.pod_ready_timeout, env=scrub_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecResult(
+                stdout="", exit_code=1,
+                stderr=f"kubectl run timed out starting pod {pod_name!r}",
+            )
+        if proc.returncode != 0:
+            return ExecResult(
+                stdout="", exit_code=1,
+                stderr=f"kubectl run failed: {proc.stderr.strip()[-2000:]}",
+            )
+
+        wait_args = [
+            *self._kubectl_prefix(), "wait", f"pod/{pod_name}",
+            "--for=condition=Ready", f"--timeout={int(self.pod_ready_timeout)}s",
+        ]
+        try:
+            proc = subprocess.run(
+                wait_args, capture_output=True, text=True,
+                timeout=self.pod_ready_timeout + 5, env=scrub_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecResult(
+                stdout="", exit_code=1,
+                stderr=f"pod {pod_name!r} did not become Ready in time",
+            )
+        if proc.returncode != 0:
+            return ExecResult(
+                stdout="", exit_code=1,
+                stderr=f"pod {pod_name!r} did not become Ready: {proc.stderr.strip()[-2000:]}",
+            )
+        return None
+
+    def _copy_in(self, pod_name: str) -> ExecResult | None:
+        """Stream the host workdir into the pod's emptyDir. Returns None on
+        success, else an ExecResult describing the failure.
+
+        The trailing ``/.`` on the source is required: ``kubectl cp`` tars
+        the source directory and untars it at the destination, so a bare
+        ``<dir>`` would land as ``<dest>/<basename(dir)>`` instead of
+        populating ``<dest>`` itself.
+        """
+        src = f"{self.workdir}/."
+        dest = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}"
+        args = [*self._kubectl_prefix(), "cp", src, dest]
+        try:
+            proc = subprocess.run(
+                args, capture_output=True, text=True,
+                timeout=self.transfer_timeout, env=scrub_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecResult(
+                stdout="", exit_code=1,
+                stderr="kubectl cp (workspace -> pod) timed out",
+            )
+        if proc.returncode != 0:
+            return ExecResult(
+                stdout="", exit_code=1,
+                stderr=f"kubectl cp (workspace -> pod) failed: {proc.stderr.strip()[-2000:]}",
+            )
+        return None
+
+    def _run_command(self, pod_name: str, cmd: str, effective: float) -> ExecResult:
+        wrapped = f"cd {shlex.quote(_POD_WORKDIR)} && {cmd}"
+        args = [*self._kubectl_prefix(), "exec", pod_name, "--", "sh", "-c", wrapped]
+        try:
+            result = subprocess.run(
+                args, capture_output=True, text=True, timeout=effective,
+                env=scrub_env(),
+            )
+            return ExecResult(
+                stdout=result.stdout[-8000:],
+                stderr=result.stderr[-2000:],
+                exit_code=result.returncode,
+            )
+        except subprocess.TimeoutExpired as e:
+            stdout = e.stdout or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            return ExecResult(
+                stdout=stdout[-8000:],
+                stderr=f"TIMEOUT after {effective}s",
+                exit_code=124,
+            )
+
+    def _copy_out(self, pod_name: str) -> str:
+        """Best-effort: stream files the command wrote/modified back to the
+        host workdir. Returns "" on success, else a short note to append to
+        the command's own stderr -- this must never override the command's
+        already-captured exit_code/stdout/stderr, so failures are reported,
+        not raised.
+        """
+        src = f"{self.namespace}/{pod_name}:{_POD_WORKDIR}/."
+        args = [*self._kubectl_prefix(), "cp", src, str(self.workdir)]
+        try:
+            proc = subprocess.run(
+                args, capture_output=True, text=True,
+                timeout=self.transfer_timeout, env=scrub_env(),
+            )
+        except subprocess.TimeoutExpired:
+            return "; kubectl cp (pod -> workspace) timed out"
+        if proc.returncode != 0:
+            return f"; kubectl cp (pod -> workspace) failed: {proc.stderr.strip()[-500:]}"
+        return ""
+
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
         effective = self.timeout if timeout is None else timeout
         pod_name = f"maverick-sb-{uuid.uuid4().hex[:12]}"
-
-        wrapped = (
-            f"mkdir -p {shlex.quote(str(self.workdir))} && "
-            f"cd {shlex.quote(str(self.workdir))} && {cmd}"
-        )
 
         if not self.allow_network:
             # We can't make a single transient `kubectl run` pod enforce
@@ -187,43 +351,26 @@ class KubernetesBackend:
                 exit_code=2,
             )
 
-        # `kubectl run` creates the pod, runs it, deletes it (--rm).
-        # restart=Never is required for --rm semantics; --quiet
-        # suppresses pod-create noise so stdout stays clean. --overrides pins
-        # the non-root securityContext + resource limits onto the pod spec.
-        args = [
-            *self._kubectl_prefix(),
-            "run", pod_name,
-            "--rm", "-i", "--restart=Never", "--quiet",
-            f"--image={self.image}",
-            "--overrides", json.dumps(self._pod_overrides(pod_name)),
-            "--",
-            "sh", "-c", wrapped,
-        ]
-
-        # Always force-delete the pod on the way out: --rm only fires on a
-        # clean exit, so a timeout, a kubectl crash, or any other exception
-        # would otherwise leak the pod. The finally runs the explicit delete
-        # for every path (success, non-zero exit, timeout, unexpected error).
+        # Always force-delete the pod on the way out, whichever step failed:
+        # the pod is never started with --rm now (it has to survive past a
+        # single command for kubectl cp to reach it), so nothing else cleans
+        # it up.
         try:
-            result = subprocess.run(
-                args, capture_output=True, text=True, timeout=effective,
-                env=scrub_env(),
-            )
-            return ExecResult(
-                stdout=result.stdout[-8000:],
-                stderr=result.stderr[-2000:],
-                exit_code=result.returncode,
-            )
-        except subprocess.TimeoutExpired as e:
-            stdout = e.stdout or ""
-            if isinstance(stdout, bytes):
-                stdout = stdout.decode("utf-8", errors="replace")
-            return ExecResult(
-                stdout=stdout[-8000:],
-                stderr=f"TIMEOUT after {effective}s",
-                exit_code=124,
-            )
+            failure = self._start_and_wait(pod_name)
+            if failure is not None:
+                return failure
+            failure = self._copy_in(pod_name)
+            if failure is not None:
+                return failure
+            result = self._run_command(pod_name, cmd, effective)
+            copy_out_note = self._copy_out(pod_name)
+            if copy_out_note:
+                result = ExecResult(
+                    stdout=result.stdout,
+                    stderr=result.stderr + copy_out_note,
+                    exit_code=result.exit_code,
+                )
+            return result
         finally:
             self._delete_pod(pod_name)
 
