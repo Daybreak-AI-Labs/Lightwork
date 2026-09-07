@@ -70,6 +70,7 @@ class AgentOverrideIn(BaseModel):
     optional: only the ones the client actually sets are persisted, so the
     pack inherits everything else from its built-in base. ``extends`` forks a
     base under a new name; omit it to customize the pack in place."""
+    expected_generation: str | None = Field(None, pattern=r"^(new|[0-9a-f]{64})$")
     description: str | None = None
     persona: str | None = None
     allow_tools: list[str] | None = None

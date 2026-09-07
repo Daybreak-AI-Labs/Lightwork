@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import json
 import logging
 import math
 import os
@@ -658,6 +659,11 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (31, _FACT_WRITE_SEQUENCE_MIGRATION),
     (32, _GOAL_EXECUTION_PRINCIPAL_MIGRATION),
     (33, _HALT_GENERATION_MIGRATION),
+    (34, [
+        "CREATE TABLE IF NOT EXISTS provider_cap_receipts ("
+        " period_key TEXT NOT NULL, provider TEXT NOT NULL,"
+        " receipts_json TEXT NOT NULL, PRIMARY KEY (period_key, provider))",
+    ]),
 ]
 
 # Highest migration version = the reported schema version.
@@ -4682,6 +4688,47 @@ class PostgresWorldModel:
             )
             row = cur.fetchone()
         return float(row[0]) if row else 0.0
+
+    def mutate_provider_cap(self, period_key: str, provider: str, operation):
+        """Lock the provider total before admission, including first-row races."""
+        with self._tx() as cur:
+            cur.execute(
+                "INSERT INTO provider_spend(period_key, provider, dollars) VALUES(%s, %s, 0) "
+                "ON CONFLICT(period_key, provider) DO NOTHING", (period_key, provider),
+            )
+            cur.execute(
+                "SELECT dollars FROM provider_spend WHERE period_key = %s AND provider = %s FOR UPDATE",
+                (period_key, provider),
+            )
+            total = float(cur.fetchone()[0])
+            cur.execute(
+                "SELECT receipts_json FROM provider_cap_receipts WHERE period_key = %s AND provider = %s",
+                (period_key, provider),
+            )
+            state = cur.fetchone()
+            total, receipts, result = operation(total, json.loads(state[0]) if state else {})
+            cur.execute(
+                "UPDATE provider_spend SET dollars = %s WHERE period_key = %s AND provider = %s",
+                (total, period_key, provider),
+            )
+            cur.execute(
+                "INSERT INTO provider_cap_receipts(period_key, provider, receipts_json) VALUES(%s, %s, %s) "
+                "ON CONFLICT(period_key, provider) DO UPDATE SET receipts_json = EXCLUDED.receipts_json",
+                (period_key, provider, json.dumps(receipts, allow_nan=False)),
+            )
+            return result
+
+    def read_provider_cap(self, period_key: str, provider: str):
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT (SELECT dollars FROM provider_spend WHERE period_key = %s AND provider = %s), "
+                "(SELECT receipts_json FROM provider_cap_receipts WHERE period_key = %s AND provider = %s)",
+                (period_key, provider, period_key, provider),
+            )
+            row = cur.fetchone()
+        if row[0] is None and row[1] is not None:
+            raise RuntimeError("Provider accounting total is missing")
+        return (float(row[0] or 0), json.loads(row[1]) if row[1] is not None else {})
 
     # ----- pruning -----
 

@@ -224,6 +224,23 @@
   {% endif %}
 
   <div class="section-head"><h2>Assigned users</h2></div>
+  <section id="wm-root" class="panel" data-tenant="{{ workspace_tenant_id }}" aria-labelledby="wm-title">
+    <h2 id="wm-title">Members of this workspace</h2>
+    <p>A workspace role applies only to <strong>{{ workspace_tenant_id or 'the workspace you select' }}</strong>. Project owners can invite these members to review selected results. Global roles and department permissions still apply.</p>
+    {% if workspace_tenant_id %}
+    <p id="wm-status" role="status" aria-live="polite">Select Refresh members to load the workspace roster.</p>
+    <button id="wm-refresh" type="button" class="btn">Refresh members</button>
+    <ul id="wm-list"></ul>
+    <form id="wm-form" data-draft-recovery="off">
+      <label for="wm-principal">Colleague's sign-in ID</label><input id="wm-principal" class="input" list="wm-known" placeholder="user:sign-in-subject" required maxlength="256">
+      <datalist id="wm-known">{% for principal, role in users %}<option value="{{ principal }}">{{ principal | identity }}</option>{% endfor %}</datalist>
+      <label for="wm-role">Role in this workspace</label><select id="wm-role" class="input">{% for r in roles %}<option value="{{ r }}"{% if r == 'operator' %} selected{% endif %}>{{ r | role_label }}</option>{% endfor %}</select>
+      <button type="submit" class="btn btn--primary">Save workspace member</button>
+    </form>
+    <p>Use a current signed-in colleague's exact identity. Review decisions require permission to operate. Removing a workspace assignment may restore a broader global role; use an explicit read-only role when you intend to reduce access.</p>
+    {% else %}<p><a href="/workspace/tenant">Select a workspace</a> before managing its members.</p>{% endif %}
+  </section>
+  <script src="/static/lightwork-workspace-members.js" defer></script>
   <div class="panel">
     {% if users %}
     {% for principal, role in users %}
