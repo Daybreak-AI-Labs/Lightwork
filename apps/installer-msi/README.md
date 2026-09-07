@@ -1,5 +1,11 @@
 # maverick-installer-msi (engineering bootstrap)
 
+The separate [Windows customer candidate](CUSTOMER.md) combines the complete
+frozen runtime, desktop app, and offline WebView2 installer. Its build,
+maintenance, signing, and acceptance workflow does not use this engineering
+bootstrap. Customer release acceptance remains pending; the distinction below
+continues to apply to `Package.wxs` and `build.ps1`.
+
 WiX Toolset v4 authoring for an **engineering-only** Windows bootstrap. It
 installs a `maverick.cmd` launcher on the per-user PATH plus one
 `maverick-agent` wheel, then asks pip to resolve that wheel's dependencies from

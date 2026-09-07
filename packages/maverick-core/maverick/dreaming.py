@@ -686,6 +686,9 @@ def prune_reflexions(
                     ln if ln.endswith("\n") else ln + "\n",
                 ))
             # Newest first so the duplicate survivor is the fresher lesson.
+            # Wall-clock resolution can give successive appends equal times.
+            # The last appended record wins that tie, including on Windows.
+            parsed.reverse()
             parsed.sort(key=lambda t: t[0], reverse=True)
             kept: list[tuple[float, set[str], str]] = []
             for entry in parsed:
@@ -1147,6 +1150,9 @@ def _replay_critiques(
             d = json.loads(Path(p).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        from .pilot_learning import excluded
+        if excluded(d.get("goal_id")):
+            continue
         critique = str(d.get("verifier_critique", "") or "").strip()
         brief = str(d.get("task_brief_text", "") or "").strip()
         try:
@@ -1186,6 +1192,9 @@ def _replay_donations(
         try:
             rec = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            continue
+        from .pilot_learning import excluded
+        if excluded(rec.get("goal_id")):
             continue
         brief = str(rec.get("task_brief_text", "") or "").strip()
         if not brief:
@@ -1412,6 +1421,9 @@ def dream_cycle(
             log.debug("dreaming: trajectory tool join skipped: %s", e)
         try:
             for g in world.list_goals(status="done", limit=max_goals, order="desc"):
+                from .pilot_learning import excluded
+                if excluded(getattr(g, "id", None)):
+                    continue
                 # Learned skill files are tenant-scoped but remain shared by
                 # every owner inside that tenant. Never fold an owner-scoped
                 # user's goal title into that tenant-wide artifact; missing
