@@ -54,6 +54,15 @@ _RESTORE_LOCK_TARGET = ".restore-transaction"
 _JOURNAL = "journal.json"
 _DB_SIDECARS = ("-wal", "-shm", "-journal")
 
+# A live WorldModel touches its WAL/SHM sidecars on every write and only holds
+# its own cross_process_lock briefly during __init__ (world_model.py), so
+# checking that lock is not by itself a reliable "is anything using this
+# world right now" signal for an already-running process. A sidecar mtime
+# inside this window is: generous enough that ordinary read/write traffic
+# (busy_timeout retries, periodic checkpoints) never trips it while idle, but
+# tight enough that it still means "something touched this file moments ago".
+_LIVE_WORLD_RECENCY_SECONDS = 10.0
+
 # Generous production ceilings, but finite on every attacker-controlled axis.
 MAX_ARCHIVE_MEMBERS = 100_000
 MAX_ARCHIVE_FILE_BYTES = 8 * 1024**3
@@ -1115,6 +1124,39 @@ def _apply_transaction(
             tx_root.rmdir()
 
 
+def _refuse_if_world_appears_live(root: Path) -> None:
+    """Best-effort guard: refuse to publish over world.db while something
+    still appears to hold it open.
+
+    Restore's own transaction lock (``_RESTORE_LOCK_TARGET``) only serializes
+    concurrent restores against each other. WorldModel takes its own
+    cross_process_lock only briefly, during __init__ -- by the time a process
+    has been running for a while, that lock is free even though the process
+    still keeps a live sqlite3 connection open. Publishing over world.db with
+    ``os.replace`` while such a connection is open silently orphans every
+    subsequent write on the old, now-unlinked inode until that process
+    restarts (a split-brain, not a crash). A WAL/SHM sidecar touched in the
+    last few seconds is the practically-observable proxy for "something has
+    this database open right now"; it is not proof, so this refusal is
+    always bypassable with ``force=True``.
+    """
+    now = time.time()
+    for suffix in ("-wal", "-shm"):
+        sidecar = root / f"world.db{suffix}"
+        try:
+            age = now - sidecar.stat().st_mtime
+        except OSError:
+            continue
+        if age < _LIVE_WORLD_RECENCY_SECONDS:
+            raise BackupError(
+                f"world.db{suffix} was touched {age:.1f}s ago -- a process "
+                "still appears to have the world database open. Restoring "
+                "now would silently lose writes made through that live "
+                "connection until it restarts. Stop `maverick serve` / the "
+                "dashboard first, or pass force=True to override."
+            )
+
+
 def restore_backup(
     tarball: str | Path,
     *,
@@ -1123,8 +1165,12 @@ def restore_backup(
 ) -> Path:
     """Authenticate, verify and transactionally restore one backup.
 
-    ``force`` does not bypass signature verification. ``allow_unsigned`` is the
-    explicit legacy path and provides integrity/bounds checks, not provenance.
+    ``force`` does not bypass signature verification. It does bypass the
+    best-effort live-world guard (see ``_refuse_if_world_appears_live``):
+    stop ``maverick serve`` / the dashboard before restoring a backup that
+    carries world.db, or pass ``force=True`` if you are certain nothing has
+    it open. ``allow_unsigned`` is the explicit legacy path and provides
+    integrity/bounds checks, not provenance.
     """
     with _verified_archive(tarball) as stream:
         manifest, key = _read_manifest_stream(stream, allow_unsigned=allow_unsigned)
@@ -1154,6 +1200,8 @@ def restore_backup(
         )
         root = _client_root()
         file_lock.ensure_private_directory(root)
+        if not force and "world.db" in expected:
+            _refuse_if_world_appears_live(root)
         with tempfile.TemporaryDirectory(prefix="mvk-restore-") as temporary:
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
             stream.seek(0)
