@@ -66,3 +66,41 @@ def test_file_goal_under_project_from_goal_page(tmp_path, monkeypatch):
     # clear it (empty value)
     client.post(f"/chat/goal/{gid}/project", data={"project_id": ""}, follow_redirects=False)
     assert w.get_goal(gid).project_id is None
+
+
+def test_project_filing_and_detail_do_not_expose_other_owners(tmp_path, monkeypatch):
+    from maverick_dashboard import app as dashboard
+    from maverick_dashboard import auth
+
+    world = _world(tmp_path, monkeypatch)
+    monkeypatch.setattr(auth, "_authorization_principal", lambda request: "user:alice")
+    monkeypatch.setattr(dashboard, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(auth, "is_dashboard_admin", lambda principal: False)
+    mine = world.create_project("Mine", owner="user:alice")
+    other = world.create_project("Private project", owner="user:bob")
+    legacy = world.create_project("Legacy project", owner="")
+    goal = world.create_goal("Alice task", "", owner="user:alice")
+    world.create_goal("Private Bob task", "", owner="user:bob", project_id=mine)
+    for target in (other, legacy, 99999):
+        response = client.post(f"/chat/goal/{goal}/project", data={"project_id":str(target)}, follow_redirects=False)
+        assert response.status_code == 404
+        assert world.get_goal(goal).project_id is None
+    assert client.get(f"/projects/{other}").status_code == 404
+    assert client.get(f"/projects/{legacy}").status_code == 404
+    page = client.get(f"/projects/{mine}")
+    assert page.status_code == 200 and "Private Bob task" not in page.text
+    assert client.post(f"/chat/goal/{goal}/project", data={"project_id":"bad"}).status_code == 422
+    assert client.post(f"/chat/goal/{goal}/project", data={"project_id":str(mine)}, follow_redirects=False).status_code == 303
+
+
+def test_new_project_uses_actual_admin_identity_and_requires_operate(tmp_path, monkeypatch):
+    from maverick_dashboard import app as dashboard
+    from maverick_dashboard import auth
+
+    world = _world(tmp_path, monkeypatch)
+    monkeypatch.setattr(dashboard, "caller_principal", lambda request: "user:admin")
+    response = client.post("/projects", data={"name":"Named admin project"}, follow_redirects=False)
+    identifier = int(response.headers["location"].split("/")[-1])
+    assert world.get_project(identifier)["owner"] == "user:admin"
+    monkeypatch.setattr(auth, "has_permission", lambda request, permission: False)
+    assert client.post("/projects", data={"name":"Forbidden"}).status_code == 403

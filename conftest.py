@@ -44,10 +44,10 @@ atexit.register(shutil.rmtree, _session_home, True)
 # DEFAULT itself is covered by test_secure_defaults.py, which overrides this.
 os.environ.setdefault("MAVERICK_SECURE_DEFAULT", "0")
 
-# Voice STT model auto-fetch ships ON so the dashboard mic works out of the
-# box, but a test that wanders into the local STT chain must never download a
+# Voice STT model auto-fetch requires explicit opt-in. A test that wanders
+# into the local STT chain must never inherit an opt-in and download a
 # ~150 MB Whisper model from Hugging Face. Tests of the auto-fetch mechanics
-# set this env themselves (against a mocked urlopen).
+# set this env themselves (against a mocked model download transport).
 os.environ.setdefault("MAVERICK_VOICE_AUTO_FETCH", "0")
 
 

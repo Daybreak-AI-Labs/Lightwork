@@ -1,0 +1,141 @@
+"""Read-only current acceptance and pricing from authorized business records."""
+from __future__ import annotations
+
+import math
+
+from .auth import caller_principal, can_access_goal, goal_owner_filter, suite_allowed
+from .outcome_pilots import digest
+
+PREPARED = "Prepared for a workflow pilot. Start this task after the pilot plan is frozen."
+
+
+def _is_prepared(goal, episodes):
+    return not episodes and ((goal.status == "pending" and not goal.result)
+                             or (goal.status == "blocked" and goal.result == PREPARED))
+
+
+def goal_source(request, reference):
+    from maverick.domain import suite_for
+
+    from .app import _world
+
+    world = _world()
+    goal = world.get_goal(int(reference))
+    if goal is None or not can_access_goal(request, goal) or not suite_allowed(request, suite_for(goal.domain)):
+        raise LookupError("Task unavailable.")
+    episodes = world.list_episodes(goal_id=goal.id, limit=2001)
+    if len(episodes) > 2000:
+        raise ValueError("Task history exceeds the measurement limit.")
+    signoff = world.signoff_for(goal.id) or {}
+    reviewer = str(signoff.get("decided_by") or "")
+    human = reviewer.startswith("user:") or (caller_principal(request) is None and reviewer == "operator")
+    values = [e.cost_dollars for e in episodes]
+    if any(not math.isfinite(v) or v < 0 for v in values):
+        raise ValueError("Task pricing history is unavailable.")
+    source = {"title": goal.title, "href": f"/chat/goal/{goal.id}", "status": goal.status,
+        "input_version": digest([goal.id, goal.title, goal.description, goal.domain]),
+        "unstarted": _is_prepared(goal, episodes),
+        "first_started_at": min((e.started_at for e in episodes), default=None),
+        "finished": not _is_prepared(goal, episodes) and goal.status in {"done", "blocked", "cancelled", "failed"},
+        "accepted": goal.status == "done" and signoff.get("decision") == "approved" and human,
+        "reviewer": reviewer if human else None,
+        "runtime_cost_usd": sum(values) if episodes else None,
+        "runtime_cost_basis": "recorded episode prices; provider invoice unverified",
+        "sample": False}
+    source["version"] = digest([source, goal.result, signoff, [vars(e) for e in episodes]])
+    return source
+
+
+def vendor_source(request, reference):
+    from .vendor_onboarding_api import _binding, _call
+
+    row = _call(_binding(request), "get", reference)
+    outcome, metrics = row.get("outcome") or {}, row.get("metrics") or {}
+    sample = (row.get("integration_mode") or {}).get("tickets") != "live_unverified"
+    reviewer = str(outcome.get("reviewer") or "")
+    source = {"title": row["vendor_name"], "href": "/third-party/vendor-onboarding", "status": row["stage"],
+        "input_version": digest({k: row.get(k) for k in
+            ("id", "vendor_name", "purpose", "project", "document_ids", "uploads", "freshness_days")}),
+        "unstarted": row["stage"] == "intake" and not row.get("evidence") and not metrics.get("document_reads") and not row.get("review_history"),
+        "first_started_at": (row.get("evidence") or {}).get("collected_at"),
+        "finished": row["stage"] in {"accepted", "customer_rejected"},
+        "accepted": not sample and row["stage"] == "accepted" and outcome.get("accepted") is True
+            and outcome.get("execution_completed") is True and outcome.get("validation") == "verified_external_record"
+            and reviewer.startswith("user:"),
+        "reviewer": reviewer or None, "runtime_cost_usd": metrics.get("execution_cost_usd"),
+        "runtime_cost_basis": metrics.get("cost_basis"), "sample": sample}
+    source["version"] = digest([source, row["revision"], outcome])
+    return source
+
+
+def resolve(request, kind, reference):
+    if kind == "goal":
+        return goal_source(request, reference)
+    if kind == "vendor":
+        return vendor_source(request, reference)
+    raise ValueError("Choose a task or vendor case.")
+
+
+def choices(request):
+    from maverick.domain import suite_for
+
+    from .app import _deliverable_specs, _world
+    from .vendor_onboarding_api import _binding, _call
+
+    items, coverage = [], []
+    try:
+        world = _world()
+        goals = world.list_goals(owner=goal_owner_filter(request), limit=201, order="desc")
+        for goal in goals[:200]:
+            if can_access_goal(request, goal) and suite_allowed(request, suite_for(goal.domain)):
+                if _is_prepared(goal, world.list_episodes(goal_id=goal.id, limit=1)):
+                    items.append({"kind": "goal", "reference": str(goal.id), "label": goal.title})
+        coverage.append({"kind": "goal", "status": "partial" if len(goals) > 200 else "current"})
+    except Exception:
+        coverage.append({"kind": "goal", "status": "unavailable"})
+    try:
+        rows = _call(_binding(request), "list")
+        for row in rows[:200]:
+            if row["stage"] == "intake" and not row.get("evidence") and not (row.get("metrics") or {}).get("document_reads"):
+                items.append({"kind": "vendor", "reference": row["id"], "label": row["vendor_name"]})
+        coverage.append({"kind": "vendor", "status": "partial" if len(rows) > 200 else "current"})
+    except Exception:
+        coverage.append({"kind": "vendor", "status": "unavailable"})
+    specialists = [{"domain": s["domain"], "label": s.get("name") or s["domain"]}
+                   for s in _deliverable_specs() if s.get("gate") and suite_allowed(request, s.get("suite"))]
+    return {"items": items, "coverage": coverage, "specialists": specialists}
+
+
+def prepare_task(request, body, context):
+    from maverick.domain import enabled_domains, suite_for
+
+    from .app import _deliverable_specs, _world
+
+    domain = body["domain"]
+    if domain not in enabled_domains() or not suite_allowed(request, suite_for(domain)):
+        raise PermissionError("Choose an enabled specialist in your permitted departments.")
+    if not any(s["domain"] == domain and s.get("gate") for s in _deliverable_specs()):
+        raise ValueError("Choose a specialist whose deliverable requires sign-off.")
+    world, actor = _world(), caller_principal(request) or ""
+    channel, key = "outcome-pilot-preparation", digest([context, body["operation_id"]])
+
+    def previous(identifier):
+        goal = world.get_goal(identifier)
+        if goal is None or not can_access_goal(request, goal):
+            raise ValueError("The prepared task is unavailable. No new task was started.")
+        if (goal.title, goal.description, goal.domain, goal.owner) != (body["title"], body["description"], domain, actor):
+            raise ValueError("This preparation reference belongs to different task inputs.")
+        return {"id": goal.id, "title": goal.title, "href": f"/chat/goal/{goal.id}"}
+
+    identifier = world.lookup_processed_message(channel, key)
+    if identifier is not None:
+        return previous(identifier)
+    identifier = world.create_goal(body["title"], body["description"], owner=actor, domain=domain)
+    world.set_goal_status(identifier, "blocked", result=PREPARED)
+    if not world.mark_message_processed(channel, key, goal_id=identifier):
+        world.set_goal_status(identifier, "cancelled", result="Duplicate preparation; use the original task.")
+        winner = world.lookup_processed_message(channel, key)
+        if winner is None:
+            raise ValueError("Task preparation is indeterminate. Refresh before retrying.")
+        return previous(winner)
+    return previous(identifier)
