@@ -44,11 +44,43 @@ def _check_url(url: str) -> str | None:
     return None
 
 
+def _preflight_egress(url: str, parsed: Any) -> str | None:
+    """Enterprise/tenant egress checks, run before any network activity.
+
+    websockets.connect() is not wrapped by egress_guard (that covers
+    httpx/httpx2/requests/urllib only), so without this the enterprise tool-
+    egress lock never sees a websocket connection at all. Mirrors
+    http_fetch._preflight_fetch's ordering: enterprise first (a denied URL
+    must not leak via DNS/TLS SNI before the denial is returned), then the
+    per-tenant egress policy.
+
+    enterprise_egress_denial's local-endpoint check only recognizes
+    http(s) schemes, so ws(s):// is translated the same way for that check
+    only ("ws"->"http", "wss"->"https") -- otherwise a genuinely local/loopback
+    websocket dev server would always fail the enterprise allow-list.
+    """
+    from ..enterprise import enterprise_egress_denial
+    deny = enterprise_egress_denial(url.replace("ws", "http", 1), tool="websocket")
+    if deny:
+        return f"ERROR: {deny}"
+    try:
+        from ..tenant.egress import egress_allowed
+        if not egress_allowed("websocket", parsed.hostname or ""):
+            return (f"ERROR: egress policy blocks websocket from reaching "
+                    f"{parsed.hostname!r} (see [egress] / [sandbox.tool.websocket]).")
+    except Exception:  # pragma: no cover -- policy never breaks a connection
+        pass
+    return None
+
+
 async def _run(args: dict[str, Any]) -> str:
     url = str(args.get("url") or "").strip()
     if not url:
         return "ERROR: url is required"
     bad = _check_url(url)
+    if bad:
+        return bad
+    bad = _preflight_egress(url, urlparse(url))
     if bad:
         return bad
     try:
