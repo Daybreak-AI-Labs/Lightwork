@@ -6,6 +6,7 @@ import binascii
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from maverick.governed_operations import ActionReviewRequiredError, ApprovalBindingError
 from maverick.governed_records import RecordConflict
 from maverick.platform_contracts import PlatformContractError
 from maverick.vendor_onboarding import VendorOnboardingContractError
@@ -103,6 +104,13 @@ def _call(binding, operation: str, *args, **kwargs):
         return getattr(binding.service, operation)(binding.context, *args, **kwargs)
     except HTTPException:
         raise
+    except (ActionReviewRequiredError, ApprovalBindingError) as exc:
+        raise _error(
+            409,
+            exc.code,
+            str(exc),
+            next_action="Reload the case, prepare the current action, and review it again.",
+        ) from exc
     except PermissionError as exc:
         raise _error(403, "permission_denied", str(exc),
                      next_action="Ask a workspace administrator to review your role and connection access.") from exc

@@ -17,14 +17,18 @@ import threading
 import time
 import uuid
 from dataclasses import asdict
+from typing import NoReturn
 
 from . import ai_vendor_risk as risk
 from . import vendor_management as vendors
 from . import vendor_onboarding_documents as documents
 from .file_lock import cross_process_lock
 from .governed_operations import (
+    ActionReviewRequiredError,
+    ApprovalBindingError,
     ServiceContext,
     apply_declared,
+    audit_authority_denial,
     digest,
     operation_binding,
     validate_approval,
@@ -138,14 +142,17 @@ class VendorOnboardingService:
 
     def _permit(self, ctx, capability, resource, *, human=False):
         if human and not ctx.human:
+            audit_authority_denial(ctx, capability, resource, "authenticated_human_required")
             raise PermissionError("this decision requires an authenticated human")
         if self.authorize(ctx, capability, resource) is not True:
+            audit_authority_denial(ctx, capability, resource, "current_authority_denied")
             raise PermissionError(f"permission denied: {capability}")
 
     def _get(self, ctx, case_id, expected_revision=None):
         self._permit(ctx, "read", case_id)
         row = _CASES.get(case_id)
         if not row or row.get("tenant") != ctx.tenant or row.get("owner") != ctx.resource_owner:
+            audit_authority_denial(ctx, "read", case_id, "resource_scope_mismatch")
             raise KeyError("vendor onboarding case not found")
         if expected_revision is not None:
             if type(expected_revision) is not int or row["revision"] != expected_revision:
@@ -269,11 +276,32 @@ class VendorOnboardingService:
                 or row.get("outcome") is not None):
             raise ValueError("external execution or acceptance freezes this case; create a renewal")
 
-    def _invalidate(self, row):
+    def _invalidate(self, row, *, reason=None):
         history = list(row.get("operation_history") or [])
         if row.get("operation"):
-            history.append(dict(row["operation"], state="invalidated"))
+            invalidated = dict(row["operation"], state="invalidated")
+            if reason:
+                invalidated["invalidated_reason"] = reason
+            history.append(invalidated)
         return {"operation": None, "operation_history": history}
+
+    def _require_new_action_review(
+        self,
+        ctx,
+        row,
+        *,
+        code,
+        message,
+        error_type=ApprovalBindingError,
+    ) -> NoReturn:
+        audit_authority_denial(ctx, "action.execute", row["id"], code)
+        self._save(
+            ctx,
+            row,
+            stage="review_approved",
+            **self._invalidate(row, reason=code),
+        )
+        raise error_type(message, code=code)
 
     @_scoped
     def intake(self, ctx, vendor_name, document_id, project, purpose, *,
@@ -720,12 +748,31 @@ class VendorOnboardingService:
                               operation=dict(operation, state="reconciliation_required"))
         if operation["state"] != "approved":
             raise ValueError("approved operation required")
-        validate_approval(operation, ctx, self.clock())
+        try:
+            validate_approval(operation, ctx, self.clock())
+        except ApprovalBindingError as exc:
+            self._require_new_action_review(ctx, row, code=exc.code, message=str(exc))
         approver = ServiceContext(**operation["context"], human=True)
         approver = ServiceContext(**dict(asdict(approver), actor=operation["approval"]["reviewer"]))
         self._permit(approver, "action.approve", case_id, human=True)
-        if self._preconditions(ctx, row) != operation["preconditions"]:
-            raise ValueError("operation preconditions changed; new review required")
+        try:
+            current_preconditions = self._preconditions(ctx, row)
+        except (PermissionError, ValueError) as exc:
+            self._require_new_action_review(
+                ctx,
+                row,
+                code="approval_preconditions_changed",
+                message=f"{exc}; prepare and review a new action.",
+                error_type=ActionReviewRequiredError,
+            )
+        if current_preconditions != operation["preconditions"]:
+            self._require_new_action_review(
+                ctx,
+                row,
+                code="approval_preconditions_changed",
+                message="Action inputs changed; prepare and review a new action.",
+                error_type=ActionReviewRequiredError,
+            )
         operation = dict(operation, state="executing", attempts=operation["attempts"] + 1,
                          started_at=self.clock())
         row = self._save(ctx, row, operation=operation, stage="executing")

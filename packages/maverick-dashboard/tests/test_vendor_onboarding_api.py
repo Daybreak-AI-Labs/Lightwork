@@ -6,6 +6,7 @@ from dataclasses import replace
 from html.parser import HTMLParser
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from maverick import config, world_model
 from maverick.governed_operations import ServiceContext
@@ -292,6 +293,71 @@ def test_http_requires_separate_explicit_approval_and_blocks_cross_origin(web):
     assert tickets.creates == 0
 
 
+def test_http_returns_reapproval_recovery_for_changed_budget_binding(web, monkeypatch):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Approved for a bounded synthetic check",
+    )
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
+
+    changed = replace(ctx, budget_authority="tenant-budget-v2")
+    service.authorize = lambda _context, _capability, _resource: True
+    monkeypatch.setattr(
+        app.state,
+        "vendor_onboarding_binding_factory",
+        lambda _request: WorkflowBinding(service, changed),
+    )
+    response = client.post(
+        f"{BASE}/{row['id']}/execute",
+        json={"expected_revision": row["revision"], "confirm": True},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "schema": "lightwork.error.v1",
+        "code": "approval_authority_changed",
+        "message": "Operation authority changed; prepare and review a new action.",
+        "retryable": False,
+        "next_action": "Reload the case, prepare the current action, and review it again.",
+    }
+    recovered = client.get(f"{BASE}/{row['id']}")
+    assert recovered.status_code == 200
+    assert recovered.json()["stage"] == "review_approved"
+    assert recovered.json()["operation"] is None
+    assert recovered.json()["operation_history"][-1]["invalidated_reason"] == (
+        "approval_authority_changed"
+    )
+    prepared = _step(client, recovered.json(), "prepare-action")
+    assert prepared["stage"] == "action_pending_approval"
+    assert tickets.creates == 0
+
+
+def test_http_cross_tenant_worker_and_export_return_no_foreign_content(web, monkeypatch):
+    client, service, ctx, tickets = web
+    row = _intake(client)
+    service.authorize = lambda _context, _capability, _resource: True
+    other = replace(ctx, tenant="synthetic-b", workspace_authority="workspace-b")
+    monkeypatch.setattr(
+        app.state,
+        "vendor_onboarding_binding_factory",
+        lambda _request: WorkflowBinding(service, other),
+    )
+
+    listing = client.get(BASE)
+    assert listing.status_code == 200
+    assert listing.json() == {"cases": []}
+    exported = client.get(f"{BASE}/{row['id']}")
+    assert exported.status_code == 404
+    assert row["vendor_name"] not in exported.text
+    assert row["purpose"] not in exported.text
+    assert tickets.creates == 0
+
+
 def test_stock_composition_rejects_anonymous_or_static_identity(web, monkeypatch):
     from maverick_dashboard.vendor_onboarding_composition import bind_request
 
@@ -310,6 +376,7 @@ def test_stock_composition_allows_upload_only_but_drive_read_still_requires_enro
 
     monkeypatch.setattr(composition, "require_permission", lambda *args: None)
     monkeypatch.setattr(composition, "caller_principal", lambda *args: "user:reviewer")
+    monkeypatch.setattr(composition, "caller_role", lambda *args: "operator")
     monkeypatch.setattr(connections, "enabled", lambda: True)
     monkeypatch.setattr(connections, "get_connection", lambda name: {
         "name": "jira", "owner": "user:reviewer", "connector": "jira", "revision": "1",
@@ -317,8 +384,67 @@ def test_stock_composition_allows_upload_only_but_drive_read_still_requires_enro
     with tenant_scope(tenant="synthetic-a"):
         context = composition._context(object())
     assert context.credential_authority == "user:reviewer"
+    assert context.authorization_role == "operator"
+    assert context.authorization_policy.startswith("sha256:")
+    assert context.budget_authority.startswith("sha256:")
+    assert context.workspace_authority.startswith("sha256:")
     with pytest.raises(PermissionError, match="authority.*unavailable"):
         GoogleDriveEvidence().search(context, "policy")
+
+
+def test_budget_authority_changes_with_tenant_spend_controls(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick.tenant import registry
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    record = SimpleNamespace(
+        id="tenant-a", status="active", plan="team", billing_status="current",
+        max_daily_dollars=25.0, feature_overrides={}, updated_at=10.0,
+    )
+    monkeypatch.setattr(registry, "get_tenant", lambda _tenant: record)
+    before = composition._budget_authority("tenant-a")
+    record.max_daily_dollars = 10.0
+    record.updated_at = 11.0
+    after = composition._budget_authority("tenant-a")
+    assert before.startswith("sha256:")
+    assert after.startswith("sha256:")
+    assert after != before
+
+
+def test_role_authority_changes_with_custom_permission_policy(monkeypatch):
+    from maverick_dashboard import rbac
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    permissions = [{"operate", "view"}]
+    monkeypatch.setattr(rbac, "permissions_for", lambda _role: frozenset(permissions[0]))
+    before = composition._role_authority("customer-operator")
+    permissions[0] = {"operate", "view", "audit"}
+    after = composition._role_authority("customer-operator")
+    assert after != before
+
+
+def test_workspace_authority_changes_after_switch_away_and_back(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick_dashboard import vendor_onboarding_composition as composition
+    from maverick_dashboard import workspace_tenants
+
+    request = SimpleNamespace(state=SimpleNamespace(workspace_tenant_source="principal_selection"))
+    binding = ["tenant-a", 1]
+    monkeypatch.setattr(
+        workspace_tenants,
+        "get_selection_binding",
+        lambda _principal: tuple(binding),
+    )
+    before = composition._workspace_authority(request, "user:reviewer", "tenant-a")
+    binding[1] = 3
+    after = composition._workspace_authority(request, "user:reviewer", "tenant-a")
+    assert after != before
+    binding[0] = "tenant-b"
+    with pytest.raises(HTTPException, match="Workspace changed") as rejected:
+        composition._workspace_authority(request, "user:reviewer", "tenant-a")
+    assert rejected.value.status_code == 409
 
 
 def test_model_context_cannot_review(web, monkeypatch):

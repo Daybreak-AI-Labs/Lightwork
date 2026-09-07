@@ -81,6 +81,36 @@ def test_selection_roundtrip_via_api():
     assert client.get("/api/v1/workspace/active-tenant").json()["tenant_id"] is None
 
 
+def test_principal_selection_generation_invalidates_switch_away_and_back():
+    from maverick_dashboard import workspace_tenants
+
+    principal = "user:reviewer"
+    assert workspace_tenants.get_selection_binding(principal) == (None, 0)
+    workspace_tenants.set_selection(principal, "acme")
+    assert workspace_tenants.get_selection_binding(principal) == ("acme", 1)
+    workspace_tenants.set_selection(principal, "acme")
+    assert workspace_tenants.get_selection_binding(principal) == ("acme", 1)
+    workspace_tenants.set_selection(principal, "globex")
+    assert workspace_tenants.get_selection_binding(principal) == ("globex", 2)
+    workspace_tenants.set_selection(principal, "acme")
+    assert workspace_tenants.get_selection_binding(principal) == ("acme", 3)
+
+
+def test_legacy_principal_selection_migrates_on_the_next_change():
+    import json
+
+    from maverick_dashboard import workspace_tenants
+
+    path = workspace_tenants.store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"user:reviewer": "acme"}), encoding="utf-8")
+    assert workspace_tenants.get_selection_binding("user:reviewer") == ("acme", 0)
+    workspace_tenants.set_selection("user:reviewer", "globex")
+    assert workspace_tenants.get_selection_binding("user:reviewer") == ("globex", 1)
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["schema"] == "lightwork.workspace-tenant-selections.v2"
+
+
 def test_selection_is_anchored_in_global_audit(monkeypatch):
     import maverick.audit as audit
 

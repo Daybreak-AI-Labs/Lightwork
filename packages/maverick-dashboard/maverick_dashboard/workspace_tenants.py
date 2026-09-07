@@ -13,6 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 _LOCK = threading.Lock()
+_SCHEMA = "lightwork.workspace-tenant-selections.v2"
 
 
 class WorkspaceTenantStoreError(RuntimeError):
@@ -35,7 +36,7 @@ def _locked(path: Path) -> ExitStack:
     return stack
 
 
-def _load() -> dict[str, str]:
+def _load() -> dict[str, dict[str, object]]:
     from maverick.file_lock import atomic_read_text, ensure_private_file
 
     path = store_path()
@@ -52,20 +53,46 @@ def _load() -> dict[str, str]:
         raise WorkspaceTenantStoreError(
             "workspace tenant selections must be an object"
         )
-    clean: dict[str, str] = {}
-    for principal, tenant_id in raw.items():
+    if raw.get("schema") == _SCHEMA:
+        entries = raw.get("selections")
+        if not isinstance(entries, dict) or set(raw) != {"schema", "selections"}:
+            raise WorkspaceTenantStoreError(
+                "workspace tenant selections have an invalid schema"
+            )
+    elif "schema" in raw or "selections" in raw:
+        raise WorkspaceTenantStoreError(
+            "workspace tenant selections use an unsupported schema"
+        )
+    else:
+        # V1 stored ``{principal: tenant_id}``. Admit it as generation zero;
+        # the next actual selection change writes V2 and starts generation one.
+        entries = raw
+    clean: dict[str, dict[str, object]] = {}
+    for principal, value in entries.items():
+        if isinstance(value, str):
+            tenant_id, generation = value, 0
+        elif isinstance(value, dict) and set(value) == {"tenant_id", "generation"}:
+            tenant_id, generation = value["tenant_id"], value["generation"]
+        else:
+            raise WorkspaceTenantStoreError(
+                "workspace tenant selections contain an invalid entry"
+            )
         if (
             not isinstance(principal, str)
             or not principal.strip()
             or principal != principal.strip()
-            or not isinstance(tenant_id, str)
-            or not tenant_id.strip()
-            or tenant_id != tenant_id.strip()
+            or (tenant_id is not None and (
+                not isinstance(tenant_id, str)
+                or not tenant_id.strip()
+                or tenant_id != tenant_id.strip()
+            ))
+            or type(generation) is not int
+            or generation < 0
         ):
             raise WorkspaceTenantStoreError(
                 "workspace tenant selections contain an invalid entry"
             )
-        clean[principal] = tenant_id
+        clean[principal] = {"tenant_id": tenant_id, "generation": generation}
     return clean
 
 
@@ -73,7 +100,19 @@ def get_selection(principal: str) -> str | None:
     name = str(principal or "").strip()
     if not name:
         return None
-    return _load().get(name)
+    record = _load().get(name)
+    return None if record is None else record["tenant_id"]
+
+
+def get_selection_binding(principal: str) -> tuple[str | None, int]:
+    """Return the selection and monotonic generation used by queued approvals."""
+    name = str(principal or "").strip()
+    if not name:
+        return None, 0
+    record = _load().get(name)
+    if record is None:
+        return None, 0
+    return record["tenant_id"], record["generation"]
 
 
 def set_selection(principal: str, tenant_id: str | None) -> None:
@@ -89,11 +128,17 @@ def set_selection(principal: str, tenant_id: str | None) -> None:
     path = store_path()
     with _locked(path):
         data = _load()
-        if selected is None:
-            data.pop(name, None)
-        else:
-            data[name] = selected
-        atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+        previous = data.get(name, {"tenant_id": None, "generation": 0})
+        if previous["tenant_id"] == selected:
+            return
+        data[name] = {
+            "tenant_id": selected,
+            "generation": int(previous["generation"]) + 1,
+        }
+        atomic_write_text(path, json.dumps({
+            "schema": _SCHEMA,
+            "selections": data,
+        }, indent=2, sort_keys=True))
 
 
 def principal_can_select(principal: str, tenant_id: str) -> bool:
@@ -135,6 +180,7 @@ __all__ = [
     "WorkspaceTenantStoreError",
     "accessible_tenant_ids",
     "get_selection",
+    "get_selection_binding",
     "principal_can_select",
     "set_selection",
     "store_path",

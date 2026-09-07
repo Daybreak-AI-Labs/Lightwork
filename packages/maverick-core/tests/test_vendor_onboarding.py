@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from maverick import config
-from maverick.governed_operations import ServiceContext
+from maverick.governed_operations import ServiceContext, digest, operation_binding
 from maverick.governed_records import RecordConflict
 from maverick.paths import tenant_scope
 from maverick.vendor_onboarding import VendorOnboardingService
@@ -38,8 +38,13 @@ def setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(audit, "record", lambda *a, **kw: True)
     monkeypatch.setattr(audit, "record_global", lambda *a, **kw: True)
-    ctx = ServiceContext("customer-a", "reviewer@example.test", "procurement",
-                         "reviewer@example.test", "jira", human=True)
+    ctx = ServiceContext(
+        "customer-a", "reviewer@example.test", "procurement",
+        "reviewer@example.test", "jira", human=True,
+        authorization_role="operator", authorization_policy="operator-policy-v1",
+        budget_authority="tenant-budget-v1",
+        workspace_authority="workspace-generation-1",
+    )
     docs = FakeGoogleDriveEvidence({(ctx.tenant, "security-paper"): EvidenceDocument(
         "security-paper", "1", NOW - 86400, TEXT,
     )})
@@ -64,6 +69,13 @@ def approved(svc, ctx):
     row = reviewed(svc, ctx)
     row = svc.prepare_action(ctx, row["id"], row["revision"])
     return svc.approve_action(ctx, row["id"], row["revision"])
+
+
+def test_worker_authority_schema_is_explicit_and_closed(setup):
+    _, ctx, *_ = setup
+    assert ctx.binding()["authority_schema"] == "lightwork.worker-authority.v1"
+    with pytest.raises(ValueError, match="unsupported worker authority schema"):
+        replace(ctx, authority_schema="lightwork.worker-authority.v2")
 
 
 @pytest.mark.parametrize("purpose", [None, "", " \t\n", "x" * 4001],
@@ -384,7 +396,13 @@ def test_evidence_absence_and_failure_are_not_valid_empty_assessments(setup, sta
         svc.assess(ctx, row["id"], row["revision"])
 
 
-@pytest.mark.parametrize("change", ["source", "credential", "permission", "actor", "owner", "expired"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "source", "credential", "permission", "actor", "owner", "role",
+        "role_policy", "budget", "workspace", "expired",
+    ],
+)
 def test_approval_preconditions_and_authority_rechecked_before_effect(setup, change):
     svc, ctx, docs, tickets, denied = setup
     row = approved(svc, ctx)
@@ -398,6 +416,14 @@ def test_approval_preconditions_and_authority_rechecked_before_effect(setup, cha
         ctx = replace(ctx, actor="other-human")
     elif change == "owner":
         ctx = replace(ctx, resource_owner="other-owner")
+    elif change == "role":
+        ctx = replace(ctx, authorization_role="admin")
+    elif change == "role_policy":
+        ctx = replace(ctx, authorization_policy="operator-policy-v2")
+    elif change == "budget":
+        ctx = replace(ctx, budget_authority="tenant-budget-v2")
+    elif change == "workspace":
+        ctx = replace(ctx, workspace_authority="workspace-generation-2")
     else:
         svc.clock = lambda: NOW + 4000
     with pytest.raises((ValueError, PermissionError, KeyError)):
@@ -474,8 +500,12 @@ def test_corrections_link_superseded_evidence_and_invalidate_action(setup):
     assert tickets.creates == 0
 
 
-def test_tenant_scope_ignores_ambient_and_never_pools_customer_data(setup):
+def test_tenant_scope_ignores_ambient_and_never_pools_customer_data(setup, monkeypatch):
+    from maverick import audit
+
     svc, ctx, docs, tickets, _ = setup
+    events = []
+    monkeypatch.setattr(audit, "record", lambda kind, **payload: events.append((kind, payload)) or True)
     with tenant_scope(tenant="ambient-untrusted"):
         row = approved(svc, ctx)
     other = replace(ctx, tenant="customer-b")
@@ -485,6 +515,84 @@ def test_tenant_scope_ignores_ambient_and_never_pools_customer_data(setup):
     assert tickets.find(other, row["operation"]["payload"]) == []
     with pytest.raises(FileNotFoundError):
         docs.fetch(other, "security-paper")
+    assert any(
+        kind == audit.EventKind.CAPABILITY_DENIED
+        and payload["reason"] == "resource_scope_mismatch"
+        and payload["tenant"] == "customer-b"
+        and payload["resource_sha256"] == digest(row["id"])
+        for kind, payload in events
+    )
+
+
+def test_approval_from_another_intent_cannot_be_replayed(setup):
+    from maverick import vendor_onboarding
+
+    svc, ctx, _, tickets, _ = setup
+    first = approved(svc, ctx)
+    second = approved(svc, ctx)
+    replayed = dict(second["operation"], approval=dict(first["operation"]["approval"]))
+    with tenant_scope(tenant=ctx.tenant):
+        vendor_onboarding._CASES.update(
+            second["id"],
+            lambda value: value.update(operation=replayed),
+            expected_revision=second["revision"],
+            action="test_cross_intent_approval_replay",
+            actor=ctx.actor,
+        )
+    with pytest.raises(PermissionError, match="(?i)exact operation"):
+        svc.execute(ctx, second["id"])
+    assert tickets.creates == 0
+
+
+def test_optional_shield_absence_keeps_kernel_authority_enforced(setup, monkeypatch):
+    import builtins
+
+    svc, ctx, _, tickets, denied = setup
+    original_import = builtins.__import__
+
+    def without_shield(name, *args, **kwargs):
+        if name == "maverick_shield" or name.startswith("maverick_shield."):
+            raise ImportError("optional shield is not installed")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_shield)
+    row = approved(svc, ctx)
+    row = svc.execute(ctx, row["id"])
+    assert row["operation"]["state"] == "verified"
+    assert tickets.creates == 1
+
+    blocked = approved(svc, ctx)
+    denied.add("action.execute")
+    with pytest.raises(PermissionError, match="action.execute"):
+        svc.execute(ctx, blocked["id"])
+    assert tickets.creates == 1
+
+
+def test_legacy_approval_without_role_or_budget_binding_requires_new_review(setup):
+    from maverick import vendor_onboarding
+
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    legacy = dict(row["operation"], context=dict(row["operation"]["context"]))
+    legacy["context"].pop("authorization_role")
+    legacy["context"].pop("authorization_policy")
+    legacy["context"].pop("budget_authority")
+    legacy["context"].pop("workspace_authority")
+    legacy["context"].pop("authority_schema")
+    legacy["approval"] = dict(
+        legacy["approval"], binding_sha256=operation_binding(legacy),
+    )
+    with tenant_scope(tenant=ctx.tenant):
+        vendor_onboarding._CASES.update(
+            row["id"],
+            lambda value: value.update(operation=legacy),
+            expected_revision=row["revision"],
+            action="test_legacy_unbound_operation",
+            actor=ctx.actor,
+        )
+    with pytest.raises(PermissionError, match="(?i)authority changed"):
+        svc.execute(ctx, row["id"])
+    assert tickets.creates == 0
 
 
 def test_stale_revision_cannot_overwrite_review(setup):
