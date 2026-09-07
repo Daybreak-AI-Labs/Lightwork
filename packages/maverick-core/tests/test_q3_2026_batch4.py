@@ -135,6 +135,7 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch):
     assert container["securityContext"]["allowPrivilegeEscalation"] is False
     assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
     assert container["resources"]["limits"] == {"memory": "2g", "cpu": "1"}
+    assert overrides["spec"]["automountServiceAccountToken"] is False
 
 
 def test_k8s_disallow_network_emits_networkpolicy_hint(monkeypatch, caplog):
