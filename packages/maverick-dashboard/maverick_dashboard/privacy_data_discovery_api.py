@@ -54,6 +54,10 @@ EnvironmentRef = Annotated[
     str,
     StringConstraints(strict=True, min_length=2, max_length=128, pattern=_ENV),
 ]
+SavedCredentialRef = Annotated[str, StringConstraints(strict=True, min_length=2, max_length=128,
+    pattern=r"^(?:[A-Z][A-Z0-9_]{1,127}|connection:[a-z0-9][a-z0-9_-]{0,63}:[0-9a-f]{32})$")]
+EvidenceKeyRef = Annotated[str, StringConstraints(strict=True, min_length=2, max_length=128,
+    pattern=r"^(?:[A-Z][A-Z0-9_]{1,127}|evidence-key:[a-z0-9][a-z0-9_-]{0,63}:[1-9][0-9]{0,9})$")]
 Digest = Annotated[
     str,
     StringConstraints(strict=True, min_length=64, max_length=64, pattern=_DIGEST),
@@ -132,8 +136,8 @@ class SourceEnrollmentIn(_StrictModel):
     provider: ProviderName
     origin: ExactOrigin
     resource_ref: OpaqueId
-    credential_env: EnvironmentRef
-    evidence_key_env: EnvironmentRef
+    credential_env: SavedCredentialRef
+    evidence_key_env: EvidenceKeyRef
     expected_revision: int = Field(default=0, ge=0, le=2**31 - 1)
     idempotency_key: IdempotencyKey
 
@@ -142,6 +146,16 @@ class SourceStateIn(_StrictModel):
     state: SourceState
     expected_revision: int = Field(ge=1, le=2**31 - 1)
     idempotency_key: IdempotencyKey
+
+
+class EvidenceKeyIn(_StrictModel):
+    expected_revision: int = Field(default=0, ge=0, le=2**31 - 1)
+    idempotency_key: IdempotencyKey
+
+
+class TestAccessIn(_StrictModel):
+    confirm: Literal[True]
+    expected_revision: int = Field(ge=1)
 
 
 class ScheduleIn(_StrictModel):
@@ -1171,6 +1185,7 @@ async def enroll_source(
 ) -> dict[str, Any]:
     require_global_permission(request, "admin")
     ops, tenant, store = _authority(request)
+    await _setup_call(request, tenant, _validate_saved_source_references, body)
     result = await _call(
         ops,
         store.enroll_source,
@@ -1184,6 +1199,108 @@ async def enroll_source(
         "credential_value_persisted": False,
         "external_side_effect": False,
     }
+
+
+def _validate_saved_source_references(body):
+    from maverick import privacy_discovery_credentials as credentials
+
+    if body.credential_env.startswith("connection:"):
+        credentials.resolve_connection(body.credential_env, provider=body.provider, origin=body.origin)
+    if body.evidence_key_env.startswith("evidence-key:"):
+        credentials.resolve_key(body.evidence_key_env)
+
+
+async def _setup_call(request, tenant, function, *args, **kwargs):
+    from maverick import connections
+    from maverick.paths import tenant_scope
+
+    from .auth import caller_principal
+
+    try:
+        with tenant_scope(tenant=tenant), connections.bind_principal(caller_principal(request)):
+            return await run_in_threadpool(function, *args, **kwargs)
+    except connections.ConnectionVersionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (RuntimeError, OSError) as exc:
+        raise HTTPException(503, "Discovery setup is unavailable; no secret values are returned") from exc
+
+
+def _setup_options(app, tenant):
+    from maverick import connections, privacy_discovery_credentials
+
+    from .privacy_data_discovery_adapters_composition import snapshot_for_tenant
+
+    snapshot = snapshot_for_tenant(app, tenant, resolve_transport=False)
+    providers = snapshot.registry.status()["descriptors"]
+    enabled = {item["provider"] for item in providers}
+    saved = [dict(name=row["name"], provider=row["connector"], origin=row["base_url"],
+                  revision=row["revision"], reference=f"connection:{row['name']}:{row['revision']}")
+             for row in connections.list_connections() if row["connector"] in enabled and row["has_token"]
+             and connections._may_use(row, connections.current_principal())]
+    return {"providers": providers, "connections": saved, "evidence_keys": privacy_discovery_credentials.list_keys(),
+            "secrets_returned": False, "provider_contacted": False}
+
+
+@router.get("/setup")
+async def setup_options(request: Request):
+    require_global_permission(request, "admin")
+    _ops()
+    return await _setup_call(request, _tenant_id(), _setup_options, request.app, _tenant_id())
+
+
+@router.put("/evidence-keys/{name}")
+async def create_evidence_key(request: Request, name: ObjectPath, body: EvidenceKeyIn):
+    from maverick.privacy_discovery_credentials import create_or_rotate
+
+    require_global_permission(request, "admin")
+    _ops()
+    result = await _setup_call(request, _tenant_id(), create_or_rotate, name, **body.model_dump())
+    return {**result, "secret_returned": False, "sources_updated": False,
+            "next_step": "Explicitly select this key version and save each source. Old key references cannot scan."}
+
+
+def _test_source_access(app, tenant, store, source_id, expected_revision):
+    import time
+
+    from .privacy_data_discovery_adapters_composition import snapshot_for_tenant
+
+    source = store.get_source(tenant, source_id)
+    if source.revision != expected_revision or source.state != "active":
+        raise ValueError("source changed or is inactive; reload it before testing access")
+    _validate_saved_source_references(source)
+    snapshot = snapshot_for_tenant(app, tenant)
+    adapters = snapshot.registry.structured if source.kind == "structured" else snapshot.registry.unstructured
+    adapter = adapters.get(source.provider)
+    if adapter is None:
+        raise ValueError("enable this source's stock provider adapter in Settings")
+    limits = _ops().ScanLimits(max_records=1, max_files=1, max_bytes=1024 * 1024, max_seconds=30,
+                              max_findings=1, max_fields_per_record=256, max_record_bytes=256 * 1024,
+                              max_document_bytes=1024 * 1024)
+    method = adapter.iter_rows if source.kind == "structured" else adapter.iter_documents
+    iterator = iter(method(source=source, credential_env=source.credential_env, limits=limits, deadline=time.time() + 30))
+    try:
+        observed = next(iterator, None) is not None
+    finally:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
+    if store.get_source(tenant, source_id).revision != expected_revision:
+        raise ValueError("source changed during access test; reload and test the current version")
+    return {"access": "readable", "sample_present": observed, "source_revision": expected_revision,
+            "provider_contacted": True, "raw_data_returned": False, "report_created": False,
+            "coverage_verified": False, "customer_acceptance_verified": False}
+
+
+@router.post("/sources/{source_id}/test-access")
+async def test_source_access(request: Request, source_id: ObjectPath, body: TestAccessIn):
+    require_global_permission(request, "admin")
+    _, tenant, store = _authority(request)
+    return await _setup_call(request, tenant, _test_source_access, request.app, tenant, store,
+                             source_id, body.expected_revision)
 
 
 @router.post("/sources/{source_id}/state")
@@ -1322,12 +1439,13 @@ async def execute_job(request: Request, job_id: ObjectPath) -> dict[str, Any]:
     ops, tenant, store = _authority(request)
     job = await _call(ops, store.get_job, tenant, job_id)
     coordinator = _coordinator(request, ops, tenant, store)
-    report = await _call(
-        ops,
-        coordinator.execute_job,
-        job,
-        worker_id=_worker_ref(request, tenant),
-    )
+    from maverick import connections
+    from maverick.paths import tenant_scope
+
+    from .auth import caller_principal
+
+    with tenant_scope(tenant=tenant), connections.bind_principal(caller_principal(request)):
+        report = await _call(ops, coordinator.execute_job, job, worker_id=_worker_ref(request, tenant))
     return {
         "report": _report_payload(report),
         "external_side_effect": True,

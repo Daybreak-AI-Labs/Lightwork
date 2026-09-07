@@ -765,3 +765,19 @@ async def run_grc_sync(request: Request, body: schemas.GRCSyncRunIn) -> dict[str
     human = _human_principal(request)
     sync = _module("grc_sync", "grc_sync")
     return await _call(sync.run_sync, actor=human, limit=body.limit)
+
+
+@router.post("/grc-sync/outbound/{record_id}/inspect")
+async def inspect_grc_delivery(request: Request, record_id: str, body: schemas.GRCInspectIn):
+    require_global_permission(request, "admin")
+    human = _human_principal(request)
+    sync = _module("grc_sync", "grc_sync")
+    return await _call(sync.inspect_delivery, record_id, actor=human, **body.model_dump())
+
+
+@router.post("/grc-sync/outbound/{record_id}/resolve")
+async def resolve_grc_delivery(request: Request, record_id: str, body: schemas.GRCResolveIn):
+    require_global_permission(request, "admin")
+    human = _human_principal(request)
+    sync = _module("grc_sync", "grc_sync")
+    return await _call(sync.resolve_delivery, record_id, actor=human, **body.model_dump())

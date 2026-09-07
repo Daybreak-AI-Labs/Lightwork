@@ -8,7 +8,6 @@ for an agent/human procedure; timings do not establish LLM or labor savings.
 from __future__ import annotations
 
 import functools
-import hashlib
 import math
 import threading
 import time
@@ -371,7 +370,7 @@ class EvidenceRenewalEvolution:
             raise ValueError("customer acceptance and verified execution required")
         if ctx.binding() != operation["context"]:
             raise PermissionError("accepted operation credential authority changed")
-        if (evidence.get("status") != "available" or evidence.get("source") != "gdrive"
+        if (evidence.get("status") != "available" or evidence.get("source") not in {"gdrive", "upload", "evidence_set"}
                 or evidence.get("content_sha256") != outcome.get("evidence_sha256")
                 or evidence.get("content_sha256") != operation["preconditions"].get("evidence_sha256")
                 or outcome.get("renewal_due_at") != evidence.get("fresh_until")
@@ -392,10 +391,8 @@ class EvidenceRenewalEvolution:
             vendor = vendor_management.get_vendor(row["vendor_id"])
             if not vendor or vendor["owner"] != ctx.resource_owner or vendor["status"] == "offboarded":
                 raise PermissionError("vendor ownership or lifecycle changed")
-            document = service.documents.fetch(ctx, row["document_id"])
-            if (document.identity() != {key: evidence[key] for key in (
-                    "document_id", "version", "modified_at", "mime")}
-                    or hashlib.sha256(document.content).hexdigest() != evidence["content_sha256"]):
+            source_version = service.current_evidence_version(ctx, row, verify_bytes=True)
+            if source_version != evidence["version"]:
                 raise ValueError("accepted source evidence bytes or version changed")
             confirmation = service.tickets.verify(
                 ctx, operation["external_confirmation"]["key"], operation["payload"],
@@ -412,7 +409,7 @@ class EvidenceRenewalEvolution:
         if service.get(ctx, case_id)["revision"] != row["revision"]:
             raise ValueError("accepted case changed during evidence capture")
         typed = RenewalInputs(
-            outcome["renewal_due_at"], self.clock(), evidence["status"], document.version,
+            outcome["renewal_due_at"], self.clock(), evidence["status"], source_version,
             evidence["version"], versions[0], versions[1], True,
         )
         provenance = {

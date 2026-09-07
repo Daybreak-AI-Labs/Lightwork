@@ -113,3 +113,35 @@ def test_billing_linked_from_spend(client):
     r = client.get("/spend")
     assert r.status_code == 200
     assert 'href="/billing"' in r.text
+
+
+def test_usage_receipts_are_owner_scoped_and_distinguish_carry_forward(client, tmp_path, monkeypatch):
+    from maverick.quotas import UsageLedger
+    from maverick_dashboard import auth
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(auth, "verify_oidc_token", lambda token, **kwargs: VerifiedPrincipal(
+        sub=token, issuer="https://issuer.example", audience="maverick", claims={"sub":token}))
+    ledger = UsageLedger()
+    ledger.record_cumulative("user:alice", "a" * 32, 0.3, 30, 10,
+                              already_settled={"dollars":0.1, "in_tokens":10, "out_tokens":5})
+    ledger.record_cumulative("user:bob", "b" * 32, 99.0, 900, 900)
+    page = client.get("/billing", headers={"Authorization":"Bearer alice"})
+    assert page.status_code == 200
+    assert "a" * 32 in page.text and "b" * 32 not in page.text
+    assert "$0.300000" in page.text and "$99.000000" not in page.text
+    assert "Previously acknowledged usage carried forward: $0.100000" in page.text
+    assert "25 new tokens counted" in page.text
+
+
+def test_unavailable_reconciliation_does_not_fabricate_zero_usage(client, monkeypatch):
+    from maverick.quotas import UsageLedger, UsageLedgerError
+
+    def unavailable(self, **kwargs):
+        raise UsageLedgerError("internal private path")
+    monkeypatch.setattr(UsageLedger, "settlement_receipts", unavailable)
+    response = client.get("/billing")
+    assert response.status_code == 200
+    assert "absence has not been interpreted as zero usage" in response.text
+    assert "internal private path" not in response.text

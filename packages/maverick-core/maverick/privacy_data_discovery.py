@@ -436,6 +436,8 @@ class ScanReport:
     limitations: tuple[str, ...]
     retention_until: float
     integrity_sha256: str
+    evidence_key_fingerprint: str | None = None
+    source_scope_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -578,6 +580,13 @@ class AuditEvent:
 
 
 def _default_evidence_key_resolver(env_name: str) -> bytes:
+    if isinstance(env_name, str) and env_name.startswith("evidence-key:"):
+        from .privacy_discovery_credentials import resolve_key
+
+        try:
+            return resolve_key(env_name)
+        except Exception as exc:
+            raise PrivacyDataDiscoveryConfigError("saved evidence key is unavailable or rotated; update the source key selection") from exc
     name = _opaque(env_name, "evidence_key_env", _ENV_RE)
     value = os.environ.get(name)
     if value is None or len(value.encode("utf-8")) < 32:
@@ -1042,8 +1051,13 @@ class PrivacyDataDiscoveryStore:
         provider_name = _opaque(provider, "provider", _PROVIDER_RE)
         exact_origin = _exact_https_origin(origin)
         resource = _opaque(resource_ref, "resource_ref")
-        credential = _opaque(credential_env, "credential_env", _ENV_RE)
-        evidence_env = _opaque(evidence_key_env, "evidence_key_env", _ENV_RE)
+        from .privacy_discovery_credentials import validate_reference
+
+        try:
+            credential = validate_reference(credential_env)
+            evidence_env = validate_reference(evidence_key_env, evidence=True)
+        except ValueError as exc:
+            raise PrivacyDataDiscoveryValidationError(str(exc)) from exc
         if credential == evidence_env:
             raise PrivacyDataDiscoveryValidationError(
                 "source credential and evidence HMAC key require separate environment refs"
@@ -1942,6 +1956,9 @@ class PrivacyDataDiscoveryStore:
         detections: Sequence[Detection],
         truncation_reasons: Sequence[str],
         error_codes: Sequence[str],
+        evidence_key_fingerprint: str | None = None,
+        source_scope_sha256: str | None = None,
+        expected_source_sha256: str | None = None,
     ) -> ScanReport:
         tenant = _tenant_id(tenant_id)
         job = _opaque(job_id, "job_id")
@@ -1974,6 +1991,11 @@ class PrivacyDataDiscoveryStore:
                 raise PrivacyDataDiscoveryNotFound("scan job does not exist for tenant")
             job_payload = self._row_payload(row, "job")
             self._verify_job_indexes(row, job_payload)
+            if expected_source_sha256 is not None:
+                source_row = connection.execute("SELECT * FROM sources WHERE tenant_id=? AND source_id=?",
+                    (tenant, job_payload["source_id"])).fetchone()
+                if source_row is None or source_row["integrity_sha256"] != expected_source_sha256:
+                    raise PrivacyDataDiscoveryConflict("source changed during scan; no report was committed")
             if (
                 job_payload["state"] != "leased"
                 or job_payload["lease_owner"] != worker
@@ -2017,6 +2039,8 @@ class PrivacyDataDiscoveryStore:
                 "error_codes": list(errors),
                 "limitations": list(limitations),
                 "retention_until": finished + int(job_payload["retention_seconds"]),
+                "evidence_key_fingerprint": evidence_key_fingerprint,
+                "source_scope_sha256": source_scope_sha256,
             }
             report_digest = _sha256(report_payload)
             connection.execute(
@@ -2679,6 +2703,12 @@ class PrivacyDataDiscoveryStore:
             raise PrivacyDataDiscoveryValidationError(
                 "inventory diff requires reports from the same source"
             )
+        if (not base.evidence_key_fingerprint or not target.evidence_key_fingerprint
+                or base.evidence_key_fingerprint != target.evidence_key_fingerprint
+                or not base.source_scope_sha256 or base.source_scope_sha256 != target.source_scope_sha256):
+            raise PrivacyDataDiscoveryValidationError(
+                "reports use different or unverified evidence key generations/source scopes; establish a new comparison baseline"
+            )
 
         def fingerprints(report_id: str) -> set[str]:
             with self._connect() as connection:
@@ -2875,10 +2905,12 @@ class PrivacyDataDiscoveryCoordinator:
         self._structured = dict(structured_sources or {})
         self._unstructured = dict(unstructured_sources or {})
         self._clock = clock
+        from .privacy_data_discovery_adapters import credential_reference_present
+
         self._credential_ref_present = (
             credential_ref_present
             if credential_ref_present is not None
-            else lambda name: name in os.environ
+            else credential_reference_present
         )
 
     @staticmethod
@@ -3095,9 +3127,14 @@ class PrivacyDataDiscoveryCoordinator:
         source = self.store.get_source(job.tenant_id, job.source_id)
         if source.state != "active":
             raise PrivacyDataDiscoveryConflict("source is not active")
+        if source.credential_env.startswith("connection:") or source.evidence_key_env.startswith("evidence-key:"):
+            from .paths import current_tenant_id_strict
+
+            if current_tenant_id_strict() != job.tenant_id:
+                raise PrivacyDataDiscoveryConfigError("saved discovery references require the exact job tenant context")
         if not self._credential_ref_present(source.credential_env):
             raise PrivacyDataDiscoveryConfigError(
-                "enrolled credential environment variable is unavailable"
+                "enrolled credential reference is unavailable or changed; update the saved source selection"
             )
         root_evidence_key = self.store._evidence_key_resolver(source.evidence_key_env)
         if not isinstance(root_evidence_key, bytes) or len(root_evidence_key) < 32:
@@ -3119,6 +3156,11 @@ class PrivacyDataDiscoveryCoordinator:
         else:
             raise PrivacyDataDiscoveryIntegrityError("source kind is unsupported")
         records, files, byte_count, detections, truncations, errors = result
+        if source.evidence_key_env.startswith("evidence-key:"):
+            # Rotation during a scan must not publish fresh evidence under the
+            # retired reference. A later scan requires explicit source update.
+            if self.store._evidence_key_resolver(source.evidence_key_env) != root_evidence_key:
+                raise PrivacyDataDiscoveryConfigError("evidence key changed during scan")
         finished = _finite_time(self._clock(), "finished_at")
         if finished > deadline and "time_limit" not in truncations:
             truncations.append("time_limit")
@@ -3134,6 +3176,9 @@ class PrivacyDataDiscoveryCoordinator:
             detections=detections,
             truncation_reasons=truncations,
             error_codes=errors,
+            evidence_key_fingerprint=hmac.new(evidence_key, b"lightwork-discovery-comparison-key-v1", hashlib.sha256).hexdigest(),
+            source_scope_sha256=_sha256({"provider": source.provider, "origin": source.origin, "resource_ref": source.resource_ref}),
+            expected_source_sha256=source.integrity_sha256,
         )
 
     def run_once(

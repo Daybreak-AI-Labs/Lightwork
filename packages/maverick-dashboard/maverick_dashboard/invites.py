@@ -75,11 +75,17 @@ def invites_enabled() -> bool:
     local-session path never runs."""
     from maverick.config import env_flag
     v = env_flag("MAVERICK_DASHBOARD_INVITES")
+    if v is None:
+        v = env_flag("LIGHTWORK_DASHBOARD_INVITES")
     if v is not None:
         return v
     try:
         from maverick.config import load_config
-        return bool(((load_config() or {}).get("dashboard") or {}).get("invites"))
+        dashboard = (load_config() or {}).get("dashboard") or {}
+        if "invites" in dashboard:
+            return dashboard["invites"] is True
+        from .local_owner import claimed
+        return claimed()
     except Exception:  # pragma: no cover - config read never gates auth
         return False
 
