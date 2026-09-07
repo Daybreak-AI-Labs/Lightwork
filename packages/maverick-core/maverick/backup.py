@@ -37,8 +37,10 @@ import tempfile
 import time
 import unicodedata
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
+from urllib.parse import quote
 
 from . import file_lock
 
@@ -72,6 +74,9 @@ MAX_MANIFEST_BYTES = 16 * 1024**2
 MAX_ARCHIVE_PATH_BYTES = 1024
 MAX_COMPONENT_UNITS = 255
 _COPY_CHUNK = 1 << 20
+_RECOVERY_SCOPE: ContextVar[tuple[Path, str | None, bytes] | None] = ContextVar("backup_recovery_scope", default=None)
+_RECOVERY_EXPANDED_LIMIT: ContextVar[int | None] = ContextVar("backup_recovery_expanded_limit", default=None)
+_RECOVERY_WHOLE_HOME: ContextVar[bool] = ContextVar("backup_recovery_whole_home", default=False)
 _REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _WINDOWS_FORBIDDEN = frozenset('<>:"/\\|?*')
 _WINDOWS_RESERVED = {
@@ -86,13 +91,35 @@ class BackupError(RuntimeError):
     """A backup cannot be created or a restore cannot be safely applied."""
 
 
+def _filesystem_path(path: str | Path) -> Path:
+    return Path(file_lock._windows_extended_path(path)) if os.name == "nt" else Path(path)
+
+
+@contextmanager
+def _temporary_directory(*, prefix: str):
+    temporary = tempfile.TemporaryDirectory(prefix=prefix)
+    # Cleanup must use the same long-path spelling as staging; otherwise
+    # Windows can create the payload but fail to remove it after verification.
+    temporary.name = str(_filesystem_path(temporary.name))
+    try:
+        yield Path(temporary.name)
+    finally:
+        temporary.cleanup()
+
+
 def _client_root() -> Path:
+    scope = _RECOVERY_SCOPE.get()
+    if scope is not None:
+        return _filesystem_path(scope[0])
     from .paths import data_dir
 
-    return data_dir()
+    return _filesystem_path(data_dir())
 
 
 def _client_id() -> str | None:
+    scope = _RECOVERY_SCOPE.get()
+    if scope is not None:
+        return scope[1]
     from .client import client_id
 
     return client_id()
@@ -111,6 +138,13 @@ def _is_alias(path: Path, info: os.stat_result) -> bool:
         or bool(getattr(info, "st_file_attributes", 0) & _REPARSE_ATTRIBUTE)
         or bool(callable(is_junction) and is_junction())
     )
+
+
+def _transaction_root(root: Path) -> Path:
+    path = root / _RESTORE_TX_ROOT
+    # The journal preserves full payload paths under originals/. Windows needs
+    # its extended filesystem spelling for hashed draft paths in that subtree.
+    return Path(file_lock._windows_extended_path(path)) if os.name == "nt" else path
 
 
 def _identity(info: os.stat_result) -> tuple[int, int, int, int]:
@@ -152,6 +186,9 @@ def _decode_operator_key(raw: str) -> bytes:
 
 
 def _operator_key(*, required: bool) -> bytes | None:
+    scope = _RECOVERY_SCOPE.get()
+    if scope is not None:
+        return scope[2]
     raw = os.environ.get(_SIGNING_KEY_ENV, "")
     if not raw.strip():
         if required:
@@ -162,6 +199,33 @@ def _operator_key(*, required: bool) -> bytes | None:
             )
         return None
     return _decode_operator_key(raw)
+
+
+@contextmanager
+def recovery_scope(root: Path, client: str | None, key: bytes, *, max_expanded_bytes: int | None = None, whole_home: bool = False):
+    """Pin a server-resolved recovery target/key without process-env mutation.
+
+    The recovery center is responsible for target authorization and quiescence.
+    Ordinary backup CLI callers keep the existing operator environment contract.
+    """
+    if len(key) != 32:
+        raise BackupError("recovery signing key must contain exactly 32 bytes")
+    if max_expanded_bytes is not None and (type(max_expanded_bytes) is not int or max_expanded_bytes < 1):
+        raise BackupError("recovery archive size limit must be a positive integer")
+    token = _RECOVERY_SCOPE.set((Path(root), client, bytes(key)))
+    limit_token = _RECOVERY_EXPANDED_LIMIT.set(max_expanded_bytes)
+    home_token = _RECOVERY_WHOLE_HOME.set(whole_home)
+    try:
+        yield
+    finally:
+        _RECOVERY_SCOPE.reset(token)
+        _RECOVERY_EXPANDED_LIMIT.reset(limit_token)
+        _RECOVERY_WHOLE_HOME.reset(home_token)
+
+
+def _expanded_limit() -> int:
+    requested = _RECOVERY_EXPANDED_LIMIT.get()
+    return min(MAX_ARCHIVE_EXPANDED_BYTES, requested) if requested is not None else MAX_ARCHIVE_EXPANDED_BYTES
 
 
 def _key_id(key: bytes) -> str:
@@ -260,6 +324,10 @@ def _is_reserved_restore_path(relative: PurePosixPath) -> bool:
     return (
         relative.parts[0] in {"backups", _RESTORE_TX_ROOT}
         or relative.as_posix() == f"{_RESTORE_LOCK_TARGET}.lock"
+        or (_RECOVERY_WHOLE_HOME.get() and (
+            relative.parts[0] in {"control-plane.lock", "control-plane-holder.json"}
+            or (len(relative.parts) >= 3 and relative.parts[0] == "tenants"
+                and relative.parts[2] in {"backups", _RESTORE_TX_ROOT, f"{_RESTORE_LOCK_TARGET}.lock"})))
     )
 
 
@@ -318,14 +386,14 @@ class _ArchiveBudget:
         if name == MANIFEST and member.size > MAX_MANIFEST_BYTES:
             raise BackupError("manifest.json exceeds the manifest-size limit")
         self.expanded += member.size
-        if self.expanded > MAX_ARCHIVE_EXPANDED_BYTES:
+        if self.expanded > _expanded_limit():
             raise BackupError("backup exceeds the total expanded-size limit")
         return rel
 
 
 @contextmanager
 def _verified_archive(path: str | Path):
-    archive = Path(path)
+    archive = _filesystem_path(path)
     try:
         before = archive.lstat()
     except OSError as exc:
@@ -457,7 +525,7 @@ def _manifest_files(
         ):
             raise BackupError(f"invalid manifest SHA-256 for {rel}")
         expected[rel] = (digest, size)
-    if total > MAX_ARCHIVE_EXPANDED_BYTES:
+    if total > _expanded_limit():
         raise BackupError("manifest declares too much expanded data")
     return expected
 
@@ -568,6 +636,7 @@ def _copy_verified_file(
     *,
     destination_precreated: bool = False,
 ) -> tuple[str, int]:
+    source, destination = _filesystem_path(source), _filesystem_path(destination)
     try:
         before = source.lstat()
     except OSError as exc:
@@ -636,7 +705,7 @@ def _consistent_db_copy(source: Path, destination: Path) -> tuple[str, int]:
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with open(path, "rb") as stream:
+    with open(_filesystem_path(path), "rb") as stream:
         for chunk in iter(lambda: stream.read(_COPY_CHUNK), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -663,10 +732,27 @@ def _excluded_from_snapshot(relative: Path) -> bool:
         or relative.parts[0] in {"backups", _RESTORE_TX_ROOT}
         or relative.name == f"{_RESTORE_LOCK_TARGET}.lock"
         or relative.name.endswith(_SKIP_SUFFIXES)
+        or _is_reserved_restore_path(PurePosixPath(relative.as_posix()))
     )
 
 
+def _is_sqlite_file(path: Path) -> bool:
+    # Consent, A2A and other stores use .sqlite3/.sqlite, and extensions are not
+    # a database format boundary. Header recognition also covers custom names.
+    # Conventional names retain fail-closed validation if their header is bad.
+    if path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
+        return True
+    try:
+        with path.open("rb") as stream:
+            return stream.read(16) == b"SQLite format 3\x00"
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise BackupError("could not inspect a possible SQLite database") from exc
+
+
 def _stage(root: Path, stage: Path) -> dict[str, dict[str, Any]]:
+    root, stage = _filesystem_path(root), _filesystem_path(stage)
     files: dict[str, dict[str, Any]] = {}
     total = 0
     count = 0
@@ -684,16 +770,18 @@ def _stage(root: Path, stage: Path) -> dict[str, dict[str, Any]]:
             continue
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise BackupError(f"backup source is not a regular file: {relative}")
+        if total + info.st_size > _expanded_limit():
+            raise BackupError("live data exceeds configured backup archive limits")
         file_lock.ensure_private_file(source)
         rel = _safe_relative_path(relative.as_posix(), label="backup source path").as_posix()
         destination = stage / Path(*PurePosixPath(rel).parts)
-        if source.suffix == ".db":
+        if _is_sqlite_file(source):
             digest, size = _consistent_db_copy(source, destination)
         else:
             digest, size = _copy_verified_file(source, destination)
         count += 1
         total += size
-        if count > MAX_ARCHIVE_MEMBERS or total > MAX_ARCHIVE_EXPANDED_BYTES:
+        if count > MAX_ARCHIVE_MEMBERS or total > _expanded_limit():
             raise BackupError("live data exceeds configured backup archive limits")
         files[rel] = {"sha256": digest, "size": size}
     directory_count = sum(1 for path in stage.rglob("*") if path.is_dir())
@@ -703,6 +791,7 @@ def _stage(root: Path, stage: Path) -> dict[str, dict[str, Any]]:
 
 
 def _unique_private_empty(parent: Path, prefix: str) -> Path:
+    parent = _filesystem_path(parent)
     for _ in range(100):
         candidate = parent / f".{prefix}-{secrets.token_hex(16)}.tmp"
         try:
@@ -730,6 +819,7 @@ def create_backup(
     out: str | Path | None = None,
     *,
     allow_unsigned: bool = False,
+    recovery_metadata: dict[str, Any] | None = None,
 ) -> Path:
     """Create one private, atomically-published backup archive.
 
@@ -750,7 +840,8 @@ def create_backup(
         out = data_backups_dir() / (
             f"maverick-{client_identifier}-{timestamp}-{secrets.token_hex(4)}.tgz"
         )
-    destination = Path(out).expanduser()
+    public_destination = Path(out).expanduser()
+    destination = _filesystem_path(public_destination)
     try:
         if default_destination:
             file_lock.ensure_private_directory(destination.parent)
@@ -763,7 +854,7 @@ def create_backup(
     if os.path.lexists(destination):
         raise BackupError(f"refusing existing backup destination: {destination}")
 
-    with tempfile.TemporaryDirectory(prefix="mvk-backup-") as temporary:
+    with _temporary_directory(prefix="mvk-backup-") as temporary:
         temp_root = file_lock.ensure_private_directory(temporary)
         stage = file_lock.ensure_private_directory(temp_root / "data")
         schema_version = _world_schema_version(root)
@@ -776,6 +867,7 @@ def create_backup(
             "created_at": time.time(),
             "world_schema_version": schema_version,
             "files": files,
+            **({"recovery": recovery_metadata} if recovery_metadata is not None else {}),
         }, key)
         manifest_path = temp_root / MANIFEST
         file_lock.atomic_create_text(
@@ -813,7 +905,7 @@ def create_backup(
         client_identifier,
         key is not None,
     )
-    return destination
+    return public_destination
 
 
 def _extract_payload_stream(
@@ -952,7 +1044,7 @@ def _capture_original(
         original = tx / "originals" / Path(*PurePosixPath(rel).parts)
         _copy_verified_file(destination, original)
     sidecars: list[str] = []
-    if destination.suffix == ".db":
+    if _is_sqlite_file(destination):
         for suffix in _DB_SIDECARS:
             sidecar = Path(str(destination) + suffix)
             if _validate_optional_live_file(sidecar):
@@ -967,7 +1059,10 @@ def _publish_staged_file(source: Path, destination: Path) -> None:
     file_lock.ensure_private_directory(destination.parent)
     if os.path.lexists(destination):
         _validate_optional_live_file(destination)
-    temporary = _unique_private_empty(destination.parent, destination.name + ".restore")
+    # A restored draft already has a long hashed filename. Repeating that name
+    # in the temporary path exceeds Windows path limits on ordinary profiles.
+    # The random suffix supplies uniqueness without copying the payload name.
+    temporary = _unique_private_empty(destination.parent, "restore")
     try:
         _copy_verified_file(
             source,
@@ -1014,7 +1109,7 @@ def _rollback(root: Path, tx: Path, document: dict[str, Any]) -> None:
     for entry in reversed(entries):
         rel = entry["rel"]
         destination = _live_path(root, rel)
-        if destination.suffix == ".db":
+        if _is_sqlite_file(destination) or entry["sidecars"]:
             for suffix in _DB_SIDECARS:
                 sidecar = Path(str(destination) + suffix)
                 if os.path.lexists(sidecar):
@@ -1038,7 +1133,7 @@ def _rollback(root: Path, tx: Path, document: dict[str, Any]) -> None:
 
 
 def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
-    tx_root = root / _RESTORE_TX_ROOT
+    tx_root = _transaction_root(root)
     if not os.path.lexists(tx_root):
         return
     file_lock.ensure_private_directory(tx_root)
@@ -1065,14 +1160,49 @@ def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
         tx_root.rmdir()
 
 
+def _replacement_targets(root: Path, expected: dict) -> set[str]:
+    targets = set(expected)
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        if _excluded_from_snapshot(relative):
+            continue
+        info = path.lstat()
+        if _is_alias(path, info):
+            raise BackupError("live recovery target contains an alias")
+        if not stat.S_ISDIR(info.st_mode):
+            targets.add(_safe_relative_path(relative.as_posix(), label="live recovery path").as_posix())
+        if len(targets) > MAX_ARCHIVE_MEMBERS:
+            raise BackupError("live recovery target exceeds file limit")
+    return targets
+
+
+def _verify_restored(root: Path, expected: dict) -> None:
+    for rel, (digest, size) in expected.items():
+        restored = _live_path(root, rel)
+        if _sha256(restored) != digest or (size is not None and restored.stat().st_size != size):
+            raise BackupError("post-restore file verification failed")
+        if _is_sqlite_file(restored):
+            uri = ("file:" + quote(str(_filesystem_path(restored)), safe=":")
+                   if os.name == "nt" else restored.resolve().as_uri())
+            connection = sqlite3.connect(uri + "?mode=ro", uri=True)
+            try:
+                if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                    raise BackupError("post-restore database integrity check failed")
+            except sqlite3.DatabaseError as exc:
+                raise BackupError("post-restore database integrity check failed") from exc
+            finally:
+                connection.close()
+
+
 def _apply_transaction(
     root: Path,
     stage: Path,
     expected: dict[str, tuple[str, int | None]],
     *,
     key: bytes | None,
+    replace_existing: bool = False,
 ) -> None:
-    tx_root = file_lock.ensure_private_directory(root / _RESTORE_TX_ROOT)
+    tx_root = file_lock.ensure_private_directory(_transaction_root(root))
     tx = file_lock.ensure_private_directory(tx_root / secrets.token_hex(16))
     body: dict[str, Any] = {
         "journal_schema": 1,
@@ -1082,7 +1212,8 @@ def _apply_transaction(
     _write_journal(tx, body, key)
     committed = False
     try:
-        entries = [_capture_original(root, tx, rel) for rel in sorted(expected)]
+        targets = _replacement_targets(root, expected) if replace_existing else set(expected)
+        entries = [_capture_original(root, tx, rel) for rel in sorted(targets)]
         body["entries"] = entries
         body["state"] = "prepared"
         _write_journal(tx, body, key)
@@ -1092,13 +1223,20 @@ def _apply_transaction(
             rel = entry["rel"]
             source = stage / Path(*PurePosixPath(rel).parts)
             destination = _live_path(root, rel)
-            if destination.suffix == ".db":
+            if _is_sqlite_file(destination) or _is_sqlite_file(source):
                 for suffix in _DB_SIDECARS:
                     sidecar = Path(str(destination) + suffix)
                     if os.path.lexists(sidecar):
                         _validate_optional_live_file(sidecar)
                         sidecar.unlink()
-            _publish_staged_file(source, destination)
+            if rel in expected:
+                _publish_staged_file(source, destination)
+            elif destination.exists():
+                destination.unlink()
+        if replace_existing:
+            # Validate before committing the journal so any failed check restores
+            # the originals, including files created after the chosen snapshot.
+            _verify_restored(root, expected)
         committed_body = dict(body)
         committed_body["state"] = "committed"
         _write_journal(tx, committed_body, key)
@@ -1162,6 +1300,7 @@ def restore_backup(
     *,
     force: bool = False,
     allow_unsigned: bool = False,
+    replace_existing: bool = False,
 ) -> Path:
     """Authenticate, verify and transactionally restore one backup.
 
@@ -1202,7 +1341,7 @@ def restore_backup(
         file_lock.ensure_private_directory(root)
         if not force and "world.db" in expected:
             _refuse_if_world_appears_live(root)
-        with tempfile.TemporaryDirectory(prefix="mvk-restore-") as temporary:
+        with _temporary_directory(prefix="mvk-restore-") as temporary:
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
@@ -1214,6 +1353,7 @@ def restore_backup(
                     stage,
                     expected,
                     key=key,
+                    replace_existing=replace_existing,
                 )
     log.info(
         "restore complete into %s (from client=%s, %d files verified, authenticated=%s)",
@@ -1225,8 +1365,104 @@ def restore_backup(
     return root
 
 
+def verify_backup(tarball: str | Path) -> dict[str, Any]:
+    """Authenticate and verify every payload byte without touching live state."""
+    with _verified_archive(tarball) as stream:
+        manifest, _ = _read_manifest_stream(stream, allow_unsigned=False)
+        expected = _manifest_files(manifest, allow_legacy_unsigned=False)
+        with _temporary_directory(prefix="mvk-backup-verify-") as temporary:
+            stage = file_lock.ensure_private_directory(Path(temporary) / "data")
+            stream.seek(0)
+            _extract_payload_stream(stream, stage, expected=expected)
+    return manifest
+
+
+def _accounting_file(relative: str, path: Path) -> bool:
+    parts = PurePosixPath(relative).parts
+    lowered = tuple(part.casefold() for part in parts)
+    name = lowered[-1]
+    # Custom database names are not a format boundary. Only ordinary lock
+    # sidecars may be ignored, never SQLite payloads whose name ends in .lock.
+    if _is_sqlite_file(path):
+        return True
+    if name.endswith(".lock"):
+        return False
+    return (
+        # Claims and completed/unconfirmed external-action records are replay
+        # authority: a valid older JSON record (or its absence) can permit the
+        # same action again. Cover workspace and whole-home paths.
+        bool({"usage", "llm_gateway_team_budget", "mcp_sidecar", "grc_sync_outbound",
+              "grc_outbound_sync_states", "grc_outbound_sync_events", "vendor_onboarding",
+              "discovery_containment_actions", "provider_accounting_reviews", "pilot_learning_exclusions",
+              "task-file-recovery"}.intersection(lowered[:-1]))
+        or name in {"provider_spend.json", "provider_spend.json.required", "tenant_registry.json", "dashboard-owner.json"}
+        or (name == "retention.index" and "draft-recovery" in lowered)
+        or (name in {"connections.sealed", "oauth-setup.sealed"} and "connections" in lowered)
+        or name.startswith("budget_receipts.")
+    )
+
+
+def compare_backup(tarball: str | Path) -> dict[str, Any]:
+    """Compare authenticated payload metadata with consistent live file copies.
+
+    This is evidence, never a restore authorization or a semantic/schema merge.
+    No file payloads are returned. Live copies are individually consistent;
+    callers must separately establish quiescence for any subsequent mutation.
+    """
+    with _verified_archive(tarball) as stream:
+        manifest, _ = _read_manifest_stream(stream, allow_unsigned=False)
+        if manifest.get("client_id") != _client_id():
+            raise BackupError("The accounting snapshot belongs to a different recovery scope.")
+        expected = _manifest_files(manifest, allow_legacy_unsigned=False)
+        with _temporary_directory(prefix="lightwork-accounting-check-") as temporary:
+            selected = file_lock.ensure_private_directory(temporary / "selected")
+            current = file_lock.ensure_private_directory(temporary / "current")
+            stream.seek(0)
+            _extract_payload_stream(stream, selected, expected=expected)
+            live = _stage(_client_root(), current)
+            protected = {
+                name for name in expected
+                if _accounting_file(name, selected / Path(*PurePosixPath(name).parts))
+            } | {
+                name for name in live
+                if _accounting_file(name, current / Path(*PurePosixPath(name).parts))
+            }
+            archived = {name: {"sha256": digest, "size": size}
+                        for name, (digest, size) in expected.items()}
+            changes = [{"path": name, "change": "added" if name not in archived else "deleted" if name not in live else "changed",
+                        "protected": name in protected, "snapshot": archived.get(name), "current": live.get(name)}
+                       for name in sorted(set(archived) | set(live)) if archived.get(name) != live.get(name)]
+            return {"items": changes, "total_changes": len(changes),
+                    "protected_changes": sum(row["protected"] for row in changes),
+                    "protected_file_count": len(protected), "snapshot_file_count": len(archived), "live_file_count": len(live),
+                    "snapshot_state_sha256": hashlib.sha256(json.dumps(archived, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                    "live_state_sha256": hashlib.sha256(json.dumps(live, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+
+
+def assert_accounting_unchanged(tarball: str | Path) -> None:
+    """Refuse recovery that could rewind spending or protected action history.
+
+    Call under the recovery scope after stopping normal work, before replacing
+    live files or application binaries. Comparison evidence cannot waive this.
+    """
+    comparison = compare_backup(tarball)
+    changed = [row["path"] for row in comparison["items"] if row["protected"]]
+    if changed:
+        raise BackupError(
+            "Automatic restore is unavailable because spending, reservations, budget controls, "
+            "database state or external-action history differs from the selected snapshot. "
+            "Administrator accounting and external-action reconciliation is required before "
+            "restoring; newer records must not be erased or passed to an older incompatible "
+            "reader, and completed or unconfirmed actions must not be repeated. "
+            "Retain the current accounting and action history, and "
+            "export the snapshot for administrator review. Protected files: " + ", ".join(changed[:5])
+        )
+
+
 __all__ = [
     "BackupError",
+    "assert_accounting_unchanged",
+    "compare_backup",
     "create_backup",
     "restore_backup",
     "read_manifest",

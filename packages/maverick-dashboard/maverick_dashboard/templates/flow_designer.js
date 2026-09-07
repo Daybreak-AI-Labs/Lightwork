@@ -51,6 +51,53 @@
   var applyInFlight = false;
   var draftGeneration = 0;
   var pendingDraft = null;
+  var draftRecovery = null;
+
+  function recoveryPayload() {
+    return {format:1, editor:JSON.parse(draftSnapshot()),
+      base:{id:rootFlow.id, version:rootFlow.version || 0, revision:rootFlow.revision || ''},
+      brief:(document.getElementById('fd-nl') || {}).value || ''};
+  }
+  async function restoreRecovery(payload) {
+    if (!payload || payload.format !== 1 || !payload.editor || !payload.editor.flow || !Array.isArray(payload.editor.flow.nodes) || !payload.base) throw new Error('This recovery copy is not a supported flow draft.');
+    var state = payload.editor, source = payload.base;
+    if (!Number.isInteger(source.version) || source.version < 0 || typeof source.id !== 'string' || typeof source.revision !== 'string' ||
+        typeof state.id !== 'string' || typeof state.name !== 'string' || !Array.isArray(state.inputs) || typeof payload.brief !== 'string') throw new Error('This flow recovery copy has invalid editor fields. Current work was kept.');
+    var pending = [state.flow];
+    while (pending.length) {
+      var graph = pending.pop();
+      if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.every(function (node) { return node && typeof node.id === 'string' && typeof node.kind === 'string'; })) throw new Error('This flow recovery copy has invalid steps. Current work was kept.');
+      graph.nodes.forEach(function (node) { if (node.body) pending.push(node.body); });
+    }
+    var before = JSON.stringify(recoveryPayload());
+    if (source.version) {
+      var response = await apiFetch('/api/v1/flows/' + encodeURIComponent(source.id));
+      var current = response.ok && await response.json();
+      if (!current || current.id !== source.id || current.revision !== source.revision || current.version !== source.version) throw new Error('The saved flow changed after this recovery copy. Current work was kept. Compare the copies and copy your edits into the latest flow before saving.');
+    }
+    if (before !== JSON.stringify(recoveryPayload())) throw new Error('Your newer canvas edits were kept. Review the recovery copy again.');
+    pushHistory();
+    rootFlow = JSON.parse(JSON.stringify(state.flow)); flow = rootFlow;
+    rootFlow.version = source.version; rootFlow.revision = source.revision;
+    stack = []; crumbs = ['Main flow']; selected = null; selectedEdge = null;
+    flowInputs = JSON.parse(JSON.stringify(state.inputs || []));
+    idInput.value = state.id; nameInput.value = state.name;
+    [['fd-maxsec','max_seconds'],['fd-maxdollars','max_dollars'],['fd-schedule','schedule'],['fd-tz','timezone'],['fd-maxconc','max_concurrent']].forEach(function (pair) {
+      var field = document.getElementById(pair[0]); if (field) field.value = state[pair[1]];
+    });
+    var notify = document.getElementById('fd-notify'); if (notify) notify.checked = !!state.notify;
+    var brief = document.getElementById('fd-nl'); if (brief) brief.value = payload.brief || '';
+    proposals = {}; impacts = {}; runState = {}; runCursor = null;
+    renderCrumbs(); syncScheduleControls(); render(); renderProps();
+  }
+  function initializeRecovery() {
+    var source = canvas.getAttribute('data-flow-id') || 'new';
+    if (!window.mvDraftRecovery || (draftRecovery && draftRecovery.source === source)) return;
+    if (draftRecovery) { draftRecovery.dispose(); draftRecovery.panel.remove(); }
+    draftRecovery = window.mvDraftRecovery.create({key:'flow-designer:' + source,
+      host:document.getElementById('content'), read:recoveryPayload, restore:restoreRecovery});
+    if (draftRecovery) draftRecovery.source = source;
+  }
 
   function draftSnapshot() {
     // Keep the editable object rather than the wire serialization: buffered
@@ -92,6 +139,7 @@
       window.history.replaceState(window.history.state, '', path);
     }
     canvas.setAttribute('data-flow-id', id);
+    if (draftRecovery && draftRecovery.source !== id) { initializeRecovery(); if (draftRecovery) draftRecovery.changed(); }
     var box = document.querySelector('.fd-hero .hero-statebox');
     if (box) {
       var stateName = box.querySelector('.hero-statebox__row strong');
@@ -205,6 +253,7 @@
   }
 
   function render() {
+    if (draftRecovery) draftRecovery.changed();
     var focusedNode = document.activeElement && document.activeElement.getAttribute
       ? document.activeElement.getAttribute('data-node') : null;
     vp.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')');
@@ -2015,12 +2064,17 @@
   // replaces this with its server snapshot; gallery/import/AI drafts remain
   // dirty and therefore receive the unload warning until saved.
   markClean();
-  if (editId) load(editId);
+  if (editId) load(editId).then(initializeRecovery);
   else if (seed && seed.nodes) {   // ?from_template= -> the template as a 1-node flow
     fromApiFlow(seed);
     say('Loaded the template as a flow — add branches, approvals, or loops around it.');
   } else { render(); renderProps(); }
   receiveAuthoringHandoff(!!(editId || (seed && seed.nodes)));
+  if (!editId) initializeRecovery();
+  window.addEventListener('lightwork:drafts-ready', function () {
+    if (editId && !rootFlow.version) return;
+    initializeRecovery();
+  });
 
   // The friendly Steps view renders the LIVE graph (not just the server seed),
   // so nodes built on the canvas show up the moment you switch views.

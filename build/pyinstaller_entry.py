@@ -3,7 +3,12 @@
 Wraps :func:`maverick.cli.main` so PyInstaller can produce a single-file
 binary. Distributed via GitHub Releases for macOS / Linux / Windows.
 """
-from maverick.cli import main
+import sys
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == "--recovery-rehearsal-worker":
+        from maverick.recovery_rehearsal import main
+        raise SystemExit(main([sys.argv[2]]))
+    else:
+        from maverick.cli import main
+        main()

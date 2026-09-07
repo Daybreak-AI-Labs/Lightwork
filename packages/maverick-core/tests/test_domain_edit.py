@@ -191,3 +191,39 @@ class TestValidateAndList:
         assert remove_override(name) is True
         assert resolved_view(name)["is_override"] is False
         assert available_domains()[name].description == base.description
+
+def test_override_compare_and_swap_keeps_newer_agent(tenant_dir):
+    from maverick.domain_edit import OverrideConflict
+    name, _ = _clean_builtin()
+    generation = resolved_view(name)["generation"]
+    saved = write_override(name, {"description": "first editor"}, expected_generation=generation, return_view=True)
+    assert saved["description"] == "first editor" and saved["generation"] != generation
+    with pytest.raises(OverrideConflict):
+        write_override(name, {"description": "stale recovery"}, expected_generation=generation)
+    assert resolved_view(name)["description"] == "first editor"
+
+
+def test_new_override_cannot_replace_existing_agent(tenant_dir):
+    from maverick.domain_edit import OverrideConflict
+    name, _ = _clean_builtin()
+    with pytest.raises(OverrideConflict):
+        write_override(name, {"description": "unreviewed replacement"}, expected_generation="new")
+    assert not (tenant_dir / (name + ".toml")).exists()
+
+
+def test_concurrent_agent_edits_compare_inside_write_lock(tenant_dir):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from maverick.domain_edit import OverrideConflict
+    name, _ = _clean_builtin()
+    generation = resolved_view(name)["generation"]
+    def attempt(description):
+        try:
+            return write_override(name, {"description": description}, expected_generation=generation, return_view=True)
+        except OverrideConflict:
+            return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, ["first editor", "second editor"]))
+    assert sum(result is not None for result in results) == 1
+    winner = next(result for result in results if result is not None)
+    assert resolved_view(name)["generation"] == winner["generation"]
