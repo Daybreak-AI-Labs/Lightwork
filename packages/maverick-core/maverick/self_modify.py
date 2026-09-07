@@ -49,6 +49,8 @@ _PROTECTED_FILES = frozenset({
     "self_improvement_runner.py",
     "killswitch.py",             # global emergency stop
     "learning_guard.py",         # learning-job emergency-stop boundary
+    "pilot_learning.py",         # frozen pilot learning-exclusion authority
+    "release_identity_transition.py",  # dual-signed native update trust admission
     "learning_rollout.py",       # canary promotion/rollback orchestration
     "learning_proof.py",         # proof/evidence authority
     "factory_learning.py",       # factory promotion/evidence consumer

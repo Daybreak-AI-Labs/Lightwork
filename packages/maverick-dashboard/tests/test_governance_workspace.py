@@ -1170,6 +1170,83 @@ def test_grc_dispatch_refuses_disabled_module_before_dispatch(monkeypatch):
     assert calls == []
 
 
+@pytest.mark.parametrize("action,body", [
+    ("inspect", {"expected_revision": 1}),
+    ("resolve", {"expected_revision": 1, "note": "Keep held."}),
+])
+@pytest.mark.parametrize("role,principal", [("viewer", "user:viewer"), ("operator", "user:operator"),
+    ("admin", "token:worker"), ("admin", None)])
+def test_grc_reconciliation_requires_named_global_admin(monkeypatch, action, body, role, principal):
+    from maverick import grc_sync
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda value: role)
+    calls = []
+    monkeypatch.setattr(grc_sync, f"{action}_delivery", lambda *args, **kwargs: calls.append(kwargs))
+    response = client.post(f"{_PREFIX}/grc-sync/outbound/GRO-test/{action}", json=body)
+    assert response.status_code == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize("action,body", [
+    ("inspect", {"expected_revision": True}),
+    ("inspect", {"expected_revision": 1, "remote_id": "../../evil"}),
+    ("inspect", {"expected_revision": 1, "reader": "arbitrary"}),
+    ("resolve", {"expected_revision": 1, "note": "Review", "actor": "user:spoof"}),
+    ("resolve", {"expected_revision": 1, "note": "Review", "evidence_sha256": "fake"}),
+    ("resolve", {"expected_revision": 1, "note": ""}),
+])
+def test_grc_reconciliation_rejects_invalid_or_injected_inputs(monkeypatch, action, body):
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda value: "admin")
+    assert client.post(f"{_PREFIX}/grc-sync/outbound/GRO-test/{action}", json=body).status_code == 422
+
+
+def test_grc_reconciliation_journey_records_actor_and_never_resends(monkeypatch):
+    from maverick import grc_sync
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    _assurance_incident()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:grc-admin")
+    monkeypatch.setattr(auth, "global_role_for_principal", lambda value: "admin")
+    sent = []
+
+    def writer(operation, path, payload):
+        sent.append(payload)
+        return "ERROR: post request failed (Timeout)"
+
+    monkeypatch.setattr(grc_sync, "_default_writer", lambda config: writer)
+    _ok(client.post(f"{_PREFIX}/grc-sync/run", json={"confirm_dispatch": True}))
+    row = _ok(client.get(f"{_PREFIX}/grc-sync/outbound"))["outbound"][0]
+    remote = {**sent[0], "sys_id": _FAKE_SYS_ID}
+    reads = []
+
+    def reader(path, params):
+        reads.append(path)
+        return json.dumps({"result": remote})
+
+    monkeypatch.setattr(grc_sync, "_default_reader", lambda config: reader)
+    inspect = _ok(client.post(f"{_PREFIX}/grc-sync/outbound/{row['id']}/inspect",
+        json={"expected_revision": row["revision"]}))
+    assert inspect["inspection"]["matched"] is True
+    resolved = _ok(client.post(f"{_PREFIX}/grc-sync/outbound/{row['id']}/resolve", json={
+        "expected_revision": inspect["revision"], "note": "Verified external incident.",
+        "evidence_sha256": inspect["inspection"]["evidence_sha256"],
+    }))
+    assert resolved["status"] == "delivered"
+    assert resolved["reconciliation"]["reviewer"] == "user:grc-admin"
+    assert len(sent) == 1 and len(reads) == 2
+    page = client.get("/security/governance")
+    assert 'id="gov-grc-recovery"' in page.text
+    assert client.get("/static/lightwork-grc-recovery.js").status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # Art. 26 deployer obligations
 # ---------------------------------------------------------------------------
