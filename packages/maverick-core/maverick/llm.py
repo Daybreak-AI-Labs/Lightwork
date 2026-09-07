@@ -76,7 +76,7 @@ ROLE_MODELS: dict[str, str] = {
 # and verification status that justify those floats. Every row must exactly
 # match the tracked evidence pack. Rows whose current official source could not
 # be captured remain available for planning, but cannot cross the billing gate.
-MODEL_RATE_CARD_VERSION = "2026-07-29.2"
+MODEL_RATE_CARD_VERSION = "2026-09-07.1"
 _PRICING_EVIDENCE = load_pricing_evidence_pack()
 
 
@@ -147,6 +147,25 @@ MODEL_PRICING_PROVIDER = VersionedPricingProvider(
             "claude-haiku-4-5-20251001",
             (1.0, 5.0),
             evidence_id="anthropic-direct-2026-07-29",
+        ),
+        # Current generation (W1-9): unlisted here previously, so a real
+        # bill on any of these fell back to the Sonnet estimate rate under
+        # [budget] strict_pricing=false, or refused outright under the
+        # (default) strict policy.
+        _model_price(
+            "claude-opus-5",
+            (5.0, 25.0),
+            evidence_id="anthropic-direct-2026-09-07",
+        ),
+        _model_price(
+            "claude-sonnet-5",
+            (2.0, 10.0),
+            evidence_id="anthropic-direct-2026-09-07",
+        ),
+        _model_price(
+            "claude-fable-5-1",
+            (10.0, 50.0),
+            evidence_id="anthropic-direct-2026-09-07",
         ),
         # OpenAI billing stores a conservative flat ceiling because the
         # published price varies by context length and processing region.

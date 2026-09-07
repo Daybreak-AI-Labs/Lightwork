@@ -282,7 +282,7 @@ def test_budget_retains_exact_rate_provenance_and_absorb_merges_it():
     assert evidence["verified"] is True
     assert evidence["currency"] == "USD"
     assert evidence["source"].startswith("https://")
-    assert evidence["rate_card_version"] == "2026-07-29.2"
+    assert evidence["rate_card_version"] == "2026-09-07.1"
     assert evidence["evidence_id"] == "anthropic-direct-2026-07-29"
 
     parent = Budget(max_dollars=100.0)
