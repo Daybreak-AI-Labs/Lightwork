@@ -8,8 +8,12 @@ uid 1000) running `maverick dashboard`; they differ only in *where* it runs and
 fallback if one platform is down.
 
 > The dashboard refuses to serve its admin surface off `localhost` without a
-> bearer token, so every option here is **token-gated**. The demo link looks
-> like `https://host/?token=<TOKEN>`; treat that link like a password.
+> bearer token, so every option here is **token-gated** — via the
+> `Authorization: Bearer <TOKEN>` header, not a `?token=` query parameter
+> (removed: it leaked the bearer through browser history, server logs, and
+> the `Referer` header). A browser navigation can't set that header, so
+> there is no plain clickable demo link; see each model below for how to
+> actually reach it. Treat the token like a password either way.
 
 ---
 
@@ -21,18 +25,20 @@ machine or a screen-share.
 ```bash
 cd deploy/demo
 cp demo.env.example demo.env        # put your ANTHROPIC_API_KEY in it
-./run-demo.sh                       # builds, starts, prints + opens the URL
+./run-demo.sh                       # builds, starts, prints the URL + token
 ```
 
 `run-demo.sh` generates a token (stored in `.demo-token`, git-ignored), boots
-the container, waits for `/livez`, prints `http://localhost:8765/?token=…`, and
-opens your browser. Stop with `docker compose -f docker-compose.yml down`
-(add `-v` to wipe demo state for a clean slate).
+the container, waits for `/livez`, and prints `http://localhost:8765/` plus
+the token and a ready-to-use `curl -H "Authorization: Bearer …"` command.
+For an actual click-through link on your own machine, put a header-injecting
+browser extension (e.g. ModHeader) in front, or use the nginx pattern from
+Model 2. Stop with `docker compose -f docker-compose.yml down` (add `-v` to
+wipe demo state for a clean slate).
 
 ## Model 2 — Hosted public URL (send a link)
 
-A reachable HTTPS URL you can share with prospects. Run the same container on a
-VPS and put **Caddy** in front for automatic TLS.
+A reachable HTTPS URL, on a VPS behind a TLS-terminating proxy.
 
 ```bash
 # on the VPS, from the repo root:
@@ -42,9 +48,14 @@ MAVERICK_DASHBOARD_TOKEN=$(openssl rand -hex 24) \
 caddy run --config deploy/demo/Caddyfile
 ```
 
-Share `https://demo.example.com/?token=<TOKEN>`. The dashboard still enforces
-the token behind the proxy (proxied traffic is treated as non-loopback,
-fail-closed).
+`deploy/demo/Caddyfile` only terminates TLS — it does not inject the
+`Authorization` header, so `https://demo.example.com/` still needs the
+Bearer header (curl/Postman/a header-injecting extension), same as Model 1.
+For an actual send-a-link demo where the proxy injects the header so
+prospects get a plain clickable URL, use
+`deploy/reference-architectures/demo-cluster/nginx.conf.template` instead
+(it sets `proxy_set_header Authorization "Bearer ${MAVERICK_DASHBOARD_TOKEN}"`)
+— treat that link like a password, since anyone who has it is authenticated.
 
 ## Model 3 — One-click cloud blueprint (managed)
 
@@ -53,8 +64,9 @@ on a managed platform. Two ready-to-use blueprints:
 
 - **Render** — `deploy/demo/render.yaml`. In Render: *New → Blueprint*, point at
   this repo. `MAVERICK_DASHBOARD_TOKEN` is generated; set `ANTHROPIC_API_KEY`
-  in the service's Environment tab. Demo link:
-  `https://<service>.onrender.com/?token=<token from Environment tab>`.
+  in the service's Environment tab. Demo link: `https://<service>.onrender.com/`
+  — authenticate with the token (copied from the Environment tab) via the
+  `Authorization: Bearer` header.
 - **Fly.io** — `deploy/demo/fly.toml`. From the repo root:
   ```bash
   flyctl launch --copy-config --config deploy/demo/fly.toml --no-deploy
@@ -62,7 +74,8 @@ on a managed platform. Two ready-to-use blueprints:
       ANTHROPIC_API_KEY=your-key-here MAVERICK_DASHBOARD_TOKEN=$(openssl rand -hex 24)
   flyctl deploy --config deploy/demo/fly.toml
   ```
-  Demo link: `https://<app>.fly.dev/?token=<the token you set>`.
+  Demo link: `https://<app>.fly.dev/` — authenticate with the token you set
+  via the `Authorization: Bearer` header.
 
 > These blueprints are templates written to each platform's documented schema;
 > validate the first deploy against your account (plan names, regions, and

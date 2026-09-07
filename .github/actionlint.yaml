@@ -3,6 +3,10 @@
 # property names. GitHub documents both as the secure way for a called workflow
 # to check out its own repository/SHA:
 # https://docs.github.com/actions/reference/workflows-and-actions/contexts#example-usage-of-job-context-workflow-identity
+self-hosted-runner:
+  labels:
+    - lightwork-clean-release-acceptance
+
 paths:
   .github/workflows/agent-on-pr.yml:
     ignore:

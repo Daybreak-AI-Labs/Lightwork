@@ -90,4 +90,34 @@
     <p class="muted">No statements yet.</p>
   {% endif %}
 </div>
+<section class="panel" id="usage-reconciliation">
+  <h2>Usage recovery and reconciliation</h2>
+  <p>These receipts record cumulative usage already counted toward runtime quotas.
+    Resuming an interrupted task charges only newly recorded usage. A repeated receipt does not add the same usage again.</p>
+  <p class="muted">This internal accounting trail is separate from the episode statement above and your provider's invoice.
+    Usage that the provider did not report before an interruption cannot be inferred here.
+    Older tasks may have no recovery receipt; retained daily details follow your retention policy.</p>
+  {% if usage_receipt_error %}<p role="status">{{ usage_receipt_error }}</p>
+  {% elif usage_receipts['items'] %}
+  <div style="overflow-x:auto;"><table>
+    <caption>Confirmed cumulative usage receipts, newest first</caption>
+    <thead><tr><th scope="col">Account</th><th scope="col">Accounted usage</th><th scope="col">Recorded updates</th><th scope="col">Last update</th><th scope="col">Details</th></tr></thead>
+    <tbody>{% for receipt in usage_receipts['items'] %}
+      <tr><td>{{ receipt.principal }}</td>
+        <td>${{ '%.6f'|format(receipt.total.dollars) }} · {{ receipt.total.in_tokens + receipt.total.out_tokens }} tokens</td>
+        <td>{{ receipt.revision }}</td><td><span data-when="{{ receipt.updated_at }}"></span></td>
+        <td><details><summary>Review accounting details</summary>
+          <p>Receipt reference: {{ receipt.scope }}</p>
+          <p>Previously acknowledged usage carried forward: ${{ '%.6f'|format(receipt.credited.dollars) }};
+            {{ receipt.credited.in_tokens + receipt.credited.out_tokens }} tokens.</p>
+          <ul>{% for day, charge in receipt.charges|dictsort %}
+            <li>{{ day }}: ${{ '%.6f'|format(charge.dollars) }}; {{ charge.in_tokens + charge.out_tokens }} new tokens counted.</li>
+          {% endfor %}</ul>
+        </details></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<p>No recovery receipts are recorded in the accessible ledger.</p>{% endif %}
+  {% if usage_receipts.offset > 0 %}<a class="btn" href="/billing?receipt_offset={{ [0, usage_receipts.offset - 50]|max }}#usage-reconciliation">Previous receipts</a>{% endif %}
+  {% if usage_receipts.has_more %}<a class="btn" href="/billing?receipt_offset={{ usage_receipts.offset + 50 }}#usage-reconciliation">Next receipts</a>{% endif %}
+</section>
 {% endblock %}

@@ -13,6 +13,15 @@ from maverick_dashboard.app import app
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def _intake_controller(page):
+    script = '/static/lightwork-ai-business-intake.js'
+    assert page.count(f'<script src="{script}" defer></script>') == 1
+    response = client.get(script)
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    return response.text
+
+
 @pytest.fixture(autouse=True)
 def _isolated_page(tmp_path, monkeypatch):
     from maverick import config
@@ -65,8 +74,6 @@ def test_assurance_page_renders_all_governance_operator_contracts():
         '"/ai-literacy/requirements"',
         '"/ai-literacy/evidence-export"',
         '"/eu-ai-incidents?limit=100"',
-        '"/ai-business-intake/drafts"',
-        '"/ai-business-intake/submissions"',
         '"/ai-cost-roi/collectors"',
         '"/ai-cost-roi/portfolio"',
         '"/ai-policy-management/policies"',
@@ -94,6 +101,17 @@ def test_assurance_page_renders_all_governance_operator_contracts():
         '"/grc-outbound/events?limit=100"',
     ):
         assert api_contract in page
+
+    intake = _intake_controller(page)
+    assert "base='/api/v1/security/assurance/ai-business-intake'" in intake
+    for api_contract in (
+        "api('/form')",
+        "api('/drafts?'",
+        "api('/drafts'+(current?",
+        "api('/drafts/'+encodeURIComponent(current.id)+'/submit','POST'",
+    ):
+        assert api_contract in intake
+    assert "X-Lightwork-Intake-Context" in intake
 
     assert "not a legal conclusion" in page
     assert "does not file reports" in page
@@ -376,7 +394,6 @@ def test_assurance_modules_lazy_load_each_read_group_once():
     for panel_id in (
         "ai-literacy-panel",
         "article-73-panel",
-        "ai-business-intake-panel",
         "ai-cost-roi-panel",
         "ai-policy-management-panel",
         "ai-explainability-panel",
@@ -390,6 +407,14 @@ def test_assurance_modules_lazy_load_each_read_group_once():
         "grc-outbound-panel",
     ):
         assert f'["{panel_id}",' in page
+
+    # The guided intake initializes from its deferred controller; registering it
+    # in the generic summary loader too would issue duplicate draft reads.
+    assert '["ai-business-intake-panel",' not in page
+    intake = _intake_controller(page)
+    assert intake.count("run(initialize);") == 1
+    assert "await api('/form')" in intake
+    assert "await list();" in intake
 
 
 def test_non_admin_page_withholds_admin_governance_mutations(monkeypatch):
@@ -455,7 +480,14 @@ def test_non_admin_page_withholds_admin_governance_mutations(monkeypatch):
     assert 'sendJson("/ai-policy-management/evaluations"' not in page
     assert 'sendJson("/dynamic-risk/signals"' not in page
     # Tenant operators retain the non-admin intake, preview, and evidence tools.
-    assert 'id="ai-business-intake-start"' in page
+    assert 'id="abi-answers"' in page
+    assert 'id="abi-fields"' in page
+    assert 'id="abi-save" type="submit"' in page
+    assert 'id="abi-submit" type="button" class="btn btn--primary" disabled' in page
+    assert 'id="abi-open"' in page
+    intake = _intake_controller(page)
+    assert "!contract.can_edit" in intake
+    assert "if(!contract.can_edit||conflicted" in intake
     assert 'id="grc-outbound-preview"' in page
     assert 'id="ai-literacy-export"' in page
     assert 'id="ai-policy-record-query"' in page
