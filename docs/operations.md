@@ -119,6 +119,13 @@ systemctl start maverick
 
 To restore: stop the writers, replace `world.db`, restart.
 
+`maverick backup restore` (the CLI's own DR path, see `maverick backup
+--help`) enforces this: it refuses when `world.db`'s WAL/SHM sidecars were
+touched within the last few seconds, since a running process silently loses
+every write made after the restore until it's stopped. Stop `maverick
+serve` / the dashboard before restoring; `--force` overrides the check for
+cases the heuristic can't see (e.g. a process on another host).
+
 ## Postgres backup & disaster recovery
 
 When the world model runs on Postgres (`[world_model] backend = "postgres"` /

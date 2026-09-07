@@ -352,9 +352,15 @@ def backup_create_cmd(out, include_keys) -> None:
 @backup_group.command("restore")
 @click.argument("tarball")
 @click.option("--force", is_flag=True,
-              help="Restore even if the backup's client id differs (dangerous).")
+              help="Restore even if the backup's client id differs, or the "
+                   "live world database still appears open (dangerous).")
 def backup_restore_cmd(tarball, force) -> None:
-    """Restore TARBALL into this client's data root (fail-closed on client id)."""
+    """Restore TARBALL into this client's data root (fail-closed on client id).
+
+    Stop `maverick serve` / the dashboard first: restoring while a process
+    still has the world database open silently loses every write made
+    through that connection until it restarts. --force overrides the check.
+    """
     from ..backup import BackupError, restore_backup
     try:
         root = restore_backup(tarball, force=force)
