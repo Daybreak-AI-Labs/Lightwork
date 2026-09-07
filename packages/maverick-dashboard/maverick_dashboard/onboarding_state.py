@@ -103,9 +103,9 @@ def _has_user_agent() -> bool:
         return False
 
 
-def _has_run(world: Any) -> bool:
+def _has_run(world: Any, owner: str | None = None) -> bool:
     try:
-        return bool(world.list_goals(limit=1))
+        return bool(world.list_goals(limit=1, owner=owner))
     except Exception:
         return False
 
@@ -162,13 +162,19 @@ def build(
     *,
     can_configure: bool = True,
     can_operate: bool = True,
+    owner: str | None = None,
+    reviewed_outcome: dict | None = None,
 ) -> dict[str, Any]:
     """Build the activation checklist and deterministic install preflight."""
 
     model_route_state = selected_model_route_state()
     provider_ok = model_route_state["configured"] is True
-    built = _has_user_template() or _has_user_agent()
-    activated = _has_run(world) or _has_automation()
+    activated = _has_run(world, owner)
+    built = _has_user_template() or _has_user_agent() or activated
+    if reviewed_outcome is None:
+        from .guided_outcome import reviewed_goal
+
+        reviewed_outcome = reviewed_goal(world, owner=owner)
     steps = [
         {
             "title": "Connect your AI service",
@@ -188,17 +194,17 @@ def build(
             "command": "maverick preflight",
         },
         {
-            "title": "Build a workflow or agent",
+            "title": "Choose a workflow or agent",
             "done": built,
             "body": (
-                "Draft a reusable workflow or a governed specialist agent in "
-                "the builder."
+                "Choose an existing specialist or workflow, or create one in the builder. "
+                "Using an existing specialist also completes this step."
             ),
             "status": "complete" if built else "incomplete",
-            "cta": "/workflow-builder",
-            "cta_label": "Open the builder",
+            "cta": "/agents",
+            "cta_label": "Choose a specialist",
             "allowed": bool(can_operate),
-            "readonly_label": "An operator can build the first workflow or agent.",
+            "readonly_label": "An operator can choose or build the first workflow or agent.",
             "command": "",
         },
         {
@@ -216,6 +222,13 @@ def build(
             "command": "",
         },
     ]
+    steps.append({
+        "title": "Review and accept your first result", "done": reviewed_outcome.get("complete") is True,
+        "body": reviewed_outcome["detail"], "status": reviewed_outcome["status"],
+        "cta": reviewed_outcome.get("href", "/deliverables"), "cta_label": "Review the result",
+        "allowed": bool(can_operate), "readonly_label": "An operator can review and accept the first result.",
+        "command": "",
+    })
     done_count = sum(step["done"] for step in steps)
     next_step = next((step for step in steps if not step["done"]), None)
     runtime_preflight = _preflight_state("run")
