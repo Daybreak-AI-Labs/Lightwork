@@ -3392,6 +3392,19 @@ class Agent:
         ``(None, 0, messages)`` unchanged. Missing history starts at zero;
         corrupt/unavailable history or exhausted current caps blocks execution.
         Usage is restored into the authoritative shared Budget.
+
+        W1-28: ``messages[0]`` on entry is the brief this run was JUST built
+        with (for the orchestrator, `run_goal` bakes in any newly-answered
+        `ask_user` question there -- see the ``qa_block`` in orchestrator.py).
+        The checkpoint's own ``messages[0]`` is that same slot from BEFORE
+        the question was answered. Wholesale-replacing `messages` with the
+        checkpoint would silently discard the fresh brief and re-show the
+        model exactly the state it was in when it asked -- the resumed run
+        re-asks the same question forever. `_save_checkpoint` always commits
+        at the top of the loop (before that step's LLM call), so the saved
+        history always ends on a "user" turn and starts on one too; swapping
+        just index 0 for the freshly-built one keeps that alternation intact
+        while carrying the rest of the crashed/blocked run's history forward.
         """
         start_step = 0
         ckpt = None
@@ -3410,7 +3423,11 @@ class Agent:
                         # Restore accounting before accepting messages. Never
                         # replace the shared Budget or import historical caps.
                         _ckpt_mod.restore_budget(saved.budget, into=self.ctx.budget)
-                        messages = saved.messages
+                        fresh_first = messages[0] if messages else None
+                        messages = list(saved.messages)
+                        if (fresh_first is not None and messages
+                                and messages[0].get("role") == "user"):
+                            messages[0] = fresh_first
                         start_step = saved.step_seq
                         bb.post(self.name, "plan",
                                 f"resumed from checkpoint at step {start_step}")
