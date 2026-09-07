@@ -3720,6 +3720,7 @@ class ConsentPreferenceStore:
         actions = {
             "profile.created": "record_created",
             "profile.linked": "relationship_changed",
+            "profile.unlinked": "relationship_changed",
             "profile.identifier_changed": "record_updated",
             "profile.subject_deleted": "record_deleted",
             "receipt.lifecycle_changed": "status_changed",
