@@ -63,6 +63,26 @@ def _compile(p: str) -> re.Pattern:
     return re.compile(p, re.IGNORECASE)
 
 
+# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-33): `rm_rf_root` and
+# `recursive_chmod_chown_root` below used to require their two dangerous
+# flags (recursive + force, or recursive alone) in ONE contiguous token
+# (`-rf`, `-...R...`). Splitting the flags across separate tokens -- `rm -r
+# -f /`, `chmod -c -R 777 /` -- is functionally identical but bypassed both
+# rules entirely, since neither single token then matched. `_FLAG_TOKEN`
+# matches one short-option cluster (`-rf`, `-c`) or one GNU long option
+# (`--recursive`); the rules below use it, bounded to a handful of
+# repetitions (never unbounded, so this can't blow up on adversarial input),
+# to detect the two flags regardless of how they're grouped or ordered.
+_FLAG_TOKEN = r"(?:-[a-zA-Z]+|--[a-zA-Z][a-zA-Z-]*)"
+
+
+def _has_flag(letter: str, long_name: str) -> str:
+    """A flag-token alternative matching a short cluster containing
+    ``letter`` (any position, case-insensitive via the module's IGNORECASE
+    compile flag) or the GNU long option ``--<long_name>``."""
+    return rf"(?:-[a-zA-Z]*{letter}[a-zA-Z]*\b|--{long_name}\b)"
+
+
 # --- de-obfuscation pre-pass -----------------------------------------------
 # The regex rules below only match literal text. A trivial obfuscation
 # (fullwidth chars, a zero-width space mid-word, a Cyrillic look-alike, a
@@ -289,15 +309,30 @@ RULES: list[Rule] = [
     # Tool abuse markers (these trigger on tool-call args, not free text).
     # The `_shell_deobfuscate` candidate strips quotes/$IFS, so quoted and
     # $IFS-split variants canonicalise into these patterns.
-    Rule("rm_rf_root", "critical",
-         _compile(r"\brm\s+-[a-z]*(?:rf|fr)[a-z]*\s+(\/|~|\$HOME)(\*|\/|[\s;&|]|$)"),
-         "rm -rf/-fr against /, ~, or $HOME"),
+    Rule(
+        "rm_rf_root", "critical",
+        _compile(
+            r"\brm\s+"
+            rf"(?=(?:{_FLAG_TOKEN}\s+){{0,5}}{_has_flag('r', 'recursive')})"
+            rf"(?=(?:{_FLAG_TOKEN}\s+){{0,5}}{_has_flag('f', 'force')})"
+            rf"(?:{_FLAG_TOKEN}\s+){{1,5}}(\/|~|\$HOME)(\*|\/|[\s;&|]|$)"
+        ),
+        "rm -rf/-fr (contiguous OR split across flags, e.g. `rm -r -f /`) "
+        "against /, ~, or $HOME",
+    ),
     Rule("disk_overwrite", "critical",
          _compile(r"\b(dd\s+[^\n]*\bof=\/dev\/(sd[a-z]|nvme\d|disk\d|hd[a-z])|mkfs(\.[a-z0-9]+)?\s+[^\n]*\/dev\/)"),
          "Raw disk overwrite via dd/mkfs against a block device"),
-    Rule("recursive_chmod_chown_root", "critical",
-         _compile(r"\bch(mod|own)\s+-[a-z]*R[a-z]*\s+[^\n]*\s(\/|~|\$HOME)(\s|;|&|\||$)"),
-         "Recursive chmod/chown against /, ~, or $HOME"),
+    Rule(
+        "recursive_chmod_chown_root", "critical",
+        _compile(
+            r"\bch(mod|own)\s+"
+            rf"(?=(?:{_FLAG_TOKEN}\s+){{0,5}}{_has_flag('R', 'recursive')})"
+            r"[^\n]*\s(\/|~|\$HOME)(\s|;|&|\||$)"
+        ),
+        "Recursive chmod/chown (contiguous OR split across flags, e.g. "
+        "`chmod -c -R 777 /`) against /, ~, or $HOME",
+    ),
     Rule("fork_bomb", "critical",
          _compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:"),
          "Classic shell fork bomb :(){ :|:& };:"),
