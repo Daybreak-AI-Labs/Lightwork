@@ -1,6 +1,6 @@
 # Infrastructure and policy decisions (from the platform improvement audit)
 
-> Companion to `PLATFORM_IMPROVEMENT_AUDIT.md`. These 28 items were deliberately left out of the code-fix
+> Companion to `PLATFORM_IMPROVEMENT_AUDIT.md`. These 29 items were deliberately left out of the code-fix
 > pass because they are production infrastructure changes or governance/architecture calls, not bugs a
 > surgical code diff should decide unilaterally. Each links back to its audit finding ID.
 
