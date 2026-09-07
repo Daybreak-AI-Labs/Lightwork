@@ -55,6 +55,46 @@ def test_guarded_urlopen_allows_public_host(monkeypatch):
     assert seen["url"] == "https://example.com/data"
 
 
+def test_guarded_urlopen_installs_an_explicit_empty_proxy_handler(monkeypatch):
+    """W2-94: build_opener's default ProxyHandler reads HTTP(S)_PROXY and
+    rewrites the connection target to the proxy host -- the pinned
+    connect() then validates THAT address instead of the real, already-
+    validated destination. A corporate proxy is nearly always on a
+    private/loopback address, so this made every guarded fetch fail with
+    a "blocked address" error naming the PROXY, not the target. Assert
+    guarded_urlopen passes build_opener an explicit, empty ProxyHandler so
+    HTTP(S)_PROXY is never consulted (matching _ssrf.safe_client, whose
+    explicit httpx transport likewise never honors it). Inspecting the
+    call to build_opener rather than the resulting opener's handler list:
+    urllib silently omits a ProxyHandler with no configured proxies from
+    that list, so its mere presence there can't be asserted directly.
+    """
+    from maverick.tools import http_fetch
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1/")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1/")
+    monkeypatch.setattr(http_fetch, "is_blocked_host", lambda _h: False)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open",
+                        lambda self, url, timeout=None: object())
+
+    real_build_opener = urllib.request.build_opener
+    captured = {}
+
+    def _capturing_build_opener(*handlers):
+        captured["handlers"] = handlers
+        return real_build_opener(*handlers)
+
+    monkeypatch.setattr(urllib.request, "build_opener", _capturing_build_opener)
+    out = http_fetch.guarded_urlopen("https://example.com/data", timeout=5)
+    assert out is not None
+    proxy_handlers = [h for h in captured["handlers"]
+                      if isinstance(h, urllib.request.ProxyHandler)]
+    assert proxy_handlers, "expected an explicit ProxyHandler passed to build_opener"
+    assert all(not h.proxies for h in proxy_handlers), (
+        "guarded_urlopen must not honor HTTP(S)_PROXY -- the destination is "
+        "already validated by _check_url_allowed; the proxy hop is not")
+
+
 def test_pinned_https_handler_uses_runtime_ssl_context(monkeypatch):
     """The handler must work across urllib versions without private attrs."""
     from maverick.tools import http_fetch
