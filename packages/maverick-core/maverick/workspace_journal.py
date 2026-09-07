@@ -84,7 +84,7 @@ def _cfg_bool(value: object, default: bool) -> bool:
 def enabled() -> bool:
     """Journal on? ``MAVERICK_WORKSPACE_JOURNAL`` (1/0) beats ``[workspace]
     journal`` so an operator can force it either way per-process."""
-    env = os.environ.get("MAVERICK_WORKSPACE_JOURNAL", "").strip().lower()
+    env = os.environ.get("MAVERICK_WORKSPACE_JOURNAL", os.environ.get("LIGHTWORK_WORKSPACE_JOURNAL", "")).strip().lower()
     if env in _TRUE:
         return True
     if env in _FALSE and env != "":
@@ -94,7 +94,7 @@ def enabled() -> bool:
 
 def strict() -> bool:
     """Strict mode: a journal failure refuses the write instead of warning."""
-    env = os.environ.get("MAVERICK_WORKSPACE_JOURNAL_STRICT", "").strip().lower()
+    env = os.environ.get("MAVERICK_WORKSPACE_JOURNAL_STRICT", os.environ.get("LIGHTWORK_WORKSPACE_JOURNAL_STRICT", "")).strip().lower()
     if env in _TRUE:
         return True
     if env in _FALSE and env != "":
