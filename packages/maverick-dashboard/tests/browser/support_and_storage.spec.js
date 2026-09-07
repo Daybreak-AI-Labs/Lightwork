@@ -1,0 +1,61 @@
+const {test,expect}=require('@playwright/test');
+const crypto=require('node:crypto'),fs=require('node:fs/promises');
+
+test.beforeEach(async({page,context,baseURL})=>{
+  await context.route('**/*',route=>new URL(route.request().url()).origin===new URL(baseURL).origin?route.continue():route.abort('blockedbyclient'));
+  page.__errors=[];page.on('pageerror',error=>page.__errors.push(error.message));
+});
+test.afterEach(async({page},info)=>{
+  await info.attach('rendered-state',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
+  expect(page.__errors).toEqual([]);
+});
+async function json(response){expect(response.ok(),await response.text()).toBeTruthy();return response.json();}
+
+test('Help reviews the actual redacted support report before downloading its exact bytes',async({page},info)=>{
+  await page.setViewportSize({width:320,height:800});await page.goto('/help');
+  await expect(page.locator('#support-status')).toHaveText('No report has been collected.');
+  const response=page.waitForResponse(r=>r.url().endsWith('/api/v1/support/preview'));
+  await page.getByRole('button',{name:'Prepare support report',exact:true}).click();
+  const report=await json(await response);
+  await expect(page.locator('#support-result')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Download reviewed report',exact:true})).toBeDisabled();
+  await page.getByText('Review the redacted report',{exact:true}).click();
+  expect(JSON.parse(await page.locator('#support-preview').textContent())).toEqual(report.bundle);
+  const sizes=await page.locator('#support-center').evaluate(node=>({width:document.documentElement.clientWidth,right:node.getBoundingClientRect().right,scroll:node.scrollWidth,inner:node.clientWidth}));
+  expect(sizes.right).toBeLessThanOrEqual(sizes.width+1);expect(sizes.scroll).toBeLessThanOrEqual(sizes.inner+1);
+  await page.screenshot({path:info.outputPath('help-320.png'),fullPage:true});
+  await page.locator('#support-confirm').check();
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Download reviewed report',exact:true}).click();
+  const download=await pending,path=info.outputPath('reviewed-support.json');await download.saveAs(path);
+  const bytes=await fs.readFile(path);expect(crypto.createHash('sha256').update(bytes).digest('hex')).toBe(report.sha256);
+  expect(JSON.parse(bytes)).toEqual(report.bundle);
+});
+
+test('Help clears a reviewed private report on HTML access denial and blocks non-administrator collection',async({page,request})=>{
+  await page.goto('/help');await page.locator('#support-prepare').click();await expect(page.locator('#support-result')).toBeVisible();
+  const context=await page.locator('#support-center').getAttribute('data-context');
+  expect((await request.post('/api/v1/support/preview',{headers:{'X-Browser-Principal':'browser-colleague','X-Lightwork-Support-Context':context},data:{}})).status()).toBe(403);
+  await page.route('**/api/v1/support/download',route=>route.fulfill({status:403,contentType:'text/html',body:'Synthetic signed-out response'}));
+  await page.locator('#support-confirm').check();await page.locator('#support-download').click();
+  await expect(page.locator('#support-status')).toContainText('Your access changed');
+  await expect(page.locator('#support-result')).toBeHidden();await expect(page.locator('#support-preview')).toHaveText('');
+  await expect(page.locator('#support-download')).toBeDisabled();
+});
+
+test('recovery storage retires discarded copies while retaining saved work and rejecting old tabs',async({page,request})=>{
+  await page.goto('/workflow-builder');await expect(page.locator('.draft-recovery')).toBeVisible();
+  const context=await page.locator('meta[name="lightwork-draft-context"]').getAttribute('content');
+  const headers={'X-Lightwork-Draft-Context':context},slots=[crypto.randomBytes(32).toString('hex'),crypto.randomBytes(32).toString('hex')];
+  for(let i=0;i<slots.length;i++){
+    const current=await json(await request.get('/api/v1/drafts/'+slots[i],{headers}));
+    await json(await request.put('/api/v1/drafts/'+slots[i],{headers,data:{expected_revision:current.revision,operation_id:crypto.randomUUID(),payload:i?{brief:'Synthetic current saved work'}:null}}));
+  }
+  const old=await json(await request.get('/api/v1/drafts/'+slots[0],{headers}));
+  const storage=page.locator('.draft-recovery details').filter({has:page.getByText('Manage recovery storage',{exact:true})});
+  await storage.locator('summary').click();await expect(storage.getByRole('status')).toContainText('1 discarded copies');
+  await storage.getByRole('button',{name:'Free discarded recovery space',exact:true}).click();
+  await expect(page.locator('#mv-confirm')).toBeVisible();await page.locator('#mv-confirm-ok').click();
+  await expect(storage.getByRole('status')).toContainText('Discarded recovery space freed.');
+  expect((await request.put('/api/v1/drafts/'+slots[0],{headers,data:{expected_revision:old.revision,operation_id:crypto.randomUUID(),payload:{brief:'Stale tab must be refused'}}})).status()).toBe(409);
+  expect((await json(await request.get('/api/v1/drafts/'+slots[1],{headers}))).payload).toEqual({brief:'Synthetic current saved work'});
+});

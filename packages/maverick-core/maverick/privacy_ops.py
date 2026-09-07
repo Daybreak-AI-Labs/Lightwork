@@ -1635,7 +1635,7 @@ def _pdf_page_content_references(pages: list[bytes]) -> list[tuple[int, int]]:
     return references
 
 
-def _pdf_objects(data: bytes) -> tuple[
+def _pdf_objects(data: bytes, *, _pages: list | None = None) -> tuple[
     dict[tuple[int, int], tuple[bytes, bytes | None]],
     list[tuple[int, int]],
 ]:
@@ -1649,6 +1649,8 @@ def _pdf_objects(data: bytes) -> tuple[
     objects, object_end = _pdf_object_map(data)
     catalog_key = _pdf_trailer_root(data, object_end)
     pages = _pdf_rooted_pages(objects, catalog_key)
+    if _pages is not None:
+        _pages.extend(pages)
     return objects, _pdf_page_content_references(pages)
 
 
@@ -1673,8 +1675,20 @@ def _pdf_extraction(data: bytes) -> tuple[str, dict]:
     ):
         return "", meta
     try:
-        objects, references = _pdf_objects(data)
+        pages: list[bytes] = []
+        objects, references = _pdf_objects(data, _pages=pages)
+        page_numbers: dict[tuple[int, int], list[int]] = {}
+        for number, page in enumerate(pages, 1):
+            # The whole tree was validated above. An empty Contents array is
+            # still a real blank page and must retain its position.
+            for direct, array in _PDF_CONTENTS.findall(page):
+                for match in _PDF_REFERENCE.finditer(direct or array):
+                    reference = (int(match.group(1)), int(match.group(2)))
+                    numbers = page_numbers.setdefault(reference, [])
+                    if number not in numbers:
+                        numbers.append(number)
         chunks: list[str] = []
+        chunk_pages: list[list[int]] = []
         aggregate_stream_bytes = 0
         decoded_text_bytes = 0
         operator_count = 0
@@ -1688,6 +1702,7 @@ def _pdf_extraction(data: bytes) -> tuple[str, dict]:
             ):
                 raise _PdfExtractionRejected("PDF decoded text exceeds limit")
             chunks.append(piece.decode("latin-1"))
+            chunk_pages.append(page_numbers[reference])
             decoded_text_bytes += separator + len(piece)
 
         for reference in references:
@@ -1715,6 +1730,13 @@ def _pdf_extraction(data: bytes) -> tuple[str, dict]:
         if len(printable.strip()) < 40:
             return "", meta
         meta["referenced_streams"] = len(references)
+        spans, offset = [], 0
+        for chunk, numbers in zip(chunks, chunk_pages, strict=True):
+            cleaned = re.sub(r"[^\x20-\x7e\n\u00a0-\uffff]", "", chunk)
+            spans.append({"start": offset, "end": offset + len(cleaned), "pages": numbers})
+            offset += len(cleaned) + 1
+        meta["page_spans"] = spans
+        meta["page_count"] = len(pages)
         return printable, meta
     except _PdfExtractionRejected:
         return "", meta

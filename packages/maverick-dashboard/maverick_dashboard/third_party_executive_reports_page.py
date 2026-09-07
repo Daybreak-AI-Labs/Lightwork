@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request
@@ -69,9 +70,11 @@ def create_third_party_executive_reports_page_router(
         require_permission(request, "view")
         _tenant_selected()
         if any(
-            key not in {"theme", "density", "font", "lang"}
+            key not in {"theme", "density", "font", "lang", "report"}
             for key in request.query_params
         ):
+            raise HTTPException(status_code=404, detail="executive report workbench unavailable")
+        if "report" in request.query_params and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", request.query_params["report"]):
             raise HTTPException(status_code=404, detail="executive report workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
         from .api import module_activation_enabled

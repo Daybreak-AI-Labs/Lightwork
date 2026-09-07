@@ -4645,26 +4645,64 @@ async def seed_evidence_gateway_demo(request: Request) -> dict[str, Any]:
 # AI business intake --------------------------------------------------------
 
 
-@router.get("/ai-business-intake/drafts")
-async def list_ai_business_intakes(request: Request) -> dict[str, Any]:
+def _intake_context(request: Request) -> str:
+    from .draft_api import context_for
+
+    context = context_for(request)
+    supplied = request.headers.get("X-Lightwork-Intake-Context")
+    if supplied is not None and supplied != context:
+        raise HTTPException(status_code=409, detail="The account or workspace changed. Reload AI business intake.")
+    return context
+
+
+def _intake_projection(request: Request, value: dict[str, Any]) -> dict[str, Any]:
+    # Existing API clients keep their response shape; the guided UI binds each
+    # response to the same account/workspace as its loaded questionnaire.
+    if request.headers.get("X-Lightwork-Intake-Context") is not None:
+        return {**value, "context": _intake_context(request)}
+    return value
+
+
+@router.get("/ai-business-intake/form", response_model=schemas.AIBusinessIntakeFormOut)
+async def ai_business_intake_form(request: Request, response: Response) -> dict[str, Any]:
+    from .auth import has_permission
+
     require_permission(request, "view")
     _require_active_tenant()
+    context = _intake_context(request)
+    intake = _module("ai_business_intake", "ai_business_intake")
+    response.headers["Cache-Control"] = "no-store"
+    return {**intake.form_contract(), "context": context, "can_edit": has_permission(request, "operate")}
+
+
+@router.get("/ai-business-intake/drafts")
+async def list_ai_business_intakes(request: Request, offset: int = Query(0, ge=0),
+                                 limit: int | None = Query(None, ge=1, le=100),
+                                 q: str = Query("", max_length=200)) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    _intake_context(request)
     intake = _module("ai_business_intake", "ai_business_intake")
     items = await _call(intake.list_intakes)
-    return {"intakes": items, "count": len(items)}
+    if limit is not None:
+        matching = [item for item in items if q.casefold() in str(item.get("use_case_name", "")).casefold()]
+        return _intake_projection(request, {"intakes": matching[offset:offset + limit], "count": len(matching),
+                                           "offset": offset, "has_more": offset + limit < len(matching)})
+    return _intake_projection(request, {"intakes": items, "count": len(items)})
 
 
 @router.get("/ai-business-intake/submissions")
 async def list_submitted_ai_business_intakes(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     _require_active_tenant()
+    _intake_context(request)
     intake = _module("ai_business_intake", "ai_business_intake")
     items = [
         item
         for item in await _call(intake.list_intakes)
         if item.get("status") == "pending_review"
     ]
-    return {"submissions": items, "count": len(items)}
+    return _intake_projection(request, {"submissions": items, "count": len(items)})
 
 
 @router.post("/ai-business-intake/drafts", status_code=201)
@@ -4674,13 +4712,14 @@ async def start_ai_business_intake(
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     _require_active_tenant()
+    _intake_context(request)
     intake = _module("ai_business_intake", "ai_business_intake")
-    return await _call(
+    return _intake_projection(request, await _call(
         intake.start_intake,
         idempotency_key=body.idempotency_key,
         initial=body.initial,
         actor=_actor(request),
-    )
+    ))
 
 
 @router.get("/ai-business-intake/drafts/{intake_id}")
@@ -4691,12 +4730,13 @@ async def get_ai_business_intake(
 ) -> dict[str, Any]:
     require_permission(request, "view")
     _require_active_tenant()
+    _intake_context(request)
     intake = _module("ai_business_intake", "ai_business_intake")
-    return await _record_call(
+    return _intake_projection(request, await _record_call(
         intake.get_intake,
         intake_id,
         include_submission=include_submission,
-    )
+    ))
 
 
 @router.patch("/ai-business-intake/drafts/{intake_id}")
@@ -4707,15 +4747,16 @@ async def save_ai_business_intake(
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     _require_active_tenant()
+    _intake_context(request)
     intake = _module("ai_business_intake", "ai_business_intake")
-    return await _call(
+    return _intake_projection(request, await _call(
         intake.save_intake,
         intake_id,
         patch=body.patch,
         operation_id=body.operation_id,
         expected_revision=body.expected_revision,
         actor=_actor(request),
-    )
+    ))
 
 
 @router.post("/ai-business-intake/drafts/{intake_id}/submit")
@@ -4726,14 +4767,15 @@ async def submit_ai_business_intake(
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     _require_active_tenant()
+    _intake_context(request)
     intake = _module("ai_business_intake", "ai_business_intake")
-    return await _call(
+    return _intake_projection(request, await _call(
         intake.submit_intake,
         intake_id,
         operation_id=body.operation_id,
         expected_revision=body.expected_revision,
         actor=_actor(request),
-    )
+    ))
 
 
 # AI cost and ROI -----------------------------------------------------------

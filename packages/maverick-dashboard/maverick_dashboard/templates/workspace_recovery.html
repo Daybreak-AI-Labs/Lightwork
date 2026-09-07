@@ -1,0 +1,101 @@
+{% extends "recovery_shell.html" if recovery_mode else "base.html" %}
+{% block title %}Workspace recovery · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-workspace-recovery.css">{% endblock %}
+{% block content %}
+<div class="wrec" id="workspace-recovery">
+  <h1>Workspace recovery</h1>
+  <p><a href="/provider-spending">Review or repair provider spending</a> while preserving recorded costs and unresolved reservations.</p>
+  <p>Keep a signed copy of this workspace, check its contents, and test that it can be restored.</p>
+  {% if recovery_mode %}
+  <div class="wrec-notice"><strong>Local recovery mode</strong><p>Ordinary work and background jobs are disabled. To resume after recovery, use the desktop menu: Workspace recovery mode → Close recovery and return to work.</p></div>
+  {% else %}
+  <p class="wrec-notice">Restoring live files requires a separate local recovery session. In Lightwork Desktop, finish active work and open <strong>Workspace recovery mode</strong> from the app menu. Separately managed services require their administrator's coordinated recovery process.</p>
+  {% endif %}
+  <p id="wrec-status" role="status" aria-live="polite">Loading workspace recovery…</p>
+  <button id="wrec-refresh" type="button">Refresh</button>
+  <p id="wrec-identity"></p>
+  <p id="wrec-last-restore" role="status" aria-live="polite"></p>
+  <section><h2>What this protects</h2><ul id="wrec-coverage"></ul><details><summary>Separate recovery requirements</summary><ul id="wrec-excluded"></ul></details><ul id="wrec-blockers"></ul></section>
+  <section><h2>Recovery key</h2><p>Keep this key in a secure place separately from your snapshots. It is required to verify and restore them. This app keeps a private local copy; a lost computer needs your separate key copy.</p>
+    <p id="wrec-key-status"></p>
+    <div class="wrec-actions"><button id="wrec-key-create" type="button" disabled>Create and download key</button><button id="wrec-key-download" type="button" disabled>Download existing key</button></div>
+    <details><summary>Use an existing recovery key</summary><label for="wrec-key-input">Recovery key</label><input id="wrec-key-input" type="password" autocomplete="off" maxlength="128"><button id="wrec-key-import" type="button" disabled>Import key</button><p>Import is available only before a key has been configured here.</p></details>
+  </section>
+  <section><h2>Encryption key custody</h2><p id="wrec-encryption-status"></p><details><summary>Keep a separate copy of local encryption keys</summary><p>This download contains sensitive plaintext key material that may unlock several workspaces. Keep it in your offline vault or secrets manager, separately from snapshots. Remote key-service and environment keys require their existing custodian. Shared keys are never replaced by a workspace restore.</p><label class="wrec-confirm"><input id="wrec-encryption-confirm" type="checkbox">I understand these keys may unlock several workspaces and will store them separately.</label><button id="wrec-encryption-download" type="button" disabled>Download local encryption keys</button></details></section>
+  <section><h2>Snapshots</h2><p>Snapshot archives contain sensitive workspace data and may include encryption keys. Store exported copies securely outside this computer.</p>
+    <button id="wrec-create" type="button" disabled>Create snapshot</button>
+    <label for="wrec-snapshot">Saved snapshot</label><select id="wrec-snapshot" disabled><option value="">Choose a snapshot</option></select>
+    <div class="wrec-actions"><button id="wrec-inspect" type="button" disabled>Verify snapshot</button><button id="wrec-download" type="button" disabled>Export snapshot</button><button id="wrec-drill" type="button" disabled>Test restore in a temporary workspace</button></div>
+    <p id="wrec-result" role="status" aria-live="polite"></p><p>Restore checks verify file hashes, sizes and local SQLite integrity. They do not certify application-level decryption, cross-file business invariants or external systems.</p>
+    <button id="wrec-drill-report-load" type="button" disabled>View last restore test</button>
+    <p id="wrec-drill-report-status" role="status" aria-live="polite"></p>
+    <div id="wrec-drill-report" hidden>
+      <p id="wrec-drill-report-summary"></p><p id="wrec-drill-report-build"></p>
+      <p>This is a saved test of the selected snapshot in a temporary workspace. It did not change your live workspace or test external services. It does not certify application-level decryption, cross-file business rules or current readiness, and does not authorize a live restore.</p>
+      <details><summary>Restore test verification details</summary><p id="wrec-drill-report-identity"></p><p id="wrec-drill-report-scope"></p></details>
+      <button id="wrec-drill-report-download" type="button" disabled>Download signed restore test</button>
+    </div>
+    <details><summary>Retire a local snapshot</summary><p>Export and verify an external copy first if retention is required. This deletes only the selected local archive. Snapshots retained for a current or recent restore cannot be removed.</p><label class="wrec-confirm"><input id="wrec-retire-confirm" type="checkbox">I have reviewed retention and want to delete this local archive.</label><button id="wrec-retire" type="button" disabled>Retire selected local snapshot</button></details>
+    <details><summary>Import a saved snapshot</summary><label for="wrec-file">Lightwork snapshot archive</label><input id="wrec-file" type="file" accept=".tgz,.gz,application/gzip"><button id="wrec-import" type="button" disabled>Import and verify</button><p>Maximum archive size: 256 MiB compressed and 1 GiB expanded. Only a snapshot signed with the configured recovery key and bound to this workspace can be imported.</p></details>
+  </section>
+  <section><h2>Test separately retained encryption keys</h2>
+    <p>Select a snapshot above, then choose the local encryption-key ZIP you previously kept separately. This tests recognized encrypted formats in a fresh temporary process using your uploaded copy. It does not install shared keys, change the live workspace or authorize recovery.</p>
+    <label for="wrec-custody-file">Previously saved encryption-key ZIP</label><input id="wrec-custody-file" type="file" accept=".zip,application/zip" aria-describedby="wrec-custody-help" data-draft-recovery="off">
+    <p id="wrec-custody-help">Maximum 4 MiB. This file contains sensitive keys that may unlock several workspaces. It is used only for this temporary test; choose your separately retained copy. Environment and remote key-service custody need their own reviewed procedure.</p>
+    <label class="wrec-confirm"><input id="wrec-custody-confirm" type="checkbox">I authorize using this sensitive custody copy only to test the selected snapshot in a temporary workspace.</label>
+    <div class="wrec-actions"><button id="wrec-custody-test" type="button" disabled>Test retained keys in a temporary workspace</button><button id="wrec-custody-report-load" type="button" disabled>View last retained-key test</button></div>
+    <p id="wrec-custody-status" role="status" aria-live="polite"></p>
+    <div id="wrec-custody-report" hidden>
+      <p id="wrec-custody-summary"></p><p id="wrec-custody-build"></p>
+      <p id="wrec-custody-totals"></p>
+      <p>Verification applies only to the recognized formats listed here. Unknown or custom encryption, application business rules and external systems are not verified. This historical temporary-test duration is not a recovery-time or data-loss guarantee.</p>
+      <ul id="wrec-custody-limits"></ul>
+      <details><summary>Format counts and verification details</summary><ul id="wrec-custody-checks"></ul><p id="wrec-custody-coverage"></p><p id="wrec-custody-identity"></p></details>
+      <button id="wrec-custody-report-download" type="button" disabled>Download signed retained-key test</button>
+    </div>
+  </section>
+  <section><h2>Review differences before recovery</h2>
+    <p>Compare the selected snapshot with the current workspace. This helps an administrator review why recovery may be refused. It does not change files, reconcile spending or external actions, or authorize a restore.</p>
+    <button id="wrec-compare" type="button" disabled>Compare with current workspace</button>
+    <p id="wrec-comparison-status" role="status" aria-live="polite"></p>
+    <div id="wrec-comparison-report" hidden>
+      <p id="wrec-comparison-summary"></p>
+      <p>This is captured evidence: the workspace may have changed since the comparison. It shows file differences, without file contents, business-level verification or external service effects. Protected differences require administrator reconciliation; downloading this report does not clear the recovery guard.</p>
+      <div class="wrec-actions"><button id="wrec-comparison-previous" type="button" disabled>Previous differences</button><button id="wrec-comparison-next" type="button" disabled>Next differences</button></div>
+      <details><summary>Comparison verification details</summary><p id="wrec-comparison-identity"></p></details>
+      <button id="wrec-comparison-download" type="button" disabled>Download signed comparison</button>
+      <ul id="wrec-comparison-items"></ul>
+    </div>
+  </section>
+  <section><h2>Restore this workspace</h2><p>Restoring replaces workspace files with the selected snapshot and removes files created afterwards. A verified safety snapshot is kept first. Other workspaces, shared administration and external stores are excluded. The exact application build must match the snapshot; a different build requires a reviewed compatibility procedure.</p>
+    <p>Live restore is refused if spending records, budget holds, protected external-action history or database files differ from the snapshot. An administrator must reconcile that history first. You can still export the snapshot and test it in a temporary workspace.</p>
+    <button id="wrec-prepare" type="button" disabled>Prepare restore and safety snapshot</button>
+    <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</label><button id="wrec-restore" type="button" disabled>Restore reviewed snapshot</button></div>
+  </section>
+  <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
+    <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>
+    <label class="wrec-confirm"><input id="wrec-installation-confirm" type="checkbox">I am authorized to pause and recover all local workspaces and shared administration on this computer.</label>
+    <details><summary>Review a signing identity transition</summary>
+      <p>Ordinary updates keep the same signing identities. A publisher or update-key change requires the default-off Signing identity transition setting, a dual-signed exact-release bridge, and your separate approval. Save the proposed review file from Install &amp; updates, then select it here. No new identity is trusted merely by selecting a file.</p>
+      <label for="wrec-installation-transition-file">Signed bridge review file</label><input id="wrec-installation-transition-file" type="file" accept="application/json,.json">
+      <button id="wrec-installation-transition-review" type="button" disabled>Verify signing transition for review</button>
+      <p id="wrec-installation-transition-details" role="status" style="overflow-wrap:anywhere;white-space:pre-line"></p>
+      <label class="wrec-confirm"><input id="wrec-installation-transition-confirm" type="checkbox">I reviewed the exact publisher and update-key change, its admission window and retained-pair rollback limits, and authorize this change in installation trust.</label>
+    </details>
+    <button id="wrec-installation-authorize" type="button" disabled>Authorize protected update</button>
+    <label for="wrec-installation-point">Completed upgrade recovery point</label><select id="wrec-installation-point"><option value="">Choose a completed upgrade</option></select>
+    <button id="wrec-installation-rollback" type="button" disabled>Authorize return to this release and snapshot</button>
+    <p id="wrec-installation-result" role="status" aria-live="polite"></p>
+    <label for="wrec-installation-code">Private maintenance authorization</label><input id="wrec-installation-code" type="text" readonly autocomplete="off" spellcheck="false"><p>Copy this short-lived authorization into <strong>Install &amp; updates</strong> in the desktop app menu. It permits the reviewed action on this computer only; do not share it. No installation or restoration starts on this page.</p>
+    <details><summary>Retire an unused authorization or obsolete recovery point</summary>
+      <p>This permanently deletes the selected point's local installers, snapshots and logs, and cancels any unused authorization. Review your retention requirements first. Unfinished operations and rollback for the installed application remain protected.</p>
+      <p id="wrec-installation-retention-status" role="status"></p><ul id="wrec-installation-retention-list"></ul>
+      <label for="wrec-installation-retire-point">Eligible authorization or recovery point</label><select id="wrec-installation-retire-point" disabled><option value="">Choose a point to retire</option></select>
+      <label class="wrec-confirm"><input id="wrec-installation-retire-confirm" type="checkbox">I reviewed retention and want to permanently retire this selected local point.</label>
+      <button id="wrec-installation-retire" type="button" disabled>Retire selected installation point</button>
+      <details><summary>Recent retirement receipts</summary><p>The most recent 100 signed retirement receipts are kept locally. They do not contain the deleted snapshots or installers.</p><ul id="wrec-installation-retirement-history"></ul></details>
+    </details>
+  </section>
+</div>
+{% endblock %}
+{% block scripts_extra %}<script src="/static/lightwork-workspace-recovery.js" defer></script>{% endblock %}
