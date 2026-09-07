@@ -2,8 +2,9 @@
 # One-command Lightwork browser demo (Model 1: local).
 #
 # Generates a dashboard token if none is set, boots the dashboard container,
-# waits for it to answer, prints the tokenized URL, and opens your browser.
-# The only "terminal" step the demo audience sees is running this once.
+# waits for it to answer, and prints the URL, the token, and how to
+# authenticate with it (the dashboard only accepts the Authorization: Bearer
+# header -- there is no ?token=... link to open a browser to directly).
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -47,7 +48,11 @@ export MAVERICK_DASHBOARD_TOKEN="$TOKEN"
 echo "Building and starting the Lightwork demo dashboard..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 
-URL="http://localhost:${PORT}/?token=${TOKEN}"
+# The dashboard no longer accepts ?token= in the URL (removed: it leaks the
+# bearer through browser history, logs, and the Referer header) -- it only
+# accepts Authorization: Bearer. A plain browser navigation cannot set that
+# header, so there is no clickable link; open a REST client instead.
+URL="http://localhost:${PORT}/"
 printf 'Waiting for the dashboard to come up'
 for _ in $(seq 1 60); do
   if curl -fsS "http://localhost:${PORT}/livez" >/dev/null 2>&1; then
@@ -59,13 +64,17 @@ done
 echo
 
 echo
-echo "Lightwork demo is live:"
-echo "  $URL"
+echo "Lightwork demo is live:  $URL"
+echo "Dashboard token:         $TOKEN"
+echo
+echo "The dashboard requires the Authorization: Bearer header -- there is no"
+echo "?token=... link (removed for security: it leaked the bearer through"
+echo "logs/Referer). Reach it with:"
+echo "  curl -H \"Authorization: Bearer $TOKEN\" $URL"
+echo "or open $URL in a browser with a header-injecting extension (e.g."
+echo "ModHeader) configured to send that Authorization header, or put a"
+echo "reverse proxy in front that injects it for a click-through demo link"
+echo "(see Model 2 in deploy/demo/README.md)."
 echo
 echo "Stop it with:   docker compose -f deploy/demo/$COMPOSE_FILE down"
 echo "Reset state:    docker compose -f deploy/demo/$COMPOSE_FILE down -v"
-
-# Best-effort browser open (macOS 'open' / Linux 'xdg-open'); harmless if neither.
-{ command -v open >/dev/null 2>&1 && open "$URL"; } \
-  || { command -v xdg-open >/dev/null 2>&1 && xdg-open "$URL"; } \
-  || true

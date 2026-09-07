@@ -9,11 +9,10 @@
 //! kill it again on exit. A dashboard the user already runs is left untouched
 //! (we only ever kill a child we spawned).
 //!
-//! Why spawn the installed CLI instead of bundling a true Tauri "sidecar"
-//! binary: the dashboard is a Python process; bundling it would mean shipping a
-//! Python runtime inside the app. The CLI installers (apps/installer-desktop,
-//! apps/installer-msi, pipx) already own "how Lightwork gets installed"; this
-//! shell stays a thin window.
+//! Customer builds carry the full frozen release runtime beside this binary.
+//! Engineering builds retain the installed-CLI lookup for local development.
+
+mod updates;
 
 use lightwork_desktop_runtime::{Dashboard, DASHBOARD_URL};
 use std::process::Command;
@@ -31,15 +30,88 @@ fn dashboard_diagnostics(state: tauri::State<'_, Dashboard>) -> Result<String, S
     state.diagnostics()
 }
 
-fn bundled_splash_url() -> tauri::Url {
+#[tauri::command]
+fn startup_support_report(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Dashboard>,
+) -> Result<serde_json::Value, String> {
+    startup_report_for_url(
+        &window
+            .url()
+            .map_err(|_| "The startup window is unavailable.")?,
+        &state,
+    )
+}
+
+fn startup_report_for_url(
+    url: &tauri::Url,
+    state: &Dashboard,
+) -> Result<serde_json::Value, String> {
+    // Tauri maps the default App(index.html) window to the bundled root;
+    // reconnect navigates to the explicit index.html URL. Admit only those
+    // exact pages (including the custom scheme's empty/slash root forms),
+    // with no query, fragment, credentials or alternate port.
+    if *url != bundled_splash_url() && *url != bundled_root_url() && *url != bundled_page_url("") {
+        return Err("Open the app's startup screen to prepare startup diagnostics.".into());
+    }
+    let facts = state.startup_support()?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "The system clock is unavailable.")?
+        .as_millis();
+    Ok(serde_json::json!({
+        "schema": "lightwork.startup-support.v1",
+        "correlation_id": format!("startup-{timestamp:x}"),
+        "generated_at_unix_ms": timestamp,
+        "desktop_version": env!("CARGO_PKG_VERSION"),
+        "platform": std::env::consts::OS,
+        "packaged_runtime_available": facts.packaged_runtime_available,
+        "process_state": facts.process_state,
+        "recovery_mode": facts.recovery_mode,
+        "scope": "Startup facts only. Configuration, account data, paths and startup logs are excluded. Full diagnostics are available from Help after sign-in."
+    }))
+}
+
+#[tauri::command]
+fn switch_recovery_mode(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Dashboard>,
+    recovery: bool,
+    confirm: bool,
+) -> Result<String, String> {
+    if window
+        .url()
+        .map_err(|_| "The recovery window is unavailable.")?
+        != bundled_page_url("recovery.html")
+        || !confirm
+    {
+        return Err("Review and confirm this action in the app's recovery controls.".into());
+    }
+    state.switch_recovery_mode(recovery)
+}
+
+fn bundled_page_url(page: &str) -> tauri::Url {
     // Tauri's bundled-asset origin, matching the default useHttpsScheme=false
     // in tauri.conf.json. This destination never comes from dashboard content.
     let origin = if cfg!(windows) {
-        "http://tauri.localhost/index.html"
+        "http://tauri.localhost/"
     } else {
-        "tauri://localhost/index.html"
+        "tauri://localhost/"
     };
-    origin.parse().expect("fixed bundled splash address")
+    format!("{origin}{page}")
+        .parse()
+        .expect("fixed bundled page address")
+}
+
+fn bundled_splash_url() -> tauri::Url {
+    bundled_page_url("index.html")
+}
+
+fn bundled_root_url() -> tauri::Url {
+    let mut url = bundled_splash_url();
+    // Special HTTP URLs retain '/', while Tauri's custom scheme uses no path.
+    url.set_path("");
+    url
 }
 
 fn reconnect_dashboard<R: tauri::Runtime>(
@@ -69,15 +141,64 @@ fn open_in_browser(url: &str) {
 }
 
 pub fn run() {
+    let context = tauri::generate_context!();
+    if std::env::args().nth(1).as_deref() == Some("--maintenance-channel") {
+        // A fixed machine-readable query used by the installed frozen runtime
+        // to bind an authenticated maintenance grant to this compiled channel.
+        let key = context
+            .config()
+            .plugins
+            .0
+            .get("updater")
+            .and_then(|value| value.get("pubkey"));
+        println!(
+            "{}",
+            serde_json::json!({"public_key": key, "version": context.package_info().version.to_string(),
+            "packaged_runtime": cfg!(all(windows, feature = "customer-runtime"))})
+        );
+        return;
+    }
+    #[cfg(feature = "customer-runtime")]
+    let dashboard = Dashboard::with_binary(
+        std::env::current_exe()
+            .expect("installed executable path")
+            .parent()
+            .expect("installed executable directory")
+            .join("maverick.exe"),
+    );
+    #[cfg(not(feature = "customer-runtime"))]
     let dashboard = Dashboard::default();
-    let _ = dashboard.start();
+    let maintenance_result = std::env::args().any(|argument| argument == "--maintenance-result");
+    if !maintenance_result {
+        let _ = dashboard.start();
+    }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .manage(dashboard)
+        .manage(updates::Maintenance::default())
         .invoke_handler(tauri::generate_handler![
             retry_dashboard,
-            dashboard_diagnostics
+            dashboard_diagnostics,
+            startup_support_report,
+            switch_recovery_mode,
+            updates::maintenance_status,
+            updates::check_desktop_update,
+            updates::install_desktop_update,
+            updates::rollback_desktop_update,
+            updates::resume_desktop_maintenance,
+            updates::desktop_maintenance_logs
         ])
+        .setup(move |app| {
+            if maintenance_result {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.navigate(bundled_page_url("maintenance.html"))?;
+                }
+            }
+            Ok(())
+        })
         // A real menu: Reload / Open in Browser / Quit, plus a standard Edit
         // menu so Cmd-C / Cmd-V / Select-All work in the dashboard's text
         // fields (on macOS the webview has no clipboard shortcuts without it).
@@ -90,11 +211,17 @@ pub fn run() {
                 .build(handle)?;
             let reconnect =
                 MenuItemBuilder::with_id("reconnect", "Reconnect Lightwork").build(handle)?;
+            let maintenance =
+                MenuItemBuilder::with_id("maintenance", "Install & updates").build(handle)?;
+            let recovery =
+                MenuItemBuilder::with_id("recovery", "Workspace recovery mode").build(handle)?;
             let quit = PredefinedMenuItem::quit(handle, Some("Quit Lightwork"))?;
             let app_menu = SubmenuBuilder::new(handle, "Lightwork")
                 .item(&open_browser)
                 .item(&reload)
                 .item(&reconnect)
+                .item(&maintenance)
+                .item(&recovery)
                 .separator()
                 .item(&quit)
                 .build()?;
@@ -116,6 +243,16 @@ pub fn run() {
                 }
             }
             "open_browser" => open_in_browser(DASHBOARD_URL),
+            "maintenance" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.navigate(bundled_page_url("maintenance.html"));
+                }
+            }
+            "recovery" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.navigate(bundled_page_url("recovery.html"));
+                }
+            }
             "reconnect" => {
                 let _ = reconnect_dashboard(app, || {
                     let _ = app.state::<Dashboard>().start();
@@ -123,7 +260,7 @@ pub fn run() {
             }
             _ => {}
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the Lightwork desktop shell")
         .run(|app, event| {
             if let RunEvent::Exit = event {
@@ -137,6 +274,52 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_report_is_allowlisted_and_available_only_from_bundled_splash() {
+        let dashboard = Dashboard::default();
+        for url in [
+            bundled_root_url(),
+            bundled_page_url(""),
+            bundled_splash_url(),
+        ] {
+            let report = startup_report_for_url(&url, &dashboard).unwrap();
+            assert_eq!(report["schema"], "lightwork.startup-support.v1");
+            assert_eq!(report["process_state"], "not_started");
+            assert_eq!(report.as_object().unwrap().len(), 9);
+        }
+        for url in [
+            DASHBOARD_URL.parse().unwrap(),
+            "https://example.test/".parse().unwrap(),
+            "http://tauri.localhost.example.test/".parse().unwrap(),
+            "http://tauri.localhost:8765/".parse().unwrap(),
+            "http://user@tauri.localhost/".parse().unwrap(),
+            bundled_page_url("maintenance.html"),
+            bundled_page_url("recovery.html"),
+            bundled_page_url("?private-query"),
+            bundled_page_url("#private-fragment"),
+            bundled_page_url("index.html?private-query"),
+            bundled_page_url("index.html#private-fragment"),
+        ] {
+            assert!(startup_report_for_url(&url, &dashboard).is_err());
+        }
+    }
+
+    #[test]
+    fn startup_report_accepts_the_framework_resolved_default_window_url() {
+        // Read the real window configuration and let pinned Tauri resolve its
+        // omitted URL. The framework maps App(index.html) to the origin root.
+        let config: tauri::utils::config::Config =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let app = tauri::test::mock_app();
+        let window = tauri::WebviewWindowBuilder::from_config(&app, &config.app.windows[0])
+            .unwrap()
+            .build()
+            .unwrap();
+        let actual = window.url().unwrap();
+        assert_eq!(actual, bundled_root_url());
+        assert!(startup_report_for_url(&actual, &Dashboard::default()).is_ok());
+    }
 
     #[test]
     fn reconnect_returns_a_failed_dashboard_to_bundled_controls_before_launch() {
