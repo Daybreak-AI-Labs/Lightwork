@@ -425,6 +425,8 @@ class Budget:
         cache_write_tok: int = 0,
         cache_write_ttl: str | None = None,
         cache_read_mult: float | None = None,
+        cache_write_5m_tok: int = 0,
+        cache_write_1h_tok: int = 0,
     ) -> None:
         """Add usage from one LLM call.
 
@@ -434,6 +436,22 @@ class Budget:
         (default 0.1x for Anthropic; pass ``CACHE_READ_MULT_OPENAI`` =0.5 for
         OpenAI/o-series/gpt-5 auto-cache). ``cache_write_tok`` at 1.25x (5m TTL)
         or 2.0x (1h TTL) — pass ``cache_write_ttl="1h"`` for a 1h breakpoint.
+
+        W1-6: a single request's cache writes can straddle BOTH TTL tiers at
+        once (e.g. a 1h system/tools breakpoint plus a 5m messages
+        breakpoint) -- Anthropic's response then reports
+        ``usage.cache_creation.ephemeral_5m_input_tokens`` /
+        ``ephemeral_1h_input_tokens`` as the real per-tier split, which is
+        NOT recoverable from the flat ``cache_write_tok`` + one
+        ``cache_write_ttl`` this function used to take (that combination
+        bills every write in the call at a single multiplier, e.g. the whole
+        thing at the 1h 2.0x rate when only part of it wrote at 1h). Pass
+        ``cache_write_5m_tok``/``cache_write_1h_tok`` when the caller has the
+        real split; they take over both the token counter and the dollar
+        computation, and ``cache_write_tok``/``cache_write_ttl`` are ignored.
+        Leave them at 0 (the default) to keep the prior single-bucket
+        behavior for callers that only have one combined count (other
+        providers, or an SDK response without the split field).
 
         Wave 12 nullsafety: ``None`` usage counts coerce to zero — Anthropic
         occasionally returns ``None`` in ``usage`` on streaming refusals; the
@@ -450,6 +468,11 @@ class Budget:
         out_tok = _coerce_count(out_tok)
         cache_read_tok = _coerce_count(cache_read_tok)
         cache_write_tok = _coerce_count(cache_write_tok)
+        cache_write_5m_tok = _coerce_count(cache_write_5m_tok)
+        cache_write_1h_tok = _coerce_count(cache_write_1h_tok)
+        split_cache_write = bool(cache_write_5m_tok or cache_write_1h_tok)
+        if split_cache_write:
+            cache_write_tok = cache_write_5m_tok + cache_write_1h_tok
         # Resolve before mutating counters. A missing/unverified billing rate
         # must leave the Budget untouched, not record tokens and then raise.
         quote = _lookup_price_quote(model)
@@ -470,13 +493,23 @@ class Budget:
             self.output_tokens += out_tok
 
             self.pricing_evidence[quote.model_id] = quote.metadata()
-            write_mult = _cache_write_mult_from_ttl(cache_write_ttl)
             # Provider-aware cache-read discount: Anthropic 0.1x (default),
             # OpenAI/o-series/gpt-5 auto-cache ~0.5x (caller passes it).
             read_mult = _CACHE_READ_MULT if cache_read_mult is None else float(cache_read_mult)
             self.dollars += (in_tok / 1_000_000) * in_rate
             self.dollars += (cache_read_tok / 1_000_000) * in_rate * read_mult
-            self.dollars += (cache_write_tok / 1_000_000) * in_rate * write_mult
+            if split_cache_write:
+                # Bill each TTL tier at its own multiplier instead of forcing
+                # the whole write to one rate (see the W1-6 docstring note).
+                self.dollars += (
+                    (cache_write_5m_tok / 1_000_000) * in_rate * _CACHE_WRITE_MULT_5M
+                )
+                self.dollars += (
+                    (cache_write_1h_tok / 1_000_000) * in_rate * _CACHE_WRITE_MULT_1H
+                )
+            else:
+                write_mult = _cache_write_mult_from_ttl(cache_write_ttl)
+                self.dollars += (cache_write_tok / 1_000_000) * in_rate * write_mult
             self.dollars += (out_tok / 1_000_000) * out_rate
             self.check()
 
