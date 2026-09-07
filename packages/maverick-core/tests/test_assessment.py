@@ -191,6 +191,35 @@ def test_saved_heads_are_bounded_read_only_and_disclose_exact_total(tmp_path, mo
     assert "_audit_pending" not in rows[0]
 
 
+def test_list_saved_tolerates_sibling_register_in_same_data_dir(tmp_path, monkeypatch):
+    """packages/maverick-core/maverick/assessments.py (the governance-suite
+    register, a distinct module) stores its own JSON at
+    ``data_dir("assessments", "register.json")`` -- the exact directory
+    ``assessment.py`` (this module) globs for saved per-subject records. Its
+    filename stem "register" passes the permissive assessment-id pattern, so
+    list_saved()/list_saved_heads() used to try to load it as a saved
+    assessment and blow up on the identity check (no "id" field == its own
+    stem). A foreign file here must be skipped, not crash the listing."""
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick.assessment import AssessmentSession, list_saved, list_saved_heads, save_session
+    from maverick.paths import data_dir
+
+    save_session(AssessmentSession(type="pia", subject="Real Subject"))
+
+    register_path = data_dir("assessments", "register.json")
+    register_path.write_text(
+        json.dumps({"schema_version": 2, "revision": 1, "records": {}}),
+        encoding="utf-8",
+    )
+
+    rows = list_saved()
+    assert [row["subject"] for row in rows] == ["Real Subject"]
+
+    heads, total = list_saved_heads()
+    assert len(heads) == 1
+    assert heads[0]["subject"] == "Real Subject"
+
+
 def test_equal_timestamp_history_has_canonical_order_and_limit():
     from maverick.assessment import (
         AssessmentSession,

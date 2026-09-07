@@ -4996,13 +4996,24 @@ def list_saved() -> list[dict]:
     for p in d.glob("*.json"):
         if not _ASSESSMENT_ID_RE.fullmatch(p.stem):
             continue
-        data = _load_saved_raw(p.stem)
+        try:
+            data = _load_saved_raw(p.stem)
+        except AssessmentStateError:
+            # A file that passes the permissive filename check but isn't a
+            # genuine per-assessment record (e.g. another module's own
+            # register living in this same data directory) fails the
+            # identity check in _read_saved_path_unlocked. That's not this
+            # listing's record to fail on -- skip it like a missing file.
+            continue
         if data is None:
             continue
         if data.get("_audit_pending") and audit_retries < _AUDIT_READ_RETRY_LIMIT:
             audit_retries += 1
             _flush_assessment_audit(p.stem)
-            data = _load_saved_raw(p.stem)
+            try:
+                data = _load_saved_raw(p.stem)
+            except AssessmentStateError:
+                continue
             if data is None:  # pragma: no cover -- immutable id cannot vanish here
                 continue
         revision = _record_revision(data, label="assessment")
@@ -5287,7 +5298,14 @@ def list_saved_heads(
     )
     records: list[dict] = []
     for assessment_id in identifiers[:limit]:
-        record = _load_saved_raw(assessment_id)
+        try:
+            record = _load_saved_raw(assessment_id)
+        except AssessmentStateError:
+            # Same tolerance as list_saved(): a filename that passes the
+            # permissive ID pattern but isn't a genuine per-assessment
+            # record (e.g. a sibling module's own register file in this
+            # directory) is skipped rather than failing the whole read.
+            continue
         if record is not None:
             records.append(_public_assessment_record(record))
     return tuple(records), len(identifiers)
