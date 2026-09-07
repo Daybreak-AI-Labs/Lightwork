@@ -301,8 +301,58 @@ def test_resume_from_checkpoint_restores_state(tmp_path, monkeypatch):
         [{"role": "user", "content": "fresh"}], ctx.blackboard, ctx.episode_id)
     assert ckpt is not None
     assert start_step == 7
-    assert messages == [{"role": "user", "content": "prior"}]
+    # W1-28: index 0 is the freshly-built brief passed in by the caller, not
+    # the checkpoint's stale one -- see
+    # test_resume_from_checkpoint_refreshes_brief_but_keeps_history below for
+    # why (a new `ask_user` answer only ever reaches the model through it).
+    assert messages == [{"role": "user", "content": "fresh"}]
     assert agent.ctx.budget.tool_calls == 4  # snapshot restored onto ctx
+
+
+def test_resume_from_checkpoint_refreshes_brief_but_keeps_history(tmp_path, monkeypatch):
+    # W1-28: run_goal bakes a newly-answered `ask_user` question into the
+    # brief it builds for the resumed root Agent (orchestrator.py's
+    # `qa_block`), which lands in `messages[0]` before `_resume_from_checkpoint`
+    # is called. Wholesale-replacing `messages` with the checkpoint discarded
+    # that fresh brief and put the model right back where it was when it
+    # asked -- the resumed run just re-asked the same question forever. The
+    # fix must swap in the fresh brief at index 0 while still carrying the
+    # rest of the crashed run's history (here: a completed tool exchange)
+    # forward, so the resumed loop doesn't repeat work already done.
+    monkeypatch.setenv("MAVERICK_DURABLE", "1")
+    ctx, world, gid = _mk_ctx(tmp_path, _ScriptedLLM([]))
+    agent = Agent(ctx=ctx, role="orchestrator", brief="stale brief", depth=0)
+    cp = ckpt_mod.Checkpointer(world)
+    prior_history = [
+        {"role": "user", "content": "Sub-goal: stale brief"},
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "t1", "name": "shell",
+             "input": {"cmd": "echo prior"}},
+        ]},
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "t1", "content": "prior"},
+        ]},
+    ]
+    cp.save(goal_id=gid, agent_id=agent.checkpoint_id, episode_id=ctx.episode_id,
+            step_seq=2, messages=prior_history, budget=Budget(max_dollars=1.0))
+
+    fresh_brief = {
+        "role": "user",
+        "content": "Sub-goal: stale brief\n\nQ: lang?\nA: BLUEPYTHON",
+    }
+    ckpt, start_step, messages = agent._resume_from_checkpoint(
+        [fresh_brief], ctx.blackboard, ctx.episode_id)
+
+    assert ckpt is not None
+    assert start_step == 2
+    # The fresh brief (carrying the newly-answered question) replaces the
+    # stale index-0 entry...
+    assert messages[0] == fresh_brief
+    assert "BLUEPYTHON" in messages[0]["content"]
+    # ...but the rest of the crashed run's history -- including the tool_use
+    # / tool_result pair, which must stay adjacent or Anthropic 400s the next
+    # call -- carries over untouched.
+    assert messages[1:] == prior_history[1:]
 
 
 def test_resume_from_checkpoint_noop_when_disabled(tmp_path, monkeypatch):

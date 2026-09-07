@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from maverick.budget import Budget
+from maverick.llm import ToolCall
 from maverick.orchestrator import run_goal
 from maverick.sandbox import LocalBackend
 from maverick.world_model import WorldModel
@@ -71,6 +72,62 @@ def test_resume_builds_and_passes_a_sandbox(tmp_path: Path, monkeypatch):
     # resume must construct a sandbox and pass it (not rely on run_goal's
     # default), so the configured backend is honored.
     assert captured["sandbox"] is not None
+
+
+@pytest.mark.asyncio
+async def test_durable_resume_threads_answered_question_into_first_call(
+    tmp_path: Path, monkeypatch, fake_llm, make_llm_response,
+):
+    """W1-28: with MAVERICK_DURABLE=1 (as `runner.py`'s background resume
+    always uses), `_resume_from_checkpoint` used to replace `messages`
+    wholesale with the checkpoint taken right before the goal asked its
+    question -- discarding the fresh brief `run_goal` had just rebuilt
+    for THIS resume (with the answer threaded into its qa_block). The
+    resumed run saw the checkpoint's stale state and re-asked forever.
+    """
+    monkeypatch.setenv("MAVERICK_DURABLE", "1")
+    world = WorldModel(tmp_path / "world.db")
+    gid = world.create_goal("build a thing", "")
+
+    fake_llm.scripted = [
+        make_llm_response(
+            text="asking",
+            tool_calls=[ToolCall(
+                id="a", name="ask_user",
+                input={"question": "Which language should I use?"},
+            )],
+            stop_reason="tool_use",
+        ),
+    ]
+    await run_goal(
+        fake_llm, world, Budget(max_dollars=1.0), gid,
+        sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
+    )
+    assert world.get_goal(gid).status == "blocked"
+    questions = world.all_questions(gid)
+    assert len(questions) == 1
+    world.answer(questions[0].id, "BLUEPYTHON")
+    calls_before_resume = len(fake_llm.calls)
+
+    fake_llm.scripted = [
+        make_llm_response(text="FINAL: done"),
+        make_llm_response(
+            text='{"confidence": 0.95, "accepts": true, "critique": "ok", "issues": []}',
+        ),
+        make_llm_response(text="FINAL: (no skill)"),
+    ]
+    await run_goal(
+        fake_llm, world, Budget(max_dollars=1.0), gid,
+        sandbox=LocalBackend(workdir=tmp_path), max_depth=1, resume=True,
+    )
+
+    # The answer must land on the VERY FIRST resumed call, not merely
+    # somewhere in the run -- proving the fresh brief (with its qa_block)
+    # survived the checkpoint restore instead of being thrown away.
+    first_resumed_call = fake_llm.calls[calls_before_resume]
+    blob = f"{first_resumed_call.get('system', '')}{first_resumed_call.get('messages', '')}"
+    assert "BLUEPYTHON" in blob
+    assert "Which language should I use?" in blob
 
 
 @pytest.mark.asyncio
