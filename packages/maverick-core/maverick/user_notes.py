@@ -123,6 +123,9 @@ def consolidate(
         except Exception:  # pragma: no cover
             continue
         for turn in turns:
+            from .pilot_learning import excluded
+            if excluded(getattr(turn, "goal_id", None)):
+                continue
             if getattr(turn, "role", "") != "user":
                 continue
             for pref in extract_preferences(getattr(turn, "content", "") or ""):

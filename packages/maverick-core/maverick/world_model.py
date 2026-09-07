@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import hashlib
+import json
 import logging
 import math
 import os
@@ -46,7 +47,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -614,6 +615,12 @@ MIGRATIONS: dict[int, list[str]] = {
     # and therefore cannot be erased by an older clear request.
     33: [
         "ALTER TABLE halt ADD COLUMN generation TEXT NOT NULL DEFAULT ''",
+    ],
+    # v34 durable provider admission receipts share the spend transaction.
+    34: [
+        "CREATE TABLE IF NOT EXISTS provider_cap_receipts ("
+        " period_key TEXT NOT NULL, provider TEXT NOT NULL,"
+        " receipts_json TEXT NOT NULL, PRIMARY KEY (period_key, provider))",
     ],
 }
 
@@ -3975,6 +3982,45 @@ class WorldModel:
             (period_key, provider),
         )
         return float(row[0]) if row else 0.0
+
+    def mutate_provider_cap(self, period_key: str, provider: str, operation):
+        """Atomically mutate admission receipts and their encumbered spend total."""
+        with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO provider_spend(period_key, provider, dollars) VALUES(?, ?, 0) "
+                "ON CONFLICT(period_key, provider) DO NOTHING", (period_key, provider),
+            )
+            row = conn.execute(
+                "SELECT dollars FROM provider_spend WHERE period_key = ? AND provider = ?",
+                (period_key, provider),
+            ).fetchone()
+            state = conn.execute(
+                "SELECT receipts_json FROM provider_cap_receipts WHERE period_key = ? AND provider = ?",
+                (period_key, provider),
+            ).fetchone()
+            total, receipts, result = operation(float(row[0]), json.loads(state[0]) if state else {})
+            conn.execute(
+                "UPDATE provider_spend SET dollars = ? WHERE period_key = ? AND provider = ?",
+                (total, period_key, provider),
+            )
+            conn.execute(
+                "INSERT INTO provider_cap_receipts(period_key, provider, receipts_json) VALUES(?, ?, ?) "
+                "ON CONFLICT(period_key, provider) DO UPDATE SET receipts_json = excluded.receipts_json",
+                (period_key, provider, json.dumps(receipts, allow_nan=False)),
+            )
+            return result
+
+    def read_provider_cap(self, period_key: str, provider: str):
+        row = self._read_one(
+            "SELECT (SELECT dollars FROM provider_spend WHERE period_key = ? AND provider = ?), "
+            "(SELECT receipts_json FROM provider_cap_receipts WHERE period_key = ? AND provider = ?)",
+            (period_key, provider, period_key, provider),
+        )
+        if row[0] is None and row[1] is not None:
+            raise RuntimeError("Provider accounting total is missing")
+        return (float(row[0] or 0), json.loads(row[1]) if row[1] is not None else {})
 
     # ----- attachments -----
     def add_attachment(
