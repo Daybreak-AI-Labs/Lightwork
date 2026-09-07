@@ -25,6 +25,50 @@ class TestBuiltinRules:
         assert blocked
         assert sev == "critical"
 
+    def test_rm_rf_root_split_flags_blocked(self):
+        """PLATFORM_IMPROVEMENT_AUDIT.md W2-33: splitting the flags across
+        tokens (functionally identical to `rm -rf /`) used to bypass the
+        rule entirely because neither single token contained both r and f."""
+        for cmd in (
+            "rm -r -f /",
+            "rm -f -r /",
+            "rm -v -r -f /",
+            "rm --recursive --force /",
+            "rm --force --recursive /",
+            "rm -r --force /",
+        ):
+            blocked, sev, names = scan(cmd, block_threshold="high")
+            assert blocked, f"{cmd!r} should be blocked"
+            assert sev == "critical"
+            assert "rm_rf_root" in names
+
+    def test_rm_split_flags_without_recursion_not_blocked_by_rm_rule(self):
+        """A single force-only or recursion-only flag against root must not
+        false-positive as the combined rm -rf rule."""
+        blocked, _, names = scan("rm -f /tmp/scratch.txt", block_threshold="high")
+        assert "rm_rf_root" not in names
+        blocked2, _, names2 = scan("rm -r -f build/", block_threshold="high")
+        assert "rm_rf_root" not in names2
+
+    def test_recursive_chmod_chown_root_split_flags_blocked(self):
+        """PLATFORM_IMPROVEMENT_AUDIT.md W2-33: same split-flag bypass for
+        the recursive chmod/chown rule."""
+        for cmd in (
+            "chmod -c -R 777 /",
+            "chmod -R 777 /",
+            "chmod -cR 777 /",
+            "chown -R user /",
+            "chmod --recursive 777 /",
+        ):
+            blocked, sev, names = scan(cmd, block_threshold="high")
+            assert blocked, f"{cmd!r} should be blocked"
+            assert sev == "critical"
+            assert "recursive_chmod_chown_root" in names
+
+    def test_chmod_without_recursive_flag_not_blocked_by_that_rule(self):
+        blocked, _, names = scan("chmod -c 777 /tmp/x", block_threshold="high")
+        assert "recursive_chmod_chown_root" not in names
+
     def test_env_file_read(self):
         blocked, _, names = scan("cat ~/.aws/credentials", block_threshold="high")
         assert blocked

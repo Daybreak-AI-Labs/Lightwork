@@ -288,7 +288,7 @@ def _clean_text(text: Any, *, shield: Any | None = None) -> str | None:
     if shield is not None:
         try:
             verdict = shield.scan_input(safe)
-            if getattr(verdict, "blocked", False):
+            if not verdict.allowed:
                 return None
         except Exception:
             return None
@@ -1050,7 +1050,7 @@ def _screen_admission(
     if detail and shield is not None:
         try:
             verdict = shield.scan_input(str(detail)[:_MAX_TEXT])
-            if getattr(verdict, "blocked", False):
+            if not verdict.allowed:
                 return (_deny_and_count(
                     agent_id, tool, "shield",
                     "action detail was blocked by the input screen"),
@@ -1418,7 +1418,7 @@ def _screen_execute_request(agent_id: str, request: dict, *,
     if shield is not None:
         try:
             verdict = shield.scan_input(scan_blob)
-            if getattr(verdict, "blocked", False):
+            if not verdict.allowed:
                 return _deny_and_count(
                     agent_id, tool, "shield",
                     "request payload was blocked by the input screen"), \
