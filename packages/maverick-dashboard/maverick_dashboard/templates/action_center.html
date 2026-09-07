@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Action Center · Lightwork{% endblock %}
+{% block content %}
+<h1>Action Center</h1>
+<p>Your approvals, deliverable sign-offs, assessments, and assigned project reviews in one place.
+  Open an item to review its evidence and make a decision.</p>
+<p class="muted">Read and snooze settings are private to your account and workspace.
+  Snoozing does not change a deadline or pause work. Overdue items remain in your active list.</p>
+<div class="panel" id="action-center" data-context="{{ action_context }}">
+  <form id="ac-filters" style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:end;">
+    <label>Show<select class="input" name="view"><option value="active">Active</option><option value="unread">Unread</option><option value="overdue">Overdue</option><option value="snoozed">Snoozed</option><option value="all">All</option></select></label>
+    <label>Type<select class="input" name="kind"><option value="all">All types</option><option value="approval">Approvals</option><option value="signoff">Sign-offs</option><option value="assessment">Assessments</option><option value="project_review">Project reviews</option></select></label>
+    <label>Assignment<select class="input" name="assignment"><option value="all">Mine and available</option><option value="mine">Assigned to me</option><option value="available">Available to review</option></select></label>
+    <button class="btn" type="submit">Refresh list</button>
+  </form>
+  <p id="ac-summary" role="status" aria-live="polite"></p>
+  <ul id="ac-coverage"></ul>
+  <div id="ac-items"></div>
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;">
+    <button class="btn" id="ac-previous" type="button" disabled>Previous</button>
+    <span id="ac-page"></span>
+    <button class="btn" id="ac-next" type="button" disabled>Next</button>
+  </div>
+  <p id="ac-status" role="status" aria-live="polite"></p>
+</div>
+{% include "_assessment_review.html" %}
+<script src="/static/lightwork-action-center.js" defer></script>
+{% endblock %}

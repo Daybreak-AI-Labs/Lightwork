@@ -1480,7 +1480,11 @@ def pick_oauth_vault() -> dict[str, Any]:
         "[dim]The OAuth token vault seals captured access/refresh tokens "
         "encrypted-at-rest under each tenant's own key (no plaintext token "
         "files, no cross-tenant readability). Recommended for hosted/multi-"
-        "tenant deploys. OFF by default.[/dim]"
+        "tenant deploys. It also enables renewable named Google Drive, Google "
+        "Cloud Storage and Jira Cloud accounts in Connections. Save app "
+        "registration credentials inside the app, then review the provider's "
+        "consent screen. Provider registration and consent remain external "
+        "requirements. OFF by default.[/dim]"
     )
     return {"vault": _q_confirm("Seal OAuth tokens in the per-tenant vault?", default=False)}
 
@@ -1569,8 +1573,9 @@ def pick_workspace_journal() -> dict[str, Any]:
     console.print(
         "[dim]The workspace journal captures every file the agents overwrite "
         "or create through the file tools — BEFORE the mutation — so "
-        "`maverick journal revert` can restore a goal's workspace to its "
-        "pre-run state without a prior snapshot. Shell-driven mutations "
+        "a named task owner can review and restore captured files inside "
+        "the app when strict capture is selected below. The legacy CLI journal "
+        "remains available for other runs. Shell-driven mutations "
         "(rm/mv/redirects) are not covered — the audit trail records those "
         "commands. Bounded disk per goal; OFF by default.[/dim]"
     )
@@ -1580,7 +1585,7 @@ def pick_workspace_journal() -> dict[str, Any]:
         return {"journal": False}
     strict = _q_confirm(
         "Strict mode: REFUSE any write whose pre-image cannot be journaled? "
-        "(makes reversibility a guarantee; a full journal then blocks writes)",
+        "(enables encrypted, reviewed file recovery inside the app for named local tasks)",
         default=False)
     out: dict[str, Any] = {"journal": True}
     if strict:
@@ -2061,7 +2066,8 @@ def pick_assessments() -> dict[str, Any]:  # noqa: C901 - independent product pr
     privacy_discovery_scheduler = False
     if privacy_data_discovery and _q_confirm(
         "Enable the bounded built-in privacy discovery source adapters? "
-        "Each source still requires an exact tenant enrollment and deployment-held credential.",
+        "Each source requires an exact tenant enrollment and a saved connection or "
+        "deployment-managed credential; evidence keys can be generated in the app.",
         default=False,
     ):
         privacy_discovery_adapter_providers = _q_checkbox(
@@ -3414,9 +3420,14 @@ def pick_security_suite() -> dict[str, Any]:
         _q_text("  Enrolled vendor resource owner (principal or team reference)", default="").strip()
         if vendor_onboarding else ""
     )
+    vendor_reviewed_uploads = (
+        _q_confirm("  Allow reviewed local Word, Excel, PDF and text evidence uploads, including explicit PDF transcription?", default=True)
+        if vendor_onboarding else False
+    )
     result = {
         "vendor_onboarding": vendor_onboarding,
         "vendor_onboarding_owner": vendor_onboarding_owner,
+        "vendor_reviewed_uploads": vendor_reviewed_uploads,
         "customer_sandbox_lifecycle": customer_sandbox_lifecycle,
         "security_ops": security_ops,
         "administration_document_access": administration_document_access,
@@ -3943,10 +3954,10 @@ def pick_advanced() -> dict[str, Any]:
             default=True,
         ),
         "voice_local_stt": _q_confirm(
-            "  Built-in local speech-to-text? Auto-fetch a checksum-verified "
+            "  Allow local speech model downloads? Fetch a checksum-verified "
             "Whisper model (~148 MB, at dashboard startup) so the mic works "
             "offline with no provider key — the engine ships with the "
-            "dashboard. ON by default (egress-locked deployments stay off).",
+            "dashboard. You can also set it up later in Settings > Models.",
             default=True,
         ),
         "attach_any_mime": _q_confirm(
@@ -4234,6 +4245,57 @@ def pick_advanced() -> dict[str, Any]:
             "client; an edit is validated before it saves, so it can never "
             "weaken the safety envelope. Turn off to lock the agent roster.",
             default=True,
+        ),
+        "allow_draft_recovery": _q_confirm(
+            "Keep encrypted recovery copies of unfinished dashboard work? "
+            "Copies are private to each account and workspace. Credentials and "
+            "attachments are excluded; restoring never runs or publishes work.",
+            default=True,
+        ),
+        "allow_support_center": _q_confirm(
+            "Allow installation administrators to prepare, review and download "
+            "redacted diagnostics from Help? Nothing is sent automatically.",
+            default=True,
+        ),
+        "allow_record_search": _q_confirm(
+            "Include business records in the app's page finder? Searches use "
+            "only metadata accessible to the signed-in account and workspace, "
+            "with visible coverage limits; document bodies are excluded.",
+            default=True,
+        ),
+        "allow_workspace_recovery": _q_confirm(
+            "Enable administrator workspace snapshots and isolated local restore? "
+            "Requires a separately kept recovery key. External stores and shared "
+            "administration need their own recovery procedures.",
+            default=False,
+        ),
+        "allow_action_center": _q_confirm(
+            "Enable the personal Action Center for approvals, sign-offs, and "
+            "assessment reviews, with private read and snooze preferences?",
+            default=True,
+        ),
+        "allow_guided_onboarding": _q_confirm(
+            "Offer a guided first workflow in the app, completed only when a "
+            "current result has a recorded human review?", default=True,
+        ),
+        "allow_workflow_readiness": _q_confirm(
+            "Show workflow readiness in the app, including implementation "
+            "limits and outstanding live or platform validation?", default=True,
+        ),
+        "allow_project_reviews": _q_confirm(
+            "Enable project team reviews of selected, fixed task results? "
+            "Assigned workspace reviewers cannot execute or sign off the live task.",
+            default=False,
+        ),
+        "allow_outcome_measurement": _q_confirm(
+            "Enable measured workflow pilots with paired baseline observations "
+            "and explicit accepted outcomes? No savings are assumed.", default=False,
+        ),
+        "allow_signing_identity_transition": _q_confirm(
+            "Permit installation administrators to review dual-signed publisher or "
+            "update-key bridge releases in isolated recovery mode? This is a new "
+            "trust decision for all local workspaces; ordinary updates do not need it.",
+            default=False,
         ),
         "allow_role_editing": _q_confirm(
             "Allow editing the core roles (orchestrator, coder, ...) from the "
@@ -4928,6 +4990,12 @@ def pick_advanced() -> dict[str, Any]:
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
     advanced["oidc"] = pick_oidc()
+    advanced["local_owner_setup"] = _q_confirm(
+        "Allow first-owner setup in the app on this computer? "
+        "A named owner creates a local passphrase and can invite colleagues. "
+        "Unavailable when managed sign-in or existing identity assignments are present.",
+        default=not bool(advanced["oidc"].get("enabled")),
+    )
     # Department (job-function) scoping only bites once sign-in is on, so it is
     # offered right after — writes under [dashboard]. Returns {} when declined.
     advanced["department_access"] = pick_department_access(bool(advanced["oidc"].get("enabled")))
@@ -7243,6 +7311,26 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     # and as ONE [features] table (two tables would be a duplicate-key TOML
     # error). The kernel reads these via config.get_features.
     _feature_locks = []
+    if advanced.get("allow_workflow_readiness") is False:
+        _feature_locks.append("workflow_readiness = false")
+    if advanced.get("allow_project_reviews") is True:
+        _feature_locks.append("project_reviews = true")
+    if advanced.get("allow_outcome_measurement") is True:
+        _feature_locks.append("outcome_measurement = true")
+    if advanced.get("allow_workspace_recovery") is True:
+        _feature_locks.append("workspace_recovery = true")
+    if advanced.get("allow_signing_identity_transition") is True:
+        _feature_locks.append("signing_identity_transition = true")
+    if advanced.get("allow_draft_recovery") is False:
+        _feature_locks.append("draft_recovery = false")
+    if advanced.get("allow_support_center") is False:
+        _feature_locks.append("support_center = false")
+    if advanced.get("allow_record_search") is False:
+        _feature_locks.append("record_search = false")
+    if advanced.get("allow_action_center") is False:
+        _feature_locks.append("action_center = false")
+    if advanced.get("allow_guided_onboarding") is False:
+        _feature_locks.append("guided_onboarding = false")
     if advanced.get("allow_pack_editing") is False:
         _feature_locks.append("pack_editing = false")
     if advanced.get("allow_role_editing") is False:
@@ -7272,10 +7360,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("voice_commands") is False:
         # Default-on; only a decline needs a line.
         _voice_lines.append("dashboard_commands = false")
-    if advanced.get("voice_local_stt") is False:
-        # Built-in local STT model auto-fetch is default-on (egress-locked
-        # deployments already default off); only a decline needs a line.
-        _voice_lines.append("auto_fetch_model = false")
+    if isinstance(advanced.get("voice_local_stt"), bool):
+        # Persist the reviewed choice; absent configuration never downloads.
+        _voice_lines.append("auto_fetch_model = " + str(advanced["voice_local_stt"]).lower())
     if _voice_lines:
         # ONE [voice] table -- two would be a duplicate-key TOML error.
         lines.append("")
@@ -7644,12 +7731,15 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     dept = advanced.get("department_access") or {}
     if isinstance(dept, dict) and (
         dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
+        or "local_owner_setup" in advanced
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
         # turn IdP (SCIM) team membership into a role / department grant.
         lines.append("")
         lines.append("[dashboard]")
+        if "local_owner_setup" in advanced:
+            _emit_kv(lines, "local_owner_setup", advanced["local_owner_setup"] is True)
         if dept.get("default_suites"):
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
@@ -8025,6 +8115,7 @@ def write_config(
             "", "[vendor_onboarding]",
             f"enable = {'true' if security_suite.get('vendor_onboarding', False) else 'false'}",
             "resource_owner = " + _toml_str(security_suite.get("vendor_onboarding_owner", "")),
+            f"reviewed_uploads = {'true' if security_suite.get('vendor_reviewed_uploads', True) else 'false'}",
             'document_connection = "gdrive"',
             'ticket_connection = "jira"',
         ]

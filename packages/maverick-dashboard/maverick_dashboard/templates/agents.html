@@ -246,7 +246,7 @@
       {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-creating="{{ '1' if creating else '' }}">
+      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-generation="{{ selected.generation if selected else 'new' }}" data-creating="{{ '1' if creating else '' }}">
         {% if creating %}
         <div class="fld">
           <label for="f-new-id">Short name <span class="sub">— choose a unique name for this specialist</span></label>
@@ -844,6 +844,7 @@
 
       function payload() {
         return {
+          expected_generation: creating ? 'new' : form.dataset.generation,
           description: document.getElementById('f-description').value,
           persona: document.getElementById('f-persona').value,
           allow_tools: words(document.getElementById('f-allow').value),
@@ -918,7 +919,7 @@
             'Reset specialist “' + name + '” to its built-in definition? Custom authority and workflow edits will be removed.',
             { okText: 'Reset specialist' }
           ))) return;
-          await call('DELETE', `/api/v1/agents/${name}/override`);
+          await call('DELETE', `/api/v1/agents/${name}/override?expected_generation=${encodeURIComponent(form.dataset.generation)}`);
           show('Reverted to built-in.', true);
           window.location.search = '?name=' + encodeURIComponent(name);
         } catch (error) {

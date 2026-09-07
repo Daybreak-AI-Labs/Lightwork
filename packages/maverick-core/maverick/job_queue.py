@@ -137,7 +137,8 @@ class JobQueue:
     ) -> int:
         now = time.time()
         rid = run_at if run_at is not None else now
-        with self._lock, self._conn() as c:
+        from .task_file_recovery import mutation_gate
+        with mutation_gate(), self._lock, self._conn() as c:
             cur = c.execute(
                 "INSERT INTO jobs (kind, payload, run_at, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?)",

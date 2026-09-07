@@ -1021,7 +1021,7 @@ def _document_candidates(
             for item in options
             for citation in item["citations"]
         ][:_MAX_CITATIONS_PER_ANSWER]
-        if len(substantive) > 1:
+        if len(substantive) > 1 or any(item["answer"] == "unknown" for item in options):
             merged[qid] = {
                 "answer": "unknown",
                 "note": "Conflicting current document answers require human resolution.",

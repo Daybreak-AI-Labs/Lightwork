@@ -130,6 +130,7 @@ def run_demo():
     from maverick.governed_operations import ServiceContext
     from maverick.vendor_onboarding import VendorOnboardingService
     from maverick.vendor_onboarding_adapters import (
+        GOOGLE_DOC_MIME,
         EvidenceDocument,
         FakeGoogleDriveEvidence,
         FakeJiraTickets,
@@ -146,19 +147,42 @@ def run_demo():
     docs = FakeGoogleDriveEvidence({(ctx.tenant, "security-paper"): EvidenceDocument(
         "security-paper", "v1", now[0] - 86400, EVIDENCE,
     )})
+    fixtures = Path(__file__).parent / "acceptance/fixtures/vendor-documents"
+    docs.documents[(ctx.tenant, "native-policy")] = EvidenceDocument(
+        "native-policy", "v1", now[0] - 86400,
+        (fixtures / "conflicting-provenance.txt").read_bytes(), GOOGLE_DOC_MIME, "text/plain",
+    )
     tickets = FakeJiraTickets()
     service = VendorOnboardingService(docs, tickets, policy, clock=lambda: now[0])
-    original = complete_case(service, ctx, service.intake(ctx, "Synthetic Northstar Support AI",
-        "security-paper", "VEND", "Draft support replies for human review", freshness_days=30))
+    initial = service.intake(ctx, "Synthetic Northstar Support AI",
+        "security-paper", "VEND", "Draft support replies for human review", freshness_days=30,
+        document_ids=["security-paper", "native-policy"])
+    initial = service.upload_document(ctx, initial["id"], initial["revision"],
+        content=(fixtures / "northstar-policy.pdf").read_bytes(), name="Synthetic Northstar policy.pdf",
+        mime="application/pdf", document_date=now[0] - 86400)
+    original = complete_case(service, ctx, initial)
+    assert original["assessment"]["answers"]["aiv_training_data"]["answer"] == "unknown"
     improvement = evolution_example(ctx, service, original, policy, now)
     # New evidence, a separate assessment and a separate reviewed ticket.
     docs.documents[(ctx.tenant, "security-paper")] = EvidenceDocument(
         "security-paper", "v2", now[0] - 1,
         EVIDENCE.replace(b"Version 1", b"Version 2") + b"\nRenewal adds a current retention statement.\n",
     )
-    renewal = complete_case(service, ctx, service.intake(ctx, original["vendor_name"],
+    docs.documents[(ctx.tenant, "native-policy")] = EvidenceDocument(
+        "native-policy", "v2", now[0] - 1,
+        b"Synthetic renewal. Model provenance is documented with provider and version.\n"
+        b"Training data sources are documented and licensed.", GOOGLE_DOC_MIME, "text/plain",
+    )
+    renewal = service.intake(ctx, original["vendor_name"],
         "security-paper", "VEND", "Renew the restricted support-drafting pilot", freshness_days=30,
-        renewal_of=original["id"]))
+        renewal_of=original["id"], document_ids=["security-paper", "native-policy"])
+    # The retained upload has its old asserted date. A new review explicitly
+    # removes and replaces it; copying a case never refreshes a document's age.
+    renewal = service.set_documents(ctx, renewal["id"], renewal["revision"], renewal["document_ids"], [])
+    renewal = service.upload_document(ctx, renewal["id"], renewal["revision"],
+        content=(fixtures / "northstar-policy.pdf").read_bytes(), name="Synthetic renewed policy.pdf",
+        mime="application/pdf", document_date=now[0] - 1)
+    renewal = complete_case(service, ctx, renewal)
     tickets.timeout_after_success = True
     ambiguous = complete_case(service, ctx, service.intake(ctx, "Synthetic Harbor Document AI",
         "security-paper", "VEND", "Demonstrate a lost provider response and read-only reconciliation"))
@@ -170,6 +194,14 @@ def run_demo():
         "case_clock": "simulated logical clock; case elapsed times are not customer labor measurements",
         "cases": [original, renewal, ambiguous], "ticket_creates": tickets.creates,
         "evolution": improvement,
+        "document_intake": {"formats": ["UTF-8 text", "native Google Docs text export (fake provider)", "digital PDF"],
+            "documents_in_initial_case": len(original["evidence"]["documents"]),
+            "original_training_data_answer": original["assessment"]["answers"]["aiv_training_data"]["answer"],
+            "renewal_training_data_answer": renewal["assessment"]["answers"]["aiv_training_data"]["answer"],
+            "renewal_changes": renewal["evidence"]["changes"],
+            "pdf_cited_pages": sorted({page for item in original["evidence"]["documents"]
+                for answer in item["extracted"]["answers"].values()
+                for citation in answer["citations"] for page in citation.get("pages", [])})},
         "limitations": ["No measured customer savings, live model quality, provider billing or live acceptance.",
                         "Review time is unmeasured in this scripted demonstration.",
                         "Definition rollback does not reverse external effects."]}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 
 from fastapi import APIRouter, HTTPException, Request
@@ -59,9 +60,11 @@ def create_governed_document_vault_page_router(
         require_permission(request, "view")
         _tenant_selected()
         if any(
-            key not in {"theme", "density", "font", "lang"}
+            key not in {"theme", "density", "font", "lang", "document"}
             for key in request.query_params
         ):
+            raise HTTPException(status_code=404, detail="workbench unavailable")
+        if "document" in request.query_params and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", request.query_params["document"]):
             raise HTTPException(status_code=404, detail="workbench unavailable")
         style_nonce = secrets.token_urlsafe(18)
         response = templates.TemplateResponse(
