@@ -512,5 +512,9 @@
     });
 
     window.mvAssessmentReview = { open: open };
+    const linkedAssessment = new URLSearchParams(window.location.search).get('assessment');
+    if (linkedAssessment && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(linkedAssessment)) {
+      open(linkedAssessment);
+    }
   })();
 </script>

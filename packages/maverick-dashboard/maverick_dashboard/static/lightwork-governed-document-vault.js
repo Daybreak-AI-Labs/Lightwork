@@ -288,5 +288,17 @@
   element("document-vault-audit").addEventListener("click", () => run("Loading audit history", () => requestJson(vaultBase, "/audit/events?limit=100")).catch(() => {}));
   element("document-vault-integrity").addEventListener("click", () => run("Verifying encrypted content", () => requestJson(vaultBase, "/integrity")).catch(() => {}));
   element("document-vault-reconcile").addEventListener("click", () => run("Reconciling delivery grants", () => postJson(vaultBase, "/maintenance/reconcile?limit=500", {})).catch(() => {}));
-  refreshStatus().then(() => refreshDocuments()).catch(() => {});
+  refreshStatus().then(async () => {
+    await refreshDocuments();
+    const requested = new URLSearchParams(window.location.search).get("document");
+    if (!requested) return;
+    await run("Loading linked document", async () => {
+      const ref = bounded(requested, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/, "Document reference");
+      const before = field("document-vault-document-ref") + ":" + field("document-vault-authority-revision");
+      const record = await requestJson(vaultBase, "/documents/" + encodeURIComponent(ref));
+      if (before !== field("document-vault-document-ref") + ":" + field("document-vault-authority-revision")) throw new Error("Your document selection changed while the link loaded. Select the linked document again to review it.");
+      if (!record || record.document_ref !== ref) throw new Error("The linked document could not be verified.");
+      hydrate(record); return record;
+    });
+  }).catch(() => {});
 })(typeof globalThis === "undefined" ? this : globalThis);

@@ -1,0 +1,40 @@
+(function(root){
+  'use strict';
+  var doc=root.document,host=doc.getElementById('support-center');if(!host)return;
+  var prepare=doc.getElementById('support-prepare'),download=doc.getElementById('support-download'),status=doc.getElementById('support-status');
+  var result=doc.getElementById('support-result'),preview=doc.getElementById('support-preview'),confirm=doc.getElementById('support-confirm');
+  var reference=doc.getElementById('support-reference'),readiness=doc.getElementById('support-readiness'),current=null,busy=false;
+  function controls(){prepare.disabled=busy;download.disabled=busy||!current||!confirm.checked;confirm.disabled=busy||!current;}
+  function clear(){current=null;preview.textContent='';reference.textContent='';readiness.replaceChildren();confirm.checked=false;result.hidden=true;controls();}
+  async function call(path,body){
+    var response=await root.fetch('/api/v1/support/'+path,{method:'POST',cache:'no-store',headers:{'Content-Type':'application/json','X-Lightwork-Support-Context':host.dataset.context},body:JSON.stringify(body)});
+    if(response.status===401||response.status===403){clear();throw new Error('Your access changed. Sign in again before preparing or downloading a support report.');}
+    if(!response.ok){var error;try{error=await response.json();}catch(_e){}throw new Error(error&&typeof error.detail==='string'?error.detail:'The report could not be confirmed. Prepare a new preview before trying again.');}
+    return response;
+  }
+  prepare.addEventListener('click',async function(){
+    if(busy)return;clear();busy=true;controls();status.textContent='Preparing a redacted support report…';
+    try{
+      var response=await call('preview',{}),data=await response.json();
+      if(!data||data.context!==host.dataset.context||!/^[0-9a-f]{32}$/.test(data.preview_id)||!/^[0-9a-f]{64}$/.test(data.sha256)||!data.bundle||typeof data.bundle!=='object')throw new Error('The report could not be verified for this account.');
+      current=data;preview.textContent=JSON.stringify(data.bundle,null,2);reference.textContent='Support reference: '+String(data.bundle.correlation_id||'Unavailable')+' · Prepared '+String(data.bundle.generated_at||'just now');
+      var labels={client_binding:'Workspace identity',shield:'Safety controls',agent_trust:'Trusted agents'};
+      var checks=data.bundle.readiness||{};Object.keys(checks).forEach(function(key){var item=doc.createElement('li');item.textContent=(labels[key]||key.replace(/_/g,' '))+': '+(checks[key]==='ok'?'ready':String(checks[key]));readiness.append(item);});
+      if(!readiness.children.length){var item=doc.createElement('li');item.textContent='Readiness details were unavailable. Review the report for the sections that were collected.';readiness.append(item);}
+      result.hidden=false;status.textContent='Report ready for review. The download is available for ten minutes.';
+    }catch(error){clear();status.textContent=error.message||'Support report unavailable.';}finally{busy=false;controls();}
+  });
+  confirm.addEventListener('change',controls);
+  download.addEventListener('click',async function(){
+    if(busy||!current||!confirm.checked)return;busy=true;controls();var selected=current;
+    try{
+      var response=await call('download',{preview_id:selected.preview_id,sha256:selected.sha256,confirm:true}),blob=await response.blob();
+      var bytes=await blob.arrayBuffer(),digest=await root.crypto.subtle.digest('SHA-256',bytes);
+      var actual=Array.from(new Uint8Array(digest),function(value){return value.toString(16).padStart(2,'0');}).join('');
+      if(actual!==selected.sha256)throw new Error('The download did not match the report you reviewed. Prepare a fresh report.');
+      var url=root.URL.createObjectURL(blob),link=doc.createElement('a');link.href=url;link.download='Lightwork-support-'+selected.preview_id+'.json';link.click();root.setTimeout(function(){root.URL.revokeObjectURL(url);},1000);
+      status.textContent='The reviewed report was downloaded. Nothing was sent to a support service.';
+    }catch(error){clear();status.textContent=error.message||'Download unavailable. Prepare a fresh report.';}finally{busy=false;controls();}
+  });
+  controls();
+})(window);
