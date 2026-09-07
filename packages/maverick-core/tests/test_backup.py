@@ -58,6 +58,115 @@ def test_create_and_restore_round_trip():
     assert file_lock.private_path_is_restricted(root / "agent_trust.json")
 
 
+@pytest.mark.parametrize("name", ["world.db", "consent-preferences.sqlite3", "tasks.sqlite", "header-only.store"])
+def test_sqlite_wal_commits_survive_snapshot_and_restore_for_real_store_names(tmp_path, name):
+    root = tmp_path / "source"
+    root.mkdir()
+    connection = sqlite3.connect(root / name)
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("CREATE TABLE evidence(value TEXT)")
+        connection.commit()
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("INSERT INTO evidence VALUES('committed in WAL')")
+        connection.commit()
+        assert Path(str(root / name) + "-wal").stat().st_size > 0
+        with backup.recovery_scope(root, "acme", bytes(range(32))):
+            archive = backup.create_backup(tmp_path / "snapshot.tgz")
+            backup.verify_backup(archive)
+    finally:
+        connection.close()
+    destination = tmp_path / "destination"
+    with backup.recovery_scope(destination, "acme", bytes(range(32))):
+        backup.restore_backup(archive, replace_existing=True)
+    restored = sqlite3.connect(destination / name)
+    try:
+        assert restored.execute("SELECT value FROM evidence").fetchall() == [("committed in WAL",)]
+    finally:
+        restored.close()
+
+
+@pytest.mark.parametrize("name", ["consent-preferences.sqlite3", "header-only.store"])
+@pytest.mark.parametrize("fail_post_check", [False, True])
+def test_restore_clears_stale_sqlite_sidecars_and_failed_restore_recovers_them(tmp_path, monkeypatch, name, fail_post_check):
+    source = tmp_path / "source"
+    source.mkdir()
+    connection = sqlite3.connect(source / name)
+    connection.execute("CREATE TABLE evidence(value TEXT)")
+    connection.execute("INSERT INTO evidence VALUES('snapshot')")
+    connection.commit()
+    connection.close()
+    with backup.recovery_scope(source, "acme", bytes(range(32))):
+        archive = backup.create_backup(tmp_path / "snapshot.tgz")
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    live = destination / name
+    connection = sqlite3.connect(live)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("CREATE TABLE evidence(value TEXT)")
+    connection.commit()
+    connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    connection.execute("INSERT INTO evidence VALUES('newer committed WAL')")
+    connection.commit()
+    pending = {suffix: Path(str(live) + suffix).read_bytes() for suffix in ("", "-wal", "-shm")}
+    connection.close()
+    # Model a closed owner whose committed WAL sidecars remain on disk.
+    for suffix, content in pending.items():
+        Path(str(live) + suffix).write_bytes(content)
+    if fail_post_check:
+        def fail(*_):
+            raise backup.BackupError("injected post-check failure")
+        monkeypatch.setattr(backup, "_verify_restored", fail)
+    with backup.recovery_scope(destination, "acme", bytes(range(32))):
+        if fail_post_check:
+            with pytest.raises(backup.BackupError, match="injected"):
+                backup.restore_backup(archive, replace_existing=True)
+        else:
+            backup.restore_backup(archive, replace_existing=True)
+    connection = sqlite3.connect(live)
+    try:
+        expected = "newer committed WAL" if fail_post_check else "snapshot"
+        assert connection.execute("SELECT value FROM evidence").fetchall() == [(expected,)]
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("name", ["consent-preferences.sqlite3", "header-only.store"])
+def test_hash_consistent_malformed_sqlite_still_fails_post_restore_integrity(tmp_path, name):
+    path = tmp_path / name
+    path.write_bytes(b"SQLite format 3\x00" + b"invalid database")
+    with pytest.raises(backup.BackupError, match="database integrity"):
+        backup._verify_restored(tmp_path, {name: (backup._sha256(path), path.stat().st_size)})
+
+
+def test_long_windows_source_and_restore_paths_keep_hashed_drafts_and_sqlite(tmp_path):
+    import shutil
+    def filesystem(path):
+        return Path(file_lock._windows_extended_path(path)) if os.name == "nt" else path
+    source = tmp_path / ("long-profile-" + "x" * 90)
+    destination = tmp_path / ("long-restored-" + "y" * 90)
+    relative = Path("draft-recovery") / ("a" * 64) / ("b" * 64 + ".draft")
+    native_source = filesystem(source)
+    native_destination = filesystem(destination)
+    try:
+        (native_source / relative).parent.mkdir(parents=True)
+        (native_source / relative).write_bytes(b"synthetic long-path draft")
+        database = sqlite3.connect(native_source / "store.sqlite3")
+        database.execute("CREATE TABLE evidence(value TEXT)")
+        database.execute("INSERT INTO evidence VALUES('long path')")
+        database.commit()
+        database.close()
+        with backup.recovery_scope(source, "acme", bytes(range(32))):
+            archive = backup.create_backup(tmp_path / "snapshot.tgz")
+        with backup.recovery_scope(destination, "acme", bytes(range(32))):
+            backup.restore_backup(archive, replace_existing=True)
+        assert (native_destination / relative).read_bytes() == b"synthetic long-path draft"
+    finally:
+        for path in (native_source, native_destination):
+            if path.exists():
+                shutil.rmtree(path)
+
+
 def test_manifest_records_client():
     from maverick.paths import data_dir
     _seed(data_dir())

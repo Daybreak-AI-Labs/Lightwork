@@ -50,6 +50,15 @@ def test_savings_report_zero_history_is_honest():
     assert body["assumptions"]["hours_per_task"] == 2.0
 
 
+def test_savings_page_labels_assumptions_and_unverified_provider_prices():
+    page = client.get("/savings")
+    assert page.status_code == 200
+    assert "Estimates based on your assumptions" in page.text
+    assert "Counted, not estimated" not in page.text
+    assert "not verified provider invoices" in page.text
+    assert 'href="/outcome-pilots"' in page.text
+
+
 def test_savings_report_uses_real_completed_work():
     _seed_completed_goal(cost=1.5, domain="finance_ap")
     resp = client.get("/api/v1/savings?days=30")

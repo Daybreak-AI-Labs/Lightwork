@@ -868,6 +868,9 @@ def distill(
     budget: Budget | None = None,
     skills_dir: Path | None = None,
 ) -> Skill | None:
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("skill_distillation", "provider_distill"):
+        return None
     target_dir = _resolved_skills_dir(skills_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     trajectory = blackboard.render(200)

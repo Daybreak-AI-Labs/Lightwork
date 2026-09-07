@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from maverick import config
@@ -17,6 +18,7 @@ from maverick.vendor_onboarding_adapters import (
 
 NOW = 1_800_000_000.0
 TEXT = b"We do not train models on customer data. Data is encrypted at rest and in transit."
+POLICY = Path(__file__).resolve().parents[3] / "scripts/acceptance/fixtures/vendor-documents/northstar-policy.pdf"
 
 
 @pytest.fixture
@@ -62,6 +64,167 @@ def approved(svc, ctx):
     row = reviewed(svc, ctx)
     row = svc.prepare_action(ctx, row["id"], row["revision"])
     return svc.approve_action(ctx, row["id"], row["revision"])
+
+
+def test_multiple_documents_conflicts_and_secondary_version_guard(setup):
+    svc, ctx, docs, tickets, _ = setup
+    docs.documents[(ctx.tenant, "policy")] = EvidenceDocument("policy", "1", NOW - 100,
+        b"Model provenance is documented with provider and version.")
+    docs.documents[(ctx.tenant, "exception")] = EvidenceDocument("exception", "1", NOW - 100,
+        b"Model provenance is undisclosed.")
+    row = svc.intake(ctx, "Synthetic multiple sources", "", "VEND", "Source comparison",
+                     document_ids=["policy", "exception"])
+    row = svc.collect_evidence(ctx, row["id"], row["revision"])
+    assert row["document_ids"] == ["exception", "policy"]
+    assert svc.current_evidence_version(ctx, row) == row["evidence"]["version"]
+    reordered = dict(row, evidence=dict(row["evidence"], documents=list(reversed(row["evidence"]["documents"]))))
+    assert svc.current_evidence_version(ctx, reordered) == row["evidence"]["version"]
+    assert svc._evidence_set(list(reversed(row["evidence"]["documents"]))) == svc._evidence_set(row["evidence"]["documents"])
+    row = svc.assess(ctx, row["id"], row["revision"])
+    assert row["assessment"]["answers"]["aiv_provenance"]["answer"] == "unknown"
+    assert "Conflicting" in row["assessment"]["answers"]["aiv_provenance"]["note"]
+    row = svc.review(ctx, row["id"], row["revision"], "approved", "Human accepts documented unresolved conflict")
+    row = svc.prepare_action(ctx, row["id"], row["revision"])
+    row = svc.approve_action(ctx, row["id"], row["revision"])
+    docs.documents[(ctx.tenant, "policy")] = replace(docs.documents[(ctx.tenant, "policy")], version="2")
+    with pytest.raises(ValueError, match="source evidence version changed"):
+        svc.execute(ctx, row["id"])
+    assert tickets.creates == 0
+
+
+def test_case_scoped_pdf_upload_clears_approval_and_cannot_inherit_new_upload_time(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    operation = row["operation"]["id"]
+    row = svc.upload_document(ctx, row["id"], row["revision"], content=POLICY.read_bytes(),
+        name="Synthetic policy.pdf", mime="application/pdf", document_date=NOW - 400 * 86400)
+    assert row["assessment"] is None and row["operation"] is None
+    assert row["operation_history"][-1]["id"] == operation
+    assert row["operation_history"][-1]["state"] == "invalidated"
+    uploaded = row["uploads"][0]
+    assert uploaded["fresh_until"] < NOW
+    assert uploaded["date_basis"] == "uploader_asserted_document_date"
+    row = svc.collect_evidence(ctx, row["id"], row["revision"])
+    assert row["evidence"]["source"] == "evidence_set"
+    row = svc.assess(ctx, row["id"], row["revision"])
+    row = svc.review(ctx, row["id"], row["revision"], "approved", "Synthetic expired evidence review")
+    with pytest.raises(ValueError, match="freshness expired"):
+        svc.prepare_action(ctx, row["id"], row["revision"])
+    assert tickets.creates == 0
+    other = svc.intake(ctx, "Synthetic other upload owner", "", "VEND", "Cannot reuse another case upload")
+    with pytest.raises(ValueError, match="belonging to this case"):
+        svc.set_documents(ctx, other["id"], other["revision"], [], [uploaded["document_id"]])
+
+
+def test_reviewed_upload_is_transient_bound_to_actor_revision_and_explicit_consent(setup, monkeypatch):
+    svc, ctx, _, tickets, denied = setup
+    row = svc.intake(ctx, "Reviewed upload", "", "VEND", "Review file")
+    args = dict(content=TEXT, name="Synthetic.txt", mime="text/plain", document_date=NOW - 100)
+    preview = svc.preview_upload(ctx, row["id"], row["revision"], **args)
+    assert preview["text"] == TEXT.decode() and preview["saved"] is False
+    assert svc.get(ctx, row["id"])["revision"] == row["revision"]
+    assert svc.get(ctx, row["id"])["uploads"] == []
+    commit = dict(args, expires_at=preview["expires_at"], review_digest=preview["review_digest"], confirm=True)
+    with pytest.raises(ValueError, match="account or request changed"):
+        svc.upload_reviewed(replace(ctx, actor="different-reviewer"), row["id"], row["revision"], **commit)
+    with pytest.raises(ValueError, match="Confirm"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **dict(commit, confirm=False))
+    with pytest.raises(ValueError, match="account or request changed"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **dict(commit, content=b"Changed text"))
+    with pytest.raises(ValueError, match="expired"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **dict(commit, expires_at=NOW))
+    with pytest.raises(KeyError):
+        svc.upload_reviewed(replace(ctx, tenant="another-customer"), row["id"], row["revision"], **commit)
+    denied.add("evidence.upload")
+    with pytest.raises(PermissionError):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **commit)
+    denied.clear()
+    saved = svc.upload_reviewed(ctx, row["id"], row["revision"], **commit)
+    assert saved["uploads"][0]["reviewed_by"] == ctx.actor
+    assert saved["assessment"] is None and tickets.creates == 0
+    with pytest.raises(RecordConflict):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **commit)
+    monkeypatch.setattr(config, "vendor_reviewed_uploads_enabled", lambda: False)
+    with pytest.raises(PermissionError, match="disabled"):
+        svc.preview_upload(ctx, saved["id"], saved["revision"], **args)
+
+
+def test_pdf_transcription_keeps_source_bytes_separate_and_never_invents_pdf_locations(setup):
+    import hashlib
+
+    svc, ctx, _, _, _ = setup
+    row = svc.intake(ctx, "Transcribed upload", "", "VEND", "Review unreadable PDF")
+    original = b"%PDF-1.4\nunsupported scanned synthetic fixture"
+    args = dict(content=original, name="Scan.pdf", mime="application/pdf", document_date=NOW - 100)
+    refused = svc.preview_upload(ctx, row["id"], row["revision"], **args)
+    assert refused["status"] == "extraction_failed" and refused["can_transcribe"]
+    with pytest.raises(ValueError, match="No supported text"):
+        svc.upload_reviewed(ctx, row["id"], row["revision"], **args, confirm=True,
+                            review_digest=refused["review_digest"], expires_at=refused["expires_at"])
+    args["transcription"] = "Model provenance is documented with provider and version."
+    preview = svc.preview_upload(ctx, row["id"], row["revision"], **args)
+    saved = svc.upload_reviewed(ctx, row["id"], row["revision"], **args, confirm=True,
+                               review_digest=preview["review_digest"], expires_at=preview["expires_at"])
+    upload = saved["uploads"][0]
+    citation = upload["extracted"]["answers"]["aiv_provenance"]["citations"][0]
+    assert citation["document_sha256"] == hashlib.sha256(original).hexdigest()
+    assert citation["extracted_text_sha256"] == hashlib.sha256(args["transcription"].encode()).hexdigest()
+    assert citation["text_origin"] == "human_transcription" and citation["transcription_paragraph"] == 1
+    assert "pages" not in citation
+    assert upload["extraction"]["method"] == "human_transcription"
+
+
+def test_uploaded_only_case_preserves_evidence_for_renewal_and_rechecks_snapshot(setup, monkeypatch):
+    from maverick.vendor_evidence_evolution import EvidenceRenewalEvolution
+
+    svc, ctx, _, tickets, _ = setup
+    def forbidden_drive(*args, **kwargs):
+        raise PermissionError("No Drive connection enrolled for uploaded evidence")
+    monkeypatch.setattr(svc.documents, "authority_version", forbidden_drive)
+    monkeypatch.setattr(svc.documents, "fetch", forbidden_drive)
+    monkeypatch.setattr(svc.documents, "head", forbidden_drive)
+    row = svc.intake(ctx, "Synthetic uploaded policy", "", "VEND", "Upload without Drive source")
+    row = svc.upload_document(ctx, row["id"], row["revision"], content=POLICY.read_bytes(),
+        name="Synthetic policy.pdf", mime="application/pdf", document_date=NOW - 100)
+    row = svc.collect_evidence(ctx, row["id"], row["revision"])
+    row = svc.assess(ctx, row["id"], row["revision"])
+    row = svc.review(ctx, row["id"], row["revision"], "approved", "Synthetic reviewer accepts cited assertions")
+    row = svc.prepare_action(ctx, row["id"], row["revision"])
+    assert row["operation"]["preconditions"]["document_credential_version"] == "not_applicable:retained_uploads"
+    row = svc.approve_action(ctx, row["id"], row["revision"])
+    row = svc.execute(ctx, row["id"])
+    row = svc.accept(ctx, row["id"], row["revision"], True, "Synthetic acceptance")
+    evolution = EvidenceRenewalEvolution(svc.authorize, clock=svc.clock)
+    observed = evolution.observe_case(ctx, svc, row["id"], "fresh", rationale="Check uploaded snapshot provenance")
+    assert observed["inputs"]["source_version"] == row["evidence"]["version"]
+    renewal = svc.intake(ctx, row["vendor_name"], "", "VEND", "Renewal", renewal_of=row["id"])
+    renewal = svc.collect_evidence(ctx, renewal["id"], renewal["revision"])
+    assert renewal["uploads"][0]["modified_at"] == row["uploads"][0]["modified_at"]
+    assert renewal["evidence"]["changes"]["documents"][0]["change"] == "unchanged"
+    upload_id = renewal["uploads"][0]["document_id"]
+    renewal = svc.set_documents(ctx, renewal["id"], renewal["revision"], [], [])
+    renewal = svc.upload_document(ctx, renewal["id"], renewal["revision"],
+        content=b"Model provenance is undisclosed.", name="Changed statement.txt", mime="text/plain", document_date=NOW)
+    renewal = svc.collect_evidence(ctx, renewal["id"], renewal["revision"])
+    changes = renewal["evidence"]["changes"]["documents"]
+    assert {item["change"] for item in changes} == {"added", "removed"}
+    assert next(item for item in changes if item["document_id"] == upload_id)["before_version"] == "1"
+    assert svc.get(ctx, row["id"]) == row
+    assert tickets.creates == 1
+
+
+def test_failed_document_blocks_partial_assessment_and_selection_is_bounded(setup):
+    svc, ctx, *_ = setup
+    row = svc.intake(ctx, "Synthetic incomplete packet", "", "VEND", "Missing secondary file",
+                     document_ids=["security-paper", "missing"])
+    row = svc.collect_evidence(ctx, row["id"], row["revision"])
+    assert {item["status"] for item in row["evidence"]["documents"]} == {"missing", "available"}
+    with pytest.raises(ValueError, match="available"):
+        svc.assess(ctx, row["id"], row["revision"])
+    with pytest.raises(ValueError, match="once"):
+        svc.set_documents(ctx, row["id"], row["revision"], ["duplicate", "duplicate"], [])
+    with pytest.raises(ValueError, match="at most 8"):
+        svc.set_documents(ctx, row["id"], row["revision"], [str(i) for i in range(9)], [])
 
 
 def test_complete_workflow_keeps_execution_acceptance_and_release_separate(setup):

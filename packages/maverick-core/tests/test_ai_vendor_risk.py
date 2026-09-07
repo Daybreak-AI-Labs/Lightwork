@@ -208,6 +208,20 @@ def test_document_citation_redacts_secret_and_never_persists_full_text():
     assert draft["answer_sources"]["aiv_provenance"]["kind"] == "document"
 
 
+def test_conflicting_document_cannot_be_overruled_by_second_clear_document():
+    with tenant_scope(tenant="acme"):
+        conflict = avr.extract_answers_from_document(
+            b"Model provenance is documented. Model provenance is undisclosed.", "text/plain", document_id="conflict")
+        clear = avr.extract_answers_from_document(
+            b"Model provenance is documented with provider and version.", "text/plain", document_id="clear")
+        assert conflict["answers"]["aiv_provenance"]["answer"] == "unknown"
+        for results in ([conflict, clear], [clear, conflict]):
+            draft = avr.draft_vendor_assessment("Synthetic conflict", document_results=results,
+                                                actor="risk-owner", use_prior=False)
+            assert draft["answers"]["aiv_provenance"]["answer"] == "unknown"
+            assert "Conflicting" in draft["answers"]["aiv_provenance"]["note"]
+
+
 def test_tampered_document_citation_is_rejected_before_governed_write():
     with tenant_scope(tenant="acme"):
         extracted = avr.extract_answers_from_document(
