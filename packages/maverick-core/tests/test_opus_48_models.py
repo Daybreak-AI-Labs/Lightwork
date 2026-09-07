@@ -89,10 +89,14 @@ def test_opus_48_defaults_to_adaptive_without_budget():
     assert kwargs.get("thinking", {}).get("type") == "adaptive"
 
 
-def test_opus_48_uses_4x_min_cache_threshold():
+def test_opus_48_uses_1024_min_cache_threshold():
+    # W1-4: Opus 4.8's documented minimum cacheable prompt length is 1,024
+    # tokens, not the 4,096 the table previously (wrongly) used for every
+    # 4.5+/4.6+ model -- see
+    # https://platform.claude.com/docs/en/build-with-claude/prompt-caching.
     from maverick.providers.anthropic_provider import (
-        _MIN_CACHE_TOKENS_4X,
+        _MIN_CACHE_TOKENS_1024,
         _min_cache_tokens,
     )
-    assert _min_cache_tokens("claude-opus-4-8") == _MIN_CACHE_TOKENS_4X
-    assert _min_cache_tokens("claude-opus-4-8-fast") == _MIN_CACHE_TOKENS_4X
+    assert _min_cache_tokens("claude-opus-4-8") == _MIN_CACHE_TOKENS_1024
+    assert _min_cache_tokens("claude-opus-4-8-fast") == _MIN_CACHE_TOKENS_1024

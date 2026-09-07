@@ -88,48 +88,56 @@ def _ephemeral(obj: dict) -> dict:
     # there is no cross-instance reuse and the 25% cache-write surcharge
     # on a 1h TTL is wasted.
     #
-    # Wave 12 hotfix — minimum cacheable prompt size:
-    # Claude Opus 4.5+, Sonnet 4.5+, and Haiku 4.5: the cumulative prompt
-    # up to AND INCLUDING the cache breakpoint must be >= 4,096 tokens
-    # or the breakpoint is silently ignored (no API error, no cache
-    # write, no cache read on subsequent calls). Older Claude 4.x and
-    # 3.x models use 1,024.
-    #
-    # Lightwork's current system prompt (~1,085 tokens) + tool catalog
-    # (~716 tokens) sit BELOW the 4,096 threshold individually, which
-    # means cache_control on them is currently a no-op. The messages
-    # breakpoint is the one that actually delivers caching on long
-    # agent traces (history grows past 4k by turn 3-4). We still mark
-    # system + tools with cache_control — it's harmless if the block
-    # is too small, and starts working once the prompt expands.
+    # Minimum cacheable prompt size (see _min_cache_tokens): the cumulative
+    # prompt up to AND INCLUDING the cache breakpoint must reach the model's
+    # minimum or the breakpoint is silently ignored (no API error, no cache
+    # write, no cache read on subsequent calls). The minimum varies by model
+    # family -- 512 to 4,096 tokens -- so whether Lightwork's system prompt
+    # (~1,085 tokens) and tool catalog (~716 tokens) actually cache depends
+    # on which model is active; the messages breakpoint delivers caching
+    # regardless once history grows past the threshold. We mark system +
+    # tools with cache_control unconditionally — it's harmless if a given
+    # model's block is too small, and starts working once the prompt (or a
+    # switch to a lower-minimum model) crosses the threshold.
     ttl = _default_cache_ttl()
     return {**obj, "cache_control": {"type": "ephemeral", "ttl": ttl}}
 
 
-# Wave 12 hotfix: cacheable-block minimums per Anthropic model family.
-# Used to warn / no-op cache_control when the prompt is too small.
-_MIN_CACHE_TOKENS_4X = 4096
-_MIN_CACHE_TOKENS_3X = 1024
+# Cacheable-block minimums per Anthropic model family, verified against
+# https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+# ("Cache limitations"). Used to warn / no-op cache_control (and to skip
+# prewarm()) when the prompt is too small to actually get cached.
+_MIN_CACHE_TOKENS_512 = 512
+_MIN_CACHE_TOKENS_1024 = 1024
+_MIN_CACHE_TOKENS_2048 = 2048
+_MIN_CACHE_TOKENS_4096 = 4096
 
 
 def _min_cache_tokens(model_id: str) -> int:
     """Minimum cumulative prompt tokens (up to + including breakpoint)
-    required for prompt caching to actually take effect.
+    required for prompt caching to actually take effect, per
+    https://platform.claude.com/docs/en/build-with-claude/prompt-caching.
 
-    Claude 4.5+ (opus 4.5/4.6/4.7/4.8, sonnet 4.5/4.6, haiku 4.5): 4096.
-    Earlier 4.x and all 3.x: 1024.
+    The prior table put every 4.5+/4.6+ model at the 4,096 minimum that
+    actually only applies to Opus 4.5/4.6 (and Haiku 4.5) -- which meant
+    the current defaults, Opus 4.8 and Sonnet 4.6 (both really 1,024),
+    were wrongly gated at 4,096: prewarm() silently no-op'd for prompts
+    that would in fact have cached, and the debug log claimed the
+    breakpoint would be ignored when it would not. 1,024 tokens is the
+    documented minimum for most models (Opus 4.8, Sonnet 5, Sonnet 4.6,
+    Sonnet 4.5, and the retired Opus 4.1/4/Sonnet 4, plus every Claude 3.x
+    model) and is this function's default; only the families below need a
+    different value.
     """
-    if (
-        model_id.startswith("claude-opus-4-5")
-        or model_id.startswith("claude-opus-4-6")
-        or model_id.startswith("claude-opus-4-7")
-        or model_id.startswith("claude-opus-4-8")
-        or model_id.startswith("claude-sonnet-4-5")
-        or model_id.startswith("claude-sonnet-4-6")
-        or model_id.startswith("claude-haiku-4-5")
-    ):
-        return _MIN_CACHE_TOKENS_4X
-    return _MIN_CACHE_TOKENS_3X
+    if model_id.startswith("claude-opus-4-6") or model_id.startswith("claude-opus-4-5"):
+        return _MIN_CACHE_TOKENS_4096
+    if model_id.startswith("claude-haiku-4-5"):
+        return _MIN_CACHE_TOKENS_4096
+    if model_id.startswith("claude-opus-4-7"):
+        return _MIN_CACHE_TOKENS_2048
+    if model_id.startswith("claude-opus-5") or model_id.startswith("claude-fable-5"):
+        return _MIN_CACHE_TOKENS_512
+    return _MIN_CACHE_TOKENS_1024
 
 
 def _cached_system(text: str) -> list[dict]:
