@@ -25,13 +25,25 @@ log = logging.getLogger(__name__)
 # Hard caps per model. Conservative: subtract a safety margin so we
 # leave room for the response (max_tokens param) and tools schema.
 # Keys are exact model ids; lookups fall back to family prefix.
+#
+# W1-5: every Opus/Sonnet 4.6+ model is actually a 1M-context model per
+# https://platform.claude.com/docs/en/build-with-claude/context-windows
+# (and each model's own overview page) -- this table had them all capped
+# at 200k, silently refusing prompts up to 800k tokens that the real API
+# would accept. Only Opus 4.5/Sonnet 4.5 and Haiku 4.5 stay at 200k.
 _MODEL_CONTEXT_LIMITS: dict[str, int] = {
     # Anthropic
-    "claude-opus-4-8":    200_000,   # current default (MODEL_OPUS)
-    "claude-opus-4-8-fast": 200_000,
-    "claude-opus-4-7":    200_000,
-    "claude-sonnet-4-6":  200_000,
-    "claude-haiku-4-5":   200_000,
+    "claude-opus-5":        1_000_000,
+    "claude-sonnet-5":      1_000_000,
+    "claude-fable-5-1":     1_000_000,
+    "claude-opus-4-8":      1_000_000,   # current default (MODEL_OPUS)
+    "claude-opus-4-8-fast": 1_000_000,
+    "claude-opus-4-7":      1_000_000,
+    "claude-opus-4-6":      1_000_000,
+    "claude-opus-4-5":        200_000,
+    "claude-sonnet-4-6":    1_000_000,   # current default (MODEL_SONNET)
+    "claude-sonnet-4-5":      200_000,
+    "claude-haiku-4-5":       200_000,
     # OpenAI
     "gpt-5.5":            128_000,
     "gpt-5.4":            128_000,

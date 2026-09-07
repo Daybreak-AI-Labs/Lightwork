@@ -9,7 +9,9 @@ import pytest
 
 def test_preflight_context_limit_known_model():
     from maverick.preflight import context_limit
-    assert context_limit("claude-opus-4-7") == 200_000
+    # W1-5: Opus 4.7 is a 1M-context model, not 200k --
+    # https://platform.claude.com/docs/en/build-with-claude/context-windows.
+    assert context_limit("claude-opus-4-7") == 1_000_000
     assert context_limit("gpt-5.4-nano") == 32_000
     assert context_limit("kimi-k2") == 128_000
 
