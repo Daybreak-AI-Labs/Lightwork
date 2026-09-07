@@ -1230,6 +1230,7 @@ def _final_uncertainty_reasons(
     verifier_incomplete: bool,
     disagreement: float,
     coding: bool,
+    no_final_marker: bool = False,
 ) -> list[str]:
     """Reasons the orchestrator cannot cleanly stand behind a FINAL.
 
@@ -1242,6 +1243,11 @@ def _final_uncertainty_reasons(
     if coding:
         return []
     reasons: list[str] = []
+    if no_final_marker:
+        reasons.append(
+            "the response never included a FINAL: marker, so the verifier "
+            "and patch-validation pipeline did not run"
+        )
     if verifier_rejected:
         reasons.append("an internal self-check did not pass after one revision")
     if verifier_incomplete:
@@ -1452,6 +1458,13 @@ class Agent:
         # consecutive count) triple, success or failure. Feeds the identical-
         # result nudge and, past _LOOP_GUARD_BLOCK, the pre-exec suppression.
         self._identical_streak: tuple[str, str, int] | None = None
+        # W1-25: whether the one-shot "please restate with FINAL:" nudge has
+        # already been used this run. A text-only response with no tool
+        # calls and no FINAL: marker skips the ENTIRE verify/patch-check/
+        # STOP-hook pipeline (it only runs inside the FINAL-marker branch);
+        # give a marker-less model one chance to comply before accepting its
+        # answer un-nudged.
+        self._final_marker_nudge_used = False
 
     def _resolve_capability(self, explicit):
         """Pick this agent's capability grant.
@@ -4174,7 +4187,46 @@ class Agent:
 
             if not resp.tool_calls:
                 if resp.text:
-                    return AgentResult(final=resp.text, role=self.role, name=self.name)
+                    # W1-25: reaching here means resp.text carried no FINAL:
+                    # marker (find_final_marker_end returned None above) --
+                    # the entire verify/patch-validation/STOP-hook pipeline
+                    # only runs inside that branch. Give the model ONE
+                    # chance to comply before accepting an un-verified
+                    # answer as if it were fully confident.
+                    if not self._final_marker_nudge_used:
+                        self._final_marker_nudge_used = True
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Your response must end your turn with a line "
+                                "starting `FINAL:` followed by your complete "
+                                "answer -- required so it can be verified. "
+                                "Please restate your answer now, ending with "
+                                "`FINAL: <answer>`."
+                            ),
+                        })
+                        continue
+                    # Nudged once and still no marker: accept the text as
+                    # final, but report honestly that verification never
+                    # ran -- never the default verifier_confidence=1.0,
+                    # which would claim a confidence no verifier produced.
+                    from .coding_mode import from_env as _cm_from_env
+                    try:
+                        _coding_cfg = _cm_from_env()
+                    except Exception:
+                        _coding_cfg = None
+                    _reasons = _final_uncertainty_reasons(
+                        verifier_rejected=False, verifier_incomplete=False,
+                        disagreement=0.0,
+                        coding=bool(_coding_cfg and _coding_cfg.enabled),
+                        no_final_marker=True,
+                    )
+                    return AgentResult(
+                        final=_final_with_uncertainty_note(resp.text, _reasons),
+                        role=self.role, name=self.name,
+                        verifier_confidence=0.0,
+                        verifier_critique="no FINAL: marker; verification did not run",
+                    )
                 return AgentResult(
                     error="empty response with no tools", role=self.role, name=self.name
                 )

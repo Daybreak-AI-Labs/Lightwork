@@ -93,6 +93,47 @@ class TestAgentLoop:
         assert result.error == "empty response with no tools"
 
     @pytest.mark.asyncio
+    async def test_marker_less_response_is_nudged_then_verified(
+        self, ctx, fake_llm, make_llm_response,
+    ):
+        # W1-25: a text-only response with no FINAL: marker used to skip the
+        # ENTIRE verify/patch-check/hook pipeline (it only runs inside the
+        # FINAL-marker branch) and return immediately with the default
+        # verifier_confidence=1.0 -- a false "fully verified" signal. Give
+        # the model one nudge to restate with the marker; if it complies,
+        # the normal FINAL pipeline (including the verifier) must still run.
+        accept = '{"confidence":0.95,"accepts":true,"critique":"ok","issues":[]}'
+        fake_llm.scripted = [
+            make_llm_response(text="The answer is 42."),          # no marker
+            make_llm_response(text="FINAL: The answer is 42."),   # nudge complied
+            make_llm_response(text=accept),                       # verifier
+        ]
+        agent = Agent(ctx=ctx, role="orchestrator", brief="compute the answer")
+        result = await agent.run()
+        assert result.final == "The answer is 42."
+        assert len(fake_llm.calls) == 3  # nudge + FINAL + verifier all ran
+        assert result.verifier_confidence == pytest.approx(0.95)
+
+    @pytest.mark.asyncio
+    async def test_marker_less_response_still_reports_honestly_after_nudge(
+        self, ctx, fake_llm, make_llm_response,
+    ):
+        # If the model ignores the explicit nudge too, the answer is still
+        # returned (we don't hang the run on an uncooperative model) but
+        # verifier_confidence must NOT claim the default 1.0 -- no verifier
+        # ever ran on this text.
+        fake_llm.scripted = [
+            make_llm_response(text="The answer is 42."),   # no marker
+            make_llm_response(text="Still 42, no marker."),  # ignores the nudge
+        ]
+        agent = Agent(ctx=ctx, role="orchestrator", brief="compute the answer")
+        result = await agent.run()
+        assert len(fake_llm.calls) == 2
+        assert result.verifier_confidence == 0.0
+        assert "could not fully verify" in result.final
+        assert "Still 42, no marker." in result.final
+
+    @pytest.mark.asyncio
     async def test_budget_exceeded_returns_error(self, ctx, fake_llm, make_llm_response):
         ctx.budget.input_tokens = ctx.budget.max_input_tokens - 1
         class _BoomLLM:
