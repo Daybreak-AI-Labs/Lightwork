@@ -29,11 +29,15 @@ class _FakeLLM:
 
 def _agent(budget: Budget, llm: _FakeLLM):
     # Duck-typed stand-in: _complete_guarded only touches self.ctx.budget,
-    # self.ctx.llm, and self._HALT_POLL_SECONDS.
-    return types.SimpleNamespace(
+    # self.ctx.llm, self._HALT_POLL_SECONDS, and (via the shared W1-31 guard)
+    # self._await_wall_clock_guarded -- bind the real method so the shared
+    # wall-clock/killswitch polling loop it delegates to actually runs.
+    obj = types.SimpleNamespace(
         ctx=types.SimpleNamespace(budget=budget, llm=llm),
         _HALT_POLL_SECONDS=0.02,
     )
+    obj._await_wall_clock_guarded = Agent._await_wall_clock_guarded.__get__(obj)
+    return obj
 
 
 def test_returns_normally_when_fast():

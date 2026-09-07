@@ -251,3 +251,52 @@ class TestReleaseSpawns:
         # 2 reserved, 1 failed -> only the failed slot released; the
         # successful child legitimately keeps its slot.
         assert ctx._spawns_used == 1
+
+
+class TestToolDispatchWallClockGuard:
+    @pytest.mark.asyncio
+    async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path):
+        # W1-31: a tool with no timeout of its own (a plugin, an MCP server,
+        # a browser/file-watcher wait) previously had no equivalent to
+        # _complete_guarded's wall-clock/killswitch polling -- it could hold
+        # the goal 'active' and ignore `maverick halt` indefinitely. A never-
+        # returning tool under a short wall cap must now abort promptly
+        # instead of hanging past it.
+        import asyncio
+        import time
+
+        from maverick.tools import Tool
+
+        hung = {"cancelled": False}
+
+        async def _never_returns(args: dict) -> str:
+            try:
+                await asyncio.sleep(3600)
+                return "should never get here"
+            except asyncio.CancelledError:
+                hung["cancelled"] = True
+                raise
+
+        llm = _CapturingLLM([
+            LLMResponse(
+                text="acting", thinking=None,
+                tool_calls=[ToolCall(id="a", name="hang", input={})],
+                stop_reason="tool_use",
+            ),
+        ])
+        ctx = _ctx(tmp_path, llm, max_wall_seconds=1.0)
+        agent = Agent(ctx=ctx, role="researcher", brief="...")
+        agent.tools.register(Tool(
+            name="hang", description="never returns",
+            input_schema={"type": "object", "properties": {}},
+            fn=_never_returns,
+        ))
+
+        t0 = time.monotonic()
+        with pytest.raises(BudgetExceeded, match="mid-tool-execution"):
+            await agent.run()
+        elapsed = time.monotonic() - t0
+
+        # Aborted near the cap, not left hanging toward the 3600s sleep.
+        assert elapsed < 5.0
+        assert hung["cancelled"] is True

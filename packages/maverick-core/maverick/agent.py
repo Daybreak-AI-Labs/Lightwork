@@ -2627,7 +2627,15 @@ class Agent:
         effect_completed = False
         execution_status = "error"
         try:
-            output = await self.tools.run(name, args)
+            # W1-31: enforce the wall-clock cap and killswitch DURING
+            # dispatch, not only at turn boundaries -- a tool with no timeout
+            # of its own (a plugin, an MCP server with a large default, a
+            # browser/file-watcher wait) could otherwise hold the goal
+            # 'active' past max_wall_seconds and ignore `maverick halt`
+            # until it happened to return.
+            output = await self._await_wall_clock_guarded(
+                lambda: self.tools.run(name, args),
+                in_flight_note="mid-tool-execution")
             # From this point onward the connector returned normally and may
             # already have committed an external mutation.  Keep that fact
             # separate from failures in hooks, screening, framing, or other
@@ -3266,19 +3274,33 @@ class Agent:
     # in flight — small enough to feel responsive, large enough to be free.
     _HALT_POLL_SECONDS = 1.0
 
-    async def _complete_guarded(self, **kw):
-        """Await an LLM completion, but ABORT the in-flight call when the
-        wall-clock budget is exhausted or the killswitch trips — instead of
-        letting a multi-minute generation run to completion and blow the SLA or
-        ignore a HALT (the cap/halt were otherwise only checked at turn
-        boundaries). Raises :class:`BudgetExceeded` (wall) or
-        :class:`killswitch.Halted`, both already handled by the caller."""
+    async def _await_wall_clock_guarded(self, make_coro, *, in_flight_note: str):
+        """Await ``make_coro()``, but ABORT it when the wall-clock budget is
+        exhausted or the killswitch trips — instead of letting it run to
+        completion and blow the SLA or ignore a HALT (the cap/halt were
+        otherwise only checked at turn boundaries). Raises
+        :class:`BudgetExceeded` (wall) or :class:`killswitch.Halted`, both
+        already handled by every caller the same way. ``in_flight_note``
+        names what was in flight (e.g. "mid-generation",
+        "mid-tool-execution") for the wall-cap message.
+
+        ``make_coro`` is a zero-arg callable, not an already-built
+        coroutine: it is invoked only once the wall cap is confirmed to have
+        time left, so an already-exhausted budget never creates (and then
+        silently abandons, as an "await" warning) the underlying call.
+
+        W1-31: shared by ``_complete_guarded`` (LLM calls) and tool dispatch
+        (``_run_dispatched_tool``) — a hung tool with no timeout of its own
+        (a plugin, an MCP server, a browser/file-watcher wait) previously had
+        no equivalent guard, so it could hold a goal 'active' past
+        ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
+        """
         budget = self.ctx.budget
         remaining = budget.remaining_wall()
         if remaining <= 0:
             raise BudgetExceeded(
                 f"wall time {budget.elapsed():.0f}s > {budget.max_wall_seconds:.0f}s")
-        task = asyncio.ensure_future(self.ctx.llm.complete_async(**kw))
+        task = asyncio.ensure_future(make_coro())
         loop = asyncio.get_running_loop()
         deadline = loop.time() + remaining
         try:
@@ -3290,16 +3312,28 @@ class Agent:
                 if loop.time() >= deadline:
                     raise BudgetExceeded(
                         f"wall-clock cap {budget.max_wall_seconds:.0f}s reached "
-                        "mid-generation")
+                        f"{in_flight_note}")
                 killswitch.check()  # raises killswitch.Halted if tripped
         except BaseException:
             # Wall cap, halt, or an upstream cancellation: cancel the in-flight
-            # generation (aborts the provider HTTP request) before propagating.
+            # call (aborts the provider HTTP request / tool coroutine) before
+            # propagating.
             if not task.done():
                 task.cancel()
                 with contextlib.suppress(BaseException):
                     await task
             raise
+
+    async def _complete_guarded(self, **kw):
+        """Await an LLM completion, but ABORT the in-flight call when the
+        wall-clock budget is exhausted or the killswitch trips — instead of
+        letting a multi-minute generation run to completion and blow the SLA or
+        ignore a HALT (the cap/halt were otherwise only checked at turn
+        boundaries). Raises :class:`BudgetExceeded` (wall) or
+        :class:`killswitch.Halted`, both already handled by the caller."""
+        return await self._await_wall_clock_guarded(
+            lambda: self.ctx.llm.complete_async(**kw),
+            in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
