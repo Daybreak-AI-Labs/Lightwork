@@ -1036,6 +1036,15 @@ _DEFAULT_TOOL_RESULT_BYTES = 32_000
 _MAX_TOOL_RESULT_BYTES = max(
     2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", _DEFAULT_TOOL_RESULT_BYTES))
 
+# W1-27: cap on total "please revise your patch" round-trips per goal, across
+# BOTH the apply-check block and the ground-truth test-verifier block (they
+# share `_patch_revision_attempts`, which -- unlike `_patch_validated` -- is
+# never reset per FINAL). 1 matches the "one retry max" every reject site
+# already documented in its own comments before the #612 fix's per-FINAL
+# reset silently defeated it.
+_MAX_PATCH_REVISION_ATTEMPTS = max(
+    1, env_int("MAVERICK_MAX_PATCH_REVISION_ATTEMPTS", 1))
+
 
 def unframe_tool_output(framed: str) -> str:
     """Recover the raw tool output from the ``<tool_output …>`` frame _run_tool
@@ -3678,6 +3687,17 @@ class Agent:
                     # apply-check / diff extraction. Reset it alongside
                     # `_already_verified` so each new FINAL re-validates the
                     # patch it actually carries.
+                    #
+                    # W1-27: that reset also broke the "one retry max" this
+                    # flag was doing double duty for -- every "ask for
+                    # revision" branch below reads `_patch_validated` to
+                    # decide whether THIS is already a retry, but by the
+                    # time the model's revised FINAL arrives here, the reset
+                    # above has already flipped it back to False, so every
+                    # branch thinks it's seeing a first attempt again. The
+                    # reject/test-driven revision loop is bounded only by
+                    # `_patch_revision_attempts` below, which is deliberately
+                    # NOT reset per FINAL.
                     self._patch_validated = False
 
                     # Wave 8: coding-mode patch self-validation. If the
@@ -3701,7 +3721,9 @@ class Agent:
 
                     if (coding_cfg is not None and coding_cfg.enabled
                             and coding_cfg.require_apply_check
-                            and not getattr(self, "_patch_validated", False)):
+                            and not getattr(self, "_patch_validated", False)
+                            and getattr(self, "_patch_revision_attempts", 0)
+                                < _MAX_PATCH_REVISION_ATTEMPTS):
                         from pathlib import Path as _Path
                         workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
                         # Wave 11: prefer SEARCH/REPLACE over unified-diff.
@@ -3736,6 +3758,8 @@ class Agent:
                                     pass
                         if patch is None and sr_summary is not None:
                             self._patch_validated = True
+                            self._patch_revision_attempts = (
+                                getattr(self, "_patch_revision_attempts", 0) + 1)
                             bb.post(
                                 self.name, "verify",
                                 f"SEARCH/REPLACE apply failed: "
@@ -3757,6 +3781,8 @@ class Agent:
                             continue
                         if patch is None:
                             self._patch_validated = True
+                            self._patch_revision_attempts = (
+                                getattr(self, "_patch_revision_attempts", 0) + 1)
                             bb.post(
                                 self.name, "verify",
                                 "no valid SEARCH/REPLACE or unified diff in "
@@ -3839,6 +3865,8 @@ class Agent:
                         validation = validate_patch(patch, workdir)
                         if not validation.valid:
                             self._patch_validated = True  # one retry max
+                            self._patch_revision_attempts = (
+                                getattr(self, "_patch_revision_attempts", 0) + 1)
                             bb.post(
                                 self.name, "verify",
                                 f"patch rejected: {validation.reason}",
@@ -3906,8 +3934,12 @@ class Agent:
                                         # verifier's own apply.
                                         await asyncio.to_thread(self._reset_workdir)
                                 if patch is None:
-                                    if not getattr(self, "_patch_validated", False):
+                                    if (not getattr(self, "_patch_validated", False)
+                                            and getattr(self, "_patch_revision_attempts", 0)
+                                                < _MAX_PATCH_REVISION_ATTEMPTS):
                                         self._patch_validated = True
+                                        self._patch_revision_attempts = (
+                                            getattr(self, "_patch_revision_attempts", 0) + 1)
                                         bb.post(
                                             self.name, "verify",
                                             "no valid diff in FINAL; asking for revision",
@@ -3922,7 +3954,8 @@ class Agent:
                                             ),
                                         })
                                         continue
-                                    # Already revised once; surface and exit.
+                                    # Already revised, or out of revision
+                                    # attempts (W1-27): surface and exit.
                                     return AgentResult(
                                         final=final, role=self.role, name=self.name,
                                         verifier_confidence=0.0,
@@ -3966,8 +3999,12 @@ class Agent:
                                     # the patch wouldn't apply. Tell the agent
                                     # so it doesn't 'fix' a working patch into
                                     # a broken one based on apply-fail noise.
-                                    if not getattr(self, "_patch_validated", False):
+                                    if (not getattr(self, "_patch_validated", False)
+                                            and getattr(self, "_patch_revision_attempts", 0)
+                                                < _MAX_PATCH_REVISION_ATTEMPTS):
                                         self._patch_validated = True
+                                        self._patch_revision_attempts = (
+                                            getattr(self, "_patch_revision_attempts", 0) + 1)
                                         bb.post(
                                             self.name, "verify",
                                             "patch failed to apply pre-test; "
@@ -3984,7 +4021,8 @@ class Agent:
                                             ),
                                         })
                                         continue
-                                    # Already retried once; surface and exit.
+                                    # Already retried, or out of revision
+                                    # attempts (W1-27): surface and exit.
                                     return AgentResult(
                                         final=final, role=self.role, name=self.name,
                                         verifier_confidence=0.0,
@@ -4062,9 +4100,15 @@ class Agent:
                                     ).strip()
                                 # Wave 9 fix (#2): one retry max so a flaky
                                 # verifier or unfixable instance doesn't loop
-                                # forever. The retry IS re-verified.
-                                if getattr(self, "_patch_validated", False):
-                                    # Already revised once; accept whatever this is.
+                                # forever. The retry IS re-verified. W1-27:
+                                # `_patch_validated` alone under-counts once a
+                                # new FINAL resets it, so also stop once the
+                                # (never-reset) revision-attempt cap is hit.
+                                if (getattr(self, "_patch_validated", False)
+                                        or getattr(self, "_patch_revision_attempts", 0)
+                                            >= _MAX_PATCH_REVISION_ATTEMPTS):
+                                    # Already revised, or out of revision
+                                    # attempts; accept whatever this is.
                                     self._already_verified = True
                                     return AgentResult(
                                         final=final, role=self.role, name=self.name,
@@ -4073,6 +4117,8 @@ class Agent:
                                         final_patch=getattr(self, "_final_patch", None),
                                     )
                                 self._patch_validated = True
+                                self._patch_revision_attempts = (
+                                    getattr(self, "_patch_revision_attempts", 0) + 1)
                                 messages.append({"role": "user", "content": critique})
                                 continue
 
