@@ -81,9 +81,12 @@ class KubernetesBackend:
         """A non-root, resource-bounded pod spec for ``kubectl run --overrides``.
 
         ``kubectl run`` otherwise emits a bare pod that runs as the image's
-        default user (often root) with no resource limits. We pin a non-root
+        default user (often root) with no resource limits and the namespace's
+        default ServiceAccount token auto-mounted. We pin a non-root
         securityContext + drop all capabilities + block privilege escalation,
-        and set requests/limits so a runaway can't starve the node.
+        disable the ServiceAccount token automount (a prompt-injected agent in
+        the pod has no cluster API credential to steal), and set
+        requests/limits so a runaway can't starve the node.
 
         ``container_name`` MUST be the pod name: ``kubectl run`` names the
         single container after the pod, and a per-container ``securityContext``
@@ -106,6 +109,7 @@ class KubernetesBackend:
             container["resources"] = {"limits": limits, "requests": limits}
         return {
             "spec": {
+                "automountServiceAccountToken": False,
                 "securityContext": {
                     "runAsNonRoot": True,
                     "runAsUser": int(self.run_as_user),
