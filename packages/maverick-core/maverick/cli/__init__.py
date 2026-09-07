@@ -465,8 +465,12 @@ def installation_maintenance_cmd(step: str) -> None:
                 # The disposable CI protocol harness may suppress the window;
                 # this changes no maintenance authority or verification gate.
                 if request.get("open_result") is not False:
+                    # This desktop outlives the onefile helper. Its later
+                    # rollback must unpack a fresh helper, not reuse this
+                    # process's temporary runtime after bootloader cleanup.
                     subprocess.Popen([str(desktop), "--maintenance-result", details["id"]],
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
                                      creationflags=subprocess.CREATE_NO_WINDOW)
         click.echo(json.dumps(result))
     except Exception as exc:

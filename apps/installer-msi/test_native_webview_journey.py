@@ -119,6 +119,146 @@ assert.deepEqual(inspect(),{ready:true,path:'other',form_rejected:false,rejectio
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.parametrize("mode", ["accepted", "visible_refusal", "incomplete", "timeout", "missing-receipt", "wrong-version"])
+def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path, modules, monkeypatch, mode):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = journey.state = tmp_path
+    journey.binary = tmp_path / "maverick-desktop.exe"
+    journey.metadata = {"version": "0.1.7"}
+    journey.report = {"checks": []}
+    journey.authorization = lambda **_kwargs: "synthetic-private-grant"
+    journey.menu = lambda _label: None
+    actions, versions = [], []
+    launched = False
+
+    def windows(_path):
+        replaced = launched and mode in {"accepted", "missing-receipt", "wrong-version"}
+        return [(123, 2 if replaced else 1)]
+
+    def version(expected):
+        versions.append(expected)
+        if len(versions) == 2 and mode == "wrong-version":
+            raise RuntimeError("private runtime details must stay excluded")
+
+    class View:
+        session = "/session/synthetic"
+
+        def fill(self, _selector, _value):
+            pass
+
+        def click(self, selector):
+            nonlocal launched
+            assert selector == "#rollback-install"
+            launched = True
+
+        def call(self, _method, _path, payload):
+            if mode in {"visible_refusal", "incomplete"}:
+                return mode
+            return "completed" if mode == "accepted" and payload["args"][0] else "pending"
+
+        def wait(self, condition, **_kwargs):
+            observed = condition()
+            if not observed:
+                raise RuntimeError("synthetic private driver error")
+            return observed
+
+        def close(self):
+            actions.append("close")
+
+        def screenshot(self, _path):
+            actions.append("screenshot")
+
+    journey.view = View()
+    journey.assert_version = version
+    journey.attach = lambda: actions.append("attach")
+    monkeypatch.setattr(module, "app_windows", windows)
+    if mode == "accepted":
+        journey.transition(rollback=True)
+        assert journey.report["checks"] == ["signed-native-rollback"]
+        assert actions == ["close", "attach", "screenshot"]
+        assert versions == ["0.1.8", "0.1.7"]
+    else:
+        with pytest.raises(RuntimeError, match="bounded transition diagnostics") as error:
+            journey.transition(rollback=True)
+        assert "private" not in str(error.value)
+        assert "private" not in json.dumps(journey.report)
+        assert journey.report["checks"] == [] and "screenshot" not in actions
+        diagnostic = journey.report["transition"]
+        assert set(diagnostic) == {"stage", "page_state", "process_state_available", "installed_old_process",
+                                   "installed_new_process", "retained_result_windows"}
+        expected = "completion_receipt" if mode == "missing-receipt" else "version_verification" if mode == "wrong-version" else "process_relaunch"
+        assert diagnostic["stage"] == expected
+        assert diagnostic["installed_old_process"] == (expected == "process_relaunch")
+
+
+def test_transition_page_script_classifies_visible_fixed_messages_without_private_data(modules):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for the actual browser-script contract check")
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    scripts = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, payload):
+            scripts.append(payload["script"])
+            return {"private": "unexpected driver payload"}
+
+    journey.view = View()
+    assert journey.transition_page_state() == "unavailable"
+    source = """
+const assert = require('node:assert/strict');
+const inspect = new Function(SCRIPT);
+global.location = {origin:'http://tauri.localhost',pathname:'/maintenance.html',search:'?private',hash:'#private'};
+let visible = true, status = '', result = '';
+global.document = {readyState:'complete',get cookie(){throw Error('cookie access forbidden')},
+  querySelector(selector){assert.ok(['#maintenance-status','#maintenance-recovery-result'].includes(selector));
+    return {getClientRects:()=>visible?[{}]:[],textContent:selector==='#maintenance-status'?status:result}}};
+status = 'Lightwork could not complete that step. Open Troubleshooting details for the reason, then check again or contact your administrator.';
+assert.equal(inspect(), 'visible_refusal');
+visible = false; assert.equal(inspect(), 'pending'); visible = true;
+status = 'private arbitrary error'; result = 'An unfinished installation is blocking normal workspace startup. private';
+assert.equal(inspect(), 'incomplete');
+result = 'Completed operations: returned to 0.1.7'; assert.equal(inspect('returned to 0.1.7'),'completed');
+assert.equal(inspect('returned to 0.1.6'),'pending');
+location.origin = 'http://127.0.0.1:8765'; assert.equal(inspect(),'unavailable');
+""".replace("SCRIPT", json.dumps(scripts[0]))
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
+def test_transition_diagnostic_enumerates_only_bounded_exact_retained_fixture_paths(tmp_path, modules, monkeypatch):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.state = tmp_path
+    journey.binary = tmp_path / "installed/maverick-desktop.exe"
+    journey.transition_page_state = lambda: "unavailable"
+    store = tmp_path / "backups/installation-recovery"
+    for name in ["private-invalid-point", *[f"{index:032x}" for index in range(25)]]:
+        point = store / name
+        point.mkdir(parents=True)
+        (point / "maverick-desktop.exe").write_bytes(b"synthetic native; never executed")
+        (point / "record.json").write_text("private record must not be read")
+    called = []
+
+    def windows(binary):
+        called.append(binary)
+        if binary == journey.binary:
+            return [(11, 7), (12, 9)]
+        assert binary.parent.parent == store and re.fullmatch(r"[0-9a-f]{32}", binary.parent.name)
+        return [(13, 10), (14, 11)]
+
+    monkeypatch.setattr(module, "app_windows", windows)
+    diagnostic = journey.transition_diagnostic({7})
+    assert len(called) <= 21
+    assert diagnostic == {"page_state": "unavailable", "process_state_available": True,
+                          "installed_old_process": True, "installed_new_process": True, "retained_result_windows": 20}
+    assert "private" not in json.dumps(diagnostic)
+
+
 def test_startup_probe_restores_runtime_and_preserves_primary_failure(tmp_path, modules):
     module, _ = modules
     journey = module.Journey.__new__(module.Journey)

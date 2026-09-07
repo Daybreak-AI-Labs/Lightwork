@@ -11,6 +11,10 @@ MAX_BYTES = 1024 * 1024
 MAX_FILES = 32
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_IMAGES = 5
+NATIVE_MAINTENANCE_LOGS = (
+    "native-webview-*/state/backups/installation-recovery/*/i-*.log",
+    "native-webview-*/state/backups/installation-recovery/*/x-*.log",
+)
 PATTERNS = (
     "lightwork-msi-*.log",
     "rollback-signed-*/stages.json",
@@ -26,6 +30,7 @@ PATTERNS = (
     "native-webview-*/acceptance.json",
     "native-webview-*/driver.log",
     "native-webview-*/msi-*.log",
+    *NATIVE_MAINTENANCE_LOGS,
     "native-webview-*/downloads/Lightwork-startup-support.json",
     "lightwork-customer-state-*/dashboard-*.log",
     "lightwork-customer-state-*/recovery-*.log",
@@ -68,9 +73,11 @@ def collect(runner: Path, artifacts: Path, output: Path) -> dict:
         "acceptance.json", "completed-rollback-acceptance.json", "runtime-inventory.json",
         "publisher-transition-acceptance.json",
     )]
-    # Reports and stage summaries must survive a large number of MSI logs.
+    # Reports remain first. Preserve the native operation's own MSI evidence
+    # before earlier fixture install/uninstall logs consume the file limit.
     for path, root in sorted(set(candidates), key=lambda item: (
-            item[1] != artifacts, item[0].suffix != ".json", str(item[0]))):
+            item[1] != artifacts, item[0].suffix != ".json",
+            not any(item[0].match(pattern) for pattern in NATIVE_MAINTENANCE_LOGS), str(item[0]))):
         if len(entries) >= MAX_FILES:
             break
         if not ordinary_file(path, root):

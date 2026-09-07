@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from itertools import islice
 from pathlib import Path
 
 try:
@@ -23,6 +24,7 @@ try:
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
 
+from collect_acceptance_diagnostics import ordinary_file
 from native_webview_driver import WebView, app_windows, menu
 from native_webview_fixture import (
     available_port,
@@ -329,15 +331,78 @@ return {ready: document.readyState === 'complete', path, form_rejected: !!alert,
         self.view.click("#rollback-install" if rollback else "#install-update")
         # The real retained helper waits for this native parent, replaces the
         # installer and starts its result window. Reattach to that actual window.
-        self.view.wait(lambda: (windows := app_windows(self.binary)) and
-                       all(pid not in old_pids for _hwnd, pid in windows), timeout=600)
-        self.view.close()
-        self.attach()
-        self.assert_version(version if rollback else newer)
-        text = "returned to " + version if rollback else "updated to " + newer
-        self.view.wait(lambda: text in self.view.text("#maintenance-recovery-result"), timeout=600)
+        stage = "process_relaunch"
+        try:
+            observed = self.view.wait(lambda: self.transition_progress(old_pids), timeout=600)
+            if observed != "replacement_ready":
+                raise RuntimeError("The native page reported an unsuccessful operation.")
+            self.view.close()
+            self.attach()
+            stage = "version_verification"
+            self.assert_version(version if rollback else newer)
+            stage = "completion_receipt"
+            text = "returned to " + version if rollback else "updated to " + newer
+            observed = self.view.wait(lambda: self.transition_progress(old_pids, text), timeout=600)
+            if observed != "completed":
+                raise RuntimeError("The native page did not report successful completion.")
+        except (OSError, RuntimeError, KeyError):
+            self.report["transition"] = {"stage": stage, **self.transition_diagnostic(old_pids)}
+            self.record(name)
+            raise RuntimeError("Native installation transition did not complete; bounded transition diagnostics were retained.") from None
         self.view.screenshot(self.directory / (name + ".png"))
         self.record(name, passed=True)
+
+    def transition_page_state(self, expected_result=None):
+        # Return classifications only. Private authorizations, errors, full
+        # URLs and page content must never enter the driver or CI artifacts.
+        script = """
+if (location.origin !== 'http://tauri.localhost' || location.pathname !== '/maintenance.html'
+    || document.readyState !== 'complete') return 'unavailable';
+const visibleText = selector => {
+  const node = document.querySelector(selector);
+  return node && node.getClientRects().length ? (node.textContent || '').trim() : '';
+};
+const status = visibleText('#maintenance-status');
+const result = visibleText('#maintenance-recovery-result');
+if (status === 'Lightwork could not complete that step. Open Troubleshooting details for the reason, then check again or contact your administrator.') return 'visible_refusal';
+if (result.startsWith('An unfinished installation is blocking normal workspace startup.')) return 'incomplete';
+return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
+"""
+        try:
+            value = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": [expected_result]})
+            if isinstance(value, str) and value in {"unavailable", "visible_refusal", "incomplete", "completed", "pending"}:
+                return value
+        except (OSError, RuntimeError, KeyError):
+            pass
+        return "unavailable"
+
+    def transition_progress(self, old_pids, expected_result=None):
+        if expected_result is None:
+            windows = app_windows(self.binary)
+            if windows and all(pid not in old_pids for _hwnd, pid in windows):
+                return "replacement_ready"
+        state = self.transition_page_state(expected_result)
+        return state if state in {"visible_refusal", "incomplete", "completed"} else None
+
+    def transition_diagnostic(self, old_pids):
+        result = {"page_state": self.transition_page_state(), "process_state_available": False,
+                  "installed_old_process": False, "installed_new_process": False, "retained_result_windows": 0}
+        try:
+            windows = app_windows(self.binary)
+            result.update(process_state_available=True,
+                          installed_old_process=any(pid in old_pids for _hwnd, pid in windows),
+                          installed_new_process=any(pid not in old_pids for _hwnd, pid in windows))
+            store = self.state / "backups/installation-recovery"
+            if store.is_dir():
+                # Derive only bounded exact fixture paths; never read a signed
+                # record's paths or follow a retained helper through reparse points.
+                for point in islice(store.iterdir(), 20):
+                    binary = point / "maverick-desktop.exe"
+                    if re.fullmatch(r"[0-9a-f]{32}", point.name) and ordinary_file(binary, self.state):
+                        result["retained_result_windows"] = min(20, result["retained_result_windows"] + len(app_windows(binary)))
+        except (OSError, RuntimeError, KeyError):
+            result["process_state_available"] = False
+        return result
 
     def reject_invalid_authorization(self):
         self.record("invalid-maintenance-authorization-refused")
