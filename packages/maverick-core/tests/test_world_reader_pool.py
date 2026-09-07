@@ -70,4 +70,28 @@ def test_close_shuts_reader_connections(tmp_path):
     w.list_goals()  # open a reader on this thread
     assert w._reader_conns  # at least one reader registered
     w.close()
-    assert w._reader_conns == []  # drained + closed
+    assert w._reader_conns == {}  # drained + closed
+
+
+def test_short_lived_reader_threads_do_not_leak_connections(tmp_path):
+    """A short-lived thread's reader connection must not be retained for the
+    WorldModel's entire lifetime: FastAPI/Starlette sync-route and template
+    work run on anyio worker threads that exit after being idle, and every
+    such thread that ever reads used to permanently leak one sqlite3
+    connection (plus its WAL/SHM file descriptors) into _reader_conns, which
+    was only ever drained in close(). A long-running dashboard with bursty
+    traffic walks toward EMFILE / 'unable to open database file'."""
+    w = WorldModel(tmp_path / "w.db")
+    try:
+        gid = w.create_goal("t", "d")
+        for _ in range(50):
+            t = threading.Thread(target=lambda: w.get_goal(gid))
+            t.start()
+            t.join()
+        # Each thread has already exited by the time the next one's first
+        # _reader() call runs, so pruning should keep the live set to at
+        # most the handful of threads genuinely alive at any one instant --
+        # nowhere near one entry per thread ever spawned.
+        assert len(w._reader_conns) <= 2, w._reader_conns
+    finally:
+        w.close()
