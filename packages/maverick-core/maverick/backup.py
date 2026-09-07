@@ -717,12 +717,28 @@ def _world_schema_version(root: Path) -> int | None:
         return None
 
 
-def _excluded_from_snapshot(relative: Path) -> bool:
+# The at-rest encryption key (keys/at_rest.key + the keys/at_rest.d/*.key
+# rotation keyring) and the audit signing key (audit/keys/) decrypt/authenticate
+# everything else this snapshot carries. docs/encryption.md tells operators to
+# escrow the at-rest key "not next to the data they unlock"; bundling it inside
+# the very archive it decrypts does the opposite and nullifies the product's
+# at-rest-encryption posture for anyone who obtains a copy (offsite backup, S3
+# bucket, standby host, a DSAR export handed to the data subject).
+_KEY_MATERIAL_ROOTS = (("keys",), ("audit", "keys"))
+
+
+def _is_key_material(relative: Path) -> bool:
+    parts = relative.parts
+    return any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS)
+
+
+def _excluded_from_snapshot(relative: Path, *, include_keys: bool) -> bool:
     return (
         not relative.parts
         or relative.parts[0] in {"backups", _RESTORE_TX_ROOT}
         or relative.name == f"{_RESTORE_LOCK_TARGET}.lock"
         or relative.name.endswith(_SKIP_SUFFIXES)
+        or (not include_keys and _is_key_material(relative))
         or _is_reserved_restore_path(PurePosixPath(relative.as_posix()))
     )
 
@@ -742,14 +758,14 @@ def _is_sqlite_file(path: Path) -> bool:
         raise BackupError("could not inspect a possible SQLite database") from exc
 
 
-def _stage(root: Path, stage: Path) -> dict[str, dict[str, Any]]:
+def _stage(root: Path, stage: Path, *, include_keys: bool) -> dict[str, dict[str, Any]]:
     root, stage = _filesystem_path(root), _filesystem_path(stage)
     files: dict[str, dict[str, Any]] = {}
     total = 0
     count = 0
     for source in sorted(root.rglob("*")):
         relative = source.relative_to(root)
-        if _excluded_from_snapshot(relative):
+        if _excluded_from_snapshot(relative, include_keys=include_keys):
             continue
         try:
             info = source.lstat()
@@ -810,6 +826,7 @@ def create_backup(
     out: str | Path | None = None,
     *,
     allow_unsigned: bool = False,
+    include_keys: bool = False,
     recovery_metadata: dict[str, Any] | None = None,
 ) -> Path:
     """Create one private, atomically-published backup archive.
@@ -818,6 +835,13 @@ def create_backup(
     ``MAVERICK_BACKUP_SIGNING_KEY``. ``allow_unsigned=True`` exists only for
     explicit legacy interoperability; such an archive is labelled unsigned.
     Existing destination paths are refused rather than overwritten.
+
+    ``include_keys`` defaults to ``False``: the at-rest encryption key (and
+    rotation keyring) and the audit signing key are excluded from the
+    archive, matching docs/encryption.md's escrow guidance to keep key
+    material off the same copy as the data it decrypts. Pass
+    ``include_keys=True`` only when the operator has explicitly chosen to
+    bundle the key with the archive instead of escrowing it separately.
     """
     root = _client_root()
     if not root.exists():
@@ -849,7 +873,7 @@ def create_backup(
         temp_root = file_lock.ensure_private_directory(temporary)
         stage = file_lock.ensure_private_directory(temp_root / "data")
         schema_version = _world_schema_version(root)
-        files = _stage(root, stage)
+        files = _stage(root, stage, include_keys=include_keys)
         if not files:
             raise BackupError(f"no data files to back up at {root}")
         manifest = _authenticate_for_write({
@@ -1151,11 +1175,19 @@ def _recover_transactions(root: Path, *, allow_unsigned: bool) -> None:
         tx_root.rmdir()
 
 
+def _archive_includes_keys(expected: dict) -> bool:
+    return any(_is_key_material(Path(*PurePosixPath(name).parts)) for name in expected)
+
+
 def _replacement_targets(root: Path, expected: dict) -> set[str]:
+    # A keys-excluded archive must never turn live key material into a
+    # replacement target: replace_existing unlinks targets absent from the
+    # archive, which would destroy the at-rest key the restored data needs.
+    include_keys = _archive_includes_keys(expected)
     targets = set(expected)
     for path in root.rglob("*"):
         relative = path.relative_to(root)
-        if _excluded_from_snapshot(relative):
+        if _excluded_from_snapshot(relative, include_keys=include_keys):
             continue
         info = path.lstat()
         if _is_alias(path, info):
@@ -1371,7 +1403,7 @@ def compare_backup(tarball: str | Path) -> dict[str, Any]:
             current = file_lock.ensure_private_directory(temporary / "current")
             stream.seek(0)
             _extract_payload_stream(stream, selected, expected=expected)
-            live = _stage(_client_root(), current)
+            live = _stage(_client_root(), current, include_keys=_archive_includes_keys(expected))
             protected = {
                 name for name in expected
                 if _accounting_file(name, selected / Path(*PurePosixPath(name).parts))

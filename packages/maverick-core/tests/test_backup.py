@@ -242,6 +242,84 @@ def test_backup_excludes_prior_backups(monkeypatch):
     assert "data/world.db" in members
 
 
+def _seed_key_material(root):
+    """Write stand-ins for the at-rest key, its rotation keyring, and the
+    audit signing key at their real on-disk locations (crypto_at_rest.py,
+    audit/signing.py)."""
+    keys_dir = root / "keys"
+    keyring_dir = keys_dir / "at_rest.d"
+    keyring_dir.mkdir(parents=True, exist_ok=True)
+    (keys_dir / "at_rest.key").write_bytes(b"\x00" * 32)
+    (keyring_dir / "k1.key").write_bytes(b"\x01" * 32)
+    audit_keys_dir = root / "audit" / "keys"
+    audit_keys_dir.mkdir(parents=True, exist_ok=True)
+    (audit_keys_dir / "signing.key").write_bytes(b"\x02" * 32)
+
+
+def test_backup_excludes_key_material_by_default():
+    """The at-rest encryption key and audit signing key decrypt/authenticate
+    everything else the archive carries; bundling them inside the same copy
+    nullifies at-rest encryption for anyone who obtains it (offsite backup,
+    S3 bucket, standby host, a DSAR export handed to the data subject).
+    docs/encryption.md's escrow guidance is "not next to the data they
+    unlock" -- the default archive must not carry any *.key member."""
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    _seed_key_material(root)
+
+    tar = backup.create_backup()
+    with tarfile.open(tar, "r:gz") as archive:
+        members = archive.getnames()
+    assert not any(name.endswith(".key") for name in members), members
+    assert "data/keys/at_rest.key" not in members
+    assert "data/keys/at_rest.d/k1.key" not in members
+    assert "data/audit/keys/signing.key" not in members
+    assert "data/world.db" in members  # everything else still ships
+
+
+def test_backup_include_keys_opts_back_in():
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    _seed_key_material(root)
+
+    tar = backup.create_backup(include_keys=True)
+    with tarfile.open(tar, "r:gz") as archive:
+        members = archive.getnames()
+    assert "data/keys/at_rest.key" in members
+    assert "data/keys/at_rest.d/k1.key" in members
+    assert "data/audit/keys/signing.key" in members
+
+
+def test_replace_existing_restore_preserves_live_keys_when_archive_excludes_them(tmp_path):
+    """replace_existing unlinks live files absent from the archive. A default
+    (keys-excluded) archive must not turn the live at-rest/audit keys into
+    such targets -- deleting them would leave the restored ciphertext
+    unreadable. Keys travel only when the archive itself carries them."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "notes.txt").write_text("payload")
+    with backup.recovery_scope(source, "acme", bytes(range(32))):
+        without_keys = backup.create_backup(tmp_path / "no-keys.tgz")
+        _seed_key_material(source)
+        with_keys = backup.create_backup(tmp_path / "with-keys.tgz", include_keys=True)
+
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    _seed_key_material(destination)
+    (destination / "keys" / "at_rest.key").write_bytes(b"\x07" * 32)
+    with backup.recovery_scope(destination, "acme", bytes(range(32))):
+        backup.restore_backup(without_keys, replace_existing=True)
+    assert (destination / "keys" / "at_rest.key").read_bytes() == b"\x07" * 32
+    assert (destination / "keys" / "at_rest.d" / "k1.key").exists()
+    assert (destination / "audit" / "keys" / "signing.key").exists()
+
+    with backup.recovery_scope(destination, "acme", bytes(range(32))):
+        backup.restore_backup(with_keys, replace_existing=True)
+    assert (destination / "keys" / "at_rest.key").read_bytes() == b"\x00" * 32
+
+
 def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None, resign=False):
     """Rebuild a backup tarball, optionally mutating the manifest dict or a
     named data file's bytes — to forge corrupt / schema-incompatible backups."""

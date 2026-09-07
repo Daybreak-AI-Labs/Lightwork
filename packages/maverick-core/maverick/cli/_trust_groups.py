@@ -316,19 +316,34 @@ def backup_group() -> None:
     """Back up / restore this client's data for DR + standby failover.
 
     Snapshots the client-scoped data root (world DB via the SQLite online backup
-    API, signed audit chain + keys, memory, fleet, managed trust registry) into
-    a portable ``.tgz`` with an authenticated manifest. Set the same 32-byte
-    ``MAVERICK_BACKUP_SIGNING_KEY`` on the active and standby nodes. Restore is
-    transactional and fail-closed on authenticity, bounds, and client id."""
+    API, signed audit chain, memory, fleet, managed trust registry) into a
+    portable ``.tgz`` with an authenticated manifest. The at-rest encryption
+    key and audit signing key are excluded by default (escrow them
+    separately per docs/encryption.md; ``--include-keys`` opts back in). Set
+    the same 32-byte ``MAVERICK_BACKUP_SIGNING_KEY`` on the active and
+    standby nodes. Restore is transactional and fail-closed on
+    authenticity, bounds, and client id."""
 
 
 @backup_group.command("create")
 @click.option("--out", default=None, help="Destination .tgz (default: under data root).")
-def backup_create_cmd(out) -> None:
+@click.option("--include-keys", is_flag=True,
+              help="Bundle the at-rest encryption + audit signing key material "
+                   "in the archive. Off by default: escrow keys separately "
+                   "instead of storing them next to the data they unlock.")
+def backup_create_cmd(out, include_keys) -> None:
     """Create a consistent backup of this client's data."""
     from ..backup import BackupError, create_backup
+    if include_keys:
+        click.echo(click.style(
+            "WARNING: --include-keys bundles the at-rest encryption and audit "
+            "signing key material inside this archive. Anyone who obtains a "
+            "copy (offsite backup, object storage, a lost disk) gets "
+            "plaintext-equivalent access to everything it seals. Escrow keys "
+            "separately unless you have a specific reason not to.",
+            fg="yellow"))
     try:
-        path = create_backup(out)
+        path = create_backup(out, include_keys=include_keys)
     except BackupError as e:
         raise click.ClickException(str(e)) from e
     click.echo(click.style(f"backup written: {path}", fg="green"))
