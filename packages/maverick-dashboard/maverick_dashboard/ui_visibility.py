@@ -40,6 +40,16 @@ from . import rbac
 # but out of the sidebar -- secondary composers/detail surfaces reached from a
 # primary page's own links, so the nav stays one entry per job.
 PAGES: tuple[dict, ...] = (
+    {"path": "/workflow-readiness", "label": "Workflow readiness", "group": "Observe",
+     "icon": "check", "floor": "view", "default": "view"},
+    {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
+     "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
+     "icon": "check", "floor": "view", "default": "view", "in_nav": False},
+    {
+        "path": "/action-center", "label": "Action Center", "group": "Operate",
+        "icon": "check", "floor": "operate", "default": "operate",
+    },
     # -- Operate --------------------------------------------------------------
     {
         "path": "/start",
@@ -1043,6 +1053,14 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "admin",
         "in_nav": True,
+    },
+    {
+        "path": "/workspace/recovery",
+        "label": "Workspace recovery",
+        "group": "Admin",
+        "icon": "settings",
+        "floor": "admin",
+        "default": "admin",
     },
     {
         "path": "/settings",

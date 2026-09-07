@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Help and diagnostics · Lightwork{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/lightwork-support.css">{% endblock %}
+{% block content %}
+<section id="support-center" data-context="{{ support_context }}" data-draft-recovery="off">
+  <h1>Help and diagnostics</h1>
+  <p>Prepare a redacted report of this installation's versions, readiness checks and recent failures. Review it here, then download the same report to share with your support contact.</p>
+  <p>Reports may contain workspace labels and error descriptions. Passwords and recognized credentials are removed. Nothing is sent automatically.</p>
+  {% if can_prepare_support %}
+  <button type="button" class="btn btn--primary" id="support-prepare">Prepare support report</button>
+  <p id="support-status" role="status" aria-live="polite">No report has been collected.</p>
+  <section id="support-result" hidden>
+    <h2>Report summary</h2><p id="support-reference"></p><ul id="support-readiness"></ul>
+    <p><a href="/settings">Review settings</a> · <a href="/workspace/recovery">Open workspace recovery</a></p>
+    <details><summary>Review the redacted report</summary><pre id="support-preview"></pre></details>
+    <p><label><input type="checkbox" id="support-confirm"> I reviewed the report and want to download it.</label></p>
+    <button type="button" class="btn btn--primary" id="support-download" disabled>Download reviewed report</button>
+  </section>
+  {% elif not support_enabled %}<p>Support report collection is disabled. An installation administrator can review its availability in Settings.</p><p><a href="/goals">Open your tasks</a></p>
+  {% else %}<p>Your installation administrator can prepare a support report. You can review your task's status and errors from its task page.</p><p><a href="/goals">Open your tasks</a></p>{% endif %}
+</section>
+{% if can_prepare_support %}<script src="/static/lightwork-support.js" defer></script>{% endif %}
+{% endblock %}

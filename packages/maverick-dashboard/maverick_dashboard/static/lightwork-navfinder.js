@@ -24,6 +24,8 @@
     var options = Array.prototype.slice.call(
       results.querySelectorAll("[data-navfinder-target]")
     );
+    var pageOptions = options.slice();
+    var recordOptions = [];
     var activeIndex = -1;
     var returnFocus = null;
     var isOpen = false;
@@ -62,7 +64,7 @@
 
     function filterResults() {
       var terms = normalise(input.value).split(/\s+/).filter(Boolean);
-      options.forEach(function (option) {
+      pageOptions.forEach(function (option) {
         var haystack = normalise(option.getAttribute("data-search"));
         var matches = terms.every(function (term) { return haystack.indexOf(term) !== -1; });
         option.hidden = !matches;
@@ -70,7 +72,9 @@
       });
 
       var visible = visibleOptions();
-      count.textContent = visible.length === 1 ? "1 page" : visible.length + " pages";
+      var pages = pageOptions.filter(function (option) { return !option.hidden; }).length;
+      count.textContent = (pages === 1 ? "1 page" : pages + " pages") +
+        (recordOptions.length ? ", " + recordOptions.length + " records shown" : "");
       empty.hidden = visible.length !== 0;
       results.hidden = visible.length === 0;
       setActive(visible.length ? 0 : -1, false);
@@ -98,6 +102,7 @@
       trigger.setAttribute("aria-expanded", "false");
       input.setAttribute("aria-expanded", "false");
       input.removeAttribute("aria-activedescendant");
+      queryChanged("closed");
       restoreFocus();
     }
 
@@ -128,11 +133,44 @@
         dialog.setAttribute("open", "");
       }
       input.focus({ preventScroll: true });
+      queryChanged("opened");
     }
 
     trigger.addEventListener("click", function () { openFinder(trigger); });
     closeButton.addEventListener("click", closeFinder);
-    input.addEventListener("input", filterResults);
+    input.addEventListener("input", function () { filterResults(); queryChanged("input"); });
+
+    function queryChanged(reason) {
+      if (typeof global.CustomEvent === "function") {
+        dialog.dispatchEvent(new global.CustomEvent("lightwork:finder-query", {detail: {reason: reason, query: input.value}}));
+      }
+    }
+
+    function bindOption(option) {
+      option.addEventListener("mouseenter", function () {
+        var index = visibleOptions().indexOf(option);
+        if (index >= 0) setActive(index, false);
+      });
+      option.addEventListener("click", closeFinder);
+    }
+
+    function setRecords(rows) {
+      recordOptions.forEach(function (option) { option.parentElement.remove(); });
+      recordOptions = [];
+      rows.forEach(function (row, index) {
+        var entry = doc.createElement("li"); entry.setAttribute("role", "none");
+        var option = doc.createElement("a"); option.id = "navfinder-record-" + index;
+        option.href = row.href; option.setAttribute("role", "option"); option.setAttribute("tabindex", "-1");
+        option.setAttribute("aria-selected", "false");
+        var label = doc.createElement("span"); label.className = "navfinder__label"; label.textContent = row.title;
+        var description = doc.createElement("span"); description.className = "navfinder__group";
+        description.textContent = row.kind + " · " + row.id + (row.revision ? " · version " + row.revision : "") + (row.state ? " · " + row.state.replaceAll("_", " ") : "");
+        option.appendChild(label); option.appendChild(description); entry.appendChild(option); results.appendChild(entry);
+        recordOptions.push(option); bindOption(option);
+      });
+      options = pageOptions.concat(recordOptions); filterResults();
+      if (!isOpen) input.removeAttribute("aria-activedescendant");
+    }
 
     dialog.addEventListener("cancel", function (event) {
       event.preventDefault();
@@ -163,14 +201,7 @@
       }
     });
 
-    options.forEach(function (option) {
-      option.addEventListener("mouseenter", function () {
-        var visible = visibleOptions();
-        var index = visible.indexOf(option);
-        if (index >= 0) setActive(index, false);
-      });
-      option.addEventListener("click", closeFinder);
-    });
+    options.forEach(bindOption);
 
     doc.addEventListener("keydown", function (event) {
       var shortcut = (event.ctrlKey || event.metaKey) && !event.altKey &&
@@ -181,12 +212,15 @@
       else openFinder(doc.activeElement || trigger);
     });
 
-    return {
+    var controller = {
       open: openFinder,
       close: closeFinder,
       filter: filterResults,
       visibleOptions: visibleOptions,
+      setRecords: setRecords,
     };
+    dialog.lightworkFinder = controller;
+    return controller;
   }
 
   global.LightworkNavFinder = { init: init };
