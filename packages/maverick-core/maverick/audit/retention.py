@@ -187,12 +187,48 @@ def _purge_table_by_time(
     try:
         # The agent may be writing concurrently; wait rather than fail fast.
         conn.execute("PRAGMA busy_timeout=5000")
+        # W1-50: the canonical (--db-path-less) path opens with foreign_keys
+        # ON, so this raw connection must too or the two routes silently
+        # disagree -- without it, deleting an episode any fact still cites
+        # leaves a dangling facts.source_episode_id/fact_history.source_episode_id
+        # instead of raising, corrupting the world.db this route writes to
+        # directly.
+        conn.execute("PRAGMA foreign_keys = ON")
         cur = conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE {time_col} IS NOT NULL AND {time_col} < ?",
             (cutoff_ts,),
         )
         (count,) = cur.fetchone()
         if not dry_run and count > 0:
+            if table == "episodes":
+                # Same reasoning as WorldModel.purge_episodes_before: an aged-out
+                # episode's provenance link on a still-live fact must be nulled,
+                # not left to trip the FK constraint just enabled above. Guard
+                # on the tables existing -- a --db-path target isn't guaranteed
+                # to be a full, current-schema world.db.
+                existing = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name IN ('facts', 'fact_history')"
+                    ).fetchall()
+                }
+                episode_query = (
+                    f"SELECT id FROM {table} "
+                    f"WHERE {time_col} IS NOT NULL AND {time_col} < ?"
+                )
+                if "facts" in existing:
+                    conn.execute(
+                        "UPDATE facts SET source_episode_id = NULL "
+                        f"WHERE source_episode_id IN ({episode_query})",
+                        (cutoff_ts,),
+                    )
+                if "fact_history" in existing:
+                    conn.execute(
+                        "UPDATE fact_history SET source_episode_id = NULL "
+                        f"WHERE source_episode_id IN ({episode_query})",
+                        (cutoff_ts,),
+                    )
             conn.execute(
                 f"DELETE FROM {table} WHERE {time_col} IS NOT NULL AND {time_col} < ?",
                 (cutoff_ts,),

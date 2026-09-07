@@ -130,6 +130,64 @@ def test_purge_world_episodes_dry_run(tmp_path: Path):
     assert left == 1  # still there
 
 
+def test_purge_episodes_before_nulls_dangling_fact_references(tmp_path: Path):
+    # W1-50 (canonical path): facts.source_episode_id / fact_history.source_
+    # episode_id REFERENCE episodes(id) with no ON DELETE clause, and the
+    # world opens with foreign_keys ON. Deleting an aged-out episode that a
+    # still-live fact cites used to raise sqlite3.IntegrityError and abort
+    # the whole retention run -- older episodes were never pruned.
+    from maverick.world_model import WorldModel
+
+    w = WorldModel(tmp_path / "world.db")
+    gid = w.create_goal("t", "d")
+    eid = w.start_episode(gid)
+    w.end_episode(eid, "s", "ok")
+    w.upsert_fact("k", "v", episode_id=eid)
+
+    deleted = w.purge_episodes_before(time.time() + 10)
+
+    assert deleted == 1
+    # The fact survives -- retention prunes old episodes, not live facts.
+    assert w.get_fact("k") == "v"
+    conn = sqlite3.connect(str(tmp_path / "world.db"))
+    (episode_id,) = conn.execute(
+        "SELECT source_episode_id FROM facts WHERE key = 'k'"
+    ).fetchone()
+    conn.close()
+    assert episode_id is None  # provenance nulled, not left dangling
+
+
+def test_purge_world_episodes_db_path_nulls_dangling_fact_references(tmp_path: Path):
+    # W1-50 (--db-path route): this path opened a raw sqlite3 connection
+    # WITHOUT foreign_keys, so it silently deleted the parent episode and
+    # left a dangling facts.source_episode_id instead of raising -- the two
+    # retention routes disagreed on the same policy.
+    from maverick.audit.retention import purge_world_episodes
+    from maverick.world_model import WorldModel
+
+    db = tmp_path / "world.db"
+    w = WorldModel(db)
+    gid = w.create_goal("t", "d")
+    eid = w.start_episode(gid)
+    w.end_episode(eid, "s", "ok")
+    w.upsert_fact("k", "v", episode_id=eid)
+
+    far_future = time.time() + 90 * 86400
+    res = purge_world_episodes(days=1, db_path=db, now=far_future)
+
+    assert res["deleted"] == 1
+    conn = sqlite3.connect(str(db))
+    (ep_count,) = conn.execute(
+        "SELECT COUNT(*) FROM episodes WHERE id = ?", (eid,)
+    ).fetchone()
+    (episode_id,) = conn.execute(
+        "SELECT source_episode_id FROM facts WHERE key = 'k'"
+    ).fetchone()
+    conn.close()
+    assert ep_count == 0  # the episode is really gone
+    assert episode_id is None  # not left dangling
+
+
 def test_purge_world_events_removes_old(tmp_path: Path):
     from maverick.audit.retention import purge_world_events
     db = tmp_path / "world.db"

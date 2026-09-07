@@ -2265,6 +2265,17 @@ class WorldModel:
         This is the backend-portable retention primitive.  Keeping the
         operation on the world model (instead of opening its SQLite file behind
         its back) preserves backend selection and transaction ownership.
+
+        W1-50: ``facts.source_episode_id``/``fact_history.source_episode_id``
+        are ``REFERENCES episodes(id)`` with no ``ON DELETE`` clause, and the
+        world opens with ``PRAGMA foreign_keys = ON`` -- deleting an episode
+        any fact still cites (retention prunes by AGE, not by whether a fact
+        still needs it) raised ``sqlite3.IntegrityError`` and aborted the
+        whole retention job. Unlike the erasure path (which deletes the
+        facts too -- the point there is removing personal data), retention
+        just wants the old episode gone; the fact itself is still live, so
+        null out the now-dangling provenance reference instead of deleting
+        the fact.
         """
         predicate = "ended_at IS NOT NULL AND ended_at < ?"
         with self._writing() as conn:
@@ -2274,6 +2285,17 @@ class WorldModel:
                     (float(cutoff_ts),),
                 ).fetchone()
                 return int(row[0] or 0)
+            episode_query = f"SELECT id FROM episodes WHERE {predicate}"
+            conn.execute(
+                "UPDATE facts SET source_episode_id = NULL "
+                f"WHERE source_episode_id IN ({episode_query})",
+                (float(cutoff_ts),),
+            )
+            conn.execute(
+                "UPDATE fact_history SET source_episode_id = NULL "
+                f"WHERE source_episode_id IN ({episode_query})",
+                (float(cutoff_ts),),
+            )
             cur = conn.execute(
                 f"DELETE FROM episodes WHERE {predicate}",
                 (float(cutoff_ts),),
