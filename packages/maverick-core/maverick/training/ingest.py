@@ -41,7 +41,10 @@ def load_donations(outbox: Path) -> Iterator[dict]:
         return
     for p in sorted(outbox.glob("*.json")):
         try:
-            yield json.loads(p.read_text(encoding="utf-8"))
+            record = json.loads(p.read_text(encoding="utf-8"))
+            from ..pilot_learning import excluded
+            if isinstance(record, dict) and not excluded(record.get("goal_id")):
+                yield record
         except json.JSONDecodeError:
             continue
 
@@ -55,6 +58,9 @@ def fetch_steps_for_goal(world, goal_id: int) -> list[dict]:
     training data. A real DB error is logged (not silently swallowed as empty).
     """
     if world is None:
+        return []
+    from ..pilot_learning import excluded
+    if excluded(goal_id):
         return []
     out: list[dict] = []
     since = 0

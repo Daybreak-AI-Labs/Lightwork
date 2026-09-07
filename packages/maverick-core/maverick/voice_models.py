@@ -22,9 +22,11 @@ import hashlib
 import logging
 import os
 import tempfile
+import threading
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +90,54 @@ KNOWN_MODELS: dict[str, tuple[str, str, int]] = {
 
 _BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 _CHUNK = 1 << 20  # 1 MiB
+_DOWNLOAD_LOCK = threading.Lock()
+
+
+class DownloadCancelled(RuntimeError):
+    """The operator cancelled before the verified file was installed."""
+
+
+def _check_cancel(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise DownloadCancelled("Speech model setup was cancelled.")
+
+
+def download_egress_permitted(url: str) -> bool:
+    """A shared model never weakens deployment policy through a tenant overlay."""
+    from .config import config_source_errors, load_global_config
+    from .enterprise import deployment_enterprise_enabled, egress_permitted
+
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        global_config = load_global_config()
+        if config_source_errors(include_tenant=True):
+            return False
+        if deployment_enterprise_enabled():
+            allowed = (global_config.get("enterprise") or {}).get("allowed_hosts") or []
+            if not isinstance(allowed, list) or not all(isinstance(host, str) for host in allowed):
+                return False
+            if parsed.hostname.lower().rstrip(".") not in {host.lower().strip().rstrip(".") for host in allowed}:
+                return False
+        return egress_permitted(url)
+    except Exception:
+        return False
+
+
+class _ModelRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not download_egress_permitted(newurl):
+            raise PermissionError("Speech model redirect is blocked by network policy.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open_model_url(url: str, *, timeout: float):
+    if not download_egress_permitted(url):
+        raise PermissionError("Speech model source is blocked by network policy.")
+    # OpenerDirector.open remains covered by the shared urllib egress guard;
+    # this extra handler preserves the deployment floor on every redirect.
+    return urllib.request.build_opener(_ModelRedirect()).open(url, timeout=timeout)  # noqa: S310
 
 
 def _voice_cfg() -> dict:
@@ -133,7 +183,7 @@ def installed_models() -> list[Path]:
     return sorted(p for p in d.glob("ggml-*.bin") if p.is_file())
 
 
-def verify_model(path: Path) -> bool | None:
+def verify_model(path: Path, *, cancel: threading.Event | None = None) -> bool | None:
     """True/False when ``path`` matches/violates a pinned digest; None when
     the filename isn't one we pin (operator-supplied model — allowed)."""
     pinned = {fn: sha for fn, sha, _ in KNOWN_MODELS.values()}
@@ -143,17 +193,44 @@ def verify_model(path: Path) -> bool | None:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(_CHUNK), b""):
+            _check_cancel(cancel)
             h.update(chunk)
     return h.hexdigest() == sha
+
+
+def model_fingerprint(stat) -> tuple[int, int, int, int, int]:
+    # Windows ctime is creation time, not inode change time. NTFS tunneling
+    # after replacement can expose different creation times through a held
+    # descriptor and Path.stat for the SAME file id. POSIX ctime is useful.
+    changed = 0 if os.name == "nt" else stat.st_ctime_ns
+    return stat.st_size, stat.st_mtime_ns, stat.st_dev, stat.st_ino, changed
+
+
+def verified_model_fingerprint(path: Path, *, cancel: threading.Event | None = None):
+    """Bind verification to a stable opened file, never a later replacement."""
+    pinned = next(((sha, size) for fn, sha, size in KNOWN_MODELS.values() if fn == path.name), None)
+    if pinned is None:
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        before = model_fingerprint(os.fstat(stream.fileno()))
+        if before[0] != pinned[1]:
+            return None
+        for chunk in iter(lambda: stream.read(_CHUNK), b""):
+            _check_cancel(cancel)
+            digest.update(chunk)
+        after = model_fingerprint(os.fstat(stream.fileno()))
+    _check_cancel(cancel)
+    if before != after or after != model_fingerprint(path.stat()) or digest.hexdigest() != pinned[0]:
+        return None
+    return after
 
 
 def auto_fetch_enabled() -> bool:
     """Runtime download of the configured model on first use / warm-up.
 
-    ON by default so the dashboard mic works with zero setup — the dashboard
-    warm-up fetches at startup, not mid-request. Egress-locked deployments
-    (enterprise boundary / compliance floors) default OFF: a locked box must
-    not phone Hugging Face because someone clicked a mic. An explicit
+    OFF unless the operator opted in. Opening the app is not consent to a
+    large model download. An explicit
     ``MAVERICK_VOICE_AUTO_FETCH`` env or ``[voice] auto_fetch_model`` config
     value always wins, in either direction."""
     raw = (os.environ.get("MAVERICK_VOICE_AUTO_FETCH") or "").strip().lower()
@@ -162,11 +239,7 @@ def auto_fetch_enabled() -> bool:
     cfg = _voice_cfg()
     if "auto_fetch_model" in cfg:
         return bool(cfg["auto_fetch_model"])
-    try:
-        from .enterprise import enterprise_enabled
-        return not enterprise_enabled()
-    except Exception:  # posture probe must never break voice paths
-        return True
+    return False
 
 
 def download_model(
@@ -175,6 +248,9 @@ def download_model(
     force: bool = False,
     progress: Callable[[int, int], None] | None = None,
     timeout: float = 60.0,
+    cancel: threading.Event | None = None,
+    verify_existing: bool = False,
+    before_install: Callable[[], None] | None = None,
 ) -> Path:
     """Fetch a GGML model into :func:`models_dir`, verifying the pinned
     SHA-256 before install (download to a temp file, hash, atomic rename).
@@ -182,11 +258,28 @@ def download_model(
     Raises ``ValueError`` for an unknown name or a digest mismatch, and
     ``OSError``/``URLError`` on network failure. Returns the installed path.
     """
-    name = name or configured_model()
+    # Serialize startup, explicit setup, and transcription in this process.
+    # Waiting remains cancellable; the explicit setup controller is single-flight.
+    while not _DOWNLOAD_LOCK.acquire(timeout=0.1):
+        _check_cancel(cancel)
+    try:
+        return _download_model(name or configured_model(), force=force, progress=progress,
+                               timeout=timeout, cancel=cancel, verify_existing=verify_existing,
+                               before_install=before_install)
+    finally:
+        _DOWNLOAD_LOCK.release()
+
+
+def _download_model(name, *, force, progress, timeout, cancel, verify_existing, before_install):
+    _check_cancel(cancel)
     dest = model_path(name)  # raises on unknown name
     filename, want_sha, want_size = KNOWN_MODELS[name]
     if dest.exists() and not force:
-        return dest
+        if not verify_existing or (dest.stat().st_size == want_size and verify_model(dest, cancel=cancel) is True):
+            _check_cancel(cancel)
+            if before_install:
+                before_install()
+            return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
     url = _BASE_URL + filename
 
@@ -197,23 +290,33 @@ def download_model(
     h = hashlib.sha256()
     done = 0
     try:
-        with os.fdopen(fd, "wb") as out, urllib.request.urlopen(  # noqa: S310 -- pinned https URL
+        with os.fdopen(fd, "wb") as out, _open_model_url(
             url, timeout=timeout
         ) as resp:
             while True:
+                _check_cancel(cancel)
                 chunk = resp.read(_CHUNK)
+                _check_cancel(cancel)
                 if not chunk:
                     break
+                if done + len(chunk) > want_size:
+                    raise ValueError(f"size exceeds the pinned limit for {filename}")
                 out.write(chunk)
                 h.update(chunk)
                 done += len(chunk)
                 if progress:
                     progress(done, want_size)
+        _check_cancel(cancel)
+        if done != want_size:
+            raise ValueError(f"size mismatch for {filename}: expected {want_size} bytes")
         if h.hexdigest() != want_sha:
             raise ValueError(
                 f"checksum mismatch for {filename}: got {h.hexdigest()}, "
                 f"expected {want_sha} — refusing to install"
             )
+        if before_install:
+            before_install()
+        _check_cancel(cancel)
         tmp.replace(dest)
     finally:
         if tmp.exists():
@@ -222,7 +325,7 @@ def download_model(
     return dest
 
 
-def locate_model() -> Path | None:
+def locate_model(*, cancel: threading.Event | None = None, timeout: float = 60.0) -> Path | None:
     """The GGML file the whisper.cpp backend should load, or None.
 
     Order: ``MAVERICK_WHISPER_CPP_MODEL`` env path > ``[voice]
@@ -251,7 +354,7 @@ def locate_model() -> Path | None:
         return installed[0]
     if preferred is not None and auto_fetch_enabled():
         try:
-            return download_model(name)
+            return download_model(name, cancel=cancel, timeout=timeout)
         except Exception as e:
             log.warning("whisper model auto-fetch failed: %s", e)
     return None

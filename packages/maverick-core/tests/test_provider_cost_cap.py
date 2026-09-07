@@ -218,11 +218,12 @@ def test_ledger_is_atomic_0600_json(caps_config, ledger):
     assert list(ledger.parent.glob("*.tmp")) == []  # no temp droppings
 
 
-def test_corrupt_ledger_fails_soft(caps_config, ledger):
+def test_corrupt_ledger_blocks_admission_and_preserves_original(caps_config, ledger):
     ledger.write_text("{ nope", encoding="utf-8")
-    assert pcc.check("anthropic", now=T0, path=ledger).spent == 0.0
-    pcc.record("anthropic", 2.0, now=T0, path=ledger)  # heals the file
-    assert pcc.check("anthropic", now=T0, path=ledger).spent == 2.0
+    with pytest.raises(pcc.ProviderAccountingUnavailable):
+        pcc.check("anthropic", now=T0, path=ledger)
+    pcc.record("anthropic", 2.0, now=T0, path=ledger)
+    assert ledger.read_text(encoding="utf-8") == "{ nope"
 
 
 def test_default_ledger_under_data_dir(caps_config):

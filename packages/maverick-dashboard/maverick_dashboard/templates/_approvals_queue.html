@@ -11,7 +11,7 @@
     </tr></thead>
     <tbody>
     {% for a in approvals %}
-      <tr data-id="{{ a.id }}">
+      <tr data-id="{{ a.id }}" id="approval-{{ a.id }}">
         <td><code>{{ a.action }}</code></td>
         <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk | humanize }}</span></td>
         <td>
