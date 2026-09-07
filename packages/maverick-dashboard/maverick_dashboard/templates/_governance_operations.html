@@ -176,44 +176,7 @@
   </div>
 
   <div class="assurance-grid">
-    <section id="ai-business-intake-panel" aria-labelledby="ai-business-intake-title">
-      <h3 id="ai-business-intake-title">AI business intake</h3>
-      <p class="assurance-muted">Start, save, resume, and submit a bounded
-        draft. Automated triage routes the use case for independent human
-        review; it does not make a legal classification.</p>
-      <div class="assurance-table"><table>
-        <caption>Recent submitted or review-routed intakes</caption>
-        <thead><tr><th>intake</th><th>use case</th><th>status</th><th>review</th></tr></thead>
-        <tbody id="ai-business-intake-submissions"><tr><td colspan="4">Loading intake records…</td></tr></tbody>
-      </table></div>
-      <p id="ai-business-intake-load-status" class="assurance-muted" role="status" aria-live="polite"></p>
-      <form id="ai-business-intake-start" class="assurance-form">
-        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="128" placeholder="use-case-request-2026-001"></label>
-        <label class="assurance-form__wide">Initial answers JSON (optional)<textarea name="initial" rows="4" placeholder='{"use_case_name":"Support copilot","accountable_owner":"owner-ref","business_unit":"Support","purpose":"Assist agents"}'></textarea></label>
-        <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Start draft</button><span id="ai-business-intake-start-status" role="status" aria-live="polite"></span></div>
-      </form>
-      <form id="ai-business-intake-resume" class="assurance-form">
-        <label class="assurance-form__wide">Draft ID<input name="draft_id" required maxlength="64" placeholder="ABI-…"></label>
-        <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Resume exact draft</button><span id="ai-business-intake-resume-status" role="status" aria-live="polite"></span></div>
-      </form>
-      <pre id="ai-business-intake-result" class="assurance-table assurance-muted" hidden></pre>
-      <details>
-        <summary>Save answers or submit a resumed draft</summary>
-        <form id="ai-business-intake-save" class="assurance-form">
-          <label>Draft ID<input name="draft_id" required maxlength="64"></label>
-          <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
-          <label class="assurance-form__wide">Operation ID<input name="operation_id" required maxlength="128"></label>
-          <label class="assurance-form__wide">Answer patch JSON<textarea name="patch" required rows="5"></textarea></label>
-          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Save draft answers</button><span id="ai-business-intake-save-status" role="status" aria-live="polite"></span></div>
-        </form>
-        <form id="ai-business-intake-submit" class="assurance-form">
-          <label>Draft ID<input name="draft_id" required maxlength="64"></label>
-          <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
-          <label class="assurance-form__wide">Operation ID<input name="operation_id" required maxlength="128"></label>
-          <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Submit for independent review</button><span id="ai-business-intake-submit-status" role="status" aria-live="polite"></span></div>
-        </form>
-      </details>
-    </section>
+    {% include "_ai_business_intake.html" %}
 
     <section id="ai-cost-roi-panel" aria-labelledby="ai-cost-roi-title">
       <h3 id="ai-cost-roi-title">AI cost and ROI</h3>
@@ -1373,63 +1336,6 @@
     });
   });
   {% endif %}
-
-  const intakeRows = value => Array.isArray(value) ? value : (value?.submissions || value?.intakes || value?.items || []);
-  const loadIntakes = async () => {
-    const target = byId("ai-business-intake-submissions"); if (!target) return;
-    try {
-      const result = await request("/ai-business-intake/submissions"); const rows = intakeRows(result); clear(target);
-      rows.forEach(item => tableRow(target, [item.id || item.draft_id, item.use_case_name, item.status, item.human_review?.required === false ? "not required" : "human review required"]));
-      if (!rows.length) emptyRow(target, 4, "No submitted intake records. Drafts may still exist and can be resumed by exact ID.");
-      setStatus("ai-business-intake-load-status", `${rows.length} bounded intake summary record(s) loaded.`);
-    } catch (error) {
-      clear(target); emptyRow(target, 4, "Business intake is unavailable. Existing drafts were not modified.");
-      setStatus("ai-business-intake-load-status", error instanceof Error ? error.message : "Business intake capability unavailable.");
-    }
-  };
-  const showIntake = value => {
-    showProjection("ai-business-intake-result", value);
-    const id = value?.id || value?.draft_id; const revision = value?.revision;
-    [byId("ai-business-intake-save"), byId("ai-business-intake-submit")].forEach(form => {
-      if (!form) return;
-      if (id && form.elements.draft_id) form.elements.draft_id.value = id;
-      if (Number.isInteger(revision) && form.elements.expected_revision) form.elements.expected_revision.value = revision;
-    });
-  };
-  const intakeStart = byId("ai-business-intake-start");
-  if (intakeStart) intakeStart.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(intakeStart, "ai-business-intake-start-status", "Starting idempotent draft…", async () => {
-      const fields = formBody(intakeStart); const result = await sendJson("/ai-business-intake/drafts", "POST", {idempotency_key: fields.get("idempotency_key"), initial: parseObject(fields.get("initial"), true)});
-      showIntake(result); setStatus("ai-business-intake-start-status", "Draft started. Save the returned draft ID before leaving this page.");
-    });
-  });
-  const intakeResume = byId("ai-business-intake-resume");
-  if (intakeResume) intakeResume.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(intakeResume, "ai-business-intake-resume-status", "Resuming exact tenant draft…", async () => {
-      const id = String(formBody(intakeResume).get("draft_id") || "").trim(); const result = await request(`/ai-business-intake/drafts/${encodeURIComponent(id)}`);
-      showIntake(result); setStatus("ai-business-intake-resume-status", "Draft loaded. Missing fields remain visible in the safe projection.");
-    });
-  });
-  const intakeSave = byId("ai-business-intake-save");
-  if (intakeSave) intakeSave.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(intakeSave, "ai-business-intake-save-status", "Saving answer patch with revision control…", async () => {
-      const fields = formBody(intakeSave); const id = String(fields.get("draft_id") || "").trim();
-      const result = await sendJson(`/ai-business-intake/drafts/${encodeURIComponent(id)}`, "PATCH", {patch: parseObject(fields.get("patch")), operation_id: fields.get("operation_id"), expected_revision: Number(fields.get("expected_revision"))});
-      showIntake(result); setStatus("ai-business-intake-save-status", "Draft answers saved. No review or classification is implied.");
-    });
-  });
-  const intakeSubmit = byId("ai-business-intake-submit");
-  if (intakeSubmit) intakeSubmit.addEventListener("submit", event => {
-    event.preventDefault();
-    withButton(intakeSubmit, "ai-business-intake-submit-status", "Routing complete draft for independent review…", async () => {
-      const fields = formBody(intakeSubmit); const id = String(fields.get("draft_id") || "").trim();
-      const result = await sendJson(`/ai-business-intake/drafts/${encodeURIComponent(id)}/submit`, "POST", {operation_id: fields.get("operation_id"), expected_revision: Number(fields.get("expected_revision"))});
-      showIntake(result); setStatus("ai-business-intake-submit-status", "Intake routed. Human inventory and assessment review remain required."); await loadIntakes();
-    });
-  });
 
   const costForm = byId("ai-cost-roi-query");
   const costCollectorForm = byId("ai-cost-collector-run");
@@ -2995,7 +2901,6 @@
   const panelLoaders = [
     ["ai-literacy-panel", [loadLiteracyRequirements]],
     ["article-73-panel", [loadIncidents]],
-    ["ai-business-intake-panel", [loadIntakes]],
     ["ai-cost-roi-panel", [loadCostCollectors, loadCost]],
     ["ai-policy-management-panel", [loadPolicyManagement]],
     ["ai-explainability-panel", [loadAIExplanations]],

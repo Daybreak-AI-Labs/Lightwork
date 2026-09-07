@@ -17,18 +17,21 @@
   {% set saved = report.saved %}
   {% from "_hero.html" import hero, state %}
   {% call hero('Value & spend', 'Savings',
-               subtitle='Counted, not estimated',
-               lede='Money saved vs the typical human cost — computed from
-                     real completed work and <strong>your</strong> cost
-                     assumptions below. Agent spend comes from the same
-                     ledger as <a href="/spend">Spend</a>.') %}
+               subtitle='Estimates based on your assumptions',
+               lede='Estimated cost avoided uses completed task counts and
+                     <strong>your</strong> human cost assumptions below. Task
+                     completion does not establish customer acceptance. Recorded
+                     runtime prices come from <a href="/spend">Spend</a> and
+                     are not verified provider invoices.') %}
     {{ state('Current state',
-             '$' ~ '{:,.2f}'.format(saved) ~ ' saved',
+             '$' ~ '{:,.2f}'.format(saved) ~ ' estimated difference',
              badge='net positive' if saved >= 0 else 'net negative',
              badge_class='ok' if saved >= 0 else 'warn',
-             copy='From completed work only — never a projection. Change the
-                   cost assumptions below and the number recomputes.') }}
+             copy='This estimate changes with your cost assumptions. Use a
+                   paired workflow pilot to record observed effort and costs.') }}
   {% endcall %}
+  <p><a href="/outcome-pilots">Measure a workflow pilot</a> to compare planned cases,
+    recorded observations, and current accepted outcomes. Enable outcome measurement in Settings first.</p>
   <div class="bd-toolbar">
     <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
       <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
@@ -44,13 +47,13 @@
 
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
-      <h2>Delivered work</h2>
-      <p class="viz-sub">Completed goals over time (weekly at longer ranges) — the work the savings number is counted from.</p>
+      <h2>Completed tasks</h2>
+      <p class="viz-sub">Completed goals over time (weekly at longer ranges) — the counts used by this estimate.</p>
       <div id="bd-delivered"></div>
     </div>
     <div class="panel viz-card">
-      <h2>Savings by department</h2>
-      <p class="viz-sub">Solid bar: saved. Pale bar: the typical human cost it came out of.</p>
+      <h2>Estimated savings by department</h2>
+      <p class="viz-sub">Solid bar: estimated difference. Pale bar: assumed human cost.</p>
       <div id="bd-dept-savings"></div>
     </div>
   </div>
@@ -232,16 +235,16 @@
     var rep = D.report;
     var k = document.getElementById('bd-kpis');
     k.textContent = '';
-    k.appendChild(B.kpi({ label: 'Saved', value: rep.saved,
+    k.appendChild(B.kpi({ label: 'Estimated savings', value: rep.saved,
       format: B.money, sparkCls: 'ok',
       spark: D.daily_done.map(function (r) { return r.n; }),
       sub: 'last ' + D.days + ' days, by your assumptions' }));
-    k.appendChild(B.kpi({ label: 'Typical human cost', value: rep.human_cost,
+    k.appendChild(B.kpi({ label: 'Assumed human cost', value: rep.human_cost,
       format: B.money }));
-    k.appendChild(B.kpi({ label: 'Agent spend', value: rep.agent_cost,
+    k.appendChild(B.kpi({ label: 'Recorded runtime cost', value: rep.agent_cost,
       format: B.money }));
-    k.appendChild(B.kpi({ label: 'Hours given back', value: rep.human_hours,
-      sub: rep.roi_multiple ? rep.roi_multiple.toFixed(1) + 'x ROI' : 'no runs yet' }));
+    k.appendChild(B.kpi({ label: 'Assumed human hours', value: rep.human_hours,
+      sub: rep.roi_multiple ? rep.roi_multiple.toFixed(1) + 'x estimated ratio' : 'no runs yet' }));
 
     var doneTotal = 0;
     D.daily_done.forEach(function (r) { doneTotal += r.n; });
@@ -250,7 +253,7 @@
       B.area(document.getElementById('bd-delivered'), {
         data: weekly ? B.bucketWeekly(D.daily_done, ['n']) : D.daily_done,
         x: 'd',
-        series: [{ key: 'n', label: 'Delivered', cls: 'ok' }],
+        series: [{ key: 'n', label: 'Completed', cls: 'ok' }],
         aria: 'Completed goals per ' + (weekly ? 'week' : 'day') +
               ' over the last ' + D.days + ' days.',
         tipHead: function (r) { return (weekly ? 'Week of ' : '') + r.d; },
@@ -259,7 +262,7 @@
         } });
     } else {
       B.empty(document.getElementById('bd-delivered'),
-        'No completed work in this window yet — savings appear as goals finish.');
+        'No completed work in this window yet — estimates appear as goals finish.');
     }
 
     var depts = (rep.by_department || []).slice(0, 8);
@@ -273,12 +276,12 @@
                    pct: Math.max(0, r.saved) / maxHuman * 100,
                    pct_bg: r.human_cost / maxHuman * 100,
                    cls: r.saved < 0 ? 'danger' : 'ok',
-                   title: name + ' — saved ' + B.money(r.saved) +
-                          ' of ' + B.money(r.human_cost) + ' human cost' };
-        }), 'Savings by department, scaled to the largest human cost.');
+                   title: name + ' — estimated difference ' + B.money(r.saved) +
+                          ' of ' + B.money(r.human_cost) + ' assumed human cost' };
+        }), 'Estimated savings by department, scaled to the largest assumed human cost.');
     } else {
       B.empty(document.getElementById('bd-dept-savings'),
-        'No completed work in this window yet — savings appear as goals finish.');
+        'No completed work in this window yet — estimates appear as goals finish.');
     }
   }
 

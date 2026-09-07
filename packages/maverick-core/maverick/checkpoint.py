@@ -23,6 +23,7 @@ import json
 import logging
 import math
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,13 +99,40 @@ class Checkpointer:
     """Append-only checkpoint store over the world model's SQLite connection.
 
     Owns its own ``checkpoints`` table (created lazily), so it does not touch
-    the world-model schema version. All methods fail open: a DB error logs and
-    returns a safe default rather than raising into the agent loop.
+    the world-model schema version. Optional writes are best-effort. Required
+    reads and accounting identity establishment fail closed before resume.
     """
 
     def __init__(self, world: Any):
         self._world = world
         self._ready = False
+
+    def settlement_scope(self, goal_id: int, episode_id: int, principal: str) -> str:
+        """Persist an opaque accounting identity before a resumable run spends.
+
+        Kept with the world database, so copied/restored checkpoints retain
+        their identity and a newly created database cannot reuse numeric IDs.
+        The principal is pinned; a change in authority needs reconciliation.
+        """
+        with self._world._writing() as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS usage_settlement_scopes ("
+                "goal_id INTEGER NOT NULL, episode_id INTEGER NOT NULL, "
+                "principal TEXT NOT NULL, scope TEXT NOT NULL UNIQUE, "
+                "PRIMARY KEY (goal_id, episode_id))"
+            )
+            conn.execute(
+                "INSERT INTO usage_settlement_scopes (goal_id, episode_id, principal, scope) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (goal_id, episode_id) DO NOTHING",
+                (goal_id, episode_id, principal, uuid.uuid4().hex),
+            )
+            row = conn.execute(
+                "SELECT principal, scope FROM usage_settlement_scopes "
+                "WHERE goal_id = ? AND episode_id = ?", (goal_id, episode_id),
+            ).fetchone()
+        if row is None or row[0] != principal:
+            raise CheckpointError("checkpoint accounting principal does not match")
+        return row[1]
 
     def _ensure(self) -> bool:
         if self._ready:
@@ -250,8 +278,9 @@ class Checkpointer:
         """Carry accounted spend past the last resumable message boundary.
 
         Acknowledged counters are carried only after the usage ledger accepted
-        settlement. The stores are not one transaction: a crash before this
-        write can charge prior spend again. Messages stay at their committed
+        settlement. The usage ledger independently retains the cumulative
+        receipt, so a crash before this write is reconciled on resume.
+        Messages stay at their committed
         boundary; accounting includes later failed/finalize calls, even when
         the ledger is unavailable and has not acknowledged the charge.
         """
