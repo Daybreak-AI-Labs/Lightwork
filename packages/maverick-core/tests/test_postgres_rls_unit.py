@@ -465,6 +465,49 @@ def test_explicit_env_off_overrides_enterprise(_clean_toggle_env, monkeypatch):
     assert postgres._rls_explicitly_set() is True
 
 
+def test_list_goals_filters_by_domain_and_project_id(monkeypatch):
+    # W1-49: SQLite's list_goals accepts domain=/project_id= (used by the
+    # dashboard's project-detail page and domain-scoped inbox); the Postgres
+    # port didn't, so both callers 500'd with a TypeError on this backend.
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+    cur.fetchall = list
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    world.list_goals(domain="finance_sox", project_id=7, order="desc")
+
+    assert len(cur.calls) == 1
+    sql, params = cur.calls[0]
+    assert "domain = %s" in sql
+    assert "project_id = %s" in sql
+    assert params == ("finance_sox", 7)
+
+
+def test_list_goals_omits_domain_and_project_id_predicates_when_unset(monkeypatch):
+    # No false positives: a plain call must not filter on either column.
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+    cur.fetchall = list
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    world.list_goals()
+
+    sql, params = cur.calls[0]
+    assert "domain" not in sql
+    assert "project_id" not in sql
+    assert params == ()
+
+
 def test_explicit_env_on_is_explicit(_clean_toggle_env, monkeypatch):
     monkeypatch.setenv("MAVERICK_PG_RLS", "1")
     assert postgres._rls_enabled() is True

@@ -2248,11 +2248,20 @@ class PostgresWorldModel:
         status: str | None = None,
         *,
         owner: str | None = None,
+        domain: str | None = None,
+        project_id: int | None = None,
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
     ) -> list[PGGoal]:
-        """List goals, optionally filtered by status + paginated (mirrors SQLite)."""
+        """List goals, optionally filtered by status + paginated (mirrors SQLite).
+
+        W1-49: ``domain``/``project_id`` were missing here (unlike SQLite's
+        ``list_goals``), so the dashboard's project-detail page and
+        domain-scoped inbox both 500 on this backend --
+        ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
+        ``TypeError`` for a keyword this method didn't accept.
+        """
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
@@ -2267,6 +2276,12 @@ class PostgresWorldModel:
         if owner is not None:
             conds.append("owner = %s")
             params.append(str(owner))
+        if domain is not None:
+            conds.append("domain = %s")
+            params.append(domain)
+        if project_id is not None:
+            conds.append("project_id = %s")
+            params.append(int(project_id))
         frag, fparams = _tenant_scope()
         if frag:
             conds.append(frag)

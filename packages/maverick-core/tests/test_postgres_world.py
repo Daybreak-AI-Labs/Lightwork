@@ -180,6 +180,28 @@ def test_list_goals_filter_and_order(world):
     assert ids.index(g2) < ids.index(g1)  # later id first in DESC order
 
 
+def test_list_goals_filters_by_domain_and_project_id(world):
+    # W1-49: parity with SQLite's list_goals(domain=..., project_id=...) --
+    # the dashboard's project-detail page and domain-scoped inbox both call
+    # these kwargs, which this backend previously rejected with a TypeError.
+    pid = world.create_project("Q3 Migration")
+    g_in_project = world.create_goal("member of the project")
+    world.set_goal_project(g_in_project, pid)
+    g_outside_project = world.create_goal("not in the project")
+
+    g_finance = world.create_goal("finance domain goal")
+    world.set_goal_domain(g_finance, "finance")
+    g_no_domain = world.create_goal("no domain")
+
+    by_project = world.list_goals(project_id=pid)
+    assert {x.id for x in by_project} == {g_in_project}
+    assert g_outside_project not in {x.id for x in by_project}
+
+    by_domain = world.list_goals(domain="finance")
+    assert g_finance in {x.id for x in by_domain}
+    assert g_no_domain not in {x.id for x in by_domain}
+
+
 def test_active_goal(world):
     gid = world.create_goal("to-activate")
     world.set_goal_status(gid, "active")
