@@ -99,5 +99,37 @@ def test_concurrent_channel_and_provider_both_apply(monkeypatch, tmp_path):
     assert persisted.count("MVKAR1:") >= 2
 
 
+def test_every_switchable_section_survives_a_round_trip(monkeypatch, tmp_path):
+    """_dump is an allowlist: a SWITCHABLE_SECTIONS entry missing from it is
+    silently dropped on the next save, so set_section_enable appears to work
+    (the in-memory overlay looks right) while the persisted file -- and thus
+    the state a restart or a fresh reader sees -- never got the change."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_dashboard import settings_store
+
+    for section in settings_store.SWITCHABLE_SECTIONS:
+        settings_store.set_section_enable(section, True)
+        overlay = settings_store.load_overlay()
+        assert overlay.get(section, {}).get("enable") is True, section
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_switch_saves_preserve_oauth_and_workspace_settings(enabled):
+    from maverick_dashboard import settings_store
+
+    preserved = {"oauth": {"vault": True}, "workspace": {"journal": True, "journal_strict": True}}
+    settings_store._write(preserved)
+    for section in settings_store.SWITCHABLE_SECTIONS:
+        settings_store.set_section_enable(section, enabled)
+    settings_store.set_toggle("capabilities", "browser", True)
+
+    # Re-read the persisted TOML after an unrelated save: this also refuses
+    # duplicate sections shared by the learning, module, and switch registries.
+    overlay = settings_store.load_overlay()
+    assert all(overlay.get(section) == value for section, value in preserved.items())
+    assert all(overlay.get(section, {}).get("enable") is enabled for section in settings_store.SWITCHABLE_SECTIONS)
+    assert overlay["capabilities"]["browser"] is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

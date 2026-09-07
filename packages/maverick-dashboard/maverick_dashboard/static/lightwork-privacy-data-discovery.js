@@ -32,6 +32,13 @@
     return selected;
   }
 
+  function savedReference(value, label, evidence) {
+    var selected = String(value || "").trim();
+    var pattern = evidence ? /^evidence-key:[a-z0-9][a-z0-9_-]{0,63}:[1-9][0-9]{0,9}$/ : /^connection:[a-z0-9][a-z0-9_-]{0,63}:[0-9a-f]{32}$/;
+    if (!pattern.test(selected)) { return environmentReference(selected, label); }
+    return selected;
+  }
+
   function digest(value, label) {
     var selected = String(value || "").trim();
     if (!DIGEST.test(selected)) {
@@ -112,6 +119,7 @@
     MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
     digest: digest,
     environmentReference: environmentReference,
+    savedReference: savedReference,
     finiteNumber: finiteNumber,
     identifier: identifier,
     parseBoundedObject: parseBoundedObject,
@@ -169,7 +177,8 @@
     var element = document.getElementById(id);
     if (!element) { throw problem("The workbench is missing " + id + ".", "invalid_page"); }
     element.addEventListener(eventName, function (event) {
-      Promise.resolve(handler(event)).catch(fail);
+      try { Promise.resolve(handler(event)).catch(fail); }
+      catch (error) { fail(error); }
     });
   }
 
@@ -207,12 +216,15 @@
       provider: identifier(formValue(form, "provider"), "Provider", false),
       origin: formValue(form, "origin"),
       resource_ref: identifier(formValue(form, "resource_ref"), "Resource reference", false),
-      credential_env: environmentReference(formValue(form, "credential_env"), "Credential reference"),
-      evidence_key_env: environmentReference(formValue(form, "evidence_key_env"), "Evidence-key reference"),
+      credential_env: savedReference(formValue(form, "credential_env"), "Credential reference", false),
+      evidence_key_env: savedReference(formValue(form, "evidence_key_env"), "Evidence-key reference", true),
       expected_revision: finiteNumber(formValue(form, "expected_revision"), "Expected revision", 0, 2147483647, true),
       idempotency_key: identifier(formValue(form, "idempotency_key"), "Idempotency key", true)
     };
-    show(await call("/sources/" + encodeURIComponent(sourceId), { method: "PUT", body: JSON.stringify(payload) }), "Source metadata enrolled. No provider connection was attempted.");
+    var saved = await call("/sources/" + encodeURIComponent(sourceId), { method: "PUT", body: JSON.stringify(payload) });
+    form.elements.expected_revision.value = saved.revision;
+    newRequest(form);
+    show(saved, "Source settings saved. Test the saved source to check bounded read access.");
   });
 
   bind("pdd-list-sources", "click", async function () {
@@ -419,6 +431,104 @@
   bind("pdd-posture", "click", async function () { show(await call("/posture"), "Privacy posture and limits loaded."); });
   bind("pdd-runtime", "click", async function () { show(await call("/status"), "Availability loaded. Operation with a live provider has not been verified by this check."); });
 
+  var setupState = {providers: [], connections: [], evidence_keys: []};
+  var savedSources = [];
+  var setupBusy = false;
+  function newRequest(form) {
+    if (global.crypto && typeof global.crypto.randomUUID === "function" && form.elements.idempotency_key)
+      form.elements.idempotency_key.value = global.crypto.randomUUID();
+  }
+  function choices(select, rows, placeholder, selected) {
+    select.replaceChildren();
+    var empty = document.createElement("option"); empty.value = ""; empty.textContent = placeholder; select.append(empty);
+    rows.forEach(function (row) { var option = document.createElement("option"); option.value = row.value; option.textContent = row.label; select.append(option); });
+    if (selected && !rows.some(function (row) { return row.value === selected; })) {
+      var old = document.createElement("option"); old.value = selected; old.textContent = "Previous selection is unavailable or changed — choose a current version"; old.disabled = true; select.append(old);
+    }
+    select.value = selected || "";
+  }
+  function renderConnections() {
+    var form = document.getElementById("pdd-source");
+    var provider = formValue(form, "provider");
+    choices(document.getElementById("pdd-connection"), setupState.connections.filter(function (row) { return row.provider === provider; }).map(function (row) {
+      return {value: row.reference, label: row.name + " · " + row.origin};
+    }), "Choose a compatible saved connection", formValue(form, "credential_env"));
+    var descriptor = setupState.providers.find(function (row) { return row.provider === provider; });
+    document.getElementById("pdd-resource-help").textContent = descriptor ? "Source scope: " + descriptor.resource_ref_contract.replace(/_/g, " ") : "Choose an enabled provider. Enable additional providers in Settings.";
+    if (descriptor) form.elements.kind.value = descriptor.kind;
+  }
+  async function loadSetup() {
+    requirePermission("admin");
+    var data = await Promise.all([call("/setup"), call("/sources?limit=500")]);
+    setupState = data[0]; savedSources = data[1].items || [];
+    if (!Array.isArray(setupState.providers) || !Array.isArray(setupState.connections) || !Array.isArray(setupState.evidence_keys)) throw problem("Setup choices are incomplete; reload before saving.");
+    var form = document.getElementById("pdd-source");
+    choices(form.elements.provider, setupState.providers.map(function (row) { return {value: row.provider, label: row.provider.replace(/_/g, " ")}; }), "Choose an enabled provider", formValue(form, "provider"));
+    renderConnections();
+    choices(document.getElementById("pdd-evidence-key"), setupState.evidence_keys.map(function (row) { return {value:row.reference, label:row.name + " · version " + row.revision}; }), "Choose an evidence key", formValue(form, "evidence_key_env"));
+    choices(document.getElementById("pdd-key-picker"), setupState.evidence_keys.map(function (row) { return {value:row.reference, label:row.name + " · version " + row.revision}; }), "Create a new key", "");
+    choices(document.getElementById("pdd-source-picker"), savedSources.map(function (row) { return {value:row.source_id, label:row.source_id + " · version " + row.revision}; }), "New source", savedSources.some(function (row) {return row.source_id===formValue(form,"source_id");}) ? formValue(form,"source_id") : "");
+    show({providers:setupState.providers.length, connections:setupState.connections.length, evidence_keys:setupState.evidence_keys.length}, "Setup choices loaded. Selecting a new key or connection does not update a source until you save it.");
+  }
+  async function setupAction(action) {
+    if (setupBusy) return;
+    setupBusy = true;
+    var controls = root.querySelectorAll("#pdd-source input,#pdd-source select,#pdd-source button,#pdd-key-form input,#pdd-key-form select,#pdd-key-form button,#pdd-load-setup,#pdd-source-picker");
+    var prior = Array.from(controls).map(function (control) { return control.disabled; });
+    controls.forEach(function (control) { control.disabled=true; });
+    try { await action(); }
+    catch (error) { fail(error); }
+    finally { controls.forEach(function (control,index) { control.disabled=prior[index]; }); setupBusy=false; applyPermissions(); }
+  }
+  if (document.getElementById("pdd-load-setup")) {
+    bind("pdd-load-setup", "click", function () { return setupAction(loadSetup); });
+    var sourceForm = document.getElementById("pdd-source"), keyForm = document.getElementById("pdd-key-form");
+    newRequest(sourceForm); newRequest(keyForm);
+    [sourceForm,keyForm].forEach(function (form) { form.addEventListener("input", function (event) {
+      if (event.target.name !== "idempotency_key") newRequest(form);
+      if (form===keyForm && event.target.name==="name") form.elements.expected_revision.value="0";
+      if (form===sourceForm && event.target.name==="source_id") form.elements.expected_revision.value="0";
+    }); });
+    sourceForm.elements.provider.addEventListener("change", function () { sourceForm.elements.credential_env.value=""; sourceForm.elements.origin.value=""; renderConnections(); newRequest(sourceForm); });
+    bind("pdd-connection", "change", function (event) {
+      var selected=setupState.connections.find(function (row) {return row.reference===event.currentTarget.value;});
+      sourceForm.elements.credential_env.value=selected ? selected.reference : "";
+      sourceForm.elements.origin.value=selected ? selected.origin : ""; newRequest(sourceForm);
+    });
+    bind("pdd-evidence-key", "change", function (event) { sourceForm.elements.evidence_key_env.value=event.currentTarget.value; newRequest(sourceForm); });
+    bind("pdd-source-picker", "change", function (event) {
+      var selected=savedSources.find(function (row) {return row.source_id===event.currentTarget.value;});
+      if (!selected) { sourceForm.reset(); sourceForm.elements.expected_revision.value="0"; newRequest(sourceForm); return; }
+      choices(sourceForm.elements.provider,setupState.providers.map(function (row) {return {value:row.provider,label:row.provider.replace(/_/g," ")};}),"Choose an enabled provider",selected.provider);
+      ["source_id","kind","provider","origin","resource_ref","credential_env","evidence_key_env"].forEach(function (name) { sourceForm.elements[name].value=selected[name]; });
+      sourceForm.elements.expected_revision.value=selected.revision;
+      renderConnections();
+      choices(document.getElementById("pdd-evidence-key"),setupState.evidence_keys.map(function (row) {return {value:row.reference,label:row.name+" · version "+row.revision};}),"Choose a current evidence key",selected.evidence_key_env);
+      newRequest(sourceForm);
+    });
+    bind("pdd-key-picker", "change", function (event) {
+      var key=setupState.evidence_keys.find(function (row) {return row.reference===event.currentTarget.value;});
+      keyForm.elements.name.value=key ? key.name : ""; keyForm.elements.expected_revision.value=key ? key.revision : 0; newRequest(keyForm);
+    });
+    bind("pdd-key-form", "submit", function (event) {
+      event.preventDefault(); requirePermission("admin");
+      var payload={expected_revision:finiteNumber(formValue(keyForm,"expected_revision"),"Key version",0,2147483647,true), idempotency_key:identifier(formValue(keyForm,"idempotency_key"),"Request reference",true)};
+      var name=formValue(keyForm,"name");
+      if (payload.expected_revision && !global.confirm("Rotate this evidence key? Sources using the previous version will stop scanning until their settings are explicitly updated.")) return;
+      return setupAction(async function () {
+        var saved=await call("/evidence-keys/"+encodeURIComponent(name),{method:"PUT",body:JSON.stringify(payload)});
+        await loadSetup(); keyForm.elements.expected_revision.value=saved.revision; newRequest(keyForm);
+        show(saved,"Evidence key saved securely. Select its current version for each source and save those source settings; existing sources were not changed.");
+      });
+    });
+    bind("pdd-test-source", "click", function () {
+      requirePermission("admin");
+      var sourceId=identifier(formValue(sourceForm,"source_id"),"Source",false);
+      var revision=finiteNumber(formValue(sourceForm,"expected_revision"),"Saved source version",1,2147483647,true);
+      if (!global.confirm("Test the saved source's read access with a bounded provider read? Unsaved form changes are not used; no findings or report will be stored.")) return;
+      return setupAction(async function () { show(await call("/sources/"+encodeURIComponent(sourceId)+"/test-access",{method:"POST",body:JSON.stringify({confirm:true,expected_revision:revision})}),"Saved source access checked within a small read bound. This does not verify complete coverage or customer acceptance."); });
+    });
+  }
   applyPermissions();
   if (root.dataset.featureEnabled === "true") {
     call("/status").then(function (payload) {

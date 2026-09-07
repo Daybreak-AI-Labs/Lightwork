@@ -19,6 +19,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
     assert wizard.pick_security_suite() == {
         "vendor_onboarding": False,
         "vendor_onboarding_owner": "",
+        "vendor_reviewed_uploads": False,
         "customer_sandbox_lifecycle": False,
         "security_ops": True,
         "administration_document_access": False,

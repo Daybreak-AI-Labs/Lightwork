@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Workflow readiness · Lightwork{% endblock %}
+{% block content %}
+<h1>Workflow readiness</h1>
+<p>What is available, what it supports, and what still needs validation.</p>
+<p>Turning a feature on does not prove that its connections, deployment, or customer workflow have been accepted.
+  This inventory describes the current implementation boundaries; it is not a certification of this workspace.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:var(--space-3);">
+{% for capability in capabilities %}
+<section class="panel" style="min-width:0;overflow-wrap:anywhere;">
+  <h2>{{ capability.name }}</h2>
+  <p><strong>{{ capability.stage_label }}</strong> · {{ capability.configuration }}</p>
+  <p>{{ capability.scope }}</p>
+  <p class="muted">{{ capability.limit }}</p>
+  {% if capability.can_open %}<a class="btn" href="{{ capability.href }}">Open {{ capability.name | lower }}</a>{% endif %}
+</section>
+{% endfor %}
+</div>
+{% endblock %}

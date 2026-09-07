@@ -5,15 +5,15 @@ Speech-to-text backends (tried in order):
   2. Groq Whisper API (GROQ_API_KEY, faster + cheap)
   3. local faster-whisper if installed
   4. local pywhispercpp (whisper.cpp wheels; a maverick-dashboard dependency,
-     so dashboard installs transcribe OUT OF THE BOX) — model file managed by
-     ``maverick.voice_models`` (auto-fetched by default; ``maverick voice
-     setup`` prefetches)
+     so dashboard installs include the speech engine) — model file managed by
+     ``maverick.voice_models`` (explicit setup in Settings > Models or
+     ``maverick voice setup``; automatic downloads require opt-in)
   5. local whisper.cpp CLI binary + the same GGML model (for installs that
      prefer a system binary over the wheel)
 
 ``[voice] stt_backend = "local"`` keeps audio on the machine even when
 provider keys are present. :func:`warm_up_local_stt` (dashboard startup)
-fetches the model and loads the engine before the first mic click.
+loads installed weights; downloading missing weights requires explicit opt-in.
 
 Text-to-speech backends:
   1. OpenAI TTS API (OPENAI_API_KEY)
@@ -368,8 +368,8 @@ def stt_warming() -> bool:
     return _WARMING.is_set()
 
 
-def warm_up_local_stt() -> bool:
-    """Fetch the local model and load the engine BEFORE the first mic click.
+def warm_up_local_stt(*, cancel: threading.Event | None = None) -> bool:
+    """Load installed weights; download only after an explicit auto-fetch opt-in.
 
     Runs from the dashboard lifespan in a background thread; a cold start
     otherwise means the first click eats a ~150 MB download plus a model
@@ -381,7 +381,9 @@ def warm_up_local_stt() -> bool:
     _WARMING.set()
     try:
         from ..voice_models import locate_model
-        model_file = locate_model()  # triggers the (default-on) auto-fetch
+        model_file = locate_model(cancel=cancel, timeout=2.0) if cancel is not None else locate_model()
+        if cancel is not None and cancel.is_set():
+            return False
         try:
             from pywhispercpp.model import Model  # type: ignore
         except ImportError:
