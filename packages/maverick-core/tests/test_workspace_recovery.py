@@ -564,18 +564,59 @@ def test_different_tenant_cannot_import_even_with_same_operator_key(monkeypatch)
             recovery.import_archive(path)
 
 
-def test_cross_version_restore_fails_without_force_override(monkeypatch):
+@pytest.mark.parametrize("operation", ["drill", "prepare"])
+@pytest.mark.parametrize("changed", ["version", "application_identity"])
+def test_cross_version_or_build_restore_blocks_before_application_mutation(isolated_workspace, monkeypatch, operation, changed):
     snapshot = ready_snapshot()
-    monkeypatch.setattr(recovery, "version", lambda: "99.0.0")
-    with pytest.raises(recovery.RecoveryError, match="different application version"):
-        recovery.prepare_restore(snapshot["id"], isolated=True, actor="admin-a")
+    before = {name: (isolated_workspace / name).read_bytes() for name in ("world.db", "record.json")}
+    monkeypatch.setattr(recovery, changed, lambda: "unsupported-other-release")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("incompatible snapshot reached restore publication")
+
+    monkeypatch.setattr(backup, "_apply_transaction", forbidden)
+    with pytest.raises(recovery.RecoveryError, match="different application.*reviewed"):
+        if operation == "drill":
+            recovery.drill(snapshot["id"])
+        else:
+            recovery.prepare_restore(snapshot["id"], isolated=True, actor="admin-a")
+    assert {name: (isolated_workspace / name).read_bytes() for name in before} == before
+    assert len(recovery.list_snapshots()) == 1
+    assert not (recovery._store() / "review.json").exists()
+    assert not (recovery._store() / "last-restore.json").exists()
+    assert not (recovery._store() / (snapshot["id"] + ".drill.json")).exists()
 
 
-def test_same_version_different_build_cannot_restore_incompatible_state(monkeypatch):
+@pytest.mark.parametrize("schema", [True, 2])
+@pytest.mark.parametrize("operation", ["drill", "prepare"])
+def test_unknown_recovery_binding_schema_blocks_before_review_or_drill(isolated_workspace, monkeypatch, schema, operation):
+    metadata = recovery._metadata
+    monkeypatch.setattr(recovery, "_metadata", lambda **kwargs: {**metadata(**kwargs), "schema": schema})
     snapshot = ready_snapshot()
+    before = (isolated_workspace / "world.db").read_bytes()
+    with pytest.raises(recovery.RecoveryError, match="verified workspace/version binding.*legacy administrator"):
+        if operation == "drill":
+            recovery.drill(snapshot["id"])
+        else:
+            recovery.prepare_restore(snapshot["id"], isolated=True, actor="admin-a")
+    assert (isolated_workspace / "world.db").read_bytes() == before
+    assert len(recovery.list_snapshots()) == 1
+    assert not (recovery._store() / "review.json").exists()
+    assert not (recovery._store() / "last-restore.json").exists()
+    assert not (recovery._store() / (snapshot["id"] + ".drill.json")).exists()
+
+
+def test_changed_build_after_review_blocks_with_actionable_diagnostic(isolated_workspace, monkeypatch):
+    snapshot = ready_snapshot()
+    review = recovery.prepare_restore(snapshot["id"], isolated=True, actor="admin-a")
+    before = (isolated_workspace / "world.db").read_bytes()
+    review_bytes = (recovery._store() / "review.json").read_bytes()
     monkeypatch.setattr(recovery, "application_identity", lambda: "test-build-two")
-    with pytest.raises(recovery.RecoveryError, match="different application build"):
-        recovery.prepare_restore(snapshot["id"], isolated=True, actor="admin-a")
+    with pytest.raises(recovery.RecoveryError, match="different application build.*exact build.*reviewed"):
+        recovery.apply_restore(review["review"], review["target"], isolated=True, actor="admin-a")
+    assert (isolated_workspace / "world.db").read_bytes() == before
+    assert (recovery._store() / "review.json").read_bytes() == review_bytes
+    assert not (recovery._store() / "last-restore.json").exists()
 
 
 def test_retirement_needs_current_bytes_and_protects_restore_safety_snapshot():

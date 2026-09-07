@@ -423,8 +423,10 @@ def test_restore_refuses_forward_schema(tmp_path, monkeypatch):
     (data_dir() / "world.db").unlink()
     with pytest.raises(backup.BackupError, match="newer than this binary"):
         backup.restore_backup(forward)
-    # force overrides the guard.
-    backup.restore_backup(forward, force=True)
+    # Administrative force never makes an unsupported database readable.
+    with pytest.raises(backup.BackupError, match="newer than this binary"):
+        backup.restore_backup(forward, force=True)
+    assert not (data_dir() / "world.db").exists()
 
 
 def test_restore_detects_corruption(tmp_path):

@@ -119,16 +119,16 @@ _WORK_LIFECYCLES = frozenset({
     "Needs reconciliation", "Verified", "Accepted", "Failed", "Cancelled",
 })
 _WORK_TRANSITIONS = {
-    "Draft": frozenset({"Ready", "Failed"}),
-    "Ready": frozenset({"Awaiting approval", "Running", "Failed"}),
+    "Draft": frozenset({"Ready", "Failed", "Cancelled"}),
+    "Ready": frozenset({"Awaiting approval", "Running", "Failed", "Cancelled"}),
     "Awaiting approval": frozenset({"Ready", "Running", "Failed", "Cancelled"}),
     "Running": frozenset({"Awaiting observation", "Needs reconciliation", "Failed", "Cancelled"}),
     "Awaiting observation": frozenset({"Verified", "Needs reconciliation", "Failed", "Cancelled"}),
-    "Needs reconciliation": frozenset({"Ready", "Verified", "Failed"}),
-    "Verified": frozenset({"Accepted", "Failed"}),
+    "Needs reconciliation": frozenset({"Ready", "Verified", "Failed", "Cancelled"}),
+    "Verified": frozenset({"Accepted", "Failed", "Cancelled"}),
     "Accepted": frozenset(),
     "Failed": frozenset(),
-    "Cancelled": frozenset(),
+    "Cancelled": frozenset({"Needs reconciliation"}),
 }
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_CONTRACT_BYTES = 1024 * 1024
@@ -608,6 +608,8 @@ def transition_work_item(
         if set(normalized_updates) & forbidden:
             _fail("invalid_contract", "transition cannot replace envelope identity")
         changed.update(normalized_updates)
+    if lifecycle == "Cancelled" and changed["technical_effect"] != current["technical_effect"]:
+        _fail("invalid_transition", "cancellation cannot change the recorded technical effect")
     changed.update(lifecycle=lifecycle, revision=expected_revision + 1, updated_at=updated_at)
     return read_contract(changed, expected_kind="work-item")
 

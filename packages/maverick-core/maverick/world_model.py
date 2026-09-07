@@ -983,6 +983,62 @@ def _resolve_world_path(path: Path | str | None) -> tuple[Path, bool]:
     return Path(path), False
 
 
+class WorldSchemaCompatibilityError(RuntimeError):
+    """The installed release cannot safely open this persisted world."""
+
+    def __init__(self, message: str, *, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _existing_world_has_data(path: Path) -> bool:
+    try:
+        return str(path) != ":memory:" and path.exists() and path.stat().st_size > 0
+    except OSError:  # pragma: no cover -- stat race; assume fresh
+        return False
+
+
+def _check_world_schema_compatibility(path: Path) -> None:
+    """Admit existing worlds read-only, including committed WAL state.
+
+    Called under the existing cross-process initialization lock and before
+    opening a writable connection, journal-mode changes or schema bootstrap.
+    Do not use immutable=1: it ignores committed versions still in a WAL.
+    Missing/empty version tables retain the supported legacy-v1 reader policy.
+    """
+    invalid = (
+        "World database schema metadata is invalid or ambiguous. "
+        "Restore a compatible backup or open it with the release that created it; "
+        "the database has not been migrated."
+    )
+    try:
+        with contextlib.closing(sqlite3.connect(
+            path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10.0,
+        )) as conn:
+            table = conn.execute(
+                "SELECT type FROM sqlite_master WHERE name='schema_version' COLLATE NOCASE",
+            ).fetchone()
+            if table is None:
+                return
+            if table[0] != "table":
+                raise WorldSchemaCompatibilityError(invalid, code="invalid_world_schema")
+            rows = conn.execute("SELECT version FROM schema_version LIMIT 2").fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise WorldSchemaCompatibilityError(invalid, code="invalid_world_schema") from exc
+    if not rows:
+        return
+    if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] < 1:
+        raise WorldSchemaCompatibilityError(invalid, code="invalid_world_schema")
+    current = rows[0][0]
+    if current > SCHEMA_VERSION:
+        raise WorldSchemaCompatibilityError(
+            f"World database uses schema {current}; this release supports up to {SCHEMA_VERSION}. "
+            "Install a newer Lightwork release that supports this schema or restore a compatible backup; "
+            "the database has not been migrated.",
+            code="unsupported_world_schema",
+        )
+
+
 def _serialize_world_initialization(init):
     """Serialize one world's open/WAL/schema bootstrap across processes.
 
@@ -1019,14 +1075,9 @@ class WorldModel:
         # any file creation below so a brand-new world.db (every fresh
         # install/tenant) is not mistaken for a legacy DB needing a
         # pre-migration backup -- only a pre-existing, non-empty DB gets one.
-        try:
-            self._db_preexisted = (
-                str(path) != ":memory:"
-                and path.exists()
-                and path.stat().st_size > 0
-            )
-        except OSError:  # pragma: no cover -- stat race; assume fresh
-            self._db_preexisted = False
+        self._db_preexisted = _existing_world_has_data(path)
+        if self._db_preexisted:
+            _check_world_schema_compatibility(path)
         # world.db holds all conversation content, messages, and facts.
         # The audit dir is locked to 0700/0600 but this DB inherited the
         # default umask (often world-readable 0644) — any local user or

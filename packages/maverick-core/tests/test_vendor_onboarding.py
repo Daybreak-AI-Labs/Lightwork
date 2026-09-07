@@ -71,6 +71,205 @@ def approved(svc, ctx):
     return svc.approve_action(ctx, row["id"], row["revision"])
 
 
+@pytest.mark.parametrize("phase", ["intake", "prepared", "approved"])
+def test_cancellation_before_dispatch_freezes_intent_without_external_effect(setup, phase):
+    svc, ctx, docs, tickets, _ = setup
+    row = (svc.intake(ctx, "Cancelled intake", "security-paper", "VEND", "Stop this request")
+           if phase == "intake" else reviewed(svc, ctx))
+    if phase != "intake":
+        row = svc.prepare_action(ctx, row["id"], row["revision"])
+    if phase == "approved":
+        row = svc.approve_action(ctx, row["id"], row["revision"])
+    original = row.get("operation")
+    cancelled = svc.cancel(ctx, row["id"], row["revision"], "No longer required")
+    assert cancelled["stage"] == "cancelled"
+    assert cancelled["work_item"]["lifecycle"] == "Cancelled"
+    assert cancelled["work_item"]["technical_effect"] == "not_verified"
+    assert cancelled["outcome"] is None
+    assert cancelled["cancellation"]["dispatch_state_at_cancellation"] == "not_dispatched"
+    assert cancelled["cancellation"]["effect_reversal"] == "not_requested"
+    assert cancelled["cancellation"]["requested_by"] == ctx.actor
+    assert cancelled["cancellation"]["authority"] == ctx.binding()
+    assert cancelled["operation"] is None
+    if original:
+        archived = cancelled["operation_history"][-1]
+        assert archived["id"] == original["id"]
+        assert archived["approval"] == original["approval"]
+        assert archived["invalidated_reason"] == "local_intent_cancelled"
+    reopened = VendorOnboardingService(docs, tickets, svc.authorize, clock=svc.clock)
+    assert reopened.get(ctx, row["id"])["cancellation"] == cancelled["cancellation"]
+    for method in ("collect_evidence", "assess", "prepare_action", "approve_action"):
+        with pytest.raises(ValueError, match="cancelled"):
+            getattr(reopened, method)(ctx, row["id"], cancelled["revision"])
+    with pytest.raises(ValueError, match="cancelled"):
+        reopened.execute(ctx, row["id"])
+    repeated = reopened.cancel(ctx, row["id"], cancelled["revision"], "No longer required")
+    assert repeated["revision"] == cancelled["revision"]
+    assert tickets.creates == 0
+
+
+def test_cancellation_after_lost_receipt_retains_uncertainty_and_read_only_recovery(setup):
+    svc, ctx, docs, tickets, _ = setup
+    row = approved(svc, ctx)
+    tickets.timeout_after_success = True
+    row = svc.execute(ctx, row["id"])
+    assert tickets.creates == 1 and len(tickets.state) == 1
+    operation = row["operation"]
+    cancelled = svc.cancel(ctx, row["id"], row["revision"], "Stop while checking delivery")
+    assert cancelled["stage"] == "reconciliation_required"
+    assert cancelled["work_item"]["lifecycle"] == "Needs reconciliation"
+    assert cancelled["work_item"]["technical_effect"] == "indeterminate"
+    assert cancelled["operation"] == operation
+    assert cancelled["cancellation"]["dispatch_state_at_cancellation"] == "possibly_dispatched"
+    assert cancelled["cancellation"]["effect_reversal"] == "not_requested"
+    reopened = VendorOnboardingService(docs, tickets, svc.authorize, clock=svc.clock)
+    with pytest.raises(ValueError, match="cancelled"):
+        reopened.execute(ctx, row["id"])
+    reconciled = reopened.reconcile(ctx, row["id"])
+    assert reconciled["stage"] == "cancelled"
+    assert reconciled["operation"]["state"] == "verified"
+    assert reconciled["operation"]["external_confirmation"]["verified"] is True
+    assert reconciled["work_item"]["lifecycle"] == "Cancelled"
+    assert reconciled["work_item"]["technical_effect"] == "verified"
+    assert reconciled["work_item"]["business_outcome"] == "pending"
+    assert reconciled["work_item"]["next_action"] == "closed_external_effect_retained"
+    assert reconciled["cancellation"] == cancelled["cancellation"]
+    assert reconciled["outcome"] is None
+    with pytest.raises(ValueError, match="cancelled"):
+        reopened.accept(ctx, row["id"], reconciled["revision"], True, "Do not fabricate acceptance")
+    assert tickets.creates == 1 and len(tickets.state) == 1
+
+
+def test_cancellation_preserves_verified_effect_and_rechecks_changed_external_state(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    row = svc.execute(ctx, row["id"])
+    cancelled = svc.cancel(ctx, row["id"], row["revision"], "Priorities changed")
+    assert cancelled["operation"] == row["operation"]
+    assert cancelled["cancellation"]["technical_effect_at_cancellation"] == "verified"
+    assert cancelled["work_item"]["technical_effect"] == "verified"
+    tickets.verify_unavailable = True
+    uncertain = svc.reconcile(ctx, row["id"])
+    assert uncertain["stage"] == "reconciliation_required"
+    assert uncertain["work_item"]["technical_effect"] == "indeterminate"
+    assert uncertain["operation"]["external_confirmation"] == row["operation"]["external_confirmation"]
+    assert uncertain["cancellation"] == cancelled["cancellation"]
+    assert tickets.creates == 1
+
+
+def test_cancellation_requires_current_human_authority_and_current_revision(setup):
+    svc, ctx, _, tickets, denied = setup
+    row = approved(svc, ctx)
+    denied.add("action.cancel")
+    with pytest.raises(PermissionError):
+        svc.cancel(ctx, row["id"], row["revision"], "Denied")
+    denied.clear()
+    with pytest.raises(PermissionError):
+        svc.cancel(replace(ctx, human=False), row["id"], row["revision"], "Worker cannot decide")
+    with pytest.raises(KeyError):
+        svc.cancel(replace(ctx, tenant="another"), row["id"], row["revision"], "Wrong workspace")
+    with pytest.raises(KeyError):
+        svc.cancel(replace(ctx, resource_owner="another"), row["id"], row["revision"], "Wrong owner")
+    with pytest.raises(RecordConflict):
+        svc.cancel(ctx, row["id"], row["revision"] - 1, "Stale review")
+    with pytest.raises(ValueError, match="rationale"):
+        svc.cancel(ctx, row["id"], row["revision"], " ")
+    assert svc.get(ctx, row["id"])["revision"] == row["revision"]
+    assert tickets.creates == 0
+
+
+def test_cancellation_does_not_rewrite_a_customer_decision(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    row = svc.execute(ctx, row["id"])
+    row = svc.accept(ctx, row["id"], row["revision"], True, "Accepted before cancellation")
+    with pytest.raises(ValueError, match="customer decision"):
+        svc.cancel(ctx, row["id"], row["revision"], "Cannot erase acceptance")
+    assert svc.get(ctx, row["id"])["outcome"] == row["outcome"]
+    assert tickets.creates == 1
+
+
+def test_cancellation_arriving_during_dispatch_cannot_overwrite_new_effect_state(setup, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    dispatched, release, cancellation_started = Event(), Event(), Event()
+    original_create = tickets.create
+
+    def commit_then_wait(*args, **kwargs):
+        original_create(*args, **kwargs)
+        dispatched.set()
+        assert release.wait(10), "test did not release synthetic provider"
+        raise TimeoutError("synthetic receipt lost after committed dispatch")
+
+    def cancel_earlier_revision():
+        cancellation_started.set()
+        return svc.cancel(ctx, row["id"], row["revision"], "Arrived after dispatch")
+
+    monkeypatch.setattr(tickets, "create", commit_then_wait)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        executing = workers.submit(svc.execute, ctx, row["id"])
+        try:
+            assert dispatched.wait(10)
+            cancelling = workers.submit(cancel_earlier_revision)
+            assert cancellation_started.wait(10)
+        finally:
+            release.set()
+        uncertain = executing.result(timeout=10)
+        with pytest.raises(RecordConflict):
+            cancelling.result(timeout=10)
+    assert uncertain["stage"] == "reconciliation_required"
+    cancelled = svc.cancel(ctx, row["id"], uncertain["revision"], "Reviewed uncertain delivery")
+    assert cancelled["operation"] == uncertain["operation"]
+    assert cancelled["work_item"]["lifecycle"] == "Needs reconciliation"
+    assert svc.reconcile(ctx, row["id"])["work_item"]["technical_effect"] == "verified"
+    assert tickets.creates == 1 and len(tickets.state) == 1
+
+
+def test_cancellation_after_claim_without_proven_dispatch_does_not_assert_absence(setup, monkeypatch):
+    svc, ctx, _, tickets, denied = setup
+    row = approved(svc, ctx)
+    original = svc._save
+
+    def revoke_after_claim(*args, **kwargs):
+        saved = original(*args, **kwargs)
+        if kwargs.get("stage") == "executing":
+            denied.add("action.execute")
+        return saved
+
+    monkeypatch.setattr(svc, "_save", revoke_after_claim)
+    row = svc.execute(ctx, row["id"])
+    assert tickets.creates == 0
+    row = svc.cancel(ctx, row["id"], row["revision"], "Stop uncertain claimed work")
+    assert row["cancellation"]["dispatch_state_at_cancellation"] == "possibly_dispatched"
+    row = svc.reconcile(ctx, row["id"])
+    assert row["work_item"]["technical_effect"] == "indeterminate"
+    assert row["stage"] == "reconciliation_required"
+    assert tickets.creates == 0
+
+
+def test_cancellation_keeps_durable_audit_receipt_when_audit_delivery_is_unavailable(setup, monkeypatch):
+    from maverick import audit
+
+    svc, ctx, docs, tickets, _ = setup
+    row = approved(svc, ctx)
+    deliveries = []
+    monkeypatch.setattr(audit, "record", lambda kind, **fields: deliveries.append(fields) or False)
+    row = svc.cancel(ctx, row["id"], row["revision"], "Stop with pending audit delivery")
+    assert deliveries[-1]["action"] == "vendor_onboarding_cancelled"
+    assert deliveries[-1]["actor"] == ctx.actor
+    assert deliveries[-1]["tenant"] == ctx.tenant
+    assert deliveries[-1]["record_id"] == row["id"]
+    reopened = VendorOnboardingService(docs, tickets, svc.authorize, clock=svc.clock)
+    stored = reopened.get(ctx, row["id"])
+    pending = stored["_audit_pending"]
+    assert any(item["action"] == "vendor_onboarding_cancelled" for item in pending)
+    assert stored["cancellation"] == row["cancellation"]
+    assert tickets.creates == 0
+
+
 def test_worker_authority_schema_is_explicit_and_closed(setup):
     _, ctx, *_ = setup
     assert ctx.binding()["authority_schema"] == "lightwork.worker-authority.v1"

@@ -212,7 +212,7 @@ def _metadata(*, kind: str) -> dict:
 
 def _compatible(manifest: dict) -> None:
     context = manifest.get("recovery")
-    if not isinstance(context, dict) or context.get("schema") != 1:
+    if not isinstance(context, dict) or type(context.get("schema")) is not int or context["schema"] != 1:
         raise RecoveryError("This archive lacks a verified workspace/version binding. Use the legacy administrator recovery process.")
     if context.get("tenant_id") != current_tenant_id_strict():
         raise RecoveryError("The snapshot belongs to a different workspace.")
@@ -737,7 +737,9 @@ def apply_restore(review_id: str, expected_target: str, *, isolated: bool, actor
                 or review.get("application_version") != version() or review.get("expires_at", 0) < time.time()):
             raise RecoveryError("The workspace, version or restore review changed. Prepare a new review.")
         selected = _inspect(review["snapshot"])
-        if selected["sha256"] != review["archive_sha256"] or selected["compatibility"] != "compatible":
+        if selected["compatibility"] != "compatible":
+            raise RecoveryError(selected["compatibility"])
+        if selected["sha256"] != review["archive_sha256"]:
             raise RecoveryError("The selected snapshot changed after review.")
         with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
             backup.assert_accounting_unchanged(_archive(review["snapshot"]))

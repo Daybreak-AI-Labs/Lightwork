@@ -73,6 +73,10 @@ class AcceptanceBody(RevisionBody):
     rationale: str = Field(min_length=1, max_length=4000)
 
 
+class CancellationBody(ApprovalBody):
+    rationale: str = Field(min_length=1, max_length=4000)
+
+
 def _error(status, code, message, *, retryable=False, next_action):
     return HTTPException(status, {
         "schema": "lightwork.error.v1", "code": code, "message": message,
@@ -250,6 +254,11 @@ def reconcile(request: Request, case_id: str, body: ApprovalBody):
 @router.post("/cases/{case_id}/accept")
 def accept(request: Request, case_id: str, body: AcceptanceBody):
     return _call(_binding(request), "accept", case_id, **body.model_dump())
+
+
+@router.post("/cases/{case_id}/cancel")
+def cancel(request: Request, case_id: str, body: CancellationBody):
+    return _call(_binding(request), "cancel", case_id, **body.model_dump(exclude={"confirm"}))
 
 
 @router.post("/cases/{case_id}/check-renewal")

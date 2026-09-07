@@ -73,18 +73,26 @@ The generic WorkItem transition validator supports these policy-level edges:
 
 | From | Allowed next states |
 |---|---|
-| Draft | Ready, Failed |
-| Ready | Awaiting approval, Running, Failed |
+| Draft | Ready, Failed, Cancelled |
+| Ready | Awaiting approval, Running, Failed, Cancelled |
 | Awaiting approval | Ready, Running, Failed, Cancelled |
 | Running | Awaiting observation, Needs reconciliation, Failed, Cancelled |
 | Awaiting observation | Verified, Needs reconciliation, Failed, Cancelled |
-| Needs reconciliation | Ready, Verified, Failed |
-| Verified | Accepted, Failed |
-| Accepted, Failed, Cancelled | none |
+| Needs reconciliation | Ready, Verified, Failed, Cancelled |
+| Verified | Accepted, Failed, Cancelled |
+| Cancelled | Needs reconciliation |
+| Accepted, Failed | none |
 
 The vendor-onboarding service projects its more detailed stages onto this
 lifecycle. Its existing durable `executing`, `reconciliation_required`, and
 `verified` operation states remain the execution authority.
+
+Cancellation records a local decision and preserves the current technical effect.
+It cannot relabel a verified external effect as absent or grant customer acceptance.
+A cancelled WorkItem can return to Needs reconciliation for new readback; that
+edge alone grants no execution permission. The domain retains the cancellation
+decision and must continue rejecting new dispatch and acceptance after cancellation,
+even if subsequent observations change the projected lifecycle.
 
 A WorkItem in Verified or Accepted must have `technical_effect=verified`.
 Accepted and `business_outcome=accepted` must occur together. In particular,

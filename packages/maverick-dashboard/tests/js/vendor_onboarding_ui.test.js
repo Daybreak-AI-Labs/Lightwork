@@ -82,15 +82,16 @@ function fixture(records = [], intercept = null, search = "") {
   const root = add("vendor-onboarding", "section");
   root.dataset.apiBase = "/api/v1/vendor-onboarding";
   const ids = ["message", "case-title", "case-reference", "status", "scope", "evidence", "assessment",
-    "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases"];
+    "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status"];
   ids.forEach(id => add(`vo-${id}`, "div", root));
   const intake = add("vo-intake", "form", root);
   ["vendor", "document", "project", "freshness", "renewal"].forEach(id => add(`vo-${id}`, "input", intake));
   add("vo-purpose", "textarea", intake);
   add("vo-create", "button", intake);
-  ["rationale", "acceptance-reason"].forEach(id => add(`vo-${id}`, "textarea", root));
+  ["rationale", "acceptance-reason", "cancellation-reason"].forEach(id => add(`vo-${id}`, "textarea", root));
+  add("vo-cancellation-confirm", "input", root);
   ["refresh", "collect", "assess", "renew", "check-renewal", "review-approve", "review-reject",
-    "prepare", "approve", "execute", "reconcile", "accept", "reject"].forEach(id => add(`vo-${id}`, "button", root));
+    "prepare", "approve", "execute", "reconcile", "accept", "reject", "cancel"].forEach(id => add(`vo-${id}`, "button", root));
   const calls = [];
   const byId = id => document.getElementById(`vo-${id}`);
   const fetch = async (url, options) => {
@@ -182,6 +183,70 @@ test("the selected case explains the promised outcome and support boundary", asy
   assert.match(ui.byId("scope").textContent, /authorized person accepts or rejects/);
   assert.match(ui.byId("scope").textContent, /procurement approval or payment/);
   assert.match(ui.byId("scope").textContent, /single persistent application replica/);
+});
+
+test("cancellation requires an explicit local-only confirmation and preserves uncertain delivery", async () => {
+  const rows = [record("one", {stage: "reconciliation_required", operation: {state: "reconciliation_required"}})];
+  let submitted;
+  const ui = fixture(rows, call => {
+    if (!call.url.endsWith("/cancel")) return undefined;
+    submitted = call.body;
+    rows[0] = {...rows[0], revision: 2, cancellation: {requested_by: "reviewer", requested_at: 1800000000,
+      rationale: "Stop local work", dispatch_state_at_cancellation: "possibly_dispatched", effect_reversal: "not_requested"}};
+    return response(rows[0]);
+  });
+  await ui.settle(); await ui.load("one");
+  await ui.click("cancel");
+  assert.equal(submitted, undefined);
+  ui.byId("cancellation-reason").value = "Stop local work";
+  await ui.click("cancel");
+  assert.equal(submitted, undefined);
+  ui.byId("cancellation-confirm").checked = true;
+  await ui.click("cancel");
+  assert.deepEqual(submitted, {expected_revision: 1, rationale: "Stop local work", confirm: true});
+  assert.match(ui.byId("cancellation-status").textContent, /outcome is still uncertain/);
+  assert.match(ui.byId("cancellation-status").textContent, /does not delete or reverse/);
+  assert.equal(ui.byId("reconcile").disabled, false);
+  for (const id of ["cancel", "execute", "accept", "reject", "collect", "prepare"])
+    assert.equal(ui.byId(id).disabled, true, id);
+});
+
+test("verified cancellation reports retained ticket and offers only current readback", async () => {
+  const ui = fixture([record("one", {stage: "cancelled", operation: {
+    state: "verified", external_confirmation: {verified: true, key: "VEND-1"}}, cancellation: {
+    requested_by: "reviewer", requested_at: 1800000000, rationale: "Priorities changed",
+    dispatch_state_at_cancellation: "possibly_dispatched", effect_reversal: "not_requested"}})]);
+  await ui.settle(); await ui.load("one");
+  assert.match(ui.byId("cancellation-status").textContent, /VEND-1.*remains/);
+  assert.match(ui.byId("outcome").textContent, /Cancelled.*no acceptance decision/);
+  assert.equal(ui.byId("reconcile").disabled, false);
+  for (const id of ["cancel", "execute", "accept", "reject", "collect", "prepare"])
+    assert.equal(ui.byId(id).disabled, true, id);
+});
+
+test("changing requests clears the cancellation reason and confirmation", async () => {
+  const ui = fixture([record("one"), record("two")]);
+  await ui.settle(); await ui.load("one");
+  ui.byId("cancellation-reason").value = "Only stop request one";
+  ui.byId("cancellation-confirm").checked = true;
+  await ui.load("two");
+  assert.equal(ui.byId("cancellation-reason").value, "");
+  assert.equal(ui.byId("cancellation-confirm").checked, false);
+});
+
+test("stale cancellation requests require current-result review without automatic retry", async () => {
+  const ui = fixture([record("one", {operation: {state: "approved"}})], call => {
+    if (call.url.endsWith("/cancel")) return response({detail: {
+      code: "revision_conflict", message: "Request revision changed",
+    }}, 409);
+  });
+  await ui.settle(); await ui.load("one");
+  ui.byId("cancellation-reason").value = "Stop this request";
+  ui.byId("cancellation-confirm").checked = true;
+  await ui.click("cancel");
+  assert.match(ui.byId("message").textContent, /Refresh requests, review the current ticket result/);
+  assert.equal(ui.calls.filter(call => call.method === "POST").length, 1);
+  assert.equal(ui.byId("refresh").disabled, false);
 });
 
 test("refreshing or reselecting an unchanged case preserves corrections and submits them for approval", async () => {

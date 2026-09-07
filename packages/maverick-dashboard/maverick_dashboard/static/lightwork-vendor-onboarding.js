@@ -22,14 +22,17 @@
   function buttons() {
     const row = selected || {};
     const op = row.operation || {};
-    const editable = Boolean(selected) && !row.outcome && !["executing", "reconciliation_required", "verified"].includes(op.state);
+    const cancelled = Boolean(row.cancellation) || row.stage === "cancelled";
+    const editable = Boolean(selected) && !cancelled && !row.outcome && !["executing", "reconciliation_required", "verified"].includes(op.state);
     const allowed = {collect: editable, assess: editable && row.evidence?.status === "available",
       renew: row.outcome?.accepted === true, "check-renewal": row.outcome?.accepted === true,
       "review-approve": editable && Boolean(row.assessment),
       "review-reject": editable && Boolean(row.assessment), prepare: editable && row.assessment?.status === "approved",
-      approve: editable && op.state === "prepared", execute: op.state === "approved",
-      reconcile: ["executing", "reconciliation_required"].includes(op.state),
-      accept: op.state === "verified" && !row.outcome, reject: op.state === "verified" && !row.outcome};
+      approve: editable && op.state === "prepared", execute: !cancelled && op.state === "approved",
+      reconcile: ["executing", "reconciliation_required"].includes(op.state) || (cancelled && op.state === "verified"),
+      cancel: Boolean(selected) && !cancelled && !row.outcome,
+      accept: !cancelled && op.state === "verified" && !row.outcome,
+      reject: !cancelled && op.state === "verified" && !row.outcome};
     for (const [name, enabled] of Object.entries(allowed)) byId(name).disabled = busy || !enabled;
     byId("intake").querySelectorAll("input,textarea,select,button").forEach(control => { control.disabled = busy; });
     byId("refresh").disabled = busy;
@@ -40,6 +43,9 @@
     byId("corrections").querySelectorAll("select,textarea").forEach(control => { control.disabled = busy || !allowed["review-approve"]; });
     byId("rationale").disabled = busy || !allowed["review-approve"];
     byId("acceptance-reason").disabled = busy || !allowed.accept;
+    byId("cancellation-reason").disabled = busy || !allowed.cancel;
+    byId("cancellation-confirm").disabled = busy || !allowed.cancel;
+    byId("reconcile").textContent = cancelled && op.state === "verified" ? "Recheck retained ticket" : "Check uncertain ticket result";
     byId("evidence-controls")?.querySelectorAll("input,textarea,button").forEach(control => { control.disabled = busy || !editable; });
     for (const id of ["upload", "upload-submit", "document-date", "upload-transcription", "upload-transcribe", "upload-confirm"])
       if (byId(id)) byId(id).disabled = busy || !editable || uploadDenied;
@@ -125,6 +131,8 @@
       clearUploadReview(true);
       byId("rationale").value = "";
       byId("acceptance-reason").value = "";
+      byId("cancellation-reason").value = "";
+      byId("cancellation-confirm").checked = false;
       reviewedAt = performance.now();
       if (byId("case-documents")) byId("case-documents").value = (record.document_ids || [record.document_id]).filter(Boolean).join("\n");
       if (byId("upload")) byId("upload").value = "";
@@ -137,7 +145,7 @@
     const outcome = record.outcome || {};
     for (const label of ["Stage: " + friendly(record.stage), "Version: " + record.revision,
       "External action: " + friendly(operation.state || operation.status || "not prepared"),
-      "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : "pending")]) {
+      "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : record.cancellation ? "cancelled; no decision" : "pending")]) {
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
     }
     const work = record.work_item || {};
@@ -190,10 +198,19 @@
     const payload = operation.payload;
     show("operation", payload ? `Project: ${payload.project}\nTicket title: ${payload.summary}\n\n${payload.description}\n\nApproval expires: ${date(operation.expires_at)}\nVerified ticket: ${operation.external_confirmation?.key || "pending"}` : "No action prepared.");
     show("operation-record", operation);
+    const cancellation = record.cancellation;
+    const effectStatus = operation.state === "verified"
+      ? `Ticket ${operation.external_confirmation?.key || "previously verified"} remains recorded as an external effect. Use Recheck retained ticket to check its current state.`
+      : cancellation?.dispatch_state_at_cancellation === "not_dispatched"
+        ? "No ticket creation was dispatched for this request."
+        : "The ticket outcome is still uncertain. Use Check uncertain ticket result; no new ticket will be created.";
+    show("cancellation-status", cancellation
+      ? `Local work cancelled by ${cancellation.requested_by} on ${date(cancellation.requested_at)}.\nReason: ${cancellation.rationale}\n${effectStatus}\nCancellation does not delete or reverse a Jira ticket. Any change to that ticket requires a separate decision.`
+      : "Cancellation stops further work on this request. If ticket creation has started, its result must still be checked. Cancellation does not delete or reverse a Jira ticket.");
     const metrics = record.metrics || {};
     const timedReviews = (record.review_history || []).filter(review => review.review_seconds !== null && review.review_seconds !== undefined);
     const reviewTime = timedReviews.length ? `${Number(metrics.human_review_seconds).toFixed(1)} seconds reported` : "Unmeasured";
-    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate approval required`);
+    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : cancellation ? "Cancelled request; no acceptance decision" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate approval required`);
     show("renewal-status", "Check current evidence and ticket versions before starting a renewal.");
     show("history", [...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
       ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item))].join("\n\n") || "No reviewer decisions or exceptions yet.");
@@ -397,6 +414,17 @@
       review_seconds: reviewedAt === null ? null : (performance.now() - reviewedAt) / 1000});
   });
   for (const name of ["approve", "execute", "reconcile"]) click(name, () => action(name === "approve" ? "approve-action" : name, {confirm: true}));
+  click("cancel", async () => {
+    const rationale = byId("cancellation-reason").value.trim();
+    if (!rationale) throw new Error("Enter a reason for cancelling this request.");
+    if (!byId("cancellation-confirm").checked) throw new Error("Confirm that cancellation stops local work and does not reverse a Jira ticket.");
+    try { return await action("cancel", {rationale, confirm: true}); }
+    catch (error) {
+      if (error.code === "revision_conflict")
+        throw new Error("The request changed during delivery. Refresh requests, review the current ticket result, then cancel again.");
+      throw error;
+    }
+  }, "Local work cancelled. Review the retained ticket result and any reconciliation still required.");
   for (const name of ["accept", "reject"]) click(name, () => {
     const rationale = byId("acceptance-reason").value.trim();
     if (!rationale) throw new Error("Enter an acceptance or rejection reason.");

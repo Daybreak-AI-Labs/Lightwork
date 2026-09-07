@@ -289,6 +289,37 @@ def test_transition_requires_the_reviewed_revision_and_preserves_business_distin
     assert conflict.value.code == "revision_conflict"
 
 
+@pytest.mark.parametrize("lifecycle,effect", [
+    ("Draft", "not_verified"), ("Ready", "not_verified"),
+    ("Awaiting approval", "not_verified"), ("Running", "indeterminate"),
+    ("Awaiting observation", "indeterminate"), ("Needs reconciliation", "indeterminate"),
+    ("Verified", "verified"),
+])
+def test_cancellation_preserves_known_effects_and_permits_only_readback(lifecycle, effect):
+    record = _common("work-item", dict(CONTRACT_CASES[0][1], lifecycle=lifecycle, technical_effect=effect))
+    cancelled = transition_work_item(record, "Cancelled", expected_revision=4, updated_at=NOW + 1,
+                                     updates={"next_action": "closed"})
+    assert cancelled["technical_effect"] == effect
+    assert cancelled["business_outcome"] == "pending"
+    assert record["lifecycle"] == lifecycle
+    reconciliation = transition_work_item(cancelled, "Needs reconciliation", expected_revision=5,
+                                          updated_at=NOW + 2, updates={"next_action": "reconcile"})
+    assert reconciliation["technical_effect"] == effect
+    for denied in ("Ready", "Running", "Accepted"):
+        with pytest.raises(PlatformContractError) as error:
+            transition_work_item(cancelled, denied, expected_revision=5, updated_at=NOW + 2)
+        assert error.value.code == "invalid_transition"
+
+
+def test_cancellation_cannot_relabel_a_verified_effect_as_not_verified():
+    record = _common("work-item", dict(CONTRACT_CASES[0][1], lifecycle="Verified", technical_effect="verified"))
+    with pytest.raises(PlatformContractError) as error:
+        transition_work_item(record, "Cancelled", expected_revision=4, updated_at=NOW + 1,
+                             updates={"technical_effect": "not_verified"})
+    assert error.value.code == "invalid_transition"
+    assert record["technical_effect"] == "verified"
+
+
 def test_export_redacts_secret_values_but_preserves_managed_references():
     record = _common("observation", {
         "subject_ref": {"id": "ticket-1"},
@@ -305,9 +336,9 @@ def test_export_redacts_secret_values_but_preserves_managed_references():
         "asserted_fact": {"status": "created"},
         "collector_ref": {"kind": "jira_readback"},
         "diagnostic": {
-            "api_key": "plaintext-secret-value",
+            "api_key": "plaintext-secret-value",  # pragma: allowlist secret
             "credential_ref": "vault://customer-a/jira",
-            "nested": {"password": "do-not-export"},
+            "nested": {"password": "do-not-export"},  # pragma: allowlist secret
         },
     })
     exported = export_contract(record)

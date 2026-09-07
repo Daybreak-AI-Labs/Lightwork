@@ -67,6 +67,58 @@ def _step(client, row, step, **extra):
     return result.json()
 
 
+@pytest.mark.parametrize("lost_receipt", [False, True])
+def test_customer_cancellation_after_dispatch_keeps_effect_and_readback(web, lost_receipt):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(client, row, "review", decision="approved", rationale="Reviewed evidence")
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
+    tickets.timeout_after_success = lost_receipt
+    row = _step(client, row, "execute", confirm=True)
+    cancelled = _step(client, row, "cancel", confirm=True, rationale="Stop this request")
+    assert cancelled["cancellation"]["effect_reversal"] == "not_requested"
+    assert cancelled["cancellation"]["requested_by"] == ctx.actor
+    assert cancelled["operation"] == row["operation"]
+    assert cancelled["outcome"] is None
+    assert cancelled["work_item"]["technical_effect"] == ("indeterminate" if lost_receipt else "verified")
+    assert client.post(f"{BASE}/{row['id']}/execute", json={
+        "expected_revision": cancelled["revision"], "confirm": True,
+    }).status_code == 409
+    reconciled = _step(client, cancelled, "reconcile", confirm=True)
+    assert reconciled["stage"] == "cancelled"
+    assert reconciled["work_item"]["technical_effect"] == "verified"
+    assert reconciled["work_item"]["business_outcome"] == "pending"
+    assert client.post(f"{BASE}/{row['id']}/accept", json={
+        "expected_revision": reconciled["revision"], "accepted": True, "rationale": "No false success",
+    }).status_code == 409
+    assert service.get(ctx, row["id"])["cancellation"] == cancelled["cancellation"]
+    assert tickets.creates == 1 and len(tickets.state) == 1
+
+
+def test_customer_cancellation_validates_confirmation_authority_and_revision(web):
+    client, service, ctx, tickets = web
+    row = _intake(client)
+    path = f"{BASE}/{row['id']}/cancel"
+    body = {"expected_revision": row["revision"], "rationale": "Stop before dispatch"}
+    assert client.post(path, json=body).status_code == 422
+    assert client.post(path, json=dict(body, confirm=False)).status_code == 422
+    assert client.post(path, json=dict(body, confirm=True, tenant="forged")).status_code == 422
+    assert client.post(path, json=dict(body, confirm=True, effect_reversed=True)).status_code == 422
+    service.authorize = lambda candidate, capability, resource: capability != "action.cancel"
+    denied = client.post(path, json=dict(body, confirm=True))
+    assert denied.status_code == 403
+    service.authorize = lambda candidate, capability, resource: candidate.binding() == ctx.binding()
+    row = _step(client, row, "collect-evidence")
+    conflict = client.post(path, json=dict(body, confirm=True))
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "revision_conflict"
+    cancelled = _step(client, row, "cancel", confirm=True, rationale=body["rationale"])
+    assert cancelled["stage"] == "cancelled"
+    assert cancelled["cancellation"]["dispatch_state_at_cancellation"] == "not_dispatched"
+    assert tickets.creates == 0
+
+
 def test_http_blank_purpose_does_not_leave_a_registered_vendor(web):
     from maverick import vendor_management
     from maverick.paths import tenant_scope
@@ -501,6 +553,46 @@ def test_current_workspace_can_accept_existing_effect_after_switch_back(stock_wo
     assert tickets.creates == 1
 
 
+def test_stock_cancellation_denies_revoked_membership_without_changing_effect(stock_workspace):
+    from maverick_dashboard import rbac
+
+    service, ctx, row, tickets, _ = stock_workspace
+    row = service.execute(ctx, row["id"])
+    rbac.remove_tenant_role(ctx.tenant, ctx.actor)
+    with pytest.raises(HTTPException):
+        service.cancel(ctx, row["id"], row["revision"], "Revoked member")
+    from maverick import vendor_onboarding
+    from maverick.paths import tenant_scope
+
+    with tenant_scope(tenant=ctx.tenant):
+        persisted = vendor_onboarding._CASES.get(row["id"])
+    assert persisted["revision"] == row["revision"]
+    assert not persisted.get("cancellation")
+    assert tickets.creates == 1
+
+
+def test_current_workspace_can_cancel_and_reconcile_after_switch_back(stock_workspace):
+    from maverick.paths import tenant_scope
+    from maverick_dashboard import vendor_onboarding_composition as composition
+    from maverick_dashboard import workspace_tenants
+
+    service, ctx, row, tickets, request = stock_workspace
+    tickets.timeout_after_success = True
+    row = service.execute(ctx, row["id"])
+    workspace_tenants.set_selection(ctx.actor, "synthetic-b")
+    workspace_tenants.set_selection(ctx.actor, ctx.tenant)
+    with tenant_scope(tenant=ctx.tenant):
+        current = composition._context(request)
+    assert current.binding() != ctx.binding()
+    cancelled = service.cancel(current, row["id"], row["revision"], "Stop after switching back")
+    assert cancelled["operation"]["context"] == row["operation"]["context"]
+    assert cancelled["cancellation"]["authority"] == current.binding()
+    reconciled = service.reconcile(current, row["id"])
+    assert reconciled["work_item"]["technical_effect"] == "verified"
+    assert reconciled["cancellation"] == cancelled["cancellation"]
+    assert tickets.creates == 1
+
+
 @pytest.mark.parametrize("step", ["approve-action", "execute"])
 def test_precondition_provider_errors_are_not_disclosed_in_reapproval_response(web, monkeypatch, step):
     client, service, _, tickets = web
@@ -606,6 +698,8 @@ def test_existing_dashboard_page_and_asset_are_usable(web):
     assert "Human review" in response.text
     assert "Approve this exact Jira task" in response.text
     assert "What this request delivers" in response.text
+    assert "Cancel local work" in response.text
+    assert "any Jira ticket already created remains" in response.text
     assert "no-store" in response.headers["cache-control"]
     asset = client.get("/static/lightwork-vendor-onboarding.js")
     assert asset.status_code == 200
@@ -637,7 +731,7 @@ def test_vendor_page_has_one_main_landmark_and_labelled_decision_fields(web):
     assert len(ids) == len(set(ids)), "Duplicate IDs break labels and request controls"
     label_targets = {attrs.get("for") for tag, attrs in markup.elements if tag == "label"}
     for field in ("vo-rationale", "vo-acceptance-reason", "vo-vendor", "vo-document",
-                  "vo-project", "vo-purpose", "vo-freshness", "vo-renewal"):
+                  "vo-project", "vo-purpose", "vo-freshness", "vo-renewal", "vo-cancellation-reason"):
         assert field in label_targets
     message = next(attrs for _, attrs in markup.elements if attrs.get("id") == "vo-message")
     assert message["aria-live"] == "polite"

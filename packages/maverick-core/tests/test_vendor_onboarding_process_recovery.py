@@ -40,7 +40,8 @@ def _write_json(path: Path, value) -> None:
 class _DurableTickets(FakeJiraTickets):
     """Test-only provider process state, deliberately outside Lightwork's store."""
 
-    def __init__(self, path: Path, *, crash_after_create=False, allow_create=False):
+    def __init__(self, path: Path, *, crash_after_create=False, allow_create=False,
+                 crash_before_send=False, crash_after_observation=False):
         saved = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         state = {(row["tenant"], row["key"]): row["value"] for row in saved.get("tickets", [])}
         super().__init__(state)
@@ -49,6 +50,8 @@ class _DurableTickets(FakeJiraTickets):
         self.reads = saved.get("reads", 0)
         self.crash_after_create = crash_after_create
         self.allow_create = allow_create
+        self.crash_before_send = crash_before_send
+        self.crash_after_observation = crash_after_observation
 
     def _persist(self):
         _write_json(self.path, {
@@ -58,6 +61,8 @@ class _DurableTickets(FakeJiraTickets):
         })
 
     def create(self, ctx, payload, operation_id, **kwargs):
+        if self.crash_before_send:
+            os._exit(_CRASH_EXIT)
         if not (self.crash_after_create or self.allow_create):
             # Persist the attempted retry too: even if the application catches
             # this assertion, the parent must observe the forbidden dispatch.
@@ -82,7 +87,58 @@ class _DurableTickets(FakeJiraTickets):
         self.reads += 1
         result = super().verify(ctx, key, payload, **kwargs)
         self._persist()
+        if self.crash_after_observation:
+            os._exit(_CRASH_EXIT)
         return result
+
+
+def _matrix_crash(ctx, service, root, point):
+    row = service.intake(ctx, "Synthetic Crash Matrix Vendor", "security-paper", "VEND", "Offline crash matrix")
+    row = service.collect_evidence(ctx, row["id"], row["revision"])
+    row = service.assess(ctx, row["id"], row["revision"])
+    row = service.review(ctx, row["id"], row["revision"], "approved", "Restricted synthetic pilot")
+    _write_json(root / "case-reference.json", {"case_id": row["id"]})
+    save = service._save
+
+    def crash_at_transition(context, current, **changes):
+        preparing = changes.get("stage") == "action_pending_approval"
+        if (point == "before_intent" and preparing
+                or point == "before_local_acceptance" and changes.get("outcome")):
+            os._exit(_CRASH_EXIT)
+        saved = save(context, current, **changes)
+        if point == "after_intent" and preparing:
+            os._exit(_CRASH_EXIT)
+        return saved
+
+    service._save = crash_at_transition
+    row = service.prepare_action(ctx, row["id"], row["revision"])
+    row = service.approve_action(ctx, row["id"], row["revision"])
+    row = service.execute(ctx, row["id"])
+    service.accept(ctx, row["id"], row["revision"], True, "Procurement accepted verified ticket")
+    raise AssertionError(f"fixture must terminate at {point}")
+
+
+def _matrix_resume(ctx, service, tickets, root):
+    reference = json.loads((root / "case-reference.json").read_text(encoding="utf-8"))
+    row = service.get(ctx, reference["case_id"])
+    before = json.loads(json.dumps(row))
+    # These two crash points never had an approved operation. An explicit human
+    # decision below authorizes the continuation; restart itself grants nothing.
+    new_approval = (row.get("operation") or {}).get("state") in {None, "prepared"}
+    if row.get("operation") is None:
+        row = service.prepare_action(ctx, row["id"], row["revision"])
+    if row["operation"]["state"] == "prepared":
+        row = service.approve_action(ctx, row["id"], row["revision"])
+    row = service.execute(ctx, row["id"])
+    if row["operation"]["state"] == "reconciliation_required":
+        row = service.reconcile(ctx, row["id"])
+    assert row["outcome"] is None
+    if row["operation"]["state"] == "verified":
+        row = service.accept(ctx, row["id"], row["revision"], True,
+                             "Procurement accepted verified ticket")
+    return {"pid": os.getpid(), "before": before, "case": row,
+            "creates": tickets.creates, "reads": tickets.reads,
+            "explicit_new_human_approval": new_approval}
 
 
 def _worker(mode: str, root: Path) -> dict:
@@ -97,13 +153,25 @@ def _worker(mode: str, root: Path) -> dict:
     documents = FakeGoogleDriveEvidence({(ctx.tenant, "security-paper"): EvidenceDocument(
         "security-paper", "1", _NOW - 86400, _DOCUMENT,
     )})
-    tickets = _DurableTickets(root / "external-provider.json", crash_after_create=mode == "crash",
-                              allow_create=mode == "execute-race")
+    point = os.environ.get("LIGHTWORK_FIXTURE_CRASH_POINT")
+    crashing_matrix = mode == "matrix-crash"
+    tickets = _DurableTickets(
+        root / "external-provider.json",
+        crash_after_create=mode == "crash" or crashing_matrix and point == "after_provider_commit",
+        allow_create=mode in {"execute-race", "matrix-crash"}
+        or mode == "matrix-resume" and point in {"before_intent", "after_intent"},
+        crash_before_send=crashing_matrix and point == "before_send",
+        crash_after_observation=crashing_matrix and point == "after_observation",
+    )
     service = VendorOnboardingService(
         documents, tickets,
         lambda context, capability, resource: context.tenant == ctx.tenant and context.actor == ctx.actor,
         clock=lambda: _NOW,
     )
+    if mode == "matrix-crash":
+        return _matrix_crash(ctx, service, root, point)
+    if mode == "matrix-resume":
+        return _matrix_resume(ctx, service, tickets, root)
     manifest_path = root / "case-reference.json"
     if mode in {"crash", "prepare"}:
         row = service.intake(ctx, "Synthetic Process Vendor", "security-paper", "VEND", "Offline recovery")
@@ -247,6 +315,59 @@ def test_two_actual_processes_contend_for_one_approved_intent(tmp_path):
     assert results[0]["case"]["revision"] == original["revision"] + 2
     assert results[0]["case"]["operation"]["attempts"] == 1
     assert results[0]["case"]["operation"]["id"] == original["operation"]["id"]
+
+
+@pytest.mark.parametrize("point,prior_state,creates", [
+    ("before_intent", None, 0),
+    ("after_intent", "prepared", 0),
+    ("before_send", "executing", 0),
+    ("after_provider_commit", "executing", 1),
+    ("after_observation", "executing", 1),
+    ("before_local_acceptance", "verified", 1),
+])
+def test_six_crash_points_preserve_authority_effect_and_acceptance(tmp_path, point, prior_state, creates):
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[vendor_onboarding]\nenable=true\n[vendor_management]\nenable=true\n"
+        "[ai_vendor_risk]\nenable=true\n[model_risk_assurance]\nenable=true\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ, MAVERICK_HOME=str(tmp_path / "lightwork-state"),
+               MAVERICK_CONFIG=str(config), MAVERICK_ENTERPRISE="0",
+               MAVERICK_SECURE_DEFAULT="0", MAVERICK_ENCRYPT_AT_REST="0",
+               PYTHONIOENCODING="utf-8", LIGHTWORK_FIXTURE_CRASH_POINT=point)
+    env.pop("MAVERICK_TENANT", None)
+    env.pop("MAVERICK_CLIENT_ID", None)
+    crashed = _child("matrix-crash", tmp_path, env)
+    assert crashed.returncode == _CRASH_EXIT, crashed.stderr
+    provider_path = tmp_path / "external-provider.json"
+    prior = json.loads(provider_path.read_text(encoding="utf-8")) if provider_path.exists() else {}
+    assert prior.get("creates", 0) == creates
+    assert len(prior.get("tickets", [])) == creates
+    recovered = _child("matrix-resume", tmp_path, env)
+    assert recovered.returncode == 0, recovered.stderr
+    proof = json.loads(recovered.stdout)
+    before, final = proof["before"], proof["case"]
+    assert (before.get("operation") or {}).get("state") == prior_state
+    assert before["outcome"] is None
+    assert proof["explicit_new_human_approval"] is (prior_state in {None, "prepared"})
+    if before.get("operation"):
+        assert final["operation"]["id"] == before["operation"]["id"]
+        assert final["operation"]["payload_sha256"] == before["operation"]["payload_sha256"]
+    if point == "before_send":
+        # The durable claim alone cannot prove a send occurred; absent search
+        # results do not authorize a new create or a fabricated acceptance.
+        assert proof["creates"] == 0 and proof["reads"] == 1
+        assert final["stage"] == "reconciliation_required"
+        assert final["outcome"] is None
+        assert final["operation"]["receipt"] is None
+    else:
+        assert proof["creates"] == 1
+        assert final["stage"] == "accepted"
+        assert final["operation"]["state"] == "verified"
+        assert final["outcome"]["accepted"] is True
+        assert final["outcome"]["released"] is False
+    assert final["operation"]["attempts"] == 1
 
 
 if __name__ == "__main__":

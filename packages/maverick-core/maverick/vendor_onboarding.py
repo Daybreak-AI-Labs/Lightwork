@@ -89,6 +89,7 @@ _WORK_ITEM_STATE = {
     "execution_completed": ("Verified", "accept_or_reject"),
     "accepted": ("Accepted", "check_renewal"),
     "customer_rejected": ("Failed", "closed"),
+    "cancelled": ("Cancelled", "closed"),
 }
 
 
@@ -207,6 +208,8 @@ class VendorOnboardingService:
         technical = ("verified" if operation.get("state") == "verified" else
                      "indeterminate" if operation.get("state") in {"executing", "reconciliation_required"}
                      else "not_verified")
+        if row.get("cancellation") and technical == "verified":
+            next_action = "closed_external_effect_retained"
         business = ("accepted" if outcome.get("accepted") is True else
                     "rejected" if outcome.get("accepted") is False else "pending")
         preconditions = operation.get("preconditions") or {}
@@ -266,20 +269,63 @@ class VendorOnboardingService:
         )
         return dict(row, journey_contract=reference, work_item=work_item)
 
-    def _save(self, ctx, row, **changes):
+    def _save(self, ctx, row, *, audit_action="vendor_onboarding_changed", **changes):
         self._contract(row)
         result = _CASES.update(
             row["id"], lambda value: value.update(changes),
-            expected_revision=row["revision"], action="vendor_onboarding_changed", actor=ctx.actor,
+            expected_revision=row["revision"], action=audit_action, actor=ctx.actor,
         )
         if result is None:
             raise KeyError("vendor onboarding case disappeared")
         return self._present(result)
 
     def _editable(self, row):
+        self._require_active_intent(row)
         if ((row.get("operation") or {}).get("state") in _CLOSED_OPERATION
                 or row.get("outcome") is not None):
             raise ValueError("external execution or acceptance freezes this case; create a renewal")
+
+    @staticmethod
+    def _require_active_intent(row):
+        if row.get("cancellation") or row.get("stage") == "cancelled":
+            raise ValueError("this request is cancelled; only existing-effect reconciliation remains available")
+
+    @_scoped
+    def cancel(self, ctx, case_id, expected_revision, rationale):
+        """Stop local intent without compensating or erasing provider effects.
+
+        The saga lock serializes cancellation with dispatch. A caller that
+        reviewed an earlier revision must reload the actual effect state first.
+        A durable execution claim is conservatively possibly dispatched even
+        when the worker lost authority before reaching the provider.
+        """
+        row = self._get(ctx, case_id, expected_revision)
+        self._permit(ctx, "action.cancel", case_id, human=True)
+        why = _text(rationale, "rationale")
+        if row.get("cancellation"):
+            return row
+        if row.get("outcome") is not None:
+            raise ValueError("an existing customer decision cannot be replaced by cancellation")
+        operation = row.get("operation") or {}
+        attempted = (operation.get("state") in _CLOSED_OPERATION
+                     or operation.get("attempts", 0) > 0)
+        verified = operation.get("state") == "verified"
+        cancellation = {
+            "requested_by": ctx.actor, "requested_at": self.clock(), "rationale": why,
+            "authority": ctx.binding(), "reviewed_revision": row["revision"],
+            "operation_id": operation.get("id"), "scope": "local_intent_only",
+            "dispatch_state_at_cancellation": "possibly_dispatched" if attempted else "not_dispatched",
+            "technical_effect_at_cancellation": ("verified" if verified else
+                                                  "indeterminate" if attempted else "not_verified"),
+            "effect_reversal": "not_requested",
+        }
+        changes = ({"operation": dict(operation, state="verified" if verified else "reconciliation_required")}
+                   if attempted else self._invalidate(row, reason="local_intent_cancelled"))
+        return self._save(
+            ctx, row, cancellation=cancellation,
+            stage="reconciliation_required" if attempted and not verified else "cancelled",
+            audit_action="vendor_onboarding_cancelled", **changes,
+        )
 
     def _invalidate(self, row, *, reason=None):
         history = list(row.get("operation_history") or [])
@@ -715,6 +761,7 @@ class VendorOnboardingService:
     def approve_action(self, ctx, case_id, expected_revision):
         row = self._get(ctx, case_id, expected_revision)
         self._permit(ctx, "action.approve", case_id, human=True)
+        self._require_active_intent(row)
         operation = row.get("operation")
         if not operation or operation["state"] != "prepared":
             raise ValueError("prepared operation required")
@@ -782,12 +829,14 @@ class VendorOnboardingService:
                             observer=ctx.binding())
         return self._save(ctx, row,
                           operation=dict(operation, state="verified", external_confirmation=confirmation),
-                          stage="execution_completed", completed_at=self.clock())
+                          stage="cancelled" if row.get("cancellation") else "execution_completed",
+                          completed_at=self.clock())
 
     @_scoped
     def execute(self, ctx, case_id):
         row = self._get(ctx, case_id)
         self._permit(ctx, "action.execute", case_id)
+        self._require_active_intent(row)
         operation = row.get("operation")
         if not operation:
             raise ValueError("approved operation required")
@@ -855,6 +904,7 @@ class VendorOnboardingService:
     def accept(self, ctx, case_id, expected_revision, accepted, rationale):
         row = self._get(ctx, case_id, expected_revision)
         self._permit(ctx, "accept", case_id, human=True)
+        self._require_active_intent(row)
         if type(accepted) is not bool or row.get("outcome") is not None:
             raise ValueError("one explicit boolean acceptance decision is required")
         why = _text(rationale, "rationale")

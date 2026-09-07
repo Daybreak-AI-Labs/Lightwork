@@ -10,8 +10,8 @@ self-consistency checks and are never described or treated as authentication.
 Unsigned legacy archives have an intentionally awkward compatibility path:
 callers must pass ``allow_unsigned=True`` to ``read_manifest`` / ``restore_backup``
 (and may create one with the same explicit flag). The CLI has no unsigned
-override. ``force=True`` only overrides client/schema compatibility and never
-bypasses signature verification.
+override. ``force=True`` only overrides client/live-world admission checks and
+never bypasses signature verification or schema compatibility.
 
 Restore scans tar streams without ``getmembers``/``extractall``, enforces hard
 member/path/type/per-file/expanded-size limits, writes only into a private
@@ -491,8 +491,8 @@ def _manifest_files(
     manifest: dict[str, Any], *, allow_legacy_unsigned: bool,
 ) -> dict[str, tuple[str, int | None]]:
     schema = manifest.get("schema")
-    if schema != SCHEMA and not (allow_legacy_unsigned and schema == 1):
-        raise BackupError(f"unsupported backup manifest schema: {schema!r}")
+    if type(schema) is not int or (schema != SCHEMA and not (allow_legacy_unsigned and schema == 1)):
+        raise BackupError("unsupported backup manifest schema; upgrade Lightwork or use a reviewed migration")
     raw_files = manifest.get("files")
     if not isinstance(raw_files, dict) or len(raw_files) > MAX_ARCHIVE_MEMBERS:
         raise BackupError("backup manifest files map is missing or oversized")
@@ -711,19 +711,92 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _world_schema_version(root: Path) -> int | None:
-    db = root / "world.db"
+def _world_schema_version(db: Path) -> int | None:
+    """Read native SQLite metadata from a private, checkpointed staging copy.
+
+    An absent marker leaves other SQLite stores unclassified; for a known
+    world, an absent/empty table is the supported unversioned legacy form.
+    Nonempty metadata must identify exactly one positive integral version.
+    """
     if not db.exists():
         return None
+    invalid = "backup world schema metadata is invalid; use a compatible backup or a reviewed migration"
     try:
-        connection = sqlite3.connect(str(db))
+        uri = (
+            "file:" + quote(str(_filesystem_path(db)), safe=":")
+            if os.name == "nt" else db.resolve().as_uri()
+        )
+        # _stage uses SQLite's online backup API, so committed WAL pages are
+        # already in the copy. Immutable avoids creating unmanifested sidecars
+        # when a copied database retains its WAL journal-mode header.
+        connection = sqlite3.connect(uri + "?mode=ro&immutable=1", uri=True)
         try:
-            row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-            return int(row[0]) if row and row[0] is not None else None
+            table = connection.execute(
+                "SELECT type FROM sqlite_master WHERE name = 'schema_version' COLLATE NOCASE"
+            ).fetchone()
+            if table is None:
+                return None
+            if table[0] != "table":
+                raise BackupError(invalid)
+            rows = connection.execute("SELECT version FROM schema_version LIMIT 2").fetchall()
         finally:
             connection.close()
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        raise BackupError(invalid) from exc
+    if not rows:
         return None
+    if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] < 1:
+        raise BackupError(invalid)
+    return rows[0][0]
+
+
+def _check_supported_world_schema(value: Any) -> None:
+    from .world_model import SCHEMA_VERSION
+
+    if value is not None and (type(value) is not int or value < 1):
+        raise BackupError("backup world schema metadata is invalid; use a compatible backup or a reviewed migration")
+    if value is not None and value > SCHEMA_VERSION:
+        raise BackupError(
+            f"backup world schema v{value} is newer than this binary's v{SCHEMA_VERSION}; "
+            "upgrade Lightwork first or select a compatible backup"
+        )
+
+
+def _validate_restore_schemas(stage: Path, manifest: dict[str, Any]) -> None:
+    """Reject unsupported staged databases before recovery or publication.
+
+    The signed v2 root declaration must match the actual root database. Legacy
+    v1 archives may omit that declaration. Header/extension-discovered SQLite
+    files with the native schema_version marker are checked regardless of
+    filename or tenant path; the root declaration does not describe them.
+    """
+    declared = manifest.get("world_schema_version")
+    _check_supported_world_schema(declared)
+    sidecar_names = {"world.db" + suffix for suffix in _DB_SIDECARS}
+    if any(path.name.casefold() in sidecar_names for path in stage.rglob("*")):
+        raise BackupError(
+            "backup world databases must be checkpointed without SQLite sidecars; "
+            "create a fresh snapshot or use a reviewed migration"
+        )
+    actual = _world_schema_version(stage / "world.db")
+    _check_supported_world_schema(actual)
+    if (manifest.get("schema") == SCHEMA or declared is not None) and actual != declared:
+        raise BackupError(
+            "backup world schema does not match its manifest; use a compatible backup or a reviewed migration"
+        )
+    for db in stage.rglob("*"):
+        if not db.is_file() or not _is_sqlite_file(db):
+            continue
+        # All supported SQLite snapshots are checkpointed copies. Check before
+        # immutable inspection: a custom file's native marker itself could
+        # otherwise be hidden in a WAL. Other component schemas are not given
+        # a world version merely because they have a SQLite header.
+        if any(db.with_name(db.name + suffix).exists() for suffix in _DB_SIDECARS):
+            raise BackupError(
+                "backup SQLite databases must be checkpointed without sidecars; "
+                "create a fresh snapshot or use a reviewed migration"
+            )
+        _check_supported_world_schema(_world_schema_version(db))
 
 
 # The at-rest encryption key (keys/at_rest.key + the keys/at_rest.d/*.key
@@ -885,8 +958,8 @@ def create_backup(
     with _temporary_directory(prefix="mvk-backup-") as temporary:
         temp_root = file_lock.ensure_private_directory(temporary)
         stage = file_lock.ensure_private_directory(temp_root / "data")
-        schema_version = _world_schema_version(root)
         files = _stage(root, stage, include_keys=include_keys)
+        schema_version = _world_schema_version(stage / "world.db")
         if not files:
             raise BackupError(f"no data files to back up at {root}")
         manifest = _authenticate_for_write({
@@ -1347,7 +1420,8 @@ def restore_backup(
     it open. ``allow_unsigned`` is the explicit legacy path and provides
     integrity/bounds checks, not provenance.
     Supported local application references are validated before publication;
-    force never bypasses that check. Governed stores require full replacement.
+    force never bypasses that check or database schema compatibility. Governed
+    stores require full replacement.
     """
     with _verified_archive(tarball) as stream:
         manifest, key = _read_manifest_stream(stream, allow_unsigned=allow_unsigned)
@@ -1358,32 +1432,21 @@ def restore_backup(
                 f"backup is for client {backup_client!r} but this deployment is "
                 f"{live_client!r}; refusing (pass force=True to override)"
             )
-        from .world_model import SCHEMA_VERSION
-
-        backup_schema = manifest.get("world_schema_version")
-        if (
-            not force
-            and isinstance(backup_schema, int)
-            and backup_schema > SCHEMA_VERSION
-        ):
-            raise BackupError(
-                f"backup world schema v{backup_schema} is newer than this "
-                f"binary's v{SCHEMA_VERSION}; upgrade Lightwork first, or pass "
-                "force=True to override"
-            )
+        _check_supported_world_schema(manifest.get("world_schema_version"))
         expected = _manifest_files(
             manifest,
             allow_legacy_unsigned=allow_unsigned and key is None,
         )
         root = _client_root()
-        file_lock.ensure_private_directory(root)
-        if not force and "world.db" in expected:
-            _refuse_if_world_appears_live(root)
         with _temporary_directory(prefix="mvk-restore-") as temporary:
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
+            _validate_restore_schemas(stage, manifest)
             _validate_application_stage(stage)
+            file_lock.ensure_private_directory(root)
+            if not force and "world.db" in expected:
+                _refuse_if_world_appears_live(root)
             lock_target = root / _RESTORE_LOCK_TARGET
             with file_lock.cross_process_lock(lock_target, strict=True):
                 if not replace_existing:
@@ -1442,11 +1505,13 @@ def validate_backup_application(tarball: str | Path) -> dict[str, Any]:
         manifest, _ = _read_manifest_stream(stream, allow_unsigned=False)
         if manifest.get("client_id") != _client_id():
             raise BackupError("Application validation requires the matching recovery workspace.")
+        _check_supported_world_schema(manifest.get("world_schema_version"))
         expected = _manifest_files(manifest, allow_legacy_unsigned=False)
         with _temporary_directory(prefix="mvk-application-verify-") as temporary:
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
+            _validate_restore_schemas(stage, manifest)
             return _validate_application_stage(stage)
 
 

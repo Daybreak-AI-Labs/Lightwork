@@ -30,6 +30,8 @@
   #vo-upload-review pre {max-height:24rem;min-width:0}
   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
   .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
+  .vo-card #vo-cancellation-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
+  #vo-cancellation-status {white-space:pre-line;overflow-wrap:anywhere}
   #vendor-onboarding:has(#vo-upload-review:not([hidden])) #vo-message {position:static}
   @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
 </style>
@@ -158,6 +160,13 @@
         <button id="vo-check-renewal" type="button" disabled>Check renewal readiness</button>
         <p id="vo-renewal-status" role="status">Check whether the evidence and ticket are still current. Renewals that need judgment remain with a human reviewer.</p>
         <h3>Corrections and exceptions</h3><pre id="vo-history"></pre>
+      </section>
+      <section class="vo-card" aria-labelledby="vo-cancellation-title">
+        <h2 id="vo-cancellation-title">Cancel this request</h2>
+        <p id="vo-cancellation-status" role="status" aria-live="polite">Select a request to review cancellation and any existing ticket result.</p>
+        <label for="vo-cancellation-reason">Cancellation reason</label><textarea id="vo-cancellation-reason" maxlength="4000" disabled></textarea>
+          <label class="vo-upload-confirm-label"><input id="vo-cancellation-confirm" type="checkbox" disabled> <span>I want to stop local work on this request. I understand that any Jira ticket already created remains, and an uncertain result still needs checking.</span></label>
+        <button id="vo-cancel" type="button" disabled>Cancel local work</button>
       </section>
     </div>
   </div>
