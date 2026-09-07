@@ -106,7 +106,8 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     @app.middleware("http")
     async def test_principal(request: Request, call_next):
         request.state.principal = SimpleNamespace(
-            sub=request.headers.get("X-Test-Subject", "operator-a")
+            sub=request.headers.get("X-Test-Subject", "operator-a"),
+            principal="user:" + request.headers.get("X-Test-Subject", "operator-a"),
         )
         return await call_next(request)
 
@@ -126,6 +127,95 @@ def environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def _ok(response, expected: int = 200):
     assert response.status_code == expected, response.text
     return response.json()
+
+
+def _saved_setup(environment, monkeypatch):
+    from maverick import config, connections
+    from maverick.paths import tenant_scope
+    from maverick.tenant import kms
+
+    client, database, rows, _, _, clock, config_path, app = environment
+    with config_path.open("a", encoding="utf-8") as stream:
+        stream.write('[privacy_automation.data_discovery.adapters]\nenable=true\nenabled_providers=["servicenow_cmdb"]\n[connections]\nenable=true\n')
+    monkeypatch.setenv("MAVERICK_CONNECTIONS", "1")
+    monkeypatch.setenv("MAVERICK_KMS_KEK", "ac" * 32)
+    config.reset_config_cache()
+    kms._clear_cache()
+    monkeypatch.setattr(privacy_data_discovery_api, "_store", lambda ops, tenant, request:
+        discovery.PrivacyDataDiscoveryStore(database, config_gate=lambda: None, clock=clock))
+    with tenant_scope(tenant="tenant-a"):
+        saved = connections.set_connection("discovery", connector="servicenow_cmdb", base_url="https://data.example.com",
+                                           token="synthetic-private-token", owner="user:operator-a")
+    app.state.privacy_data_discovery_structured_sources["servicenow_cmdb"] = rows
+    created = _ok(client.put(f"{API}/evidence-keys/inventory", json={"expected_revision":0,"idempotency_key":"create-key"}))
+    payload = dict(_source_payload(), provider="servicenow_cmdb", credential_env="connection:discovery:" + saved["revision"], evidence_key_env=created["reference"])
+    return payload, created
+
+
+def test_saved_setup_seals_keys_filters_connection_choices_and_rejects_forged_origin(environment, monkeypatch):
+    client, *_ = environment
+    payload, created = _saved_setup(environment, monkeypatch)
+    assert created["secret_returned"] is False and created["sources_updated"] is False
+    assert "key_hex" not in json.dumps(created)
+    setup = _ok(client.get(f"{API}/setup"))
+    assert setup["connections"][0]["reference"] == payload["credential_env"]
+    assert [provider["provider"] for provider in setup["providers"]] == ["servicenow_cmdb"]
+    assert "synthetic-private-token" not in json.dumps(setup)
+    _ok(client.put(f"{API}/sources/customers", json=payload))
+    forged = dict(payload, origin="https://attacker.example", idempotency_key="forged-source")
+    assert client.put(f"{API}/sources/forged", json=forged).status_code == 403
+    other = client.get(f"{API}/setup", headers={"X-Test-Subject":"operator-b"})
+    assert _ok(other)["connections"] == []
+    assert _ok(other)["evidence_keys"] == []
+
+
+def test_key_rotation_requires_explicit_source_update_and_binds_execution_principal(environment, monkeypatch):
+    from maverick import connections
+    from maverick.paths import current_tenant_id_strict
+
+    client, _, rows, _, _, _, _, _ = environment
+    payload, created = _saved_setup(environment, monkeypatch)
+    _ok(client.put(f"{API}/sources/customers", json=payload))
+    calls = []
+
+    def scoped_rows(**kwargs):
+        calls.append((connections.current_principal(), current_tenant_id_strict()))
+        yield discovery.StructuredRecord("row", {"email":"one@example.com"})
+
+    rows.iter_rows = scoped_rows
+    first = _run_manual(client, rows, values=[], operation="saved-key-first")
+    assert calls == [("user:operator-a", "tenant-a")]
+    rotated = _ok(client.put(f"{API}/evidence-keys/inventory", json={"expected_revision":1,"idempotency_key":"rotate-key"}))
+    assert _ok(client.put(f"{API}/evidence-keys/inventory", json={"expected_revision":1,"idempotency_key":"rotate-key"})) == rotated
+    unchanged = _ok(client.get(f"{API}/sources/customers"))
+    assert unchanged["revision"] == 1 and unchanged["evidence_key_env"] == created["reference"]
+    _ok(client.post(f"{API}/sources/customers/jobs", json=_manual_payload("old-key-scan")))
+    job = _ok(client.post(f"{API}/jobs/claim", json={"limit":1,"lease_seconds":60.0}))["items"][0]
+    blocked = client.post(f"{API}/jobs/{job['job_id']}/execute")
+    assert blocked.status_code == 403 and "rotated" in blocked.text
+    assert len(calls) == 1
+    updated = dict(payload, expected_revision=1, evidence_key_env=rotated["reference"], idempotency_key="rebind-source-key")
+    _ok(client.put(f"{API}/sources/customers", json=updated))
+    second = _ok(client.post(f"{API}/jobs/{job['job_id']}/execute"))
+    assert first["report"]["evidence_key_fingerprint"] != second["report"]["evidence_key_fingerprint"]
+
+
+def test_source_access_test_uses_saved_scope_and_returns_no_sample_or_report(environment, monkeypatch):
+    from maverick_dashboard import privacy_data_discovery_adapters_composition as composition
+
+    client, database, rows, _, _, clock, _, _ = environment
+    payload, _ = _saved_setup(environment, monkeypatch)
+    _ok(client.put(f"{API}/sources/customers", json=payload))
+    monkeypatch.setattr(composition, "snapshot_for_tenant", lambda *args, **kwargs: SimpleNamespace(
+        registry=SimpleNamespace(structured={"servicenow_cmdb":rows}, unstructured={})))
+    rows.rows = [discovery.StructuredRecord("row", {"email":"never-return@example.com"})]
+    assert client.post(f"{API}/sources/customers/test-access", json={"expected_revision":1,"confirm":False}).status_code == 422
+    result = _ok(client.post(f"{API}/sources/customers/test-access", json={"expected_revision":1,"confirm":True}))
+    assert result["access"] == "readable" and result["report_created"] is False
+    assert result["raw_data_returned"] is False
+    assert "never-return" not in json.dumps(result)
+    assert rows.calls[0][0] == payload["origin"]
+    assert discovery.PrivacyDataDiscoveryStore(database, config_gate=lambda: None, clock=clock).list_reports("tenant-a") == ()
 
 
 def _source_payload(*, kind: str = "structured") -> dict[str, object]:
