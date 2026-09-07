@@ -42,15 +42,17 @@ async def test_budget_exhaustion_gives_helpful_message(tmp_path: Path, fake_llm)
     assert world.get_goal(gid).status == "blocked"
 
 
-class _NeverDispatchedClient:
-    """A provider client whose `complete_async` must never actually run --
-    `LLM.complete_async`'s pre-dispatch cost estimate must raise
-    UnpricedModelError for an unverified model id before this is reached."""
+class _StrictInvoiceClient:
+    """A provider client that dispatches and then invoices through
+    ``Budget.record_tokens`` the way every real client does. W1-1 made the
+    pre-dispatch estimate estimate-only (so Azure/Bedrock/gateway ids can
+    dispatch at all); the invoice stays strict, and it is this call that
+    must raise UnpricedModelError for an unverified model id."""
 
-    async def complete_async(self, **kwargs):
+    async def complete_async(self, *, budget, model, **kwargs):
+        budget.record_tokens(10, 5, model=model)
         raise AssertionError(
-            "should never dispatch -- the pre-dispatch pricing check must "
-            "raise UnpricedModelError first"
+            "record_tokens must refuse to bill an unverified model id"
         )
 
 
@@ -69,7 +71,7 @@ async def test_unpriced_model_gives_pricing_message_not_a_cap_message(
     world = WorldModel(tmp_path / "world.db")
     gid = world.create_goal("goal on an unpriced model", "")
     llm = LLM(model="claude-nonexistent-99")
-    llm._get_client = lambda provider: _NeverDispatchedClient()
+    llm._get_client = lambda provider: _StrictInvoiceClient()
 
     out = await run_goal(
         llm, world, Budget(max_dollars=5.0), gid,

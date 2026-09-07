@@ -733,12 +733,16 @@ def _world_schema_version(root: Path) -> int | None:
 # the very archive it decrypts does the opposite and nullifies the product's
 # at-rest-encryption posture for anyone who obtains a copy (offsite backup, S3
 # bucket, standby host, a DSAR export handed to the data subject).
+# Only raw secrets are withheld: the at-rest primary key, its rotation keyring
+# and the audit signing keys (all ``*.key``). A wrapped DEK (keys/dek.wrapped)
+# is ciphertext under the primary key and public keys are public; both stay in
+# the archive because recovery of the encrypted payload needs them.
 _KEY_MATERIAL_ROOTS = (("keys",), ("audit", "keys"))
 
 
 def _is_key_material(relative: Path) -> bool:
     parts = relative.parts
-    return any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS)
+    return relative.suffix == ".key" and any(parts[: len(root)] == root for root in _KEY_MATERIAL_ROOTS)
 
 
 def _excluded_from_snapshot(relative: Path, *, include_keys: bool) -> bool:

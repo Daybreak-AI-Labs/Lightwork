@@ -128,7 +128,7 @@ async def enable(request: Request, response: Response, body: Reviewed):
 
 
 @router.get("/chat/goal/{goal_id}/files")
-async def page(request: Request, goal_id: int):
+def page(request: Request, goal_id: int):
     from .app import templates
     world, _, _ = _authority(request, goal_id)
     return templates.TemplateResponse(request, "task_file_recovery.html", {"goal": world.get_goal(goal_id)}, headers={"Cache-Control": "private, no-store"})

@@ -150,7 +150,7 @@ def dispatcher(ledger, monkeypatch):
     monkeypatch.setattr(llm, "_run_preflight", lambda *a, **kw: None)
     monkeypatch.setattr(llm, "_enforce_circuit", lambda *a: None)
     monkeypatch.setattr(llm, "_hedge_ms", lambda: None)
-    monkeypatch.setattr("maverick.budget._lookup_price", lambda _: (1_000_000, 0))
+    monkeypatch.setattr("maverick.budget._lookup_price", lambda _model, **_kw: (1_000_000, 0))
     cap.record("openai", 18, path=ledger)
     return llm.LLM(model="openai:synthetic-cap-model")
 

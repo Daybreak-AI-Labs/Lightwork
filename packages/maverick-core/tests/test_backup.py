@@ -255,6 +255,9 @@ def _seed_key_material(root):
     audit_keys_dir = root / "audit" / "keys"
     audit_keys_dir.mkdir(parents=True, exist_ok=True)
     (audit_keys_dir / "signing.key").write_bytes(b"\x02" * 32)
+    # Not secrets: a DEK wrapped under the primary key, and a public key.
+    (keys_dir / "dek.wrapped").write_bytes(b"\x03" * 64)
+    (audit_keys_dir / "signing.pub").write_bytes(b"\x04" * 32)
 
 
 def test_backup_excludes_key_material_by_default():
@@ -277,6 +280,9 @@ def test_backup_excludes_key_material_by_default():
     assert "data/keys/at_rest.d/k1.key" not in members
     assert "data/audit/keys/signing.key" not in members
     assert "data/world.db" in members  # everything else still ships
+    # Wrapped/public material is what a recovery of the ciphertext needs.
+    assert "data/keys/dek.wrapped" in members
+    assert "data/audit/keys/signing.pub" in members
 
 
 def test_backup_include_keys_opts_back_in():

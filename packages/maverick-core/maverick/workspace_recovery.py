@@ -742,7 +742,7 @@ def apply_restore(review_id: str, expected_target: str, *, isolated: bool, actor
             safety_manifest = backup.read_manifest(_archive(review["safety_snapshot"]))
         with backup._temporary_directory(prefix="lightwork-restore-drift-") as temporary, backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
-            if backup._stage(_root(), stage) != safety_manifest["files"]:
+            if backup._stage(_root(), stage, include_keys=backup._archive_includes_keys(safety_manifest["files"])) != safety_manifest["files"]:
                 raise RecoveryError("Workspace files changed after review. Prepare a new safety snapshot before restoring.")
         # Consume before applying. A retry never repeats a possibly completed
         # restore; the independent pre-restore archive remains downloadable.
