@@ -13,7 +13,7 @@ import math
 import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Context, Decimal, DecimalException, Inexact, InvalidOperation, Overflow
 from typing import Any
 
 CONTRACT_SCHEMAS = {
@@ -181,18 +181,45 @@ def _timestamp(value: object, name: str) -> str:
     return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+def _native_decimal(value: Decimal, name: str) -> Decimal:
+    """Reduce native coefficients within fixed resources, without rounding value."""
+    if not value.is_finite() or value < 0:
+        _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
+    if value.is_zero():
+        return Decimal(0)
+    adjusted = value.adjusted()
+    if not -62 <= adjusted <= 63:
+        _fail("invalid_budget", f"{name} must be a bounded decimal")
+    # A <=64-character fixed-point value has at most 64 significant digits
+    # and, when fractional, room for the integer part plus a decimal point.
+    # Quantize before normalize/str/as_tuple: normalizing the original native
+    # value can itself copy its arbitrarily large coefficient. Inexact is fatal;
+    # only redundant trailing zeros may be discarded.
+    quantum = Decimal((0, (1,), max(-62, min(0, adjusted - 62))))
+    context = Context(prec=64, Emax=63, Emin=-62, traps=[Inexact, InvalidOperation, Overflow])
+    try:
+        return context.normalize(value.quantize(quantum, context=context))
+    except DecimalException as exc:
+        raise PlatformContractError(
+            f"{name} must be an exact bounded decimal", code="invalid_budget",
+        ) from exc
+
+
 def _decimal(value: object, name: str) -> str:
     if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
         _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
     if isinstance(value, float) and not math.isfinite(value):
         _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
-    raw = str(value)
-    if len(raw) > 64:
-        _fail("invalid_budget", f"{name} must be a bounded decimal")
-    try:
-        amount = Decimal(raw)
-    except (InvalidOperation, ValueError):
-        _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
+    if isinstance(value, Decimal):
+        amount = _native_decimal(value, name)
+    else:
+        raw = str(value)
+        if len(raw) > 64:
+            _fail("invalid_budget", f"{name} must be a bounded decimal")
+        try:
+            amount = Decimal(raw)
+        except (InvalidOperation, ValueError):
+            _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
     if not amount.is_finite() or amount < 0:
         _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
     if amount.is_zero():
@@ -586,25 +613,22 @@ def transition_work_item(
 
 
 def _normalized_key(name: str) -> str:
-    words = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", words).lower().replace("-", "_")
+    # Case and word separators carry no credential meaning: APIKEY, apiKey
+    # and api_key must use the same policy, including their reference suffixes.
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
 def _secret_key(name: str) -> bool:
-    key = _normalized_key(name)
-    return key in {
-        "secret", "token", "password", "passwd", "api_key", "access_key",
-        "client_secret", "private_key", "credential", "credentials", "authorization",
-        "proxy_authorization", "cookie", "set_cookie",
-    } or key.endswith((
-        "_secret", "_token", "_password", "_api_key", "_private_key", "_access_key",
-        "_authorization", "_cookie", "_credentials",
+    return _normalized_key(name).endswith((
+        "secret", "token", "password", "passwd", "apikey", "accesskey",
+        "clientsecret", "privatekey", "credential", "credentials", "authorization",
+        "proxyauthorization", "cookie", "setcookie",
     ))
 
 
 def _credential_reference_key(name: str) -> bool:
     key = _normalized_key(name)
-    for suffix in ("_ref", "_reference", "_refs", "_references"):
+    for suffix in ("ref", "reference", "refs", "references"):
         if key.endswith(suffix):
             return _secret_key(key[:-len(suffix)])
     return False

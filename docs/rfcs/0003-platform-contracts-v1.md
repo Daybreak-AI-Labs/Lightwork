@@ -55,6 +55,12 @@ Native `Decimal` values are permitted only for budget limit/spent
 and exact cost amount; readers convert those to decimal strings. Fixed-point
 money representations are limited to 64 characters, with magnitude and scale
 checked before exponent expansion. Negative zero is normalized to `0`.
+Native Decimal coefficients are bounded before string or tuple conversion:
+exact quantization uses a fixed 64-digit context and traps any inexact result.
+Oversized fractional coefficients are rejected even when their magnitude is
+small; arbitrarily many redundant trailing zeros may be removed because their
+removal preserves the exact monetary value. Ambient decimal precision cannot
+silently change the result.
 
 Unknown schemas, cross-tenant reads, non-finite or overspent budgets, invalid
 timestamps, stale revisions, and invalid transitions raise
@@ -99,6 +105,9 @@ value is redacted, including unknown provider fields and free-form messages.
 Defined domain maps are scrubbed recursively for credential-bearing field names,
 including snake/camel/acronym variants of API keys, access keys, tokens, secrets,
 passwords, credentials, Authorization, Proxy-Authorization, Cookie and Set-Cookie.
+Matching is case-insensitive after removing separators, so compact uppercase
+forms such as `APIKEY` and `ACCESSKEY` follow the same rule as `api_key`. Credential
+reference suffixes use that identical normalization.
 A credential-like name ending in `ref` or `reference` does not by itself exempt
 its value. Supported references are a closed `{kind: managed_connection, id: ...}`
 object with an opaque bounded identifier, or a legacy `vault://tenant/path`

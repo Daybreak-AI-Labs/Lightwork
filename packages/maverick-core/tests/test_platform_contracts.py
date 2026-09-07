@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import tracemalloc
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 from maverick.platform_contracts import (
@@ -581,3 +581,62 @@ def test_exact_transport_boundary_counts_unicode_escapes_and_punctuation(charact
     with pytest.raises(PlatformContractError) as raised:
         read_contract(record)
     assert raised.value.code == "invalid_contract"
+
+
+@pytest.mark.parametrize("field", ["budget", "cost"])
+@pytest.mark.parametrize("amount", [
+    Decimal("1" * 100_000), Decimal("0." + "1" * 100_000),
+    Decimal("1." + "0" * 99_999 + "1"),
+], ids=["large_magnitude", "large_fractional_coefficient", "nonzero_far_beyond_precision"])
+def test_native_decimal_coefficients_are_bounded_before_string_or_tuple_expansion(field, amount):
+    record = _review_work_item()
+    record[field]["limit" if field == "budget" else "amount"] = amount
+    tracemalloc.start()
+    try:
+        with pytest.raises(PlatformContractError) as raised:
+            read_contract(record)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert raised.value.code == ("invalid_budget" if field == "budget" else "invalid_contract")
+    assert peak < 20_000
+
+
+@pytest.mark.parametrize(("amount", "expected"), [
+    (Decimal("1." + "0" * 100_000), "1"),
+    (Decimal("9" * 64), "9" * 64),
+    (Decimal("1e-62"), "0." + "0" * 61 + "1"),
+    (Decimal("1.23456789"), "1.23456789"),
+])
+def test_native_decimal_normalization_is_exact_and_independent_of_ambient_precision(amount, expected):
+    record = _review_work_item()
+    record["cost"]["amount"] = amount
+    with localcontext() as context:
+        context.prec = 3
+        tracemalloc.start()
+        try:
+            normalized = read_contract(record)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+    assert normalized["cost"]["amount"] == expected
+    assert peak < 20_000
+
+
+@pytest.mark.parametrize("key", [
+    "APIKEY", "ACCESSKEY", "CLIENTSECRET", "PRIVATEKEY", "PROXYAUTHORIZATION",
+    "SETCOOKIE", "SERVICE_APIKEY", "providerACCESSKEY",
+])
+def test_compact_uppercase_credential_aliases_are_redacted_in_defined_maps(key):
+    record = _review_work_item()
+    record["provenance"][key] = "synthetic-secret"
+    assert export_contract(record)["provenance"][key] == "[redacted]"
+
+
+@pytest.mark.parametrize("key", ["APIKEYREF", "ACCESSKEYREFERENCE", "CLIENTSECRETREFS", "PRIVATEKEYREFERENCES"])
+def test_compact_credential_reference_aliases_use_the_same_closed_reference_policy(key):
+    record = _review_work_item()
+    record["provenance"][key] = "synthetic-secret"
+    assert export_contract(record)["provenance"][key] == "[redacted]"
+    record["provenance"][key] = {"kind": "managed_connection", "id": "jira"}
+    assert export_contract(record)["provenance"][key] == {"kind": "managed_connection", "id": "jira"}
