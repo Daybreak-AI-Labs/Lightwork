@@ -6,6 +6,7 @@
 # repository bytes stable across Windows and POSIX checkouts.
 /proof/*.json text eol=lf
 /scripts/acceptance/fixtures/*.json text eol=lf
+/scripts/acceptance/fixtures/vendor-documents/*.pdf binary
 
 # Signed governance-frontier evidence, published as one unit. The manifest is
 # Ed25519-signed by the key in trusted-publisher.pub and pins SHA-256 digests

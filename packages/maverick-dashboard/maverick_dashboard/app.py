@@ -61,6 +61,7 @@ from ._shared import (
     require_provider_or_400,
 )
 from ._shared import _world_cache as _world_cache  # re-export: tests clear app._world_cache
+from .action_center_api import router as action_center_router
 from .api import router as api_router
 from .api_schemas import GOAL_DESCRIPTION_MAX_LENGTH, GOAL_TITLE_MAX_LENGTH
 from .auth import (
@@ -86,6 +87,8 @@ from .auth import (
     stored_automation_identity,
     websocket_caller_principal,
 )
+from .draft_api import page_context as _draft_page_context
+from .draft_api import router as draft_router
 from .health_routes import (
     health_response as _health_response,
 )
@@ -96,6 +99,11 @@ from .health_routes import (
     readiness_response as _readiness_response,
 )
 from .oidc_login import router as oidc_login_router
+from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
+from .outcome_pilots_api import router as outcome_pilots_router
+from .project_reviews_api import router as project_reviews_router
+from .record_search_api import page_context as _record_search_page_context
+from .record_search_api import router as record_search_router
 from .route_identity import (
     stabilize_effective_route_names as _stabilize_effective_route_names,
 )
@@ -245,6 +253,9 @@ def _theme_context(request: Request) -> dict:
 # Register the per-request context processor with Starlette so every
 # TemplateResponse picks up the resolved theme automatically.
 templates.context_processors.append(_theme_context)
+
+templates.context_processors.append(_draft_page_context)
+templates.context_processors.append(_record_search_page_context)
 
 
 # Context processor: every template gets `nav_groups` -- the sidebar filtered
@@ -526,6 +537,9 @@ async def _lifespan(app: FastAPI):
     startup -- that is the point of a deploy gate. It is a silent no-op
     otherwise, so the default fail-open posture is unchanged (kernel rule 1).
     """
+    from maverick.installation_recovery import assert_normal_start_allowed
+
+    assert_normal_start_allowed()
     from maverick.deployment import require_enterprise_or_die
 
     require_enterprise_or_die()
@@ -609,25 +623,18 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_refresher)
     except Exception:  # pragma: no cover - never block startup
         log.exception("license auto-refresh not started")
-    # Voice warm-up: fetch/load the local STT model in the background so the
-    # first mic click transcribes instead of 503ing into browser fallback.
-    # A plain daemon thread, NOT run_in_threadpool: the first-run model
-    # download can take minutes and must never delay startup. Fail-open —
-    # requests degrade to the normal backend chain if warm-up loses.
+    # Load installed voice weights without delaying startup. Downloads require
+    # explicit persisted opt-in, or the separately reviewed Settings action.
     try:
-        from maverick.tools.voice import warm_up_local_stt
+        from .voice_setup_api import start_warmup
 
-        from .api import _voice_commands_enabled
-
-        if _voice_commands_enabled():
-            threading.Thread(
-                target=warm_up_local_stt,
-                name="voice-stt-warmup",
-                daemon=True,
-            ).start()
+        start_warmup(app)
     except Exception:  # pragma: no cover - never block startup
         log.exception("voice STT warm-up not started")
     yield
+    from .voice_setup_api import stop_setup
+
+    await run_in_threadpool(stop_setup, app)
     try:
         from maverick.entitlements import stop_refresher
 
@@ -932,9 +939,28 @@ attach_unified_audit_composition(app)
 install_shared_governance_inventory_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
+app.include_router(draft_router)
+app.include_router(record_search_router)
+app.include_router(action_center_router)
+app.include_router(outcome_pilots_router)
+app.include_router(outcome_pilot_costs_router)
+app.include_router(project_reviews_router)
 from .in_app_routes import router as in_app_router  # noqa: E402
 
 app.include_router(in_app_router)
+from .provider_spending_api import router as provider_spending_router  # noqa: E402
+from .recovery_api import router as recovery_router  # noqa: E402
+from .recovery_mode import RecoveryOnlyMiddleware  # noqa: E402
+from .support_api import router as support_router  # noqa: E402
+from .voice_setup_api import VoiceSetup  # noqa: E402
+from .voice_setup_api import router as voice_setup_router  # noqa: E402
+
+app.include_router(recovery_router)
+app.include_router(provider_spending_router)
+app.include_router(support_router)
+app.include_router(voice_setup_router)
+app.state.voice_setup = VoiceSetup()
+app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
 )
@@ -1026,6 +1052,14 @@ from .vendor_onboarding_page import create_vendor_onboarding_page_router  # noqa
 
 attach_vendor_onboarding_composition(app)
 app.include_router(vendor_onboarding_router, prefix="/api/v1")
+from .task_file_recovery_api import router as task_file_recovery_router  # noqa: E402
+from .vendor_setup_api import router as vendor_setup_router  # noqa: E402
+
+app.include_router(vendor_setup_router)
+app.include_router(task_file_recovery_router)
+from .connection_setup_api import router as connection_setup_router  # noqa: E402
+
+app.include_router(connection_setup_router)
 app.include_router(create_vendor_onboarding_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .cortex_api import router as cortex_router  # noqa: E402
@@ -1119,6 +1153,9 @@ app.include_router(oidc_login_router)
 # admin mints on /users. Self-gates on [dashboard] invites (default off), so
 # including it unconditionally is inert. See maverick_dashboard.invite_routes.
 from .invite_routes import router as invite_router  # noqa: E402
+from .local_owner_routes import router as local_owner_router  # noqa: E402
+
+app.include_router(local_owner_router)
 
 app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
@@ -1313,6 +1350,8 @@ _AUTH_EXEMPT = {
     "/auth/callback",
     "/auth/logout",
     "/auth/error",
+    "/auth/local-owner",
+    "/auth/local-login",
     # The brand logo is a public, non-sensitive image; the public share view
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
@@ -2022,6 +2061,9 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
                 f"/auth/login?return_to={quote(return_to, safe='')}",
                 status_code=302,
             )
+        from .local_owner import claimed as local_owner_claimed
+        if local_owner_claimed() and request.url.path not in {"/auth/local-owner", "/auth/local-login"}:
+            return RedirectResponse("/auth/local-login", status_code=302)
     if _wants_html(request):
         status = int(exc.status_code)
         title, message = {
@@ -2763,12 +2805,13 @@ async def projects_create(
 ) -> RedirectResponse:
     """Create a project, then redirect to it. Same-origin; owned by the caller."""
     _require_same_origin(request)
+    require_permission(request, "operate")
     if not name.strip():
         raise HTTPException(status_code=422, detail="a project needs a name")
     pid = _world().create_project(
         name.strip(),
         description=description.strip(),
-        owner=goal_owner_filter(request) or "",
+        owner=caller_principal(request) or "",
         domain=domain.strip(),
     )
     return RedirectResponse(f"/projects/{pid}", status_code=303)
@@ -2782,13 +2825,16 @@ async def project_detail(request: Request, project_id: int) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such project")
     # Owner-scoped like goals: a project you don't own 404s rather than leaks.
     owner = goal_owner_filter(request)
-    if owner is not None and project["owner"] not in ("", owner):
+    if owner is not None and project["owner"] != owner:
         raise HTTPException(status_code=404, detail="no such project")
-    goals = w.list_goals(project_id=project_id, order="desc")
+    goals = w.list_goals(project_id=project_id, owner=owner, order="desc")
+    counts: dict[str, int] = {}
+    for goal in goals:
+        counts[goal.status] = counts.get(goal.status, 0) + 1
     return templates.TemplateResponse(
         request,
         "project_detail.html",
-        {"project": project, "goals": goals, "counts": w.project_status_counts(project_id)},
+        {"project": project, "goals": goals, "counts": counts},
     )
 
 
@@ -2799,12 +2845,21 @@ async def goal_set_project(
     """File a goal under a project (empty value clears it). Same-origin; the
     caller must be able to access the goal."""
     _require_same_origin(request)
+    require_permission(request, "operate")
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    pid = int(project_id) if project_id.strip() else None
+    try:
+        pid = int(project_id) if project_id.strip() else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Choose a valid project.") from exc
+    if pid is not None:
+        project = w.get_project(pid)
+        owner = goal_owner_filter(request)
+        if project is None or (owner is not None and project["owner"] != owner):
+            raise HTTPException(status_code=404, detail="no such project")
     w.set_goal_project(goal_id, pid)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
@@ -2902,6 +2957,28 @@ async def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     default_mine = mine if (not selected and role != "all") else None
     model = build_inbox(specs, runs_by_domain, selected, signoffs, mine=default_mine)
     return templates.TemplateResponse(request, "deliverables.html", model)
+
+
+@app.get("/action-center", response_class=HTMLResponse)
+async def action_center_page(request: Request) -> HTMLResponse:
+    from .action_center_api import require_enabled
+    from .draft_api import context_for
+
+    require_enabled(request)
+    return templates.TemplateResponse(request, "action_center.html", {"action_context": context_for(request)})
+
+
+@app.get("/workflow-readiness", response_class=HTMLResponse)
+async def workflow_readiness_page(request: Request) -> HTMLResponse:
+    from maverick import config
+
+    from .workflow_readiness import for_request
+
+    require_permission(request, "view")
+    if config.config_source_errors(include_tenant=True) or config.get_features().get("workflow_readiness") is not True:
+        raise HTTPException(403, "Workflow readiness is disabled in Settings or configuration is unavailable.")
+    return templates.TemplateResponse(request, "workflow_readiness.html", {"capabilities": for_request(request)},
+                                      headers={"Cache-Control": "private, no-store"})
 
 
 @app.get("/tenants", response_class=HTMLResponse)
@@ -4904,7 +4981,7 @@ async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
 
 
 @app.get("/billing")
-async def billing_page(request: Request, format: str = "", period: str = ""):
+async def billing_page(request: Request, format: str = "", period: str = "", receipt_offset: int = 0):
     """Tenant billing statement: accrued charges for the current period, a
     period-over-period trend, and an itemized CSV invoice.
 
@@ -4987,6 +5064,15 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
     if previous and previous["cost"] > 0:
         delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
+    from maverick.quotas import UsageLedger, UsageLedgerError
+
+    receipt_error = None
+    receipts = {"items": [], "total": 0, "offset": max(0, receipt_offset), "limit": 50, "has_more": False}
+    try:
+        receipts = UsageLedger().settlement_receipts(principal=goal_owner_filter(request),
+                                                     offset=max(0, receipt_offset))
+    except (UsageLedgerError, OSError):
+        receipt_error = "Usage reconciliation records could not be loaded. Their absence has not been interpreted as zero usage."
     return templates.TemplateResponse(
         request,
         "billing.html",
@@ -4997,6 +5083,8 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
             "previous": previous,
             "delta_pct": delta_pct,
             "series": series,
+            "usage_receipts": receipts,
+            "usage_receipt_error": receipt_error,
         },
     )
 
@@ -8685,6 +8773,7 @@ async def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
         "chat_goal.html",
         {
             "goal": g,
+            "can_recover_task_files": bool(g.owner and g.owner.startswith("user:") and caller_principal(request) == g.owner),
             "deliverable": contract,
             "rendered": rendered,
             "signoff": signoff,
@@ -9348,9 +9437,29 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-facts.js")
 @app.get("/static/lightwork-consent-policy-editor.js")
 @app.get("/static/lightwork-setup.js")
+@app.get("/static/lightwork-voice-setup.js")
+@app.get("/static/lightwork-vendor-setup.js")
+@app.get("/static/lightwork-task-file-recovery.js")
+@app.get("/static/lightwork-connection-setup.js")
 @app.get("/static/lightwork-template-library.js")
 @app.get("/static/lightwork-guided-actions.js")
+@app.get("/static/lightwork-ai-business-intake.js")
 @app.get("/static/lightwork-guided-actions.css")
+@app.get("/static/lightwork-draft-recovery.js")
+@app.get("/static/lightwork-support.js")
+@app.get("/static/lightwork-support.css")
+@app.get("/static/lightwork-record-search.js")
+@app.get("/static/lightwork-record-search.css")
+@app.get("/static/lightwork-grc-recovery.js")
+@app.get("/static/lightwork-workspace-recovery.js")
+@app.get("/static/lightwork-workspace-recovery.css")
+@app.get("/static/lightwork-action-center.js")
+@app.get("/static/lightwork-outcome-pilots.js")
+@app.get("/static/lightwork-outcome-pilot-costs.js")
+@app.get("/static/lightwork-project-reviews.js")
+@app.get("/static/lightwork-workspace-members.js")
+@app.get("/static/lightwork-consent-picker.js")
+@app.get("/static/lightwork-draft-recovery.css")
 async def in_app_ui_asset(request: Request) -> FileResponse:
     """Serve only the explicitly registered in-app form assets."""
     name = request.url.path.rsplit("/", 1)[-1]
@@ -9835,6 +9944,7 @@ async def workflow_builder_page(
             }
             edit_agent_prefill = {
                 "name": view.get("name", edit_agent),
+                "generation": view.get("generation"),
                 "description": view.get("description", ""),
                 "persona": view.get("persona", ""),
                 "allow_tools": view.get("allow_tools", []),
@@ -9885,17 +9995,27 @@ async def workflow_builder_page(
 
 
 @app.get("/start", response_class=HTMLResponse)
-async def get_started_page(request: Request) -> HTMLResponse:
+async def get_started_page(request: Request, use_case: str = "deliverable") -> HTMLResponse:
     """First-run guide: a live checklist from zero to a running AI workforce.
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
+    from maverick.config import get_features
+
+    from .guided_outcome import for_request
     from .onboarding_state import build
+
+    guided = for_request(request, _world(), use_case) if get_features().get("guided_onboarding") is True else None
 
     state = build(
         _world(),
         can_configure=has_global_permission(request, "admin"),
         can_operate=has_permission(request, "operate"),
+        owner=goal_owner_filter(request),
+        reviewed_outcome=guided["outcome"] if guided else None,
     )
+    state["guided"] = guided
+    from .local_owner import available as local_owner_available
+    state["local_owner_setup_available"] = local_owner_available(request)
     return templates.TemplateResponse(
         request,
         "get_started.html",
@@ -10440,7 +10560,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Lightwork dashboard")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--recovery-mode", action="store_true")
     args = parser.parse_args()
+    if args.recovery_mode:
+        from .recovery_mode import configure
+        configure(app, host=args.host)
 
     if not _is_loopback_host(args.host) and not os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
         raise SystemExit(

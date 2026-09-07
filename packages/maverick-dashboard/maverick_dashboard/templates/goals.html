@@ -6,7 +6,7 @@
      same glass family as the rest of the platform. The search JS rebuilds the
      same .g-row markup, so server- and client-rendered rows match. */
   .g-bar{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
-  .g-bar__search{ margin-inline-start: auto; min-width: 16rem; flex: 0 1 22rem; }
+  .g-bar__search{ margin-inline-start: auto; min-width: 0; max-width: 100%; flex: 1 1 16rem; }
   .g-list{ display: flex; flex-direction: column; gap: var(--space-2); }
   .g-row{ display: flex; align-items: center; gap: var(--space-3);
     border: 1px solid var(--glass-border, var(--border)); border-radius: var(--radius-lg);
@@ -21,6 +21,12 @@
   .g-row__actions a{ font-size: var(--text-sm); color: var(--muted); }
   .g-row__actions a:hover{ color: var(--brand-hi); }
   .g-row:hover .g-row__actions{ opacity: 1; }
+  @media(max-width:540px){
+    .g-row{flex-wrap:wrap}
+    .g-row__id{width:auto}
+    .g-row__main{flex-basis:100%;order:2}
+    .g-row__actions{margin-inline-start:auto;flex-wrap:wrap;min-width:0}
+  }
   .g-empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
     border: 1px dashed var(--glass-border, var(--border)); border-radius: var(--radius-lg);
     background: var(--glass-soft, var(--surface-1)); }
@@ -30,8 +36,7 @@
   {% set running = goals | selectattr('status', 'equalto', 'running') | list | length %}
   {% call hero('Your AI workforce', 'Goals',
                subtitle='Every run on record',
-               lede='Every run this deployment has executed — search across
-                     them, then open a plan, replay, or errors.') %}
+               lede='Find your work, read its result, and open a task to review or continue it.') %}
     {{ state('Current state',
              goals | length ~ ' recent run' ~ ('' if goals | length == 1 else 's'),
              badge=(running ~ ' running') if running else ('ready' if goals else 'none yet'),
@@ -57,9 +62,9 @@
     {% for g in goals %}
     <div class="g-row" id="{{ g.id }}">
       <span class="g-row__id">#{{ g.id }}</span>
-      <span class="badge {{ g.status }}">{{ g.status }}</span>
+      <span class="badge {{ g.status }}" title="{{ g.status }}">{{ g.status | replace('_', ' ') | capitalize }}</span>
       <span class="g-row__main">
-        <div class="g-row__title">{{ g.title }}</div>
+        <div class="g-row__title"><a href="/chat/goal/{{ g.id }}">{{ g.title }}</a></div>
         {% if g.description %}<div class="g-row__desc" title="{{ g.description }}">{{ (g.description or '')[:160] }}</div>{% endif %}
       </span>
       <span class="g-row__actions">
@@ -70,6 +75,8 @@
     </div>
     {% endfor %}
   </div>
+  <p id="run-search-status" role="status" aria-live="polite"></p>
+  <button id="run-search-retry" type="button" class="btn" hidden>Retry search</button>
   {% else %}
     <div class="g-empty">
       <p style="font-weight: var(--font-semibold); margin: 0 0 var(--space-2);">No goals yet</p>
@@ -84,7 +91,8 @@
     var listEl = document.getElementById('run-list');
     if (!input || !listEl) return;
     var original = listEl.innerHTML;
-    var timer = null;
+    var timer = null, generation = 0, controller = null, expired = false;
+    var status = document.getElementById('run-search-status'), retry = document.getElementById('run-search-retry');
     function esc(s) {
       return (s == null ? '' : String(s)).replace(/[&<>"]/g, function (c) {
         return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
@@ -99,8 +107,8 @@
         var d = (g.description || '').slice(0, 160);
         return '<div class="g-row" id="' + g.id + '">' +
           '<span class="g-row__id">#' + g.id + '</span>' +
-          '<span class="badge ' + esc(g.status) + '">' + esc(g.status) + '</span>' +
-          '<span class="g-row__main"><div class="g-row__title">' + esc(g.title) + '</div>' +
+          '<span class="badge ' + esc(g.status) + '" title="' + esc(g.status) + '">' + esc(String(g.status).replace(/_/g, ' ')) + '</span>' +
+          '<span class="g-row__main"><div class="g-row__title"><a href="/chat/goal/' + encodeURIComponent(g.id) + '">' + esc(g.title) + '</a></div>' +
           (d ? '<div class="g-row__desc">' + esc(d) + '</div>' : '') + '</span>' +
           '<span class="g-row__actions">' +
           '<a href="/goals/' + g.id + '/plan">plan</a>' +
@@ -108,18 +116,43 @@
           '<a href="/goals/' + g.id + '/errors">errors</a></span></div>';
       }).join('');
     }
-    input.addEventListener('input', function () {
+    function search(immediate) {
+      if (expired) return;
       var q = input.value.trim();
-      clearTimeout(timer);
-      if (!q) { listEl.innerHTML = original; return; }
+      clearTimeout(timer); var attempt = ++generation;
+      if (controller) controller.abort();
+      retry.hidden = true; listEl.setAttribute('aria-busy', 'false');
+      if (!q) { listEl.innerHTML = original; status.textContent = ''; return; }
       timer = setTimeout(function () {
+        controller = new AbortController(); listEl.setAttribute('aria-busy', 'true');
+        status.textContent = 'Searching… Previous results remain below until the search completes.';
         fetch('/api/v1/goals/search?q=' + encodeURIComponent(q) + '&limit=100',
-              {headers: {'Accept': 'application/json'}})
-          .then(function (r) { return r.ok ? r.json() : []; })
-          .then(render)
-          .catch(function () { /* keep current rows on error */ });
-      }, 200);
-    });
+              {headers: {'Accept': 'application/json'}, cache: 'no-store', signal: controller.signal})
+          .then(function (r) {
+            if (attempt !== generation) return null;
+            if (r.status === 401 || r.status === 403) {
+              expired = true; original = ''; listEl.replaceChildren(); input.disabled = true;
+              throw new Error('Your sign-in or access changed. Sign in again and reload your goals.');
+            }
+            if (!r.ok) throw new Error('Search could not be loaded. Previous results remain below. Retry when the service is available.');
+            return r.json();
+          })
+          .then(function (rows) {
+            if (attempt !== generation || rows === null) return;
+            if (!Array.isArray(rows)) throw new Error('The search response could not be read. Previous results remain below.');
+            render(rows); status.textContent = rows.length ? rows.length + ' matching runs.' : 'No matching runs.';
+          })
+          .catch(function (error) {
+            if (attempt !== generation || error.name === 'AbortError') return;
+            status.textContent = expired ? error.message : 'Search could not be completed. Previous results remain below. Your search is kept; try again.';
+            retry.hidden = expired;
+          })
+          .finally(function () { if (attempt === generation) listEl.setAttribute('aria-busy', 'false'); });
+      }, immediate ? 0 : 200);
+    }
+    input.addEventListener('input', function () { search(false); });
+    retry.addEventListener('click', function () { search(true); });
+    window.addEventListener('pagehide', function () { ++generation; clearTimeout(timer); if (controller) controller.abort(); });
   })();
   </script>
 {% endblock %}

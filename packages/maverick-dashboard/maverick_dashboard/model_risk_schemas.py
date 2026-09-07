@@ -1146,6 +1146,25 @@ class GRCOutboundSourceIn(BaseModel):
         return self
 
 
+class AIBusinessIntakeFieldOut(BaseModel):
+    path: str
+    label: str
+    kind: Literal["text", "boolean", "choice", "multiple"]
+    group: str
+    required: bool
+    choices: list[str] | None = None
+    max_length: int | None = None
+
+
+class AIBusinessIntakeFormOut(BaseModel):
+    schema_version: str = Field(alias="schema")
+    fields: list[AIBusinessIntakeFieldOut]
+    max_submission_bytes: int
+    notice: str
+    context: str
+    can_edit: bool
+
+
 class AIBusinessIntakeStartIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
