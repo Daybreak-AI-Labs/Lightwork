@@ -184,9 +184,12 @@ def _exact_origin(value: object) -> str:
 
 
 def _credential_env(value: object) -> str:
-    if not isinstance(value, str) or not _ENV_RE.fullmatch(value):
-        raise DiscoveryAdapterConfigError("credential env reference is invalid")
-    return value
+    from .privacy_discovery_credentials import validate_reference
+
+    try:
+        return validate_reference(value)
+    except ValueError as exc:
+        raise DiscoveryAdapterConfigError("credential reference is invalid") from exc
 
 
 def _path(value: object) -> str:
@@ -491,8 +494,12 @@ def _default_credential_resolver(name: str) -> str | None:
 
 
 def credential_reference_present(name: str) -> bool:
-    """Check only env-name presence; credential values stay transport-owned."""
+    """Check reference availability; credential values stay transport-owned."""
 
+    if isinstance(name, str) and name.startswith("connection:"):
+        from .privacy_discovery_credentials import connection_present
+
+        return connection_present(name)
     return isinstance(name, str) and _ENV_RE.fullmatch(name) is not None and name in os.environ
 
 
@@ -675,7 +682,14 @@ class PinnedDiscoveryHTTPTransport:
         return "PinnedDiscoveryHTTPTransport(credential_owner='ephemeral')"
 
     def _headers(self, request: DiscoveryHTTPRequest) -> dict[str, str]:
-        secret = _credential(request.credential_env, self._resolver)
+        if request.credential_env.startswith("connection:"):
+            from .privacy_discovery_credentials import resolve_connection
+
+            def resolver(reference):
+                return resolve_connection(reference, provider=request.provider, origin=request.origin)["token"]
+        else:
+            resolver = self._resolver
+        secret = _credential(request.credential_env, resolver)
         if request.provider == AWS_S3:
             try:
                 now = float(self._clock())

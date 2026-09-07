@@ -229,5 +229,14 @@
   document.getElementById("tper-integrity").addEventListener("click", async function () { try { busy("Verifying report ledger…"); show("Integrity verification completed.", await requestJson("/integrity")); } catch (error) { show(error.message, { error: true }); } });
   document.getElementById("tper-audit").addEventListener("click", async function () { try { busy("Loading audit history…"); show("Audit history loaded.", await requestJson("/audit?limit=100")); } catch (error) { show(error.message, { error: true }); } });
   document.getElementById("tper-refresh").addEventListener("click", refresh);
-  refresh();
+  refresh().then(async function () {
+    var requested = new URLSearchParams(window.location.search).get("report");
+    if (!requested) return;
+    try {
+      var ref = identifier(requested, "Report reference", false);
+      var record = await requestJson("/reports/" + encodeURIComponent(ref));
+      if (!record || record.report_id !== ref) throw failure("The linked report could not be verified.");
+      renderReports({items:[record]}); show("Linked report loaded. Review its version before downloading or changing it.", record);
+    } catch (error) { show(error.message, {error:true}); }
+  });
 }());

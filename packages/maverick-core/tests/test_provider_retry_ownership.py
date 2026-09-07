@@ -186,11 +186,29 @@ def _provider_client_calls() -> list[tuple[Path, str, str, ast.Call]]:
             relative = path.relative_to(_REPO_ROOT)
             if "tests" in relative.parts or path.name.startswith("test_"):
                 continue
+            # Wheel builds leave copies of package modules under build/lib.
+            # They are generated artifacts, not additional provider transports.
+            if (relative.parts[0] in {"apps", "packages"}
+                    and relative.parts[2:4] == ("build", "lib")):
+                continue
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(relative))
             visitor = _ProviderClientVisitor(relative)
             visitor.visit(tree)
             calls.extend(visitor.calls)
     return calls
+
+
+def test_provider_scan_keeps_source_and_ignores_generated_wheel_copy(tmp_path, monkeypatch):
+    source = tmp_path / "packages" / "example" / "example" / "provider.py"
+    generated = tmp_path / "packages" / "example" / "build" / "lib" / "example" / "provider.py"
+    for path in (source, generated):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("client = OpenAI(max_retries=0)\n", encoding="utf-8")
+    monkeypatch.setattr(f"{__name__}._REPO_ROOT", tmp_path)
+    calls = _provider_client_calls()
+    assert [(path.as_posix(), constructor) for path, _, constructor, _ in calls] == [
+        ("packages/example/example/provider.py", "OpenAI")
+    ]
 
 
 def _call_names_in_scope(relative: str, scope: str) -> set[str]:

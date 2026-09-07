@@ -96,6 +96,136 @@ class _Writer:
         return json.dumps({"result": {"sys_id": f"sys{len(self.calls):04d}"}})
 
 
+def _held(monkeypatch):
+    _sources(monkeypatch, findings=[_finding()])
+    writer = _Writer(["ERROR: post request failed (Timeout)"])
+    grc_sync.run_sync(actor="user:admin", writer=writer)
+    row = grc_sync.list_outbound()[0]
+    payload = writer.calls[0][2]
+    calls = []
+    remote = {**payload, "sys_id": "sys0001", "sys_updated_on": "2026-09-05 12:00:00"}
+
+    def reader(path, params):
+        calls.append((path, params))
+        return json.dumps({"result": [dict(remote)]})
+
+    return row, writer, reader, remote, calls
+
+
+def test_reconciliation_reads_exact_attempt_then_records_human_decision_without_resending(monkeypatch):
+    row, writer, reader, remote, calls = _held(monkeypatch)
+    inspected = grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"],
+                                           actor="user:admin", reader=reader)
+    assert inspected["inspection"]["matched"] is True
+    assert calls[0][1]["sysparm_query"] == "correlation_id=MRF-open"
+    resolved = grc_sync.resolve_delivery(row["id"], expected_revision=inspected["revision"],
+        actor="user:admin", note="Compared the original content with the external record.",
+        evidence_sha256=inspected["inspection"]["evidence_sha256"], reader=reader)
+    assert resolved["status"] == "delivered"
+    assert resolved["remote_id"] == remote["sys_id"]
+    assert resolved["reconciliation"]["reviewer"] == "user:admin"
+    assert len(calls) == 2 and calls[1][0].endswith("/sys0001")
+    grc_sync.run_sync(actor="user:admin", writer=writer)
+    assert len(writer.calls) == 1
+
+
+def test_original_attempt_survives_source_change_and_next_sync_patches_same_record(monkeypatch):
+    row, writer, reader, remote, _ = _held(monkeypatch)
+    changed = _finding(summary="A changed finding after the ambiguous send.")
+    changed["finding_sha256"] = "a" * 64
+    _sources(monkeypatch, findings=[changed])
+    inspected = grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"],
+                                           actor="user:admin", reader=reader)
+    assert inspected["inspection"]["matched"] is True
+    grc_sync.resolve_delivery(row["id"], expected_revision=inspected["revision"],
+        actor="user:admin", note="Verified original attempt before updating.",
+        evidence_sha256=inspected["inspection"]["evidence_sha256"], reader=reader)
+    grc_sync.run_sync(actor="user:admin", writer=writer)
+    assert len(writer.calls) == 2
+    assert writer.calls[-1][0] == "patch"
+    assert writer.calls[-1][1].endswith("/" + remote["sys_id"])
+
+
+@pytest.mark.parametrize("mode", ["none", "duplicate", "changed", "wrong_id"])
+def test_unverified_external_result_cannot_clear_hold(monkeypatch, mode):
+    row, writer, _, remote, _ = _held(monkeypatch)
+    rows = [remote]
+    if mode == "none":
+        rows = []
+    elif mode == "duplicate":
+        rows = [remote, dict(remote)]
+    elif mode == "changed":
+        remote["short_description"] = "different"
+    else:
+        remote["sys_id"] = "different_id"
+    inspected = grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"],
+        actor="user:admin", remote_id="sys0001", reader=lambda *_: json.dumps({"result": rows}))
+    assert inspected["inspection"]["matched"] is False
+    with pytest.raises(grc_sync.GRCSyncStateError):
+        grc_sync.resolve_delivery(row["id"], expected_revision=inspected["revision"],
+            actor="user:admin", note="Cannot verify.", evidence_sha256=inspected["inspection"]["evidence_sha256"])
+    result = grc_sync.resolve_delivery(row["id"], expected_revision=inspected["revision"],
+        actor="user:admin", note="Contacted the record owner; awaiting evidence.")
+    assert result["status"] == "dispatch_unconfirmed"
+    assert result["reconciliation"]["decision"] == "kept_held"
+    assert len(writer.calls) == 1
+
+
+@pytest.mark.parametrize("change", ["version", "payload", "actor", "expiry", "future", "revision", "target"])
+def test_confirmation_rechecks_content_identity_freshness_revision_and_target(monkeypatch, change):
+    row, _, reader, remote, _ = _held(monkeypatch)
+    inspected = grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"],
+        actor="user:admin", reader=reader)
+    revision = inspected["revision"]
+    actor = "user:admin"
+    if change == "version":
+        remote["sys_updated_on"] = "2026-09-05 12:05:00"
+    elif change == "payload":
+        remote["short_description"] = "changed after comparison"
+    elif change == "actor":
+        actor = "user:other"
+    elif change in {"expiry", "future"}:
+        checked_at = inspected["inspection"]["checked_at"]
+        monkeypatch.setattr(grc_sync.time, "time", lambda: checked_at + (301 if change == "expiry" else -1))
+    elif change == "revision":
+        revision = row["revision"]
+    else:
+        reader.target_sha256 = "b" * 64
+    with pytest.raises((grc_sync.GRCSyncStateError, grc_sync.RecordConflict)):
+        grc_sync.resolve_delivery(row["id"], expected_revision=revision, actor=actor,
+            note="Review the stored comparison.", reader=reader,
+            evidence_sha256=inspected["inspection"]["evidence_sha256"])
+    assert grc_sync.list_outbound()[0]["status"] == "dispatch_unconfirmed"
+
+
+def test_reconciliation_is_workspace_isolated_and_rejects_destination_change(monkeypatch):
+    with tenant_scope(tenant="workspace-a"):
+        row, _, reader, _, _ = _held(monkeypatch)
+        grc_sync._STORE.update(row["id"], lambda value: value["dispatch"].update(target_sha256="a" * 64),
+                              expected_revision=row["revision"], actor="user:admin", action="test_snapshot")
+        reader.target_sha256 = "b" * 64
+        with pytest.raises(grc_sync.GRCSyncStateError, match="destination changed"):
+            grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"] + 1,
+                                      actor="user:admin", reader=reader)
+    with tenant_scope(tenant="workspace-b"):
+        with pytest.raises(grc_sync.GRCSyncStateError, match="not found"):
+            grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"],
+                                      actor="user:admin", reader=reader)
+
+
+def test_legacy_changed_source_and_unreadable_response_remain_held(monkeypatch):
+    row, _, reader, _, _ = _held(monkeypatch)
+    grc_sync._STORE.update(row["id"], lambda value: value.pop("dispatch"),
+                          expected_revision=row["revision"], actor="user:admin", action="test_legacy")
+    _sources(monkeypatch, findings=[])
+    with pytest.raises(grc_sync.GRCSyncStateError, match="Original delivery content"):
+        grc_sync.inspect_delivery(row["id"], expected_revision=row["revision"] + 1,
+                                  actor="user:admin", reader=reader)
+    for response in ["ERROR: get request failed (Timeout)", "<html>Error</html>", "null", "[1]", "[{}, {}, {}]"]:
+        with pytest.raises(grc_sync.GRCSyncStateError):
+            grc_sync._remote_rows(response)
+
+
 def test_config_gate_is_default_off_and_hostile_values_are_refused(tmp_path):
     (tmp_path / "config.toml").write_text("", encoding="utf-8")
     config.reset_config_cache()

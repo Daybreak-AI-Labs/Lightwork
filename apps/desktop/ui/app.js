@@ -30,6 +30,11 @@
   var generation = 0;
   var retryPending = false;
   var diagnostics = document.getElementById("diagnostics");
+  var prepareReport = document.getElementById("prepare-startup-report");
+  var downloadReport = document.getElementById("download-startup-report");
+  var reportStatus = document.getElementById("startup-report-status");
+  var reportPreview = document.getElementById("startup-report");
+  var startupReport = null;
 
   function invoke(command) {
     if (window.__TAURI__ && window.__TAURI__.core) return window.__TAURI__.core.invoke(command);
@@ -41,6 +46,27 @@
       if (diagnostics) diagnostics.textContent = text;
     }, function (error) {
       if (diagnostics) diagnostics.textContent = String(error);
+    });
+  }
+
+  if (prepareReport && downloadReport && reportStatus && reportPreview) {
+    prepareReport.addEventListener("click", function () {
+      startupReport = null; prepareReport.disabled = true; downloadReport.disabled = true;
+      reportPreview.textContent = ""; reportPreview.hidden = true; reportStatus.textContent = "Preparing startup facts…";
+      invoke("startup_support_report").then(function (report) {
+        if (!report || report.schema !== "lightwork.startup-support.v1") throw new Error("The startup report could not be verified.");
+        startupReport = JSON.stringify(report, null, 2); reportPreview.textContent = startupReport; reportPreview.hidden = false;
+        downloadReport.disabled = false; reportStatus.textContent = "Review the startup report, then download it if you want to share it.";
+      }).catch(function () {
+        startupReport = null; reportStatus.textContent = "Startup report unavailable. You can retry or review the existing startup details.";
+      }).finally(function () { prepareReport.disabled = false; });
+    });
+    downloadReport.addEventListener("click", function () {
+      if (!startupReport) return;
+      var url = URL.createObjectURL(new Blob([startupReport], {type: "application/json"}));
+      var link = document.createElement("a"); link.href = url; link.download = "Lightwork-startup-support.json"; link.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      reportStatus.textContent = "Startup report downloaded. Nothing was sent automatically.";
     });
   }
 

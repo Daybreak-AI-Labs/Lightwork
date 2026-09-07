@@ -597,6 +597,57 @@ class ConsentPublishingStore:
                 if connection.in_transaction:
                     connection.execute("ROLLBACK")
 
+    def catalog(self, tenant_id: str, *, kind: str, query: str = "", resource_id: str = "",
+                offset: int = 0, limit: int = 25) -> dict[str, Any]:
+        """Bounded, tenant-scoped record selection from one consistent snapshot."""
+        tenant = self._tenant(tenant_id)
+        if kind not in _RESOURCE_KINDS | {"property"} or len(query) > 200 or not 0 <= offset <= 1_000_000 or not 1 <= limit <= 50:
+            raise PublishingValidationError("invalid catalog search or page size")
+        if resource_id:
+            resource_id = _text(resource_id, "resource_id")
+        with self._snapshot() as connection:
+            if kind == "property":
+                where = "p.tenant = ? AND instr(lower(p.property_id), lower(?)) > 0"
+                args = [tenant, query]
+                if resource_id:
+                    where += " AND p.property_id = ?"
+                    args.append(resource_id)
+                total = connection.execute("SELECT count(*) FROM publishing_properties p WHERE " + where, args).fetchone()[0]
+                rows = connection.execute(
+                    "SELECT p.*, coalesce(h.current_revision, 0) AS publication_revision FROM publishing_properties p "
+                    "LEFT JOIN consent_publication_heads h ON h.tenant = p.tenant AND h.property_id = p.property_id WHERE "
+                    + where + " ORDER BY p.property_id LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+                items = [{**self._property_result(row, tenant), "publication_revision": int(row["publication_revision"])} for row in rows]
+            else:
+                where = "v.tenant = ? AND v.resource_kind = ? AND instr(lower(v.resource_id || ' ' || v.locale), lower(?)) > 0"
+                args = [tenant, kind, query]
+                if resource_id:
+                    where += " AND v.resource_id = ?"
+                    args.append(resource_id)
+                else:
+                    where += " AND v.version = h.current_version"
+                joined = " FROM publishing_versions v JOIN publishing_version_heads h ON h.tenant = v.tenant AND h.resource_kind = v.resource_kind AND h.resource_id = v.resource_id AND h.locale = v.locale WHERE "
+                total = connection.execute("SELECT count(*)" + joined + where, args).fetchone()[0]
+                rows = connection.execute("SELECT v.*, h.current_version" + joined + where + " ORDER BY v.resource_id, v.locale, v.version DESC LIMIT ? OFFSET ?", [*args, limit, offset]).fetchall()
+                items = []
+                for row in rows:
+                    item = self._resource_result(row, tenant)
+                    item.pop("payload")
+                    item["current_version"] = int(row["current_version"])
+                    items.append(item)
+            return {"items": items, "total": total, "offset": offset, "limit": limit,
+                    "next_offset": offset + limit if offset + limit < total else None}
+
+    def resource_version(self, tenant_id: str, kind: str, resource_id: str, version: int, *, locale: str = "") -> dict[str, Any]:
+        tenant = self._tenant(tenant_id)
+        if kind not in _RESOURCE_KINDS:
+            raise PublishingValidationError("unknown resource kind")
+        resource_id = _text(resource_id, "resource_id")
+        version = _positive_integer(version, "version")
+        locale = _locale(locale) if kind == "translation" else ""
+        with self._snapshot() as connection:
+            return self._resource_result(self._resource_row(connection, tenant, kind, resource_id, version, locale=locale), tenant)
+
     def _initialize(self) -> None:
         statements = (
             """
