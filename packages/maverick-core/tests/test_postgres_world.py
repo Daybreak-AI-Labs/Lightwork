@@ -29,6 +29,45 @@ def world():
         w.close()
 
 
+def test_provider_admission_is_atomic_across_shared_connections(monkeypatch):
+    """Real PostgreSQL CI service; distinct connections race one provider period."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, local
+
+    from maverick import provider_cost_cap as cap
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    provider = "acceptance-" + uuid.uuid4().hex
+    worlds = [PostgresWorldModel(dsn=_DSN) for _ in range(2)]
+    current = local()
+    barrier = Barrier(2)
+    monkeypatch.setattr(cap, "caps_from_config", lambda: {provider: 20.0})
+    monkeypatch.setattr(cap, "period_from_config", lambda: "day")
+    monkeypatch.setattr(cap, "_shared_world", lambda: current.world)
+    worlds[0].add_provider_spend(cap.period_key(0), provider, 18)
+
+    def admit(index):
+        current.world = worlds[index]
+        barrier.wait(timeout=5)
+        try:
+            return cap.reserve(provider, 2, now=0, request_id=f"attempt-{index}")
+        except cap.ProviderCapExceeded:
+            return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            holds = [item for item in pool.map(admit, range(2)) if item is not None]
+        assert len(holds) == 1
+        cap.settle(holds[0], 1)
+        cap.settle(holds[0], 1)
+        current.world = worlds[1]
+        assert cap.check(provider, now=0).spent == 19
+        assert cap.check(provider, now=0).reserved == 0
+    finally:
+        for database in worlds:
+            database.close()
+
+
 def test_goal_lifecycle(world):
     gid = world.create_goal("build the thing", description="desc")
     assert isinstance(gid, int)
