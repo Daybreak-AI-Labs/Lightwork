@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -79,11 +80,18 @@ def hosted_environment(workspace: Path, runner: Path) -> tuple[str, str]:
     return powershell, node
 
 
+def read_payload_identity(report: Path, expected_msi_hash: str) -> str:
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    if (payload.get("schema") != "lightwork.msi-native-payload.v1"
+            or payload.get("msi_sha256") != expected_msi_hash):
+        raise RuntimeError("Extracted native identity is not bound to the exact input MSI.")
+    return payload["native_sha256"]
+
+
 def accept(workspace: Path, runner: Path) -> None:
     powershell, node = hosted_environment(workspace, runner)
     from maverick import release_identity_transition as bridge
-    inputs = {"base": workspace / "customer-artifacts/Lightwork.msi", "next": runner / "upgrade-fixture.msi",
-              "base_native": runner / "transition-base-native.exe", "next_native": runner / "transition-next-native.exe"}
+    inputs = {"base": workspace / "customer-artifacts/Lightwork.msi", "next": runner / "upgrade-fixture.msi"}
     originals = {name: file_hash(path) for name, path in inputs.items()}
     fixture = runner / ("identity-transition-" + uuid.uuid4().hex)
     fixture.mkdir()
@@ -120,6 +128,15 @@ def accept(workspace: Path, runner: Path) -> None:
 
     primary = None
     try:
+        # Bundle-time package markers change native bytes. Hash the payload in
+        # each exact MSI, never Tauri's subsequently restored build executable.
+        native_hashes = {}
+        for name in ("base", "next"):
+            payload_report = fixture / (name + "-payload.json")
+            stage(name + "-payload", [sys.executable, str(workspace / "apps/installer-msi/msi_native_payload.py"),
+                  "--msi", str(inputs[name]), "--report", str(payload_report)], 180)
+            native_hashes[name] = read_payload_identity(payload_report, originals[name])
+        observed["native_payload_sha256"] = native_hashes
         shutil.copyfile(inputs["base"], publishers["old"] / "base.msi")
         shutil.copyfile(inputs["next"], publishers["new"] / "next.msi")
         for name, label in (("old", "base"), ("new", "next")):
@@ -129,7 +146,7 @@ def accept(workspace: Path, runner: Path) -> None:
         inventory = json.loads((workspace / "customer-artifacts/runtime-inventory.json").read_text(encoding="utf-8-sig"))
         public_key = Path(os.environ["ACCEPTANCE_PRIVATE_KEY"] + ".pub").read_text(encoding="utf-8").strip()
         policy = make_policy(version=inventory["version"], runtime_hash=inventory["runtime"]["sha256"],
-            old_native=originals["base_native"], new_native=originals["next_native"], old_publisher=old_publisher,
+            old_native=native_hashes["base"], new_native=native_hashes["next"], old_publisher=old_publisher,
             new_publisher=new_publisher, public_key=public_key, installer_hash=file_hash(publishers["new"] / "next.msi"))
         cli = workspace / "apps/installer-desktop/node_modules/@tauri-apps/cli/tauri.js"
 

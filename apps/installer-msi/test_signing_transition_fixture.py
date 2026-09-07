@@ -81,7 +81,7 @@ def test_workstation_refused_before_input_reads_trust_or_install(tmp_path, monke
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows hosted orchestration contract; no native execution")
-@pytest.mark.parametrize("failure", ["old-create", "new-trust", "bridge-to-signature", "transition-rollback", "new-cleanup", "deadline", None])
+@pytest.mark.parametrize("failure", ["base-payload", "next-payload", "payload-binding", "old-create", "new-trust", "bridge-to-signature", "transition-rollback", "new-cleanup", "deadline", None])
 def test_failed_stages_preserve_error_and_try_both_exact_certificate_cleanups(tmp_path, monkeypatch, failure):
     from maverick import release_identity_transition as bridge
     workspace, runner = tmp_path / "workspace", tmp_path / "runner"
@@ -111,6 +111,13 @@ def test_failed_stages_preserve_error_and_try_both_exact_certificate_cleanups(tm
     def stage(command, name, directory, **kwargs):
         assert kwargs["timeout"] <= 2400
         stages.append(name)
+        if name.endswith("-payload"):
+            source = Path(command[command.index("--msi") + 1])
+            payload = {"schema": "lightwork.msi-native-payload.v1", "msi_sha256": fixture.file_hash(source),
+                       "native_sha256": ("b" if name == "base-payload" else "c") * 64}
+            if failure == "payload-binding":
+                payload["msi_sha256"] = "0" * 64
+            Path(command[command.index("--report") + 1]).write_text(json.dumps(payload))
         if failure == "deadline" and name == "old-trust":
             clock[0] += 2300
         if name.endswith("-create"):
@@ -121,6 +128,9 @@ def test_failed_stages_preserve_error_and_try_both_exact_certificate_cleanups(tm
             Path(command[-1] + ".sig").write_text("synthetic signature only")
         if name == "transition-rollback":
             envelope = json.loads((directory / "bridge.json").read_text())
+            # The restored build-output decoys above must never enter policy.
+            assert envelope["policy"]["from"]["native_sha256"] == "b" * 64
+            assert envelope["policy"]["to"]["native_sha256"] == "c" * 64
             final = report(envelope["policy"], bridge.digest(envelope), fixture.file_hash(identities["old"] / "base.msi"))
             (workspace / "customer-artifacts/publisher-transition-acceptance.json").write_text(json.dumps(final))
         if name == failure or name == "new-cleanup" and failure not in (None, "new-cleanup", "old-create"):
@@ -128,16 +138,20 @@ def test_failed_stages_preserve_error_and_try_both_exact_certificate_cleanups(tm
 
     monkeypatch.setattr(fixture, "run_stage", stage)
     if failure:
-        with pytest.raises(RuntimeError, match="work deadline" if failure == "deadline" else "synthetic " + failure + " failure"):
+        expected = "work deadline" if failure == "deadline" else "bound to the exact input MSI" if failure == "payload-binding" else "synthetic " + failure + " failure"
+        with pytest.raises(RuntimeError, match=expected):
             fixture.accept(workspace, runner)
     else:
         fixture.accept(workspace, runner)
-    assert stages[-1] == "old-cleanup"
+    if "old" in identities:
+        assert stages[-1] == "old-cleanup"
+    else:
+        assert not any(name.endswith(("-create", "-trust", "-cleanup")) for name in stages)
     if "new" in identities:
         assert stages[-2] == "new-cleanup"
     saved = json.loads(next(runner.glob("identity-transition-*/stages.json")).read_text())
     assert saved["acceptance_passed"] == (failure in (None, "new-cleanup"))
-    assert saved["cleanup_passed"] == (failure in (None, "old-create", "deadline"))
+    assert saved["cleanup_passed"] == (failure in (None, "base-payload", "next-payload", "payload-binding", "old-create", "deadline"))
     for path, raw in originals.items():
         assert path.read_bytes() == raw
 

@@ -155,11 +155,32 @@ function Start-Recovery {
 }
 
 function Stop-Recovery {
+    param([ValidateRange(100,15000)][int]$TimeoutMilliseconds=10000)
+    if (-not $script:server) { return }
     if ($script:server -and -not $script:server.HasExited) {
         & (Join-Path $env:SystemRoot 'System32/taskkill.exe') /PID $script:server.Id /T /F | Out-Null
         if (-not $script:server.WaitForExit(15000)) { throw 'The owned recovery process did not stop.' }
     }
-    $script:server = $null
+    # The frozen bootloader can exit before its worker's listener closes.
+    # Do not start another server or acquire a maintenance lease in that gap.
+    # A different listener is never killed: uncertainty ends in a refusal.
+    $closure = [Diagnostics.Stopwatch]::StartNew()
+    while ($closure.Elapsed.TotalMilliseconds -lt $TimeoutMilliseconds) {
+        $client = [Net.Sockets.TcpClient]::new()
+        $closed = $false
+        # Windows can take about two seconds to report a refused loopback
+        # connection. A short timeout alone is not proof that the port closed.
+        $remaining = [Math]::Max(1, [Math]::Min(3000, [int]($TimeoutMilliseconds - $closure.Elapsed.TotalMilliseconds)))
+        try { $null = $client.ConnectAsync('127.0.0.1',8765).Wait($remaining) }
+        catch {
+            $failure = $_.Exception.GetBaseException()
+            $closed = $failure -is [Net.Sockets.SocketException] -and
+                $failure.SocketErrorCode -eq [Net.Sockets.SocketError]::ConnectionRefused
+        } finally { $client.Dispose() }
+        if ($closed) { $script:server = $null; return }
+        Start-Sleep -Milliseconds 50
+    }
+    throw 'The owned recovery workspace is still responding. A new recovery process was not started.'
 }
 
 function Authorization([string]$rollbackId='', [string]$BridgeFile='') {
