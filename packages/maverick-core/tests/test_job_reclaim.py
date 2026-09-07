@@ -239,3 +239,70 @@ def test_live_worker_heartbeat_prevents_lease_steal(tmp_path):
     assert job.status == "done"
     assert job.attempts == 1
     assert runs == [1]  # executed exactly once
+
+
+def test_transient_complete_failure_does_not_re_run_the_handler(tmp_path):
+    """W1-70: complete() sharing the handler's try/except meant a transient
+    terminal-write failure (e.g. sqlite 'database is locked' past
+    busy_timeout) was routed through fail() -- requeuing a job whose handler
+    had ALREADY run to completion, so the next claim re-ran it. A duplicate
+    side effect on the *normal* path, not just the documented at-least-once
+    reclaim-path caveat."""
+    import sqlite3
+
+    from maverick.job_queue import JobQueue
+    from maverick.worker import Worker
+
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    w = Worker(queue=q, retry_after=0.0)
+    runs: list[int] = []
+    w.register("side_effect", lambda job: runs.append(job.id))
+    jid = q.enqueue("side_effect", {})
+
+    real_complete = q.complete
+    calls = {"n": 0}
+
+    def flaky_complete(job_id, *, expected_attempts=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real_complete(job_id, expected_attempts=expected_attempts)
+
+    q.complete = flaky_complete
+
+    assert w.run_once() is True
+    assert w.run_once() is False  # nothing left to claim -- not re-queued
+
+    assert runs == [jid]  # handler ran exactly once
+    job = q.get(jid)
+    assert job.status == "done"
+    assert job.attempts == 1
+
+
+def test_permanently_failing_complete_leaves_job_running_for_reclaim(tmp_path):
+    """If complete() keeps failing, the job must be left 'running' (for
+    lease reclaim to recover, same as a crashed worker) rather than routed
+    through fail() -- which would reschedule it for an immediate, unwarranted
+    re-run of a handler that already succeeded."""
+    import sqlite3
+
+    from maverick.job_queue import JobQueue
+    from maverick.worker import Worker
+
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    w = Worker(queue=q, retry_after=0.0)
+    runs: list[int] = []
+    w.register("side_effect", lambda job: runs.append(job.id))
+    jid = q.enqueue("side_effect", {})
+
+    def always_fails(job_id, *, expected_attempts=None):
+        raise sqlite3.OperationalError("database is locked")
+
+    q.complete = always_fails
+
+    assert w.run_once() is True
+
+    assert runs == [jid]  # handler ran exactly once
+    job = q.get(jid)
+    assert job.status == "running"  # not 'pending' (would re-run) or 'failed'
+    assert job.attempts == 1

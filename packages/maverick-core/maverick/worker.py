@@ -338,11 +338,6 @@ class Worker:
                 # It is idempotent, so a retry never duplicates the successor.
                 self._maybe_rearm(job)
                 self._dispatch(job)
-            # Fence the terminal write with the attempt we claimed at: if our
-            # lease was reclaimed and re-claimed mid-run, this no-ops instead of
-            # clobbering the peer that now owns the job.
-            self.queue.complete(job.id, expected_attempts=job.attempts)
-            log.info("worker: job %d done", job.id)
         except UnknownJobKind as e:
             # No retry — terminal.
             self.queue.fail(job.id, f"no handler for kind {e}",
@@ -373,10 +368,50 @@ class Worker:
             )
             log.warning("worker: job %d failed, requeued: %s",
                         job.id, err.splitlines()[0])
+        else:
+            # W1-70: the terminal write is a separate failure domain from the
+            # handler. It used to share the try above, so a transient error
+            # here (e.g. sqlite "database is locked" past busy_timeout) was
+            # routed through the except Exception clause above -- requeuing a
+            # job whose handler had ALREADY run to completion, and re-running
+            # it on the very next claim. That is a duplicate-side-effect bug
+            # on the normal path, not just the documented at-least-once
+            # reclaim-path caveat below.
+            self._complete_with_retry(job)
         finally:
             hb_stop.set()
             hb.join(timeout=5.0)
         return True
+
+    def _complete_with_retry(self, job: Job, *, attempts: int = 3) -> None:
+        """Mark a successfully-dispatched job 'done', retrying the write.
+
+        ``complete()`` is a pure, attempt-fenced UPDATE with no side effects
+        of its own, so retrying it on failure is always safe -- unlike
+        routing the failure through ``fail()``, which would re-queue (and
+        re-run) a handler that already succeeded. If every attempt fails,
+        the job is left 'running': the same lease-reclaim path that recovers
+        a crashed worker (see ``_reclaim_stale``'s caveat) will eventually
+        pick it back up, rather than this call manufacturing an immediate,
+        unwarranted re-run.
+        """
+        delay = 0.05
+        for attempt in range(1, attempts + 1):
+            try:
+                self.queue.complete(job.id, expected_attempts=job.attempts)
+                log.info("worker: job %d done", job.id)
+                return
+            except Exception:
+                if attempt == attempts:
+                    log.exception(
+                        "worker: job %d handler succeeded but complete() "
+                        "failed after %d attempt(s); leaving it 'running' "
+                        "for lease reclaim instead of re-running the handler",
+                        job.id, attempts,
+                    )
+                    return
+                time.sleep(delay)
+                delay *= 3
 
     def _heartbeat_lease(self, job: Job, stop: threading.Event) -> None:
         """Bump the claimed job's ``updated_at`` every ``reclaim_lease/4``
