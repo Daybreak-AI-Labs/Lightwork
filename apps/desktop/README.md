@@ -1,5 +1,23 @@
 # maverick-desktop
 
+The [Windows customer candidate](../installer-msi/CUSTOMER.md) uses this shell
+with `customer-runtime` to start its bundled, complete executable. It adds
+**Lightwork → Install & updates** with explicit review, signature-verified
+updates, immutable-version repair, protected completed-upgrade rollback and
+in-app recovery logs. The default engineering build and developer
+setup below continue to use the installed CLI. Native packaging and trusted
+publisher acceptance must pass before the customer candidate is distributed.
+
+**Lightwork → Workspace recovery mode** opens a bundled confirmation window.
+It switches only the owned runtime to an isolated recovery process, and offers
+an explicit return to normal work. Independent services are never taken over.
+See [workspace recovery](../../docs/workspace-recovery.md) for administrator
+setup, restore checks and excluded storage. Native Windows acceptance is still
+required. The customer maintenance protocol uses a separate explicit global
+administrator authorization covering every local workspace; it restores the
+exact prior application and matching snapshot together. See the candidate
+guide for its scope, failure recovery and unverified native release gates.
+
 Native desktop window for the **local** Lightwork dashboard. A Tauri v2 shell:
 the window opens on a bundled splash, the Rust side starts
 `maverick dashboard --host 127.0.0.1 --port 8765` if nothing is listening

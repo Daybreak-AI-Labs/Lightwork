@@ -36,6 +36,7 @@ uv.lock
 poetry.lock
 package-lock.json
 !packages/maverick-dashboard/tests/js/package-lock.json
+!packages/maverick-dashboard/tests/browser/package-lock.json
 
 # Testing / coverage
 .coverage
@@ -131,3 +132,4 @@ agent_run_ledger.json
 *.report.json
 # Agent per-instance forensics sidecars (model result text, cost, diffs)
 /forensics/
+/.browser-runtime/

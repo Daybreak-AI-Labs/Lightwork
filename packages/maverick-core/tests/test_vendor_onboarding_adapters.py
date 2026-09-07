@@ -11,6 +11,9 @@ from maverick.governed_operations import ServiceContext
 from maverick.paths import current_tenant_id_strict, tenant_scope
 from maverick.tools import _ssrf
 from maverick.vendor_onboarding_adapters import (
+    GOOGLE_DOC_MIME,
+    MAX_PDF_BYTES,
+    MAX_TEXT_BYTES,
     GoogleDriveEvidence,
     JiraTickets,
     jira_body,
@@ -101,7 +104,7 @@ def test_drive_brackets_complete_bounded_text_download_with_provider_versions(cr
 
     def download(base, token, ref, doc_id, max_bytes):
         assert current_tenant_id_strict() == ctx.tenant
-        assert max_bytes == 128 * 1024
+        assert max_bytes == MAX_TEXT_BYTES
         return b"Internally authored synthetic evidence", "text/plain"
 
     monkeypatch.setattr(doc_discovery, "_get", metadata)
@@ -109,6 +112,68 @@ def test_drive_brackets_complete_bounded_text_download_with_provider_versions(cr
     doc = GoogleDriveEvidence().fetch(ctx, "doc/id")
     assert doc.version == "42"
     assert doc.content == b"Internally authored synthetic evidence"
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_google_docs_uses_bounded_export_and_brackets_source_version(credential, monkeypatch, changed):
+    ctx, _ = credential
+    versions = iter(["42", "43" if changed else "42"])
+    monkeypatch.setattr(doc_discovery, "_get", lambda *a, **kw: (200, {
+        "id": "native/doc", "version": next(versions), "mimeType": GOOGLE_DOC_MIME,
+        "modifiedTime": "2026-09-01T12:00:00Z",
+    }))
+    calls = []
+
+    def download(url, token, max_bytes):
+        calls.append(url)
+        assert url == "https://www.googleapis.com/drive/v3/files/native%2Fdoc/export?mimeType=text%2Fplain"
+        assert token == "synthetic-drive-token"
+        assert max_bytes == MAX_TEXT_BYTES
+        return b"Native document exported as text", "text/plain"
+
+    monkeypatch.setattr(doc_discovery, "_download", download)
+    if changed:
+        with pytest.raises(ValueError, match="changed during download"):
+            GoogleDriveEvidence().fetch(ctx, "native/doc")
+    else:
+        document = GoogleDriveEvidence().fetch(ctx, "native/doc")
+        assert document.mime == GOOGLE_DOC_MIME
+        assert document.export_mime == "text/plain"
+        assert document.identity()["mime"] == GOOGLE_DOC_MIME
+    assert len(calls) == 1
+
+
+def test_drive_pdf_download_has_separate_bound_and_credential_rotation_guard(credential, monkeypatch):
+    ctx, records = credential
+    monkeypatch.setattr(doc_discovery, "_get", lambda *a, **kw: (200, {
+        "id": "pdf", "version": "42", "mimeType": "application/pdf",
+        "modifiedTime": "2026-09-01T12:00:00Z",
+    }))
+
+    def download(base, token, ref, doc_id, max_bytes):
+        assert max_bytes == MAX_PDF_BYTES
+        records["drive-a"]["revision"] = "rotated"
+        return b"%PDF-", "application/pdf"
+
+    monkeypatch.setattr(doc_discovery, "_fetch_gdrive", download)
+    with pytest.raises(PermissionError, match="credential changed"):
+        GoogleDriveEvidence().fetch(ctx, "pdf")
+
+
+def test_drive_picker_escapes_query_and_limits_results_to_supported_types(credential, monkeypatch):
+    ctx, _ = credential
+
+    def search(url, token, params):
+        assert url == "https://www.googleapis.com/drive/v3/files"
+        assert "name contains 'Alice\\'s\\\\paper'" in params["q"]
+        assert params["pageSize"] == 20
+        assert GOOGLE_DOC_MIME in params["q"]
+        return 200, {"files": [{"id": "doc", "name": "Policy", "mimeType": GOOGLE_DOC_MIME},
+                                {"id": "exe", "mimeType": "application/octet-stream"}], "nextPageToken": "more"}
+
+    monkeypatch.setattr(doc_discovery, "_get", search)
+    result = GoogleDriveEvidence().search(ctx, "Alice's\\paper")
+    assert result == {"documents": [{"id": "doc", "name": "Policy", "mime": GOOGLE_DOC_MIME}], "has_more": True}
 
 
 def test_drive_changed_version_during_download_is_not_evidence(credential, monkeypatch):
