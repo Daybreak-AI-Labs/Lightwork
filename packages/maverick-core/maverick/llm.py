@@ -25,7 +25,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .budget import Budget, _cache_write_mult_from_ttl
+from .budget import Budget, BudgetExceeded, _cache_write_mult_from_ttl
 from .pricing import (
     ModelPrice,
     PriceUse,
@@ -687,6 +687,46 @@ def _record_provider_call(provider: str) -> None:
         record(provider)
     except Exception:  # pragma: no cover -- prediction never blocks a call
         pass
+
+
+# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-2): mirrors
+# failover_policy._DEFAULT_FAILOVER_ON -- the classes a provider-transport
+# problem can actually fall into. Kept as an independent literal (not a
+# cross-module import of a private name) since the two call sites answer
+# different questions: failover asks "should the NEXT model try this
+# request", the breaker asks "is THIS provider currently unhealthy".
+_TRANSPORT_FAILURE_CLASSES = frozenset({"rate_limit", "timeout", "network", "server", "other"})
+
+
+def _is_provider_transport_failure(exc: BaseException) -> bool:
+    """True only for a genuine provider-transport failure (429/5xx/timeout/
+    connection) -- never for a LOCAL guard (budget, model-not-allowed,
+    preflight, egress) or a non-retryable 4xx (auth/bad-request).
+
+    Before this classification, every exception escaping ``client.complete``
+    counted as a provider failure, including ``BudgetExceeded`` raised
+    *after* a successful API call. A single fan-out goal that hits its
+    dollar cap (N parallel sub-agents each raising BudgetExceeded) could
+    trip the breaker and take the provider offline for every concurrent
+    goal and tenant sharing this process -- one tenant's quota problem
+    should never degrade another's.
+    """
+    if isinstance(exc, (BudgetExceeded, ModelNotAllowedError)):
+        return False
+    try:
+        from .preflight import PreflightFailed
+        if isinstance(exc, PreflightFailed):
+            return False
+    except ImportError:  # pragma: no cover -- preflight always ships with core
+        pass
+    try:
+        from .enterprise import EgressBlocked
+        if isinstance(exc, EgressBlocked):
+            return False
+    except ImportError:  # pragma: no cover -- optional enterprise import
+        pass
+    from .failover_policy import classify_error
+    return classify_error(exc) in _TRANSPORT_FAILURE_CLASSES
 
 
 def _feed_circuit(provider: str, error: bool) -> None:
@@ -1447,8 +1487,8 @@ class LLM:
             ):
                 _resp = client.complete(**kwargs)
                 return _resp
-        except Exception:
-            _err = True
+        except Exception as _exc:
+            _err = _is_provider_transport_failure(_exc)
             raise
         finally:
             if _held:
@@ -1641,8 +1681,8 @@ class LLM:
                     # classification upstream sees the provider's exception, not
                     # the race wrapper.
                     raise (e.__cause__ or e) from None
-        except Exception:
-            _err = True
+        except Exception as _exc:
+            _err = _is_provider_transport_failure(_exc)
             raise
         finally:
             if _held:

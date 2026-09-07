@@ -96,3 +96,97 @@ def test_opus_48_uses_4x_min_cache_threshold():
     )
     assert _min_cache_tokens("claude-opus-4-8") == _MIN_CACHE_TOKENS_4X
     assert _min_cache_tokens("claude-opus-4-8-fast") == _MIN_CACHE_TOKENS_4X
+
+
+# --- PLATFORM_IMPROVEMENT_AUDIT.md W1-3: "claude-opus-4-8-fast" is a
+# catalog-only id -- the wire shape Anthropic actually requires is
+# model="claude-opus-4-8" + speed="fast" + the fast-mode beta, sent through
+# the beta messages endpoint. The tests above only ever asserted pricing and
+# thinking-mode behaviour; none of them looked at what `model` value actually
+# reaches the API. These do. ---
+
+class TestFastModeRequestShape:
+    def test_outbound_model_never_contains_fast_suffix(self):
+        from maverick.providers.anthropic_provider import AnthropicClient
+        client = AnthropicClient.__new__(AnthropicClient)
+        kwargs = client._build_request(
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            thinking_budget=None,
+            model=MODEL_OPUS_FAST,
+        )
+        assert kwargs["model"] == MODEL_OPUS
+        assert "-fast" not in kwargs["model"]
+
+    def test_fast_mode_sets_speed_and_beta_flag(self):
+        from maverick.providers.anthropic_provider import AnthropicClient
+        client = AnthropicClient.__new__(AnthropicClient)
+        kwargs = client._build_request(
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            thinking_budget=None,
+            model=MODEL_OPUS_FAST,
+        )
+        assert kwargs["speed"] == "fast"
+        assert kwargs["betas"] == ["fast-mode-2026-02-01"]
+
+    def test_non_fast_opus_request_has_no_speed_or_betas(self):
+        from maverick.providers.anthropic_provider import AnthropicClient
+        client = AnthropicClient.__new__(AnthropicClient)
+        kwargs = client._build_request(
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            thinking_budget=None,
+            model=MODEL_OPUS,
+        )
+        assert "speed" not in kwargs
+        assert "betas" not in kwargs
+
+    def test_complete_routes_fast_mode_through_beta_endpoint_and_bills_fast_sku(self):
+        """The request must go to client.beta.messages (only endpoint that
+        validates `speed`), while Budget still bills the fast-mode SKU."""
+        from types import SimpleNamespace
+
+        from maverick.budget import Budget
+        from maverick.providers.anthropic_provider import AnthropicClient
+
+        client = AnthropicClient.__new__(AnthropicClient)
+        calls = {}
+
+        def fake_create(**kwargs):
+            calls["kwargs"] = kwargs
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="ok")],
+                stop_reason="end_turn",
+                usage=SimpleNamespace(
+                    input_tokens=10, output_tokens=5,
+                    cache_creation_input_tokens=0, cache_read_input_tokens=0,
+                ),
+            )
+
+        # Non-beta client: must NOT be called for a fast-mode request.
+        client.client = SimpleNamespace(
+            messages=SimpleNamespace(
+                create=lambda **kw: (_ for _ in ()).throw(
+                    AssertionError("fast-mode request must use the beta endpoint")),
+            ),
+            beta=SimpleNamespace(messages=SimpleNamespace(create=fake_create)),
+        )
+
+        budget = Budget(max_dollars=100.0, max_input_tokens=10_000_000,
+                        max_output_tokens=10_000_000)
+        client.complete(
+            system="sys", messages=[{"role": "user", "content": "hi"}],
+            model=MODEL_OPUS_FAST, budget=budget,
+        )
+
+        assert calls["kwargs"]["model"] == MODEL_OPUS
+        assert calls["kwargs"]["speed"] == "fast"
+        # Billed at the fast-mode SKU's $10/$50 rate, not the base $5/$25.
+        assert abs(budget.dollars - (10 * 10 / 1_000_000 + 50 * 5 / 1_000_000)) < 0.0001

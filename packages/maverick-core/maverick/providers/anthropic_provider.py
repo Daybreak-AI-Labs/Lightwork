@@ -17,8 +17,16 @@ from typing import Any
 import anthropic
 
 from ..budget import Budget
-from ..llm import LLMResponse, ToolCall
+from ..llm import MODEL_OPUS, MODEL_OPUS_FAST, LLMResponse, ToolCall
 from ..retry import async_retry, sync_retry
+
+# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-3): fast mode is a real
+# Anthropic API feature (Claude Opus 5 / Opus 4.8 only, research preview),
+# but it needs a specific wire shape -- the beta messages endpoint, this
+# beta flag, and a top-level `speed="fast"` parameter -- none of which
+# MODEL_OPUS_FAST ("claude-opus-4-8-fast") got: the phantom id was sent
+# verbatim as `model`, which the API has never recognized.
+_FAST_MODE_BETA = "fast-mode-2026-02-01"
 
 log = logging.getLogger(__name__)
 # Module-level flag so we only emit the low-cache warning once per process.
@@ -315,6 +323,15 @@ class AnthropicClient:
         model: str | None,
         effort: str | None = None,
     ) -> dict[str, Any]:
+        # Fast mode (W1-3): MODEL_OPUS_FAST is a catalog-only id, never sent
+        # to the API. Substitute the real model NOW so every prefix check
+        # below (adaptive-thinking gating, cache minimums, etc.) sees the
+        # actual "claude-opus-4-8" and behaves identically to a plain Opus
+        # request; the fast-mode-specific kwargs are layered on at the end.
+        want_fast = model == MODEL_OPUS_FAST
+        if want_fast:
+            model = MODEL_OPUS
+
         # Wave 10: cache the most recent stable user message so repeated
         # tool-use turns hit the cache for the history (40-55% input
         # token cost cut on long trajectories). Toggle via env var so
@@ -465,6 +482,13 @@ class AnthropicClient:
                     oc["effort"] = model_effort
                 else:
                     kwargs["output_config"] = {"effort": model_effort}
+
+        if want_fast:
+            # `speed` is a top-level request field the API only validates on
+            # the beta messages endpoint; complete/complete_async route this
+            # request there when they see it.
+            kwargs["speed"] = "fast"
+            kwargs["betas"] = [_FAST_MODE_BETA]
         return kwargs
 
     def _parse_response(
@@ -617,9 +641,18 @@ class AnthropicClient:
     ) -> LLMResponse:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort)
+        # Fast mode (W1-3) is beta-endpoint-only: `speed` is only a validated
+        # field on client.beta.messages.*. Bill against the CALLER's model id
+        # ("claude-opus-4-8-fast", the correctly-priced rate-card SKU), not
+        # kwargs["model"] (the real wire id _build_request substituted) --
+        # but only for the fast-mode case; the non-fast default (model=None
+        # -> DEFAULT_MODEL) still needs kwargs["model"] for the resolved id.
+        is_fast = kwargs.get("speed") == "fast"
+        endpoint = self.client.beta.messages if is_fast else self.client.messages
+        billing_model = model if is_fast else kwargs.get("model")
         if on_delta is None:
-            resp = sync_retry(lambda: self.client.messages.create(**kwargs))
-            return self._parse_response(resp, budget, model=kwargs.get("model"))
+            resp = sync_retry(lambda: endpoint.create(**kwargs))
+            return self._parse_response(resp, budget, model=billing_model)
 
         # Council finding: wrapping the streaming path in sync_retry
         # would replay every on_delta callback after a mid-stream
@@ -627,11 +660,11 @@ class AnthropicClient:
         # called from interactive paths (CLI --stream, dashboard chat);
         # surface the error directly and let the caller retry the
         # higher-level request without partial output.
-        with self.client.messages.stream(**kwargs) as stream:
+        with endpoint.stream(**kwargs) as stream:
             for event in stream.text_stream:
                 on_delta(event)
             final = stream.get_final_message()
-        return self._parse_response(final, budget, model=kwargs.get("model"))
+        return self._parse_response(final, budget, model=billing_model)
 
     async def complete_async(
         self,
@@ -646,8 +679,11 @@ class AnthropicClient:
     ) -> LLMResponse:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort)
-        resp = await async_retry(lambda: self.aclient.messages.create(**kwargs))
-        return self._parse_response(resp, budget, model=kwargs.get("model"))
+        is_fast = kwargs.get("speed") == "fast"
+        endpoint = self.aclient.beta.messages if is_fast else self.aclient.messages
+        billing_model = model if is_fast else kwargs.get("model")
+        resp = await async_retry(lambda: endpoint.create(**kwargs))
+        return self._parse_response(resp, budget, model=billing_model)
 
     def prewarm(
         self,
