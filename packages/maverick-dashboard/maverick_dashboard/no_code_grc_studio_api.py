@@ -12,6 +12,7 @@ from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import require_global_permission, require_permission
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
@@ -181,21 +182,11 @@ def _tenant_id() -> str:
 
 
 def _principal(request: Request, tenant_id: str) -> str:
-    from .auth import anonymous_local_access_allowed, caller_principal
-
-    subject = caller_principal(request)
-    if subject is None:
-        if not anonymous_local_access_allowed():
-            raise HTTPException(
-                status_code=401, detail="an authenticated principal is required for the GRC studio"
-            )
-        subject = "authorized-local-operator"
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise HTTPException(
-            status_code=401, detail="an authenticated principal is required for the GRC studio"
-        )
+    subject = authenticated_subject(
+        request, error_detail="an authenticated principal is required for the GRC studio",
+    )
     digest = hashlib.sha256(
-        f"lightwork.no-code-grc-studio.identity.v1:{tenant_id}:{subject.strip()}".encode()
+        f"lightwork.no-code-grc-studio.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"grc-studio-principal-{digest[:40]}"
 

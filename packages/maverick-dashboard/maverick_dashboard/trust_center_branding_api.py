@@ -13,6 +13,7 @@ from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import require_global_permission, require_permission
 from .trust_center_branding_composition import trust_center_branding_enabled
 
@@ -108,10 +109,7 @@ def _tenant_id() -> str:
 
 
 def _actor(request: Request, tenant_id: str) -> str:
-    principal = getattr(request.state, "principal", None)
-    subject = getattr(principal, "principal", None) or getattr(principal, "sub", None)
-    if not isinstance(subject, str) or not subject:
-        raise HTTPException(status_code=401, detail="authenticated principal required")
+    subject = authenticated_subject(request, error_detail="authenticated principal required")
     return "brand-actor-" + hashlib.sha256(
         f"lightwork.trust-center-brand.api.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()[:32]

@@ -268,8 +268,6 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         "require_permission",
         lambda _request, permission: state.permissions.append(permission),
     )
-    monkeypatch.setattr(api, "caller_principal", lambda _request: state.subject)
-
     def factory(tenant_id: str, actor_ref: str, request: Request):
         state.factory_calls.append((tenant_id, actor_ref, request))
         store = Store(tenant_id)
@@ -287,6 +285,12 @@ def environment(monkeypatch: pytest.MonkeyPatch):
         status_settings_for=lambda _tenant: dict(state.media_settings),
     )
     app = FastAPI()
+
+    @app.middleware("http")
+    async def _principal(request: Request, call_next):
+        request.state.principal = SimpleNamespace(principal=state.subject)
+        return await call_next(request)
+
     app.include_router(api.create_ai_evidence_analysis_router(deps), prefix="/api/v1")
     client = TestClient(app, headers={"Origin": "http://testserver"})
     return client, state, app
@@ -826,8 +830,13 @@ def test_api_round_trip_with_real_core_store_and_distinct_human_reviewer(
     state = _ns(subject="user:submitter")
     monkeypatch.setattr(api, "_tenant_id", lambda: TENANT)
     monkeypatch.setattr(api, "require_permission", lambda _request, _permission: None)
-    monkeypatch.setattr(api, "caller_principal", lambda _request: state.subject)
     app = FastAPI()
+
+    @app.middleware("http")
+    async def _principal(request: Request, call_next):
+        request.state.principal = SimpleNamespace(principal=state.subject)
+        return await call_next(request)
+
     app.include_router(
         api.create_ai_evidence_analysis_router(
             api.AiEvidenceAnalysisDependencies(

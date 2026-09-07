@@ -457,7 +457,9 @@ def _activate_capability(
     return second_response.json(), context_revision + 3
 
 
-def test_status_is_store_free_default_off_and_server_scoped(environment) -> None:
+def test_status_is_store_free_default_off_and_server_scoped(
+    environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, _database, state = environment
     response = client.get(f"{API}/status")
     assert response.status_code == 200
@@ -497,11 +499,25 @@ def test_status_is_store_free_default_off_and_server_scoped(environment) -> None
     assert state["factory_calls"] == []
 
     state["enabled"] = True
+    monkeypatch.setattr("maverick_dashboard.auth.anonymous_local_access_allowed", lambda: False)
+    monkeypatch.setattr("maverick_dashboard.auth._dashboard_token_authenticated", lambda _r: False)
     unauthenticated = client.get(
         f"{API}/status",
         headers={"X-Test-No-Principal": "1"},
     )
     assert unauthenticated.status_code == 401
+
+
+def test_status_grants_a_synthetic_operator_ref_under_genuine_auth_off(environment) -> None:
+    """A missing principal is not ALWAYS a 401: genuine local auth-off mode
+    and a valid static dashboard bearer are both already-authenticated
+    shapes require_permission() itself accepts (W3-1)."""
+    client, _database, _state = environment
+    response = client.get(
+        f"{API}/status",
+        headers={"X-Test-No-Principal": "1"},
+    )
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize(

@@ -21,6 +21,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import require_global_permission, require_permission
 
 _MAX_JSON_BYTES = 64 * 1024
@@ -178,15 +179,11 @@ def _tenant_id() -> str:
 
 
 def _principal(request: Request, tenant_id: str) -> str:
-    verified = getattr(request.state, "principal", None)
-    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise HTTPException(
-            status_code=401,
-            detail="an authenticated principal is required for consent custom indexes",
-        )
+    subject = authenticated_subject(
+        request, error_detail="an authenticated principal is required for consent custom indexes",
+    )
     digest = hashlib.sha256(
-        f"lightwork.consent-custom-index.identity.v1:{tenant_id}:{subject.strip()}".encode()
+        f"lightwork.consent-custom-index.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"consent-index-admin-{digest[:40]}"
 

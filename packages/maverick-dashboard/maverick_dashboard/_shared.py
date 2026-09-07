@@ -131,16 +131,21 @@ def authenticated_subject(request, *, error_detail: str) -> str:
     raises 401 with the caller's own message -- only when NONE of the three
     shapes require_permission() itself accepts actually authenticated this
     request.
+
+    Reads ``request.state.principal`` directly (checking both its
+    ``.principal`` and ``.sub`` attributes) rather than going through
+    ``auth.caller_principal`` (which only reads ``.principal``): the two are
+    always in sync on the real ``VerifiedPrincipal`` production attaches
+    (``.principal`` is a derived ``f"user:{sub}"`` property), but most of the
+    22 call sites this replaces made both names acceptable, and this keeps
+    that unchanged instead of narrowing it.
     """
     from fastapi import HTTPException
 
-    from .auth import (
-        _dashboard_token_authenticated,
-        anonymous_local_access_allowed,
-        caller_principal,
-    )
+    from .auth import _dashboard_token_authenticated, anonymous_local_access_allowed
 
-    subject = caller_principal(request)
+    verified = getattr(getattr(request, "state", None), "principal", None)
+    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
     if isinstance(subject, str) and subject.strip() and len(subject) <= 512:
         return subject.strip()
     if anonymous_local_access_allowed():
