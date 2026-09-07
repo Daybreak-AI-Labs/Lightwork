@@ -197,6 +197,9 @@ def index_goal(goal, *, store: Any | None = None) -> bool:
     skipped (returns False) rather than shipping plaintext to the store -- the
     caller falls back to lexical recall over the sealed world DB. Never raises.
     """
+    from .pilot_learning import excluded
+    if excluded(getattr(goal, "id", None)):
+        return False
     store = store if store is not None else build_store()
     if store is None:
         return False
