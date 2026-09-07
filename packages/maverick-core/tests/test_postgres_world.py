@@ -219,6 +219,28 @@ def test_list_goals_filter_and_order(world):
     assert ids.index(g2) < ids.index(g1)  # later id first in DESC order
 
 
+def test_list_goals_filters_by_domain_and_project_id(world):
+    # W1-49: parity with SQLite's list_goals(domain=..., project_id=...) --
+    # the dashboard's project-detail page and domain-scoped inbox both call
+    # these kwargs, which this backend previously rejected with a TypeError.
+    pid = world.create_project("Q3 Migration")
+    g_in_project = world.create_goal("member of the project")
+    world.set_goal_project(g_in_project, pid)
+    g_outside_project = world.create_goal("not in the project")
+
+    g_finance = world.create_goal("finance domain goal")
+    world.set_goal_domain(g_finance, "finance")
+    g_no_domain = world.create_goal("no domain")
+
+    by_project = world.list_goals(project_id=pid)
+    assert {x.id for x in by_project} == {g_in_project}
+    assert g_outside_project not in {x.id for x in by_project}
+
+    by_domain = world.list_goals(domain="finance")
+    assert g_finance in {x.id for x in by_domain}
+    assert g_no_domain not in {x.id for x in by_domain}
+
+
 def test_active_goal(world):
     gid = world.create_goal("to-activate")
     world.set_goal_status(gid, "active")
@@ -545,17 +567,26 @@ def test_prune_conversations_keeps_fresh(world):
 
 # ---------- #469: messages, attachments, dedup, pruning (final batch) ----------
 
-def test_append_and_search_messages(world):
-    g = world.create_goal("searchable")
+def test_append_message(world, monkeypatch):
+    # W1-53: search_messages was removed (zero production callers on either
+    # backend; its FTS index/GIN index remain in the schema only because the
+    # additive-only migration policy blocks dropping them -- see
+    # append_message's own comment). append_message itself is still the only
+    # thing under test here. Encryption off so the raw column is plaintext
+    # (this test isn't about sealing -- test_at_rest_encryption_seals_columns_
+    # and_round_trips covers that).
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    g = world.create_goal("has-messages")
     world.append_message(g, "user", "the quick brown fox jumps")
     world.append_message(g, "assistant", "a lazy dog sleeps soundly")
-    hits = world.search_messages("brown fox")
-    assert any("quick brown fox" in h["content"] for h in hits)
-    # Natural-language input with FTS-operator chars must not raise.
-    assert world.search_messages('"unbalanced -quote*') == [] or isinstance(
-        world.search_messages('"unbalanced -quote*'), list
-    )
-    assert world.search_messages("") == []
+    with world._tx() as cur:
+        cur.execute(
+            "SELECT role, content FROM messages WHERE goal_id = %s ORDER BY id",
+            (g,),
+        )
+        rows = cur.fetchall()
+    assert [r[0] for r in rows] == ["user", "assistant"]
+    assert rows[0][1] == "the quick brown fox jumps"
 
 
 def test_attachments_add_and_list(world):

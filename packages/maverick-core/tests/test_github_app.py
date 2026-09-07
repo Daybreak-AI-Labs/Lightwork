@@ -228,3 +228,61 @@ class TestProcessIssueGitTimeout:
         # At least the checkout ran, and every observed call carried a timeout.
         assert seen_timeouts
         assert all(t is not None for t in seen_timeouts)
+
+
+class TestProcessIssueDoesNotBlockEventLoop:
+    """W1-71: process_issue is `async def` but is awaited directly on the
+    dashboard's shared event loop (Starlette awaits an async BackgroundTask
+    inline). Its git subprocess calls must therefore run off-thread --
+    otherwise a slow clone/checkout/push/PR-create stalls every other
+    concurrent request on the dashboard for that call's full duration."""
+
+    def _payload(self):
+        from maverick.github_app import WebhookPayload
+        return WebhookPayload(
+            event="issues", action="labeled", repo_full_name="octocat/spoon",
+            issue_number=7, issue_title="t", issue_body="b",
+            trigger_label="maverick", sender_login="alice",
+        )
+
+    def test_slow_clone_does_not_stall_concurrent_coroutines(self, monkeypatch, tmp_path):
+        import asyncio
+        import subprocess
+        import time
+
+        from maverick import github_app as ga
+
+        sleep_seconds = 0.3
+
+        def _slow_clone(*a, **k):
+            time.sleep(sleep_seconds)  # simulates a slow real `git clone`
+            return tmp_path
+
+        monkeypatch.setattr(ga, "clone_repo", _slow_clone)
+
+        def _boom(*a, **k):
+            # Fail the branch checkout so process_issue returns right after
+            # the clone -- only the clone's blocking window needs observing.
+            raise subprocess.TimeoutExpired(cmd="git", timeout=ga._GIT_TIMEOUT)
+
+        monkeypatch.setattr(ga.subprocess, "run", _boom)
+
+        async def scenario() -> int:
+            ticks = 0
+
+            async def heartbeat() -> None:
+                nonlocal ticks
+                while True:
+                    await asyncio.sleep(0.01)
+                    ticks += 1
+
+            hb = asyncio.create_task(heartbeat())
+            await ga.process_issue(self._payload(), token="x")
+            hb.cancel()
+            return ticks
+
+        ticks = asyncio.run(scenario())
+        # A fully blocked loop ticks ~0 times during a 0.3s sleep; a healthy
+        # one ticks ~30. A generous floor avoids flakiness while still
+        # failing hard on a regression back to an inline blocking call.
+        assert ticks >= 10, f"event loop appears blocked (only {ticks} tick(s))"

@@ -26,6 +26,7 @@ Output:
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import hmac
@@ -296,6 +297,47 @@ def _origin_full_name(workdir: Path) -> str:
 _GIT_TIMEOUT = 60
 
 
+def _checkout_branch(workdir: Path, branch_name: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(workdir), "checkout", "-b", branch_name],
+        check=True, capture_output=True, timeout=_GIT_TIMEOUT,
+    )
+
+
+def _stage_and_commit(workdir: Path, issue_number: int) -> bool:
+    """Stage any uncommitted changes and commit them.
+
+    Returns False if there was nothing to commit (the agent made no changes).
+    """
+    diff_out = subprocess.run(
+        ["git", "-C", str(workdir), "diff", "--cached", "--quiet"],
+        capture_output=True, timeout=_GIT_TIMEOUT,
+    )
+    # Returncode 1 = changes staged; 0 = nothing staged.
+    has_staged = diff_out.returncode == 1
+    if not has_staged:
+        # Auto-add everything modified so a sloppy agent run still
+        # produces a PR (operator can review the diff).
+        subprocess.run(
+            ["git", "-C", str(workdir), "add", "-A"],
+            check=False, capture_output=True, timeout=_GIT_TIMEOUT,
+        )
+        # Empty changeset -> no PR.
+        check = subprocess.run(
+            ["git", "-C", str(workdir), "diff", "--cached", "--quiet"],
+            capture_output=True, timeout=_GIT_TIMEOUT,
+        )
+        if check.returncode == 0:
+            return False
+
+    subprocess.run(
+        ["git", "-C", str(workdir), "commit", "-m",
+         f"Lightwork: address #{issue_number}"],
+        check=False, capture_output=True, timeout=_GIT_TIMEOUT,
+    )
+    return True
+
+
 async def process_issue(
     payload: WebhookPayload,
     *,
@@ -321,7 +363,12 @@ async def process_issue(
     branch_name = f"maverick/issue-{payload.issue_number}-{slugify(payload.issue_title)}"
     workdir = Path(tempfile.mkdtemp(prefix="maverick-gh-"))
     try:
-        clone_repo(payload.repo_full_name, token, workdir)
+        # W1-71: this coroutine is awaited directly on the dashboard's shared
+        # event loop (Starlette's async BackgroundTask awaits it inline), so
+        # every blocking git/gh subprocess call below must run off-thread via
+        # to_thread -- otherwise a slow clone/push/PR-create stalls every
+        # other concurrent request for its full timeout (up to 120s).
+        await asyncio.to_thread(clone_repo, payload.repo_full_name, token, workdir)
     except subprocess.CalledProcessError as e:
         # Defense in depth: scrub in case any git output still echoes a
         # credential-shaped string into the error we hand back.
@@ -334,10 +381,7 @@ async def process_issue(
     # Create the branch in the clone before the agent starts so its
     # commits land where we expect.
     try:
-        subprocess.run(
-            ["git", "-C", str(workdir), "checkout", "-b", branch_name],
-            check=True, capture_output=True, timeout=_GIT_TIMEOUT,
-        )
+        await asyncio.to_thread(_checkout_branch, workdir, branch_name)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         from .secrets import scrub
         return PRResult(
@@ -372,41 +416,20 @@ async def process_issue(
     # wedge the handler forever -- time-box each call and surface a timeout as a
     # clean result (the run's work is preserved in the summary).
     try:
-        diff_out = subprocess.run(
-            ["git", "-C", str(workdir), "diff", "--cached", "--quiet"],
-            capture_output=True, timeout=_GIT_TIMEOUT,
-        )
-        # Returncode 1 = changes staged; 0 = nothing staged.
-        has_staged = diff_out.returncode == 1
-        if not has_staged:
-            # Auto-add everything modified so a sloppy agent run still
-            # produces a PR (operator can review the diff).
-            subprocess.run(
-                ["git", "-C", str(workdir), "add", "-A"],
-                check=False, capture_output=True, timeout=_GIT_TIMEOUT,
-            )
-            # Empty changeset -> no PR.
-            check = subprocess.run(
-                ["git", "-C", str(workdir), "diff", "--cached", "--quiet"],
-                capture_output=True, timeout=_GIT_TIMEOUT,
-            )
-            if check.returncode == 0:
-                return PRResult(
-                    branch_name=branch_name, pr_url=None, workdir=workdir,
-                    summary=summary,
-                    error="agent finished but produced no changes",
-                )
-
-        subprocess.run(
-            ["git", "-C", str(workdir), "commit", "-m",
-             f"Lightwork: address #{payload.issue_number}"],
-            check=False, capture_output=True, timeout=_GIT_TIMEOUT,
+        has_changes = await asyncio.to_thread(
+            _stage_and_commit, workdir, payload.issue_number,
         )
     except subprocess.TimeoutExpired as e:
         from .secrets import scrub
         return PRResult(
             branch_name=branch_name, pr_url=None, workdir=workdir,
             summary=summary, error=scrub(f"git timed out staging changes: {e}"),
+        )
+    if not has_changes:
+        return PRResult(
+            branch_name=branch_name, pr_url=None, workdir=workdir,
+            summary=summary,
+            error="agent finished but produced no changes",
         )
 
     pr_title = f"Lightwork: {payload.issue_title[:60]}"
@@ -416,7 +439,8 @@ async def process_issue(
         f"_Triggered by {payload.sender_login} via "
         f"{'label ' + payload.trigger_label if payload.trigger_label else SLASH_TRIGGER}._"
     )
-    pr_url = create_pr_via_gh(
+    pr_url = await asyncio.to_thread(
+        create_pr_via_gh,
         workdir, branch_name,
         payload.issue_number, pr_title, pr_body, draft=draft,
     )

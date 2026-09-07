@@ -21,6 +21,9 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextvars
+import functools
 import logging
 import threading
 import time
@@ -46,6 +49,23 @@ MAX_CONCURRENT_GOALS_PER_PRINCIPAL = max(
 _run_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_GOALS)
 _inflight_lock = threading.Lock()
 _inflight_count = 0
+
+# W1-72: run_goal_in_background_async used to hand the ENTIRE goal run (up to
+# DEFAULT_MAX_WALL_SECONDS, plus up to 2x _ACQUIRE_TIMEOUT of semaphore
+# waiting) to asyncio.to_thread, which uses the event loop's default
+# ThreadPoolExecutor -- sized min(32, cpu_count()+4) by CPython, e.g. 8 on a
+# 4-core box. That silently capped real concurrency below the advertised
+# MAX_CONCURRENT_GOALS=16 ceiling AND queued every other to_thread caller in
+# the process (companion generation, MCP elicitation, dispatch-failure
+# marking) behind long-running goal threads. A dedicated pool sized to the
+# actual concurrency knob keeps goal execution off that shared pool
+# entirely. The small allowance covers a submission that is still waiting on
+# a per-principal/global semaphore rather than a fresh thread being denied
+# outright by pool exhaustion.
+_goal_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=MAX_CONCURRENT_GOALS + MAX_CONCURRENT_GOALS_PER_PRINCIPAL,
+    thread_name_prefix="maverick-goal",
+)
 
 # Per-principal lanes, created on first use. Guarded by _principal_sems_lock.
 # The dict grows with the number of distinct principals seen this process — a
@@ -133,15 +153,21 @@ def run_goal_in_thread(
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    acquire_timeout: float | None = None,
 ) -> str | None:
     """Synchronously run a goal under the global concurrency semaphore.
 
     Designed to be passed to ``fastapi.BackgroundTasks.add_task`` or any
-    threadpool. Acquires the semaphore (blocking up to
-    ``_ACQUIRE_TIMEOUT`` if the cap is reached), runs the swarm, releases
-    the semaphore, and never re-raises -- the FastAPI / channel callers'
-    contract (return a goal id, poll for result) doesn't surface mid-run
-    exceptions.
+    threadpool. Acquires the semaphore (blocking up to ``acquire_timeout``,
+    default ``_ACQUIRE_TIMEOUT``, if the cap is reached), runs the swarm,
+    releases the semaphore, and never re-raises -- the FastAPI / channel
+    callers' contract (return a goal id, poll for result) doesn't surface
+    mid-run exceptions.
+
+    ``acquire_timeout`` lets a caller that can cheaply retry later (W1-73:
+    the job-queue's run_goal/start_goal handlers, which share a small worker
+    pool with cron ticks/flow sweeps) use a short timeout instead of blocking
+    a whole worker thread for up to ``_ACQUIRE_TIMEOUT`` per semaphore.
 
     Returns the goal's terminal status string (``"done"`` / ``"blocked"``
     / ...) so the worker daemon can decide whether the *job* succeeded:
@@ -154,6 +180,7 @@ def run_goal_in_thread(
     handles the concurrency), and always closes the WorldModel so the
     per-goal connection + WAL handle don't leak for the process lifetime.
     """
+    timeout = acquire_timeout if acquire_timeout is not None else _ACQUIRE_TIMEOUT
     # Per-user lane first: bounds one caller's own fan-out without ever
     # blocking on another caller's runs.  Some execution identities (for
     # example fleet agent audit principals) are derived from user-controlled
@@ -161,19 +188,19 @@ def run_goal_in_thread(
     # for scheduling while preserving ``user_id`` for audit/governance.
     lane_principal = concurrency_principal if concurrency_principal is not None else user_id
     principal_sem = _principal_semaphore(lane_principal)
-    if not principal_sem.acquire(timeout=_ACQUIRE_TIMEOUT):
+    if not principal_sem.acquire(timeout=timeout):
         log.error(
             "run_goal_in_thread: per-user concurrency cap (%d) reached within "
             "%.0fs (goal_id=%s, principal=%s); refusing run",
-            MAX_CONCURRENT_GOALS_PER_PRINCIPAL, _ACQUIRE_TIMEOUT, goal_id, lane_principal,
+            MAX_CONCURRENT_GOALS_PER_PRINCIPAL, timeout, goal_id, lane_principal,
         )
         return None
     # Global ceiling next: only a host-wide saturation makes anyone wait here.
-    if not _run_semaphore.acquire(timeout=_ACQUIRE_TIMEOUT):
+    if not _run_semaphore.acquire(timeout=timeout):
         principal_sem.release()
         log.error(
             "run_goal_in_thread: no global concurrency slot within %.0fs "
-            "(goal_id=%s); refusing run", _ACQUIRE_TIMEOUT, goal_id,
+            "(goal_id=%s); refusing run", timeout, goal_id,
         )
         return None
     _mark_inflight_started()
@@ -423,24 +450,32 @@ async def run_goal_in_background_async(
 
     Dispatcher submission is deliberately synchronous: local execution waits
     for the terminal status, queue submission may perform broker I/O, and gRPC
-    waits for the worker RPC.  ``asyncio.to_thread`` preserves contextvars
-    (including the active tenant) while keeping all three paths off the caller's
-    event loop.
+    waits for the worker RPC. Runs on the dedicated ``_goal_executor`` (W1-72)
+    rather than ``asyncio.to_thread``'s shared default pool, so a long local
+    run can't starve other to_thread callers or get starved by them, and the
+    advertised MAX_CONCURRENT_GOALS ceiling is actually reachable regardless
+    of host core count. Context is propagated the same way
+    ``asyncio.to_thread`` does it (``contextvars.copy_context().run(...)``),
+    preserving the active tenant across the thread hop.
     """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    call = functools.partial(
+        ctx.run,
+        run_goal_in_background,
+        goal_id,
+        max_dollars,
+        max_wall_seconds,
+        max_depth,
+        channel=channel,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        capability=capability,
+        concurrency_principal=concurrency_principal,
+        allowed_suites=allowed_suites,
+    )
     try:
-        status = await asyncio.to_thread(
-            run_goal_in_background,
-            goal_id,
-            max_dollars,
-            max_wall_seconds,
-            max_depth,
-            channel=channel,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            capability=capability,
-            concurrency_principal=concurrency_principal,
-            allowed_suites=allowed_suites,
-        )
+        status = await loop.run_in_executor(_goal_executor, call)
     except Exception:
         # Adapters historically rely on the background runner's no-raise
         # contract. A rejecting queue or broken broker must fail closed, but it

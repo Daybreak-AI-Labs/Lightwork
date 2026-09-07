@@ -33,9 +33,23 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
+from ._envparse import env_float, env_int
 from .job_queue import Job, JobQueue
 
 log = logging.getLogger(__name__)
+
+# W1-73: the automation worker pool shares a handful of threads (default 3)
+# across run_goal/start_goal AND control jobs (cron ticks, flow sweeps). The
+# default per-semaphore acquire timeout (5 minutes, see runner._ACQUIRE_TIMEOUT)
+# is sized for a caller that has nothing better to do but wait; a queue worker
+# thread does -- other jobs are waiting behind it -- so it probes for a slot
+# only briefly and defers instead of blocking the pool for minutes.
+_QUEUE_GOAL_ACQUIRE_TIMEOUT = env_float("MAVERICK_QUEUE_GOAL_ACQUIRE_TIMEOUT", 5.0)
+# Bounded like automation_queue._defer_for_slot's flow-concurrency defer, so a
+# goal whose principal/global lane never frees up doesn't requeue forever.
+_MAX_GOAL_SLOT_DEFERS = env_int("MAVERICK_GOAL_SLOT_MAX_DEFERS", 20)
+_GOAL_SLOT_DEFER_SECONDS = env_float("MAVERICK_GOAL_SLOT_DEFER_SECONDS", 15.0)
+_SLOT_DEFERS_KEY = "_slot_defers"
 
 
 Handler = Callable[[Job], None]
@@ -155,21 +169,64 @@ class Worker:
     def register(self, kind: str, handler: Handler) -> None:
         self._handlers[kind] = handler
 
+    def _defer_for_concurrency_slot(self, job: Job) -> bool:
+        """Re-enqueue a run_goal/start_goal job because no concurrency slot
+        was free within the short queue-probe window, WITHOUT bumping
+        job_queue's own attempts/dead-letter counter.
+
+        ``claim()`` bumps ``attempts`` on every claim regardless of outcome,
+        so resetting the SAME row's ``run_at`` in place would still march it
+        toward ``max_attempts`` even though the goal never ran. Enqueuing a
+        fresh row instead -- mirroring
+        ``maverick_dashboard.automation_queue._defer_for_slot``'s pattern for
+        flow concurrency caps -- lets the original job complete normally.
+        Returns True if deferred, False once the defer budget
+        (``_MAX_GOAL_SLOT_DEFERS``) is spent.
+        """
+        defers = int(job.payload.get(_SLOT_DEFERS_KEY) or 0)
+        if defers >= _MAX_GOAL_SLOT_DEFERS:
+            return False
+        payload = dict(job.payload)
+        payload[_SLOT_DEFERS_KEY] = defers + 1
+        self.queue.enqueue(
+            job.kind, payload, run_at=time.time() + _GOAL_SLOT_DEFER_SECONDS,
+        )
+        log.info(
+            "worker: job %d deferred for a concurrency slot (attempt %d/%d)",
+            job.id, defers + 1, _MAX_GOAL_SLOT_DEFERS,
+        )
+        return True
+
     def _install_builtin_handlers(self) -> None:
         def _run_goal(job: Job) -> None:
             goal_id = job.payload.get("goal_id")
             if not goal_id:
                 raise ValueError("run_goal payload requires goal_id")
-            # Sync run so the queue waits before claiming the next job.
+            # Sync run so the queue waits before claiming the next job. A
+            # short acquire_timeout (W1-73) keeps a busy principal/global
+            # concurrency lane from blocking this worker thread -- shared
+            # with cron ticks and flow sweeps -- for minutes.
             from .runner import run_goal_in_thread
-            status = run_goal_in_thread(int(goal_id), **_run_identity_kwargs(job.payload))
-            # Retry only genuinely transient outcomes: couldn't start (None) or
-            # an internal crash ('error'/'failed'). A goal that ended 'blocked'
-            # is a DELIBERATE stop -- budget cap hit, killswitch armed, or
-            # awaiting user input -- and must NOT be retried, or run_once()
-            # re-executes the entire swarm and re-spends budget. Let those
-            # complete the job normally.
-            if status is None or status in ("error", "failed"):
+            status = run_goal_in_thread(
+                int(goal_id), acquire_timeout=_QUEUE_GOAL_ACQUIRE_TIMEOUT,
+                **_run_identity_kwargs(job.payload),
+            )
+            if status is None:
+                # No slot within the short probe window -- the goal never
+                # started, so this is not a failed attempt. Defer instead of
+                # raising, so a busy lane can't dead-letter a goal that never ran.
+                if self._defer_for_concurrency_slot(job):
+                    return
+                raise GoalRunFailed(
+                    f"goal {goal_id}: no concurrency slot after "
+                    f"{_MAX_GOAL_SLOT_DEFERS} deferrals"
+                )
+            # Retry only a genuine internal crash ('error'/'failed'). A goal
+            # that ended 'blocked' is a DELIBERATE stop -- budget cap hit,
+            # killswitch armed, or awaiting user input -- and must NOT be
+            # retried, or run_once() re-executes the entire swarm and
+            # re-spends budget. Let those complete the job normally.
+            if status in ("error", "failed"):
                 raise GoalRunFailed(
                     f"goal {goal_id} terminal status={status!r}"
                 )
@@ -208,10 +265,21 @@ class Worker:
                     close_world_if_owned(world)
                 job.payload["goal_id"] = goal_id
                 self.queue.set_payload(job.id, job.payload)
-            # Same retry contract as run_goal: only transient outcomes requeue.
+            # Same retry contract as run_goal: only a genuine crash requeues;
+            # a missing concurrency slot defers instead (W1-73).
             from .runner import run_goal_in_thread
-            status = run_goal_in_thread(int(goal_id), **_run_identity_kwargs(job.payload))
-            if status is None or status in ("error", "failed"):
+            status = run_goal_in_thread(
+                int(goal_id), acquire_timeout=_QUEUE_GOAL_ACQUIRE_TIMEOUT,
+                **_run_identity_kwargs(job.payload),
+            )
+            if status is None:
+                if self._defer_for_concurrency_slot(job):
+                    return
+                raise GoalRunFailed(
+                    f"scheduled goal {goal_id}: no concurrency slot after "
+                    f"{_MAX_GOAL_SLOT_DEFERS} deferrals"
+                )
+            if status in ("error", "failed"):
                 raise GoalRunFailed(
                     f"scheduled goal {goal_id} terminal status={status!r}"
                 )
@@ -338,11 +406,6 @@ class Worker:
                 # It is idempotent, so a retry never duplicates the successor.
                 self._maybe_rearm(job)
                 self._dispatch(job)
-            # Fence the terminal write with the attempt we claimed at: if our
-            # lease was reclaimed and re-claimed mid-run, this no-ops instead of
-            # clobbering the peer that now owns the job.
-            self.queue.complete(job.id, expected_attempts=job.attempts)
-            log.info("worker: job %d done", job.id)
         except UnknownJobKind as e:
             # No retry — terminal.
             self.queue.fail(job.id, f"no handler for kind {e}",
@@ -373,10 +436,50 @@ class Worker:
             )
             log.warning("worker: job %d failed, requeued: %s",
                         job.id, err.splitlines()[0])
+        else:
+            # W1-70: the terminal write is a separate failure domain from the
+            # handler. It used to share the try above, so a transient error
+            # here (e.g. sqlite "database is locked" past busy_timeout) was
+            # routed through the except Exception clause above -- requeuing a
+            # job whose handler had ALREADY run to completion, and re-running
+            # it on the very next claim. That is a duplicate-side-effect bug
+            # on the normal path, not just the documented at-least-once
+            # reclaim-path caveat below.
+            self._complete_with_retry(job)
         finally:
             hb_stop.set()
             hb.join(timeout=5.0)
         return True
+
+    def _complete_with_retry(self, job: Job, *, attempts: int = 3) -> None:
+        """Mark a successfully-dispatched job 'done', retrying the write.
+
+        ``complete()`` is a pure, attempt-fenced UPDATE with no side effects
+        of its own, so retrying it on failure is always safe -- unlike
+        routing the failure through ``fail()``, which would re-queue (and
+        re-run) a handler that already succeeded. If every attempt fails,
+        the job is left 'running': the same lease-reclaim path that recovers
+        a crashed worker (see ``_reclaim_stale``'s caveat) will eventually
+        pick it back up, rather than this call manufacturing an immediate,
+        unwarranted re-run.
+        """
+        delay = 0.05
+        for attempt in range(1, attempts + 1):
+            try:
+                self.queue.complete(job.id, expected_attempts=job.attempts)
+                log.info("worker: job %d done", job.id)
+                return
+            except Exception:
+                if attempt == attempts:
+                    log.exception(
+                        "worker: job %d handler succeeded but complete() "
+                        "failed after %d attempt(s); leaving it 'running' "
+                        "for lease reclaim instead of re-running the handler",
+                        job.id, attempts,
+                    )
+                    return
+                time.sleep(delay)
+                delay *= 3
 
     def _heartbeat_lease(self, job: Job, stop: threading.Event) -> None:
         """Bump the claimed job's ``updated_at`` every ``reclaim_lease/4``

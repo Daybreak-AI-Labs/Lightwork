@@ -483,10 +483,14 @@ def test_write_config_emits_rate_limits_with_glob(tmp_path: Path, monkeypatch):
 def test_write_config_emits_retention(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(
         tmp_path, monkeypatch,
-        retention={"audit_days": 90, "episodes_days": 365, "events_days": 180},
+        retention={
+            "audit_days": 90, "episodes_days": 365, "events_days": 180,
+            "messages_days": 180,
+        },
     )
     assert parsed["retention"]["audit_days"] == 90
     assert parsed["retention"]["episodes_days"] == 365
+    assert parsed["retention"]["messages_days"] == 180
 
 
 def test_write_config_emits_persona(tmp_path: Path, monkeypatch):
@@ -617,6 +621,20 @@ def test_pick_retention_skipped(monkeypatch):
     _StubQ(monkeypatch)
     from maverick_installer.wizard import pick_retention
     assert pick_retention() == {}
+
+
+def test_pick_retention_accepted_includes_messages_days(monkeypatch):
+    """W1-57: messages is the fourth retention knob, prompted alongside
+    audit/episodes/events when the operator opts in to auto-pruning."""
+    from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: True)
+    monkeypatch.setattr(wizard, "_q_text", lambda *a, **kw: kw.get("default", ""))
+    assert wizard.pick_retention() == {
+        "audit_days": 90,
+        "episodes_days": 365,
+        "events_days": 180,
+        "messages_days": 180,
+    }
 
 
 def test_pick_persona_skipped(monkeypatch):

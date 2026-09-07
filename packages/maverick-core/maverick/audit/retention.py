@@ -7,6 +7,7 @@ Reads ``[retention]`` from ``~/.maverick/config.toml`` and prunes:
   - ``episodes`` rows in ``~/.maverick/world.db`` with
     ``ended_at`` older than ``episodes_days``.
   - ``goal_events`` rows with ``ts`` older than ``events_days``.
+  - ``messages`` rows with ``ts`` older than ``messages_days``.
   - usage-ledger ``(principal, day)`` cost buckets older than
     ``usage_days`` (the per-principal chargeback tally grows forever
     otherwise).
@@ -178,7 +179,9 @@ def _purge_table_by_time(
     # Table/column names can't be parameter-bound, so they MUST come from
     # this fixed allow-set — never from caller/user input — to keep the
     # f-string interpolation below injection-free.
-    _ALLOWED = {("episodes", "ended_at"), ("goal_events", "ts")}
+    _ALLOWED = {
+        ("episodes", "ended_at"), ("goal_events", "ts"), ("messages", "ts"),
+    }
     if (table, time_col) not in _ALLOWED:
         raise ValueError(
             f"refusing to purge unknown table/column: {table!r}/{time_col!r}"
@@ -187,12 +190,48 @@ def _purge_table_by_time(
     try:
         # The agent may be writing concurrently; wait rather than fail fast.
         conn.execute("PRAGMA busy_timeout=5000")
+        # W1-50: the canonical (--db-path-less) path opens with foreign_keys
+        # ON, so this raw connection must too or the two routes silently
+        # disagree -- without it, deleting an episode any fact still cites
+        # leaves a dangling facts.source_episode_id/fact_history.source_episode_id
+        # instead of raising, corrupting the world.db this route writes to
+        # directly.
+        conn.execute("PRAGMA foreign_keys = ON")
         cur = conn.execute(
             f"SELECT COUNT(*) FROM {table} WHERE {time_col} IS NOT NULL AND {time_col} < ?",
             (cutoff_ts,),
         )
         (count,) = cur.fetchone()
         if not dry_run and count > 0:
+            if table == "episodes":
+                # Same reasoning as WorldModel.purge_episodes_before: an aged-out
+                # episode's provenance link on a still-live fact must be nulled,
+                # not left to trip the FK constraint just enabled above. Guard
+                # on the tables existing -- a --db-path target isn't guaranteed
+                # to be a full, current-schema world.db.
+                existing = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' "
+                        "AND name IN ('facts', 'fact_history')"
+                    ).fetchall()
+                }
+                episode_query = (
+                    f"SELECT id FROM {table} "
+                    f"WHERE {time_col} IS NOT NULL AND {time_col} < ?"
+                )
+                if "facts" in existing:
+                    conn.execute(
+                        "UPDATE facts SET source_episode_id = NULL "
+                        f"WHERE source_episode_id IN ({episode_query})",
+                        (cutoff_ts,),
+                    )
+                if "fact_history" in existing:
+                    conn.execute(
+                        "UPDATE fact_history SET source_episode_id = NULL "
+                        f"WHERE source_episode_id IN ({episode_query})",
+                        (cutoff_ts,),
+                    )
             conn.execute(
                 f"DELETE FROM {table} WHERE {time_col} IS NOT NULL AND {time_col} < ?",
                 (cutoff_ts,),
@@ -246,6 +285,29 @@ def purge_world_events(
             "purge_goal_events_before", cutoff_ts, dry_run=dry_run,
         )
     log.info("retention: goal_events deleted=%d dry_run=%s", deleted, dry_run)
+    return {"deleted": deleted, "cutoff_ts": cutoff_ts}
+
+
+def purge_world_messages(
+    *,
+    days: int,
+    db_path: Path | None = None,
+    dry_run: bool = False,
+    now: float | None = None,
+) -> dict:
+    """Delete ``messages`` rows older than ``days``."""
+    if days is None or int(days) <= 0:
+        return {"deleted": 0, "reason": "disabled"}
+    cutoff_ts = _cutoff_for_days(days, now=now)
+    if db_path is not None:
+        deleted = _purge_table_by_time(
+            db_path, "messages", "ts", cutoff_ts, dry_run=dry_run,
+        )
+    else:
+        deleted = _purge_canonical_world(
+            "purge_messages_before", cutoff_ts, dry_run=dry_run,
+        )
+    log.info("retention: messages deleted=%d dry_run=%s", deleted, dry_run)
     return {"deleted": deleted, "cutoff_ts": cutoff_ts}
 
 
@@ -321,8 +383,9 @@ def record_retention_marker(report: dict, *, audit_dir: Path | None = None) -> d
     removed_files = list(audit.get("removed") or [])
     episodes = int((report.get("episodes") or {}).get("deleted") or 0)
     events = int((report.get("goal_events") or {}).get("deleted") or 0)
+    messages = int((report.get("messages") or {}).get("deleted") or 0)
     usage_buckets = int((report.get("usage_ledger") or {}).get("removed_buckets") or 0)
-    if not (removed_files or episodes or events or usage_buckets):
+    if not (removed_files or episodes or events or messages or usage_buckets):
         return None
 
     payload = {
@@ -331,6 +394,7 @@ def record_retention_marker(report: dict, *, audit_dir: Path | None = None) -> d
         "audit_cutoff_day": audit.get("cutoff_day", ""),
         "episodes_deleted": episodes,
         "goal_events_deleted": events,
+        "messages_deleted": messages,
         "usage_buckets_removed": usage_buckets,
     }
     try:
@@ -411,6 +475,7 @@ def enforce(
     audit_days = cfg.get("audit_days")
     episodes_days = cfg.get("episodes_days")
     events_days = cfg.get("events_days")
+    messages_days = cfg.get("messages_days")
     usage_days = cfg.get("usage_days")
 
     report: dict = {"dry_run": dry_run}
@@ -425,6 +490,10 @@ def enforce(
     if events_days:
         report["goal_events"] = purge_world_events(
             days=events_days, db_path=db_path, dry_run=dry_run, now=now,
+        )
+    if messages_days:
+        report["messages"] = purge_world_messages(
+            days=messages_days, db_path=db_path, dry_run=dry_run, now=now,
         )
     if usage_days:
         report["usage_ledger"] = purge_usage_ledger(

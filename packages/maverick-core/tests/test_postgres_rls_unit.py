@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import importlib.util
 import inspect
+import threading
 from contextlib import contextmanager
 
 import pytest
 from maverick.world_model_backends import postgres
 from maverick.world_model_backends.postgres import PostgresWorldModel
+
+_HAS_PSYCOPG = importlib.util.find_spec("psycopg") is not None
 
 
 class RecordingCursor:
@@ -359,6 +363,7 @@ def test_no_guc_is_written_when_rls_is_off(monkeypatch):
     [
         ("purge_episodes_before", "episodes"),
         ("purge_goal_events_before", "goal_events"),
+        ("purge_messages_before", "messages"),
     ],
 )
 def test_retention_purge_uses_exact_active_tenant(monkeypatch, method, table):
@@ -465,6 +470,49 @@ def test_explicit_env_off_overrides_enterprise(_clean_toggle_env, monkeypatch):
     assert postgres._rls_explicitly_set() is True
 
 
+def test_list_goals_filters_by_domain_and_project_id(monkeypatch):
+    # W1-49: SQLite's list_goals accepts domain=/project_id= (used by the
+    # dashboard's project-detail page and domain-scoped inbox); the Postgres
+    # port didn't, so both callers 500'd with a TypeError on this backend.
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+    cur.fetchall = list
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    world.list_goals(domain="finance_sox", project_id=7, order="desc")
+
+    assert len(cur.calls) == 1
+    sql, params = cur.calls[0]
+    assert "domain = %s" in sql
+    assert "project_id = %s" in sql
+    assert params == ("finance_sox", 7)
+
+
+def test_list_goals_omits_domain_and_project_id_predicates_when_unset(monkeypatch):
+    # No false positives: a plain call must not filter on either column.
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+    cur.fetchall = list
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    world.list_goals()
+
+    sql, params = cur.calls[0]
+    assert "domain" not in sql
+    assert "project_id" not in sql
+    assert params == ()
+
+
 def test_explicit_env_on_is_explicit(_clean_toggle_env, monkeypatch):
     monkeypatch.setenv("MAVERICK_PG_RLS", "1")
     assert postgres._rls_enabled() is True
@@ -529,3 +577,107 @@ def test_preflight_skipped_when_explicitly_opted_in(monkeypatch):
     world.conn = object()
     world._preflight_rls_or_die()
     assert called["preflight"] is False
+
+
+@pytest.mark.skipif(not _HAS_PSYCOPG, reason="psycopg not installed")
+class TestReconnectOnBrokenConnection:
+    """W1-54: the single shared (non-pooled) connection must self-heal after
+    a managed-Postgres failover or idle-connection reset instead of raising
+    OperationalError on every call until the process restarts."""
+
+    class _FakeCursor:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, *a, **kw):
+            pass
+
+        def close(self):
+            pass
+
+    class _FakeConnection:
+        def __init__(self, *, breaks_on_cursor=False):
+            self.closed = 0
+            self._breaks_on_cursor = breaks_on_cursor
+            self.committed = False
+            self.rolled_back = False
+
+        def cursor(self):
+            if self._breaks_on_cursor:
+                import psycopg
+                raise psycopg.OperationalError(
+                    "server closed the connection unexpectedly")
+            return TestReconnectOnBrokenConnection._FakeCursor(self)
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            self.closed = 1
+
+    def _world(self):
+        world = PostgresWorldModel.__new__(PostgresWorldModel)
+        world._pool = None
+        world._rls = False
+        world._lock = threading.RLock()
+        world._dsn = "postgresql://fake"
+        return world
+
+    def test_already_closed_connection_is_reopened_before_use(self, monkeypatch):
+        world = self._world()
+        dead = self._FakeConnection()
+        dead.closed = 1  # e.g. explicitly closed by a prior broken _tx()
+        world.conn = dead
+        fresh = self._FakeConnection()
+        connect_calls = []
+
+        def _fake_connect(dsn, autocommit=False):
+            connect_calls.append((dsn, autocommit))
+            return fresh
+
+        import psycopg
+        monkeypatch.setattr(psycopg, "connect", _fake_connect)
+
+        with world._tx() as cur:
+            cur.execute("SELECT 1")
+
+        assert connect_calls == [("postgresql://fake", False)]
+        assert world.conn is fresh
+        assert fresh.committed is True
+
+    def test_connection_broken_mid_transaction_is_closed_not_left_dangling(
+        self, monkeypatch,
+    ):
+        world = self._world()
+        dying = self._FakeConnection(breaks_on_cursor=True)
+        world.conn = dying
+        import psycopg
+
+        with pytest.raises(psycopg.OperationalError):
+            with world._tx():
+                pass  # never reached -- cursor() raises first
+
+        assert dying.closed == 1  # explicitly closed, not left half-dead
+
+    def test_next_tx_reconnects_after_a_broken_transaction(self, monkeypatch):
+        world = self._world()
+        dying = self._FakeConnection(breaks_on_cursor=True)
+        world.conn = dying
+        import psycopg
+
+        with pytest.raises(psycopg.OperationalError):
+            with world._tx():
+                pass
+
+        fresh = self._FakeConnection()
+        monkeypatch.setattr(psycopg, "connect",
+                             lambda dsn, autocommit=False: fresh)
+
+        with world._tx() as cur:
+            cur.execute("SELECT 1")
+
+        assert world.conn is fresh
+        assert fresh.committed is True

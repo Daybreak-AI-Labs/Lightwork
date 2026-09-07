@@ -1158,6 +1158,25 @@ class PostgresWorldModel:
     def __exit__(self, *exc) -> None:
         self.close()
 
+    def _reconnect_if_broken(self) -> None:
+        """W1-54: reopen the single shared connection (non-pooled mode) after
+        it's been killed out from under us.
+
+        Managed Postgres (RDS/CloudSQL multi-AZ) fails over and resets idle
+        connections; without this, the ``psycopg`` driver had already marked
+        ``self.conn`` closed (from a PREVIOUS ``_tx()`` that caught the break
+        and closed it -- see the ``except`` clause below) and every later
+        call would raise ``OperationalError`` forever, turning a transient DB
+        blip into an outage that needs a process restart. Only checks the
+        cheap, local ``.closed`` flag -- it can't detect a connection the
+        server killed but the client hasn't tried to use since; that case is
+        caught where it actually surfaces, inside ``_tx``'s try block.
+        """
+        if self.conn is not None and not self.conn.closed:
+            return
+        import psycopg
+        self.conn = psycopg.connect(self._dsn, autocommit=False)
+
     @contextmanager
     def _tx(self) -> Iterator:
         """Cursor scope that commits on success and ROLLS BACK on error.
@@ -1167,10 +1186,19 @@ class PostgresWorldModel:
         this (shared, long-lived) connection fails with
         InFailedSqlTransaction until the process restarts. Rolling back
         keeps the connection usable.
+
+        W1-54: a rollback can't save a connection the SERVER killed (a
+        managed-Postgres failover, or an idle-connection reset) -- the
+        rollback itself fails too. In that case, close and drop the
+        connection instead of leaving a dead one in ``self.conn``, so
+        ``_reconnect_if_broken()`` opens a fresh one on the NEXT call rather
+        than repeating ``OperationalError`` forever until the process
+        restarts.
         """
         if self._pool is not None:
             # Pooled: each tx gets its own connection; the pool's context
             # commits on success and rolls back on error, so no shared lock.
+            # psycopg_pool already detects and replaces a broken connection.
             with self._pool.connection() as conn:
                 cur = conn.cursor()
                 try:
@@ -1179,20 +1207,35 @@ class PostgresWorldModel:
                 finally:
                     cur.close()
             return
+        import psycopg
         with self._lock:
-            cur = self.conn.cursor()
+            self._reconnect_if_broken()
+            cur = None
             try:
+                cur = self.conn.cursor()
                 self._set_tenant_guc(cur)
                 yield cur
                 self.conn.commit()
+            except (psycopg.OperationalError, psycopg.InterfaceError):
+                try:
+                    self.conn.close()
+                except Exception:  # pragma: no cover
+                    pass
+                raise
             except Exception:
                 try:
                     self.conn.rollback()
+                except (psycopg.OperationalError, psycopg.InterfaceError):
+                    try:
+                        self.conn.close()
+                    except Exception:  # pragma: no cover
+                        pass
                 except Exception:  # pragma: no cover
                     pass
                 raise
             finally:
-                cur.close()
+                if cur is not None:
+                    cur.close()
 
     def _set_tenant_guc(self, cur) -> None:
         """Under RLS, bind this transaction to the active tenant.
@@ -2254,11 +2297,20 @@ class PostgresWorldModel:
         status: str | None = None,
         *,
         owner: str | None = None,
+        domain: str | None = None,
+        project_id: int | None = None,
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
     ) -> list[PGGoal]:
-        """List goals, optionally filtered by status + paginated (mirrors SQLite)."""
+        """List goals, optionally filtered by status + paginated (mirrors SQLite).
+
+        W1-49: ``domain``/``project_id`` were missing here (unlike SQLite's
+        ``list_goals``), so the dashboard's project-detail page and
+        domain-scoped inbox both 500 on this backend --
+        ``list_goals(project_id=...)`` / ``list_goals(domain=...)`` raised
+        ``TypeError`` for a keyword this method didn't accept.
+        """
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
@@ -2273,6 +2325,12 @@ class PostgresWorldModel:
         if owner is not None:
             conds.append("owner = %s")
             params.append(str(owner))
+        if domain is not None:
+            conds.append("domain = %s")
+            params.append(domain)
+        if project_id is not None:
+            conds.append("project_id = %s")
+            params.append(int(project_id))
         frag, fparams = _tenant_scope()
         if frag:
             conds.append(frag)
@@ -4408,6 +4466,21 @@ class PostgresWorldModel:
     # ----- messages (goal-scoped log + full-text search) -----
 
     def append_message(self, goal_id: int, role: str, content: str) -> None:
+        # W1-53: idx_pg_messages_fts (a GIN index on to_tsvector(content), see
+        # SCHEMA above) is built and maintained on every insert here, INCLUDING
+        # ciphertext once at_rest_enabled() is on (the default) -- the same
+        # ciphertext-indexing cost the SQLite messages_fts drop targets.
+        # search_messages(), the index's one reader, has been removed (zero
+        # production callers -- only its own definition and tests referenced
+        # it, confirmed by grep). The index itself could not be dropped in the
+        # same pass: migration_governance.py's additive-only policy for NEW
+        # migrations (old replicas must keep reading the old schema during a
+        # rolling deploy) refuses DROP INDEX, and SCHEMA is immutable once
+        # released (fingerprinted as the governance ladder's version 1) --
+        # editing it, even to remove this one statement, trips the checksum
+        # guard. Routed to INFRA_AND_POLICY_DECISIONS.md: dropping it needs
+        # either a policy exception or a different technical approach.
+        #
         # Gate on the parent goal being in the active tenant (see start_episode);
         # a cross-tenant write silently no-ops, like set_goal_status.
         frag, fparams = _tenant_scope()
@@ -4425,61 +4498,6 @@ class PostgresWorldModel:
                     "VALUES(%s, %s, %s, %s)",
                     (goal_id, role, _seal(content), time.time()),
                 )
-
-    def search_messages(self, query: str, limit: int = 10) -> list[dict]:
-        """Full-text search over message content, most-recent first.
-
-        With at-rest encryption off, uses Postgres FTS (plainto_tsquery, which
-        parses arbitrary natural-language input safely). With encryption on,
-        content is ciphertext so FTS can't match -- it then scans a bounded
-        window of recent messages and substring-matches on the decrypted text
-        (scan-then-decrypt), mirroring how the SQLite backend degrades."""
-        if not query or not query.strip():
-            return []
-        cols = ["id", "goal_id", "role", "content", "ts"]
-        select_cols = [f"m.{c}" for c in cols]
-        frag, fparams = _tenant_scope("g.tenant_id")
-        table = "messages m"
-        if frag:
-            table += " JOIN goals g ON g.id = m.goal_id"
-        cap = max(1, int(limit))
-        from ..crypto_at_rest import at_rest_enabled
-        if at_rest_enabled():
-            sql = f"SELECT {', '.join(select_cols)} FROM {table}"
-            params: list = []
-            if frag:
-                sql += " WHERE " + frag
-                params += fparams
-            sql += " ORDER BY m.ts DESC LIMIT %s"
-            params.append(max(cap * 50, 500))  # bounded scan window
-            with self._tx() as cur:
-                cur.execute(sql, tuple(params))
-                rows = cur.fetchall()
-            ql = query.strip().lower()
-            out: list[dict] = []
-            for r in rows:
-                content = _unseal(r[3]) or ""
-                if ql in content.lower():
-                    d = dict(zip(cols, r, strict=False))
-                    d["content"] = content
-                    out.append(d)
-                    if len(out) >= cap:
-                        break
-            return out
-        sql = (
-            f"SELECT {', '.join(select_cols)} FROM {table} "
-            "WHERE to_tsvector('english', m.content) @@ plainto_tsquery('english', %s)"
-        )
-        params = [query]
-        if frag:
-            sql += " AND " + frag
-            params += fparams
-        sql += " ORDER BY m.ts DESC LIMIT %s"
-        params.append(cap)
-        with self._tx() as cur:
-            cur.execute(sql, tuple(params))
-            rows = cur.fetchall()
-        return [dict(zip(cols, r, strict=False)) for r in rows]
 
     # ----- attachments -----
 
@@ -4741,6 +4759,28 @@ class PostgresWorldModel:
         verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
         with self._tx() as cur:
             cur.execute(f"{verb} goal_events WHERE {predicate}", tuple(params))
+            if dry_run:
+                row = cur.fetchone()
+                return int(row[0] or 0)
+            return int(cur.rowcount or 0)
+
+    def purge_messages_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete old conversation messages in the active tenant.
+
+        W1-57: nothing references ``messages.id`` via foreign key, so this
+        is a plain age-based delete scoped through the owning goal's tenant.
+        """
+        tenant = _required_retention_tenant("message retention")
+        predicate = (
+            "ts IS NOT NULL AND ts < %s "
+            "AND goal_id IN (SELECT id FROM goals WHERE tenant_id = %s)"
+        )
+        params: list = [float(cutoff_ts), tenant]
+        verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
+        with self._tx() as cur:
+            cur.execute(f"{verb} messages WHERE {predicate}", tuple(params))
             if dry_run:
                 row = cur.fetchone()
                 return int(row[0] or 0)
