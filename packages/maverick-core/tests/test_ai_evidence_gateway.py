@@ -1847,3 +1847,68 @@ def test_segment_byte_bound_rolls_before_oversized_append(monkeypatch):
         match="receipt_segment_bytes must be an integer",
     ):
         gateway._receipt_ledger()
+
+
+def test_append_verifies_a_bounded_number_of_rows_regardless_of_segment_size(
+    monkeypatch,
+):
+    # W4-28: append() used to re-verify every row in the active segment (via
+    # _verify_file -> _iter_verified_rows) on EVERY call, so one delivery's
+    # cost grew with the whole segment instead of staying bounded -- measured
+    # 64ms -> 237ms across a 4,096-row segment, under a lock that serializes
+    # ALL governed-output delivery. A call-count assertion is used instead of
+    # wall-clock timing: it directly proves the fixed shape (append() checks
+    # only the row(s) IT wrote) without being sensitive to machine speed.
+    _enable(monkeypatch)
+    ledger = SegmentedReceiptLedger(
+        gateway._receipt_path(),
+        tenant_id="gateway-test-tenant",
+        segment_rows=10_000,
+        max_receipts=10_000,
+    )
+    import maverick.ai_evidence_ledger as ledger_mod
+
+    calls = {"n": 0}
+    real_verify = ledger_mod._verify_chained_row
+
+    def counting_verify(*args, **kwargs):
+        calls["n"] += 1
+        return real_verify(*args, **kwargs)
+
+    monkeypatch.setattr(ledger_mod, "_verify_chained_row", counting_verify)
+
+    n = 300
+    for i in range(n):
+        event = {
+            "receipt_id": f"AIR-{i:032x}",
+            "receipt_payload_sha256": "ab" * 32,
+        }
+        ledger.append(event, identity=event["receipt_id"])
+
+    # One row verified per append (all land in the same never-rolled
+    # segment, so no header row is involved). A reintroduced full-segment
+    # re-verify would instead check 1+2+...+300 = 45,150 rows.
+    assert calls["n"] == n
+    assert ledger.verify_integrity() == (True, "")
+
+
+def test_verify_appended_row_rejects_a_tip_mismatch(monkeypatch):
+    # Direct unit test of the new append-time check's actual safety
+    # property: a row whose prev_hash does not match the tip append()
+    # believes it extended must be refused, not silently accepted.
+    _enable(monkeypatch)
+    ledger = SegmentedReceiptLedger(
+        gateway._receipt_path(),
+        tenant_id="gateway-test-tenant",
+        segment_rows=10_000,
+        max_receipts=10_000,
+    )
+    first = {"receipt_id": "AIR-" + "1" * 32, "receipt_payload_sha256": "2" * 64}
+    ledger.append(first, identity=first["receipt_id"])
+    segment_path = ledger._segment_path(0)
+    with pytest.raises(SegmentedLedgerError, match="failed verification"):
+        ledger._verify_appended_row(
+            segment_path,
+            offset_before=0,
+            expected_previous="f" * 64,
+        )

@@ -230,6 +230,97 @@ def _iter_strict_rows(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
         ) from exc
 
 
+def _verify_chained_row(
+    row: dict[str, Any],
+    *,
+    previous: str,
+    public_keys: dict[str, Any],
+    registry: Mapping[str, str],
+    path_name: str,
+    row_ref: str,
+) -> None:
+    """Verify one signed row's chain link, hash, and Ed25519 signature.
+
+    Shared by the full-segment scan (:func:`_iter_verified_rows`, verifying
+    every row from genesis) and the append-time tail check
+    (:meth:`SegmentedReceiptLedger._verify_appended_row`, verifying only the
+    row just written) so what "verified" means can never quietly drift
+    between the two call sites. ``public_keys`` is a same-shape ``key_id ->
+    Ed25519PublicKey`` cache at both call sites; a newly-seen key is added to
+    it. Raises :class:`SegmentedLedgerError` (using ``path_name``/``row_ref``
+    for the message) on any failure.
+    """
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PublicKey,
+    )
+
+    key_id = row.get("key_id")
+    row_hash = row.get("hash")
+    signature = row.get("sig")
+    row_previous = row.get("prev_hash")
+    if (
+        not isinstance(key_id, str)
+        or not _KEY_ID_RE.fullmatch(key_id)
+        or not isinstance(row_hash, str)
+        or not _DIGEST_RE.fullmatch(row_hash)
+        or not isinstance(signature, str)
+        or len(signature) != 128
+        or not isinstance(row_previous, str)
+        or (
+            row_previous != ""
+            and not _DIGEST_RE.fullmatch(row_previous)
+        )
+        or not hmac.compare_digest(row_previous, previous)
+    ):
+        raise SegmentedLedgerError(
+            f"signed receipt segment failed verification: {path_name} "
+            f"(invalid chain row {row_ref})"
+        )
+    unsigned = {
+        key: value
+        for key, value in row.items()
+        if key not in {"hash", "sig"}
+    }
+    try:
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                unsigned,
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+    except (TypeError, ValueError) as exc:
+        raise SegmentedLedgerError(
+            f"signed receipt segment failed verification: {path_name} "
+            f"(unhashable row {row_ref})"
+        ) from exc
+    if not hmac.compare_digest(expected_hash, row_hash):
+        raise SegmentedLedgerError(
+            f"signed receipt segment failed verification: {path_name} "
+            f"(hash mismatch at row {row_ref})"
+        )
+    try:
+        public_key = public_keys.get(key_id)
+        if public_key is None:
+            public_hex = registry.get(key_id)
+            if not isinstance(public_hex, str):
+                raise ValueError("unknown signing key")
+            public_key = Ed25519PublicKey.from_public_bytes(
+                bytes.fromhex(public_hex)
+            )
+            public_keys[key_id] = public_key
+        public_key.verify(
+            bytes.fromhex(signature),
+            bytes.fromhex(row_hash),
+        )
+    except (InvalidSignature, TypeError, ValueError) as exc:
+        raise SegmentedLedgerError(
+            f"signed receipt segment failed verification: {path_name} "
+            f"(bad signature at row {row_ref})"
+        ) from exc
+
+
 def _iter_verified_rows(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
     """Yield one segment while verifying its chain and every signature.
 
@@ -240,7 +331,6 @@ def _iter_verified_rows(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
     causes a retry rather than a false integrity finding.
     """
 
-    from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PublicKey,
     )
@@ -258,71 +348,15 @@ def _iter_verified_rows(path: Path) -> Iterator[tuple[int, dict[str, Any]]]:
     count = 0
     for line_number, row in _iter_strict_rows(path):
         count = line_number
-        key_id = row.get("key_id")
-        row_hash = row.get("hash")
-        signature = row.get("sig")
-        row_previous = row.get("prev_hash")
-        if (
-            not isinstance(key_id, str)
-            or not _KEY_ID_RE.fullmatch(key_id)
-            or not isinstance(row_hash, str)
-            or not _DIGEST_RE.fullmatch(row_hash)
-            or not isinstance(signature, str)
-            or len(signature) != 128
-            or not isinstance(row_previous, str)
-            or (
-                row_previous != ""
-                and not _DIGEST_RE.fullmatch(row_previous)
-            )
-            or not hmac.compare_digest(row_previous, previous)
-        ):
-            raise SegmentedLedgerError(
-                f"signed receipt segment failed verification: {path.name} "
-                f"(invalid chain row {line_number})"
-            )
-        unsigned = {
-            key: value
-            for key, value in row.items()
-            if key not in {"hash", "sig"}
-        }
-        try:
-            expected_hash = hashlib.sha256(
-                json.dumps(
-                    unsigned,
-                    sort_keys=True,
-                    default=str,
-                ).encode("utf-8")
-            ).hexdigest()
-        except (TypeError, ValueError) as exc:
-            raise SegmentedLedgerError(
-                f"signed receipt segment failed verification: {path.name} "
-                f"(unhashable row {line_number})"
-            ) from exc
-        if not hmac.compare_digest(expected_hash, row_hash):
-            raise SegmentedLedgerError(
-                f"signed receipt segment failed verification: {path.name} "
-                f"(hash mismatch at row {line_number})"
-            )
-        try:
-            public_key = public_keys.get(key_id)
-            if public_key is None:
-                public_hex = registry.get(key_id)
-                if not isinstance(public_hex, str):
-                    raise ValueError("unknown signing key")
-                public_key = Ed25519PublicKey.from_public_bytes(
-                    bytes.fromhex(public_hex)
-                )
-                public_keys[key_id] = public_key
-            public_key.verify(
-                bytes.fromhex(signature),
-                bytes.fromhex(row_hash),
-            )
-        except (InvalidSignature, TypeError, ValueError) as exc:
-            raise SegmentedLedgerError(
-                f"signed receipt segment failed verification: {path.name} "
-                f"(bad signature at row {line_number})"
-            ) from exc
-        previous = row_hash
+        _verify_chained_row(
+            row,
+            previous=previous,
+            public_keys=public_keys,
+            registry=registry,
+            path_name=path.name,
+            row_ref=str(line_number),
+        )
+        previous = str(row.get("hash") or "")
         yield line_number, row
     if count == 0:
         raise SegmentedLedgerError(
@@ -682,6 +716,85 @@ class SegmentedReceiptLedger:
             last_row = row
         assert last_row is not None
         return count, last_row
+
+    def _verify_appended_row(
+        self,
+        path: Path,
+        *,
+        offset_before: int,
+        expected_previous: str,
+    ) -> dict[str, Any]:
+        """Verify ONLY the row just written at ``offset_before``, not the
+        whole segment (W4-28).
+
+        ``append()`` holds ``cross_process_lock`` for its entire duration and
+        has already reconciled ``state`` against the physical file moments
+        earlier (``_ensure_ready_locked``), so no other writer could have
+        appended between then and now. What remains to prove is narrower than
+        "is this whole segment intact": it is "did the single row I just
+        asked ``AuditSigner`` to write land correctly, chained to the tip I
+        expected". Re-streaming every prior row on every append made a single
+        delivery's cost grow with the whole segment (measured 64ms -> 237ms
+        across a 4,096-row segment) under a lock that serializes ALL
+        governed-output delivery. Full prefix verification is preserved
+        everywhere else: crash reconciliation (``_rebuild_locked``/``_scan``)
+        and explicit integrity checks still stream and verify every row from
+        genesis.
+
+        Reads exactly the bytes written after ``offset_before`` (the file's
+        pre-write size), so an arbitrarily large single row is still read in
+        full -- unlike the bounded tail probe :meth:`_quick_physical_matches`
+        uses for its cheaper "does state look plausible" check, this seam
+        needs a definite answer, not a probe.
+        """
+        from .audit.signing import trusted_audit_public_keys
+
+        try:
+            with path.open("rb") as stream:
+                stream.seek(offset_before)
+                tail_bytes = stream.read()
+        except OSError as exc:
+            raise SegmentedLedgerError(
+                f"signed receipt segment is unreadable after append: {path.name}"
+            ) from exc
+        if not tail_bytes.endswith(b"\n") or tail_bytes.count(b"\n") != 1:
+            raise SegmentedLedgerError(
+                "signed receipt segment failed verification: "
+                f"{path.name} (malformed row after append)"
+            )
+        raw = tail_bytes[:-1]
+        if not raw.strip():
+            raise SegmentedLedgerError(
+                "signed receipt segment failed verification: "
+                f"{path.name} (blank row after append)"
+            )
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SegmentedLedgerError(
+                "signed receipt segment failed verification: "
+                f"{path.name} (malformed JSON after append)"
+            ) from exc
+        if not isinstance(row, dict):
+            raise SegmentedLedgerError(
+                "signed receipt segment failed verification: "
+                f"{path.name} (non-object row after append)"
+            )
+        try:
+            registry = trusted_audit_public_keys()
+        except (OSError, TypeError, ValueError) as exc:
+            raise SegmentedLedgerError(
+                "audit public-key registry is unavailable"
+            ) from exc
+        _verify_chained_row(
+            row,
+            previous=expected_previous,
+            public_keys={},
+            registry=registry,
+            path_name=path.name,
+            row_ref="just-appended",
+        )
+        return row
 
     def _scan(
         self,
@@ -1749,6 +1862,7 @@ class SegmentedReceiptLedger:
             ):
                 segment_number = state.active_segment
                 segment_path = self._segment_path(segment_number)
+                new_segment_tip = None
             else:
                 segment_number = max(1, state.active_segment + 1)
                 segment_path = self._segment_path(segment_number)
@@ -1774,10 +1888,43 @@ class SegmentedReceiptLedger:
                     raise SegmentedLedgerError(
                         "audit signer refused the receipt segment header"
                     )
+                # The header is the new segment's chain root (prev_hash always
+                # ""); verifying it here (not just the event row below) means
+                # every row this call adds is checked, not only the last one.
+                new_segment_tip = self._verify_appended_row(
+                    segment_path, offset_before=0, expected_previous="",
+                ).get("hash")
+            try:
+                offset_before_event = segment_path.stat().st_size
+            except FileNotFoundError:
+                offset_before_event = 0
+            except OSError as exc:
+                raise SegmentedLedgerError(
+                    "signed receipt segment size is unavailable before append"
+                ) from exc
             signer = AuditSigner(segment_path)
             if not signer.write(dict(event)):
                 raise SegmentedLedgerError("audit signer refused evidence")
-            line_number, signed = self._verify_file(segment_path)
+            # W4-28: verify only the row just written, chained to the tip we
+            # already know (this new segment's own header, or the active
+            # segment's authenticated tip) -- not the whole segment from
+            # genesis. append() holds cross_process_lock start-to-finish and
+            # _ensure_ready_locked() already reconciled state against the
+            # physical file moments ago, so nothing else could have appended
+            # in between; full prefix verification remains the job of crash
+            # reconciliation and explicit integrity checks, run outside this
+            # lock. See _verify_appended_row for the full reasoning.
+            signed = self._verify_appended_row(
+                segment_path,
+                offset_before=offset_before_event,
+                expected_previous=(
+                    new_segment_tip if new_segment_tip is not None
+                    else state.active_segment_tip
+                ),
+            )
+            line_number = 2 if new_segment_tip is not None else (
+                state.active_file_row_count + 1
+            )
             try:
                 written_size = segment_path.stat().st_size
             except OSError as exc:
