@@ -78,6 +78,58 @@ def test_http_fetch_enterprise_denial_happens_before_robots(monkeypatch):
     assert out.startswith("ERROR:") and "enterprise mode" in out and "boundary" in out
 
 
+def test_websocket_tool_blocks_egress_under_enterprise(monkeypatch):
+    # W2-87: websockets.connect is not wrapped by egress_guard (httpx/requests/
+    # urllib only), so without a manual check the enterprise tool-egress lock
+    # never saw a websocket connection at all.
+    import asyncio
+
+    _enterprise(monkeypatch)
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # isolate the gate
+    from maverick.tools.websocket_tool import _run
+    out = asyncio.run(_run({"url": "wss://exfil.invalid/steal", "recv": False}))
+    assert out.startswith("ERROR:") and "enterprise mode" in out and "boundary" in out
+
+
+def test_websocket_tool_enterprise_denial_happens_before_connect(monkeypatch):
+    import asyncio
+
+    import maverick.tools._ssrf as ssrf_mod
+
+    _enterprise(monkeypatch)
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    from maverick.tools import websocket_tool
+
+    def fail_if_called(host):
+        raise AssertionError("resolve_pinned_ip was called before enterprise denial")
+
+    monkeypatch.setattr(ssrf_mod, "resolve_pinned_ip", fail_if_called)
+    out = asyncio.run(websocket_tool._run({"url": "wss://exfil.invalid/steal", "recv": False}))
+    assert out.startswith("ERROR:") and "enterprise mode" in out
+
+
+def test_websocket_tool_allows_local_endpoint_under_enterprise(monkeypatch):
+    import asyncio
+
+    _enterprise(monkeypatch)
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    from maverick.tools.websocket_tool import _run
+    out = asyncio.run(_run({"url": "ws://127.0.0.1:1/x", "recv": False}))
+    # Not blocked by the enterprise gate -- whatever it fails on next (no
+    # listener there, or websockets missing) is a different, later error.
+    assert "enterprise mode" not in out
+
+
+def test_websocket_tool_allow_listed_host_permitted_under_enterprise(monkeypatch):
+    import asyncio
+
+    _enterprise(monkeypatch, allowed=["api.example.com"])
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    from maverick.tools.websocket_tool import _run
+    out = asyncio.run(_run({"url": "wss://api.example.com/socket", "recv": False}))
+    assert "enterprise mode" not in out
+
+
 def test_web_search_disabled_under_enterprise_without_allowlist(monkeypatch):
     _enterprise(monkeypatch)
     from maverick.tools.web_search import _run_search
