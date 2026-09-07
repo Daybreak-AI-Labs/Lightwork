@@ -190,3 +190,21 @@ class TestPackEditingSafetyEnvelope:
         assert "deny_tools cannot remove" in detail
         assert "max_risk cannot be raised" in detail
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
+
+def test_restored_agent_revision_cannot_overwrite_a_newer_save():
+    name = _clean_builtin_name()
+    original = client.get(f"/api/v1/agents/{name}").json()
+    first = client.post(f"/api/v1/agents/{name}/override", json={"description": "Newer saved work", "expected_generation": original["generation"]})
+    assert first.status_code == 200
+    stale = client.post(f"/api/v1/agents/{name}/override", json={"description": "Recovered old work", "expected_generation": original["generation"]})
+    assert stale.status_code == 409
+    assert client.get(f"/api/v1/agents/{name}").json()["description"] == "Newer saved work"
+
+def test_stale_reset_cannot_delete_a_newer_agent():
+    name = _clean_builtin_name()
+    original = client.post(f"/api/v1/agents/{name}/override", json={"description": "First"}).json()
+    newer = client.post(f"/api/v1/agents/{name}/override", json={"description": "Second", "expected_generation": original["generation"]})
+    assert newer.status_code == 200
+    stale = client.delete(f"/api/v1/agents/{name}/override", params={"expected_generation": original["generation"]})
+    assert stale.status_code == 409
+    assert client.get(f"/api/v1/agents/{name}").json()["description"] == "Second"
