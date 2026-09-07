@@ -95,3 +95,29 @@ def test_missing_base_url_raises(fake_openai):
     with pytest.raises(ValueError) as exc:
         OpenAICompatibleClient()
     assert "base_url" in str(exc.value)
+
+
+def test_keyless_local_endpoint_gets_a_placeholder_key(fake_openai, monkeypatch):
+    """W1-8: the module's own docstring names LM Studio / llama.cpp -- both
+    genuinely key-less local servers -- as headline use cases, but a
+    loopback base_url with no configured key used to hit the base client's
+    hard "no key" refusal. A loopback/private-network endpoint must
+    construct successfully with a placeholder key instead, matching the
+    TGI/vLLM providers' unconditional "<provider>-no-auth" pattern."""
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "http://localhost:1234/v1")
+    from maverick.providers.openai_compatible_provider import OpenAICompatibleClient
+
+    client = OpenAICompatibleClient()
+    assert client._sync.base_url == "http://localhost:1234/v1"
+    assert client._sync.api_key  # non-empty placeholder, not None
+
+
+def test_keyless_public_endpoint_still_refuses(fake_openai, monkeypatch):
+    """A public host with no key is a real misconfiguration (unlike TGI/
+    vLLM, this provider also fronts public gateways like Groq/Together) --
+    must stay refused, not silently get the local-endpoint placeholder."""
+    monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.groq.com/openai/v1")
+    from maverick.providers.openai_compatible_provider import OpenAICompatibleClient
+
+    with pytest.raises(RuntimeError, match="non-empty API key"):
+        OpenAICompatibleClient()
