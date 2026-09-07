@@ -15,6 +15,12 @@ from typing import Any
 from .agent import Agent
 from .blackboard import Blackboard
 from .budget import Budget, BudgetExceeded
+from .git_safety import (
+    git_env_without_user_config as _git_env_without_user_config,
+)
+from .git_safety import (
+    git_metadata_may_execute_filters as _git_metadata_may_execute_filters,
+)
 from .llm import LLM, model_for_role
 from .mcp_client import load_mcp_specs_from_config, start_mcp_clients, stop_mcp_clients
 from .sandbox import LocalBackend
@@ -2181,89 +2187,12 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
         log.warning("best-of-N candidate donation skipped: %s", e)
 
 
-def _git_env_without_user_config() -> dict[str, str]:
-    """Return a scrubbed environment for host-side best-of-N git reads.
-
-    Git clean/smudge filters and fsmonitor hooks are command hooks.  The
-    sandbox workdir can be attacker-controlled, so never let global/system
-    config, the orchestrator's process environment, or repo-local fsmonitor
-    settings add executable helpers to these host-side probes. Local repo config
-    is still checked separately before any git command runs.
-    """
-    env = {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_SYSTEM": os.devnull,
-        "GIT_TERMINAL_PROMPT": "0",
-        "HOME": os.devnull,
-        "PATH": os.environ.get("PATH", ""),
-        # Override repo-local config entries that can cause otherwise read-only
-        # host-side Git probes to execute workspace-controlled programs.
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "core.fsmonitor",
-        "GIT_CONFIG_VALUE_0": "false",
-        "GIT_CONFIG_KEY_1": "core.untrackedCache",
-        "GIT_CONFIG_VALUE_1": "false",
-    }
-    for key in ("LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"):
-        if key in os.environ:
-            env[key] = os.environ[key]
-    return env
-
-
-def _git_metadata_may_execute_filters(wd) -> bool:
-    """Conservatively detect local git metadata that can make git run commands.
-
-    A coding attempt can write the mounted workdir, including `.gitattributes`,
-    `.git/info/attributes`, and local config. If those mention filters, config
-    includes, or fsmonitor hooks, host-side `git add`/`reset` may execute
-    attacker-controlled commands. Fail open by skipping capture/reset instead.
-    """
-    try:
-        # Git executes a command via filter sections (modern `[filter "name"]`
-        # or deprecated-but-supported `[filter.name]` syntax), attributes files
-        # selected from config, or config includes that could pull either in. The
-        # bare word "filter" is NOT sufficient and caused a false positive on
-        # every partial clone: `git clone --filter=blob:none` writes a benign
-        # `partialclonefilter = blob:none` into .git/config that never runs a
-        # command, so matching "filter" skipped best-of-N reset/capture for the
-        # entire staged corpus. Match the executable surfaces precisely instead.
-        config_files = [wd / ".git" / "config"]
-        config_needles = (
-            '[filter "',
-            "[filter.",
-            "[include",
-            "include.path",
-            "includeif",
-            "fsmonitor",
-            "attributesfile",
-        )
-        for path in config_files:
-            try:
-                if path.is_file():
-                    text = path.read_text(encoding="utf-8", errors="ignore").lower()
-                    if any(needle in text for needle in config_needles):
-                        return True
-            except OSError:
-                return True
-        # An attributes file assigning a `filter` attribute references a named
-        # filter whose clean/smudge command lives in config -- treat that
-        # reference as unsafe. Attributes files never contain a
-        # `partialclonefilter` value, so there is no blobless-clone false
-        # positive here.
-        attr_files = [wd / ".git" / "info" / "attributes"]
-        attr_files.extend(wd.glob("**/.gitattributes"))
-        for path in attr_files:
-            try:
-                if path.is_file():
-                    text = path.read_text(encoding="utf-8", errors="ignore").lower()
-                    if "filter=" in text or "filter " in text:
-                        return True
-            except OSError:
-                return True
-    except Exception:
-        return True
-    return False
+# Host-git RCE hardening (fsmonitor/filter-hook guard + scrubbed env) now
+# lives in git_safety.py so every host-side git caller shares it -- see
+# PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2. Imported at module top as
+# _git_env_without_user_config / _git_metadata_may_execute_filters; kept
+# under those private names since test_orchestrator_git_safety.py imports
+# them from here.
 
 
 def _reset_workdir_to_head(workdir) -> None:

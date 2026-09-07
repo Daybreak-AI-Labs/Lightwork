@@ -39,10 +39,15 @@ Defended against:
 from __future__ import annotations
 
 import difflib
+import logging
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from .git_safety import git_env_without_user_config, git_metadata_may_execute_filters
+
+log = logging.getLogger(__name__)
 
 # Block header markers. The dividers must each occupy their own line.
 # We accept 5 or more characters of each marker so model variations
@@ -398,7 +403,12 @@ def _is_sensitive_path(path_str: str) -> bool:
         return True
     return False
 
-def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:
+def _writes_git_metadata(target: Path) -> bool:
+    """True if ``target`` is (or is under) a `.git` directory."""
+    return any(part == ".git" for part in target.parts)
+
+
+def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:  # noqa: C901  -- the added .git/ metadata guard (W2-1/W2-3) tipped this over the cap; decompose under dedicated review
     target = (workdir / block.path).resolve()
     # Guard against path traversal.
     try:
@@ -420,6 +430,22 @@ def _apply_one(block: SearchReplaceBlock, workdir: Path) -> ApplyResult:
             ok=False, block=block,
             reason=f"path {block.path!r} contains absolute or parent "
                    "traversal; use workspace-relative paths only",
+        )
+
+    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): a SEARCH/REPLACE
+    # block writing `.git/config` can plant a core.fsmonitor hook or filter
+    # smudge/clean command that later host-side git calls (render_diff,
+    # reviewer.get_diff, coding_mode) would execute. Refuse unconditionally --
+    # there is no legitimate reason for the edit format to touch git's own
+    # metadata directory. (`.gitattributes` in the tree merely NAMES a filter;
+    # the filter's actual command lives in `.git/config`, which this blocks,
+    # and every host-side git call also checks `git_metadata_may_execute_filters`
+    # before running.)
+    if _writes_git_metadata(target):
+        return ApplyResult(
+            ok=False, block=block,
+            reason=f"path {block.path!r} writes under .git/, which is "
+                   "never a valid edit target",
         )
 
     # New-file case: empty SEARCH = create file.
@@ -622,9 +648,24 @@ def render_diff(workdir: Path,
     on SWE-bench Pro need new files). We `git add --intent-to-add` the
     caller-supplied paths before running diff so new files show up with
     a proper `--- /dev/null` hunk.
+
+    `workdir` is agent-writable (write_file / SEARCH-REPLACE apply here),
+    so it can carry a `.git/config` `core.fsmonitor` hook or a
+    `[filter "x"]` smudge command that git executes during any of these
+    calls. Refuse to touch the repo at all when `git_metadata_may_execute_filters`
+    finds such metadata, and run every git call under
+    `git_env_without_user_config` so a false negative there still can't
+    reach the caller's environment (provider API keys included). See
+    PLATFORM_IMPROVEMENT_AUDIT.md W2-1 / W2-2.
     """
-    import os
     import subprocess
+
+    if git_metadata_may_execute_filters(workdir):
+        log.warning(
+            "render_diff skipped: unsafe git filter/fsmonitor metadata in %s",
+            workdir,
+        )
+        return ""
 
     scoped: list[str] = []
     if paths is not None:
@@ -639,11 +680,11 @@ def render_diff(workdir: Path,
         # rendered diff.
         try:
             ls = subprocess.run(
-                ["git", "-c", "core.quotePath=false", "-C", str(workdir),
-                 "ls-files", "--others", "--exclude-standard", "-z", "--"]
+                ["git", "-c", "core.quotePath=false", "-c", "core.hooksPath=/dev/null",
+                 "-C", str(workdir), "ls-files", "--others", "--exclude-standard", "-z", "--"]
                 + scoped,
                 capture_output=True, timeout=15,
-                env={**os.environ, "GIT_LITERAL_PATHSPECS": "1"},
+                env={**git_env_without_user_config(), "GIT_LITERAL_PATHSPECS": "1"},
             )
             if ls.returncode == 0 and ls.stdout:
                 raw = ls.stdout.decode("utf-8", errors="replace")
@@ -652,16 +693,17 @@ def render_diff(workdir: Path,
                 for i in range(0, len(untracked), 100):
                     chunk = untracked[i:i + 100]
                     subprocess.run(
-                        ["git", "-C", str(workdir), "add", "--intent-to-add",
-                         "--"] + chunk,
+                        ["git", "-c", "core.hooksPath=/dev/null", "-C", str(workdir),
+                         "add", "--intent-to-add", "--"] + chunk,
                         capture_output=True, timeout=30,
-                        env={**os.environ, "GIT_LITERAL_PATHSPECS": "1"},
+                        env={**git_env_without_user_config(), "GIT_LITERAL_PATHSPECS": "1"},
                     )
         except (subprocess.SubprocessError, OSError):
             pass
 
     try:
-        cmd = ["git", "-c", "core.quotePath=false", "-C", str(workdir), "diff",
+        cmd = ["git", "-c", "core.quotePath=false", "-c", "core.hooksPath=/dev/null",
+               "-C", str(workdir), "diff",
                "--no-color", "--no-ext-diff", "--no-textconv",
                "--unified=3", "HEAD"]
         if scoped:
@@ -669,7 +711,7 @@ def render_diff(workdir: Path,
             cmd.extend(scoped)
         proc = subprocess.run(
             cmd, capture_output=True, timeout=30,
-            env={**os.environ, "GIT_LITERAL_PATHSPECS": "1"},
+            env={**git_env_without_user_config(), "GIT_LITERAL_PATHSPECS": "1"},
         )
         if proc.returncode == 0:
             raw = proc.stdout.decode("utf-8", errors="replace")
