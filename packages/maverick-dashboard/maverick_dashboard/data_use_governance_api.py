@@ -178,12 +178,12 @@ def _config() -> Mapping[str, Any]:
 
 
 def _ops():
-    from maverick import data_use_governance
+    from maverick import config, data_use_governance
 
-    if _config().get("enable") is not True:
+    if not config.data_use_governance_enabled():
         raise HTTPException(
             status_code=403,
-            detail="data-use governance is disabled ([data_use_governance] enable)",
+            detail="Data Use Governance is disabled or its configuration is unavailable.",
         )
     return data_use_governance
 

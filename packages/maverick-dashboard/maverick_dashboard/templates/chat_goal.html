@@ -174,6 +174,7 @@
     </button>
   </div>
 
+  {% if can_recover_task_files %}<p><a class="btn" href="/chat/goal/{{ goal.id }}/files">Review task files</a></p>{% endif %}
   <div class="msg msg--user">
     <div class="bubble">
       <div class="bubble__title">{{ goal.title }}</div>
@@ -343,19 +344,25 @@
       </ul>
     </div>
     <div id="halt-card" class="halt-card" style="display: none;">
-      <div class="halt-card__title">Stopped before finishing</div>
+      {% set pilot_prepared = goal.result == 'Prepared for a workflow pilot. Start this task after the pilot plan is frozen.' %}
+      <div class="halt-card__title">{{ 'Ready to start' if pilot_prepared else 'Stopped before finishing' }}</div>
       <p id="halt-reason" class="muted" style="margin: var(--space-2) 0 0;"></p>
       <p class="muted" style="margin: var(--space-3) 0 0; font-size: var(--text-sm);">
+        {% if pilot_prepared %}
+        This task was prepared without running it. Freeze your <a href="/outcome-pilots">workflow pilot plan</a>,
+        review the spending limit, then start when you are ready.
+        {% else %}
         This usually means the goal reached its budget or time cap, the emergency stop was armed, or it hit an error.
         You can resume it from here, or <a href="/oversight">open Oversight</a> for details.
+        {% endif %}
       </p>
       <form id="halt-resume-form" style="margin-top: var(--space-3);">
         <div class="field">
           <label for="halt-resume-budget">Spending limit for this attempt (USD, optional)</label>
           <input id="halt-resume-budget" class="input" type="number" min="0.01" step="0.01" placeholder="Use the deployment’s default limit" aria-describedby="halt-resume-budget-hint">
-          <p id="halt-resume-budget-hint" class="muted">This limits the resumed attempt. Your organization’s spending and safety limits still apply.</p>
+          <p id="halt-resume-budget-hint" class="muted">This limits the next attempt. Your organization’s spending and safety limits still apply.</p>
         </div>
-        <button id="halt-resume" class="btn btn--primary" type="submit">Resume this goal</button>
+        <button id="halt-resume" class="btn btn--primary" type="submit">{{ 'Start this task' if pilot_prepared else 'Resume this goal' }}</button>
         <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
       </form>
     </div>

@@ -225,6 +225,40 @@ def _authority():
     return ops, tenant, _store(ops, tenant)
 
 
+_CATALOG_KINDS = {"properties":"property", "purposes":"purpose", "topics":"topic",
+                  "custom-preferences":"custom_preference", "notices":"notice", "translations":"translation",
+                  "templates":"template", "themes":"theme", "rule-groups":"rule_group"}
+
+
+def _catalog_authority(request: Request):
+    require_permission(request, "operate")
+    ops, tenant, store = _authority()
+    expected = request.headers.get("X-Lightwork-Expected-Tenant")
+    if expected is not None and expected != tenant:
+        raise HTTPException(status_code=409, detail="The active workspace changed. Reload before choosing saved consent records.")
+    return ops, tenant, store
+
+
+@router.get("/catalog/{kind}")
+async def catalog(request: Request, kind: str, q: str = Query("", max_length=200),
+                  resource_id: str = Query("", max_length=128), offset: int = Query(0, ge=0, le=1_000_000),
+                  limit: int = Query(25, ge=1, le=50)) -> dict:
+    if kind not in _CATALOG_KINDS:
+        raise HTTPException(status_code=422, detail="unknown consent resource kind")
+    ops, tenant, store = _catalog_authority(request)
+    return await _call(ops, store.catalog, tenant, kind=_CATALOG_KINDS[kind], query=q,
+                       resource_id=resource_id, offset=offset, limit=limit)
+
+
+@router.get("/catalog/{kind}/{resource_id}/versions/{version}")
+async def catalog_version(request: Request, kind: str, resource_id: str, version: int,
+                          locale: str = Query("", max_length=64)) -> dict:
+    if kind not in _CATALOG_KINDS or kind == "properties":
+        raise HTTPException(status_code=422, detail="unknown consent resource kind")
+    ops, tenant, store = _catalog_authority(request)
+    return await _call(ops, store.resource_version, tenant, _CATALOG_KINDS[kind], resource_id, version, locale=locale)
+
+
 @router.put("/properties/{property_id}")
 async def upsert_property(request: Request, property_id: str, body: PropertyIn) -> dict:
     require_global_permission(request, "admin")

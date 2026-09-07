@@ -9,22 +9,27 @@ const vm = require("node:vm");
 function splash(copyResult, invoke) {
   const handlers = {};
   const nodes = Object.fromEntries(
-    ["status-text", "trouble", "retry", "copy", "copied", "diagnostics", "refresh-details"].map((id) => [id, {
+    ["status-text", "trouble", "retry", "copy", "copied", "diagnostics", "refresh-details",
+      "prepare-startup-report", "download-startup-report", "startup-report-status", "startup-report"].map((id) => [id, {
       style: {},
       textContent: id === "copied" ? "Copied" : "",
       addEventListener(name, handler) { handlers[`${id}:${name}`] = handler; },
     }]),
   );
   const appended = [];
+  const downloads = [];
+  const blobs = [];
   const context = {
     window: { location: { replace() {} }, __TAURI__: invoke ? { core: { invoke } } : undefined },
     navigator: {},
     fetch: () => new Promise(() => {}),
     setTimeout: () => 1,
     clearTimeout() {},
+    Blob,
+    URL: { createObjectURL(blob) { blobs.push(blob); return "blob:fixture"; }, revokeObjectURL() {} },
     document: {
       getElementById: (id) => nodes[id],
-      createElement: () => ({ style: {}, select() {} }),
+      createElement: () => ({ style: {}, select() {}, click() { downloads.push(this.download); } }),
       execCommand: copyResult,
       body: {
         appendChild(node) { appended.push(node); },
@@ -35,7 +40,7 @@ function splash(copyResult, invoke) {
   vm.runInNewContext(
     fs.readFileSync(path.join(__dirname, "../ui/app.js"), "utf8"), context,
   );
-  return { clickCopy: handlers["copy:click"], feedback: nodes.copied, appended, handlers, nodes };
+  return { clickCopy: handlers["copy:click"], feedback: nodes.copied, appended, handlers, nodes, downloads, blobs };
 }
 
 test("fallback clipboard rejection reports failure and removes temporary input", () => {
@@ -97,4 +102,40 @@ test("startup details are loaded only by the explicit in-app action", async () =
   await app.handlers["refresh-details:click"]();
   assert.deepEqual(calls, ["dashboard_diagnostics"]);
   assert.equal(app.nodes.diagnostics.textContent, "Synthetic startup output");
+});
+
+test("startup report requires an explicit prepare and downloads the reviewed bytes", async () => {
+  const calls = [];
+  const report = { schema: "lightwork.startup-support.v1", process_state: "not_started" };
+  const app = splash(() => true, async (command) => { calls.push(command); return report; });
+  assert.deepEqual(calls, []);
+  app.handlers["download-startup-report:click"]();
+  assert.equal(app.downloads.length, 0);
+  app.handlers["prepare-startup-report:click"]();
+  await new Promise(setImmediate);
+  assert.deepEqual(calls, ["startup_support_report"]);
+  assert.equal(app.nodes["startup-report"].textContent, JSON.stringify(report, null, 2));
+  assert.equal(app.downloads.length, 0);
+  app.handlers["download-startup-report:click"]();
+  assert.deepEqual(app.downloads, ["Lightwork-startup-support.json"]);
+  assert.equal(await app.blobs[0].text(), app.nodes["startup-report"].textContent);
+});
+
+test("failed startup report refresh invalidates the old download and hides raw errors", async () => {
+  let fail = false;
+  const app = splash(() => true, async () => {
+    if (fail) throw new Error("private fixture token");
+    return { schema: "lightwork.startup-support.v1" };
+  });
+  app.handlers["prepare-startup-report:click"]();
+  await new Promise(setImmediate);
+  fail = true;
+  app.handlers["prepare-startup-report:click"]();
+  assert.equal(app.nodes["download-startup-report"].disabled, true);
+  assert.equal(app.nodes["startup-report"].textContent, "");
+  await new Promise(setImmediate);
+  assert.doesNotMatch(app.nodes["startup-report-status"].textContent, /private/);
+  app.handlers["download-startup-report:click"]();
+  assert.equal(app.downloads.length, 0);
+  assert.equal(app.nodes["prepare-startup-report"].disabled, false);
 });
