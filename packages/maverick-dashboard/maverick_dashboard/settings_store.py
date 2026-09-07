@@ -442,7 +442,8 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control",
-                    *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS)):
+                    *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
+                    *SWITCHABLE_SECTIONS)):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")

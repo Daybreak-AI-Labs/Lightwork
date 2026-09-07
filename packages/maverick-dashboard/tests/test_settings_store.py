@@ -99,5 +99,19 @@ def test_concurrent_channel_and_provider_both_apply(monkeypatch, tmp_path):
     assert persisted.count("MVKAR1:") >= 2
 
 
+def test_every_switchable_section_survives_a_round_trip(monkeypatch, tmp_path):
+    """_dump is an allowlist: a SWITCHABLE_SECTIONS entry missing from it is
+    silently dropped on the next save, so set_section_enable appears to work
+    (the in-memory overlay looks right) while the persisted file -- and thus
+    the state a restart or a fresh reader sees -- never got the change."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick_dashboard import settings_store
+
+    for section in settings_store.SWITCHABLE_SECTIONS:
+        settings_store.set_section_enable(section, True)
+        overlay = settings_store.load_overlay()
+        assert overlay.get(section, {}).get("enable") is True, section
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
