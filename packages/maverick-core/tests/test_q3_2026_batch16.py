@@ -201,3 +201,155 @@ def test_url_less_browser_action_denies_disallowed_current_host(monkeypatch):
     assert "DENIED by capability" in out
     assert "evil.com" in out
     assert closed == [True]
+
+
+# ---------- egress checks (platform audit W2-88) ----------
+#
+# Previously the browser tool ran outside both the enterprise egress lock
+# and the per-tenant egress plane entirely -- no check at all, unlike every
+# sibling outbound-request tool (http_fetch, websocket). See
+# test_enterprise_tool_egress.py / test_tenant_egress.py for the
+# enterprise-mode / tenant-plane integration tests; these cover the
+# mechanics: the post-hoc close-on-landed-redirect path, and the
+# network-level `page.route` backstop that also covers subresources a
+# page's own JS fetches in the background (which never show up as
+# ``page.url`` at all).
+
+def test_deny_and_close_current_page_closes_on_enterprise_denial(monkeypatch):
+    monkeypatch.setattr(
+        browser_mod, "_egress_denial",
+        lambda url: "enterprise mode: refusing tool egress to 'evil.com'",
+    )
+    closed = []
+    monkeypatch.setattr(browser_mod, "close_browser", lambda: closed.append(True))
+
+    class _Page:
+        url = "https://evil.com/private"
+
+    out = browser_mod._deny_and_close_current_page(_Page(), ())
+    assert out is not None
+    assert "enterprise mode" in out and "session was closed" in out
+    assert closed == [True]
+
+
+def test_deny_and_close_current_page_allows_when_egress_permits(monkeypatch):
+    monkeypatch.setattr(browser_mod, "_egress_denial", lambda url: None)
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # isolate from real DNS
+    closed = []
+    monkeypatch.setattr(browser_mod, "close_browser", lambda: closed.append(True))
+
+    class _Page:
+        url = "https://ok.example.com/x"
+
+    assert browser_mod._deny_and_close_current_page(_Page(), ()) is None
+    assert closed == []
+
+
+class _FakeRequest:
+    def __init__(self, url):
+        self.url = url
+
+
+class _FakeRoute:
+    def __init__(self):
+        self.aborted = False
+        self.continued = False
+
+    def abort(self):
+        self.aborted = True
+
+    def continue_(self):
+        self.continued = True
+
+
+def test_route_guard_continues_non_http_schemes():
+    route = _FakeRoute()
+    browser_mod._route_guard(route, _FakeRequest("data:image/png;base64,AAAA"))
+    assert route.continued and not route.aborted
+
+
+def test_route_guard_aborts_loopback_subresource():
+    route = _FakeRoute()
+    browser_mod._route_guard(route, _FakeRequest("http://127.0.0.1/steal"))
+    assert route.aborted and not route.continued
+
+
+def test_route_guard_aborts_localhost_subresource():
+    route = _FakeRoute()
+    browser_mod._route_guard(route, _FakeRequest("http://localhost:9/steal"))
+    assert route.aborted and not route.continued
+
+
+def test_route_guard_allows_public_host(monkeypatch):
+    monkeypatch.setattr("maverick.tools.http_fetch.is_blocked_host", lambda h: False)
+    route = _FakeRoute()
+    browser_mod._route_guard(route, _FakeRequest("https://cdn.example.com/img.png"))
+    assert route.continued and not route.aborted
+
+
+def test_route_guard_aborts_under_enterprise_denial(monkeypatch):
+    monkeypatch.setattr("maverick.tools.http_fetch.is_blocked_host", lambda h: False)
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
+    import maverick.config as cfg
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: {})
+    route = _FakeRoute()
+    browser_mod._route_guard(route, _FakeRequest("https://cdn.example.com/img.png"))
+    assert route.aborted and not route.continued
+
+
+def test_route_guard_aborts_under_tenant_egress_deny(monkeypatch):
+    monkeypatch.setattr("maverick.tools.http_fetch.is_blocked_host", lambda h: False)
+    monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
+    import maverick.config as cfg
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda *a, **k: {"egress": {"deny": ["cdn.example.com"]}},
+    )
+    route = _FakeRoute()
+    browser_mod._route_guard(route, _FakeRequest("https://cdn.example.com/img.png"))
+    assert route.aborted and not route.continued
+
+
+def test_ensure_started_registers_route_guard_on_the_context(monkeypatch):
+    """Regression guard for the registration call itself -- everything above
+    tests `_route_guard`'s logic, but nothing exercises it if it's never
+    wired onto a context/page."""
+    import sys
+    import types
+
+    captured = {"route": None}
+
+    class _FakeContext:
+        def route(self, pattern, handler):
+            captured["route"] = (pattern, handler)
+
+        def new_page(self):
+            return _FakePage()
+
+    class _FakeBrowser:
+        def new_context(self, **kwargs):
+            return _FakeContext()
+
+    class _FakeChromium:
+        def launch(self, headless):
+            return _FakeBrowser()
+
+    class _FakePlaywrightHandle:
+        chromium = _FakeChromium()
+
+    class _FakeSyncPlaywright:
+        def start(self):
+            return _FakePlaywrightHandle()
+
+    fake_sync_api = types.ModuleType("playwright.sync_api")
+    fake_sync_api.sync_playwright = lambda: _FakeSyncPlaywright()
+    fake_playwright = types.ModuleType("playwright")
+    fake_playwright.sync_api = fake_sync_api
+    monkeypatch.setitem(sys.modules, "playwright", fake_playwright)
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake_sync_api)
+    monkeypatch.setenv("MAVERICK_BROWSER_NO_PERSIST", "1")
+
+    sess = _BrowserSession()
+    sess._ensure_started()
+
+    assert captured["route"] == ("**/*", browser_mod._route_guard)
