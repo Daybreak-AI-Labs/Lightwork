@@ -82,6 +82,7 @@ External MCP tools (if any) appear as `mcp_<server>__<tool>`."""
 
 def select_base_template(
     *, role: str, depth: int, max_depth: int, coding_enabled: bool,
+    is_root: bool = False,
 ) -> str:
     """Pick the base system template for an agent. Pure: no env/config reads.
 
@@ -91,13 +92,20 @@ def select_base_template(
     coding mode off it is the orchestrator template for the planner and the
     worker template for every other role. First side-effect-free seam extracted
     from ``Agent._build_system`` (god-module decomposition: PromptBuilder).
+
+    ``is_root`` (W1-24): a domain-routed goal's depth-0 agent has
+    ``role=profile.name`` (e.g. ``"finance_controller"``), not
+    ``"orchestrator"`` -- it still emits the goal's FINAL and needs the
+    orchestrator template, not the "specialist worker" one. The domain
+    persona is layered on separately via ``apply_role_overlays``, so this
+    does not lose any pack flavor.
     """
     if coding_enabled:
         from .coding_mode import CODER_CODING_MODE_TEMPLATE
         return CODER_CODING_MODE_TEMPLATE.format(
             role=role, depth=depth, max_depth=max_depth,
         )
-    if role == "orchestrator":
+    if role == "orchestrator" or is_root:
         return ORCHESTRATOR_SYSTEM_TEMPLATE.format(max_depth=max_depth)
     return WORKER_SYSTEM_TEMPLATE.format(role=role, depth=depth, max_depth=max_depth)
 
@@ -1330,19 +1338,30 @@ class Agent:
         knowledge_sources: list[str] | None = None,
         domain_effort: str | None = None,
         autonomy=None,
+        is_goal_root: bool = False,
     ):
         self.ctx = ctx
         self.role = role
         self.brief = brief
         self.depth = depth
         self.parent = parent
+        # W1-24: whether this agent owns the GOAL's FINAL synthesis --
+        # verification, the review checkpoint, prompt-cache prewarm, the
+        # thinking budget, and the base system template all keyed on
+        # role == "orchestrator" alone, so a domain-routed goal's depth-0
+        # root (role=profile.name, e.g. "finance_controller") silently
+        # skipped every one of them. agent_from_profile passes this
+        # explicitly for its depth==0 construction; plain role=="orchestrator"
+        # still qualifies too (the two are OR'd at each use, not merged here,
+        # so this flag never needs to fake a role rename).
+        self._is_goal_root = bool(is_goal_root)
         # Long-horizon review checkpoint (root only; opt-in). Built once per
         # agent from config; None when unconfigured (the common case) so the
         # turn gate stays a no-op. The reviewer uses the consent/approval path
         # with silent auto-approval disabled, so crossing an interval requires
         # an explicit operator decision to continue.
         self._review_checkpoint = None
-        if role == "orchestrator":
+        if role == "orchestrator" or self._is_goal_root:
             try:
                 from .review_checkpoint import consent_review, from_config
                 _cp = from_config(
@@ -1634,6 +1653,7 @@ class Agent:
         base = select_base_template(
             role=self.role, depth=self.depth, max_depth=self.ctx.max_depth,
             coding_enabled=bool(_coding_cfg is not None and _coding_cfg.enabled),
+            is_root=getattr(self, "_is_goal_root", False),
         )
 
         # Swarm-wide additive overlays (persona, output style, learned-habits
@@ -1715,7 +1735,8 @@ class Agent:
             return []
 
     def _thinking_budget(self) -> int | None:
-        if self.role not in ("orchestrator", "revisor"):
+        if (not getattr(self, "_is_goal_root", False)
+                and self.role not in ("orchestrator", "revisor")):
             return None
         # Thinking tokens bill at the output rate, so the base is a first-class
         # cost knob: `[thinking] budget` (default 8000, the long-standing value).
@@ -3380,7 +3401,7 @@ class Agent:
         # the first real turn reads the system+tools cache instead of paying the
         # cold-write latency. Subagents are skipped (each has a distinct prompt;
         # warming them would be a wasted write). Never blocks the run.
-        if self.role == "orchestrator":
+        if self.role == "orchestrator" or getattr(self, "_is_goal_root", False):
             try:
                 from .llm import cache_prewarm_enabled
                 if cache_prewarm_enabled():
@@ -3452,7 +3473,10 @@ class Agent:
             # at the root, fire a human-review heartbeat every N dollars / M tool
             # calls / T seconds. A reviewer vote to halt stops the run cleanly,
             # like the killswitch. Inert (no checkpoint object) when unconfigured.
-            if self.role == "orchestrator" and self._review_checkpoint is not None:
+            if (
+                (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
+                and self._review_checkpoint is not None
+            ):
                 _cp_event = self._review_checkpoint.check(self.ctx.budget)
                 if _cp_event is not None:
                     bb.post(self.name, "note",
@@ -3815,7 +3839,7 @@ class Agent:
                     # Only the orchestrator's FINAL is verified. Sub-agents
                     # answer to their parent; the parent is their verifier.
                     if (
-                        self.role == "orchestrator"
+                        (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
                         and self.depth == 0
                         and not getattr(self, "_already_verified", False)
                         and self.ctx.goal_id is not None

@@ -5,6 +5,7 @@ not in the lightweight local subset).
 """
 from __future__ import annotations
 
+import pytest
 from maverick.agent_autonomy import AutonomyLevel, AutonomyProfile
 from maverick.capability import Capability
 from maverick.domain import DomainProfile, agent_from_profile
@@ -113,6 +114,84 @@ def test_agent_from_profile_sets_knowledge_sources(tmp_path):
                             allow_tools=["read_file"])
     agent = agent_from_profile(profile, ctx, "task")
     assert agent.knowledge_sources == ["finance"]
+
+
+def test_agent_from_profile_depth_zero_root_is_goal_root(tmp_path):
+    # W1-24: run_goal's domain-routed root (orchestrator.py) always calls
+    # agent_from_profile with no parent, at depth 0 -- role=profile.name,
+    # e.g. "finance_controller", never "orchestrator". Every kernel
+    # mechanic gated on "is this the goal's root" must still fire for it.
+    ctx = _ctx(tmp_path)
+    profile = DomainProfile(name="finance_controller", allow_tools=["read_file"])
+    root = agent_from_profile(profile, ctx, "close the books")
+    assert root.role == "finance_controller"
+    assert root._is_goal_root is True
+
+    child = agent_from_profile(profile, ctx, "sub-task", parent=root, depth=1)
+    assert child._is_goal_root is False  # a nested domain spawn is not the root
+
+
+def test_domain_routed_root_gets_orchestrator_template_with_persona(tmp_path):
+    # W1-24: before the fix, select_base_template picked the WORKER template
+    # ("You are a specialist agent... depth 0") for ANY role other than
+    # literally "orchestrator" -- so a domain pack's root never got the
+    # orchestrator framing that tells it to decompose/delegate/verify. The
+    # persona is layered on separately (apply_role_overlays), so fixing the
+    # base template must not lose it.
+    ctx = _ctx(tmp_path)
+    profile = DomainProfile(
+        name="finance_controller",
+        persona="You are the finance controller. Cite every figure.",
+        allow_tools=["read_file"],
+    )
+    root = agent_from_profile(profile, ctx, "close the books")
+    assert "You are the orchestrator of a Lightwork swarm" in root.system
+    assert "specialist agent" not in root.system
+    assert "finance controller" in root.system  # persona preserved
+
+
+@pytest.mark.asyncio
+async def test_domain_routed_root_invokes_the_final_verifier(tmp_path, monkeypatch):
+    # W1-24 end-to-end regression: before the fix, a domain-routed root's
+    # FINAL was accepted with verifier_confidence=1.0 and no verifier LLM
+    # call at all -- indistinguishable from a genuinely-verified answer to
+    # every downstream consumer (trajectory donation, the autonomy servo,
+    # the dashboard). This reproduces run_goal's real path (agent_from_profile
+    # at depth 0, no parent) rather than a bare Agent(role=...) construction.
+    monkeypatch.setenv("MAVERICK_REHEARSAL", "0")
+    from maverick.llm import LLMResponse
+
+    class _ScriptedLLM:
+        model = "fake:test"
+
+        def __init__(self, scripted):
+            self.scripted = list(scripted)
+            self.calls = []
+
+        async def complete_async(self, **kwargs):
+            self.calls.append(kwargs)
+            if self.scripted:
+                return self.scripted.pop(0)
+            return LLMResponse(text="FINAL: (exhausted)", thinking=None,
+                               tool_calls=[], stop_reason="end_turn")
+
+    ctx = _ctx(tmp_path)
+    ctx.llm = _ScriptedLLM([
+        LLMResponse(text="FINAL: books closed", thinking=None,
+                    tool_calls=[], stop_reason="end_turn"),
+        LLMResponse(
+            text='{"confidence":0.95,"accepts":true,"critique":"ok","issues":[]}',
+            thinking=None, tool_calls=[], stop_reason="end_turn",
+        ),
+    ])
+    profile = DomainProfile(name="finance_controller", allow_tools=["read_file"])
+    root = agent_from_profile(profile, ctx, "close the books")
+
+    result = await root.run()
+
+    assert result.final == "books closed"
+    assert len(ctx.llm.calls) == 2  # FINAL + the verifier that actually ran
+    assert result.verifier_confidence == pytest.approx(0.95)
 
 
 def test_build_intake_agent_assembles_interviewer(tmp_path):
