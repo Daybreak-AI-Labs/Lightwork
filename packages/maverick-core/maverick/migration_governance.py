@@ -242,16 +242,67 @@ def regen_blockers(
     return blockers
 
 
-def write_lock() -> Path:
+def repin_blockers(
+    lads: dict[str, dict[int, list[str]]] | None = None,
+    existing_lock: dict | None = None,
+) -> list[str]:
+    """Already-locked versions whose checksum would change on the next write.
+
+    W1-55: ``regen_blockers`` only inspects versions ABSENT from the lock, so
+    editing a released migration and running ``--regen`` re-pinned it with a
+    green CI afterward -- the exact event the immutability rule exists to
+    catch (``lock_problems`` flags the edit before regen, but nothing stopped
+    ``write_lock`` from silently making that checksum the new baseline).
+    """
+    lads = lads if lads is not None else ladders()
+    if existing_lock is None:
+        existing_lock = load_lock()
+    locked = (existing_lock or {}).get("checksums", {})
+    fp = fingerprint(lads)
+    repins: list[str] = []
+    for backend, current in fp["checksums"].items():
+        prior = locked.get(backend, {})
+        for version, cksum in current.items():
+            if version in prior and prior[version] != cksum:
+                repins.append(
+                    f"{backend}:{version} ({prior[version]} -> {cksum})")
+    return repins
+
+
+def write_lock(*, force_repin: set[str] | None = None) -> Path:
+    """Rewrite migrations.lock.json from the current ladders.
+
+    ``force_repin`` is the set of ``"backend:version"`` tokens (e.g.
+    ``"sqlite:7"``) the caller has explicitly reviewed and wants re-pinned
+    despite already being released -- anything else in :func:`repin_blockers`
+    still refuses. Empty by default, so an accidental edit-then-regen of a
+    released migration is refused, not silently laundered.
+    """
+    force_repin = force_repin or set()
     lads = ladders()
+    existing_lock = load_lock()
     # Refuse to launder a destructive NEW migration into the grandfathered set.
-    blockers = regen_blockers(lads)
+    blockers = regen_blockers(lads, existing_lock)
     if blockers:
         raise ValueError(
             "refusing to regenerate migrations.lock.json -- a new migration is "
             "destructive and would be grandfathered into immutability. Make it "
             "additive (old replicas still read the old schema):\n  - "
             + "\n  - ".join(blockers))
+    repins = [
+        r for r in repin_blockers(lads, existing_lock)
+        if r.split(" ", 1)[0] not in force_repin
+    ]
+    if repins:
+        raise ValueError(
+            "refusing to regenerate migrations.lock.json -- this would "
+            "silently re-pin already-released version(s), the exact edit the "
+            "immutability rule exists to catch:\n  - " + "\n  - ".join(repins)
+            + "\nReleased migrations must not be edited; add a new version "
+              "instead. If a re-pin is genuinely intentional (e.g. correcting "
+              "a lock that was committed before the version actually "
+              "shipped), pass --force-repin=backend:version for each one "
+              "after review.")
     path = lock_path()
     payload = fingerprint(lads)
     payload["_comment"] = (
@@ -282,11 +333,18 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
                    help="exit 1 on any governance violation")
     p.add_argument("--regen", action="store_true",
                    help="rewrite migrations.lock.json from the current ladders")
+    p.add_argument("--force-repin", action="append", default=[],
+                   metavar="BACKEND:VERSION",
+                   help="acknowledge re-pinning an already-released version's "
+                        "checksum (e.g. sqlite:7); repeatable. Only for "
+                        "correcting a lock committed before the version "
+                        "actually shipped -- released migrations must "
+                        "otherwise never be edited. Get it reviewed.")
     args = p.parse_args(argv)
 
     if args.regen:
         try:
-            path = write_lock()
+            path = write_lock(force_repin=set(args.force_repin))
         except ValueError as e:
             print(f"migration governance: {e}")
             return 1
@@ -309,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
 __all__ = [
     "lock_path", "version_checksum", "ladders", "fingerprint",
     "structural_problems", "lock_problems", "validate", "load_lock",
-    "write_lock", "render", "main",
+    "write_lock", "repin_blockers", "render", "main",
 ]
 
 

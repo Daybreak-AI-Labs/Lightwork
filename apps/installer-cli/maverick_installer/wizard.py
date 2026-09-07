@@ -5465,6 +5465,9 @@ def pick_retention() -> dict[str, int]:
         "events_days": _safe_int(
             _q_text("  Goal-event retention days", default="180"), default=180
         ),
+        "messages_days": _safe_int(
+            _q_text("  Message retention days", default="180"), default=180
+        ),
     }
 
 
@@ -8689,17 +8692,26 @@ GOVERNANCE_PROFILES: dict[str, dict[str, Any]] = {
     "essentials": {
         "advanced": dict(_LEARNING_LIFECYCLE),
         "self_learning": dict(_PROFILE_SELF_LEARNING),
-        "retention": {"audit_days": 30, "episodes_days": 90, "events_days": 30},
+        "retention": {
+            "audit_days": 30, "episodes_days": 90, "events_days": 30,
+            "messages_days": 30,
+        },
     },
     "standard": {
         "advanced": {**_LEARNING_LIFECYCLE, **_STANDARD_GOVERNANCE},
         "self_learning": dict(_PROFILE_SELF_LEARNING),
-        "retention": {"audit_days": 90, "episodes_days": 180, "events_days": 90},
+        "retention": {
+            "audit_days": 90, "episodes_days": 180, "events_days": 90,
+            "messages_days": 90,
+        },
     },
     "regulated": {
         "advanced": {**_LEARNING_LIFECYCLE, **_REGULATED_GOVERNANCE},
         "self_learning": dict(_PROFILE_SELF_LEARNING),
-        "retention": {"audit_days": 365, "episodes_days": 365, "events_days": 365},
+        "retention": {
+            "audit_days": 365, "episodes_days": 365, "events_days": 365,
+            "messages_days": 365,
+        },
     },
 }
 

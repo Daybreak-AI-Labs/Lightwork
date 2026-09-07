@@ -188,6 +188,7 @@ def test_consumer_default_is_essentials(monkeypatch, tmp_path: Path):
     assert "audit" not in config
     assert "quotas" not in config
     assert config["retention"]["audit_days"] == 30
+    assert config["retention"]["messages_days"] == 30
     # Safety seat unchanged at every level.
     assert config["safety"]["profile"] == "strict"
     assert config["budget"]["max_dollars"] == 5.0
@@ -206,6 +207,7 @@ def test_consumer_standard_level(monkeypatch, tmp_path: Path):
     assert config["quotas"]["enforce"] is True
     assert config["quotas"]["max_dollars_per_day"] == 25.0
     assert config["retention"]["audit_days"] == 90
+    assert config["retention"]["messages_days"] == 90
     # Ladder on; still no human-signature gate and no WORM at standard.
     assert config["self_improvement"]["enable"] is True
     assert not config["self_improvement"].get("require_signed_approval")
@@ -230,6 +232,7 @@ def test_consumer_regulated_level(monkeypatch, tmp_path: Path):
     assert config["self_improvement"]["enable"] is True
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365
+    assert config["retention"]["messages_days"] == 365
     # Learning still on -- regulated is a stricter wrapper, not a lobotomy.
     assert config["self_learning"]["enable"] is True
     assert config["reflexion"]["enable"] is True
@@ -254,3 +257,4 @@ def test_express_regulated_adds_governance(monkeypatch, tmp_path: Path):
     assert config["self_improvement"]["enable"] is True
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365
+    assert config["retention"]["messages_days"] == 365

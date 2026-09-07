@@ -392,6 +392,7 @@ class _RetentionTx:
     [
         ("purge_episodes_before", "episodes"),
         ("purge_goal_events_before", "goal_events"),
+        ("purge_messages_before", "messages"),
     ],
 )
 def test_retention_requires_exact_active_tenant(monkeypatch, method_name, table):
@@ -414,6 +415,7 @@ def test_retention_requires_exact_active_tenant(monkeypatch, method_name, table)
     [
         "purge_episodes_before",
         "purge_goal_events_before",
+        "purge_messages_before",
         "prune_goal_events",
         "prune_processed_messages",
         "prune_conversations",

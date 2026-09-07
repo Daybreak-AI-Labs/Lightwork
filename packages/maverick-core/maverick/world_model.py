@@ -1492,16 +1492,37 @@ class WorldModel:
         try:
             while current < SCHEMA_VERSION:
                 next_version = current + 1
-                for stmt in MIGRATIONS.get(next_version, []):
-                    try:
-                        self.conn.execute(stmt)
-                    except sqlite3.OperationalError as e:
-                        msg = str(e).lower()
-                        if "duplicate column" not in msg:
-                            raise
-                self.conn.execute(
-                    "UPDATE schema_version SET version = ?", (next_version,),
-                )
+                # W1-56: Python's sqlite3 legacy driver auto-commits DDL/
+                # backfill statements one at a time outside any transaction,
+                # so a failing multi-statement migration left EARLIER
+                # statements of the SAME version permanently applied while
+                # schema_version stayed unbumped -- an interrupted upgrade
+                # left the DB in a state no later open could detect or retry
+                # cleanly. Wrap each version in its own explicit transaction
+                # so a failure rolls back every statement of that version.
+                # `commit()` first is a safe no-op except right after a
+                # fresh DB's `_init_schema_version()` INSERT, whose
+                # transaction is still open here (only committed after this
+                # method returns) -- BEGIN inside an open transaction raises
+                # `OperationalError: cannot start a transaction within a
+                # transaction`.
+                self.conn.commit()
+                self.conn.execute("BEGIN IMMEDIATE")
+                try:
+                    for stmt in MIGRATIONS.get(next_version, []):
+                        try:
+                            self.conn.execute(stmt)
+                        except sqlite3.OperationalError as e:
+                            msg = str(e).lower()
+                            if "duplicate column" not in msg:
+                                raise
+                    self.conn.execute(
+                        "UPDATE schema_version SET version = ?", (next_version,),
+                    )
+                    self.conn.commit()
+                except BaseException:
+                    self.conn.rollback()
+                    raise
                 current = next_version
         finally:
             if prior is not None:
@@ -2296,6 +2317,17 @@ class WorldModel:
         This is the backend-portable retention primitive.  Keeping the
         operation on the world model (instead of opening its SQLite file behind
         its back) preserves backend selection and transaction ownership.
+
+        W1-50: ``facts.source_episode_id``/``fact_history.source_episode_id``
+        are ``REFERENCES episodes(id)`` with no ``ON DELETE`` clause, and the
+        world opens with ``PRAGMA foreign_keys = ON`` -- deleting an episode
+        any fact still cites (retention prunes by AGE, not by whether a fact
+        still needs it) raised ``sqlite3.IntegrityError`` and aborted the
+        whole retention job. Unlike the erasure path (which deletes the
+        facts too -- the point there is removing personal data), retention
+        just wants the old episode gone; the fact itself is still live, so
+        null out the now-dangling provenance reference instead of deleting
+        the fact.
         """
         predicate = "ended_at IS NOT NULL AND ended_at < ?"
         with self._writing() as conn:
@@ -2305,6 +2337,17 @@ class WorldModel:
                     (float(cutoff_ts),),
                 ).fetchone()
                 return int(row[0] or 0)
+            episode_query = f"SELECT id FROM episodes WHERE {predicate}"
+            conn.execute(
+                "UPDATE facts SET source_episode_id = NULL "
+                f"WHERE source_episode_id IN ({episode_query})",
+                (float(cutoff_ts),),
+            )
+            conn.execute(
+                "UPDATE fact_history SET source_episode_id = NULL "
+                f"WHERE source_episode_id IN ({episode_query})",
+                (float(cutoff_ts),),
+            )
             cur = conn.execute(
                 f"DELETE FROM episodes WHERE {predicate}",
                 (float(cutoff_ts),),
@@ -2396,6 +2439,29 @@ class WorldModel:
                 return int(row[0] or 0)
             cur = conn.execute(
                 f"DELETE FROM goal_events WHERE {predicate}",
+                (float(cutoff_ts),),
+            )
+            return int(cur.rowcount or 0)
+
+    def purge_messages_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete conversation messages older than an absolute cutoff.
+
+        W1-57: unlike episodes, nothing references ``messages.id`` via a
+        foreign key, so this is a plain age-based delete with no dangling
+        provenance to null out first.
+        """
+        predicate = "ts IS NOT NULL AND ts < ?"
+        with self._writing() as conn:
+            if dry_run:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM messages WHERE {predicate}",
+                    (float(cutoff_ts),),
+                ).fetchone()
+                return int(row[0] or 0)
+            cur = conn.execute(
+                f"DELETE FROM messages WHERE {predicate}",
                 (float(cutoff_ts),),
             )
             return int(cur.rowcount or 0)
@@ -3275,35 +3341,27 @@ class WorldModel:
 
     # ----- messages -----
     def append_message(self, goal_id: int, role: str, content: str) -> None:
+        # W1-53: this trigger the messages_fts virtual table (SCHEMA, applied
+        # via executescript above) into tokenizing every inserted row, INCLUDING
+        # ciphertext once at_rest_enabled() is on (the default) -- >100% storage
+        # overhead measured on 300 messages, for an index that can then only
+        # ever match legacy pre-encryption plaintext. search_messages(), the
+        # index's one reader, has been removed (zero production callers; only
+        # its own definition and tests referenced it -- grep confirmed). The
+        # trigger/table themselves could not be removed in the same pass:
+        # migration_governance.py's additive-only policy for NEW migrations
+        # (old replicas must keep reading the old schema during a rolling
+        # deploy) refuses any DROP TABLE/TRIGGER/INDEX, and SCHEMA itself
+        # (fingerprinted as the governance ladder's version 1) is immutable
+        # once released -- editing it, even to add this comment inline, trips
+        # the same checksum guard. Routed to INFRA_AND_POLICY_DECISIONS.md:
+        # removing the schema objects needs either a policy exception or a
+        # different technical approach (e.g. a new table name), not a code fix.
         with self._writing() as conn:
             conn.execute(
                 "INSERT INTO messages(goal_id, role, content, ts) VALUES(?, ?, ?, ?)",
                 (goal_id, role, _enc_field(content), time.time()),
             )
-
-    def search_messages(self, query: str, limit: int = 10) -> list[dict]:
-        # Quote the user text as a single FTS5 string literal (escaping
-        # embedded quotes). Passing it raw let an unbalanced quote / leading
-        # `*` / `NEAR` / `-` raise sqlite3.OperationalError: fts5 syntax error
-        # and crash the search on ordinary natural-language input.
-        if not query or not query.strip():
-            return []
-        fts_query = '"' + query.replace('"', '""') + '"'
-        rows = self._read_all(
-            "SELECT m.* FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid "
-            "WHERE messages_fts MATCH ? ORDER BY m.ts DESC LIMIT ?",
-            (fts_query, limit),
-        )
-        # Decrypt content for any matched rows. Under at-rest encryption the FTS
-        # index holds ciphertext, so a plaintext query only matches legacy
-        # plaintext rows (search over encrypted messages is disabled); those rows
-        # are returned decrypted, and pre-encryption plaintext passes through.
-        out: list[dict] = []
-        for r in rows:
-            d = dict(r)
-            d["content"] = _dec_field(d.get("content"))
-            out.append(d)
-        return out
 
     # ----- conversations (multi-turn per channel user) -----
     def get_or_create_conversation(self, channel: str, user_id: str) -> Conversation:

@@ -162,6 +162,68 @@ def test_editing_base_schema_is_caught_by_the_ratchet():
     assert any("checksum changed" in p and "v1" in p for p in probs)
 
 
+# ---- write_lock must not silently re-pin a released version (W1-55) -------
+
+def test_write_lock_refuses_to_silently_repin_a_released_version(tmp_path, monkeypatch):
+    # regen_blockers() only inspects versions ABSENT from the lock, so an
+    # edit to an already-released migration followed by --regen used to
+    # succeed and quietly rewrite that version's checksum into the lock --
+    # lock_problems() flags the edit right up until the moment --regen
+    # launders it, which is exactly the bypass the immutability rule exists
+    # to prevent.
+    fake_lock_path = tmp_path / "migrations.lock.json"
+    monkeypatch.setattr(mg, "lock_path", lambda: fake_lock_path)
+    lads = {"sqlite": {1: ["CREATE TABLE a (id int)"]}, "postgres": {1: []}}
+    monkeypatch.setattr(mg, "ladders", lambda: lads)
+
+    mg.write_lock()  # bootstrap the initial lock
+    original = fake_lock_path.read_text()
+
+    lads["sqlite"][1] = ["CREATE TABLE a (id int, extra text)"]  # edit shipped v1
+
+    with pytest.raises(ValueError, match="silently re-pin"):
+        mg.write_lock()
+    assert fake_lock_path.read_text() == original  # lock file untouched
+
+
+def test_write_lock_force_repin_requires_the_exact_token(tmp_path, monkeypatch):
+    fake_lock_path = tmp_path / "migrations.lock.json"
+    monkeypatch.setattr(mg, "lock_path", lambda: fake_lock_path)
+    lads = {"sqlite": {1: ["CREATE TABLE a (id int)"]}, "postgres": {1: []}}
+    monkeypatch.setattr(mg, "ladders", lambda: lads)
+    mg.write_lock()
+
+    lads["sqlite"][1] = ["CREATE TABLE a (id int, extra text)"]
+
+    # A force_repin for the WRONG version must not let a different version's
+    # re-pin through.
+    with pytest.raises(ValueError, match="silently re-pin"):
+        mg.write_lock(force_repin={"sqlite:2"})
+
+    # The correct token is a deliberate, reviewable acknowledgment -- it
+    # succeeds and actually updates the checksum.
+    import json
+    path = mg.write_lock(force_repin={"sqlite:1"})
+    new_lock = json.loads(path.read_text())
+    assert (new_lock["checksums"]["sqlite"]["1"]
+            == mg.version_checksum(lads["sqlite"][1]))
+
+
+def test_repin_blockers_empty_for_a_brand_new_additive_version():
+    lads = {"sqlite": {1: [], 2: ["ALTER TABLE g ADD COLUMN z TEXT"]},
+            "postgres": {1: []}}
+    existing = mg.fingerprint({"sqlite": {1: []}, "postgres": {1: []}})
+    assert mg.repin_blockers(lads, existing) == []
+
+
+def test_repin_blockers_flags_an_edited_released_version():
+    lads = {"sqlite": {1: ["CREATE TABLE a (id int)"]}, "postgres": {1: []}}
+    existing = mg.fingerprint(lads)
+    lads["sqlite"][1] = ["CREATE TABLE a (id int, extra text)"]
+    blockers = mg.repin_blockers(lads, existing)
+    assert any(b.startswith("sqlite:1 ") for b in blockers)
+
+
 # ---- guard: real ladders match the committed lock -------------------------
 
 def test_real_ladders_pass_governance():

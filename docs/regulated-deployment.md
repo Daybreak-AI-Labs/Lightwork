@@ -50,6 +50,7 @@ anonymous = true       # redact PII (email/SSN/phone) from audit events before w
 audit_days = 365       # storage limitation (GDPR Art. 5(1)(e)) -- tune to your policy
 episodes_days = 90
 events_days = 365
+messages_days = 365
 ```
 
 Anonymization is required, not optional: at-rest encryption protects *closed, sealed*

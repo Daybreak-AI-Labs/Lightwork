@@ -21,7 +21,7 @@ def test_worker_marks_crashed_goal_as_failed_job(tmp_path, monkeypatch):
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: "error")
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: "error")
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=1)
     jid = q.enqueue("run_goal", {"goal_id": 1})
@@ -36,7 +36,7 @@ def test_worker_does_not_retry_deliberately_blocked_goal(tmp_path, monkeypatch):
     from maverick.worker import Worker
 
     # 'blocked' = budget cap / killswitch / awaiting user -- a deliberate stop.
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: "blocked")
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: "blocked")
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=5)
     jid = q.enqueue("run_goal", {"goal_id": 1})
@@ -45,18 +45,51 @@ def test_worker_does_not_retry_deliberately_blocked_goal(tmp_path, monkeypatch):
     assert q.get(jid).status == "done"
 
 
-def test_worker_retries_when_goal_could_not_start(tmp_path, monkeypatch):
+def test_worker_defers_when_goal_could_not_start(tmp_path, monkeypatch):
+    """W1-73: a missing concurrency slot must not be treated like a crashed
+    handler. Re-raising through fail() would bump the SAME row toward
+    max_attempts and eventually dead-letter a goal that never even started;
+    deferring to a fresh job lets the original complete normally."""
+    import time
+
     import maverick.runner as runner
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: None)
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: None)
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=5)
+    now = time.time()
     jid = q.enqueue("run_goal", {"goal_id": 1})
     w.run_once()
-    # None (no slot) -> raise -> requeued 'pending' for retry.
+    # The original job completes (not requeued in place)...
+    assert q.get(jid).status == "done"
+    # ...and a deferred successor carries the retry, with its own bounded
+    # defer counter -- not job_queue's attempts/dead-letter mechanism.
+    pending = q.list(status="pending", limit=10)
+    assert len(pending) == 1
+    assert pending[0].payload["goal_id"] == 1
+    assert pending[0].payload["_slot_defers"] == 1
+    assert pending[0].run_at > now  # scheduled into the future, not immediate
+
+
+def test_worker_gives_up_after_defer_budget_exhausted(tmp_path, monkeypatch):
+    """Once MAVERICK_GOAL_SLOT_MAX_DEFERS deferrals are spent, a persistent
+    'no slot' outcome must still surface as a job failure eventually."""
+    import maverick.runner as runner
+    import maverick.worker as worker_mod
+    from maverick.job_queue import JobQueue
+    from maverick.worker import Worker
+
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: None)
+    monkeypatch.setattr(worker_mod, "_MAX_GOAL_SLOT_DEFERS", 2)
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    w = Worker(queue=q, retry_after=0.0, max_attempts=5)
+    jid = q.enqueue("run_goal", {"goal_id": 1, "_slot_defers": 2})
+    w.run_once()
+    # Defer budget already spent -> raises -> job_queue's normal retry path.
     assert q.get(jid).status == "pending"
+    assert q.list(status="pending", limit=10)[0].id == jid  # no new successor
 
 
 def test_worker_completes_when_goal_done(tmp_path, monkeypatch):
@@ -64,7 +97,7 @@ def test_worker_completes_when_goal_done(tmp_path, monkeypatch):
     from maverick.job_queue import JobQueue
     from maverick.worker import Worker
 
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: "done")
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid, **k: "done")
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q)
     jid = q.enqueue("run_goal", {"goal_id": 1})
@@ -85,6 +118,30 @@ def test_runner_refuses_when_no_concurrency_slot(monkeypatch):
     monkeypatch.setattr(runner, "_ACQUIRE_TIMEOUT", 0.05)
     # Returns None promptly instead of wedging the caller forever.
     assert runner.run_goal_in_thread(999) is None
+
+
+def test_run_goal_in_thread_acquire_timeout_override(monkeypatch):
+    """W1-73: an explicit acquire_timeout overrides the module default -- the
+    knob the job-queue's run_goal/start_goal handlers use so a busy lane
+    can't block a shared worker thread for the full 5-minute default."""
+    import threading
+    import time
+
+    import maverick.runner as runner
+
+    drained = threading.BoundedSemaphore(1)
+    drained.acquire()  # 0 permits left
+    monkeypatch.setattr(runner, "_principal_semaphore", lambda p: drained)
+    # Leave the module default large so a bug that ignores the override
+    # would make this test visibly hang/timeout rather than pass by luck.
+    monkeypatch.setattr(runner, "_ACQUIRE_TIMEOUT", 30.0)
+
+    t0 = time.monotonic()
+    result = runner.run_goal_in_thread(999, acquire_timeout=0.05)
+    elapsed = time.monotonic() - t0
+
+    assert result is None
+    assert elapsed < 5.0
 
 
 # --- SEC-3: the local shell backend must scrub secrets, not just 5 names ---

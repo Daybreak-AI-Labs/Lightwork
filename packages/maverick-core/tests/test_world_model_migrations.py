@@ -19,6 +19,7 @@ import os
 import sqlite3
 import time
 
+import pytest
 from maverick.file_lock import private_path_is_restricted
 from maverick.world_model import SCHEMA_VERSION, WorldModel
 
@@ -266,3 +267,37 @@ def test_recent_goal_events_returns_tail_in_chronological_order(tmp_path):
     events = wm.recent_goal_events(gid, limit=3)
 
     assert [e.content for e in events] == ["event-3", "event-4", "event-5"]
+
+
+def test_failing_migration_rolls_back_atomically(tmp_path, monkeypatch):
+    """W1-56: Python's sqlite3 legacy driver auto-commits DDL/backfill
+    statements one at a time outside any transaction. Without an explicit
+    wrapping transaction per version, a migration whose SECOND statement
+    fails still left its FIRST statement permanently applied while
+    schema_version stayed unbumped -- an interrupted upgrade left the DB
+    half-migrated with no way for a later open to detect or retry cleanly.
+    """
+    import maverick.world_model as wm_mod
+
+    db = tmp_path / "world.db"
+    w = WorldModel(db)
+    w.conn.execute(
+        "UPDATE schema_version SET version = ?", (SCHEMA_VERSION - 1,),
+    )
+    w.conn.commit()
+    w.conn.close()
+
+    monkeypatch.setitem(
+        wm_mod.MIGRATIONS, SCHEMA_VERSION,
+        ["ALTER TABLE goals ADD COLUMN audit_probe TEXT", "CREATE TABLE goals (x)"],
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        WorldModel(db)
+
+    conn = sqlite3.connect(str(db))
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(goals)").fetchall()]
+    version = conn.execute("SELECT version FROM schema_version").fetchone()[0]
+    conn.close()
+    assert "audit_probe" not in cols  # first statement rolled back too
+    assert version == SCHEMA_VERSION - 1  # never bumped
