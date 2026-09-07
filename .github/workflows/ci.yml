@@ -756,7 +756,7 @@ jobs:
             -e ./packages/maverick-mcp \
             -e ./packages/maverick-knowledge \
             -e ./apps/installer-cli \
-            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]'
+            pytest pytest-asyncio pytest-timeout pytest-xdist 'pyjwt[crypto]' pyyaml
           python -m pip check
           python scripts/verify_constraint_closure.py
       - name: Test and gate the production security posture
