@@ -1041,7 +1041,20 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
     model's input rate + max_tokens at the output rate (chars/4 heuristic,
     matching the token preflight). Input dominates -- a 200k-token context is
     the cost driver -- so output using the full max_tokens is acceptably
-    conservative."""
+    conservative.
+
+    This is a hold/projection against the budget cap, not the invoice -- the
+    real spend is billed afterward from actual usage via
+    ``Budget.record_tokens``, which stays strict. Pricing this estimate with
+    ``estimate_only=True`` matters for any model id without a *verified* rate
+    (an Azure deployment name, a Bedrock model id, an OpenAI-compatible
+    gateway, or a provisional/unverified rate-card entry): without it, the
+    default fail-closed ``[budget] strict_pricing`` policy raised
+    ``UnpricedModelError`` here and refused the call before it was ever
+    dispatched -- even with no ``budget`` passed at all. The estimate falls
+    back to a conservative rate (the verified one when available, otherwise a
+    labeled-unverified estimate) instead of blocking dispatch on pricing
+    verification, which is ``record_tokens``'s job, not this one's."""
     from .budget import _lookup_price
     try:
         # Price the max_tokens the provider will actually send: the Anthropic
@@ -1053,7 +1066,7 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
                                           thinking_budget)
     except Exception:  # pragma: no cover -- estimate must never block a call
         pass
-    in_rate, out_rate = _lookup_price(model_id)
+    in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
     chars = len(system or "")
     for m in messages or []:
         c = m.get("content") if isinstance(m, dict) else m
@@ -1100,6 +1113,18 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     -- the dispatching client's ``CACHE_READ_MULT`` (DeepSeek 0.1x, Gemini
     0.25x, OpenAI 0.5x); ``None`` falls back to OpenAI's 0.5x. Anthropic cache
     reads always bill 0.1x (they arrive via ``cache_read_tokens`` instead).
+
+    W1-1: this feeds the provider-cap ledger / provider-health / circuit
+    breaker accounting from ``complete()``'s own ``finally`` block, called
+    unconditionally there (not inside a try/except) -- it is NOT the
+    authoritative per-goal bill (that is the provider client's own
+    ``Budget.record_tokens`` call, which stays strict). Pricing it with
+    ``estimate_only=True`` matters for the same reason as
+    ``_estimate_call_cost``: without it, a call to a model id lacking a
+    *verified* rate raised ``UnpricedModelError`` out of ``finally`` -- even
+    after the provider call itself had already succeeded -- discarding the
+    real response and skipping the circuit-breaker/metrics recording below it
+    in the same block.
     """
     if resp is None:
         return None
@@ -1140,7 +1165,7 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     if not cache_read:
         openai_cached = min(_openai_cached_tokens(usage), in_tok)
         in_tok -= openai_cached
-    in_rate, out_rate = _lookup_price(model_id)
+    in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
     # ``cache_write`` (cache_creation_tokens) is only ever surfaced by the
     # Anthropic provider, which writes its breakpoints at the configured TTL
     # (``_default_cache_ttl()`` -- "1h" in interactive mode, billed at 2.0x).
