@@ -16,9 +16,9 @@ logical ID, server-resolved tenant and owner, purpose, UTC timestamps, monotonic
 revision, provenance, policy snapshot, authority and credential versions,
 idempotency state, budget, exact or explicitly unknown cost, freshness, human
 intervention, uncertainty, and causal status. Unknown values are structured
-states with a reason. Secret values are excluded from defined fields and
-secret-shaped extension fields are redacted during export; managed references
-remain visible.
+states with a reason. Producers must exclude secret values from defined domain
+fields. Export applies the separate boundary below; it does not detect secrets
+embedded in arbitrary customer prose.
 
 The v1 schemas are:
 
@@ -44,6 +44,18 @@ and empty authority or credential-version maps. Identity and domain fields have
 no guessed default. Reading then reserializing a supported legacy v1 projection
 therefore preserves its logical ID and meaning.
 
+Inputs must have string object keys and JSON values, with at most 64 levels of
+nesting and 65,536 value nodes within the 1 MiB serialized transport limit.
+Tuples, bytes, sets, cycles and other Python objects are rejected before copying
+or exporting. Before copying or rendering JSON, traversal also sums aggregate
+encoded size, counting repeated references each time they occur, object keys,
+container punctuation, scalars, and JSON's ASCII escapes for controls and Unicode.
+The normalized serialized record then passes a final exact UTF-8 byte-limit check.
+Native `Decimal` values are permitted only for budget limit/spent
+and exact cost amount; readers convert those to decimal strings. Fixed-point
+money representations are limited to 64 characters, with magnitude and scale
+checked before exponent expansion. Negative zero is normalized to `0`.
+
 Unknown schemas, cross-tenant reads, non-finite or overspent budgets, invalid
 timestamps, stale revisions, and invalid transitions raise
 `PlatformContractError` with a stable machine code. Domain mutation services
@@ -67,6 +79,40 @@ The generic WorkItem transition validator supports these policy-level edges:
 The vendor-onboarding service projects its more detailed stages onto this
 lifecycle. Its existing durable `executing`, `reconciliation_required`, and
 `verified` operation states remain the execution authority.
+
+A WorkItem in Verified or Accepted must have `technical_effect=verified`.
+Accepted and `business_outcome=accepted` must occur together. In particular,
+Verified does not imply business acceptance: a transition to Accepted must
+explicitly supply the accepted business verdict. These checks enforce projection
+consistency; the owning domain service still validates the human decision,
+evidence and authority that justify it.
+
+## Export boundary
+
+`read_contract` preserves bounded JSON extensions for additive compatibility.
+`export_contract` exports defined envelope and record fields (including the
+WorkItem's optional `objective` and `contract_binding`). Other top-level
+extensions become `[redacted]`. The optional `diagnostic` extension retains its
+object/list structure and managed credential references, but every other leaf
+value is redacted, including unknown provider fields and free-form messages.
+
+Defined domain maps are scrubbed recursively for credential-bearing field names,
+including snake/camel/acronym variants of API keys, access keys, tokens, secrets,
+passwords, credentials, Authorization, Proxy-Authorization, Cookie and Set-Cookie.
+A credential-like name ending in `ref` or `reference` does not by itself exempt
+its value. Supported references are a closed `{kind: managed_connection, id: ...}`
+object with an opaque bounded identifier, or a legacy `vault://tenant/path`
+locator without embedded authentication, query parameters or fragments. Plural
+reference lists apply the same check to every entry; unsupported values are
+redacted. These are reference-shape checks, not proof that a connection exists or
+that the caller may access it.
+
+Defined customer text and domain observations remain customer data. The exporter
+does not infer whether a secret was placed in a purpose, fact, arbitrary domain
+field or syntactically valid managed identifier. The producing service must keep
+raw credentials out of those fields and authorize the tenant, resource and
+recipient before exporting. This helper is neither an authorization service nor
+a general free-text secret scanner.
 
 ## First product slice
 

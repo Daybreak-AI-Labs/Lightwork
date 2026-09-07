@@ -132,6 +132,10 @@ _WORK_TRANSITIONS = {
 }
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_CONTRACT_BYTES = 1024 * 1024
+_MAX_CONTRACT_DEPTH = 64
+_MAX_CONTRACT_NODES = 65_536
+_MONEY_PATHS = frozenset({("budget", "limit"), ("budget", "spent"), ("cost", "amount")})
+_WORK_OPTIONAL_EXPORT_FIELDS = frozenset({"objective", "contract_binding"})
 
 
 class PlatformContractError(ValueError):
@@ -156,9 +160,9 @@ def _timestamp(value: object, name: str) -> str:
     if isinstance(value, bool):
         _fail("invalid_timestamp", f"{name} must be a UTC timestamp")
     if isinstance(value, (int, float)):
-        if not math.isfinite(value) or value < 0:
-            _fail("invalid_timestamp", f"{name} must be a UTC timestamp")
         try:
+            if not math.isfinite(value) or value < 0:
+                _fail("invalid_timestamp", f"{name} must be a UTC timestamp")
             parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
         except (OverflowError, OSError, ValueError):
             _fail("invalid_timestamp", f"{name} must be a UTC timestamp")
@@ -191,16 +195,94 @@ def _decimal(value: object, name: str) -> str:
         _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
     if not amount.is_finite() or amount < 0:
         _fail("invalid_budget", f"{name} must be a finite nonnegative decimal")
-    rendered = format(amount, "f")
-    if len(rendered) > 64:
+    if amount.is_zero():
+        return "0"
+    # Fixed-point formatting expands exponent notation. Bound its output before
+    # allocating it; the input and final JSON limits cannot prevent that expansion.
+    parts = amount.as_tuple()
+    exponent = parts.exponent
+    digits = len(parts.digits)
+    rendered_length = (digits + exponent if exponent >= 0 else
+                       max(digits + 1, 2 - exponent))
+    if rendered_length > 64:
         _fail("invalid_budget", f"{name} must be a bounded decimal")
+    rendered = format(amount, "f")
     return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         _fail("invalid_contract", f"{name} must be an object")
-    return copy.deepcopy(dict(value))
+    # The public reader validates the complete graph before making its owned copy.
+    return dict(value)
+
+
+def _json_string_size(value: str) -> int:
+    """Size of json.dumps' quoted ensure_ascii representation, without rendering."""
+    size = 2
+    for char in value:
+        if char in '"\\\b\f\n\r\t':
+            size += 2
+        elif " " <= char <= "~":
+            size += 1
+        else:
+            size += 6 if ord(char) <= 0xFFFF else 12
+    return size
+
+
+def _validate_json_shape(value: Mapping[str, Any]) -> None:
+    """Bound traversal before deepcopy/serialization, including cyclic inputs."""
+    pending = [(value, ())]
+    visited = 0
+    encoded_bytes = 0
+    while pending:
+        item, path = pending.pop()
+        visited += 1
+        if len(path) > _MAX_CONTRACT_DEPTH or visited > _MAX_CONTRACT_NODES:
+            _fail("invalid_contract", "contract nesting or node count exceeds its limit")
+        if isinstance(item, Mapping):
+            if len(item) + len(pending) + visited > _MAX_CONTRACT_NODES:
+                _fail("invalid_contract", "contract node count exceeds its limit")
+            # Braces, commas, and the colon after every quoted key.
+            encoded_bytes += 2 + max(0, len(item) - 1) + len(item)
+            for key, child in item.items():
+                if not isinstance(key, str) or len(key) > _MAX_CONTRACT_BYTES:
+                    _fail("invalid_contract", "contract objects require bounded string keys")
+                encoded_bytes += _json_string_size(key)
+                if encoded_bytes > _MAX_CONTRACT_BYTES:
+                    _fail("invalid_contract", "contract exceeds the 1 MiB transport limit")
+                pending.append((child, (*path, key)))
+        elif isinstance(item, list):
+            if len(item) + len(pending) + visited > _MAX_CONTRACT_NODES:
+                _fail("invalid_contract", "contract node count exceeds its limit")
+            encoded_bytes += 2 + max(0, len(item) - 1)
+            pending.extend((child, (*path, index)) for index, child in enumerate(item))
+        elif isinstance(item, Decimal) and path in _MONEY_PATHS:
+            # Native exact money is not a JSON scalar; count its supported
+            # string representation, using the same bounded normalizer as read.
+            try:
+                normalized = _decimal(item, " ".join(path))
+            except PlatformContractError as exc:
+                if path[0] == "cost":
+                    raise PlatformContractError(str(exc), code="invalid_contract") from exc
+                raise
+            encoded_bytes += len(normalized) + 2
+        elif type(item) not in (str, int, float, bool, type(None)):
+            _fail("invalid_contract", "contract must contain JSON values")
+        elif isinstance(item, str):
+            if len(item) > _MAX_CONTRACT_BYTES:
+                _fail("invalid_contract", "contract string exceeds its transport limit")
+            encoded_bytes += _json_string_size(item)
+        elif type(item) is int:
+            if item.bit_length() > 4096:
+                _fail("invalid_contract", "contract integer exceeds its transport limit")
+            encoded_bytes += len(str(item))
+        elif type(item) is float:
+            encoded_bytes += len(repr(item))
+        else:
+            encoded_bytes += 5 if item is False else 4  # false / true / null
+        if encoded_bytes > _MAX_CONTRACT_BYTES:
+            _fail("invalid_contract", "contract exceeds the 1 MiB transport limit")
 
 
 def _state(value: object, name: str, allowed: frozenset[str]) -> dict[str, Any]:
@@ -264,6 +346,10 @@ def _validate_work_item(record: dict[str, Any]) -> None:
         _fail("invalid_contract", "technical effect is unsupported")
     if record["business_outcome"] not in {"pending", "accepted", "rejected"}:
         _fail("invalid_contract", "business outcome is unsupported")
+    if record["lifecycle"] in {"Verified", "Accepted"} and record["technical_effect"] != "verified":
+        _fail("invalid_transition", "verified or accepted work requires a verified technical effect")
+    if (record["lifecycle"] == "Accepted") != (record["business_outcome"] == "accepted"):
+        _fail("invalid_transition", "accepted work requires an accepted business outcome")
     if record["parent_work_item_id"] is not None:
         record["parent_work_item_id"] = _text(
             record["parent_work_item_id"], "parent_work_item_id", 128,
@@ -359,11 +445,14 @@ def read_contract(
     """Validate and normalize a v1 contract, including legacy optional defaults."""
     if not isinstance(value, Mapping):
         _fail("invalid_contract", "contract must be an object")
-    record = copy.deepcopy(dict(value))
-    schema = record.get("schema")
+    schema = value.get("schema")
+    if not isinstance(schema, str):
+        _fail("unsupported_contract_schema", "contract schema is unsupported")
     kind = _SCHEMA_KINDS.get(schema)
     if kind is None:
         _fail("unsupported_contract_schema", "contract schema is unsupported")
+    _validate_json_shape(value)
+    record = copy.deepcopy(dict(value))
     if expected_kind is not None and kind != expected_kind:
         _fail("contract_kind_mismatch", "contract kind does not match the requested reader")
     missing = _COMMON_REQUIRED - record.keys()
@@ -437,7 +526,7 @@ def build_contract(
     causal_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one normalized v1 contract from domain-owned source fields."""
-    if kind not in CONTRACT_SCHEMAS:
+    if not isinstance(kind, str) or kind not in CONTRACT_SCHEMAS:
         _fail("unsupported_contract_schema", "contract kind is unsupported")
     field_values = _mapping(fields, "fields")
     if set(field_values) & (_COMMON_REQUIRED | _COMMON_DEFAULTS.keys() | {"updated_at"}):
@@ -481,9 +570,9 @@ def transition_work_item(
 ) -> dict[str, Any]:
     """Return a validated next work-item revision without mutating the input."""
     current = read_contract(value, expected_kind="work-item")
-    if current["revision"] != expected_revision:
+    if type(expected_revision) is not int or current["revision"] != expected_revision:
         _fail("revision_conflict", "work-item changed after it was reviewed")
-    if lifecycle not in _WORK_TRANSITIONS[current["lifecycle"]]:
+    if not isinstance(lifecycle, str) or lifecycle not in _WORK_TRANSITIONS[current["lifecycle"]]:
         _fail("invalid_transition", "work-item transition is not permitted")
     changed = copy.deepcopy(current)
     forbidden = _COMMON_REQUIRED | {"schema_version", "created_at", "revision", "updated_at"}
@@ -496,30 +585,76 @@ def transition_work_item(
     return read_contract(changed, expected_kind="work-item")
 
 
+def _normalized_key(name: str) -> str:
+    words = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", words).lower().replace("-", "_")
+
+
 def _secret_key(name: str) -> bool:
-    key = name.lower().replace("-", "_")
-    if key.endswith(("_ref", "_refs", "_reference", "_references", "_versions")):
-        return False
+    key = _normalized_key(name)
     return key in {
         "secret", "token", "password", "passwd", "api_key", "access_key",
-        "client_secret", "private_key", "credential",
-    } or key.endswith(("_secret", "_token", "_password", "_api_key", "_private_key"))
+        "client_secret", "private_key", "credential", "credentials", "authorization",
+        "proxy_authorization", "cookie", "set_cookie",
+    } or key.endswith((
+        "_secret", "_token", "_password", "_api_key", "_private_key", "_access_key",
+        "_authorization", "_cookie", "_credentials",
+    ))
 
 
-def _redact(value: Any) -> Any:
+def _credential_reference_key(name: str) -> bool:
+    key = _normalized_key(name)
+    for suffix in ("_ref", "_reference", "_refs", "_references"):
+        if key.endswith(suffix):
+            return _secret_key(key[:-len(suffix)])
+    return False
+
+
+def _export_credential_reference(value: Any) -> Any:
+    # Support the existing opaque vault locator plus a closed structured form.
+    # Neither form permits embedded auth, query parameters, or provider payloads.
+    if isinstance(value, list):
+        return [_export_credential_reference(item) for item in value]
+    if isinstance(value, str) and len(value) <= 512 and re.fullmatch(
+        r"vault://[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+", value,
+    ):
+        return value
+    if (isinstance(value, dict) and set(value) == {"kind", "id"}
+            and value.get("kind") == "managed_connection"
+            and isinstance(value.get("id"), str)
+            and re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", value["id"])):
+        return dict(value)
+    return "[redacted]"
+
+
+def _redact(value: Any, *, diagnostic: bool = False) -> Any:
     if isinstance(value, Mapping):
         return {
-            key: "[redacted]" if _secret_key(key) else _redact(item)
+            key: (_export_credential_reference(item) if _credential_reference_key(key) else
+                  "[redacted]" if _secret_key(key) else _redact(item, diagnostic=diagnostic))
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_redact(item) for item in value]
-    return copy.deepcopy(value)
+        return [_redact(item, diagnostic=diagnostic) for item in value]
+    return "[redacted]" if diagnostic else copy.deepcopy(value)
 
 
 def export_contract(value: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a validated export with raw secret-shaped fields redacted."""
-    return _redact(read_contract(value))
+    """Export known domain fields; close unknown and free-form diagnostic data.
+
+    Domain prose remains customer data, not automatically sanitized text. Its
+    producer must exclude secrets and authorize export to the intended recipient.
+    """
+    record = read_contract(value)
+    kind = _SCHEMA_KINDS[record["schema"]]
+    known = _COMMON_REQUIRED | _COMMON_DEFAULTS.keys() | _KIND_REQUIRED[kind] | {"updated_at"}
+    if kind == "work-item":
+        known |= _WORK_OPTIONAL_EXPORT_FIELDS
+    return {
+        key: (_redact(item, diagnostic=True) if key == "diagnostic" else
+              _redact({key: item})[key] if key in known else "[redacted]")
+        for key, item in record.items()
+    }
 
 
 __all__ = [

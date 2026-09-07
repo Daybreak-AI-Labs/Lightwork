@@ -1,6 +1,7 @@
 """Request-bound authority and existing connector composition for onboarding."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
@@ -43,7 +44,20 @@ def _budget_authority(tenant: str) -> str:
             "feature_overrides": record.feature_overrides,
             "updated_at": record.updated_at,
         }
-    return "sha256:" + digest(material)
+    try:
+        from maverick.runtime_overrides import budget_override
+
+        policy = config.get_budget_overrides()
+        if not isinstance(policy, dict) or config.config_source_errors(include_tenant=True):
+            raise ValueError("budget configuration is unavailable")
+        # Inspect authority without constructing Budget: construction can reserve
+        # tenant funds, which must never happen merely to compare an approval.
+        material["configured_budget"] = policy
+        material["dashboard_dollar_cap"] = budget_override()
+        material["environment_dollar_cap"] = os.environ.get("MAVERICK_BUDGET_DOLLARS")
+        return "sha256:" + digest(material)
+    except Exception as exc:
+        raise HTTPException(503, "Budget policy authority is unavailable") from exc
 
 
 def _role_authority(role: str) -> str:
@@ -89,6 +103,21 @@ def _context(request: Request) -> ServiceContext:
     actor = caller_principal(request)
     if not actor:
         raise HTTPException(403, "A named authenticated reviewer is required")
+    from maverick.tenant.registry import TenantSuspended, assert_tenant_active
+
+    from . import workspace_tenants
+
+    try:
+        assert_tenant_active(tenant)
+        source = getattr(getattr(request, "state", None), "workspace_tenant_source", "")
+        if source == "principal_selection" and not workspace_tenants.principal_can_select(actor, tenant):
+            raise HTTPException(403, "Workspace membership is no longer active")
+    except TenantSuspended as exc:
+        raise HTTPException(403, "Workspace is no longer active") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "Workspace membership authority is unavailable") from exc
     role = caller_role(request)
     if not role:
         raise HTTPException(403, "A current workspace role is required")

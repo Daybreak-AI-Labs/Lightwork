@@ -8,11 +8,17 @@
 
 Every provider effect carries one immutable `ServiceContext` from authenticated request composition. The context binds the tenant, principal, resource owner, dashboard role and its current permission-set digest, workspace selection generation, named ticket and document credential references, credential authority, and tenant budget-authority digest. It contains references and hashes, never credential values.
 
+The budget digest includes registered tenant controls, the current budget configuration, the dashboard dollar cap and the environment dollar override. Comparing authority does not construct a `Budget` or reserve funds. This snapshot detects policy drift; it does not replace spend accounting or the existing budget enforcement on any model/tool invocation.
+
 The supplier workflow persists that context in the exact action intent before approval. The approval digest also covers the action name, unredacted proposed payload, source and assessment revisions, vendor revision, document and ticket credential versions, target scope, and expiry. Execution compares the current context and every precondition with the approved values before it makes a durable execution claim, then repeats policy, precondition, approval and approver checks immediately before the adapter call.
 
 The workspace selection store assigns a monotonic generation to each principal. Switching away and back therefore produces a different workspace authority even when the final tenant string is unchanged. Legacy selection rows are admitted at generation zero and move to the versioned format on their next real change. Repeating the same selection is a no-op and does not invalidate work.
 
-Approved operations created before role, budget and workspace binding existed do not inherit those fields. They fail the current-context comparison and require a newly prepared and approved intent before an effect.
+Prepared or approved operations created before role, budget and workspace binding existed do not inherit those fields. They require a newly prepared and approved intent before an effect. Invalidating a stale prepared intent archives it and returns the case to review so the customer can prepare the replacement in the app.
+
+Composition rechecks tenant activity and, for a principal-selected workspace, current membership at each sensitive boundary. A global default operator role cannot substitute for revoked workspace membership.
+
+Read-only reconciliation and customer acceptance authorize the current observer separately from historical execution authority. They preserve the original intent, payload, approval digest, tenant, resource owner, connector reference, credential authority and expected credential generation. Changes to navigation generation, actor, role or spend policy do not rewrite those original records or authorize a second create. Readback records the current observer and requires current permissions. A changed connector enrollment or credential generation blocks readback until the original destination can be established; connection migration is not implicitly supported.
 
 ## Authority trace
 
@@ -30,7 +36,7 @@ Approved operations created before role, budget and workspace binding existed do
 
 - A customer reviewer operates the in-app workflow under the current dashboard role. Changing that role invalidates the queued intent even if the new role also has `operate` permission.
 - The workflow worker holds only the service context and named connector references required for the one approved Jira action. It cannot use ambient request-body authority or raw credentials.
-- A research worker is governed by the separate attenuating `Capability` and self-modification reference monitor. Candidate evaluation requires a non-host-visible sandbox with egress denied, root disabled, bounded processes, memory and output, and authenticated evaluator evidence. Evaluator, authority, tenant, secret, audit, sandbox and promotion paths remain outside the editable surface. Production credentials are absent from the sandbox environment and the candidate cannot grant itself capability.
+- A research worker is governed by the separate attenuating `Capability` and self-modification reference monitor. Candidate evaluation requires a non-host-visible sandbox with egress denied, root disabled, bounded processes, memory and output, and authenticated evaluator evidence. These are required properties, not demonstrated process containment: the present foundation tests use mocked backend declarations, and an actual adversarial process qualification remains outstanding. Evaluator, authority, tenant, secret, audit, sandbox and promotion paths remain outside the intended editable surface.
 
 Dashboard roles and research capabilities are separate control planes. A researcher does not become a customer operator merely by producing a candidate, and an operator approval does not authorize candidate promotion.
 

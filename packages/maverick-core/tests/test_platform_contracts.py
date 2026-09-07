@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+import json
+import tracemalloc
+from decimal import Decimal
 
 import pytest
 from maverick.platform_contracts import (
@@ -41,7 +44,7 @@ def _common(kind: str, fields: dict) -> dict:
     )
 
 
-@pytest.fixture(params=[
+CONTRACT_CASES = [
     ("work-item", {
         "requester": "reviewer@example.test",
         "process": {"id": "journey", "version": 1, "sha256": "b" * 64},
@@ -153,7 +156,10 @@ def _common(kind: str, fields: dict) -> dict:
         "rollout_plan": {"state": "sandbox_only"},
         "supported_domain": {"workflow": "vendor_onboarding"},
     }),
-], ids=lambda value: value[0])
+]
+
+
+@pytest.fixture(params=CONTRACT_CASES, ids=lambda value: value[0])
 def contract(request):
     kind, fields = request.param
     return kind, _common(kind, fields)
@@ -310,3 +316,268 @@ def test_export_redacts_secret_values_but_preserves_managed_references():
     assert "do-not-export" not in rendered
     assert exported["diagnostic"]["api_key"] == "[redacted]"
     assert exported["diagnostic"]["credential_ref"] == "vault://customer-a/jira"
+
+
+def _review_work_item():
+    return _common("work-item", {
+        "requester": "requester", "process": {}, "supported_deployment": {},
+        "acceptance_contract": {}, "out_of_scope": [], "lifecycle": "Verified",
+        "next_action": "accept", "technical_effect": "verified", "business_outcome": "pending",
+        "target_scope": {}, "deployment_profile": {}, "admission_id": "work-item-1",
+        "acceptance_contract_ref": {}, "parent_work_item_id": None,
+    })
+
+
+@pytest.mark.parametrize("amount", ["1e1000000", "1e-1000000"])
+@pytest.mark.parametrize("field", ["budget", "cost"])
+def test_decimal_exponents_are_rejected_without_allocating_the_expanded_string(amount, field):
+    record = _review_work_item()
+    record[field]["limit" if field == "budget" else "amount"] = amount
+    tracemalloc.start()
+    try:
+        with pytest.raises(PlatformContractError) as raised:
+            read_contract(record)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert raised.value.code == ("invalid_budget" if field == "budget" else "invalid_contract")
+    # A 9/10-byte input must not allocate its million-character representation.
+    assert peak < 200_000
+
+
+@pytest.mark.parametrize(("amount", "normalized"), [
+    ("1e63", "1" + "0" * 63), ("1e-62", "0." + "0" * 61 + "1"),
+    (Decimal("1.2300"), "1.23"), ("-0", "0"),
+])
+def test_bounded_exact_decimal_values_preserve_value(amount, normalized):
+    record = _review_work_item()
+    record["cost"]["amount"] = amount
+    assert read_contract(record)["cost"]["amount"] == normalized
+
+
+@pytest.mark.parametrize("schema", [{}, [], None, True])
+def test_malformed_schema_types_have_a_stable_contract_error(schema):
+    record = dict(_review_work_item(), schema=schema)
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(record)
+    assert raised.value.code == "unsupported_contract_schema"
+
+
+@pytest.mark.parametrize("extension", [{1: "value"}, ("value",), b"value", {"value"}])
+def test_non_json_extensions_are_rejected_by_the_reader(extension):
+    record = dict(_review_work_item(), extension=extension)
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(record)
+    assert raised.value.code == "invalid_contract"
+
+
+def test_deep_or_cyclic_contracts_fail_with_stable_errors_before_copying():
+    cycle = {}
+    cycle["again"] = cycle
+    deep = {}
+    for _ in range(1100):
+        deep = {"next": deep}
+    for extension in (cycle, deep):
+        with pytest.raises(PlatformContractError) as raised:
+            read_contract(dict(_review_work_item(), extension=extension))
+        assert raised.value.code == "invalid_contract"
+
+
+def test_export_has_a_closed_diagnostic_and_unknown_extension_boundary():
+    record = _review_work_item()
+    record["diagnostic"] = {
+        "Authorization": "Bearer synthetic-secret", "Cookie": "session=synthetic-secret",
+        "accessKey": "synthetic-secret", "provider_response": "free-form synthetic-secret",
+        "credential_ref": {"kind": "managed_connection", "id": "jira"},
+        "nested": [{"arbitrary_new_name": "synthetic-secret"}],
+    }
+    record["future_extension"] = {"unknown": "synthetic-secret"}
+    exported = export_contract(record)
+    assert "synthetic-secret" not in str(exported)
+    assert exported["diagnostic"]["Authorization"] == "[redacted]"
+    assert exported["diagnostic"]["credential_ref"] == {"kind": "managed_connection", "id": "jira"}
+    assert exported["future_extension"] == "[redacted]"
+    # Compatibility readers preserve unknown fields; safe exports apply a separate policy.
+    assert read_contract(record)["future_extension"] == record["future_extension"]
+
+
+@pytest.mark.parametrize("key", [
+    "Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie", "accessKey",
+    "clientSecret", "apiKey", "APIKey", "X-Api-Key", "refreshToken", "password", "credentials",
+])
+def test_export_scrubs_credential_aliases_inside_defined_domain_maps(key):
+    record = _review_work_item()
+    record["provenance"]["headers"] = {key: "synthetic-secret"}
+    assert "synthetic-secret" not in str(export_contract(record))
+
+
+@pytest.mark.parametrize("reference", [
+    "plaintext-credential", "https://example.test/?token=synthetic-secret",
+    {"kind": "managed_connection", "id": "jira", "token": "synthetic-secret"},
+])
+def test_reference_suffix_does_not_exempt_raw_or_unrecognized_credentials(reference):
+    record = _review_work_item()
+    record["provenance"]["credential_ref"] = reference
+    assert export_contract(record)["provenance"]["credential_ref"] == "[redacted]"
+
+
+def test_plural_credential_references_validate_each_managed_reference():
+    record = _review_work_item()
+    record["provenance"]["credential_refs"] = [
+        "plaintext-credential", {"kind": "managed_connection", "id": "jira"},
+    ]
+    assert export_contract(record)["provenance"]["credential_refs"] == [
+        "[redacted]", {"kind": "managed_connection", "id": "jira"},
+    ]
+
+
+def test_export_preserves_defined_domain_text_without_claiming_to_sanitize_prose():
+    record = _review_work_item()
+    record["purpose"] = "Customer supplied prose remains customer data"
+    record["objective"] = record["purpose"]
+    exported = export_contract(record)
+    assert exported["purpose"] == record["purpose"]
+    assert exported["objective"] == record["objective"]
+
+
+def test_acceptance_transition_requires_explicit_accepted_business_outcome():
+    record = _review_work_item()
+    with pytest.raises(PlatformContractError) as raised:
+        transition_work_item(record, "Accepted", expected_revision=4, updated_at=NOW + 1)
+    assert raised.value.code == "invalid_transition"
+    accepted = transition_work_item(
+        record, "Accepted", expected_revision=4, updated_at=NOW + 1,
+        updates={"business_outcome": "accepted", "next_action": "check_renewal"},
+    )
+    assert accepted["technical_effect"] == "verified"
+    assert accepted["business_outcome"] == "accepted"
+    assert record["business_outcome"] == "pending"
+
+
+@pytest.mark.parametrize(("lifecycle", "technical", "business"), [
+    ("Verified", "not_verified", "pending"), ("Verified", "indeterminate", "pending"),
+    ("Accepted", "verified", "pending"), ("Accepted", "verified", "rejected"),
+    ("Accepted", "not_verified", "accepted"), ("Running", "verified", "accepted"),
+])
+def test_contradictory_lifecycle_outcomes_are_rejected(lifecycle, technical, business):
+    record = dict(_review_work_item(), lifecycle=lifecycle, technical_effect=technical, business_outcome=business)
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(record)
+    assert raised.value.code == "invalid_transition"
+
+
+def test_malformed_transition_arguments_have_stable_codes():
+    record = _review_work_item()
+    with pytest.raises(PlatformContractError) as raised:
+        transition_work_item(record, [], expected_revision=4, updated_at=NOW + 1)
+    assert raised.value.code == "invalid_transition"
+    with pytest.raises(PlatformContractError) as raised:
+        transition_work_item(dict(record, revision=1), "Failed", expected_revision=True, updated_at=NOW + 1)
+    assert raised.value.code == "revision_conflict"
+
+
+@pytest.mark.parametrize("malformed", [{}, []], ids=["object", "array"])
+@pytest.mark.parametrize("field", ["budget", "cost", "idempotency", "fresh_until", "causal_status"])
+def test_unhashable_common_state_values_have_stable_errors_for_every_kind(contract, field, malformed):
+    _, record = contract
+    record[field] = {"state": malformed}
+    for boundary in (read_contract, export_contract):
+        with pytest.raises(PlatformContractError) as raised:
+            boundary(record)
+        assert raised.value.code == ("invalid_budget" if field == "budget" else "invalid_contract")
+
+
+@pytest.mark.parametrize("malformed", [{}, []], ids=["object", "array"])
+@pytest.mark.parametrize(("kind", "field"), [
+    ("work-item", "lifecycle"), ("work-item", "technical_effect"), ("work-item", "business_outcome"),
+    ("action-intent", "dispatch_state"), ("outcome-record", "verdict"),
+    ("experience-record", "training_expires_at"),
+])
+def test_unhashable_domain_state_values_are_rejected_before_enum_lookup(kind, field, malformed):
+    record = _common(kind, dict(CONTRACT_CASES)[kind])
+    record[field] = {"state": malformed} if field == "training_expires_at" else malformed
+    for boundary in (read_contract, export_contract):
+        with pytest.raises(PlatformContractError) as raised:
+            boundary(record)
+        assert raised.value.code == "invalid_contract"
+
+
+@pytest.mark.parametrize("malformed", [{}, []], ids=["object", "array"])
+def test_public_kind_and_transition_boundaries_reject_unhashable_selectors(malformed):
+    record = _review_work_item()
+    with pytest.raises(PlatformContractError) as raised:
+        _common(malformed, dict(CONTRACT_CASES)["work-item"])
+    assert raised.value.code == "unsupported_contract_schema"
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(record, expected_kind=malformed)
+    assert raised.value.code == "contract_kind_mismatch"
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(record, expected_tenant_id=malformed)
+    assert raised.value.code == "tenant_mismatch"
+    with pytest.raises(PlatformContractError) as raised:
+        transition_work_item(record, malformed, expected_revision=4, updated_at=NOW + 1)
+    assert raised.value.code == "invalid_transition"
+    with pytest.raises(PlatformContractError) as raised:
+        transition_work_item(record, "Failed", expected_revision=malformed, updated_at=NOW + 1)
+    assert raised.value.code == "revision_conflict"
+
+
+@pytest.mark.parametrize("extension", [{1: "value"}, ("value",), b"value", {"value"}])
+def test_build_and_transition_enforce_json_shape_before_returning_a_record(extension):
+    fields = dict(dict(CONTRACT_CASES)["work-item"], extension=extension)
+    with pytest.raises(PlatformContractError) as raised:
+        _common("work-item", fields)
+    assert raised.value.code == "invalid_contract"
+    record = _review_work_item()
+    with pytest.raises(PlatformContractError) as raised:
+        transition_work_item(record, "Failed", expected_revision=4, updated_at=NOW + 1,
+                             updates={"extension": extension})
+    assert raised.value.code == "invalid_contract"
+    assert "extension" not in record
+
+
+def test_timestamp_overflow_is_a_stable_error_at_the_public_reader():
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(dict(_review_work_item(), updated_at=10**400))
+    assert raised.value.code == "invalid_timestamp"
+
+
+@pytest.mark.parametrize("oversized", [
+    ["x" * 1024] * 4096,
+    {"\n" * 600_000: 0},
+], ids=["repeated_string_aliases", "escaped_object_key"])
+def test_aggregate_size_is_rejected_before_copying_or_serializing(oversized):
+    record = dict(_review_work_item(), extension=oversized)
+    tracemalloc.start()
+    try:
+        with pytest.raises(PlatformContractError) as raised:
+            read_contract(record)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert raised.value.code == "invalid_contract"
+    assert peak < 1_500_000
+
+
+@pytest.mark.parametrize("character", ["x", "\n", "\x00", "\x7f", "é", "😀", '"', "\\"])
+def test_exact_transport_boundary_counts_unicode_escapes_and_punctuation(character):
+    record = dict(_review_work_item(), extension={
+        "escaped\nkey": "", "scalars": [None, True, False, 0, -1, 2.5, -0.0, 1e20],
+        "empty_list": [], "empty_map": {},
+    })
+    limit = 1024 * 1024
+
+    def dump(value):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+    available = limit - len(dump(record))
+    unit_size = len(json.dumps(character)) - 2
+    repeats, remaining = divmod(available, unit_size)
+    record["extension"]["escaped\nkey"] = character * repeats + "x" * remaining
+    assert len(dump(record)) == limit
+    assert read_contract(record) == record
+    record["extension"]["escaped\nkey"] += "x"
+    assert len(dump(record)) == limit + 1
+    with pytest.raises(PlatformContractError) as raised:
+        read_contract(record)
+    assert raised.value.code == "invalid_contract"

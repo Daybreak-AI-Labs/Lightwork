@@ -144,7 +144,12 @@ class VendorOnboardingService:
         if human and not ctx.human:
             audit_authority_denial(ctx, capability, resource, "authenticated_human_required")
             raise PermissionError("this decision requires an authenticated human")
-        if self.authorize(ctx, capability, resource) is not True:
+        try:
+            allowed = self.authorize(ctx, capability, resource)
+        except Exception:
+            audit_authority_denial(ctx, capability, resource, "current_authority_unavailable")
+            raise
+        if allowed is not True:
             audit_authority_denial(ctx, capability, resource, "current_authority_denied")
             raise PermissionError(f"permission denied: {capability}")
 
@@ -716,20 +721,65 @@ class VendorOnboardingService:
         # Review credentials may differ from execution credentials; source and
         # domain checks always use the bound execution principal.
         execution = ServiceContext(**operation["context"])
-        self._permit(execution, "action.execute", case_id)
-        if self._preconditions(execution, row) != operation["preconditions"]:
-            raise ValueError("operation preconditions changed before approval")
+        if operation["context"] != execution.binding():
+            self._require_new_action_review(
+                ctx, row, code="approval_authority_changed",
+                message="Operation authority changed; prepare and review a new action.",
+            )
+        try:
+            self._permit(execution, "action.execute", case_id)
+        except PermissionError:
+            self._require_new_action_review(
+                ctx, row, code="approval_authority_changed",
+                message="Operation authority changed; prepare and review a new action.",
+            )
+        self._check_prepared_inputs(execution, row)
         approval = {"reviewer": ctx.actor, "at": self.clock(),
                     "binding_sha256": operation_binding(operation), "scope": operation["scope"]}
         return self._save(ctx, row, operation=dict(operation, state="approved", approval=approval),
                           stage="action_approved")
 
+    def _check_prepared_inputs(self, ctx, row):
+        try:
+            matches = self._preconditions(ctx, row) == row["operation"]["preconditions"]
+        except (PermissionError, ValueError):
+            # Provider exception text is untrusted and may contain credentials.
+            matches = False
+        if not matches:
+            self._require_new_action_review(
+                ctx, row, code="approval_preconditions_changed",
+                message="Action inputs or connection access changed; refresh the evidence and review a new action.",
+                error_type=ActionReviewRequiredError,
+            )
+
+    def _permit_readback(self, ctx, row, operation):
+        """Authorize a current observer without rewriting historical authority.
+
+        Navigation, actor and spend policy changes cannot grant another create
+        or strand an existing effect. The original connector enrollment and
+        credential generation still pin its destination for read-only checks.
+        """
+        self._permit(ctx, "action.reconcile", row["id"])
+        original = operation.get("context") or {}
+        for field in ("tenant", "resource_owner", "credential_authority", "credential_ref"):
+            if original.get(field) != getattr(ctx, field):
+                audit_authority_denial(ctx, "action.reconcile", row["id"], "effect_scope_changed")
+                raise PermissionError(
+                    "Original effect credential scope is unavailable; restore its enrolled connection for readback."
+                )
+        if digest(operation["payload"]) != operation["payload_sha256"]:
+            raise ValueError("operation payload digest mismatch")
+        if (operation.get("approval") or {}).get("binding_sha256") != operation_binding(operation):
+            raise ValueError("original operation approval binding is invalid")
+
     def _finish(self, ctx, row, operation, key, *, reconciled=False):
+        self._permit_readback(ctx, row, operation)
         confirmation = self.tickets.verify(ctx, key, operation["payload"],
                                            expected_credential_version=operation["preconditions"]["ticket_credential_version"])
         if confirmation.get("verified") is not True:
             raise ValueError("external record does not match the approved payload")
-        confirmation = dict(confirmation, confirmed_at=self.clock(), reconciled=reconciled)
+        confirmation = dict(confirmation, confirmed_at=self.clock(), reconciled=reconciled,
+                            observer=ctx.binding())
         return self._save(ctx, row,
                           operation=dict(operation, state="verified", external_confirmation=confirmation),
                           stage="execution_completed", completed_at=self.clock())
@@ -755,24 +805,7 @@ class VendorOnboardingService:
         approver = ServiceContext(**operation["context"], human=True)
         approver = ServiceContext(**dict(asdict(approver), actor=operation["approval"]["reviewer"]))
         self._permit(approver, "action.approve", case_id, human=True)
-        try:
-            current_preconditions = self._preconditions(ctx, row)
-        except (PermissionError, ValueError) as exc:
-            self._require_new_action_review(
-                ctx,
-                row,
-                code="approval_preconditions_changed",
-                message=f"{exc}; prepare and review a new action.",
-                error_type=ActionReviewRequiredError,
-            )
-        if current_preconditions != operation["preconditions"]:
-            self._require_new_action_review(
-                ctx,
-                row,
-                code="approval_preconditions_changed",
-                message="Action inputs changed; prepare and review a new action.",
-                error_type=ActionReviewRequiredError,
-            )
+        self._check_prepared_inputs(ctx, row)
         operation = dict(operation, state="executing", attempts=operation["attempts"] + 1,
                          started_at=self.clock())
         row = self._save(ctx, row, operation=operation, stage="executing")
@@ -806,10 +839,7 @@ class VendorOnboardingService:
         operation = row.get("operation") or {}
         if operation.get("state") not in {"executing", "reconciliation_required", "verified"}:
             raise ValueError("an attempted operation is required")
-        if ctx.binding() != operation["context"]:
-            raise PermissionError("reconciliation execution authority changed")
-        if digest(operation["payload"]) != operation["payload_sha256"]:
-            raise ValueError("operation payload digest mismatch")
+        self._permit_readback(ctx, row, operation)
         try:
             matches = self.tickets.find(ctx, operation["payload"],
                                         expected_credential_version=operation["preconditions"]["ticket_credential_version"])
@@ -831,13 +861,13 @@ class VendorOnboardingService:
         operation = row.get("operation") or {}
         if operation.get("state") != "verified":
             raise ValueError("verified external effect required before customer acceptance")
-        execution = ServiceContext(**operation["context"])
-        self._permit(execution, "action.reconcile", case_id)
-        observed = self.tickets.verify(execution, operation["external_confirmation"]["key"],
+        self._permit_readback(ctx, row, operation)
+        observed = self.tickets.verify(ctx, operation["external_confirmation"]["key"],
                                        operation["payload"],
                                        expected_credential_version=operation["preconditions"]["ticket_credential_version"])
         if observed.get("verified") is not True:
             raise ValueError("external state changed before acceptance")
+        observed = dict(observed, confirmed_at=self.clock(), observer=ctx.binding())
         vendor = vendors.get_vendor(row["vendor_id"])
         if vendor is None or vendor["owner"] != ctx.resource_owner:
             raise PermissionError("vendor ownership unavailable or changed")

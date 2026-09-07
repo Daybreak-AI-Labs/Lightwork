@@ -173,7 +173,9 @@ def test_unknown_case_or_journey_contract_cannot_reach_mutation(setup):
 def test_every_case_stage_has_an_explicit_work_item_state(setup, stage, lifecycle, next_action):
     svc, ctx, *_ = setup
     row = svc.intake(ctx, "Synthetic state map", "security-paper", "VEND", "Map state")
-    projected = svc._present(dict(row, stage=stage))
+    operation = {"state": "verified"} if stage in {"execution_completed", "accepted", "customer_rejected"} else None
+    outcome = {"accepted": stage == "accepted"} if stage in {"accepted", "customer_rejected"} else None
+    projected = svc._present(dict(row, stage=stage, operation=operation, outcome=outcome))
     assert projected["work_item"]["lifecycle"] == lifecycle
     assert projected["work_item"]["next_action"] == next_action
 
@@ -199,8 +201,9 @@ def test_multiple_documents_conflicts_and_secondary_version_guard(setup):
     row = svc.prepare_action(ctx, row["id"], row["revision"])
     row = svc.approve_action(ctx, row["id"], row["revision"])
     docs.documents[(ctx.tenant, "policy")] = replace(docs.documents[(ctx.tenant, "policy")], version="2")
-    with pytest.raises(ValueError, match="source evidence version changed"):
+    with pytest.raises(ValueError) as rejected:
         svc.execute(ctx, row["id"])
+    assert rejected.value.code == "approval_preconditions_changed"
     assert tickets.creates == 0
 
 
@@ -607,3 +610,105 @@ def test_stale_revision_cannot_overwrite_review(setup):
                    corrections={question: {"answer": "unknown", "note": "Stale writer"}})
     assert svc.get(ctx, row["id"])["revision"] == 5
     assert tickets.creates == 0
+
+
+@pytest.mark.parametrize("change", ["legacy", "role", "budget", "workspace", "reviewer"])
+def test_attempted_effect_can_be_read_back_with_current_authority(setup, change):
+    from maverick import vendor_onboarding
+
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    tickets.timeout_after_success = True
+    row = svc.execute(ctx, row["id"])
+    operation = row["operation"]
+    if change == "legacy":
+        operation = dict(operation, context={
+            key: value for key, value in operation["context"].items()
+            if key not in {"authorization_role", "authorization_policy", "budget_authority",
+                           "workspace_authority", "authority_schema"}
+        })
+        operation["approval"] = dict(operation["approval"],
+                                     binding_sha256=operation_binding(operation))
+        with tenant_scope(tenant=ctx.tenant):
+            vendor_onboarding._CASES.update(
+                row["id"], lambda value: value.update(operation=operation),
+                expected_revision=row["revision"], action="legacy_effect_fixture", actor=ctx.actor,
+            )
+    elif change == "role":
+        ctx = replace(ctx, authorization_role="admin", authorization_policy="admin-policy")
+    elif change == "budget":
+        ctx = replace(ctx, budget_authority="revised-budget")
+    elif change == "workspace":
+        ctx = replace(ctx, workspace_authority="returned-to-workspace")
+    else:
+        ctx = replace(ctx, actor="second-reviewer@example.test")
+    svc.authorize = lambda candidate, *_: candidate.binding() == ctx.binding()
+    recovered = svc.reconcile(ctx, row["id"])
+    assert recovered["operation"]["state"] == "verified"
+    accepted = svc.accept(ctx, row["id"], recovered["revision"], True, "Checked existing result")
+    assert accepted["outcome"]["reviewer"] == ctx.actor
+    assert accepted["operation"]["context"] == operation["context"]
+    assert tickets.creates == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("credential_ref", "another-jira"), ("credential_authority", "another-owner"),
+])
+def test_readback_cannot_change_original_effect_credential_scope(setup, monkeypatch, field, value):
+    svc, ctx, _, tickets, _ = setup
+    row = svc.execute(ctx, approved(svc, ctx)["id"])
+    changed = replace(ctx, **{field: value})
+    reads = []
+    monkeypatch.setattr(tickets, "find", lambda *a, **kw: reads.append("find") or [])
+    monkeypatch.setattr(tickets, "verify", lambda *a, **kw: reads.append("verify") or {})
+    with pytest.raises(PermissionError, match="(?i)(credential|scope)"):
+        svc.reconcile(changed, row["id"])
+    with pytest.raises(PermissionError, match="(?i)(credential|scope)"):
+        svc.accept(changed, row["id"], row["revision"], True, "Should be blocked")
+    assert reads == []
+    assert tickets.creates == 1
+
+
+def test_stale_prepared_authority_returns_case_to_reviewable_state(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = reviewed(svc, ctx)
+    row = svc.prepare_action(ctx, row["id"], row["revision"])
+    changed = replace(ctx, workspace_authority="new-generation")
+    svc.authorize = lambda candidate, *_: candidate.binding() == changed.binding()
+    with pytest.raises(PermissionError, match="(?i)authority changed"):
+        svc.approve_action(changed, row["id"], row["revision"])
+    reopened = svc.get(changed, row["id"])
+    assert reopened["stage"] == "review_approved"
+    assert reopened["operation"] is None
+    prepared = svc.prepare_action(changed, row["id"], reopened["revision"])
+    assert prepared["operation"]["id"] != row["operation"]["id"]
+    assert tickets.creates == 0
+
+
+def test_changed_source_before_approval_allows_fresh_review_in_app(setup):
+    svc, ctx, docs, tickets, _ = setup
+    row = reviewed(svc, ctx)
+    row = svc.prepare_action(ctx, row["id"], row["revision"])
+    docs.documents[(ctx.tenant, "security-paper")] = EvidenceDocument("security-paper", "2", NOW, TEXT)
+    with pytest.raises(ValueError):
+        svc.approve_action(ctx, row["id"], row["revision"])
+    reopened = svc.get(ctx, row["id"])
+    assert reopened["operation"] is None
+    assert reopened["stage"] == "review_approved"
+    assert tickets.creates == 0
+
+
+def test_reconciliation_rejects_rewritten_historical_approval(setup):
+    from maverick import vendor_onboarding
+
+    svc, ctx, _, tickets, _ = setup
+    row = svc.execute(ctx, approved(svc, ctx)["id"])
+    changed = dict(row["operation"], context=dict(row["operation"]["context"], actor="forged-reviewer"))
+    with tenant_scope(tenant=ctx.tenant):
+        vendor_onboarding._CASES.update(
+            row["id"], lambda value: value.update(operation=changed),
+            expected_revision=row["revision"], action="tampered_history_fixture", actor=ctx.actor,
+        )
+    with pytest.raises(ValueError, match="approval binding"):
+        svc.reconcile(ctx, row["id"])
+    assert tickets.creates == 1

@@ -412,6 +412,146 @@ def test_budget_authority_changes_with_tenant_spend_controls(monkeypatch):
     assert after != before
 
 
+@pytest.fixture
+def stock_workspace(web, monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick import connections
+    from maverick.paths import tenant_scope
+    from maverick_dashboard import rbac, workspace_tenants
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    _, original, ctx, tickets = web
+    rbac.set_role(ctx.actor, "operator")
+    rbac.set_tenant_role(ctx.tenant, ctx.actor, "operator")
+    workspace_tenants.set_selection(ctx.actor, ctx.tenant)
+    monkeypatch.setattr(connections, "get_connection", lambda _: {"owner": ctx.actor})
+    request = SimpleNamespace(state=SimpleNamespace(
+        principal=SimpleNamespace(principal=ctx.actor),
+        workspace_tenant_source="principal_selection",
+    ))
+    with tenant_scope(tenant=ctx.tenant):
+        binding = composition.bind_request(request)
+    service = binding.service
+    service.documents, service.tickets, service.clock = original.documents, tickets, original.clock
+    current = binding.context
+    row = service.intake(current, "Synthetic stock authority", "security-paper", "VEND", "Draft replies")
+    row = service.collect_evidence(current, row["id"], row["revision"])
+    row = service.assess(current, row["id"], row["revision"])
+    row = service.review(current, row["id"], row["revision"], "approved", "Reviewed synthetic evidence")
+    row = service.prepare_action(current, row["id"], row["revision"])
+    row = service.approve_action(current, row["id"], row["revision"])
+    return service, current, row, tickets, request
+
+
+@pytest.mark.parametrize("timing", ["before_claim", "after_claim"])
+def test_stock_worker_rechecks_revoked_membership_before_effect(stock_workspace, monkeypatch, timing):
+    from maverick_dashboard import rbac
+
+    service, ctx, row, tickets, _ = stock_workspace
+    if timing == "before_claim":
+        rbac.remove_tenant_role(ctx.tenant, ctx.actor)
+    else:
+        original = service._preconditions
+        calls = []
+
+        def revoke_after_claim(*args):
+            result = original(*args)
+            calls.append(True)
+            if len(calls) == 2:
+                rbac.remove_tenant_role(ctx.tenant, ctx.actor)
+            return result
+
+        monkeypatch.setattr(service, "_preconditions", revoke_after_claim)
+    try:
+        service.execute(ctx, row["id"])
+    except (HTTPException, PermissionError):
+        pass
+    assert tickets.creates == 0
+
+
+def test_stock_worker_denies_suspended_tenant(stock_workspace):
+    from maverick.paths import tenant_scope
+    from maverick.tenant import registry
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    service, ctx, row, tickets, request = stock_workspace
+    registry.create_tenant(ctx.tenant)
+    registry.suspend_tenant(ctx.tenant)
+    with tenant_scope(tenant=ctx.tenant), pytest.raises(HTTPException):
+        composition._context(request)
+    with pytest.raises(HTTPException):
+        service.execute(ctx, row["id"])
+    assert tickets.creates == 0
+
+
+def test_current_workspace_can_accept_existing_effect_after_switch_back(stock_workspace):
+    from maverick.paths import tenant_scope
+    from maverick_dashboard import vendor_onboarding_composition as composition
+    from maverick_dashboard import workspace_tenants
+
+    service, ctx, row, tickets, request = stock_workspace
+    row = service.execute(ctx, row["id"])
+    workspace_tenants.set_selection(ctx.actor, "synthetic-b")
+    workspace_tenants.set_selection(ctx.actor, ctx.tenant)
+    with tenant_scope(tenant=ctx.tenant):
+        current = composition._context(request)
+    accepted = service.accept(current, row["id"], row["revision"], True, "Verified deliverable")
+    assert accepted["outcome"]["accepted"] is True
+    assert tickets.creates == 1
+
+
+@pytest.mark.parametrize("step", ["approve-action", "execute"])
+def test_precondition_provider_errors_are_not_disclosed_in_reapproval_response(web, monkeypatch, step):
+    client, service, _, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(client, row, "review", decision="approved", rationale="Reviewed evidence")
+    row = _step(client, row, "prepare-action")
+    if step == "execute":
+        row = _step(client, row, "approve-action", confirm=True)
+
+    def unavailable(*args):
+        raise ValueError("Authorization: synthetic-private-provider-value")
+
+    monkeypatch.setattr(service.documents, "head", unavailable)
+    response = client.post(f"{BASE}/{row['id']}/{step}", json={
+        "expected_revision": row["revision"], "confirm": True,
+    })
+    assert response.status_code == 409, response.text
+    assert "synthetic-private-provider-value" not in response.text
+    assert response.json()["detail"]["code"] == "approval_preconditions_changed"
+    assert tickets.creates == 0
+
+
+@pytest.mark.parametrize("source", ["config", "dashboard", "environment"])
+def test_stock_budget_policy_change_requires_new_action_review(stock_workspace, monkeypatch, tmp_path, source):
+    import os
+    from pathlib import Path
+
+    from maverick import runtime_overrides
+    from maverick.paths import tenant_scope
+    from maverick_dashboard import vendor_onboarding_composition as composition
+
+    service, ctx, row, tickets, request = stock_workspace
+    if source == "config":
+        path = Path(os.environ["MAVERICK_CONFIG"])
+        path.write_text(path.read_text(encoding="utf-8") + "\n[budget]\nmax_tool_calls=10\n", encoding="utf-8")
+        config.reset_config_cache()
+    elif source == "dashboard":
+        monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
+        runtime_overrides.set_budget(0.01)
+    else:
+        monkeypatch.setenv("MAVERICK_BUDGET_DOLLARS", "0.02")
+    with tenant_scope(tenant=ctx.tenant):
+        current = composition._context(request)
+    assert current.budget_authority != ctx.budget_authority
+    with pytest.raises(PermissionError) as rejected:
+        service.execute(current, row["id"])
+    assert rejected.value.code == "approval_authority_changed"
+    assert service.get(current, row["id"])["operation"] is None
+    assert tickets.creates == 0
+
+
 def test_role_authority_changes_with_custom_permission_policy(monkeypatch):
     from maverick_dashboard import rbac
     from maverick_dashboard import vendor_onboarding_composition as composition
