@@ -18,10 +18,14 @@ from pathlib import Path
 # *_PASSWORD, *_CREDENTIAL, header blobs that may carry auth values
 # (MAVERICK_OTEL_HEADERS, OTEL_EXPORTER_OTLP_HEADERS), plus connection
 # strings that embed creds (DATABASE_URL, SENTRY_DSN, MONGO_URI,
-# REDIS_URL, *_OAUTH, *_BEARER).
+# REDIS_URL, *_OAUTH, *_BEARER). KEK/DEK: the tenant envelope-encryption key
+# material read by tenant/kms.py (MAVERICK_KMS_KEK) -- neither substring is
+# covered by KEY/SECRET/CREDENTIAL above (Sept 2026 fix,
+# PLATFORM_IMPROVEMENT_AUDIT.md W2-45; this key wraps every tenant's DEK, so
+# leaking it into a sandboxed shell is a full data-at-rest compromise).
 _SECRET_ENV_RE = re.compile(
     r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|APIKEY|DSN|URI|URL|CONN"
-    r"|OAUTH|BEARER|HEADER|NETRC|COOKIE|AUTH)",
+    r"|OAUTH|BEARER|HEADER|NETRC|COOKIE|AUTH|KEK|DEK)",
     re.IGNORECASE,
 )
 # Stripped explicitly even though the pattern already covers them — kept
@@ -32,6 +36,10 @@ _ALWAYS_STRIP_ENV = (
     "GITHUB_TOKEN",
     "GH_TOKEN",
     "GITLAB_TOKEN",
+    # The tenant KMS key-encryption-key (kms.py) -- also covered by the KEK
+    # alternative above, but kept explicit as this codebase's convention for
+    # its most sensitive secrets.
+    "MAVERICK_KMS_KEK",
     # GitHub Actions command files are a cross-step code-injection surface.
     # A model-driven child that appends to GITHUB_PATH/GITHUB_ENV can alter the
     # trusted step that follows it even when ordinary credentials are scrubbed.
