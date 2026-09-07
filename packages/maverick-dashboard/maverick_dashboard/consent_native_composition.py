@@ -33,7 +33,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from maverick.consent_native_sdk import (
     NativeApplicationAuthority,
     NativeConsentCapacityError,
@@ -55,6 +55,7 @@ from maverick.file_lock import (
 )
 from maverick.paths import canonical_tenant_id, current_tenant_id_strict, data_dir, tenant_scope
 
+from ._shared import authenticated_subject
 from .consent_native_backend import LightworkNativeConsentBackend
 from .consent_native_sdk_api import NativeConsentSDKAPIDependencies
 from .consent_public_api import PublicClientBinding, PublicConsentDependencies
@@ -1482,12 +1483,14 @@ def _request_for(app: FastAPI, request: object, tenant_id: str, principal_ref: s
     current = current_tenant_id_strict()
     if current is None or canonical_tenant_id(current) != tenant:
         raise NativeConsentDenied("native consent tenant authority is unavailable")
-    principal = getattr(request.state, "principal", None)
-    subject = getattr(principal, "principal", None) or getattr(principal, "sub", None)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise NativeConsentDenied("native consent principal authority is unavailable")
+    try:
+        subject = authenticated_subject(
+            request, error_detail="native consent principal authority is unavailable",
+        )
+    except HTTPException as exc:
+        raise NativeConsentDenied(str(exc.detail)) from exc
     expected = "native-consent-admin-" + _text_sha256(
-        f"lightwork.native-consent.identity.v1:{tenant}:{subject.strip()}"
+        f"lightwork.native-consent.identity.v1:{tenant}:{subject}"
     )[:40]
     if not _same(principal_ref, expected):
         raise NativeConsentDenied("native consent principal authority changed")
@@ -1496,12 +1499,15 @@ def _request_for(app: FastAPI, request: object, tenant_id: str, principal_ref: s
 
 def native_consent_principal_ref(request: Request, tenant_id: str) -> str:
     tenant = canonical_tenant_id(tenant_id)
-    principal = getattr(request.state, "principal", None)
-    subject = getattr(principal, "principal", None) or getattr(principal, "sub", None)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise NativeConsentDenied("native consent principal authority is unavailable")
+    subject = authenticated_subject(
+        request,
+        error_detail={
+            "code": "native_consent_principal_required",
+            "message": "authenticated principal authority is unavailable",
+        },
+    )
     return "native-consent-admin-" + _text_sha256(
-        f"lightwork.native-consent.identity.v1:{tenant}:{subject.strip()}"
+        f"lightwork.native-consent.identity.v1:{tenant}:{subject}"
     )[:40]
 
 

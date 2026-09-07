@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +114,10 @@ def _op_incidents(status: str, limit: int) -> str:
 
 
 def _op_incident_get(iid: str) -> str:
-    code, data = _get(f"/incidents/{iid}")
+    seg = safe_path_segment(iid)
+    if seg is None:
+        return "ERROR: incident_get requires a valid id"
+    code, data = _get(f"/incidents/{seg}")
     if code == 404:
         return f"incident {iid!r} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -131,6 +134,9 @@ def _op_incident_get(iid: str) -> str:
 
 
 def _set_status(iid: str, status: str, confirm: bool) -> str:
+    seg = safe_path_segment(iid)
+    if seg is None:
+        return "ERROR: a valid incident id is required"
     if not confirm:
         return f"DRY RUN: would set {iid} -> {status}. Re-run with confirm=true."
     from_email = _from_email()
@@ -142,7 +148,7 @@ def _set_status(iid: str, status: str, confirm: bool) -> str:
             "'From' header when using an account-level token."
         )
     code, data = _put(
-        f"/incidents/{iid}",
+        f"/incidents/{seg}",
         {"incident": {"type": "incident_reference", "status": status}},
         from_email=from_email,
     )

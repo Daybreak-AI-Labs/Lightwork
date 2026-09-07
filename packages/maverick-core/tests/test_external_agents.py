@@ -300,11 +300,17 @@ def test_screen_fails_closed_on_scanner_error_and_shield_block():
                         risk="low", shield=_Boom())
     assert verdict["allowed"] is False and verdict["rule"] == "screen_error"
 
+    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-32): use the REAL
+    # ShieldVerdict shape (allowed=False), not a fake `blocked` attribute --
+    # the fake previously matched a bug in the caller (it checked
+    # `getattr(verdict, "blocked", False)`, which is never a real
+    # ShieldVerdict field, so the shield could never actually block) rather
+    # than the real maverick_shield interface, and so never caught it.
+    from maverick_shield.guard import ShieldVerdict
+
     class _Block:
         def scan_input(self, text):
-            class V:
-                blocked = True
-            return V()
+            return ShieldVerdict.block("high", "bad payload")
 
     verdict = xa.screen("sf-quotebot", "crm_update", detail="bad payload",
                         risk="low", shield=_Block())
@@ -719,6 +725,38 @@ def test_execute_read_runs_immediately_and_is_audited(monkeypatch):
     assert fired[0]["external_agent"] == "sf-quotebot"
     assert fired[0]["connector"] == "fakecrm"
     assert fired[0]["outcome"] == "executed"
+
+
+def test_execute_denies_when_shield_blocks_the_request(monkeypatch):
+    """PLATFORM_IMPROVEMENT_AUDIT.md W2-32: _screen_execute_request checked
+    `getattr(verdict, "blocked", False)`, which is never a real ShieldVerdict
+    field (only `.allowed` is), so this admission gate could never actually
+    deny anything the shield flagged."""
+    from maverick_shield.guard import ShieldVerdict
+
+    class _Block:
+        def scan_input(self, text):
+            return ShieldVerdict.block("high", "bad payload")
+
+    _wire_fakecrm(monkeypatch)
+    _enroll()
+    verdict = xa.execute("sf-quotebot", _write_request(), shield=_Block())
+    assert verdict["allowed"] is False and verdict["rule"] == "shield"
+
+
+def test_record_run_denies_when_shield_blocks_the_payload():
+    """PLATFORM_IMPROVEMENT_AUDIT.md W2-32: _clean_text (used by record_run
+    for title/summary/step ingest) had the same never-blocks bug."""
+    from maverick_shield.guard import ShieldVerdict
+
+    class _Block:
+        def scan_input(self, text):
+            return ShieldVerdict.block("high", "bad payload")
+
+    _enroll()
+    with pytest.raises(xa.ExternalAgentsError, match="ingest screen"):
+        xa.record_run("sf-quotebot", {"title": "bad", "summary": "x",
+                                      "outcome": "success"}, shield=_Block())
 
 
 def test_preview_describes_a_write_without_performing_it(monkeypatch):

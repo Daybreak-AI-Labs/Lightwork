@@ -9,6 +9,9 @@ OPUS = "claude-opus-4-8"
 SONNET = "claude-sonnet-4-6"
 HAIKU = "claude-haiku-4-5"
 SONNET45 = "claude-sonnet-4-5"
+OPUS5 = "claude-opus-5"
+SONNET5 = "claude-sonnet-5"
+FABLE51 = "claude-fable-5-1"
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +30,27 @@ def test_effort_supported_matrix():
     assert effort_supported(SONNET) is True
     assert effort_supported(HAIKU) is False     # haiku 4.5 rejects effort
     assert effort_supported(SONNET45) is False  # sonnet 4.5 rejects effort
+
+
+def test_effort_supported_current_generation():
+    # W1-9: Opus 5 / Sonnet 5 / Fable 5.1 were unknown to this predicate --
+    # verified against https://platform.claude.com/docs/en/build-with-claude/effort
+    # ("Supported models" list).
+    assert effort_supported(OPUS5) is True
+    assert effort_supported(SONNET5) is True
+    assert effort_supported(FABLE51) is True
+
+
+def test_xhigh_and_max_on_current_generation(monkeypatch):
+    # All three support both xhigh and max (same source as above).
+    monkeypatch.setenv("MAVERICK_EFFORT", "xhigh")
+    assert effort_for_role("coder", OPUS5) == "xhigh"
+    assert effort_for_role("coder", SONNET5) == "xhigh"
+    assert effort_for_role("coder", FABLE51) == "xhigh"
+    monkeypatch.setenv("MAVERICK_EFFORT", "max")
+    assert effort_for_role("coder", OPUS5) == "max"
+    assert effort_for_role("coder", SONNET5) == "max"
+    assert effort_for_role("coder", FABLE51) == "max"
 
 
 def test_off_by_default():
@@ -86,7 +110,12 @@ def test_xhigh_clamped_off_opus_78(monkeypatch):
 def test_max_clamped_off_opus_tier(monkeypatch):
     monkeypatch.setenv("MAVERICK_EFFORT", "max")
     assert effort_for_role("coder", OPUS) == "max"        # opus 4.8 supports max
-    assert effort_for_role("coder", SONNET) == "high"     # sonnet -> clamp down
+    # W1-9: Sonnet 4.6 supports "max" too (verified against
+    # https://platform.claude.com/docs/en/build-with-claude/effort) -- it
+    # used to be wrongly clamped down to "high" here.
+    assert effort_for_role("coder", SONNET) == "max"
+    # Sonnet 4.5 doesn't support effort at all (see test_effort_supported_matrix).
+    assert effort_for_role("coder", SONNET45) is None
 
 
 def test_invalid_level_is_ignored(monkeypatch):
@@ -99,7 +128,7 @@ def test_preselected_effort_clamps_for_actual_model():
     # the fallback model must still get its own model-specific ceiling.
     assert effort_for_model("xhigh", OPUS) == "xhigh"
     assert effort_for_model("xhigh", SONNET) == "high"
-    assert effort_for_model("max", SONNET) == "high"
+    assert effort_for_model("max", SONNET) == "max"  # W1-9: Sonnet 4.6 supports max
     assert effort_for_model("medium", HAIKU) is None
 
 

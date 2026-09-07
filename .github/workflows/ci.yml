@@ -211,6 +211,22 @@ jobs:
         # from regressing on the basics without a browser/Node. Complements
         # the live `a11y` tool (pa11y/axe).
         run: python -m maverick.a11y_audit --ci
+      - name: Async route audit (no new event-loop-blocking dashboard routes)
+        # A FastAPI `async def` route runs on the single event loop thread
+        # that serves every request -- unlike a plain `def` route, which
+        # FastAPI thread-pools automatically. A census found 469 async route
+        # handlers with zero `await` that still call synchronous SQLite/
+        # world/file/config work, blocking every other in-flight request for
+        # that call's duration.
+        #
+        # Rewriting all 469 is a separate, large mechanical change, not
+        # something to bundle unreviewed into this gate. They're grandfathered
+        # in async_route_audit_grandfathered.json (a debt register to shrink,
+        # not an exemption list) -- this fails the build on any NEW
+        # zero-await/blocking-call route, and on a grandfathered entry that no
+        # longer reproduces (regenerate with `--regen` once it's actually
+        # fixed, so the register shrinks instead of just going stale).
+        run: python -m maverick.async_route_audit --ci
       - name: Failure-policy gate (audit-subsystem broad excepts are classified)
         # Requires every broad `except` in maverick/audit/* to declare its
         # failure mode (# failure-policy: fail_closed | fail_soft_with_audit |

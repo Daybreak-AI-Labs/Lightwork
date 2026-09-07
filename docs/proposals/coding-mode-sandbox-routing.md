@@ -23,13 +23,23 @@ never call `subprocess.run` from a tool directly") and, more importantly,
 - `workdir = Path(getattr(self.ctx.sandbox, "workdir", "."))`.
 
 For `SSHBackend` the workdir is a **remote** path (`~/maverick-workspace`,
-`sandbox/ssh.py`), and for `KubernetesBackend` it is an **in-pod** path
-(`/workspaces/repo`, `sandbox/kubernetes.py`). So `git -C <that-path> apply` on
-the host operates on a path that **doesn't exist locally / is a different tree**
-than where the agent's edits and tests actually ran. Docker/podman work only by
-the bind-mount accident (`docker.py` mounts the host workdir to `/workspace`).
+`sandbox/ssh.py`), so `git -C <that-path> apply` on the host operates on a path
+that **doesn't exist locally**, a different tree than where the agent's edits
+and tests actually ran. Docker/podman work only by the bind-mount accident
+(`docker.py` mounts the host workdir to `/workspace`).
 
-Net: coding mode silently produces wrong/empty patches under SSH/k8s/firecracker.
+(Platform audit **W1-86** fixed the same class of bug for `KubernetesBackend`:
+its `workdir` used to be an in-pod path with nothing ever copied into it —
+`exec()` ran commands against an empty directory, so this proposal's host-side
+`git -C <workdir>` calls were doubly wrong there. `workdir` is now the HOST
+directory `kubectl cp` streams into/out of the pod on every `exec()`, the same
+contract as every other backend, so it no longer needs special-casing here —
+though routing git through `sandbox.exec()` remains the more correct fix in
+general, per this proposal.)
+
+Net: coding mode silently produces wrong/empty patches under SSH/firecracker
+(the Firecracker scaffold has its own, still-open "exec path does not yet
+mount the workspace" gap — see `docs/FEATURES.md`).
 
 ## Proposed fix
 
@@ -56,7 +66,7 @@ same filesystem context as the edits and tests.
 - The `git apply -` stdin handling is the crux; getting it wrong silently drops
   patches (exactly the failure class we're fixing).
 - It is **not** a launch blocker for the default (`local`) sandbox — local
-  coding mode works today. The bug bites SSH/k8s/firecracker users, who are a
+  coding mode works today. The bug bites SSH/firecracker users, who are a
   later-quarter audience.
 
 ## Verification plan (before merge)
@@ -67,8 +77,8 @@ same filesystem context as the edits and tests.
    `test_integration_swe_smoke::test_full_pipeline_produces_valid_patch` must
    still pass (note: it is **currently failing on main**, unrelated — investigate
    that first so it's a real gate).
-3. SSH/k8s: exercise against a configured remote/cluster (not available in the
-   audit environment) — confirm the patch is rendered from the remote tree.
+3. SSH: exercise against a configured remote host (not available in the audit
+   environment) — confirm the patch is rendered from the remote tree.
 
 ## Recommendation
 

@@ -18,7 +18,7 @@ client = TestClient(app)
 def store(tmp_path, monkeypatch):
     """Point the continuous-benchmark store at a temp dir."""
     from maverick import continuous_benchmark as cb
-    monkeypatch.setattr(cb, "_STORE", tmp_path / "benchmarks")
+    monkeypatch.setattr(cb, "data_dir", lambda *a, **k: tmp_path / "benchmarks")
     return cb
 
 

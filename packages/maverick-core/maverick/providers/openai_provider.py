@@ -98,6 +98,82 @@ def _extract_tool_result_text(content: Any) -> str:
     return str(content) if content is not None else ""
 
 
+def _image_block_to_openai_part(block: dict) -> dict:
+    """Translate an Anthropic image content block to an OpenAI
+    ``image_url`` content part.
+
+    Anthropic images carry ``source`` as either ``{"type": "base64",
+    "media_type": ..., "data": ...}`` or ``{"type": "url", "url": ...}``.
+    OpenAI's vision format takes a single ``url`` either way -- a data URI
+    for base64, the URL verbatim otherwise. An unrecognized/missing source
+    fails closed to an empty data URL rather than raising, matching this
+    translator's existing tolerance for malformed blocks (the request will
+    surface as an ordinary provider-side image error, not a crash here).
+    """
+    source = block.get("source")
+    if isinstance(source, dict):
+        if source.get("type") == "url" and source.get("url"):
+            return {"type": "image_url", "image_url": {"url": source["url"]}}
+        if source.get("type") == "base64" and source.get("data"):
+            media_type = source.get("media_type") or "application/octet-stream"
+            return {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{source['data']}"},
+            }
+    return {"type": "image_url", "image_url": {"url": ""}}
+
+
+def _translate_user_blocks(content: list) -> tuple[list[dict], dict | None]:
+    """Split one Anthropic user turn's content blocks into OpenAI ``tool``
+    messages plus a single trailing ``user`` message (or ``None`` if the
+    turn carried no text/image content at all).
+
+    W1-7: an Anthropic image/document block used to fall into the
+    ``else`` branch below and get ``str()``-stringified into plain text --
+    the model saw a Python dict repr containing the raw base64 payload as
+    prompt text, not an actual image. content_parts holds OpenAI
+    content-part dicts (text and image_url) so a real image reaches the
+    model as an image; collapsed back to a plain string when the turn has
+    no image (the common case), to keep that path's output byte-for-byte
+    unchanged. A document block has no OpenAI-family equivalent (no inline
+    file content type) and is rejected rather than silently mangled.
+    """
+    tool_msgs: list[dict] = []
+    content_parts: list[dict] = []
+    for block in content:
+        if not isinstance(block, dict):
+            content_parts.append({"type": "text", "text": str(block)})
+            continue
+        bt = block.get("type")
+        if bt == "tool_result":
+            tool_msgs.append({
+                "role": "tool",
+                "tool_call_id": block.get("tool_use_id", ""),
+                "content": _extract_tool_result_text(block.get("content")),
+            })
+        elif bt == "text":
+            content_parts.append({"type": "text", "text": block.get("text", "")})
+        elif bt == "image":
+            content_parts.append(_image_block_to_openai_part(block))
+        elif bt == "document":
+            raise RuntimeError(
+                "OpenAI-family providers do not accept inline document "
+                "blocks (no equivalent to Anthropic's document content "
+                "type); route file input through the provider's own "
+                "file-upload API instead."
+            )
+        else:
+            content_parts.append({"type": "text", "text": str(block)})
+    if not content_parts:
+        return tool_msgs, None
+    if any(p["type"] != "text" for p in content_parts):
+        return tool_msgs, {"role": "user", "content": content_parts}
+    return tool_msgs, {
+        "role": "user",
+        "content": "\n".join(p["text"] for p in content_parts),
+    }
+
+
 def _openai_import_error_message(e: ImportError) -> str:
     """Explain a failed ``from openai import ...`` without misdiagnosing it.
 
@@ -263,26 +339,10 @@ class OpenAIClient:
                     # that raw order: emit ALL tool messages first (keeping their
                     # relative order so each matches its tool_call), then any
                     # supplementary text as a single trailing user message.
-                    tool_msgs: list[dict] = []
-                    text_buf: list[str] = []
-                    for block in content:
-                        if not isinstance(block, dict):
-                            text_buf.append(str(block))
-                            continue
-                        bt = block.get("type")
-                        if bt == "tool_result":
-                            tool_msgs.append({
-                                "role": "tool",
-                                "tool_call_id": block.get("tool_use_id", ""),
-                                "content": _extract_tool_result_text(block.get("content")),
-                            })
-                        elif bt == "text":
-                            text_buf.append(block.get("text", ""))
-                        else:
-                            text_buf.append(str(block))
+                    tool_msgs, user_msg = _translate_user_blocks(content)
                     out.extend(tool_msgs)
-                    if text_buf:
-                        out.append({"role": "user", "content": "\n".join(text_buf)})
+                    if user_msg is not None:
+                        out.append(user_msg)
 
             elif role == "assistant":
                 if isinstance(content, str):

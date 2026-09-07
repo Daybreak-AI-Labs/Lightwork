@@ -847,11 +847,13 @@ def retire_stale_skills(
     """Retire learned skills whose recall track record decayed.
 
     Learning loops without forgetting loops degrade: a skill that keeps being
-    recalled but rarely helps (``skill_stats.evictable``: >= ``min_uses``
-    decided uses, win rate <= ``below``) is MOVED to ``<store>/retired/`` —
-    out of ``load_skills``' glob, so it stops being recalled — with a
-    ``retired.ndjson`` line recording when and why. Reversible by moving the
-    file back. Returns the retired skill names.
+    recalled but rarely helps -- ``skill_stats.evictable``: >= ``min_uses``
+    decided uses AND the Wilson-score upper bound on its win rate <=
+    ``below`` (a confidence bound, not the raw win rate: a thin sample near
+    the threshold is NOT retired on the point estimate alone) -- is MOVED to
+    ``<store>/retired/`` — out of ``load_skills``' glob, so it stops being
+    recalled — with a ``retired.ndjson`` line recording when and why.
+    Reversible by moving the file back. Returns the retired skill names.
     """
     from .skill import stats as skill_stats
     from .skill.distillation_local import _STORE
@@ -859,16 +861,24 @@ def retire_stale_skills(
     store_dir = Path(store) if store is not None else _STORE
     if not store_dir.is_dir():
         return []
+    reasons: dict[str, str] = {}
     try:
         names = skill_stats.evictable(
             path=stats_path, min_uses=min_uses, max_win_rate=below,
         )
+        reasons.update(dict.fromkeys(
+            names,
+            f"Wilson-score upper bound on win rate <= {below} "
+            f"after >= {min_uses} decided uses",
+        ))
     except Exception as e:  # pragma: no cover -- stats never block a dream
         log.debug("dreaming: evictable lookup failed: %s", e)
         return []
     # Probation (the learning-side canary, half 1): a freshly-distilled skill
     # that loses its FIRST few decided uses outright never earned its place —
     # retire it before min_uses lets it linger. wins==0 keeps this strict.
+    # A distinct, stricter rule from the Wilson-bound gate above, so it gets
+    # its own reason string rather than reusing the wrong one.
     try:
         for md in sorted(store_dir.glob("*.md")):
             name = md.stem
@@ -877,6 +887,7 @@ def retire_stale_skills(
             st = skill_stats.get(name, path=stats_path)
             if st and st.uses >= 3 and st.wins == 0 and st.losses >= 3:
                 names.append(name)
+                reasons[name] = "probation: 0 wins in >= 3 decided uses"
     except Exception as e:  # pragma: no cover
         log.debug("dreaming: probation scan failed: %s", e)
     retired: list[str] = []
@@ -907,7 +918,10 @@ def retire_stale_skills(
                         "uses": getattr(st, "uses", 0),
                         "wins": getattr(st, "wins", 0),
                         "losses": getattr(st, "losses", 0),
-                        "reason": f"win rate <= {below} after >= {min_uses} uses",
+                        "reason": reasons.get(
+                            name,
+                            f"win rate <= {below} after >= {min_uses} uses",
+                        ),
                     }) + "\n")
                     f.flush()
                     os.fsync(f.fileno())
@@ -1029,12 +1043,8 @@ async def rehearse(
     installed — the kernel never *requires* the evolve package).
     """
     check_learning_halt("dreaming", "rehearsal_start")
-    try:
-        from .calibration import learning_frozen
-        frozen = bool(learning_frozen())
-    except Exception:  # pragma: no cover -- interlock absent = not frozen
-        frozen = False
-    if frozen:
+    from .calibration import learning_frozen_safe
+    if learning_frozen_safe():
         raise RehearsalFrozen(
             "verifier calibration is frozen; refusing to rehearse against a "
             "distrusted grader (see maverick.calibration)."
@@ -1279,7 +1289,13 @@ def benchmark_regressed() -> bool:
         from . import continuous_benchmark as _cb
         history = _cb.load_history(_cb._store_path())
         names = {str(h.get("name")) for h in history if h.get("name")}
-        return any(_cb.detect_regression(history, n) for n in names)
+        # detect_regression returns a report dict (always truthy), not a
+        # bool -- `any(...)` over the dicts themselves was true whenever ANY
+        # tracked benchmark had history, regardless of its verdict, so every
+        # newly distilled skill was quarantined the moment one benchmark had
+        # ever run. Read the actual verdict field instead.
+        return any(bool(_cb.detect_regression(history, n).get("regressed"))
+                  for n in names)
     except Exception:  # pragma: no cover -- canary never blocks a dream
         return False
 
@@ -1313,11 +1329,8 @@ def _consolidate_learning(report, by_domain_success, failures, *,
     prevent). rehearse() already refuses on a frozen verifier; the consolidation
     path did not, so the headline interlock was a no-op here. Returns the new
     insights to persist (empty when frozen)."""
-    try:
-        from .calibration import learning_frozen as _lf
-        report.learning_frozen = bool(_lf())
-    except Exception:  # pragma: no cover -- interlock absent = not frozen
-        report.learning_frozen = False
+    from .calibration import learning_frozen_safe
+    report.learning_frozen = learning_frozen_safe()
     if report.learning_frozen:
         return []
 

@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 
 from . import killswitch
 from ._envparse import env_float, env_int
-from .budget import BudgetExceeded
+from .budget import BudgetExceeded, UnpricedModelError
 from .llm import model_for_role
 from .swarm import SwarmContext
 from .tools import ToolRegistry, base_registry
@@ -82,6 +82,7 @@ External MCP tools (if any) appear as `mcp_<server>__<tool>`."""
 
 def select_base_template(
     *, role: str, depth: int, max_depth: int, coding_enabled: bool,
+    is_root: bool = False,
 ) -> str:
     """Pick the base system template for an agent. Pure: no env/config reads.
 
@@ -91,13 +92,20 @@ def select_base_template(
     coding mode off it is the orchestrator template for the planner and the
     worker template for every other role. First side-effect-free seam extracted
     from ``Agent._build_system`` (god-module decomposition: PromptBuilder).
+
+    ``is_root`` (W1-24): a domain-routed goal's depth-0 agent has
+    ``role=profile.name`` (e.g. ``"finance_controller"``), not
+    ``"orchestrator"`` -- it still emits the goal's FINAL and needs the
+    orchestrator template, not the "specialist worker" one. The domain
+    persona is layered on separately via ``apply_role_overlays``, so this
+    does not lose any pack flavor.
     """
     if coding_enabled:
         from .coding_mode import CODER_CODING_MODE_TEMPLATE
         return CODER_CODING_MODE_TEMPLATE.format(
             role=role, depth=depth, max_depth=max_depth,
         )
-    if role == "orchestrator":
+    if role == "orchestrator" or is_root:
         return ORCHESTRATOR_SYSTEM_TEMPLATE.format(max_depth=max_depth)
     return WORKER_SYSTEM_TEMPLATE.format(role=role, depth=depth, max_depth=max_depth)
 
@@ -996,6 +1004,21 @@ def _tool_call_failed(output: str) -> bool:
     return tool_result_failed(output)
 
 
+def _budget_error_label(e: BudgetExceeded) -> str:
+    """W1-30: distinguish a genuinely unpriced model from a real cap trip.
+
+    ``UnpricedModelError`` is a ``BudgetExceeded`` subclass (so it still
+    aborts the run and skips billing), but it is not a spending/time cap
+    being reached -- it is Lightwork refusing to bill a model with no
+    verified price. Labelling both alike as "budget exceeded" made the
+    orchestrator's "raise your cap and resume" message the reply for a
+    problem raising the cap can never fix, and fed the budget-cap failure
+    class -- poisoning the self-tuning budget learner with a failure that
+    had nothing to do with spend.
+    """
+    return "unpriced model" if isinstance(e, UnpricedModelError) else "budget exceeded"
+
+
 def _audit_summary(value: Any, limit: int = 200) -> str:
     """Short, whitespace-collapsed, length-bounded text for the audit log.
 
@@ -1027,6 +1050,15 @@ def _tool_status(output: str) -> str:
 _DEFAULT_TOOL_RESULT_BYTES = 32_000
 _MAX_TOOL_RESULT_BYTES = max(
     2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", _DEFAULT_TOOL_RESULT_BYTES))
+
+# W1-27: cap on total "please revise your patch" round-trips per goal, across
+# BOTH the apply-check block and the ground-truth test-verifier block (they
+# share `_patch_revision_attempts`, which -- unlike `_patch_validated` -- is
+# never reset per FINAL). 1 matches the "one retry max" every reject site
+# already documented in its own comments before the #612 fix's per-FINAL
+# reset silently defeated it.
+_MAX_PATCH_REVISION_ATTEMPTS = max(
+    1, env_int("MAVERICK_MAX_PATCH_REVISION_ATTEMPTS", 1))
 
 
 def unframe_tool_output(framed: str) -> str:
@@ -1230,6 +1262,7 @@ def _final_uncertainty_reasons(
     verifier_incomplete: bool,
     disagreement: float,
     coding: bool,
+    no_final_marker: bool = False,
 ) -> list[str]:
     """Reasons the orchestrator cannot cleanly stand behind a FINAL.
 
@@ -1242,6 +1275,11 @@ def _final_uncertainty_reasons(
     if coding:
         return []
     reasons: list[str] = []
+    if no_final_marker:
+        reasons.append(
+            "the response never included a FINAL: marker, so the verifier "
+            "and patch-validation pipeline did not run"
+        )
     if verifier_rejected:
         reasons.append("an internal self-check did not pass after one revision")
     if verifier_incomplete:
@@ -1330,19 +1368,30 @@ class Agent:
         knowledge_sources: list[str] | None = None,
         domain_effort: str | None = None,
         autonomy=None,
+        is_goal_root: bool = False,
     ):
         self.ctx = ctx
         self.role = role
         self.brief = brief
         self.depth = depth
         self.parent = parent
+        # W1-24: whether this agent owns the GOAL's FINAL synthesis --
+        # verification, the review checkpoint, prompt-cache prewarm, the
+        # thinking budget, and the base system template all keyed on
+        # role == "orchestrator" alone, so a domain-routed goal's depth-0
+        # root (role=profile.name, e.g. "finance_controller") silently
+        # skipped every one of them. agent_from_profile passes this
+        # explicitly for its depth==0 construction; plain role=="orchestrator"
+        # still qualifies too (the two are OR'd at each use, not merged here,
+        # so this flag never needs to fake a role rename).
+        self._is_goal_root = bool(is_goal_root)
         # Long-horizon review checkpoint (root only; opt-in). Built once per
         # agent from config; None when unconfigured (the common case) so the
         # turn gate stays a no-op. The reviewer uses the consent/approval path
         # with silent auto-approval disabled, so crossing an interval requires
         # an explicit operator decision to continue.
         self._review_checkpoint = None
-        if role == "orchestrator":
+        if role == "orchestrator" or self._is_goal_root:
             try:
                 from .review_checkpoint import consent_review, from_config
                 _cp = from_config(
@@ -1452,6 +1501,13 @@ class Agent:
         # consecutive count) triple, success or failure. Feeds the identical-
         # result nudge and, past _LOOP_GUARD_BLOCK, the pre-exec suppression.
         self._identical_streak: tuple[str, str, int] | None = None
+        # W1-25: whether the one-shot "please restate with FINAL:" nudge has
+        # already been used this run. A text-only response with no tool
+        # calls and no FINAL: marker skips the ENTIRE verify/patch-check/
+        # STOP-hook pipeline (it only runs inside the FINAL-marker branch);
+        # give a marker-less model one chance to comply before accepting its
+        # answer un-nudged.
+        self._final_marker_nudge_used = False
 
     def _resolve_capability(self, explicit):
         """Pick this agent's capability grant.
@@ -1634,6 +1690,7 @@ class Agent:
         base = select_base_template(
             role=self.role, depth=self.depth, max_depth=self.ctx.max_depth,
             coding_enabled=bool(_coding_cfg is not None and _coding_cfg.enabled),
+            is_root=getattr(self, "_is_goal_root", False),
         )
 
         # Swarm-wide additive overlays (persona, output style, learned-habits
@@ -1715,7 +1772,8 @@ class Agent:
             return []
 
     def _thinking_budget(self) -> int | None:
-        if self.role not in ("orchestrator", "revisor"):
+        if (not getattr(self, "_is_goal_root", False)
+                and self.role not in ("orchestrator", "revisor")):
             return None
         # Thinking tokens bill at the output rate, so the base is a first-class
         # cost knob: `[thinking] budget` (default 8000, the long-standing value).
@@ -2627,7 +2685,15 @@ class Agent:
         effect_completed = False
         execution_status = "error"
         try:
-            output = await self.tools.run(name, args)
+            # W1-31: enforce the wall-clock cap and killswitch DURING
+            # dispatch, not only at turn boundaries -- a tool with no timeout
+            # of its own (a plugin, an MCP server with a large default, a
+            # browser/file-watcher wait) could otherwise hold the goal
+            # 'active' past max_wall_seconds and ignore `maverick halt`
+            # until it happened to return.
+            output = await self._await_wall_clock_guarded(
+                lambda: self.tools.run(name, args),
+                in_flight_note="mid-tool-execution")
             # From this point onward the connector returned normally and may
             # already have committed an external mutation.  Keep that fact
             # separate from failures in hooks, screening, framing, or other
@@ -3262,23 +3328,58 @@ class Agent:
         except Exception as e:  # pragma: no cover -- observability never blocks
             log.debug("live-spend mirror skipped: %s", e)
 
+    def _goal_cancelled(self) -> bool:
+        """Whether an operator cancelled this goal (POST /goals/{id}/cancel).
+
+        The global killswitch/budget checks above stop every run; this is
+        the goal-scoped analogue -- without it, nothing in the loop ever
+        read goal status, so the dashboard Cancel button flipped the row to
+        'cancelled' but the swarm kept spending until FINAL, max_steps, or
+        the budget cap (#W1-23). `get_goal` is a single indexed
+        primary-key read at the same cadence as the untimed killswitch.check()
+        /budget.check() calls beside it, so no throttling here. Fails open
+        (a transient world-read error must not itself stop the run).
+        """
+        if self.ctx.goal_id is None:
+            return False
+        try:
+            goal = self.ctx.world.get_goal(self.ctx.goal_id)
+        except Exception as e:  # pragma: no cover -- a stop check must not crash the run
+            log.debug("goal-cancelled check skipped: %s", e)
+            return False
+        return goal is not None and goal.status == "cancelled"
+
     # Poll interval (seconds) for the killswitch while an LLM generation is
     # in flight — small enough to feel responsive, large enough to be free.
     _HALT_POLL_SECONDS = 1.0
 
-    async def _complete_guarded(self, **kw):
-        """Await an LLM completion, but ABORT the in-flight call when the
-        wall-clock budget is exhausted or the killswitch trips — instead of
-        letting a multi-minute generation run to completion and blow the SLA or
-        ignore a HALT (the cap/halt were otherwise only checked at turn
-        boundaries). Raises :class:`BudgetExceeded` (wall) or
-        :class:`killswitch.Halted`, both already handled by the caller."""
+    async def _await_wall_clock_guarded(self, make_coro, *, in_flight_note: str):
+        """Await ``make_coro()``, but ABORT it when the wall-clock budget is
+        exhausted or the killswitch trips — instead of letting it run to
+        completion and blow the SLA or ignore a HALT (the cap/halt were
+        otherwise only checked at turn boundaries). Raises
+        :class:`BudgetExceeded` (wall) or :class:`killswitch.Halted`, both
+        already handled by every caller the same way. ``in_flight_note``
+        names what was in flight (e.g. "mid-generation",
+        "mid-tool-execution") for the wall-cap message.
+
+        ``make_coro`` is a zero-arg callable, not an already-built
+        coroutine: it is invoked only once the wall cap is confirmed to have
+        time left, so an already-exhausted budget never creates (and then
+        silently abandons, as an "await" warning) the underlying call.
+
+        W1-31: shared by ``_complete_guarded`` (LLM calls) and tool dispatch
+        (``_run_dispatched_tool``) — a hung tool with no timeout of its own
+        (a plugin, an MCP server, a browser/file-watcher wait) previously had
+        no equivalent guard, so it could hold a goal 'active' past
+        ``max_wall_seconds`` and ignore ``maverick halt`` until it returned.
+        """
         budget = self.ctx.budget
         remaining = budget.remaining_wall()
         if remaining <= 0:
             raise BudgetExceeded(
                 f"wall time {budget.elapsed():.0f}s > {budget.max_wall_seconds:.0f}s")
-        task = asyncio.ensure_future(self.ctx.llm.complete_async(**kw))
+        task = asyncio.ensure_future(make_coro())
         loop = asyncio.get_running_loop()
         deadline = loop.time() + remaining
         try:
@@ -3290,16 +3391,28 @@ class Agent:
                 if loop.time() >= deadline:
                     raise BudgetExceeded(
                         f"wall-clock cap {budget.max_wall_seconds:.0f}s reached "
-                        "mid-generation")
+                        f"{in_flight_note}")
                 killswitch.check()  # raises killswitch.Halted if tripped
         except BaseException:
             # Wall cap, halt, or an upstream cancellation: cancel the in-flight
-            # generation (aborts the provider HTTP request) before propagating.
+            # call (aborts the provider HTTP request / tool coroutine) before
+            # propagating.
             if not task.done():
                 task.cancel()
                 with contextlib.suppress(BaseException):
                     await task
             raise
+
+    async def _complete_guarded(self, **kw):
+        """Await an LLM completion, but ABORT the in-flight call when the
+        wall-clock budget is exhausted or the killswitch trips — instead of
+        letting a multi-minute generation run to completion and blow the SLA or
+        ignore a HALT (the cap/halt were otherwise only checked at turn
+        boundaries). Raises :class:`BudgetExceeded` (wall) or
+        :class:`killswitch.Halted`, both already handled by the caller."""
+        return await self._await_wall_clock_guarded(
+            lambda: self.ctx.llm.complete_async(**kw),
+            in_flight_note="mid-generation")
 
     async def run(self) -> AgentResult:
         # OTel GenAI semconv: every agent execution is an ``invoke_agent``
@@ -3328,6 +3441,19 @@ class Agent:
         ``(None, 0, messages)`` unchanged. Missing history starts at zero;
         corrupt/unavailable history or exhausted current caps blocks execution.
         Usage is restored into the authoritative shared Budget.
+
+        W1-28: ``messages[0]`` on entry is the brief this run was JUST built
+        with (for the orchestrator, `run_goal` bakes in any newly-answered
+        `ask_user` question there -- see the ``qa_block`` in orchestrator.py).
+        The checkpoint's own ``messages[0]`` is that same slot from BEFORE
+        the question was answered. Wholesale-replacing `messages` with the
+        checkpoint would silently discard the fresh brief and re-show the
+        model exactly the state it was in when it asked -- the resumed run
+        re-asks the same question forever. `_save_checkpoint` always commits
+        at the top of the loop (before that step's LLM call), so the saved
+        history always ends on a "user" turn and starts on one too; swapping
+        just index 0 for the freshly-built one keeps that alternation intact
+        while carrying the rest of the crashed/blocked run's history forward.
         """
         start_step = 0
         ckpt = None
@@ -3346,7 +3472,11 @@ class Agent:
                         # Restore accounting before accepting messages. Never
                         # replace the shared Budget or import historical caps.
                         _ckpt_mod.restore_budget(saved.budget, into=self.ctx.budget)
-                        messages = saved.messages
+                        fresh_first = messages[0] if messages else None
+                        messages = list(saved.messages)
+                        if (fresh_first is not None and messages
+                                and messages[0].get("role") == "user"):
+                            messages[0] = fresh_first
                         start_step = saved.step_seq
                         bb.post(self.name, "plan",
                                 f"resumed from checkpoint at step {start_step}")
@@ -3380,7 +3510,7 @@ class Agent:
         # the first real turn reads the system+tools cache instead of paying the
         # cold-write latency. Subagents are skipped (each has a distinct prompt;
         # warming them would be a wasted write). Never blocks the run.
-        if self.role == "orchestrator":
+        if self.role == "orchestrator" or getattr(self, "_is_goal_root", False):
             try:
                 from .llm import cache_prewarm_enabled
                 if cache_prewarm_enabled():
@@ -3445,14 +3575,21 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name)
             except BudgetExceeded as e:
-                bb.post(self.name, "error", f"budget exceeded: {e}")
-                return AgentResult(error=f"budget exceeded: {e}", role=self.role, name=self.name)
+                label = _budget_error_label(e)
+                bb.post(self.name, "error", f"{label}: {e}")
+                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name)
+            if self._goal_cancelled():
+                bb.post(self.name, "error", "cancelled via dashboard")
+                return AgentResult(error="cancelled via dashboard", role=self.role, name=self.name)
 
             # Long-horizon review checkpoint (opt-in [safety] review_checkpoint):
             # at the root, fire a human-review heartbeat every N dollars / M tool
             # calls / T seconds. A reviewer vote to halt stops the run cleanly,
             # like the killswitch. Inert (no checkpoint object) when unconfigured.
-            if self.role == "orchestrator" and self._review_checkpoint is not None:
+            if (
+                (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
+                and self._review_checkpoint is not None
+            ):
                 _cp_event = self._review_checkpoint.check(self.ctx.budget)
                 if _cp_event is not None:
                     bb.post(self.name, "note",
@@ -3547,8 +3684,9 @@ class Agent:
                     **_effort_kw,
                 )
             except BudgetExceeded as e:
-                bb.post(self.name, "error", f"budget exceeded: {e}")
-                return AgentResult(error=f"budget exceeded: {e}", role=self.role, name=self.name)
+                label = _budget_error_label(e)
+                bb.post(self.name, "error", f"{label}: {e}")
+                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name)
             except killswitch.Halted as e:
                 # The killswitch tripped MID-generation; the in-flight call was
                 # cancelled by _complete_guarded. Stop like a turn-boundary halt.
@@ -3617,6 +3755,17 @@ class Agent:
                     # apply-check / diff extraction. Reset it alongside
                     # `_already_verified` so each new FINAL re-validates the
                     # patch it actually carries.
+                    #
+                    # W1-27: that reset also broke the "one retry max" this
+                    # flag was doing double duty for -- every "ask for
+                    # revision" branch below reads `_patch_validated` to
+                    # decide whether THIS is already a retry, but by the
+                    # time the model's revised FINAL arrives here, the reset
+                    # above has already flipped it back to False, so every
+                    # branch thinks it's seeing a first attempt again. The
+                    # reject/test-driven revision loop is bounded only by
+                    # `_patch_revision_attempts` below, which is deliberately
+                    # NOT reset per FINAL.
                     self._patch_validated = False
 
                     # Wave 8: coding-mode patch self-validation. If the
@@ -3640,7 +3789,9 @@ class Agent:
 
                     if (coding_cfg is not None and coding_cfg.enabled
                             and coding_cfg.require_apply_check
-                            and not getattr(self, "_patch_validated", False)):
+                            and not getattr(self, "_patch_validated", False)
+                            and getattr(self, "_patch_revision_attempts", 0)
+                                < _MAX_PATCH_REVISION_ATTEMPTS):
                         from pathlib import Path as _Path
                         workdir = _Path(getattr(self.ctx.sandbox, "workdir", "."))
                         # Wave 11: prefer SEARCH/REPLACE over unified-diff.
@@ -3675,6 +3826,8 @@ class Agent:
                                     pass
                         if patch is None and sr_summary is not None:
                             self._patch_validated = True
+                            self._patch_revision_attempts = (
+                                getattr(self, "_patch_revision_attempts", 0) + 1)
                             bb.post(
                                 self.name, "verify",
                                 f"SEARCH/REPLACE apply failed: "
@@ -3696,6 +3849,8 @@ class Agent:
                             continue
                         if patch is None:
                             self._patch_validated = True
+                            self._patch_revision_attempts = (
+                                getattr(self, "_patch_revision_attempts", 0) + 1)
                             bb.post(
                                 self.name, "verify",
                                 "no valid SEARCH/REPLACE or unified diff in "
@@ -3778,6 +3933,8 @@ class Agent:
                         validation = validate_patch(patch, workdir)
                         if not validation.valid:
                             self._patch_validated = True  # one retry max
+                            self._patch_revision_attempts = (
+                                getattr(self, "_patch_revision_attempts", 0) + 1)
                             bb.post(
                                 self.name, "verify",
                                 f"patch rejected: {validation.reason}",
@@ -3815,7 +3972,7 @@ class Agent:
                     # Only the orchestrator's FINAL is verified. Sub-agents
                     # answer to their parent; the parent is their verifier.
                     if (
-                        self.role == "orchestrator"
+                        (self.role == "orchestrator" or getattr(self, "_is_goal_root", False))
                         and self.depth == 0
                         and not getattr(self, "_already_verified", False)
                         and self.ctx.goal_id is not None
@@ -3845,8 +4002,12 @@ class Agent:
                                         # verifier's own apply.
                                         await asyncio.to_thread(self._reset_workdir)
                                 if patch is None:
-                                    if not getattr(self, "_patch_validated", False):
+                                    if (not getattr(self, "_patch_validated", False)
+                                            and getattr(self, "_patch_revision_attempts", 0)
+                                                < _MAX_PATCH_REVISION_ATTEMPTS):
                                         self._patch_validated = True
+                                        self._patch_revision_attempts = (
+                                            getattr(self, "_patch_revision_attempts", 0) + 1)
                                         bb.post(
                                             self.name, "verify",
                                             "no valid diff in FINAL; asking for revision",
@@ -3861,7 +4022,8 @@ class Agent:
                                             ),
                                         })
                                         continue
-                                    # Already revised once; surface and exit.
+                                    # Already revised, or out of revision
+                                    # attempts (W1-27): surface and exit.
                                     return AgentResult(
                                         final=final, role=self.role, name=self.name,
                                         verifier_confidence=0.0,
@@ -3905,8 +4067,12 @@ class Agent:
                                     # the patch wouldn't apply. Tell the agent
                                     # so it doesn't 'fix' a working patch into
                                     # a broken one based on apply-fail noise.
-                                    if not getattr(self, "_patch_validated", False):
+                                    if (not getattr(self, "_patch_validated", False)
+                                            and getattr(self, "_patch_revision_attempts", 0)
+                                                < _MAX_PATCH_REVISION_ATTEMPTS):
                                         self._patch_validated = True
+                                        self._patch_revision_attempts = (
+                                            getattr(self, "_patch_revision_attempts", 0) + 1)
                                         bb.post(
                                             self.name, "verify",
                                             "patch failed to apply pre-test; "
@@ -3923,7 +4089,8 @@ class Agent:
                                             ),
                                         })
                                         continue
-                                    # Already retried once; surface and exit.
+                                    # Already retried, or out of revision
+                                    # attempts (W1-27): surface and exit.
                                     return AgentResult(
                                         final=final, role=self.role, name=self.name,
                                         verifier_confidence=0.0,
@@ -4001,9 +4168,15 @@ class Agent:
                                     ).strip()
                                 # Wave 9 fix (#2): one retry max so a flaky
                                 # verifier or unfixable instance doesn't loop
-                                # forever. The retry IS re-verified.
-                                if getattr(self, "_patch_validated", False):
-                                    # Already revised once; accept whatever this is.
+                                # forever. The retry IS re-verified. W1-27:
+                                # `_patch_validated` alone under-counts once a
+                                # new FINAL resets it, so also stop once the
+                                # (never-reset) revision-attempt cap is hit.
+                                if (getattr(self, "_patch_validated", False)
+                                        or getattr(self, "_patch_revision_attempts", 0)
+                                            >= _MAX_PATCH_REVISION_ATTEMPTS):
+                                    # Already revised, or out of revision
+                                    # attempts; accept whatever this is.
                                     self._already_verified = True
                                     return AgentResult(
                                         final=final, role=self.role, name=self.name,
@@ -4012,6 +4185,8 @@ class Agent:
                                         final_patch=getattr(self, "_final_patch", None),
                                     )
                                 self._patch_validated = True
+                                self._patch_revision_attempts = (
+                                    getattr(self, "_patch_revision_attempts", 0) + 1)
                                 messages.append({"role": "user", "content": critique})
                                 continue
 
@@ -4174,7 +4349,46 @@ class Agent:
 
             if not resp.tool_calls:
                 if resp.text:
-                    return AgentResult(final=resp.text, role=self.role, name=self.name)
+                    # W1-25: reaching here means resp.text carried no FINAL:
+                    # marker (find_final_marker_end returned None above) --
+                    # the entire verify/patch-validation/STOP-hook pipeline
+                    # only runs inside that branch. Give the model ONE
+                    # chance to comply before accepting an un-verified
+                    # answer as if it were fully confident.
+                    if not self._final_marker_nudge_used:
+                        self._final_marker_nudge_used = True
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "Your response must end your turn with a line "
+                                "starting `FINAL:` followed by your complete "
+                                "answer -- required so it can be verified. "
+                                "Please restate your answer now, ending with "
+                                "`FINAL: <answer>`."
+                            ),
+                        })
+                        continue
+                    # Nudged once and still no marker: accept the text as
+                    # final, but report honestly that verification never
+                    # ran -- never the default verifier_confidence=1.0,
+                    # which would claim a confidence no verifier produced.
+                    from .coding_mode import from_env as _cm_from_env
+                    try:
+                        _coding_cfg = _cm_from_env()
+                    except Exception:
+                        _coding_cfg = None
+                    _reasons = _final_uncertainty_reasons(
+                        verifier_rejected=False, verifier_incomplete=False,
+                        disagreement=0.0,
+                        coding=bool(_coding_cfg and _coding_cfg.enabled),
+                        no_final_marker=True,
+                    )
+                    return AgentResult(
+                        final=_final_with_uncertainty_note(resp.text, _reasons),
+                        role=self.role, name=self.name,
+                        verifier_confidence=0.0,
+                        verifier_critique="no FINAL: marker; verification did not run",
+                    )
                 return AgentResult(
                     error="empty response with no tools", role=self.role, name=self.name
                 )
@@ -4188,6 +4402,11 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(
                     error=f"halted: {e}", role=self.role, name=self.name,
+                )
+            if self._goal_cancelled():
+                bb.post(self.name, "error", "cancelled via dashboard")
+                return AgentResult(
+                    error="cancelled via dashboard", role=self.role, name=self.name,
                 )
 
             # Frontier-loop optimization: when the model emits 2+ tool
@@ -4316,6 +4535,14 @@ class Agent:
                         bb.post(self.name, "error", f"halted: {e}")
                         return AgentResult(
                             error=f"halted: {e}", role=self.role, name=self.name,
+                        )
+                    if self._goal_cancelled():
+                        _answer_pending_tool_uses(
+                            "ERROR: tool not executed (goal cancelled)"
+                        )
+                        bb.post(self.name, "error", "cancelled via dashboard")
+                        return AgentResult(
+                            error="cancelled via dashboard", role=self.role, name=self.name,
                         )
                     # #612: record_tool_call() calls check() and can raise
                     # mid-turn; answer pending tool_use blocks, then re-raise

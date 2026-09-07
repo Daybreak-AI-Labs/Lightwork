@@ -28,6 +28,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .git_safety import git_env_without_user_config, git_metadata_may_execute_filters
+
 CODER_CODING_MODE_TEMPLATE = """You are a coding agent solving a real software-engineering task on an
 existing codebase. Your goal is to resolve the issue described in
 the brief so the FAIL_TO_PASS tests start passing AND the PASS_TO_PASS
@@ -2027,10 +2029,27 @@ async def evaluate_candidate(
                       + ", ".join(guard.blocked_paths))
         return cand
 
+    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-4): `workdir` is the
+    # agent's own working directory. `git worktree add` / `apply` / `reset
+    # --hard` / `clean -fd` below all check out or touch tracked files, so a
+    # repo-local `[filter "x"] smudge` command (referenced from
+    # `.gitattributes`, defined in `.git/config`) executes on the host during
+    # this call -- `core.hooksPath` does NOT suppress it. Refuse to evaluate
+    # this candidate at all when such metadata is present, and scrub the
+    # environment either way so a false negative can't leak provider secrets.
+    if git_metadata_may_execute_filters(workdir):
+        cand.apply_check_passed = False
+        cand.error = (
+            "candidate evaluation refused: unsafe git filter/fsmonitor "
+            "metadata in the workdir"
+        )
+        return cand
+
     import shutil as _shutil
     import subprocess as _subprocess
     import tempfile as _tempfile
 
+    git_env = git_env_without_user_config()
     wt_root = Path(_tempfile.mkdtemp(prefix=f"maverick-cand-{index}-"))
     wt_path = wt_root / "wt"
 
@@ -2038,9 +2057,9 @@ async def evaluate_candidate(
     used_worktree = False
     try:
         proc = _subprocess.run(
-            ["git", "-C", str(workdir), "worktree", "add",
-             "--detach", str(wt_path), "HEAD"],
-            capture_output=True, timeout=60,
+            ["git", "-c", "core.hooksPath=/dev/null", "-C", str(workdir),
+             "worktree", "add", "--detach", str(wt_path), "HEAD"],
+            capture_output=True, timeout=60, env=git_env,
         )
         used_worktree = (proc.returncode == 0)
     except Exception:
@@ -2050,9 +2069,9 @@ async def evaluate_candidate(
 
     try:
         ap = _subprocess.run(
-            ["git", "-C", str(eval_dir), "apply", "-"],
+            ["git", "-c", "core.hooksPath=/dev/null", "-C", str(eval_dir), "apply", "-"],
             input=patch.encode("utf-8"),
-            capture_output=True, timeout=30,
+            capture_output=True, timeout=30, env=git_env,
         )
         if ap.returncode != 0:
             cand.error = (
@@ -2089,9 +2108,9 @@ async def evaluate_candidate(
         if used_worktree:
             try:
                 _subprocess.run(
-                    ["git", "-C", str(workdir), "worktree", "remove",
-                     "--force", str(wt_path)],
-                    capture_output=True, timeout=30,
+                    ["git", "-c", "core.hooksPath=/dev/null", "-C", str(workdir),
+                     "worktree", "remove", "--force", str(wt_path)],
+                    capture_output=True, timeout=30, env=git_env,
                 )
             except Exception:
                 pass
@@ -2103,12 +2122,14 @@ async def evaluate_candidate(
             # Fallback path: best-effort reset.
             try:
                 _subprocess.run(
-                    ["git", "-C", str(workdir), "reset", "--hard", "HEAD"],
-                    capture_output=True, timeout=20,
+                    ["git", "-c", "core.hooksPath=/dev/null", "-C", str(workdir),
+                     "reset", "--hard", "HEAD"],
+                    capture_output=True, timeout=20, env=git_env,
                 )
                 _subprocess.run(
-                    ["git", "-C", str(workdir), "clean", "-fd"],
-                    capture_output=True, timeout=20,
+                    ["git", "-c", "core.hooksPath=/dev/null", "-C", str(workdir),
+                     "clean", "-fd"],
+                    capture_output=True, timeout=20, env=git_env,
                 )
             except Exception:
                 pass

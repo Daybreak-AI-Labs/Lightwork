@@ -161,12 +161,15 @@ def test_row_returning_read_classified_sql_is_not_committed(monkeypatch):
     fake_sa.text = lambda s: s
     monkeypatch.setitem(sys.modules, "sqlalchemy", fake_sa)
 
+    # DATABASE_URL (operator-set), not a model-supplied url arg -- this test
+    # is about commit behavior for read-classified SQL with side effects,
+    # unrelated to the url-arg capability gate.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
     from maverick.tools.database_tool import database_tool
 
     out = database_tool().fn({
         "op": "query",
         "sql": "SELECT perform_side_effect()",
-        "url": "postgresql+psycopg://u:p@localhost/db",
     })
 
     assert "columns: ['n']" in out
@@ -282,12 +285,14 @@ def test_row_limit_is_clamped(monkeypatch):
     fake_sa.text = lambda s: s
     monkeypatch.setitem(__import__("sys").modules, "sqlalchemy", fake_sa)
 
+    # DATABASE_URL (operator-set), not a model-supplied url arg -- this test
+    # is about row-limit clamping, unrelated to the url-arg capability gate.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
     from maverick.tools.database_tool import database_tool
 
     database_tool().fn({
         "op": "query",
         "sql": "SELECT 1",
-        "url": "postgresql+psycopg://u:p@localhost/db",
         "limit": 100_000_000,
     })
     assert captured["size"] == 1000  # clamped to _DEFAULT_MAX_ROWS
@@ -306,3 +311,93 @@ def test_database_url_host_scope_applies_to_env_url(monkeypatch):
 
     assert "DENIED by capability" in out
     assert "evil.com" in out
+
+
+def test_model_supplied_url_denied_without_allow_hosts_or_knob(monkeypatch):
+    # W1-111: with no allow_hosts grant and the opt-in knob off (default), a
+    # model-supplied url must be refused outright -- not merely capability
+    # scoped -- so an agent cannot pick an arbitrary reachable DB server.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("MAVERICK_DATABASE_ALLOW_URL_ARG", raising=False)
+    from maverick.tools.database_tool import database_tool
+
+    out = database_tool().fn({
+        "op": "query",
+        "sql": "SELECT 1",
+        "url": "postgresql+psycopg://u:p@attacker.example/db",
+    })
+
+    assert "DENIED" in out
+    assert "database_allow_url_arg" in out
+
+
+def test_model_supplied_sqlite_url_denied_even_with_allow_hosts(monkeypatch):
+    # W1-111: sqlite: has no host for allow_hosts to scope, so it is refused
+    # unconditionally -- granting allow_hosts must not open this back up,
+    # since it would let an agent read/write this deployment's own world.db.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    from maverick.tools.database_tool import database_tool
+
+    out = database_tool().fn({
+        "op": "query",
+        "sql": "SELECT 1",
+        "url": "sqlite:///./world.db",
+        "_capability_allow_hosts": ("*",),
+    })
+
+    assert "DENIED" in out
+    assert "sqlite" in out
+
+
+def test_model_supplied_url_allowed_when_opt_in_knob_set(monkeypatch):
+    # The MAVERICK_DATABASE_ALLOW_URL_ARG knob is the deliberate operator
+    # opt-in that lets a model-supplied non-sqlite url proceed with no
+    # allow_hosts grant -- confirm it actually reaches host-scope, not the
+    # url-arg gate, by pairing it with a real reproduction below.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("MAVERICK_DATABASE_ALLOW_URL_ARG", "1")
+    from maverick.tools.database_tool import database_tool
+
+    out = database_tool().fn({
+        "op": "query",
+        "sql": "SELECT 1",
+        "url": "postgresql+psycopg://u:p@127.0.0.1:1/db",
+    })
+
+    # Past the url-arg gate: fails at connection time (nothing listening),
+    # not at the capability/knob gate.
+    assert "DENIED" not in out
+    assert out.startswith("ERROR")
+
+
+def test_model_supplied_sqlite_reproduction_now_denied(monkeypatch, tmp_path):
+    # Direct reproduction of the original W1-111 vulnerability: a
+    # model-supplied sqlite: url pointing at a file containing secret data,
+    # with no allow_hosts grant and the opt-in knob off (default). Before the
+    # fix this read the row straight back to the model; now it must deny.
+    import pytest
+    pytest.importorskip("sqlalchemy")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("MAVERICK_DATABASE_ALLOW_URL_ARG", raising=False)
+
+    db = tmp_path / "secrets.db"
+    url = f"sqlite:///{db}"
+
+    from sqlalchemy import create_engine, text
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE secrets(id INTEGER PRIMARY KEY, v TEXT)"))
+        conn.execute(text("INSERT INTO secrets(id, v) VALUES(1, 'top-secret')"))
+        conn.commit()
+    engine.dispose()
+
+    from maverick.tools.database_tool import database_tool
+
+    out = database_tool().fn({
+        "op": "query",
+        "sql": "SELECT v FROM secrets",
+        "url": url,
+    })
+
+    assert "DENIED" in out
+    assert "top-secret" not in out

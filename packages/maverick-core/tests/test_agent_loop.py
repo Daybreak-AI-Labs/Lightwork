@@ -93,6 +93,47 @@ class TestAgentLoop:
         assert result.error == "empty response with no tools"
 
     @pytest.mark.asyncio
+    async def test_marker_less_response_is_nudged_then_verified(
+        self, ctx, fake_llm, make_llm_response,
+    ):
+        # W1-25: a text-only response with no FINAL: marker used to skip the
+        # ENTIRE verify/patch-check/hook pipeline (it only runs inside the
+        # FINAL-marker branch) and return immediately with the default
+        # verifier_confidence=1.0 -- a false "fully verified" signal. Give
+        # the model one nudge to restate with the marker; if it complies,
+        # the normal FINAL pipeline (including the verifier) must still run.
+        accept = '{"confidence":0.95,"accepts":true,"critique":"ok","issues":[]}'
+        fake_llm.scripted = [
+            make_llm_response(text="The answer is 42."),          # no marker
+            make_llm_response(text="FINAL: The answer is 42."),   # nudge complied
+            make_llm_response(text=accept),                       # verifier
+        ]
+        agent = Agent(ctx=ctx, role="orchestrator", brief="compute the answer")
+        result = await agent.run()
+        assert result.final == "The answer is 42."
+        assert len(fake_llm.calls) == 3  # nudge + FINAL + verifier all ran
+        assert result.verifier_confidence == pytest.approx(0.95)
+
+    @pytest.mark.asyncio
+    async def test_marker_less_response_still_reports_honestly_after_nudge(
+        self, ctx, fake_llm, make_llm_response,
+    ):
+        # If the model ignores the explicit nudge too, the answer is still
+        # returned (we don't hang the run on an uncooperative model) but
+        # verifier_confidence must NOT claim the default 1.0 -- no verifier
+        # ever ran on this text.
+        fake_llm.scripted = [
+            make_llm_response(text="The answer is 42."),   # no marker
+            make_llm_response(text="Still 42, no marker."),  # ignores the nudge
+        ]
+        agent = Agent(ctx=ctx, role="orchestrator", brief="compute the answer")
+        result = await agent.run()
+        assert len(fake_llm.calls) == 2
+        assert result.verifier_confidence == 0.0
+        assert "could not fully verify" in result.final
+        assert "Still 42, no marker." in result.final
+
+    @pytest.mark.asyncio
     async def test_budget_exceeded_returns_error(self, ctx, fake_llm, make_llm_response):
         ctx.budget.input_tokens = ctx.budget.max_input_tokens - 1
         class _BoomLLM:
@@ -199,6 +240,139 @@ class TestAgentLoop:
         assert result.error is not None and "halted" in result.error.lower()
         # The LLM was called exactly once; the dangerous tool was never run.
         assert len(ctx.llm.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_cancelled_goal_halts_at_turn_boundary(
+        self, ctx, fake_llm, make_llm_response,
+    ):
+        """POST /goals/{id}/cancel sets world status to 'cancelled'. Its
+        docstring claims the agent loop checks status at each tool-call
+        boundary, but before this fix nothing in the loop ever read goal
+        status (W1-23): a goal cancelled before/between turns must stop the
+        run before the next LLM call, exactly like the global killswitch."""
+        fake_llm.scripted = [
+            make_llm_response(
+                text="acting",
+                tool_calls=[ToolCall(id="t1", name="shell",
+                                     input={"cmd": "echo hi"})],
+            ),
+        ]
+        ctx.world.set_goal_status(
+            ctx.goal_id, "cancelled", result="cancelled via dashboard")
+        agent = Agent(ctx=ctx, role="researcher", brief="should be cancelled")
+        result = await agent.run()
+        assert result.error is not None and "cancelled" in result.error.lower()
+        # Cancellation is checked before the LLM call, so the model was
+        # never invoked.
+        assert fake_llm.calls == []
+
+    @pytest.mark.asyncio
+    async def test_cancelled_goal_halts_before_tool_dispatch(
+        self, ctx, make_llm_response,
+    ):
+        """A cancellation that lands DURING the LLM call (the user clicks
+        Cancel mid-think) is honoured at the tool-call boundary: the
+        returned tool never runs."""
+        class _CancellingLLM:
+            model = "fake:test"
+
+            def __init__(self, world, goal_id):
+                self.calls = []
+                self._world = world
+                self._goal_id = goal_id
+
+            async def complete_async(self, **kwargs):
+                self.calls.append(kwargs)
+                self._world.set_goal_status(
+                    self._goal_id, "cancelled", result="cancelled via dashboard")
+                return make_llm_response(
+                    text="acting",
+                    tool_calls=[ToolCall(id="t1", name="shell",
+                                         input={"cmd": "rm -rf /"})],
+                )
+
+        ctx.llm = _CancellingLLM(ctx.world, ctx.goal_id)
+        agent = Agent(ctx=ctx, role="coder", brief="...")
+        result = await agent.run()
+        assert result.error is not None and "cancelled" in result.error.lower()
+        # The LLM was called exactly once; the dangerous tool was never run.
+        assert len(ctx.llm.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_cancelled_goal_stops_mid_turn_without_orphaning_tool_use(
+        self, ctx, make_llm_response, monkeypatch,
+    ):
+        """A single turn with TWO serial tool calls: cancellation lands
+        (via _run_tool, standing in for a concurrent dashboard click) after
+        the first tool runs but before the second. The serial per-tool
+        check must stop before dispatching the second AND -- like the
+        #612 budget-trip fix it mirrors -- answer the already-emitted
+        tool_use so no orphan reaches a resume/parent."""
+        fake_llm_scripted = [
+            make_llm_response(
+                text="acting",
+                tool_calls=[
+                    ToolCall(id="a", name="shell", input={"cmd": "echo 1"}),
+                    ToolCall(id="b", name="shell", input={"cmd": "echo 2"}),
+                ],
+                stop_reason="tool_use",
+            ),
+        ]
+
+        class _CapturingLLM:
+            model = "fake:test"
+
+            def __init__(self, scripted):
+                self.scripted = list(scripted)
+                self.last_messages = None
+
+            async def complete_async(self, *, system, messages, **kwargs):
+                self.last_messages = messages
+                if self.scripted:
+                    return self.scripted.pop(0)
+                return make_llm_response(text="FINAL: should never get here")
+
+        llm = _CapturingLLM(fake_llm_scripted)
+        ctx.llm = llm
+        agent = Agent(ctx=ctx, role="researcher", brief="...")
+
+        real_run_tool = agent._run_tool
+        calls: list[str] = []
+
+        async def _tracking_run_tool(name, args):
+            calls.append(args.get("cmd"))
+            out = await real_run_tool(name, args)
+            if len(calls) == 1:
+                ctx.world.set_goal_status(
+                    ctx.goal_id, "cancelled", result="cancelled via dashboard")
+            return out
+
+        monkeypatch.setattr(agent, "_run_tool", _tracking_run_tool)
+        result = await agent.run()
+
+        assert calls == ["echo 1"]  # the second tool never ran
+        assert result.error is not None and "cancelled" in result.error.lower()
+        # No orphan tool_use: both t1/t2 in the assistant turn have a
+        # matching tool_result in the following user message.
+        assert llm.last_messages is not None
+        for i, m in enumerate(llm.last_messages):
+            if m.get("role") != "assistant":
+                continue
+            content = m.get("content")
+            if not isinstance(content, list):
+                continue
+            tool_use_ids = [
+                b["id"] for b in content
+                if isinstance(b, dict) and b.get("type") == "tool_use"
+            ]
+            if not tool_use_ids:
+                continue
+            nxt = llm.last_messages[i + 1]
+            answered = {
+                b["tool_use_id"] for b in nxt["content"]
+                if isinstance(b, dict) and b.get("type") == "tool_result"
+            }
+            assert set(tool_use_ids) <= answered
 
     @pytest.mark.asyncio
     async def test_shield_blocks_tool_call(self, ctx, fake_llm, make_llm_response):

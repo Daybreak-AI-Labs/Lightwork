@@ -181,24 +181,38 @@ def _denied(url: str) -> str | None:
     """Denial reason for an outbound URL, or None to allow.
 
     Resolved at request time rather than at install time: enterprise mode, the
-    compliance floor, and the allow-list are all live config, and a deployment
-    that turns the boundary on must not have to restart to get it.
+    compliance floor, the allow-list, and the tenant egress plane are all live
+    config, and a deployment that turns the boundary on must not have to
+    restart to get it.
+
+    Composes the per-tenant egress plane (:mod:`maverick.tenant.egress` --
+    independent of enterprise mode, since a tenant boundary matters whether or
+    not enterprise mode is on) with the enterprise allow-list: a request is
+    admitted only when BOTH permit it. Before this, the tenant plane was
+    consulted directly by exactly one tool (``http_fetch``) despite its own
+    docstring claiming it applies to every tool -- hooking it in here, at the
+    seam every httpx/requests/urllib call already funnels through, is what
+    actually makes that claim true (platform audit W2-69).
     """
-    try:
-        from .enterprise import egress_permitted
-        if egress_permitted(url):
-            return None
-    # failure-policy: fail_closed
-    except Exception:
-        log.exception("egress guard: policy unavailable; refusing egress to %r", url)
-        return ("egress policy could not be evaluated, so the boundary stays "
-                "closed")
     host = ""
     try:
         from .enterprise import _host_of
         host = _host_of(url)
     except Exception:  # failure-policy: best_effort
         host = ""
+    tenant_denied = False
+    try:
+        from .enterprise import egress_permitted
+        enterprise_ok = egress_permitted(url)
+        from .tenant.egress import host_allowed
+        tenant_denied = bool(host) and not host_allowed(host)
+        if enterprise_ok and not tenant_denied:
+            return None
+    # failure-policy: fail_closed
+    except Exception:
+        log.exception("egress guard: policy unavailable; refusing egress to %r", url)
+        return ("egress policy could not be evaluated, so the boundary stays "
+                "closed")
     # Deliberate, narrow exception to the audit-refusal contract.
     #
     # That contract exists so "we could not record this action" never becomes
@@ -224,6 +238,11 @@ def _denied(url: str) -> str | None:
             "egress guard: blocked egress to %r but the audit subsystem "
             "refused to record it; the request is still refused",
             host or url)
+    if tenant_denied:
+        return (
+            f"egress policy blocks this request to {host or url!r} "
+            "(see [egress] / [tenancy.egress.<tenant>])."
+        )
     return (
         f"enterprise mode: refusing egress to {host or url!r} -- not a local "
         "endpoint and not in [enterprise] allowed_hosts. The application "

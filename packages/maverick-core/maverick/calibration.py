@@ -99,10 +99,14 @@ _DEFAULTS = {
 _lock = threading.Lock()
 
 
-def _settings() -> dict:
+def _settings(*, config: dict | None = None) -> dict:
+    """``config`` is only ever forwarded when actually given one, so the
+    many existing test doubles for this function (a zero-argument
+    ``lambda: {...}``) keep working when this is called the old, plain
+    way -- only ``learning_frozen``'s config-reuse path passes one."""
     try:
         from .config import get_calibration
-        return get_calibration()
+        return get_calibration() if config is None else get_calibration(config=config)
     except Exception:  # pragma: no cover -- config must never block a run
         return dict(_DEFAULTS)
 
@@ -439,7 +443,9 @@ def _load_verdict(path: Path | None = None) -> dict | None:
     return verdict if isinstance(verdict, dict) else None
 
 
-def learning_frozen(*, verdict_path: Path | None = None) -> bool:
+def learning_frozen(
+    *, verdict_path: Path | None = None, config: dict | None = None,
+) -> bool:
     """Whether self-improvement should be frozen because the verifier drifted.
 
     True only when enforcement is enabled AND a persisted assessment exists and
@@ -453,13 +459,18 @@ def learning_frozen(*, verdict_path: Path | None = None) -> bool:
     A/B harness to force a clean control arm independent of verifier drift:
     ``1/true/on`` forces frozen (no learning), ``0/false/off`` forces unfrozen,
     anything else falls through to the calibration logic below.
+
+    ``config`` lets a caller that already loaded config reuse that snapshot
+    for the ``[calibration]`` lookup; only forwarded when actually given one,
+    so the many existing ``_settings`` test doubles (zero-argument) keep
+    working when this is called the old, plain way.
     """
     override = os.environ.get("MAVERICK_LEARNING_FROZEN", "").strip().lower()
     if override in {"1", "true", "yes", "on"}:
         return True
     if override in {"0", "false", "no", "off"}:
         return False
-    s = _settings()
+    s = _settings() if config is None else _settings(config=config)
     if not s["enforce"]:
         return False
     if verdict_path is None:
@@ -469,6 +480,30 @@ def learning_frozen(*, verdict_path: Path | None = None) -> bool:
         # No assessment has run: we have no evidence of drift, so don't freeze.
         return False
     return not bool(verdict.get("adequate", True))
+
+
+def learning_frozen_safe(*, config: dict | None = None) -> bool:
+    """``learning_frozen()``, but never raises into a caller that can't afford
+    to: an interlock deciding whether to distill/consolidate/rehearse must
+    fail OPEN (not frozen) rather than crash the learning loop if calibration
+    itself is unavailable or its state is unreadable.
+
+    Three call sites (``dreaming.rehearse``, ``dreaming._consolidate_learning``,
+    ``orchestrator``'s per-run skill distillation gate) each independently
+    wrapped ``learning_frozen()`` in this exact
+    ``try: ... except Exception: return False`` shape; sharing it here means a
+    future change to what "fail open" should mean here only has one place to
+    change. Deliberately drops ``verdict_path`` -- no call site has ever
+    needed a custom one. ``config`` exists ONLY so orchestrator's per-run
+    gate (the one call site that also checks ``distillation_local.enabled()``
+    in the same breath) can load config once for both checks; it is never
+    forwarded unless actually given, so every existing zero-argument test
+    double for ``learning_frozen`` keeps working when this is called the
+    old, plain way."""
+    try:
+        return bool(learning_frozen() if config is None else learning_frozen(config=config))
+    except Exception:  # pragma: no cover -- interlock absent = not frozen
+        return False
 
 
 __all__ = [
@@ -482,6 +517,7 @@ __all__ = [
     "load_samples",
     "run_assessment",
     "learning_frozen",
+    "learning_frozen_safe",
     "SAMPLES_PATH",
     "VERDICT_PATH",
     "RISK_VERDICT_PATH",

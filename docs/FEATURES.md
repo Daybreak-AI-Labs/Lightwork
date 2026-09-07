@@ -266,8 +266,10 @@ here.
   shared insights. Department-scoped failures remain compartment-local and are
   never synthesized into globally recallable `domain=None` insights.
 - **Skill retirement (the forgetting loop)** — a dream phase moves learned
-  skills with a decayed track record (`skill_stats.evictable`: enough uses,
-  win rate under the floor) to `learned-skills/retired/` with a logged
+  skills with a decayed track record (`skill_stats.evictable`: enough uses
+  AND the Wilson-score CONFIDENCE upper bound on win rate under the floor —
+  not the raw win rate, so a thin sample near the floor is not retired on
+  the point estimate alone) to `learned-skills/retired/` with a logged
   reason — out of the recall glob, reversible by moving the file back
   (`[dreaming] retire_skills / retire_min_uses / retire_below`).
 - **Dream-time rehearsal** — dream cycles queue the biggest recurring
@@ -2597,9 +2599,11 @@ skip container startup; torn down on `close()`.
 
 ## LLM providers & routing
 
-13 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
-Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (generic
-OpenAI-compatible via `base_url`), and **Codex CLI**
+14 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
+Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM, and
+`openai_compatible` (a separate generic-gateway provider — any other
+OpenAI-compatible server or proxy via a configurable `base_url`: LM Studio,
+llama.cpp, Together, Groq, etc.), and **Codex CLI**
 (`providers/codex_cli_provider.py`: ChatGPT/Codex *subscription* via a local
 `codex exec` subprocess — auth from `CODEX_ACCESS_TOKEN` or `codex login`,
 token fed on STDIN only; tool calls emulated via a fenced-JSON protocol;
@@ -2725,10 +2729,12 @@ Opus 4.7/4.8: model-gated `output_config.effort` tiered by role (critical roles
 `high`, bulk roles `medium`/`low`), opt-in via `[effort] enabled`.
 
 **Prompt caching** (`providers/anthropic_provider.py`) — frozen system prompt +
-name-sorted tool catalog + a stable-history-prefix breakpoint (with a secondary
-breakpoint on long turns for the 20-block lookback), 1h TTL; opt-in **cache
-pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
-`maverick_llm_cache_tokens_total` hit-rate metric.
+name-sorted tool catalog (1h TTL) + a stable-history-prefix breakpoint (5m TTL,
+with a secondary breakpoint on long turns for the 20-block lookback); billing
+reads Anthropic's per-tier `cache_creation` split (5m vs 1h write surcharge)
+when the response reports it, rather than pricing the whole write at one TTL.
+Opt-in **cache pre-warming** (`max_tokens=0` prefill at orchestrator start)
+and a `maverick_llm_cache_tokens_total` hit-rate metric.
 
 ## MCP & agent interop
 

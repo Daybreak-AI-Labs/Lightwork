@@ -19,7 +19,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -66,8 +66,11 @@ def _base() -> str:
 def _op_query(entity: str, params: dict) -> str:
     if not entity:
         return "ERROR: query requires entity"
+    seg = safe_path_segment(entity)
+    if seg is None:
+        return "ERROR: query requires a valid entity"
     import httpx
-    r = httpx.get(f"{_base()}/{entity}", headers=_headers(),
+    r = httpx.get(f"{_base()}/{seg}", headers=_headers(),
                   params=params or {}, timeout=30.0)
     try:
         data = r.json()
@@ -88,10 +91,13 @@ def _op_query(entity: str, params: dict) -> str:
 def _op_create(entity: str, fields: dict, confirm: bool) -> str:
     if not entity or not fields:
         return "ERROR: create requires entity and fields"
+    seg = safe_path_segment(entity)
+    if seg is None:
+        return "ERROR: create requires a valid entity"
     if not confirm:
         return f"DRY RUN: would create a {entity} row. Re-run with confirm=true."
     import httpx
-    r = httpx.post(f"{_base()}/{entity}", headers=_headers(), json=fields, timeout=30.0)
+    r = httpx.post(f"{_base()}/{seg}", headers=_headers(), json=fields, timeout=30.0)
     if r.status_code >= 400:
         try:
             return f"ERROR: create ({r.status_code}): {r.json().get('error', r.text[:300])}"

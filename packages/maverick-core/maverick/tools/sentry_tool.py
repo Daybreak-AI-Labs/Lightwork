@@ -22,7 +22,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +112,10 @@ def _op_issues(query: str, limit: int) -> str:
 
 
 def _op_issue_get(issue_id: str) -> str:
-    code, data = _get(f"/issues/{issue_id}/")
+    seg = safe_path_segment(issue_id)
+    if seg is None:
+        return "ERROR: issue_get requires a valid issue_id"
+    code, data = _get(f"/issues/{seg}/")
     if code == 404:
         return f"issue {issue_id!r} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -130,8 +133,11 @@ def _op_issue_get(issue_id: str) -> str:
 
 
 def _op_events(issue_id: str, limit: int) -> str:
+    seg = safe_path_segment(issue_id)
+    if seg is None:
+        return "ERROR: events requires a valid issue_id"
     code, data = _get(
-        f"/issues/{issue_id}/events/", {"limit": limit},
+        f"/issues/{seg}/events/", {"limit": limit},
     )
     if code >= 400 or not isinstance(data, list):
         return f"ERROR: events ({code}): {data}"
@@ -149,9 +155,12 @@ def _op_events(issue_id: str, limit: int) -> str:
 
 
 def _op_resolve(issue_id: str, confirm: bool) -> str:
+    seg = safe_path_segment(issue_id)
+    if seg is None:
+        return "ERROR: resolve requires a valid issue_id"
     if not confirm:
         return f"DRY RUN: would resolve {issue_id}. Re-run with confirm=true."
-    code, data = _put(f"/issues/{issue_id}/", {"status": "resolved"})
+    code, data = _put(f"/issues/{seg}/", {"status": "resolved"})
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: resolve ({code}): {data}"
     return f"resolved {issue_id} (status={data.get('status')})"

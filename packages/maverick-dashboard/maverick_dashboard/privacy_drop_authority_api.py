@@ -25,6 +25,7 @@ from maverick.privacy_drop_management import (
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import require_global_permission
 
 ClosedRef = Annotated[
@@ -208,12 +209,9 @@ def _tenant_id() -> str:
 
 
 def _principal(request: Request, tenant_id: str) -> str:
-    verified = getattr(request.state, "principal", None)
-    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise HTTPException(status_code=401, detail="an authenticated principal is required")
+    subject = authenticated_subject(request, error_detail="an authenticated principal is required")
     digest = hashlib.sha256(
-        f"lightwork.privacy-drop.identity.v1:{tenant_id}:{subject.strip()}".encode()
+        f"lightwork.privacy-drop.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"drop-principal-{digest[:32]}"
 

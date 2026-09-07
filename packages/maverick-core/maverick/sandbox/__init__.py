@@ -477,7 +477,10 @@ def build_sandbox(
             image=_resolve_image(full_cfg),
             namespace=full_cfg.get("namespace", "default"),
             context=full_cfg.get("context"),
-            workdir=Path(full_cfg.get("workdir", "/workspaces/repo")),
+            # HOST directory, same as every other container backend -- it's
+            # streamed into the pod's emptyDir via `kubectl cp`, not used as
+            # an in-pod path (see KubernetesBackend's module docstring).
+            workdir=wd,
             timeout=timeout,
             allow_network=_config_bool(full_cfg.get("allow_network"), False),
             extra_kubectl_args=full_cfg.get("extra_kubectl_args") or [],

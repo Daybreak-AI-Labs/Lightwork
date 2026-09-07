@@ -148,7 +148,9 @@ def _create(client: TestClient, *, actor: str = "creator") -> dict:
     return response.json()
 
 
-def test_status_is_store_free_honest_and_requires_authenticated_principal(environment) -> None:
+def test_status_is_store_free_honest_and_requires_authenticated_principal(
+    environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, _database, state = environment
     response = client.get(f"{API}/status")
     assert response.status_code == 200, response.text
@@ -186,11 +188,25 @@ def test_status_is_store_free_honest_and_requires_authenticated_principal(enviro
     assert state["factory_calls"] == []
 
     state["enabled"] = True
+    monkeypatch.setattr("maverick_dashboard.auth.anonymous_local_access_allowed", lambda: False)
+    monkeypatch.setattr("maverick_dashboard.auth._dashboard_token_authenticated", lambda _r: False)
     unauthenticated = client.get(
         f"{API}/status",
         headers={"X-Test-No-Principal": "1"},
     )
     assert unauthenticated.status_code == 401
+
+
+def test_status_grants_a_synthetic_operator_ref_under_genuine_auth_off(environment) -> None:
+    """A missing principal is not ALWAYS a 401: genuine local auth-off mode
+    and a valid static dashboard bearer are both already-authenticated
+    shapes require_permission() itself accepts (W3-1)."""
+    client, _database, _state = environment
+    response = client.get(
+        f"{API}/status",
+        headers={"X-Test-No-Principal": "1"},
+    )
+    assert response.status_code == 200
 
 
 def test_hashed_principal_and_factory_never_receive_browser_scope(environment) -> None:

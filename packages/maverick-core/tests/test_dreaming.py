@@ -458,7 +458,11 @@ class TestSkillRetirement:
         return store, stats
 
     def test_decayed_skill_is_retired_reversibly(self, tmp_path):
-        store, stats = self._seed(tmp_path, wins=1, losses=9)
+        # n=20 so the Wilson upper bound on the observed 1/20 win rate
+        # (~0.24) actually clears the 0.25 threshold -- retirement now gates
+        # on a confidence bound, not the raw point estimate, so a thin
+        # sample (e.g. 1 win in 5) is deliberately NOT enough evidence.
+        store, stats = self._seed(tmp_path, wins=1, losses=19)
         retired = dreaming.retire_stale_skills(
             store, min_uses=5, below=0.25, stats_path=stats,
         )
@@ -494,6 +498,40 @@ class TestSkillRetirement:
         assert retired == ["never-won"]
         assert (store / "retired" / "never-won.md").exists()
 
+    def _read_retired_log(self, store):
+        import json
+        lines = (store / "retired" / "retired.ndjson").read_text(
+            encoding="utf-8").splitlines()
+        return {json.loads(ln)["name"]: json.loads(ln) for ln in lines}
+
+    def test_retired_log_reason_matches_the_wilson_bound_rule(self, tmp_path):
+        # The audit-trail "reason" must describe the rule that ACTUALLY fired
+        # (a confidence bound), not the pre-Wilson point-estimate wording --
+        # an operator/auditor reading retired.ndjson must not be misled about
+        # why a skill was retired.
+        store, stats = self._seed(tmp_path, wins=1, losses=19)
+        dreaming.retire_stale_skills(store, min_uses=5, below=0.25, stats_path=stats)
+        rows = self._read_retired_log(store)
+        assert "Wilson" in rows["flaky-skill"]["reason"]
+        assert "win rate" not in rows["flaky-skill"]["reason"].split("Wilson")[0]
+
+    def test_retired_log_reason_distinguishes_probation(self, tmp_path):
+        # Probation is a DIFFERENT rule (0 wins in >= 3 uses, no confidence
+        # bound involved) from the Wilson-gated main path -- it must not
+        # reuse that path's reason text.
+        import json
+        store = tmp_path / "learned-skills"
+        store.mkdir()
+        (store / "never-won.md").write_text("# nw", encoding="utf-8")
+        stats = tmp_path / "skill_stats.json"
+        stats.write_text(json.dumps({
+            "never-won": {"uses": 3, "wins": 0, "losses": 3, "last_used": 1.0},
+        }), encoding="utf-8")
+        dreaming.retire_stale_skills(store, min_uses=5, below=0.25, stats_path=stats)
+        rows = self._read_retired_log(store)
+        assert "probation" in rows["never-won"]["reason"]
+        assert "Wilson" not in rows["never-won"]["reason"]
+
 
 class TestBenchmarkCanary:
     def test_new_skills_quarantined_while_regressing(self, tmp_path, monkeypatch):
@@ -519,6 +557,29 @@ class TestBenchmarkCanary:
         import maverick.continuous_benchmark as cb
         monkeypatch.setattr(cb, "load_history", lambda p: [])
         assert dreaming.benchmark_regressed() is False
+
+    def test_stable_history_reads_as_green(self, monkeypatch):
+        # Real detect_regression() call (no monkeypatch of benchmark_regressed
+        # itself): detect_regression returns a REPORT DICT, which is always
+        # truthy -- `any(detect_regression(...) for ...)` would read this as
+        # regressing just because a tracked benchmark has history at all,
+        # even when its own "regressed" field is False.
+        import maverick.continuous_benchmark as cb
+        history: list = []
+        for _ in range(5):
+            cb.record_result(history, "swe", 0.80)
+        cb.record_result(history, "swe", 0.79)  # well within threshold
+        monkeypatch.setattr(cb, "load_history", lambda p: history)
+        assert dreaming.benchmark_regressed() is False
+
+    def test_real_regression_is_detected(self, monkeypatch):
+        import maverick.continuous_benchmark as cb
+        history: list = []
+        for _ in range(5):
+            cb.record_result(history, "swe", 0.80)
+        cb.record_result(history, "swe", 0.50)  # a real, large drop
+        monkeypatch.setattr(cb, "load_history", lambda p: history)
+        assert dreaming.benchmark_regressed() is True
 
 
 class TestRehearsal:

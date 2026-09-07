@@ -9,9 +9,14 @@ audit chain, stored under ``data_dir("audit", "keys")``):
 
   - ``pubkey`` / ``key_id``: the signer's raw Ed25519 public key (hex) and
     fingerprint, included in the signed bytes;
-  - ``sig``: Ed25519 signature over the SHA-256 of the canonical JSON
-    (``sort_keys=True``) of every field except ``sig`` — byte-for-byte the
-    convention ``audit.signing.AuditSigner`` uses for chain rows.
+  - ``sig``: Ed25519 signature over ``FEDERATION_ENVELOPE_MESSAGE_VERSION +
+    b"\\x00" +`` the SHA-256 digest of the canonical JSON (``sort_keys=True``)
+    of every field except ``sig``. The digest computation reuses the audit
+    chain's canonicalization, but the signed message is domain-separated from
+    it (and from detached evidence-export signatures) by the version prefix --
+    without it, an envelope signature would be indistinguishable from, and
+    replayable as, a signature over an ``audit.signing.AuditSigner`` chain-row
+    hash produced under the same key.
 
 Trust model — **fail-closed, pinned keys**: verification only succeeds when
 the envelope's ``origin`` appears in the operator's ``[federation]`` peer
@@ -133,6 +138,20 @@ def _digest(payload: dict) -> str:
     ).hexdigest()
 
 
+# Domain-separated, versioned prefix for the bytes actually signed/verified.
+# The digest above intentionally reuses the audit chain row-hash convention,
+# but signing the bare digest would make an envelope signature indistinguishable
+# from -- and replayable as -- an AuditSigner chain-row signature or a detached
+# evidence-export signature produced under the same audit Ed25519 key. This
+# prefix is what makes the three uses of that one key cryptographically
+# distinct even though all three hash canonical JSON the same way.
+FEDERATION_ENVELOPE_MESSAGE_VERSION = "maverick-federation-envelope/v1"
+
+
+def _envelope_message(digest_hex: str) -> bytes:
+    return FEDERATION_ENVELOPE_MESSAGE_VERSION.encode("utf-8") + b"\x00" + bytes.fromhex(digest_hex)
+
+
 # Envelopes are flat field maps; the deepest legitimate shape is a marketplace
 # bundle (a list of flat listing dicts) — depth ~3. A hostile peer can otherwise
 # send a deeply-nested object whose canonical-JSON encoding (``_digest`` ->
@@ -184,7 +203,7 @@ def sign_envelope(payload: dict) -> dict:
     env["pubkey"] = pub.hex()
     env["key_id"] = key_id
     digest = _digest(env)
-    env["sig"] = signer.sign(bytes.fromhex(digest)).hex()
+    env["sig"] = signer.sign(_envelope_message(digest)).hex()
     return env
 
 
@@ -228,7 +247,7 @@ def verify_envelope(
     if not audit_signing._have_crypto():
         return False, "cryptography not installed; refusing to apply an unverifiable envelope"
     body = {k: v for k, v in envelope.items() if k != "sig"}
-    if not audit_signing.verify_ed25519(pinned, sig, bytes.fromhex(_digest(body))):
+    if not audit_signing.verify_ed25519(pinned, sig, _envelope_message(_digest(body))):
         return False, "signature verification failed"
     return True, "ok"
 
@@ -241,4 +260,5 @@ __all__ = [
     "verify_envelope",
     "valid_origin",
     "DEFAULT_ORIGIN",
+    "FEDERATION_ENVELOPE_MESSAGE_VERSION",
 ]

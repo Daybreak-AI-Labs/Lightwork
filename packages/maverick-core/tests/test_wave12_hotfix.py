@@ -87,18 +87,31 @@ class TestOpus47AdaptiveThinking:
 
 
 class TestLowCacheWarning:
-    """The 4096-token min cacheable block on Sonnet 4.6 / Opus 4.7 means
-    Lightwork's current ~1085-tok system + ~716-tok tools won't actually
-    cache. Operators need to see this in logs."""
+    """The min cacheable block on Opus 4.6/4.5 and Haiku 4.5 is 4096 tokens
+    (2048 for Opus 4.7; 1024 for everything else, including the current
+    defaults Sonnet 4.6 and Opus 4.8), so a small enough system+tools block
+    won't actually cache. Operators need to see this in logs.
+
+    W1-4: the table used to put Sonnet 4.6/4.5 and Opus 4.7/4.8 at the 4096
+    minimum too (verified wrong against
+    https://platform.claude.com/docs/en/build-with-claude/prompt-caching:
+    Opus 4.7 is 2048, the rest are 1024)."""
 
     def test_min_cache_tokens_for_modern_models(self):
         from maverick.providers.anthropic_provider import _min_cache_tokens
-        assert _min_cache_tokens("claude-opus-4-7") == 4096
+        assert _min_cache_tokens("claude-opus-4-7") == 2048
         assert _min_cache_tokens("claude-opus-4-6") == 4096
         assert _min_cache_tokens("claude-opus-4-5") == 4096
-        assert _min_cache_tokens("claude-sonnet-4-6") == 4096
-        assert _min_cache_tokens("claude-sonnet-4-5") == 4096
+        assert _min_cache_tokens("claude-opus-4-8") == 1024
+        assert _min_cache_tokens("claude-sonnet-4-6") == 1024
+        assert _min_cache_tokens("claude-sonnet-4-5") == 1024
         assert _min_cache_tokens("claude-haiku-4-5") == 4096
+
+    def test_min_cache_tokens_for_current_generation_models(self):
+        from maverick.providers.anthropic_provider import _min_cache_tokens
+        assert _min_cache_tokens("claude-opus-5") == 512
+        assert _min_cache_tokens("claude-sonnet-5") == 1024
+        assert _min_cache_tokens("claude-fable-5-1") == 512
 
     def test_min_cache_tokens_for_legacy_models(self):
         from maverick.providers.anthropic_provider import _min_cache_tokens

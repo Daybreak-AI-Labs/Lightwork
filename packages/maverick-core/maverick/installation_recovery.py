@@ -429,7 +429,7 @@ def _verify_completed_state(directory: Path, record: dict, outcome: str) -> None
         # that representation. Non-database bytes remain exact hash checks.
         with backup._temporary_directory(prefix="lightwork-completion-check-") as temporary:
             stage = file_lock.ensure_private_directory(temporary / "data")
-            observed = backup._stage(_home(), stage)
+            observed = backup._stage(_home(), stage, include_keys=backup._archive_includes_keys(expected))
             if set(observed) != set(expected):
                 raise MaintenanceError("Local files changed after the completion receipt.")
             backup._verify_restored(stage, expected)

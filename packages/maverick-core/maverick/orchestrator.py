@@ -14,7 +14,13 @@ from typing import Any
 
 from .agent import Agent
 from .blackboard import Blackboard
-from .budget import Budget, BudgetExceeded
+from .budget import Budget, BudgetExceeded, UnpricedModelError
+from .git_safety import (
+    git_env_without_user_config as _git_env_without_user_config,
+)
+from .git_safety import (
+    git_metadata_may_execute_filters as _git_metadata_may_execute_filters,
+)
 from .llm import LLM, model_for_role
 from .mcp_client import load_mcp_specs_from_config, start_mcp_clients, stop_mcp_clients
 from .sandbox import LocalBackend
@@ -34,6 +40,28 @@ def _enrich(label: str):
         yield
     except Exception as e:  # pragma: no cover -- enrichment never blocks a run
         log.debug("%s skipped: %s", label, e)
+
+def _skill_distillation_frozen(*, config: dict | None = None) -> bool:
+    """Whether calibration has frozen learning (the verifier drifted and no
+    longer discriminates correct from incorrect).
+
+    ``dreaming._consolidate_learning`` already refuses to distill skills or
+    synthesize insights while frozen; the per-run local distillation below
+    fed the same success/failure labels straight into a saved, recallable
+    skill with no such check, making the interlock a no-op for the busiest
+    distillation path. A thin, unit-testable name for
+    ``calibration.learning_frozen_safe()`` at this call site -- shared with
+    ``dreaming.rehearse`` and ``dreaming._consolidate_learning``, which used
+    to each carry their own copy of the same fail-open try/except.
+
+    ``config`` lets the call site below reuse the config it already loaded
+    for ``distillation_local.enabled()`` instead of loading it a second
+    time; only forwarded when actually given one, so a bare
+    ``_skill_distillation_frozen()`` call (every existing test) is
+    unaffected."""
+    from .calibration import learning_frozen_safe
+    return learning_frozen_safe() if config is None else learning_frozen_safe(config=config)
+
 
 # The "skill distill disabled" opt-in hint is a standing setting, not a
 # per-goal event -- show it at most once per process (see run_goal).
@@ -192,6 +220,22 @@ def _format_tree_of_thought_plan(winning_plan: str, *, shield: Any | None = None
         "<tree_of_thought_plan>\n"
         f"{plan}\n"
         "</tree_of_thought_plan>"
+    )
+
+
+def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
+    """W1-30: a genuinely unpriced model is not a cap trip -- raising the cap
+    and resuming (``_budget_exceeded_message``'s advice) fails identically,
+    because the real problem is that Lightwork refuses to bill a model with
+    no verified price, not that spend or time ran out.
+    """
+    return (
+        "Stopped: this goal used a model with no verified price, so "
+        "Lightwork refused to bill it rather than guess.\n"
+        f"Detail: {exc}\n"
+        "Fix: add a sourced price for this model to the rate card, or set "
+        "[budget] strict_pricing = false to allow a warning-labelled "
+        f"estimate, then resume: maverick resume {goal_id}"
     )
 
 
@@ -1586,6 +1630,28 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
 
         try:
             result = await root.run()
+        except UnpricedModelError as e:
+            # W1-30: a genuinely unpriced model, not a cap trip -- must be
+            # caught BEFORE the BudgetExceeded clause below (it's a
+            # subclass) or it's reported as "raise your cap and resume",
+            # advice that fails identically since spend was never the issue.
+            _lifecycle.end_episode(f"unpriced model: {e}", "failure")
+            try:  # default-on local failure telemetry; no-op when disabled
+                from . import failure_telemetry as _ft
+                _ft.record_failure("unpriced_model", goal_id=goal_id, detail=str(e))
+            except Exception:  # pragma: no cover -- telemetry never blocks a run
+                pass
+            _maybe_record_reflexion(
+                goal, failure_class="unpriced_model", failure_msg=str(e),
+                blackboard=blackboard, shield=shield, channel=channel,
+                user_id=user_id, domain=domain,
+            )
+            world.set_goal_status(goal_id, "blocked", result=f"unpriced model: {e}")
+            _fire_webhook("goal_finished", {
+                "goal_id": goal_id, "status": "blocked",
+                "result": f"unpriced model: {e}",
+            })
+            return _unpriced_model_message(e, goal_id)
         except BudgetExceeded as e:
             _lifecycle.end_episode(f"budget: {e}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
@@ -1726,6 +1792,28 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "result": f"budget exceeded: {be}",
                 })
                 return _budget_exceeded_message(budget, goal_id)
+            # W1-30: an unpriced model inside a spawned child is swallowed by
+            # the agent into `result.error` (same reason a budget cap trip
+            # is), not raised -- `budget.check()` above never sees it (it's
+            # not a cap trip). Detect it via agent.py's "unpriced model:"
+            # label and give the pricing remediation, not the "raise your
+            # cap and resume" advice that fails identically.
+            if (result.error or "").startswith("unpriced model:"):
+                _lifecycle.end_episode(result.error, "failure")
+                _maybe_record_reflexion(
+                    goal, failure_class="unpriced_model", failure_msg=result.error,
+                    blackboard=blackboard, shield=shield, channel=channel,
+                    user_id=user_id, domain=domain,
+                )
+                world.set_goal_status(goal_id, "blocked", result=result.error)
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": result.error,
+                })
+                # Strip the "unpriced model: " label back off so the Detail
+                # line reads the same raw pricing message as the direct-raise
+                # handler above, instead of doubling the label.
+                _detail = result.error.split(": ", 1)[-1]
+                return _unpriced_model_message(_detail, goal_id)
             # A halt tripped mid-run surfaces as result.error too. Give the
             # clear unhalt instruction rather than the generic error (whose
             # 'resume' advice would just halt again).
@@ -1989,7 +2077,16 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         auto_distill = os.getenv("MAVERICK_AUTO_DISTILL", "").strip().lower() in {
             "1", "true", "yes", "on",
         }
-        if auto_distill:
+        # Same calibration-freeze interlock as the local distillation path
+        # below (and dreaming._consolidate_learning): a drifted verifier's
+        # success/failure labels must not seed a new, LLM-written, recallable
+        # skill either. This is the second of the two distillation call
+        # sites the freeze needs to reach -- this one is opt-in but still
+        # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
+        if auto_distill and _skill_distillation_frozen():
+            auto_distill = False
+            skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
+        elif auto_distill:
             try:
                 skill = distill(goal.title, summary, blackboard, llm, budget=budget)
                 # A None return means the distiller's output failed the skill
@@ -2020,8 +2117,15 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # the persisted goal history as trajectories, so no extra store is
         # needed. No-op when explicitly disabled; never raises into the run.
         with _enrich("local skill distillation"):
+            # Load config once and reuse it for both checks below (each
+            # otherwise independently calls config.load_config() for its own
+            # section) -- caught by this block's own fail-open _enrich() the
+            # same as a failure inside either check would have been.
+            from .config import load_config as _load_config
             from .skill import distillation_local as _sdl
-            if _sdl.enabled():
+            _cfg = _load_config()
+            if (_sdl.enabled(config=_cfg)
+                    and not _skill_distillation_frozen(config=_cfg)):
                 trajectories = [
                     {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
@@ -2263,89 +2367,12 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
         log.warning("best-of-N candidate donation skipped: %s", e)
 
 
-def _git_env_without_user_config() -> dict[str, str]:
-    """Return a scrubbed environment for host-side best-of-N git reads.
-
-    Git clean/smudge filters and fsmonitor hooks are command hooks.  The
-    sandbox workdir can be attacker-controlled, so never let global/system
-    config, the orchestrator's process environment, or repo-local fsmonitor
-    settings add executable helpers to these host-side probes. Local repo config
-    is still checked separately before any git command runs.
-    """
-    env = {
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_SYSTEM": os.devnull,
-        "GIT_TERMINAL_PROMPT": "0",
-        "HOME": os.devnull,
-        "PATH": os.environ.get("PATH", ""),
-        # Override repo-local config entries that can cause otherwise read-only
-        # host-side Git probes to execute workspace-controlled programs.
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "core.fsmonitor",
-        "GIT_CONFIG_VALUE_0": "false",
-        "GIT_CONFIG_KEY_1": "core.untrackedCache",
-        "GIT_CONFIG_VALUE_1": "false",
-    }
-    for key in ("LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"):
-        if key in os.environ:
-            env[key] = os.environ[key]
-    return env
-
-
-def _git_metadata_may_execute_filters(wd) -> bool:
-    """Conservatively detect local git metadata that can make git run commands.
-
-    A coding attempt can write the mounted workdir, including `.gitattributes`,
-    `.git/info/attributes`, and local config. If those mention filters, config
-    includes, or fsmonitor hooks, host-side `git add`/`reset` may execute
-    attacker-controlled commands. Fail open by skipping capture/reset instead.
-    """
-    try:
-        # Git executes a command via filter sections (modern `[filter "name"]`
-        # or deprecated-but-supported `[filter.name]` syntax), attributes files
-        # selected from config, or config includes that could pull either in. The
-        # bare word "filter" is NOT sufficient and caused a false positive on
-        # every partial clone: `git clone --filter=blob:none` writes a benign
-        # `partialclonefilter = blob:none` into .git/config that never runs a
-        # command, so matching "filter" skipped best-of-N reset/capture for the
-        # entire staged corpus. Match the executable surfaces precisely instead.
-        config_files = [wd / ".git" / "config"]
-        config_needles = (
-            '[filter "',
-            "[filter.",
-            "[include",
-            "include.path",
-            "includeif",
-            "fsmonitor",
-            "attributesfile",
-        )
-        for path in config_files:
-            try:
-                if path.is_file():
-                    text = path.read_text(encoding="utf-8", errors="ignore").lower()
-                    if any(needle in text for needle in config_needles):
-                        return True
-            except OSError:
-                return True
-        # An attributes file assigning a `filter` attribute references a named
-        # filter whose clean/smudge command lives in config -- treat that
-        # reference as unsafe. Attributes files never contain a
-        # `partialclonefilter` value, so there is no blobless-clone false
-        # positive here.
-        attr_files = [wd / ".git" / "info" / "attributes"]
-        attr_files.extend(wd.glob("**/.gitattributes"))
-        for path in attr_files:
-            try:
-                if path.is_file():
-                    text = path.read_text(encoding="utf-8", errors="ignore").lower()
-                    if "filter=" in text or "filter " in text:
-                        return True
-            except OSError:
-                return True
-    except Exception:
-        return True
-    return False
+# Host-git RCE hardening (fsmonitor/filter-hook guard + scrubbed env) now
+# lives in git_safety.py so every host-side git caller shares it -- see
+# PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-2. Imported at module top as
+# _git_env_without_user_config / _git_metadata_may_execute_filters; kept
+# under those private names since test_orchestrator_git_safety.py imports
+# them from here.
 
 
 def _reset_workdir_to_head(workdir) -> None:

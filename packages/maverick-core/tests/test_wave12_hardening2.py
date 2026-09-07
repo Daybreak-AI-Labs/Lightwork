@@ -199,6 +199,42 @@ class TestAnthropicProviderRobust:
         # Should have coerced "100"→100; ~$0.001 spent.
         assert budget.input_tokens == 100
 
+    def test_split_cache_creation_ttl_bills_each_tier(self):
+        """W1-6: usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens
+        must be read and passed through so a call that writes both a 1h
+        (system/tools) and a 5m (messages) breakpoint bills each tier at its
+        own rate, instead of the whole cache_creation_input_tokens total at
+        one multiplier."""
+        from maverick.budget import Budget
+        from maverick.providers.anthropic_provider import AnthropicClient
+
+        client = AnthropicClient.__new__(AnthropicClient)
+
+        class _CacheCreation:
+            ephemeral_5m_input_tokens = 500_000
+            ephemeral_1h_input_tokens = 500_000
+
+        class _Usage:
+            input_tokens = 0
+            output_tokens = 0
+            cache_creation_input_tokens = 1_000_000
+            cache_read_input_tokens = 0
+            cache_creation = _CacheCreation()
+
+        class _Resp:
+            content = []
+            usage = _Usage()
+            stop_reason = "end_turn"
+
+        budget = Budget(max_dollars=100.0, max_input_tokens=10_000_000,
+                        max_output_tokens=10_000_000)
+        client._parse_response(_Resp(), budget, model="claude-sonnet-4-6")
+        # Sonnet: 500k @ 5m (1.25x) + 500k @ 1h (2.0x) = $1.875 + $3.00 = $4.875.
+        # The old single-multiplier path (whole 1M at _default_cache_ttl(),
+        # 1h in interactive mode) would give $6.00 instead.
+        assert abs(budget.dollars - 4.875) < 0.001
+        assert budget.cache_write_tokens == 1_000_000
+
     def test_string_usage_garbage_does_not_crash(self):
         from maverick.budget import Budget
         from maverick.providers.anthropic_provider import AnthropicClient

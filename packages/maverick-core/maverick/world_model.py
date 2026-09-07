@@ -1065,7 +1065,10 @@ class WorldModel:
         # mid-transaction, tracked by _writer_ident.
         self._is_memory = str(path) == ":memory:"
         self._readers = threading.local()
-        self._reader_conns: list[sqlite3.Connection] = []
+        # Keyed by thread ident (not a plain list) so a dead thread's
+        # connection can be pruned instead of retained for the WorldModel's
+        # entire lifetime -- see _prune_dead_reader_conns_locked.
+        self._reader_conns: dict[int, sqlite3.Connection] = {}
         self._reader_conns_lock = threading.Lock()
         self._writer_ident: int | None = None
         # Create the DB file 0o600 BEFORE sqlite opens it: connect() would
@@ -1196,6 +1199,26 @@ class WorldModel:
                 if self._write_depth == 0:
                     self._writer_ident = None
 
+    def _prune_dead_reader_conns_locked(self) -> None:
+        """Close and drop reader connections whose owning thread has exited.
+
+        Caller must hold ``_reader_conns_lock``. ``threading.local()`` itself
+        already frees a dead thread's *slot*, but the strong reference kept
+        here (so :meth:`close` can reclaim every connection at shutdown) would
+        otherwise retain the connection -- and its WAL/SHM file descriptors --
+        for the WorldModel's entire lifetime. A dashboard's WorldModel is
+        process-cached for the life of the server while ASGI worker threads
+        come and go (an idle anyio worker thread exits after ~10s), so an
+        unpruned list grows by one leaked connection and two leaked fds per
+        short-lived thread that ever reads -- a slow walk toward EMFILE.
+        """
+        alive = {t.ident for t in threading.enumerate()}
+        for ident in [i for i in self._reader_conns if i not in alive]:
+            try:
+                self._reader_conns.pop(ident).close()
+            except Exception:  # pragma: no cover
+                pass
+
     def _reader(self) -> sqlite3.Connection | None:
         """A per-thread read-only connection, or ``None`` when reads must use the
         shared write connection: a ``:memory:`` DB (which is per-connection, so a
@@ -1217,7 +1240,8 @@ class WorldModel:
             conn.execute(f"PRAGMA busy_timeout = {DEFAULT_BUSY_TIMEOUT_MS}")
             self._readers.conn = conn
             with self._reader_conns_lock:
-                self._reader_conns.append(conn)
+                self._prune_dead_reader_conns_locked()
+                self._reader_conns[threading.get_ident()] = conn
         return conn
 
     def _read_all(self, sql: str, params: tuple[Any, ...] = ()) -> list:
@@ -1252,7 +1276,7 @@ class WorldModel:
         checkpoint fails.
         """
         with self._reader_conns_lock:
-            readers, self._reader_conns = self._reader_conns, []
+            readers, self._reader_conns = list(self._reader_conns.values()), {}
         for rconn in readers:
             try:
                 rconn.close()

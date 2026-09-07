@@ -34,6 +34,45 @@ def test_estimate_call_cost_scales_with_input():
     assert big > small > 0
 
 
+@pytest.mark.parametrize("spec", (
+    "azure:gpt-4o-prod",
+    "bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
+    "openai_compatible:llama-3.3-70b-versatile",
+    "moonshot:kimi-k2",
+    "openrouter:meta-llama/llama-3.3-70b",
+))
+def test_estimate_call_cost_never_refuses_an_unverified_model_before_dispatch(
+    monkeypatch, spec,
+):
+    """W1-1: with the default fail-closed [budget] strict_pricing policy,
+    _estimate_call_cost used to call budget._lookup_price WITHOUT
+    estimate_only=True, so it enforced the same verified-rate requirement as
+    live billing -- raising UnpricedModelError for any Azure/Bedrock/
+    openai_compatible/Moonshot/OpenRouter id lacking a verified rate-card row,
+    before the call ever dispatched and even with no Budget involved at all.
+    The estimate is a pre-dispatch hold/projection, not the invoice (that is
+    Budget.record_tokens's job, which stays strict); it must fall back to an
+    estimate instead of blocking dispatch."""
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    from maverick.llm import _estimate_call_cost
+    cost = _estimate_call_cost(spec, "sys", [{"role": "user", "content": "hi"}], None, 100)
+    assert cost > 0
+
+
+def test_complete_dispatches_an_unverified_azure_model_instead_of_refusing(monkeypatch):
+    """Same bug, exercised through the real dispatch path: a call to a model
+    id that cannot have a verified rate (an Azure deployment name) must reach
+    the provider client, not die in the pre-dispatch cost estimate."""
+    import maverick.llm as llm_mod
+
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    llm = llm_mod.LLM(model="azure:gpt-4o-prod")
+    monkeypatch.setattr(llm, "_get_client", lambda provider: _SelfHostedClient())
+    out = llm.complete(system="s", messages=[{"role": "user", "content": "hi"}],
+                       budget=Budget(), max_tokens=100)
+    assert out.text == "ok"
+
+
 def test_reserve_bounds_total_holds_to_cap():
     b = Budget(max_dollars=1.0)
     held = []

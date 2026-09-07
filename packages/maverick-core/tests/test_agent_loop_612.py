@@ -151,6 +151,56 @@ class TestBudgetTripDoesNotOrphanToolUse:
         assert agent._patch_validated is False
 
     @pytest.mark.asyncio
+    async def test_apply_check_reject_loop_stops_at_revision_cap(
+        self, tmp_path, monkeypatch,
+    ):
+        # W1-27: the #612 fix above resets `_patch_validated` on every new
+        # FINAL, which also silently defeated the "one retry max" every
+        # reject site in the apply-check block was relying on that flag
+        # for -- each revised FINAL looked like a first attempt again, so
+        # an agent that keeps submitting an unapplyable patch looped until
+        # `max_steps` instead of stopping after one retry.
+        # `_patch_revision_attempts` (never reset per FINAL) must cap it.
+        monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
+        monkeypatch.delenv("MAVERICK_FAIL_TO_PASS", raising=False)
+        monkeypatch.delenv("MAVERICK_PASS_TO_PASS", raising=False)
+
+        # tmp_path is deliberately NOT a git repo, so `validate_patch`
+        # always returns valid=False ("workdir is not a git repository")
+        # no matter what the diff says -- a guaranteed, deterministic
+        # apply-check rejection on every attempt.
+        final_text = (
+            "FINAL: fixing it\n"
+            "```diff\n"
+            "--- a/x\n"
+            "+++ b/x\n"
+            "@@ -1 +1 @@\n"
+            "-a\n"
+            "+b\n"
+            "```\n"
+        )
+        llm = _CapturingLLM([
+            LLMResponse(text=final_text, thinking=None, tool_calls=[],
+                        stop_reason="end_turn"),
+            LLMResponse(text=final_text, thinking=None, tool_calls=[],
+                        stop_reason="end_turn"),
+            LLMResponse(text=final_text, thinking=None, tool_calls=[],
+                        stop_reason="end_turn"),
+        ])
+        ctx = _ctx(tmp_path, llm)
+        agent = Agent(ctx=ctx, role="researcher", brief="...")
+
+        result = await agent.run()
+
+        assert result.final is not None
+        # First FINAL: rejected, one revision requested (attempts -> 1).
+        # Second FINAL: the cap is already hit, so the apply-check block
+        # is skipped entirely and the FINAL is accepted as-is. The third
+        # scripted response must never be consumed.
+        assert agent._patch_revision_attempts == 1
+        assert len(llm.scripted) == 1
+
+    @pytest.mark.asyncio
     async def test_parallel_path_budget_trip_answers_pending(self, tmp_path):
         # Two parallel-safe reads -> parallel path records both up front; the
         # second record_tool_call() raises before any result is appended.
@@ -251,3 +301,52 @@ class TestReleaseSpawns:
         # 2 reserved, 1 failed -> only the failed slot released; the
         # successful child legitimately keeps its slot.
         assert ctx._spawns_used == 1
+
+
+class TestToolDispatchWallClockGuard:
+    @pytest.mark.asyncio
+    async def test_hung_tool_is_aborted_at_the_wall_cap(self, tmp_path):
+        # W1-31: a tool with no timeout of its own (a plugin, an MCP server,
+        # a browser/file-watcher wait) previously had no equivalent to
+        # _complete_guarded's wall-clock/killswitch polling -- it could hold
+        # the goal 'active' and ignore `maverick halt` indefinitely. A never-
+        # returning tool under a short wall cap must now abort promptly
+        # instead of hanging past it.
+        import asyncio
+        import time
+
+        from maverick.tools import Tool
+
+        hung = {"cancelled": False}
+
+        async def _never_returns(args: dict) -> str:
+            try:
+                await asyncio.sleep(3600)
+                return "should never get here"
+            except asyncio.CancelledError:
+                hung["cancelled"] = True
+                raise
+
+        llm = _CapturingLLM([
+            LLMResponse(
+                text="acting", thinking=None,
+                tool_calls=[ToolCall(id="a", name="hang", input={})],
+                stop_reason="tool_use",
+            ),
+        ])
+        ctx = _ctx(tmp_path, llm, max_wall_seconds=1.0)
+        agent = Agent(ctx=ctx, role="researcher", brief="...")
+        agent.tools.register(Tool(
+            name="hang", description="never returns",
+            input_schema={"type": "object", "properties": {}},
+            fn=_never_returns,
+        ))
+
+        t0 = time.monotonic()
+        with pytest.raises(BudgetExceeded, match="mid-tool-execution"):
+            await agent.run()
+        elapsed = time.monotonic() - t0
+
+        # Aborted near the cap, not left hanging toward the 3600s sleep.
+        assert elapsed < 5.0
+        assert hung["cancelled"] is True

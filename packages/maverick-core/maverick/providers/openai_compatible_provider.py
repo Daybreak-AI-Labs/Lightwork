@@ -19,6 +19,13 @@ The base_url is passed through verbatim — supply the full documented
 endpoint (e.g. Groq's ``/openai/v1``); we don't rewrite it. Model id is
 user-chosen via ``[models]``; the placeholder DEFAULT_MODEL is only a
 last-resort label.
+
+A missing ``api_key`` is only tolerated for a loopback/private-network
+base_url (LM Studio, llama.cpp, or any other key-less local server) --
+same as the TGI/vLLM providers' unconditional placeholder key, but scoped
+here since this provider (unlike TGI/vLLM, which are always self-hosted by
+design) also fronts public gateways like Groq/Together, where a missing
+key is a real misconfiguration and stays refused.
 """
 from __future__ import annotations
 
@@ -52,6 +59,15 @@ class OpenAICompatibleClient(OpenAIClient):
             or cfg.get("api_key")
             or os.environ.get("OPENAI_COMPATIBLE_API_KEY")
         )
+        if not key:
+            from ..enterprise import _is_local_endpoint
+
+            if _is_local_endpoint(url):
+                # LM Studio / llama.cpp / any other key-less local server --
+                # matches the TGI/vLLM "<provider>-no-auth" placeholder so a
+                # genuinely key-less endpoint (the docstring's own headline
+                # use case) doesn't hit the base client's "no key" refusal.
+                key = "openai-compatible-no-auth"
         super().__init__(
             api_key=key,
             base_url=url,

@@ -203,10 +203,19 @@ def _recall_lessons(query: str, k: int, *, model_id: str | None,
     scored: list[tuple[float, Hit]] = []
     for model, lines in (self_harness.list_learned() or {}).items():
         for line in lines:
-            overlap = len(want & _tokens(line))
+            # list_learned() is a raw, unscreened read of the addenda store
+            # (built for operator inspection). recall_addendum() re-screens
+            # its own lines before they reach a prompt (_rescreen_block); this
+            # fallback renders lines into a Hit the same way, so it needs the
+            # exact same screen -- a legacy/tampered/policy-eroding line must
+            # not reach a model here just because no model_id was given.
+            screened = self_harness.screen_stored_line(line)
+            if screened is None:
+                continue
+            overlap = len(want & _tokens(screened))
             if overlap:
                 scored.append((overlap / max(1, len(want)),
-                               Hit("lessons", "lesson", line, f"self-harness · {model}",
+                               Hit("lessons", "lesson", screened, f"self-harness · {model}",
                                    overlap / max(1, len(want)), {"model": model})))
     scored.sort(key=lambda t: t[0], reverse=True)
     return [h for _, h in scored[:k]]

@@ -70,6 +70,7 @@ _HTTP_CALLS = {
     "urllib.request.install_opener": "urllib",
     "http.client.HTTPConnection": "http.client",
     "http.client.HTTPSConnection": "http.client",
+    "websockets.connect": "websockets",
 }
 
 #: Modules known to reach the network through a library the guard does not
@@ -80,6 +81,11 @@ KNOWN_UNCOVERED: dict[str, str] = {
     "packages/maverick-channels/maverick_channels/slack.py":
         "aiohttp ClientSession in the Socket Mode listener; migrating it means "
         "reworking the websocket loop, so it is recorded rather than rushed",
+    "packages/maverick-core/maverick/tools/websocket_tool.py":
+        "websockets.connect cannot be wrapped by the process-wide httpx/urllib "
+        "guard; _preflight_egress() calls enterprise_egress_denial and "
+        "tenant.egress.egress_allowed directly before every connect instead, "
+        "the same manual pattern http_fetch's _preflight_fetch uses",
 }
 
 

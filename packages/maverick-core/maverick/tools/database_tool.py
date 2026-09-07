@@ -12,6 +12,16 @@ Auth: ``DATABASE_URL`` (a SQLAlchemy URL), e.g.
   cockroachdb://user@host:26257/db
 The matching driver (psycopg / pymysql / pyodbc / ...) must be installed.
 
+The schema also advertises a model-facing ``url`` arg, but it is honored only
+when a capability ``allow_hosts`` is granted or the operator opts in with
+``MAVERICK_DATABASE_ALLOW_URL_ARG=1`` / ``[tools] database_allow_url_arg =
+true`` (off by default) -- otherwise an agent could pick any reachable
+database server, credentials embedded in the URL. A model-supplied
+``sqlite:`` URL is refused unconditionally either way: it has no host for
+``allow_hosts`` to scope, and an agent has no legitimate need to open its own
+local database file (including this deployment's own world.db).
+``DATABASE_URL`` itself is operator-set and always trusted.
+
 ops:
   - query(sql, url, limit, confirm)
 """
@@ -25,6 +35,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from .._envparse import coerce_bool, is_truthy
 from . import Tool, as_bool
 from .sql_safety import has_unconfirmed_statement_separator
 
@@ -123,6 +134,55 @@ def _is_read_sql(sql: str) -> bool:
     return keyword != "select" or _SELECT_EFFECT_RE.search(sql) is None
 
 
+def _database_allow_url_arg_enabled() -> bool:
+    """Whether a model-supplied ``url`` arg is honored at all (default off).
+
+    ``allow_hosts`` is a real additional constraint when it is granted, but
+    its ABSENCE must not mean "any URL is fine": with no capability grant
+    the tool otherwise accepted an agent-chosen SQLAlchemy URL unconditionally,
+    letting a prompt-injected agent point it at any reachable database server
+    (credentials embedded in the URL) or, via ``sqlite:``, at the deployment's
+    OWN world.db/audit tables. Off by default; enable with
+    ``MAVERICK_DATABASE_ALLOW_URL_ARG=1`` or ``[tools] database_allow_url_arg
+    = true`` for a deployment that deliberately wants agents picking their own
+    connection string. ``DATABASE_URL`` (operator-set) is unaffected either way.
+    """
+    env = os.environ.get("MAVERICK_DATABASE_ALLOW_URL_ARG", "").strip()
+    if env:
+        return is_truthy(env)
+    try:
+        from ..config import load_config
+        return coerce_bool((load_config() or {}).get("tools", {}).get(
+            "database_allow_url_arg"))
+    except Exception:  # pragma: no cover -- config never blocks the gate
+        return False
+
+
+def _model_supplied_url_denial(url: str, allow_hosts: tuple[str, ...]) -> str | None:
+    """Extra gate applied ONLY to a url the model supplied via the ``url``
+    arg -- never to the operator-configured ``DATABASE_URL`` fallback."""
+    try:
+        scheme = urlsplit(url).scheme.split("+", 1)[0].lower()
+    except ValueError:
+        scheme = ""
+    if scheme == "sqlite":
+        return (
+            "⚠ DENIED: a model-supplied database url may not use sqlite: "
+            "(local file access has no host for allow_hosts to scope, and "
+            "an agent has no legitimate need to pick its own database file "
+            "-- including this deployment's own world.db). Configure "
+            "DATABASE_URL instead if a sqlite connection is genuinely needed."
+        )
+    if not allow_hosts and not _database_allow_url_arg_enabled():
+        return (
+            "⚠ DENIED: a model-supplied database url requires either a "
+            "capability allow_hosts grant or [tools] database_allow_url_arg "
+            "= true (off by default). Configure DATABASE_URL for an "
+            "operator-set connection instead."
+        )
+    return None
+
+
 def _denial(host: str) -> str:
     return (
         f"⚠ DENIED by capability policy: database URL host {host!r} is not "
@@ -155,7 +215,7 @@ def _host_denial(url: str, allow_hosts: tuple[str, ...]) -> str | None:
     return None
 
 
-def _op_query(sql: str, url: str, limit: int, confirm: bool,
+def _op_query(sql: str, url_arg: str, limit: int, confirm: bool,
               allow_hosts: tuple[str, ...] = ()) -> str:
     if not sql:
         return "ERROR: query requires sql"
@@ -165,9 +225,14 @@ def _op_query(sql: str, url: str, limit: int, confirm: bool,
     needs_confirm = (not _is_read_sql(sql)) or has_unconfirmed_statement_separator(sql)
     if needs_confirm and not confirm:
         return "DRY RUN: non-read SQL (INSERT/UPDATE/DELETE/DDL). Re-run with confirm=true."
-    url = (url or os.environ.get("DATABASE_URL", "")).strip()
+    url_arg = url_arg.strip()
+    url = (url_arg or os.environ.get("DATABASE_URL", "")).strip()
     if not url:
         return "ERROR: database requires a SQLAlchemy URL via the url arg or DATABASE_URL."
+    if url_arg:
+        denial = _model_supplied_url_denial(url_arg, allow_hosts)
+        if denial:
+            return denial
     denial = _host_denial(url, allow_hosts)
     if denial:
         return denial

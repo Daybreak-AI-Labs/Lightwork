@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .budget import Budget, _cache_write_mult_from_ttl
+from .budget import Budget, BudgetExceeded, _cache_write_mult_from_ttl
 from .pricing import (
     ModelPrice,
     PriceUse,
@@ -77,7 +77,7 @@ ROLE_MODELS: dict[str, str] = {
 # and verification status that justify those floats. Every row must exactly
 # match the tracked evidence pack. Rows whose current official source could not
 # be captured remain available for planning, but cannot cross the billing gate.
-MODEL_RATE_CARD_VERSION = "2026-07-29.2"
+MODEL_RATE_CARD_VERSION = "2026-09-07.1"
 _PRICING_EVIDENCE = load_pricing_evidence_pack()
 
 
@@ -148,6 +148,25 @@ MODEL_PRICING_PROVIDER = VersionedPricingProvider(
             "claude-haiku-4-5-20251001",
             (1.0, 5.0),
             evidence_id="anthropic-direct-2026-07-29",
+        ),
+        # Current generation (W1-9): unlisted here previously, so a real
+        # bill on any of these fell back to the Sonnet estimate rate under
+        # [budget] strict_pricing=false, or refused outright under the
+        # (default) strict policy.
+        _model_price(
+            "claude-opus-5",
+            (5.0, 25.0),
+            evidence_id="anthropic-direct-2026-09-07",
+        ),
+        _model_price(
+            "claude-sonnet-5",
+            (2.0, 10.0),
+            evidence_id="anthropic-direct-2026-09-07",
+        ),
+        _model_price(
+            "claude-fable-5-1",
+            (10.0, 50.0),
+            evidence_id="anthropic-direct-2026-09-07",
         ),
         # OpenAI billing stores a conservative flat ceiling because the
         # published price varies by context length and processing region.
@@ -690,6 +709,46 @@ def _record_provider_call(provider: str) -> None:
         pass
 
 
+# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-2): mirrors
+# failover_policy._DEFAULT_FAILOVER_ON -- the classes a provider-transport
+# problem can actually fall into. Kept as an independent literal (not a
+# cross-module import of a private name) since the two call sites answer
+# different questions: failover asks "should the NEXT model try this
+# request", the breaker asks "is THIS provider currently unhealthy".
+_TRANSPORT_FAILURE_CLASSES = frozenset({"rate_limit", "timeout", "network", "server", "other"})
+
+
+def _is_provider_transport_failure(exc: BaseException) -> bool:
+    """True only for a genuine provider-transport failure (429/5xx/timeout/
+    connection) -- never for a LOCAL guard (budget, model-not-allowed,
+    preflight, egress) or a non-retryable 4xx (auth/bad-request).
+
+    Before this classification, every exception escaping ``client.complete``
+    counted as a provider failure, including ``BudgetExceeded`` raised
+    *after* a successful API call. A single fan-out goal that hits its
+    dollar cap (N parallel sub-agents each raising BudgetExceeded) could
+    trip the breaker and take the provider offline for every concurrent
+    goal and tenant sharing this process -- one tenant's quota problem
+    should never degrade another's.
+    """
+    if isinstance(exc, (BudgetExceeded, ModelNotAllowedError)):
+        return False
+    try:
+        from .preflight import PreflightFailed
+        if isinstance(exc, PreflightFailed):
+            return False
+    except ImportError:  # pragma: no cover -- preflight always ships with core
+        pass
+    try:
+        from .enterprise import EgressBlocked
+        if isinstance(exc, EgressBlocked):
+            return False
+    except ImportError:  # pragma: no cover -- optional enterprise import
+        pass
+    from .failover_policy import classify_error
+    return classify_error(exc) in _TRANSPORT_FAILURE_CLASSES
+
+
 def _feed_circuit(provider: str, error: bool) -> None:
     """Record a provider call's outcome on its circuit breaker so repeated
     failures trip it (observable via ``maverick diag circuits``). This is the
@@ -1066,7 +1125,20 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
     model's input rate + max_tokens at the output rate (chars/4 heuristic,
     matching the token preflight). Input dominates -- a 200k-token context is
     the cost driver -- so output using the full max_tokens is acceptably
-    conservative."""
+    conservative.
+
+    This is a hold/projection against the budget cap, not the invoice -- the
+    real spend is billed afterward from actual usage via
+    ``Budget.record_tokens``, which stays strict. Pricing this estimate with
+    ``estimate_only=True`` matters for any model id without a *verified* rate
+    (an Azure deployment name, a Bedrock model id, an OpenAI-compatible
+    gateway, or a provisional/unverified rate-card entry): without it, the
+    default fail-closed ``[budget] strict_pricing`` policy raised
+    ``UnpricedModelError`` here and refused the call before it was ever
+    dispatched -- even with no ``budget`` passed at all. The estimate falls
+    back to a conservative rate (the verified one when available, otherwise a
+    labeled-unverified estimate) instead of blocking dispatch on pricing
+    verification, which is ``record_tokens``'s job, not this one's."""
     from .budget import _lookup_price
     try:
         # Price the max_tokens the provider will actually send: the Anthropic
@@ -1078,7 +1150,7 @@ def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
                                           thinking_budget)
     except Exception:  # pragma: no cover -- estimate must never block a call
         pass
-    in_rate, out_rate = _lookup_price(model_id)
+    in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
     chars = len(system or "")
     for m in messages or []:
         c = m.get("content") if isinstance(m, dict) else m
@@ -1125,6 +1197,18 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     -- the dispatching client's ``CACHE_READ_MULT`` (DeepSeek 0.1x, Gemini
     0.25x, OpenAI 0.5x); ``None`` falls back to OpenAI's 0.5x. Anthropic cache
     reads always bill 0.1x (they arrive via ``cache_read_tokens`` instead).
+
+    W1-1: this feeds the provider-cap ledger / provider-health / circuit
+    breaker accounting from ``complete()``'s own ``finally`` block, called
+    unconditionally there (not inside a try/except) -- it is NOT the
+    authoritative per-goal bill (that is the provider client's own
+    ``Budget.record_tokens`` call, which stays strict). Pricing it with
+    ``estimate_only=True`` matters for the same reason as
+    ``_estimate_call_cost``: without it, a call to a model id lacking a
+    *verified* rate raised ``UnpricedModelError`` out of ``finally`` -- even
+    after the provider call itself had already succeeded -- discarding the
+    real response and skipping the circuit-breaker/metrics recording below it
+    in the same block.
     """
     if resp is None:
         return None
@@ -1165,20 +1249,29 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     if not cache_read:
         openai_cached = min(_openai_cached_tokens(usage), in_tok)
         in_tok -= openai_cached
-    in_rate, out_rate = _lookup_price(model_id)
+    in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
     # ``cache_write`` (cache_creation_tokens) is only ever surfaced by the
-    # Anthropic provider, which writes its breakpoints at the configured TTL
-    # (``_default_cache_ttl()`` -- "1h" in interactive mode, billed at 2.0x).
-    # Hardcoding ``None`` here priced every write at the 5m 1.25x rate, so this
-    # cross-run provider-cap ledger under-counted 1h cache-write spend by ~37.5%
-    # vs the authoritative Budget.record_tokens (which receives the real TTL),
-    # letting a deployment overshoot its configured provider cap. Match the TTL
-    # the real per-run path bills at.
-    if cache_write:
-        from .providers.anthropic_provider import _default_cache_ttl
-        write_mult = _cache_write_mult_from_ttl(_default_cache_ttl())
-    else:
-        write_mult = _cache_write_mult_from_ttl(None)
+    # Anthropic provider. A single call can write BOTH the system/tools
+    # breakpoint (``_default_cache_ttl()`` -- 1h in interactive mode, 2.0x)
+    # and the messages breakpoint (5m, 1.25x) at once -- W1-6: billing the
+    # combined total at one multiplier over/undercounts whichever tier
+    # doesn't match. Anthropic reports the real split as
+    # usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens; use it
+    # when present and fall back to the single-multiplier heuristic
+    # (matching Budget.record_tokens's own fallback) otherwise.
+    cache_creation_detail = getattr(usage, "cache_creation", None)
+
+    def _detail(*names) -> int:
+        for n in names:
+            v = getattr(cache_creation_detail, n, None) if cache_creation_detail is not None else None
+            if v is not None:
+                try:
+                    return max(0, int(v))
+                except (TypeError, ValueError):
+                    return 0
+        return 0
+    cache_write_5m = _detail("ephemeral_5m_input_tokens")
+    cache_write_1h = _detail("ephemeral_1h_input_tokens")
     # Per-provider cached-prompt discount, mirroring the authoritative
     # Budget.record_tokens path (openai_provider passes its class
     # CACHE_READ_MULT -- DeepSeek 0.1x, Gemini 0.25x). Hard-coding OpenAI's
@@ -1188,7 +1281,14 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     cost = (in_tok / 1_000_000) * in_rate
     cost += (cache_read / 1_000_000) * in_rate * _CACHE_READ_MULT   # Anthropic 0.1x
     cost += (openai_cached / 1_000_000) * in_rate * openai_mult
-    cost += (cache_write / 1_000_000) * in_rate * write_mult
+    if cache_write_5m or cache_write_1h:
+        from .budget import _CACHE_WRITE_MULT_1H, _CACHE_WRITE_MULT_5M
+        cost += (cache_write_5m / 1_000_000) * in_rate * _CACHE_WRITE_MULT_5M
+        cost += (cache_write_1h / 1_000_000) * in_rate * _CACHE_WRITE_MULT_1H
+    elif cache_write:
+        from .providers.anthropic_provider import _default_cache_ttl
+        write_mult = _cache_write_mult_from_ttl(_default_cache_ttl())
+        cost += (cache_write / 1_000_000) * in_rate * write_mult
     cost += (out_tok / 1_000_000) * out_rate
     return cost
 
@@ -1476,8 +1576,8 @@ class LLM:
                 _provider_started = True
                 _resp = client.complete(**kwargs)
                 return _resp
-        except Exception:
-            _err = True
+        except Exception as _exc:
+            _err = _is_provider_transport_failure(_exc)
             raise
         finally:
             if _held:
@@ -1681,8 +1781,8 @@ class LLM:
                     # classification upstream sees the provider's exception, not
                     # the race wrapper.
                     raise (e.__cause__ or e) from None
-        except Exception:
-            _err = True
+        except Exception as _exc:
+            _err = _is_provider_transport_failure(_exc)
             raise
         finally:
             if _held:

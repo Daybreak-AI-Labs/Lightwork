@@ -66,6 +66,49 @@ def test_canonical_source_exports_are_digest_only_and_contiguous(tmp_path) -> No
     assert "asset-private" not in repr(data_use_records)
 
 
+def test_consent_unified_audit_export_survives_an_unlink(tmp_path) -> None:
+    """profile.unlinked has no entry in the unified-audit action map used to
+    crash unified_audit_records() with "stored consent outbox event type is
+    unsupported" for any tenant that had ever unlinked a profile. The outbox
+    is immutable (no-update/no-delete triggers), so that export stayed broken
+    forever for that tenant once it happened -- silently breaking the
+    platform-level Operating Record capture (stock_suite_audit_capture.py
+    calls this method)."""
+    import time
+
+    consent = ConsentPreferenceStore(tmp_path / "consent-unlink.sqlite3")
+    tenant = "tenant-a"
+    consent.create_profile(tenant, "known-1", "known", _sha("known"), "create-known")
+    consent.create_profile(
+        tenant, "anon-1", "anonymous", _sha("anon"), "create-anon"
+    )
+    consent.link_profiles(
+        tenant, "known-1", "anon-1",
+        expected_known_revision=0, expected_anonymous_revision=0,
+        idempotency_key="link-1",
+    )
+    consent.unlink_profile(
+        tenant, "anon-1",
+        expected_anonymous_revision=1, expected_known_revision=1,
+        expected_link_revision=1,
+        idempotency_key="unlink-1",
+        identity_evidence_sha256=_sha("identity-evidence"),
+        audit_evidence_sha256=_sha("audit-evidence"),
+        actor_sha256=_sha("actor"),
+        reason_sha256=_sha("reason"),
+        retention_until=time.time() + 86400,
+    )
+
+    records = consent.unified_audit_records(tenant)
+    _assert_chain(records)
+    assert [r.action for r in records] == [
+        "record_created",
+        "record_created",
+        "relationship_changed",  # profile.linked
+        "relationship_changed",  # profile.unlinked
+    ]
+
+
 def test_hash_chained_suite_stores_export_verified_source_records(tmp_path) -> None:
     ai = AIGovernanceLoopStore(
         tmp_path / "ai.sqlite3",

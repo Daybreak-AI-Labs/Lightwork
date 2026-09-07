@@ -54,7 +54,9 @@ def test_skills_stats_shows_track_record(_skills_and_stats):
 
 
 def test_skills_evict_dry_run_lists_without_removing(_skills_and_stats):
-    for _ in range(6):
+    # 0 wins in 16 uses: the Wilson 95% upper bound (0.194) clears the 0.2
+    # threshold; 6 uses would leave it near 0.39 and not convict the skill.
+    for _ in range(16):
         skill_stats.record_use(["bad"])
         skill_stats.record_outcome(["bad"], success=False)
     result = CliRunner().invoke(main, ["skills", "evict"])
@@ -66,7 +68,9 @@ def test_skills_evict_dry_run_lists_without_removing(_skills_and_stats):
 
 
 def test_skills_evict_apply_removes(_skills_and_stats):
-    for _ in range(6):
+    # 0 wins in 16 uses: the Wilson 95% upper bound (0.194) clears the 0.2
+    # threshold; 6 uses would leave it near 0.39 and not convict the skill.
+    for _ in range(16):
         skill_stats.record_use(["bad"])
         skill_stats.record_outcome(["bad"], success=False)
     result = CliRunner().invoke(main, ["skills", "evict", "--apply"])

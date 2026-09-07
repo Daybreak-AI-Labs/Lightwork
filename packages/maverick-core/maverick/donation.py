@@ -59,7 +59,19 @@ def _redact_text(text: str) -> str:
     return out
 
 
-DEFAULT_OUTBOX = data_dir("outbox")
+def _default_outbox() -> Path:
+    """The active scope's donation outbox, resolved at CALL time.
+
+    Every peer learning store (reflexion, dreaming, self_harness) resolves its
+    tenant-scoped path per call via ``data_dir(..., tenant=...)`` /
+    ``_tenant_path`` so a later ``set_tenant`` takes effect. Binding this as a
+    module-level constant at import time froze it to whatever tenant (or no
+    tenant) was active during import -- so with critique mining on by default,
+    ``dreaming._replay_critiques`` could read another tenant's donated outbox
+    into THIS tenant's dream cycle. Resolved fresh here, like the rest of the
+    learning stores.
+    """
+    return data_dir("outbox")
 
 
 @dataclass
@@ -285,7 +297,7 @@ def write_record(
     payload = _scrub_payload(asdict(record))
 
     try:
-        out_dir = outbox or DEFAULT_OUTBOX
+        out_dir = outbox or _default_outbox()
         out_dir.mkdir(parents=True, exist_ok=True)
         # Trajectory records carry prompt/result text; keep the outbox and
         # files owner-only (the default umask often leaves them
@@ -309,7 +321,7 @@ def write_record(
 
 def list_pending(outbox: Path | None = None) -> list[Path]:
     """Return the outbox files awaiting upload, for `maverick donate-status`."""
-    out_dir = outbox or DEFAULT_OUTBOX
+    out_dir = outbox or _default_outbox()
     if not out_dir.exists():
         return []
     return sorted(out_dir.glob("*.json"))
@@ -317,7 +329,7 @@ def list_pending(outbox: Path | None = None) -> list[Path]:
 
 def clear_outbox(outbox: Path | None = None) -> int:
     """Delete every pending record. Returns count removed."""
-    out_dir = outbox or DEFAULT_OUTBOX
+    out_dir = outbox or _default_outbox()
     if not out_dir.exists():
         return 0
     n = 0

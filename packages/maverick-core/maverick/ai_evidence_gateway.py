@@ -1497,6 +1497,86 @@ def _complete_conversation(
     raise EvidenceGatewayStateError("conversation completion contention exceeded")
 
 
+def _abandon_conversation_reservation(
+    conversation_sha256: str,
+    receipt_id: str,
+    *,
+    actor: str,
+) -> None:
+    """Release a reservation whose delivery failed before it could be
+    committed (W4-29).
+
+    ``_conversation_reservation`` reserves the conversation, and only
+    ``_complete_conversation`` ever clears ``pending`` -- if rendering or
+    signing raises after the reservation (signer refusal, segment/capacity
+    error, disk full), nothing released it, so every later ``deliver_text``
+    for this conversation with a *different* idempotency key raised
+    ``ConversationOrderError`` forever (the only recovery was resending the
+    exact same key, which real clients rarely do).
+
+    Only clears a reservation that still belongs to ``receipt_id`` -- a
+    compare-and-swap, matching ``_complete_conversation``'s own pattern --
+    and only after confirming no signed row for ``receipt_id`` actually
+    landed in the ledger. If the write partially succeeded (e.g. the ledger
+    append landed but a later bookkeeping step failed), that sequence number
+    is legitimately spent and must not be handed to a different receipt on a
+    later attempt, so this is a no-op in that case: fail toward leaving the
+    conversation reservation in place (the pre-existing, if inconvenient,
+    behavior) rather than risk a sequence collision. Likewise a no-op (never
+    raises) if the ledger can't be consulted, or the reservation no longer
+    matches (already completed, or already abandoned by a concurrent
+    caller).
+    """
+    try:
+        rows = _signed_rows(_receipt_path(), "receipt_id", receipt_id)
+    except Exception:
+        return
+    if rows:
+        return
+    record_id = _stable_id("AIC", conversation_sha256)
+    for _attempt in range(16):
+        current = _CONVERSATIONS.get(record_id)
+        if current is None:
+            return
+        pending = current.get("pending")
+        if not isinstance(pending, Mapping) or pending.get("receipt_id") != receipt_id:
+            return
+        reserved_sequence = pending.get("sequence")
+
+        def mutate(row: dict[str, Any], reserved_sequence: Any = reserved_sequence) -> None:
+            row_pending = row.get("pending")
+            if (
+                not isinstance(row_pending, Mapping)
+                or row_pending.get("receipt_id") != receipt_id
+            ):
+                raise RecordConflict("conversation reservation changed")
+            row["pending"] = None
+            # Give the sequence number back so the next successful attempt
+            # reuses it and the chain stays gapless (_conversation_chains_valid
+            # requires exactly 1, 2, 3, ... with no skips). Only when this
+            # reservation is still the one that consumed it -- a concurrent
+            # successful delivery already advancing next_sequence further
+            # must not be rewound.
+            if (
+                isinstance(reserved_sequence, int)
+                and not isinstance(reserved_sequence, bool)
+                and row.get("next_sequence") == reserved_sequence + 1
+            ):
+                row["next_sequence"] = reserved_sequence
+
+        try:
+            _CONVERSATIONS.update(
+                record_id,
+                mutate,
+                expected_revision=int(current["revision"]),
+                action="delivery_abandoned",
+                actor=actor,
+            )
+        except RecordConflict:
+            continue
+        return
+
+
 def _editorial_exception(value: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -2344,127 +2424,146 @@ def _deliver_text_locked(  # noqa: C901 - linear release transaction is auditabl
                 actor=operator,
             )
         )
-        delivered, decision = _render_text(
-            generated_text,
-            receipt_id=receipt_id,
-            settings=settings,
-            human_interaction=human_interaction,
-            apply_interaction_disclosure=disclosure_due,
-            synthetic_content=synthetic_content,
-            deepfake=deepfake,
-            public_interest_text=public_interest_text,
-            editorial_exception=exception,
-        )
-        event = _receipt_event(
-            tenant_id=tenant_id,
-            receipt_id=receipt_id,
-            issued_at=issued_at,
-            conversation_sha256=conversation_sha,
-            sequence=sequence,
-            idempotency_sha256=idempotency_sha,
-            input_sha256=input_sha,
-            generated_output_sha256=generated_sha,
-            delivered_output_sha256=_sha256(delivered.encode("utf-8")),
-            policy=policy,
-            model_sha256=model_digest,
-            context_sha256=context_digest,
-            transparency=decision,
-            parent_receipt_hash=parent_hash,
-            actor_sha256=actor_sha,
-            modality=modality_token,
-        )
-        signed, _public_key = _sign_event(
-            event,
-            path=_receipt_path(),
-            identity_key="receipt_id",
-            identity=receipt_id,
-        )
-        if existing is None:
-            try:
-                saved = _RECEIPTS.create(
-                    {
-                        "id": receipt_record_id,
-                        "schema": RECEIPT_SCHEMA,
-                        "status": "issued",
-                        "receipt_id": receipt_id,
-                        "signed_receipt": signed,
-                    },
-                    action="interaction_receipt_issued",
-                    actor=operator,
-                )
-            except RecordConflict:
-                saved = _RECEIPTS.get(receipt_record_id)
-                if saved is None or saved.get("status") != "issued":
+        # W4-29: render/sign/receipt-commit can fail after the reservation
+        # above (signer refusal, segment/capacity error, disk full) --
+        # _complete_conversation below is the only thing that ever clears
+        # it, so an exception here used to poison every later delivery in
+        # this conversation forever (a fresh idempotency key hits
+        # ConversationOrderError permanently; only resending the exact same
+        # key recovers). Abandon this receipt_id's reservation on any
+        # failure so the conversation is not permanently stuck; the
+        # abandon helper itself refuses to clear it if a signed row for
+        # receipt_id actually made it into the ledger (a partial success
+        # must not have its sequence number handed to a different receipt).
+        try:
+            delivered, decision = _render_text(
+                generated_text,
+                receipt_id=receipt_id,
+                settings=settings,
+                human_interaction=human_interaction,
+                apply_interaction_disclosure=disclosure_due,
+                synthetic_content=synthetic_content,
+                deepfake=deepfake,
+                public_interest_text=public_interest_text,
+                editorial_exception=exception,
+            )
+            event = _receipt_event(
+                tenant_id=tenant_id,
+                receipt_id=receipt_id,
+                issued_at=issued_at,
+                conversation_sha256=conversation_sha,
+                sequence=sequence,
+                idempotency_sha256=idempotency_sha,
+                input_sha256=input_sha,
+                generated_output_sha256=generated_sha,
+                delivered_output_sha256=_sha256(delivered.encode("utf-8")),
+                policy=policy,
+                model_sha256=model_digest,
+                context_sha256=context_digest,
+                transparency=decision,
+                parent_receipt_hash=parent_hash,
+                actor_sha256=actor_sha,
+                modality=modality_token,
+            )
+            signed, _public_key = _sign_event(
+                event,
+                path=_receipt_path(),
+                identity_key="receipt_id",
+                identity=receipt_id,
+            )
+            if existing is None:
+                try:
+                    saved = _RECEIPTS.create(
+                        {
+                            "id": receipt_record_id,
+                            "schema": RECEIPT_SCHEMA,
+                            "status": "issued",
+                            "receipt_id": receipt_id,
+                            "signed_receipt": signed,
+                        },
+                        action="interaction_receipt_issued",
+                        actor=operator,
+                    )
+                except RecordConflict:
+                    saved = _RECEIPTS.get(receipt_record_id)
+                    if saved is None or saved.get("status") != "issued":
+                        raise EvidenceGatewayStateError(
+                            "authoritative interaction receipt is unavailable "
+                            "after a concurrent issue"
+                        ) from None
+                    return _deliver_text_locked(
+                        generated_text,
+                        input_text=input_text,
+                        conversation_id=conversation,
+                        idempotency_key=idempotency,
+                        actor=operator,
+                        policy_id=policy_token,
+                        model_sha256=model_digest,
+                        context_sha256=context_digest,
+                        modality=modality_token,
+                        human_interaction=human_interaction,
+                        synthetic_content=synthetic_content,
+                        deepfake=deepfake,
+                        public_interest_text=public_interest_text,
+                        editorial_exception=exception,
+                    )
+            else:
+                if existing.get("status") != "pending":
                     raise EvidenceGatewayStateError(
-                        "authoritative interaction receipt is unavailable "
-                        "after a concurrent issue"
-                    ) from None
-                return _deliver_text_locked(
-                    generated_text,
-                    input_text=input_text,
-                    conversation_id=conversation,
-                    idempotency_key=idempotency,
-                    actor=operator,
-                    policy_id=policy_token,
-                    model_sha256=model_digest,
-                    context_sha256=context_digest,
-                    modality=modality_token,
-                    human_interaction=human_interaction,
-                    synthetic_content=synthetic_content,
-                    deepfake=deepfake,
-                    public_interest_text=public_interest_text,
-                    editorial_exception=exception,
-                )
-        else:
-            if existing.get("status") != "pending":
-                raise EvidenceGatewayStateError("interaction receipt state is invalid")
+                        "interaction receipt state is invalid"
+                    )
 
-            def issue(row: dict[str, Any]) -> None:
-                row["status"] = "issued"
-                row["signed_receipt"] = signed
+                def issue(row: dict[str, Any]) -> None:
+                    row["status"] = "issued"
+                    row["signed_receipt"] = signed
 
-            try:
-                saved = _RECEIPTS.update(
-                    receipt_record_id,
-                    issue,
-                    expected_revision=int(existing["revision"]),
-                    action="interaction_receipt_issued",
-                    actor=operator,
-                )
-            except RecordConflict:
-                saved = _RECEIPTS.get(receipt_record_id)
-                if saved is None or saved.get("status") != "issued":
-                    raise EvidenceGatewayStateError(
-                        "authoritative interaction receipt is unavailable "
-                        "after a concurrent issue"
-                    ) from None
-                return _deliver_text_locked(
-                    generated_text,
-                    input_text=input_text,
-                    conversation_id=conversation,
-                    idempotency_key=idempotency,
-                    actor=operator,
-                    policy_id=policy_token,
-                    model_sha256=model_digest,
-                    context_sha256=context_digest,
-                    modality=modality_token,
-                    human_interaction=human_interaction,
-                    synthetic_content=synthetic_content,
-                    deepfake=deepfake,
-                    public_interest_text=public_interest_text,
-                    editorial_exception=exception,
-                )
-            if saved is None:
-                raise EvidenceGatewayStateError("interaction receipt disappeared")
-        _complete_conversation(
-            conversation_sha,
-            receipt_id,
-            str(signed["hash"]),
-            interaction_disclosure_applied=bool(
-                signed["transparency"]["interaction_disclosure_applied"]
-            ),
-            actor=operator,
-        )
+                try:
+                    saved = _RECEIPTS.update(
+                        receipt_record_id,
+                        issue,
+                        expected_revision=int(existing["revision"]),
+                        action="interaction_receipt_issued",
+                        actor=operator,
+                    )
+                except RecordConflict:
+                    saved = _RECEIPTS.get(receipt_record_id)
+                    if saved is None or saved.get("status") != "issued":
+                        raise EvidenceGatewayStateError(
+                            "authoritative interaction receipt is unavailable "
+                            "after a concurrent issue"
+                        ) from None
+                    return _deliver_text_locked(
+                        generated_text,
+                        input_text=input_text,
+                        conversation_id=conversation,
+                        idempotency_key=idempotency,
+                        actor=operator,
+                        policy_id=policy_token,
+                        model_sha256=model_digest,
+                        context_sha256=context_digest,
+                        modality=modality_token,
+                        human_interaction=human_interaction,
+                        synthetic_content=synthetic_content,
+                        deepfake=deepfake,
+                        public_interest_text=public_interest_text,
+                        editorial_exception=exception,
+                    )
+                if saved is None:
+                    raise EvidenceGatewayStateError("interaction receipt disappeared")
+            _complete_conversation(
+                conversation_sha,
+                receipt_id,
+                str(signed["hash"]),
+                interaction_disclosure_applied=bool(
+                    signed["transparency"]["interaction_disclosure_applied"]
+                ),
+                actor=operator,
+            )
+        except Exception:
+            _abandon_conversation_reservation(
+                conversation_sha, receipt_id, actor=operator,
+            )
+            raise
         return {
             "enabled": True,
             "delivered_text": delivered,

@@ -14,9 +14,12 @@ configured :func:`effort_for_role` returns ``None`` and behaviour is unchanged.
 Turn it on with ``[effort] enabled = true`` (then per-role overrides), a global
 ``MAVERICK_EFFORT=medium``, or per-role ``MAVERICK_EFFORT_<ROLE>=low``.
 
-Model-gated so it never 400s: effort is supported on Opus 4.5+ and Sonnet 4.6;
-``xhigh`` is Opus 4.7/4.8 only and ``max`` is Opus-tier (4.6+), so a level above
-the model's ceiling is clamped down rather than rejected.
+Model-gated so it never 400s: effort is supported on Opus 4.5+, Sonnet 4.6,
+and the current generation (Opus 5, Sonnet 5, Fable 5.x); ``xhigh`` is Opus
+4.7+ and the current generation, and ``max`` is Opus-tier (4.6+), Sonnet
+4.6, and the current generation -- so a level above the model's ceiling is
+clamped down rather than rejected. Verified against
+https://platform.claude.com/docs/en/build-with-claude/effort.
 """
 from __future__ import annotations
 
@@ -44,24 +47,38 @@ _ROLE_DEFAULTS: dict[str, str] = {
 
 
 def effort_supported(model_id: str) -> bool:
-    """Whether ``model_id`` accepts ``output_config.effort`` at all (Opus 4.5+ and
-    Sonnet 4.6; Sonnet 4.5 and Haiku 4.5 reject it with a 400)."""
+    """Whether ``model_id`` accepts ``output_config.effort`` at all (Opus
+    4.5+, Sonnet 4.6, and the current generation -- Opus 5, Sonnet 5, Fable
+    5.x; Sonnet 4.5 and Haiku 4.5 reject it with a 400)."""
     m = model_id or ""
     return (
         m.startswith(("claude-opus-4-5", "claude-opus-4-6",
-                      "claude-opus-4-7", "claude-opus-4-8"))
+                      "claude-opus-4-7", "claude-opus-4-8",
+                      "claude-opus-5", "claude-sonnet-5", "claude-fable-5"))
         or m.startswith("claude-sonnet-4-6")
     )
 
 
 def _clamp(level: str, model_id: str) -> str:
-    """Lower a level the model can't take to one it can (never 400)."""
+    """Lower a level the model can't take to one it can (never 400).
+
+    Per https://platform.claude.com/docs/en/build-with-claude/effort:
+    ``xhigh`` is available on Opus 4.7+ and the current generation (Opus 5,
+    Sonnet 5, Fable 5.x) -- not Opus 4.6 or Sonnet 4.6. ``max`` is available
+    on Opus 4.6+, Sonnet 4.6, and the current generation -- not Opus 4.5,
+    which supports effort but not ``max``."""
     m = model_id or ""
-    is_opus_78 = m.startswith(("claude-opus-4-7", "claude-opus-4-8"))
-    is_opus_tier = m.startswith(("claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"))
-    if level == "xhigh" and not is_opus_78:
+    xhigh_ok = m.startswith((
+        "claude-opus-4-7", "claude-opus-4-8",
+        "claude-opus-5", "claude-sonnet-5", "claude-fable-5",
+    ))
+    max_ok = m.startswith((
+        "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
+        "claude-opus-5", "claude-sonnet-5", "claude-fable-5",
+    )) or m.startswith("claude-sonnet-4-6")
+    if level == "xhigh" and not xhigh_ok:
         return "high"
-    if level == "max" and not is_opus_tier:
+    if level == "max" and not max_ok:
         return "high"
     return level
 

@@ -541,7 +541,10 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         execution_principal="agent:worker",
     ) == 99
     sql, params = cursor.calls[0]
-    assert "owner, execution_principal, tenant_id" in sql
+    # PLATFORM_IMPROVEMENT_AUDIT.md W1-47: domain/project_id joined the
+    # column list (signature parity with the SQLite backend), between
+    # execution_principal and tenant_id.
+    assert "owner, execution_principal, domain, project_id, tenant_id" in sql
     assert params == (
         4,
         "owned goal",
@@ -550,6 +553,8 @@ def test_create_goal_persists_owner_with_tenant(monkeypatch):
         123.0,
         "user:alice",
         "agent:worker",
+        "",     # domain default
+        None,   # project_id default
         "tenant-a",
     )
 

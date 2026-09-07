@@ -19,7 +19,7 @@ import os
 import time
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +139,10 @@ def _op_predict_get(args: dict) -> str:
     pid = (args.get("prediction_id") or "").strip()
     if not pid:
         return "ERROR: predict_get requires prediction_id"
-    code, data = _get(f"/predictions/{pid}")
+    seg = safe_path_segment(pid)
+    if seg is None:
+        return "ERROR: predict_get requires a valid prediction_id"
+    code, data = _get(f"/predictions/{seg}")
     if code == 404:
         return f"prediction {pid} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -151,9 +154,12 @@ def _op_cancel(args: dict) -> str:
     pid = (args.get("prediction_id") or "").strip()
     if not pid:
         return "ERROR: cancel requires prediction_id"
+    seg = safe_path_segment(pid)
+    if seg is None:
+        return "ERROR: cancel requires a valid prediction_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would cancel {pid}. Re-run with confirm=true."
-    code, data = _post(f"/predictions/{pid}/cancel", {})
+    code, data = _post(f"/predictions/{seg}/cancel", {})
     if code >= 400:
         return f"ERROR: cancel ({code}): {data}"
     return f"cancelled {pid}"

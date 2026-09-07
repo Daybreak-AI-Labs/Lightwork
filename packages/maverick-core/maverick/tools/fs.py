@@ -122,6 +122,20 @@ def _write_text_contained(sandbox, target: Path, content: str, *, legacy_journal
     ``ValueError`` on escape; ``OSError`` propagates.
     """
     workdir = Path(sandbox.workdir).resolve()
+    # Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W2-1/W2-3): `.git/` writes
+    # were previously blocked only in opaque benchmark mode (`_is_opaque_blocked`
+    # below). In ordinary operation this let write_file/str_replace_editor/
+    # ast_edit plant a `.git/config` `core.fsmonitor` hook or filter
+    # smudge/clean command that a later host-side git call
+    # (edit_format.render_diff, reviewer.get_diff, coding_mode candidate
+    # evaluation) would execute. Refuse unconditionally: there is no
+    # legitimate reason for a file-editing tool to write git's own metadata.
+    try:
+        rel = target.relative_to(workdir)
+    except ValueError:
+        rel = target
+    if ".git" in rel.parts:
+        raise ValueError(f"refusing to write under .git/: {rel}")
     # Workspace journal chokepoint: every file-tool write (write_file, the
     # str_replace editors, ast_edit) funnels through here, so the pre-image is
     # captured BEFORE the O_CREAT below can create the file — a created file

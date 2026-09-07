@@ -1,0 +1,1249 @@
+[
+  {
+    "blocking_calls": [
+      "settings_store.clear_provider"
+    ],
+    "lineno": 305,
+    "name": "settings_clear_provider",
+    "path": "maverick_dashboard/admin_pages.py"
+  },
+  {
+    "blocking_calls": [
+      "load_config",
+      "settings_store.state"
+    ],
+    "lineno": 33,
+    "name": "settings_page",
+    "path": "maverick_dashboard/admin_pages.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.rotate_provider"
+    ],
+    "lineno": 269,
+    "name": "settings_set_provider",
+    "path": "maverick_dashboard/admin_pages.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.set_webhooks_secret"
+    ],
+    "lineno": 252,
+    "name": "settings_set_webhooks",
+    "path": "maverick_dashboard/admin_pages.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 1686,
+    "name": "answer_question",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.flow_cohort",
+      "store.load_flow",
+      "store.save_flow"
+    ],
+    "lineno": 7117,
+    "name": "apply_flow_proposal_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12644,
+    "name": "approval_state",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12596,
+    "name": "approve_approval",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 10423,
+    "name": "automation_runs",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9087,
+    "name": "cancel_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12655,
+    "name": "claim_approval",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 13440,
+    "name": "compose_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 13403,
+    "name": "create_child_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "event_triggers_store.get_trigger",
+      "event_triggers_store.set_trigger",
+      "event_triggers_store.slugify",
+      "event_triggers_store.snapshot_from_template",
+      "flow_store.load_flow",
+      "flow_store.load_published_bundle"
+    ],
+    "lineno": 9971,
+    "name": "create_event_trigger",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 1319,
+    "name": "create_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9444,
+    "name": "create_goal_share",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "flow_store.load_flow",
+      "flow_store.load_published_bundle",
+      "triggers_store.get_trigger",
+      "triggers_store.set_trigger",
+      "triggers_store.slugify",
+      "triggers_store.snapshot_from_template"
+    ],
+    "lineno": 9783,
+    "name": "create_trigger",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 982,
+    "name": "dashboard_board",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "event_triggers_store.delete_trigger"
+    ],
+    "lineno": 10069,
+    "name": "delete_event_trigger_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.delete_flow",
+      "store.load_flow"
+    ],
+    "lineno": 6969,
+    "name": "delete_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "triggers_store.delete_trigger"
+    ],
+    "lineno": 9872,
+    "name": "delete_trigger_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12629,
+    "name": "deny_approval",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 14151,
+    "name": "department_review_api",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.load_run",
+      "store.snapshot_flow_bundle"
+    ],
+    "lineno": 6882,
+    "name": "dry_run_flow_draft_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9285,
+    "name": "edit_deliverable",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "trigger_events_store.history"
+    ],
+    "lineno": 10168,
+    "name": "event_trigger_history",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 10189,
+    "name": "event_trigger_outcomes",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9348,
+    "name": "export_deliverable_csv",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.list_flows"
+    ],
+    "lineno": 6838,
+    "name": "flow_insights_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow"
+    ],
+    "lineno": 7247,
+    "name": "flow_node_impact_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow"
+    ],
+    "lineno": 7067,
+    "name": "flow_proposals_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.load_flow_schema"
+    ],
+    "lineno": 6318,
+    "name": "flow_schema_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow"
+    ],
+    "lineno": 7083,
+    "name": "flow_signals_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.list_versions",
+      "store.load_flow"
+    ],
+    "lineno": 7187,
+    "name": "flow_versions_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world",
+      "goal_feedback_store.latest_for_goal"
+    ],
+    "lineno": 9245,
+    "name": "get_feedback",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow"
+    ],
+    "lineno": 6956,
+    "name": "get_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "goal_feedback_store.count"
+    ],
+    "lineno": 7295,
+    "name": "get_flywheel_state",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 1538,
+    "name": "get_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9165,
+    "name": "get_signoff",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8041,
+    "name": "get_spend",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9402,
+    "name": "goal_artifact_history",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 1547,
+    "name": "goal_events",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9109,
+    "name": "goal_open_questions",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 13338,
+    "name": "goal_tree_api",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world",
+      "world.active_halt",
+      "world.disarm_halt"
+    ],
+    "lineno": 8747,
+    "name": "halt_clear",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8666,
+    "name": "halt_set",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8594,
+    "name": "halt_status",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5206,
+    "name": "link_outcome",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12339,
+    "name": "list_approvals",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5167,
+    "name": "list_facts",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.list_runs"
+    ],
+    "lineno": 6305,
+    "name": "list_flow_runs_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.list_flows"
+    ],
+    "lineno": 5885,
+    "name": "list_flows_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9389,
+    "name": "list_goal_artifacts",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5106,
+    "name": "list_goal_attachments",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 1485,
+    "name": "list_goals",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9519,
+    "name": "list_tools",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "triggers_store.list_triggers"
+    ],
+    "lineno": 9763,
+    "name": "list_triggers_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 14163,
+    "name": "outcomes_api",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12684,
+    "name": "oversight_active",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12729,
+    "name": "oversight_why",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world",
+      "goal_feedback_store.record"
+    ],
+    "lineno": 9258,
+    "name": "post_feedback",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9181,
+    "name": "post_signoff",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.publish_flow"
+    ],
+    "lineno": 5958,
+    "name": "publish_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.set_value_assumptions"
+    ],
+    "lineno": 8148,
+    "name": "put_savings_assumptions",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5181,
+    "name": "record_outcome",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5230,
+    "name": "record_outcome_by_key",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12674,
+    "name": "release_approval",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 13372,
+    "name": "reparent_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 11966,
+    "name": "replay_evidence",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 11952,
+    "name": "replay_json",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 13952,
+    "name": "resume_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 13352,
+    "name": "retitle_goal",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.load_published_bundle"
+    ],
+    "lineno": 6511,
+    "name": "retry_flow_run_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9474,
+    "name": "revoke_goal_share",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.rollback_flow"
+    ],
+    "lineno": 7216,
+    "name": "rollback_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 12797,
+    "name": "run_fleet_agent",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.load_published_bundle",
+      "store.load_run"
+    ],
+    "lineno": 6996,
+    "name": "run_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world",
+      "world.get_goal"
+    ],
+    "lineno": 14457,
+    "name": "run_tree_api",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.save_flow"
+    ],
+    "lineno": 5909,
+    "name": "save_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 1522,
+    "name": "search_goals",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.set_dgm"
+    ],
+    "lineno": 14360,
+    "name": "set_dgm_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5172,
+    "name": "set_fact",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.set_flow_autonomy"
+    ],
+    "lineno": 14415,
+    "name": "set_flow_autonomy_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.set_learning"
+    ],
+    "lineno": 14333,
+    "name": "set_learning_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7449,
+    "name": "templates_suggested",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "store.load_flow",
+      "store.unpublish_flow"
+    ],
+    "lineno": 6002,
+    "name": "unpublish_flow_endpoint",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "close_world_if_owned",
+      "open_world"
+    ],
+    "lineno": 13164,
+    "name": "watch_glance",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 479,
+    "name": "workforce_posture",
+    "path": "maverick_dashboard/api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7382,
+    "name": "annotations_list",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9104,
+    "name": "api_goal_events_legacy",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8781,
+    "name": "api_goal_legacy",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8871,
+    "name": "api_plan_tree",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 6649,
+    "name": "approvals_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_flow_store.list_flow_summaries"
+    ],
+    "lineno": 5329,
+    "name": "assessments_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "event_triggers_store.list_triggers",
+      "triggers_store.list_triggers"
+    ],
+    "lineno": 10026,
+    "name": "automations_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 4907,
+    "name": "billing_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.clear_channel"
+    ],
+    "lineno": 6962,
+    "name": "channels_clear",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.channels_state"
+    ],
+    "lineno": 6858,
+    "name": "channels_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8659,
+    "name": "chat_goal",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7592,
+    "name": "chat_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7167,
+    "name": "cost_anomalies",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7545,
+    "name": "cost_by_tag_api",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8988,
+    "name": "cost_csv",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2871,
+    "name": "deliverables_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8972,
+    "name": "errors_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 3113,
+    "name": "facts_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 6737,
+    "name": "fleets_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7321,
+    "name": "gallery_list",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7368,
+    "name": "gallery_remove",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9888,
+    "name": "get_started_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7417,
+    "name": "goal_anomalies",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7136,
+    "name": "goal_cost_breakdown",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7101,
+    "name": "goal_cost_preview",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7495,
+    "name": "goal_explain",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8882,
+    "name": "goal_minimap",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7458,
+    "name": "goal_replay_storyboard",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2796,
+    "name": "goal_set_project",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7443,
+    "name": "goal_tutorial",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2748,
+    "name": "goals_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 9766,
+    "name": "graph_editor_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 5522,
+    "name": "oversight_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2618,
+    "name": "overview",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7262,
+    "name": "pins_add",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 10210,
+    "name": "plan_tree_3d_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8939,
+    "name": "plan_tree_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2778,
+    "name": "project_detail",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2761,
+    "name": "projects_create",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2754,
+    "name": "projects_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2564,
+    "name": "public_demo",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "close_world_if_owned",
+      "open_world"
+    ],
+    "lineno": 5141,
+    "name": "replay_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 7509,
+    "name": "runs_compare",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 4881,
+    "name": "savings_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8716,
+    "name": "shared_goal",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 3118,
+    "name": "spend_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 6129,
+    "name": "tools_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 8956,
+    "name": "trajectory_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 10137,
+    "name": "walkthroughs_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_flow_store.list_flow_summaries"
+    ],
+    "lineno": 9907,
+    "name": "workflows_index_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 2655,
+    "name": "workforce_page",
+    "path": "maverick_dashboard/app.py"
+  },
+  {
+    "blocking_calls": [
+      "store.status"
+    ],
+    "lineno": 250,
+    "name": "status",
+    "path": "maverick_dashboard/data_use_governance_api.py"
+  },
+  {
+    "blocking_calls": [
+      "_store"
+    ],
+    "lineno": 511,
+    "name": "ekko_candidate_handoff",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store"
+    ],
+    "lineno": 488,
+    "name": "ekko_candidates",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.set_ekko"
+    ],
+    "lineno": 348,
+    "name": "ekko_control",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store"
+    ],
+    "lineno": 563,
+    "name": "ekko_erase_data",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store",
+      "store.erase",
+      "store.get_session"
+    ],
+    "lineno": 544,
+    "name": "ekko_erase_session",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store"
+    ],
+    "lineno": 577,
+    "name": "ekko_forget_device",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store"
+    ],
+    "lineno": 499,
+    "name": "ekko_mine_candidates",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store",
+      "store.list_sessions",
+      "store.path.exists"
+    ],
+    "lineno": 368,
+    "name": "ekko_sessions",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "_store",
+      "store.create_session",
+      "store.list_sessions"
+    ],
+    "lineno": 383,
+    "name": "ekko_start_session",
+    "path": "maverick_dashboard/ekko_routes.py"
+  },
+  {
+    "blocking_calls": [
+      "settings_store.security_suite_revision"
+    ],
+    "lineno": 179,
+    "name": "security_config",
+    "path": "maverick_dashboard/security_api.py"
+  },
+  {
+    "blocking_calls": [
+      "_world"
+    ],
+    "lineno": 33,
+    "name": "shoring_console",
+    "path": "maverick_dashboard/shoring_page.py"
+  }
+]

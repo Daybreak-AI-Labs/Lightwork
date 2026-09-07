@@ -183,6 +183,16 @@ class _BrowserSession:
             viewport={"width": 1280, "height": 800},
             storage_state=_restore_state_arg(),
         )
+        # Network-level backstop: every OTHER guard in this module only
+        # re-checks page.url after an action completes, so a page's own
+        # background requests (fetch/XHR, images, iframes, a popup this
+        # context spawns) to a blocked/enterprise-denied host were never
+        # checked at all -- readable/exfiltratable without ever showing up
+        # as page.url (platform audit W2-88). Registered on the CONTEXT, not
+        # just the one page this tool tracks, so it also covers any popup a
+        # page opens (this tool doesn't interact with popups, but Playwright
+        # still lets a page's script open and use one).
+        self._context.route("**/*", _route_guard)
         self._page = self._context.new_page()
 
     @property
@@ -288,6 +298,31 @@ def _browser_host_denial(url: str, allow_hosts: tuple[str, ...]) -> str | None:
     return _capability_denied(host)
 
 
+def _egress_denial(url: str) -> str | None:
+    """Enterprise-mode + per-tenant egress checks for a browser destination.
+
+    Mirrors http_fetch._preflight_fetch's enterprise/tenant checks: before
+    this, the browser tool was reachable from enterprise mode / a restrictive
+    [egress] or [tenancy.egress.<t>] plane with no check at all -- every other
+    outbound-request tool (http_fetch, websocket, connectors) gates on these
+    two, but a prompt-injected page could still make the *browser* reach
+    anything the process itself could (platform audit W2-88).
+    """
+    from ..enterprise import enterprise_egress_denial
+    deny = enterprise_egress_denial(url, tool="browser")
+    if deny:
+        return deny
+    try:
+        from ..tenant.egress import egress_allowed
+        host = (urlparse(url).hostname or "").strip().lower()
+        if host and not egress_allowed("browser", host):
+            return (f"egress policy blocks browser from reaching {host!r} "
+                    "(see [egress] / [sandbox.tool.browser]).")
+    except Exception:  # pragma: no cover -- policy never breaks a navigation
+        pass
+    return None
+
+
 def _deny_and_close_current_page(page: Any, allow_hosts: tuple[str, ...]) -> str | None:
     url = getattr(page, "url", "") or ""
     # SSRF re-check on the URL we ACTUALLY landed on. page.goto / click / back
@@ -303,6 +338,11 @@ def _deny_and_close_current_page(page: Any, allow_hosts: tuple[str, ...]) -> str
             f"⚠ DENIED: navigation landed on a private/internal host {host!r} "
             "(redirect to a non-public address); the browser session was closed."
         )
+    if url and _SAFE_URL_RE.match(url):
+        denial = _egress_denial(url)
+        if denial is not None:
+            close_browser()
+            return f"⚠ DENIED: {denial} The browser session was closed."
     denial = _browser_host_denial(url, allow_hosts)
     if denial is None:
         return None
@@ -331,6 +371,53 @@ def _is_safe_browser_url(url: str) -> bool:
     return not is_blocked_host(host)
 
 
+def _route_guard(route: Any, request: Any) -> None:
+    """Playwright request interceptor: abort any http(s) request -- main
+    frame OR subresource (image, script, XHR/fetch, iframe, popup) -- whose
+    host fails the same SSRF/enterprise/tenant checks every other guard in
+    this module applies only to page.url. This is the actual network
+    chokepoint, so unlike a post-navigation page.url re-check it also
+    catches a page's own background requests, which never show up as
+    page.url at all.
+
+    Non-http(s) schemes (data:, blob:, about:, chrome-error:, ...) are not
+    egress and are waved through -- these are same-document resource loads
+    a page uses constantly (inline images, blob downloads) that have no
+    host to check.
+    """
+    try:
+        parsed = urlparse(request.url)
+    except ValueError:
+        route.abort()
+        return
+    if parsed.scheme not in ("http", "https"):
+        route.continue_()
+        return
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host == "localhost" or host.endswith(".localhost"):
+        route.abort()
+        return
+    from .http_fetch import is_blocked_host
+    if is_blocked_host(host):
+        route.abort()
+        return
+    try:
+        from ..enterprise import egress_permitted
+        if not egress_permitted(request.url):
+            route.abort()
+            return
+    except Exception:  # pragma: no cover -- policy never breaks a request
+        pass
+    try:
+        from ..tenant.egress import egress_allowed
+        if not egress_allowed("browser", host):
+            route.abort()
+            return
+    except Exception:  # pragma: no cover -- policy never breaks a request
+        pass
+    route.continue_()
+
+
 def _browser_navigate(session, page, args, timeout, allow_hosts) -> str:
     url = args.get("url") or ""
     if not _is_safe_browser_url(url):
@@ -338,6 +425,14 @@ def _browser_navigate(session, page, args, timeout, allow_hosts) -> str:
             "ERROR: URL must be http(s) and must not target localhost or "
             f"non-public IP ranges; got {url!r}"
         )
+    # Enterprise/tenant egress checks on the REQUESTED url, before any
+    # request is made -- so a denied destination can't leak via DNS, TLS
+    # SNI, or redirects before the denial is returned (same rationale as
+    # http_fetch._preflight_fetch). _deny_and_close_current_page below
+    # re-runs this on the url actually landed on, in case of a redirect.
+    denial = _egress_denial(url)
+    if denial is not None:
+        return f"ERROR: {denial}"
     log.info("browser.navigate %s", url)
     page.goto(url, timeout=timeout, wait_until="domcontentloaded")
     denial = _deny_and_close_current_page(page, allow_hosts)

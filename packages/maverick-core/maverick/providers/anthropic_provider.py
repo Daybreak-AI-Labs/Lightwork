@@ -17,8 +17,16 @@ from typing import Any
 import anthropic
 
 from ..budget import Budget
-from ..llm import LLMResponse, ToolCall
+from ..llm import MODEL_OPUS, MODEL_OPUS_FAST, LLMResponse, ToolCall
 from ..retry import async_retry, sync_retry
+
+# Sept 2026 fix (PLATFORM_IMPROVEMENT_AUDIT.md W1-3): fast mode is a real
+# Anthropic API feature (Claude Opus 5 / Opus 4.8 only, research preview),
+# but it needs a specific wire shape -- the beta messages endpoint, this
+# beta flag, and a top-level `speed="fast"` parameter -- none of which
+# MODEL_OPUS_FAST ("claude-opus-4-8-fast") got: the phantom id was sent
+# verbatim as `model`, which the API has never recognized.
+_FAST_MODE_BETA = "fast-mode-2026-02-01"
 
 log = logging.getLogger(__name__)
 # Module-level flag so we only emit the low-cache warning once per process.
@@ -54,12 +62,23 @@ def _adaptive_max_tokens_floor() -> int:
 
 
 def _is_opus_adaptive(model_id: str) -> bool:
-    """Opus 4.7/4.8 (incl. ``-fast`` variants): the models that ONLY accept
-    adaptive thinking (explicit "enabled" returns 400) and get the auto-
-    adaptive default. The single place to extend when 4.9 lands — the request
-    builder and the budget estimate both key off this predicate."""
+    """Models that ONLY accept adaptive thinking (explicit "enabled" returns
+    400) and get the auto-adaptive default: Opus 4.7/4.8 (incl. ``-fast``
+    variants) and the current generation (Opus 5, Sonnet 5, Fable 5.x), all
+    "Adaptive"-only per each model's own capabilities table at
+    https://platform.claude.com/docs/en/about-claude/models/overview.
+
+    W1-9: this used to match only Opus 4.7/4.8, so an unrecognized
+    current-generation id fell through to the manual
+    ``{"type": "enabled", "budget_tokens": ...}`` path below -- which those
+    models reject with a 400, the same way Opus 4.7/4.8 do. The single
+    place to extend when the next generation lands — the request builder
+    and the budget estimate both key off this predicate."""
     return (model_id.startswith("claude-opus-4-7")
-            or model_id.startswith("claude-opus-4-8"))
+            or model_id.startswith("claude-opus-4-8")
+            or model_id.startswith("claude-opus-5")
+            or model_id.startswith("claude-sonnet-5")
+            or model_id.startswith("claude-fable-5"))
 
 
 def effective_max_tokens(model_id: str, max_tokens: int,
@@ -88,48 +107,56 @@ def _ephemeral(obj: dict) -> dict:
     # there is no cross-instance reuse and the 25% cache-write surcharge
     # on a 1h TTL is wasted.
     #
-    # Wave 12 hotfix — minimum cacheable prompt size:
-    # Claude Opus 4.5+, Sonnet 4.5+, and Haiku 4.5: the cumulative prompt
-    # up to AND INCLUDING the cache breakpoint must be >= 4,096 tokens
-    # or the breakpoint is silently ignored (no API error, no cache
-    # write, no cache read on subsequent calls). Older Claude 4.x and
-    # 3.x models use 1,024.
-    #
-    # Lightwork's current system prompt (~1,085 tokens) + tool catalog
-    # (~716 tokens) sit BELOW the 4,096 threshold individually, which
-    # means cache_control on them is currently a no-op. The messages
-    # breakpoint is the one that actually delivers caching on long
-    # agent traces (history grows past 4k by turn 3-4). We still mark
-    # system + tools with cache_control — it's harmless if the block
-    # is too small, and starts working once the prompt expands.
+    # Minimum cacheable prompt size (see _min_cache_tokens): the cumulative
+    # prompt up to AND INCLUDING the cache breakpoint must reach the model's
+    # minimum or the breakpoint is silently ignored (no API error, no cache
+    # write, no cache read on subsequent calls). The minimum varies by model
+    # family -- 512 to 4,096 tokens -- so whether Lightwork's system prompt
+    # (~1,085 tokens) and tool catalog (~716 tokens) actually cache depends
+    # on which model is active; the messages breakpoint delivers caching
+    # regardless once history grows past the threshold. We mark system +
+    # tools with cache_control unconditionally — it's harmless if a given
+    # model's block is too small, and starts working once the prompt (or a
+    # switch to a lower-minimum model) crosses the threshold.
     ttl = _default_cache_ttl()
     return {**obj, "cache_control": {"type": "ephemeral", "ttl": ttl}}
 
 
-# Wave 12 hotfix: cacheable-block minimums per Anthropic model family.
-# Used to warn / no-op cache_control when the prompt is too small.
-_MIN_CACHE_TOKENS_4X = 4096
-_MIN_CACHE_TOKENS_3X = 1024
+# Cacheable-block minimums per Anthropic model family, verified against
+# https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+# ("Cache limitations"). Used to warn / no-op cache_control (and to skip
+# prewarm()) when the prompt is too small to actually get cached.
+_MIN_CACHE_TOKENS_512 = 512
+_MIN_CACHE_TOKENS_1024 = 1024
+_MIN_CACHE_TOKENS_2048 = 2048
+_MIN_CACHE_TOKENS_4096 = 4096
 
 
 def _min_cache_tokens(model_id: str) -> int:
     """Minimum cumulative prompt tokens (up to + including breakpoint)
-    required for prompt caching to actually take effect.
+    required for prompt caching to actually take effect, per
+    https://platform.claude.com/docs/en/build-with-claude/prompt-caching.
 
-    Claude 4.5+ (opus 4.5/4.6/4.7/4.8, sonnet 4.5/4.6, haiku 4.5): 4096.
-    Earlier 4.x and all 3.x: 1024.
+    The prior table put every 4.5+/4.6+ model at the 4,096 minimum that
+    actually only applies to Opus 4.5/4.6 (and Haiku 4.5) -- which meant
+    the current defaults, Opus 4.8 and Sonnet 4.6 (both really 1,024),
+    were wrongly gated at 4,096: prewarm() silently no-op'd for prompts
+    that would in fact have cached, and the debug log claimed the
+    breakpoint would be ignored when it would not. 1,024 tokens is the
+    documented minimum for most models (Opus 4.8, Sonnet 5, Sonnet 4.6,
+    Sonnet 4.5, and the retired Opus 4.1/4/Sonnet 4, plus every Claude 3.x
+    model) and is this function's default; only the families below need a
+    different value.
     """
-    if (
-        model_id.startswith("claude-opus-4-5")
-        or model_id.startswith("claude-opus-4-6")
-        or model_id.startswith("claude-opus-4-7")
-        or model_id.startswith("claude-opus-4-8")
-        or model_id.startswith("claude-sonnet-4-5")
-        or model_id.startswith("claude-sonnet-4-6")
-        or model_id.startswith("claude-haiku-4-5")
-    ):
-        return _MIN_CACHE_TOKENS_4X
-    return _MIN_CACHE_TOKENS_3X
+    if model_id.startswith("claude-opus-4-6") or model_id.startswith("claude-opus-4-5"):
+        return _MIN_CACHE_TOKENS_4096
+    if model_id.startswith("claude-haiku-4-5"):
+        return _MIN_CACHE_TOKENS_4096
+    if model_id.startswith("claude-opus-4-7"):
+        return _MIN_CACHE_TOKENS_2048
+    if model_id.startswith("claude-opus-5") or model_id.startswith("claude-fable-5"):
+        return _MIN_CACHE_TOKENS_512
+    return _MIN_CACHE_TOKENS_1024
 
 
 def _cached_system(text: str) -> list[dict]:
@@ -315,6 +342,15 @@ class AnthropicClient:
         model: str | None,
         effort: str | None = None,
     ) -> dict[str, Any]:
+        # Fast mode (W1-3): MODEL_OPUS_FAST is a catalog-only id, never sent
+        # to the API. Substitute the real model NOW so every prefix check
+        # below (adaptive-thinking gating, cache minimums, etc.) sees the
+        # actual "claude-opus-4-8" and behaves identically to a plain Opus
+        # request; the fast-mode-specific kwargs are layered on at the end.
+        want_fast = model == MODEL_OPUS_FAST
+        if want_fast:
+            model = MODEL_OPUS
+
         # Wave 10: cache the most recent stable user message so repeated
         # tool-use turns hit the cache for the history (40-55% input
         # token cost cut on long trajectories). Toggle via env var so
@@ -465,6 +501,13 @@ class AnthropicClient:
                     oc["effort"] = model_effort
                 else:
                     kwargs["output_config"] = {"effort": model_effort}
+
+        if want_fast:
+            # `speed` is a top-level request field the API only validates on
+            # the beta messages endpoint; complete/complete_async route this
+            # request there when they see it.
+            kwargs["speed"] = "fast"
+            kwargs["betas"] = [_FAST_MODE_BETA]
         return kwargs
 
     def _parse_response(
@@ -537,6 +580,16 @@ class AnthropicClient:
         cache_read = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
         in_tok = _safe_int(getattr(usage, "input_tokens", 0))
         out_tok = _safe_int(getattr(usage, "output_tokens", 0))
+        # W1-6: the system/tools breakpoint writes at _default_cache_ttl()
+        # (1h in interactive mode) while the messages breakpoint writes at
+        # _msg_cache_ttl() (5m) -- a single call can write BOTH tiers at
+        # once. Anthropic reports the real per-tier split as
+        # usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens when
+        # present; billing the combined total at one multiplier overcharges
+        # (or undercharges) whichever tier isn't the one that TTL matches.
+        cache_creation_detail = getattr(usage, "cache_creation", None)
+        cache_write_5m = _safe_int(getattr(cache_creation_detail, "ephemeral_5m_input_tokens", 0))
+        cache_write_1h = _safe_int(getattr(cache_creation_detail, "ephemeral_1h_input_tokens", 0))
 
         if budget is not None:
             # ``usage.input_tokens`` is non-cached input only. Cache reads
@@ -547,8 +600,11 @@ class AnthropicClient:
                 cache_read_tok=cache_read,
                 cache_write_tok=cache_creation,
                 # Wave 12: pass TTL so write surcharge math matches the
-                # actual breakpoint TTL (5m vs 1h).
+                # actual breakpoint TTL (5m vs 1h) when the per-tier split
+                # below isn't available (older SDK, or a single-tier write).
                 cache_write_ttl=_default_cache_ttl(),
+                cache_write_5m_tok=cache_write_5m,
+                cache_write_1h_tok=cache_write_1h,
             )
 
         # Prometheus token + cache-effectiveness metrics (no-op unless the
@@ -617,9 +673,18 @@ class AnthropicClient:
     ) -> LLMResponse:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort)
+        # Fast mode (W1-3) is beta-endpoint-only: `speed` is only a validated
+        # field on client.beta.messages.*. Bill against the CALLER's model id
+        # ("claude-opus-4-8-fast", the correctly-priced rate-card SKU), not
+        # kwargs["model"] (the real wire id _build_request substituted) --
+        # but only for the fast-mode case; the non-fast default (model=None
+        # -> DEFAULT_MODEL) still needs kwargs["model"] for the resolved id.
+        is_fast = kwargs.get("speed") == "fast"
+        endpoint = self.client.beta.messages if is_fast else self.client.messages
+        billing_model = model if is_fast else kwargs.get("model")
         if on_delta is None:
-            resp = sync_retry(lambda: self.client.messages.create(**kwargs))
-            return self._parse_response(resp, budget, model=kwargs.get("model"))
+            resp = sync_retry(lambda: endpoint.create(**kwargs))
+            return self._parse_response(resp, budget, model=billing_model)
 
         # Council finding: wrapping the streaming path in sync_retry
         # would replay every on_delta callback after a mid-stream
@@ -627,11 +692,11 @@ class AnthropicClient:
         # called from interactive paths (CLI --stream, dashboard chat);
         # surface the error directly and let the caller retry the
         # higher-level request without partial output.
-        with self.client.messages.stream(**kwargs) as stream:
+        with endpoint.stream(**kwargs) as stream:
             for event in stream.text_stream:
                 on_delta(event)
             final = stream.get_final_message()
-        return self._parse_response(final, budget, model=kwargs.get("model"))
+        return self._parse_response(final, budget, model=billing_model)
 
     async def complete_async(
         self,
@@ -646,8 +711,11 @@ class AnthropicClient:
     ) -> LLMResponse:
         kwargs = self._build_request(
             system, messages, tools, max_tokens, thinking_budget, model, effort)
-        resp = await async_retry(lambda: self.aclient.messages.create(**kwargs))
-        return self._parse_response(resp, budget, model=kwargs.get("model"))
+        is_fast = kwargs.get("speed") == "fast"
+        endpoint = self.aclient.beta.messages if is_fast else self.aclient.messages
+        billing_model = model if is_fast else kwargs.get("model")
+        resp = await async_retry(lambda: endpoint.create(**kwargs))
+        return self._parse_response(resp, budget, model=billing_model)
 
     def prewarm(
         self,

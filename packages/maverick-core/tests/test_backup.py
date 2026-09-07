@@ -7,6 +7,7 @@ import io
 import os
 import sqlite3
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
@@ -242,6 +243,90 @@ def test_backup_excludes_prior_backups(monkeypatch):
     assert "data/world.db" in members
 
 
+def _seed_key_material(root):
+    """Write stand-ins for the at-rest key, its rotation keyring, and the
+    audit signing key at their real on-disk locations (crypto_at_rest.py,
+    audit/signing.py)."""
+    keys_dir = root / "keys"
+    keyring_dir = keys_dir / "at_rest.d"
+    keyring_dir.mkdir(parents=True, exist_ok=True)
+    (keys_dir / "at_rest.key").write_bytes(b"\x00" * 32)
+    (keyring_dir / "k1.key").write_bytes(b"\x01" * 32)
+    audit_keys_dir = root / "audit" / "keys"
+    audit_keys_dir.mkdir(parents=True, exist_ok=True)
+    (audit_keys_dir / "signing.key").write_bytes(b"\x02" * 32)
+    # Not secrets: a DEK wrapped under the primary key, and a public key.
+    (keys_dir / "dek.wrapped").write_bytes(b"\x03" * 64)
+    (audit_keys_dir / "signing.pub").write_bytes(b"\x04" * 32)
+
+
+def test_backup_excludes_key_material_by_default():
+    """The at-rest encryption key and audit signing key decrypt/authenticate
+    everything else the archive carries; bundling them inside the same copy
+    nullifies at-rest encryption for anyone who obtains it (offsite backup,
+    S3 bucket, standby host, a DSAR export handed to the data subject).
+    docs/encryption.md's escrow guidance is "not next to the data they
+    unlock" -- the default archive must not carry any *.key member."""
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    _seed_key_material(root)
+
+    tar = backup.create_backup()
+    with tarfile.open(tar, "r:gz") as archive:
+        members = archive.getnames()
+    assert not any(name.endswith(".key") for name in members), members
+    assert "data/keys/at_rest.key" not in members
+    assert "data/keys/at_rest.d/k1.key" not in members
+    assert "data/audit/keys/signing.key" not in members
+    assert "data/world.db" in members  # everything else still ships
+    # Wrapped/public material is what a recovery of the ciphertext needs.
+    assert "data/keys/dek.wrapped" in members
+    assert "data/audit/keys/signing.pub" in members
+
+
+def test_backup_include_keys_opts_back_in():
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    _seed_key_material(root)
+
+    tar = backup.create_backup(include_keys=True)
+    with tarfile.open(tar, "r:gz") as archive:
+        members = archive.getnames()
+    assert "data/keys/at_rest.key" in members
+    assert "data/keys/at_rest.d/k1.key" in members
+    assert "data/audit/keys/signing.key" in members
+
+
+def test_replace_existing_restore_preserves_live_keys_when_archive_excludes_them(tmp_path):
+    """replace_existing unlinks live files absent from the archive. A default
+    (keys-excluded) archive must not turn the live at-rest/audit keys into
+    such targets -- deleting them would leave the restored ciphertext
+    unreadable. Keys travel only when the archive itself carries them."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "notes.txt").write_text("payload")
+    with backup.recovery_scope(source, "acme", bytes(range(32))):
+        without_keys = backup.create_backup(tmp_path / "no-keys.tgz")
+        _seed_key_material(source)
+        with_keys = backup.create_backup(tmp_path / "with-keys.tgz", include_keys=True)
+
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    _seed_key_material(destination)
+    (destination / "keys" / "at_rest.key").write_bytes(b"\x07" * 32)
+    with backup.recovery_scope(destination, "acme", bytes(range(32))):
+        backup.restore_backup(without_keys, replace_existing=True)
+    assert (destination / "keys" / "at_rest.key").read_bytes() == b"\x07" * 32
+    assert (destination / "keys" / "at_rest.d" / "k1.key").exists()
+    assert (destination / "audit" / "keys" / "signing.key").exists()
+
+    with backup.recovery_scope(destination, "acme", bytes(range(32))):
+        backup.restore_backup(with_keys, replace_existing=True)
+    assert (destination / "keys" / "at_rest.key").read_bytes() == b"\x00" * 32
+
+
 def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None, resign=False):
     """Rebuild a backup tarball, optionally mutating the manifest dict or a
     named data file's bytes — to forge corrupt / schema-incompatible backups."""
@@ -268,6 +353,62 @@ def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None, resign=
             info = tarfile.TarInfo(m.name)
             info.size = len(blobs[m.name])
             t.addfile(info, io.BytesIO(blobs[m.name]))
+
+
+def test_restore_refuses_when_world_appears_live():
+    """restore_backup's own transaction lock only serializes concurrent
+    restores; WorldModel takes its cross_process_lock only briefly during
+    __init__, so a long-running process holds no lock a restore could see
+    -- but it does keep touching world.db's WAL/SHM sidecars. Publishing
+    over world.db with a process still holding it open silently orphans
+    every later write on the old, unlinked inode (a split-brain, not a
+    crash)."""
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    tar = backup.create_backup()
+
+    (root / "world.db-wal").write_bytes(b"live-wal-content")
+    now = time.time()
+    os.utime(root / "world.db-wal", (now, now))
+
+    with pytest.raises(backup.BackupError, match="still appears to have the world database open"):
+        backup.restore_backup(tar)
+    # force overrides the guard.
+    backup.restore_backup(tar, force=True)
+
+
+def test_restore_proceeds_when_wal_sidecar_is_stale():
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    tar = backup.create_backup()
+
+    stale_wal = root / "world.db-wal"
+    stale_wal.write_bytes(b"old-checkpointed-wal")
+    stale_time = time.time() - 3600
+    os.utime(stale_wal, (stale_time, stale_time))
+
+    backup.restore_backup(tar)  # does not raise
+
+
+def test_restore_live_guard_only_fires_when_backup_carries_world_db():
+    """A backup that never included world.db shouldn't be blocked by
+    activity on a world.db it will never publish over."""
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    (root / "world.db").unlink()  # this backup will not carry world.db
+    tar = backup.create_backup()
+    m = backup.read_manifest(tar)
+    assert "world.db" not in m["files"]
+
+    live_wal = root / "world.db-wal"
+    live_wal.write_bytes(b"live-wal-content")
+    now = time.time()
+    os.utime(live_wal, (now, now))
+
+    backup.restore_backup(tar)  # does not raise: nothing to publish over
 
 
 def test_restore_refuses_forward_schema(tmp_path, monkeypatch):
@@ -724,6 +865,12 @@ def test_partial_restore_failure_rolls_back_entire_file_set(monkeypatch):
     connection.close()
     wal = root / "world.db-wal"
     wal.write_bytes(b"pre-restore-sidecar")
+    # Backdate it: this fixture is a pre-existing sidecar to verify rollback
+    # restores unchanged, not a signal that a process currently has the
+    # database open -- a fresh mtime here would trip the live-world guard
+    # this test isn't exercising.
+    stale = time.time() - 3600
+    os.utime(wal, (stale, stale))
     before = {
         "trust": (root / "agent_trust.json").read_bytes(),
         "audit": (root / "audit" / "2026-06-18.ndjson").read_bytes(),
