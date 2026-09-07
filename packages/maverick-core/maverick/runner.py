@@ -153,15 +153,21 @@ def run_goal_in_thread(
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    acquire_timeout: float | None = None,
 ) -> str | None:
     """Synchronously run a goal under the global concurrency semaphore.
 
     Designed to be passed to ``fastapi.BackgroundTasks.add_task`` or any
-    threadpool. Acquires the semaphore (blocking up to
-    ``_ACQUIRE_TIMEOUT`` if the cap is reached), runs the swarm, releases
-    the semaphore, and never re-raises -- the FastAPI / channel callers'
-    contract (return a goal id, poll for result) doesn't surface mid-run
-    exceptions.
+    threadpool. Acquires the semaphore (blocking up to ``acquire_timeout``,
+    default ``_ACQUIRE_TIMEOUT``, if the cap is reached), runs the swarm,
+    releases the semaphore, and never re-raises -- the FastAPI / channel
+    callers' contract (return a goal id, poll for result) doesn't surface
+    mid-run exceptions.
+
+    ``acquire_timeout`` lets a caller that can cheaply retry later (W1-73:
+    the job-queue's run_goal/start_goal handlers, which share a small worker
+    pool with cron ticks/flow sweeps) use a short timeout instead of blocking
+    a whole worker thread for up to ``_ACQUIRE_TIMEOUT`` per semaphore.
 
     Returns the goal's terminal status string (``"done"`` / ``"blocked"``
     / ...) so the worker daemon can decide whether the *job* succeeded:
@@ -174,6 +180,7 @@ def run_goal_in_thread(
     handles the concurrency), and always closes the WorldModel so the
     per-goal connection + WAL handle don't leak for the process lifetime.
     """
+    timeout = acquire_timeout if acquire_timeout is not None else _ACQUIRE_TIMEOUT
     # Per-user lane first: bounds one caller's own fan-out without ever
     # blocking on another caller's runs.  Some execution identities (for
     # example fleet agent audit principals) are derived from user-controlled
@@ -181,19 +188,19 @@ def run_goal_in_thread(
     # for scheduling while preserving ``user_id`` for audit/governance.
     lane_principal = concurrency_principal if concurrency_principal is not None else user_id
     principal_sem = _principal_semaphore(lane_principal)
-    if not principal_sem.acquire(timeout=_ACQUIRE_TIMEOUT):
+    if not principal_sem.acquire(timeout=timeout):
         log.error(
             "run_goal_in_thread: per-user concurrency cap (%d) reached within "
             "%.0fs (goal_id=%s, principal=%s); refusing run",
-            MAX_CONCURRENT_GOALS_PER_PRINCIPAL, _ACQUIRE_TIMEOUT, goal_id, lane_principal,
+            MAX_CONCURRENT_GOALS_PER_PRINCIPAL, timeout, goal_id, lane_principal,
         )
         return None
     # Global ceiling next: only a host-wide saturation makes anyone wait here.
-    if not _run_semaphore.acquire(timeout=_ACQUIRE_TIMEOUT):
+    if not _run_semaphore.acquire(timeout=timeout):
         principal_sem.release()
         log.error(
             "run_goal_in_thread: no global concurrency slot within %.0fs "
-            "(goal_id=%s); refusing run", _ACQUIRE_TIMEOUT, goal_id,
+            "(goal_id=%s); refusing run", timeout, goal_id,
         )
         return None
     _mark_inflight_started()

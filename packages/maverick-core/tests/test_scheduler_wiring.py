@@ -174,6 +174,7 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
 
     monkeypatch.setattr("maverick.runner.run_goal_in_thread", _fake_run)
 
+    import maverick.worker as worker_mod
     from maverick.job_queue import Job
     from maverick.worker import Worker
     w = Worker(db_path=tmp_path / "jobs.db")
@@ -199,7 +200,10 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
     assert g.title == "Digest"
     assert g.description == "Summarize overnight emails"
     assert g.owner == "user:alice"
-    assert seen["run_kwargs"] == {"channel": "api", "user_id": "alice"}
+    assert seen["run_kwargs"] == {
+        "channel": "api", "user_id": "alice",
+        "acquire_timeout": worker_mod._QUEUE_GOAL_ACQUIRE_TIMEOUT,
+    }
 
 
 def test_start_goal_records_schedule_provenance(tmp_path, monkeypatch):
