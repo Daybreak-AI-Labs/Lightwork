@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Task files · Lightwork{% endblock %}
+{% block content %}
+<section id="task-files" data-goal="{{ goal.id }}" style="max-width:900px;margin-inline:auto;min-width:0">
+  <a href="/chat/goal/{{ goal.id }}">Back to task</a>
+  <h1>Review and restore task files</h1>
+  <p>{{ goal.title }}</p>
+  <p>Restore the files captured before this task's latest local run. Review every listed change first. Shell commands, remote files, tickets and other external changes are not undone.</p>
+  <p id="tf-status" role="status" aria-live="polite" tabindex="-1">Loading file history…</p>
+  <button id="tf-refresh" class="btn" type="button">Refresh file history</button>
+  <div id="tf-enable-panel" hidden>
+    <p>Enable protected file capture before running a task. Captured originals remain encrypted in this app. A write is refused if its original cannot be safely saved. This does not reconstruct earlier work.</p>
+    <label><input id="tf-enable-confirm" type="checkbox">Enable file capture and refuse uncaptured file-tool writes for future tasks.</label>
+    <button id="tf-enable" class="btn" type="button" disabled>Enable file capture</button>
+  </div>
+  <button id="tf-preview" class="btn" type="button" disabled>Review restore changes</button>
+  <div id="tf-files"></div>
+  <div id="tf-review" hidden>
+    <p id="tf-operation"></p>
+    <label><input id="tf-confirm" type="checkbox">I reviewed these file changes and want to restore the captured originals. Newly created files listed here will be removed.</label>
+    <button id="tf-restore" class="btn" type="button" disabled>Restore reviewed files</button>
+  </div>
+  <details><summary>What this recovery covers</summary><p>Only this named owner's captured local file-tool writes are available. Up to 100 files, 8 MiB per file and 32 MiB total per run are protected. Previews may be shortened; exact file fingerprints still bind the complete content. Stop tasks using the same folder and cancel pending jobs before recovery. An interrupted restore retains its exact request for explicit retry. Remote-worker deployments and old unbound journal records cannot use this restore.</p></details>
+</section>
+<style>
+  #task-files p,#task-files h1,#task-files h2,#task-files button{overflow-wrap:anywhere}
+  #task-files label{display:flex;align-items:flex-start;gap:var(--space-2);margin-block:var(--space-3)}#task-files label input{flex:0 0 auto;margin-top:.3em}
+  #task-files button{white-space:normal;max-width:100%;margin-block:var(--space-2)}#tf-files article{min-width:0;border:1px solid var(--border);padding:var(--space-3);margin-block:var(--space-3);border-radius:var(--radius-md)}
+  #tf-files pre{max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#tf-files code{overflow-wrap:anywhere;word-break:break-all}
+</style>
+<script src="/static/lightwork-task-file-recovery.js"></script>
+{% endblock %}

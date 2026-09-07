@@ -192,6 +192,73 @@ async def test_resume_counts_history_once_and_settles_only_new_usage(run_state, 
 
 
 @pytest.mark.asyncio
+async def test_lost_checkpoint_ack_does_not_charge_history_twice(run_state, monkeypatch):
+    ctx = run_state
+    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)
+    attempts = 0
+
+    async def execute(self):
+        nonlocal attempts
+        attempts += 1
+        self._resume_from_checkpoint([], self.ctx.blackboard, self.ctx.episode_id)
+        self.ctx.budget.record_tokens(120, 40, model="fake:test")
+        if attempts == 1:
+            Checkpointer(self.ctx.world).save(
+                goal_id=self.ctx.goal_id, episode_id=self.ctx.episode_id,
+                agent_id=self.checkpoint_id, step_seq=1,
+                messages=[{"role": "user", "content": "reviewed evidence"}],
+                budget=self.ctx.budget,
+            )
+            self.ctx.budget.record_tokens(10, 5, model="fake:test")
+            raise RuntimeError("provider interrupted")
+        return AgentResult(role=self.role, name=self.name, final="assessment ready")
+
+    def lose_ack(*args, **kwargs):
+        raise OSError("process stopped after ledger commit")
+
+    monkeypatch.setattr(Agent, "run", execute)
+    original_ack = Checkpointer.record_settlement
+    monkeypatch.setattr(Checkpointer, "record_settlement", lose_ack)
+    with pytest.raises(RuntimeError, match="provider interrupted"):
+        await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
+    assert UsageLedger().usage("user:local")["in_tokens"] == 130
+    monkeypatch.setattr(Checkpointer, "record_settlement", original_ack)
+    resumed = Budget(max_dollars=2)
+    await run_goal(ctx.llm, ctx.world, resumed, ctx.goal_id, sandbox=ctx.sandbox, resume=True)
+    assert resumed.input_tokens == 250
+    assert UsageLedger().usage("user:local")["in_tokens"] == 250
+    assert UsageLedger().usage("user:local")["out_tokens"] == 85
+
+
+@pytest.mark.asyncio
+async def test_spent_episode_without_checkpoint_requires_new_episode(run_state, monkeypatch):
+    ctx = run_state
+    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)
+    attempts = []
+
+    async def execute(self):
+        attempts.append(True)
+        self.ctx.budget.record_tokens(120, 40, model="fake:test")
+        if len(attempts) == 1:
+            raise RuntimeError("interrupted before first checkpoint")
+        return AgentResult(role=self.role, name=self.name, final="assessment ready")
+
+    monkeypatch.setattr(Agent, "run", execute)
+    with pytest.raises(RuntimeError, match="before first checkpoint"):
+        await run_goal(ctx.llm, ctx.world, ctx.budget, ctx.goal_id, sandbox=ctx.sandbox)
+    episode, = ctx.world.list_episodes(goal_id=ctx.goal_id)
+    with pytest.raises(ValueError, match="no resumable checkpoint"):
+        await run_goal(ctx.llm, ctx.world, Budget(max_dollars=2), ctx.goal_id,
+                       sandbox=ctx.sandbox, resume_episode_id=episode.id)
+    assert len(attempts) == 1
+    assert UsageLedger().usage("user:local")["in_tokens"] == 120
+    assert ctx.world.list_episodes(goal_id=ctx.goal_id)[0].input_tokens == 120
+    await run_goal(ctx.llm, ctx.world, Budget(max_dollars=2), ctx.goal_id, sandbox=ctx.sandbox)
+    assert len(attempts) == 2
+    assert UsageLedger().usage("user:local")["in_tokens"] == 240
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("agent_key", ["orchestrator-0", "compliance-reviewer-0"])
 async def test_resume_limit_checked_before_paid_brief(run_state, monkeypatch, agent_key):
     ctx = run_state

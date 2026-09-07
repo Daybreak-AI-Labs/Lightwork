@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import threading
+import time
 from datetime import datetime, timezone
 
 from .file_lock import (
@@ -44,6 +45,7 @@ log = logging.getLogger(__name__)
 # second save clobbers the first -- spend is undercounted and a principal slips
 # past its quota.
 _RECORD_LOCK = threading.Lock()
+_LEDGER_FORMAT = "lightwork-usage-v2"
 
 
 _cross_process_lock = cross_process_lock
@@ -132,6 +134,32 @@ def _validate_ledger(data: object) -> dict:
     return validated
 
 
+def _validate_settlements(receipts: object) -> dict:
+    if not isinstance(receipts, dict):
+        raise UsageLedgerError("usage settlement receipts must be an object")
+    for scope, receipt in receipts.items():
+        if (not isinstance(scope, str) or len(scope) != 32
+                or any(c not in "0123456789abcdef" for c in scope)
+                or not isinstance(receipt, dict)):
+            raise UsageLedgerError("invalid usage settlement identity")
+        principal = receipt.get("principal")
+        if not isinstance(principal, str) or not principal.strip():
+            raise UsageLedgerError("invalid usage settlement principal")
+        for name in ("total", "credited"):
+            amount = receipt.get(name)
+            if not isinstance(amount, dict) or set(amount) != {"dollars", "in_tokens", "out_tokens"}:
+                raise UsageLedgerError("invalid usage settlement counters")
+            _validate_ledger({principal: {"2000-01-01": amount}})
+        if any(receipt["credited"][key] > receipt["total"][key] for key in receipt["total"]):
+            raise UsageLedgerError("settled credit exceeds cumulative usage")
+        revision, timestamp = receipt.get("revision"), receipt.get("updated_at")
+        if (type(revision) is not int or revision < 1 or type(timestamp) not in (int, float)
+                or not math.isfinite(timestamp) or timestamp < 0):
+            raise UsageLedgerError("invalid usage settlement revision")
+        _validate_ledger({principal: receipt.get("charges")})
+    return receipts
+
+
 class UsageLedger:
     """A persistent ``(principal, day) -> {dollars, in_tokens, out_tokens}`` tally.
 
@@ -145,10 +173,10 @@ class UsageLedger:
     def __init__(self, path=None) -> None:
         self.path = path if path is not None else _ledger_path()
 
-    def _load(self) -> dict:
+    def _load_state(self) -> tuple[dict, dict]:
         ensure_private_directory(self.path.parent)
         if not self.path.exists():
-            return {}
+            return {}, {}
         try:
             ensure_private_file(self.path)
             data = _decode_ledger(atomic_read_text(self.path))
@@ -156,14 +184,92 @@ class UsageLedger:
             raise
         except OSError as exc:
             raise UsageLedgerError(f"usage ledger unreadable: {exc}") from exc
-        return _validate_ledger(data)
+        if isinstance(data, dict) and data.get("format") == _LEDGER_FORMAT:
+            if set(data) != {"format", "usage", "settlements"}:
+                raise UsageLedgerError("invalid usage ledger envelope")
+            return _validate_ledger(data["usage"]), _validate_settlements(data["settlements"])
+        return _validate_ledger(data), {}
+
+    def _load(self) -> dict:
+        """Compatibility view consumed by quotas, billing, and reporting."""
+        return self._load_state()[0]
 
     def _save(self, data: dict) -> None:
+        _, receipts = self._load_state()
+        self._save_state(data, receipts)
+
+    def _save_state(self, data: dict, receipts: dict) -> None:
         ensure_private_directory(self.path.parent)
+        document = ({"format": _LEDGER_FORMAT, "usage": data, "settlements": receipts}
+                    if receipts else data)
         atomic_write_text(
             self.path,
-            json.dumps(data, sort_keys=True, allow_nan=False),
+            json.dumps(document, sort_keys=True, allow_nan=False),
         )
+
+    def settlement(self, scope: str, principal: str) -> dict | None:
+        """Read the durable receipt used to reconcile an interrupted resume."""
+        receipt = self._load_state()[1].get(scope)
+        if receipt is not None and receipt["principal"] != principal:
+            raise UsageLedgerError("usage settlement belongs to another principal")
+        return receipt
+
+    def settlement_receipts(self, *, principal: str | None = None,
+                            limit: int = 50, offset: int = 0) -> dict:
+        """An owner-filtered reconciliation trail, separate from provider invoices."""
+        if type(limit) is not int or not 1 <= limit <= 200 or type(offset) is not int or offset < 0:
+            raise ValueError("invalid receipt page bounds")
+        rows = [{"scope": scope, **receipt} for scope, receipt in self._load_state()[1].items()
+                if principal is None or receipt["principal"] == principal]
+        rows.sort(key=lambda row: (row["updated_at"], row["scope"]), reverse=True)
+        return {"items": rows[offset:offset + limit], "total": len(rows),
+                "offset": offset, "limit": limit, "has_more": offset + limit < len(rows)}
+
+    def record_cumulative(
+        self, principal: str, scope: str, dollars: float, in_tokens: int, out_tokens: int,
+        *, already_settled: dict | None = None, day: str | None = None,
+    ) -> None:
+        """Commit cumulative counters and their receipt in one atomic write.
+
+        Checkpoint acknowledgement is advisory: repeating any committed total
+        cannot add spend again. Only the increase is charged on the current day.
+        Legacy checkpoints may carry a previously acknowledged credit, applied
+        only when creating their first receipt. Receipts survive bucket pruning
+        so restoring an old checkpoint cannot charge the deleted history again.
+        """
+        total = {"dollars": dollars, "in_tokens": in_tokens, "out_tokens": out_tokens}
+        previous = already_settled or {}
+        credited = {key: previous.get(key, 0) for key in total}
+        candidate = {"principal": principal, "total": total, "credited": credited,
+                     "revision": 1, "updated_at": time.time(), "charges": {}}
+        _validate_settlements({scope: candidate})
+        day = day or _today()
+        _validate_ledger({principal: {day: total}})
+        with _RECORD_LOCK, _cross_process_lock(self.path):
+            usage, receipts = self._load_state()
+            prior = receipts.get(scope)
+            if prior is not None:
+                if prior["principal"] != principal:
+                    raise UsageLedgerError("usage settlement belongs to another principal")
+                if all(total[key] <= prior["total"][key] for key in total):
+                    return  # identical or older delivery, already accounted
+                if any(total[key] < prior["total"][key] for key in total):
+                    raise UsageLedgerError("usage counters conflict with the settlement receipt")
+                candidate.update(credited=prior["credited"], charges=prior["charges"],
+                                 revision=prior["revision"] + 1)
+            baseline = prior["total"] if prior is not None else credited
+            delta = {key: total[key] - baseline[key] for key in total}
+            cell = usage.setdefault(principal, {}).setdefault(
+                day, {"dollars": 0.0, "in_tokens": 0, "out_tokens": 0},
+            )
+            charge = candidate["charges"].setdefault(
+                day, {"dollars": 0.0, "in_tokens": 0, "out_tokens": 0},
+            )
+            for key in delta:
+                cell[key] += delta[key]
+                charge[key] += delta[key]
+            receipts[scope] = candidate
+            self._save_state(usage, receipts)
 
     def record(
         self,
@@ -245,7 +351,7 @@ class UsageLedger:
         removed_buckets = 0
         removed_principals = 0
         with _RECORD_LOCK, _cross_process_lock(self.path):
-            data = self._load()
+            data, receipts = self._load_state()
             for principal in list(data.keys()):
                 days = data.get(principal) or {}
                 expired = [d for d in days if isinstance(d, str) and d <= cutoff_day]
@@ -262,7 +368,12 @@ class UsageLedger:
                     if not dry_run:
                         del data[principal]
             if not dry_run and removed_buckets:
-                self._save(data)
+                for receipt in receipts.values():
+                    receipt["charges"] = {
+                        day: charge for day, charge in receipt["charges"].items()
+                        if day > cutoff_day
+                    }
+                self._save_state(data, receipts)
         return {"removed_buckets": removed_buckets,
                 "removed_principals": removed_principals,
                 "cutoff_day": cutoff_day}
@@ -350,6 +461,8 @@ def record_usage(
     out_tokens: int = 0,
     *,
     reservation_id: str | None = None,
+    settlement_id: str | None = None,
+    already_settled: dict | None = None,
 ) -> bool:
     """Record a finished run's spend against ``principal`` for today's window.
 
@@ -370,7 +483,14 @@ def record_usage(
     """
     recorded = False
     try:
-        UsageLedger().record(principal, dollars, in_tokens, out_tokens)
+        ledger = UsageLedger()
+        if settlement_id:
+            ledger.record_cumulative(
+                principal, settlement_id, dollars, in_tokens, out_tokens,
+                already_settled=already_settled,
+            )
+        else:
+            ledger.record(principal, dollars, in_tokens, out_tokens)
         recorded = bool(principal)
     except Exception as e:  # pragma: no cover - ledger is fully fail-soft
         log.warning("quotas: failed to record usage for %r: %s", principal, e)
