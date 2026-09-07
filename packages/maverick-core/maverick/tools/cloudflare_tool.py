@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +108,8 @@ def _ok(data: Any) -> bool:
 
 
 def _zone(args: dict) -> str:
-    return (args.get("zone_id") or _zone_default()).strip()
+    raw = (args.get("zone_id") or _zone_default()).strip()
+    return safe_path_segment(raw) or ""
 
 
 def _op_dns_list(args: dict) -> str:
@@ -158,10 +159,13 @@ def _op_dns_update(args: dict) -> str:
     content = args.get("content")
     if not (zone and rid and content):
         return "ERROR: dns_update requires zone_id, record_id, content"
+    rid_seg = safe_path_segment(rid)
+    if rid_seg is None:
+        return "ERROR: dns_update requires a valid record_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would update {rid} -> {content}. Re-run with confirm=true."
     code, data = _patch(
-        f"/zones/{zone}/dns_records/{rid}", {"content": str(content)},
+        f"/zones/{zone}/dns_records/{rid_seg}", {"content": str(content)},
     )
     if not _ok(data):
         return f"ERROR: dns_update ({code}): {data}"
@@ -173,9 +177,12 @@ def _op_dns_delete(args: dict) -> str:
     rid = (args.get("record_id") or "").strip()
     if not (zone and rid):
         return "ERROR: dns_delete requires zone_id and record_id"
+    rid_seg = safe_path_segment(rid)
+    if rid_seg is None:
+        return "ERROR: dns_delete requires a valid record_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would delete {rid}. Re-run with confirm=true."
-    code, data = _delete(f"/zones/{zone}/dns_records/{rid}")
+    code, data = _delete(f"/zones/{zone}/dns_records/{rid_seg}")
     if not _ok(data):
         return f"ERROR: dns_delete ({code}): {data}"
     return f"deleted {rid}"

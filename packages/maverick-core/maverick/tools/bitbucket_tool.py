@@ -20,7 +20,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool
+from . import Tool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +78,10 @@ def _slug(args: dict) -> tuple[str, str] | str:
     repo = (args.get("repo_slug") or "").strip()
     if not ws or not repo:
         return "ERROR: workspace and repo_slug are required"
-    return ws, repo
+    ws_seg, repo_seg = safe_path_segment(ws), safe_path_segment(repo)
+    if ws_seg is None or repo_seg is None:
+        return "ERROR: workspace and repo_slug must be valid path segments"
+    return ws_seg, repo_seg
 
 
 def _op_issues(args: dict) -> str:

@@ -52,6 +52,34 @@ def as_bool(value: Any) -> bool:
     return value is True
 
 
+def safe_path_segment(value: Any) -> str | None:
+    """Percent-encode a model-supplied id/slug for interpolation into a
+    connector API path, or ``None`` if it can't be used as one segment.
+
+    httpx (and most HTTP clients) normalizes ``..`` dot-segments in a URL
+    path before sending the request. A hand-written connector that does
+    ``f"/tasks/{tgid}"`` with an unencoded, model-supplied ``tgid`` lets a
+    value like ``"../../api/1.0/goals/123"`` retarget the request to an
+    arbitrary endpoint under the same host and credential -- escalating a
+    narrowly described op ("complete a task") to any GET/POST/PUT/DELETE the
+    token can reach. ``quote(value, safe="")`` percent-encodes ``/`` too, so
+    the result is always exactly one opaque path segment: a traversal
+    sequence like ``../../x`` becomes the literal, inert text ``..%2F..%2Fx``
+    with no path-delimiter meaning left for the client to normalize.
+    Rejecting an empty value or a bare ``.``/``..`` (quoting alone leaves
+    dots unencoded, since they're RFC 3986 unreserved) closes the remaining
+    edge case where the whole id is a no-op segment. Legitimate connector
+    ids/slugs -- Asana gids, ClickUp/Confluence/Dynamics ids, Cloudflare
+    zone/record ids, Bitbucket workspace/repo slugs -- never need a literal
+    ``.`` or ``..`` value, so this never rejects a real one.
+    """
+    text = str(value or "").strip()
+    if not text or text in (".", ".."):
+        return None
+    from urllib.parse import quote
+    return quote(text, safe="")
+
+
 def scrub_child_env() -> dict[str, Any]:
     """Env for a tool subprocess with secrets stripped.
 

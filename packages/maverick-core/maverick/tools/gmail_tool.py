@@ -18,7 +18,7 @@ import os
 from email.message import EmailMessage
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +138,10 @@ def _op_get(args: dict) -> str:
     mid = (args.get("message_id") or "").strip()
     if not mid:
         return "ERROR: get requires message_id"
-    code, data = _get(f"/messages/{mid}", {"format": "full"})
+    seg = safe_path_segment(mid)
+    if seg is None:
+        return "ERROR: get requires a valid message_id"
+    code, data = _get(f"/messages/{seg}", {"format": "full"})
     if code == 404:
         return f"message {mid} not found"
     if code >= 400 or not isinstance(data, dict):

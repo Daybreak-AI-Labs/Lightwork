@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -149,8 +149,11 @@ def _op_lookup(args: dict) -> str:
     phone = (args.get("phone") or "").strip()
     if not phone:
         return "ERROR: lookup requires phone"
+    seg = safe_path_segment(phone)
+    if seg is None:
+        return "ERROR: lookup requires a valid phone"
     code, data = _get(
-        f"/PhoneNumbers/{phone}",
+        f"/PhoneNumbers/{seg}",
         {"Fields": "line_type_intelligence"},
         lookups=True,
     )

@@ -17,7 +17,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -52,8 +52,15 @@ def _token() -> str:
     return t
 
 
-def _user(arg: str) -> str:
-    return (arg or os.environ.get("ZOOM_USER_ID") or "me").strip()
+def _user(arg: str) -> str | None:
+    """The Zoom user id/email to scope a request to, or None if invalid.
+
+    ``arg`` is model-supplied and interpolated into /users/{user}/... paths,
+    so it goes through the same safe_path_segment guard as every other
+    connector id (a value like "../../accounts" must not retarget the
+    request to a different API path)."""
+    raw = (arg or os.environ.get("ZOOM_USER_ID") or "me").strip()
+    return safe_path_segment(raw)
 
 
 def _headers() -> dict[str, str]:
@@ -90,6 +97,8 @@ def _delete(path: str) -> int:
 
 def _op_meetings(args: dict) -> str:
     user = _user(args.get("user") or "")
+    if user is None:
+        return "ERROR: meetings requires a valid user"
     params = {
         "type": (args.get("type") or "upcoming"),
         "page_size": max(1, min(int(args.get("limit") or 25), 100)),
@@ -111,7 +120,10 @@ def _op_meeting_get(args: dict) -> str:
     mid = (args.get("meeting_id") or "").strip()
     if not mid:
         return "ERROR: meeting_get requires meeting_id"
-    code, data = _get(f"/meetings/{mid}")
+    seg = safe_path_segment(mid)
+    if seg is None:
+        return "ERROR: meeting_get requires a valid meeting_id"
+    code, data = _get(f"/meetings/{seg}")
     if code == 404:
         return f"meeting {mid} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -133,6 +145,8 @@ def _op_meeting_create(args: dict) -> str:
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would create '{topic}' at {start}. Re-run with confirm=true."
     user = _user(args.get("user") or "")
+    if user is None:
+        return "ERROR: meeting_create requires a valid user"
     body = {
         "topic": topic,
         "type": 2,  # scheduled
@@ -149,9 +163,12 @@ def _op_meeting_delete(args: dict) -> str:
     mid = (args.get("meeting_id") or "").strip()
     if not mid:
         return "ERROR: meeting_delete requires meeting_id"
+    seg = safe_path_segment(mid)
+    if seg is None:
+        return "ERROR: meeting_delete requires a valid meeting_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would delete {mid}. Re-run with confirm=true."
-    code = _delete(f"/meetings/{mid}")
+    code = _delete(f"/meetings/{seg}")
     if code >= 400:
         return f"ERROR: meeting_delete ({code})"
     return f"deleted meeting {mid}"
@@ -159,6 +176,8 @@ def _op_meeting_delete(args: dict) -> str:
 
 def _op_recordings(args: dict) -> str:
     user = _user(args.get("user") or "")
+    if user is None:
+        return "ERROR: recordings requires a valid user"
     params: dict = {
         "page_size": max(1, min(int(args.get("limit") or 25), 300)),
     }

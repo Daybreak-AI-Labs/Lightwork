@@ -17,7 +17,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +125,10 @@ def _op_deployment_get(args: dict) -> str:
     did = (args.get("deployment_id") or "").strip()
     if not did:
         return "ERROR: deployment_get requires deployment_id"
-    code, data = _get(f"/v13/deployments/{did}")
+    seg = safe_path_segment(did)
+    if seg is None:
+        return "ERROR: deployment_get requires a valid deployment_id"
+    code, data = _get(f"/v13/deployments/{seg}")
     if code == 404:
         return f"deployment {did} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -144,8 +147,11 @@ def _op_deployment_logs(args: dict) -> str:
     did = (args.get("deployment_id") or "").strip()
     if not did:
         return "ERROR: deployment_logs requires deployment_id"
+    seg = safe_path_segment(did)
+    if seg is None:
+        return "ERROR: deployment_logs requires a valid deployment_id"
     limit = max(1, min(int(args.get("limit") or 100), 1000))
-    code, data = _get(f"/v2/deployments/{did}/events", {"limit": limit})
+    code, data = _get(f"/v2/deployments/{seg}/events", {"limit": limit})
     if code >= 400 or not isinstance(data, list):
         return f"ERROR: deployment_logs ({code}): {data}"
     if not data:
@@ -161,9 +167,12 @@ def _op_cancel(args: dict) -> str:
     did = (args.get("deployment_id") or "").strip()
     if not did:
         return "ERROR: cancel requires deployment_id"
+    seg = safe_path_segment(did)
+    if seg is None:
+        return "ERROR: cancel requires a valid deployment_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would cancel deployment {did}. Re-run with confirm=true."
-    code, data = _patch(f"/v12/deployments/{did}/cancel", {})
+    code, data = _patch(f"/v12/deployments/{seg}/cancel", {})
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: cancel ({code}): {data}"
     return f"cancelled {did} (state={data.get('readyState') or data.get('state')})"
@@ -173,7 +182,10 @@ def _op_domains(args: dict) -> str:
     pid = (args.get("project_id") or "").strip()
     if not pid:
         return "ERROR: domains requires project_id"
-    code, data = _get(f"/v9/projects/{pid}/domains")
+    seg = safe_path_segment(pid)
+    if seg is None:
+        return "ERROR: domains requires a valid project_id"
+    code, data = _get(f"/v9/projects/{seg}/domains")
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: domains ({code}): {data}"
     rows = data.get("domains") or []

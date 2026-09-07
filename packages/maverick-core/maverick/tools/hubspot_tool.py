@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +152,10 @@ def _op_contact_get(args: dict) -> str:
     cid = (args.get("contact_id") or "").strip()
     if not cid:
         return "ERROR: contact_get requires contact_id"
-    code, data = _get(f"/crm/v3/objects/contacts/{cid}",
+    seg = safe_path_segment(cid)
+    if seg is None:
+        return "ERROR: contact_get requires a valid contact_id"
+    code, data = _get(f"/crm/v3/objects/contacts/{seg}",
                        {"properties": "email,firstname,lastname,company,phone"})
     if code == 404:
         return f"contact {cid} not found"
@@ -193,10 +196,13 @@ def _op_contact_update(args: dict) -> str:
     props = args.get("properties") if isinstance(args.get("properties"), dict) else None
     if not cid or not props:
         return "ERROR: contact_update requires contact_id and properties"
+    seg = safe_path_segment(cid)
+    if seg is None:
+        return "ERROR: contact_update requires a valid contact_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would update {cid}. Re-run with confirm=true."
     code, data = _patch(
-        f"/crm/v3/objects/contacts/{cid}",
+        f"/crm/v3/objects/contacts/{seg}",
         {"properties": {str(k): str(v) for k, v in props.items()}},
     )
     if code >= 400 or not isinstance(data, dict):

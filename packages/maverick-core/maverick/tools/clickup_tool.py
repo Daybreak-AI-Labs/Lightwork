@@ -17,7 +17,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -92,7 +92,10 @@ def _op_spaces(args: dict) -> str:
     tid = (args.get("team_id") or "").strip()
     if not tid:
         return "ERROR: spaces requires team_id"
-    code, data = _get(f"/team/{tid}/space")
+    seg = safe_path_segment(tid)
+    if seg is None:
+        return "ERROR: spaces requires a valid team_id"
+    code, data = _get(f"/team/{seg}/space")
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: spaces ({code}): {data}"
     spaces = data.get("spaces") or []
@@ -103,7 +106,10 @@ def _op_lists(args: dict) -> str:
     sid = (args.get("space_id") or "").strip()
     if not sid:
         return "ERROR: lists requires space_id"
-    code, data = _get(f"/space/{sid}/list")
+    seg = safe_path_segment(sid)
+    if seg is None:
+        return "ERROR: lists requires a valid space_id"
+    code, data = _get(f"/space/{seg}/list")
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: lists ({code}): {data}"
     lists = data.get("lists") or []
@@ -117,6 +123,9 @@ def _op_tasks(args: dict) -> str:
     lid = (args.get("list_id") or "").strip()
     if not lid:
         return "ERROR: tasks requires list_id"
+    seg = safe_path_segment(lid)
+    if seg is None:
+        return "ERROR: tasks requires a valid list_id"
     limit = max(1, min(int(args.get("limit") or 25), 100))
     archived = "true" if args.get("archived") else "false"
     # ClickUp paginates ~100 tasks per page with a `last_page` flag. Follow
@@ -126,7 +135,7 @@ def _op_tasks(args: dict) -> str:
     page = 0
     max_pages = max(1, (limit // 100) + 2)
     for _ in range(max_pages):
-        code, data = _get(f"/list/{lid}/task", {"archived": archived, "page": page})
+        code, data = _get(f"/list/{seg}/task", {"archived": archived, "page": page})
         if code >= 400 or not isinstance(data, dict):
             return f"ERROR: tasks ({code}): {data}"
         batch = data.get("tasks") or []
@@ -148,7 +157,10 @@ def _op_task_get(args: dict) -> str:
     tid = (args.get("task_id") or "").strip()
     if not tid:
         return "ERROR: task_get requires task_id"
-    code, data = _get(f"/task/{tid}")
+    seg = safe_path_segment(tid)
+    if seg is None:
+        return "ERROR: task_get requires a valid task_id"
+    code, data = _get(f"/task/{seg}")
     if code == 404:
         return f"task {tid} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -168,6 +180,9 @@ def _op_task_create(args: dict) -> str:
     name = (args.get("name") or "").strip()
     if not lid or not name:
         return "ERROR: task_create requires list_id and name"
+    seg = safe_path_segment(lid)
+    if seg is None:
+        return "ERROR: task_create requires a valid list_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would create task in list {lid}. Re-run with confirm=true."
     body: dict = {"name": name}
@@ -179,7 +194,7 @@ def _op_task_create(args: dict) -> str:
         body["status"] = args["status"]
     if args.get("priority"):
         body["priority"] = int(args["priority"])
-    code, data = _post(f"/list/{lid}/task", body)
+    code, data = _post(f"/list/{seg}/task", body)
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: task_create ({code}): {data}"
     return f"created task {data.get('id')}: {data.get('url', '')}"

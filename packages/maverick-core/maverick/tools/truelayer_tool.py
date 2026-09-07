@@ -22,7 +22,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool
+from . import Tool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +87,10 @@ def _op_balance(args: dict) -> str:
     acct = (args.get("account_id") or "").strip()
     if not acct:
         return "ERROR: balance requires account_id"
-    code, data = _get(f"/data/v1/accounts/{acct}/balance", args["access_token"])
+    seg = safe_path_segment(acct)
+    if seg is None:
+        return "ERROR: balance requires a valid account_id"
+    code, data = _get(f"/data/v1/accounts/{seg}/balance", args["access_token"])
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: balance ({code}): {data}"
     rows = data.get("results") or []
@@ -108,12 +111,15 @@ def _op_transactions(args: dict) -> str:
     acct = (args.get("account_id") or "").strip()
     if not acct:
         return "ERROR: transactions requires account_id"
+    seg = safe_path_segment(acct)
+    if seg is None:
+        return "ERROR: transactions requires a valid account_id"
     params = {}
     if (args.get("from_date") or "").strip():
         params["from"] = args["from_date"].strip()
     if (args.get("to_date") or "").strip():
         params["to"] = args["to_date"].strip()
-    code, data = _get(f"/data/v1/accounts/{acct}/transactions",
+    code, data = _get(f"/data/v1/accounts/{seg}/transactions",
                       args["access_token"], params)
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: transactions ({code}): {data}"
