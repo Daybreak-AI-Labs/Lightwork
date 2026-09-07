@@ -1040,12 +1040,8 @@ async def rehearse(
     installed — the kernel never *requires* the evolve package).
     """
     check_learning_halt("dreaming", "rehearsal_start")
-    try:
-        from .calibration import learning_frozen
-        frozen = bool(learning_frozen())
-    except Exception:  # pragma: no cover -- interlock absent = not frozen
-        frozen = False
-    if frozen:
+    from .calibration import learning_frozen_safe
+    if learning_frozen_safe():
         raise RehearsalFrozen(
             "verifier calibration is frozen; refusing to rehearse against a "
             "distrusted grader (see maverick.calibration)."
@@ -1324,11 +1320,8 @@ def _consolidate_learning(report, by_domain_success, failures, *,
     prevent). rehearse() already refuses on a frozen verifier; the consolidation
     path did not, so the headline interlock was a no-op here. Returns the new
     insights to persist (empty when frozen)."""
-    try:
-        from .calibration import learning_frozen as _lf
-        report.learning_frozen = bool(_lf())
-    except Exception:  # pragma: no cover -- interlock absent = not frozen
-        report.learning_frozen = False
+    from .calibration import learning_frozen_safe
+    report.learning_frozen = learning_frozen_safe()
     if report.learning_frozen:
         return []
 

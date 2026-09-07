@@ -1128,6 +1128,19 @@ def _erodes_policy(line: str) -> bool:
     return bool(_POLICY_EROSION_RE.search(line or ""))
 
 
+# recall_addendum() rides the agent's per-prompt hot path (see its own comment
+# below), so a persistently-bad stored line -- one that keeps failing this
+# screen every time it's recalled, because nothing purges it from the store --
+# would otherwise re-log the SAME warning on every single prompt/turn/goal
+# run that recalls it, forever. Dedup to once per distinct rejected line per
+# process, the same "standing condition, not a per-event one" treatment
+# orchestrator.py's _WARNED_DISTILL_DISABLED already gives an analogous
+# recurring warning. Unbounded but expected to stay small: only lines that
+# actually FAIL the screen land here, and a real deployment has at most a
+# handful of stale/tampered lines across all models, never thousands.
+_WARNED_EROSION_LINES: set[str] = set()
+
+
 def _screen_addendum_line(line: str) -> str | None:
     """Apply the prompt-addendum safety screen to an already-proposed line.
 
@@ -1139,7 +1152,9 @@ def _screen_addendum_line(line: str) -> str | None:
     if not line or len(line) > 280:
         return None
     if _erodes_policy(line):
-        log.warning("self_harness: refused policy-eroding addendum line: %r", line)
+        if line not in _WARNED_EROSION_LINES:
+            _WARNED_EROSION_LINES.add(line)
+            log.warning("self_harness: refused policy-eroding addendum line: %r", line)
         return None
     return line
 
