@@ -2888,7 +2888,12 @@ def dashboard(host: str, port: int, token) -> None:
     import uvicorn
     click.echo(f"Lightwork dashboard: http://{host}:{port}")
     click.echo(f"REST API docs:      http://{host}:{port}/docs")
-    uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
+    try:
+        from ..proxy_auth import uvicorn_launch_kwargs
+        proxy_kwargs = uvicorn_launch_kwargs()
+    except Exception:  # pragma: no cover - never block startup on a config read
+        proxy_kwargs = {}
+    uvicorn.run(fastapi_app, host=host, port=port, log_level="info", **proxy_kwargs)
 
 
 @main.command()

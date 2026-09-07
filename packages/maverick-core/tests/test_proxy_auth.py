@@ -14,6 +14,7 @@ from maverick.proxy_auth import (
     proxy_auth_enabled,
     proxy_header_name,
     proxy_trusts,
+    uvicorn_launch_kwargs,
     warn_if_untrusted_proxy_config,
 )
 
@@ -77,6 +78,107 @@ def test_trusts_configured_proxies_replace_default(monkeypatch):
     # An explicit list is exact: it replaces the loopback default so a stray
     # local process can't assert identity unless you listed loopback too.
     assert proxy_trusts("127.0.0.1") is False
+
+
+def test_trusts_configured_proxies_by_cidr(monkeypatch):
+    # W2-25: a proxy pool / load balancer can't be pinned by one exact IP.
+    _cfg(monkeypatch, {"auth": {"proxy": {"trusted_proxies": ["10.0.0.0/24"]}}})
+    assert proxy_trusts("10.0.0.5") is True
+    assert proxy_trusts("10.0.0.254") is True
+    assert proxy_trusts("10.0.1.1") is False   # outside the range
+    assert proxy_trusts("127.0.0.1") is False
+
+
+def test_trusts_configured_proxies_normalizes_ipv4_mapped_ipv6(monkeypatch):
+    # A dual-stack listener reports an IPv4 peer as ::ffff:10.0.0.5, which is
+    # not string-equal to a plain "10.0.0.5" pin.
+    _cfg(monkeypatch, {"auth": {"proxy": {"trusted_proxies": ["10.0.0.5"]}}})
+    assert proxy_trusts("::ffff:10.0.0.5") is True
+    assert proxy_trusts("::ffff:10.0.0.6") is False
+
+
+def test_trusts_configured_proxies_ignores_unparsable_entry(monkeypatch, caplog):
+    _cfg(monkeypatch, {"auth": {"proxy": {
+        "trusted_proxies": ["not-an-ip", "10.0.0.5"],
+    }}})
+    with caplog.at_level(logging.WARNING, logger="maverick.proxy_auth"):
+        assert proxy_trusts("10.0.0.5") is True
+        assert proxy_trusts("not-an-ip") is False
+    assert any("not-an-ip" in r.message for r in caplog.records)
+
+
+def test_uvicorn_launch_kwargs_disables_proxy_headers_when_enabled(monkeypatch):
+    # W2-8/W2-9: uvicorn's default ProxyHeadersMiddleware rewrites
+    # request.client.host from X-Forwarded-For for any peer it trusts
+    # (127.0.0.1 by default), in place, with the original peer unrecoverable.
+    # That both lets a co-located loopback peer spoof its way past a pinned
+    # non-loopback trusted_proxies pin, and breaks a pinned-loopback-proxy
+    # setup outright. proxy_trusts() needs the raw, unrewritten peer.
+    monkeypatch.delenv("MAVERICK_PROXY_AUTH", raising=False)
+    _cfg(monkeypatch, {"auth": {"proxy": {"enabled": True, "trusted_proxies": ["10.0.0.5"]}}})
+    assert uvicorn_launch_kwargs() == {"proxy_headers": False}
+
+
+def test_uvicorn_launch_kwargs_empty_when_proxy_auth_disabled(monkeypatch):
+    monkeypatch.delenv("MAVERICK_PROXY_AUTH", raising=False)
+    _cfg(monkeypatch, {})
+    assert uvicorn_launch_kwargs() == {}
+
+
+async def _run_asgi(app, *, client_host, headers):
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": (client_host, 12345),
+        "server": ("testserver", 80),
+        "scheme": "http",
+        "query_string": b"",
+    }
+    result: dict = {}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            result["body"] = message.get("body", b"")
+
+    await app(scope, receive, send)
+    return result
+
+
+def test_proxy_headers_middleware_can_spoof_a_pinned_proxy_by_default(monkeypatch):
+    """ASGI-level proof of W2-8: uvicorn's ProxyHeadersMiddleware (installed
+    by default with trusted_hosts=127.0.0.1) rewrites scope["client"] in
+    place from X-Forwarded-For for any loopback peer, so a co-located
+    loopback process can present as the pinned proxy to proxy_trusts()."""
+    import asyncio
+
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    _cfg(monkeypatch, {"auth": {"proxy": {"trusted_proxies": ["10.0.0.5"]}}})
+
+    async def inner_app(scope, receive, send):
+        trusted = proxy_trusts(scope["client"][0] if scope.get("client") else None)
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"trusted" if trusted else b"untrusted"})
+
+    # uvicorn's actual default wiring: proxy_headers=True, trusted_hosts=127.0.0.1.
+    vulnerable = ProxyHeadersMiddleware(inner_app, trusted_hosts="127.0.0.1")
+    result = asyncio.run(_run_asgi(
+        vulnerable, client_host="127.0.0.1", headers={"X-Forwarded-For": "10.0.0.5"},
+    ))
+    assert result["body"] == b"trusted"  # a loopback peer spoofed the pinned proxy
+
+    # uvicorn_launch_kwargs()'s fix: proxy_headers=False means this middleware
+    # is never installed, so the raw (unspoofable) peer always reaches
+    # proxy_trusts() -- the same loopback peer is refused.
+    result = asyncio.run(_run_asgi(
+        inner_app, client_host="127.0.0.1", headers={"X-Forwarded-For": "10.0.0.5"},
+    ))
+    assert result["body"] == b"untrusted"
 
 
 def test_warn_if_untrusted_proxy_config(monkeypatch, caplog):

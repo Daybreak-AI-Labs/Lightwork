@@ -10482,10 +10482,16 @@ def main() -> None:
     # propagate to the JSON root handler. In text mode omit the kwarg entirely so
     # uvicorn keeps its colored default for the local-dev experience.
     _json_logs = os.environ.get("MAVERICK_LOG_FORMAT", "text").strip().lower() == "json"
+    try:
+        from maverick.proxy_auth import uvicorn_launch_kwargs
+        _proxy_kwargs = uvicorn_launch_kwargs()
+    except Exception:  # pragma: no cover - never block startup on a config read
+        _proxy_kwargs = {}
     if _json_logs:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info", log_config=None)
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info",
+                    log_config=None, **_proxy_kwargs)
     else:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info", **_proxy_kwargs)
 
 
 # This must remain after every route declaration so lazy included-router
