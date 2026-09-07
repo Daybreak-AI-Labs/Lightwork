@@ -23,6 +23,8 @@ from pathlib import Path
 
 from . import backup, file_lock
 from .paths import current_tenant_id_strict, data_dir
+from .restore_validation import SCHEMA as REFERENCE_VALIDATION_SCHEMA
+from .restore_validation import VERIFICATION_SCOPE
 
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
@@ -448,7 +450,7 @@ def status() -> dict:
                          "PostgreSQL, remote memory stores, external-provider state, object-storage buckets and independently managed workers.",
                          "Shared encryption keys outside this workspace, and environment/HSM/KMS keys. Keep their custody and restore procedures separately; encrypted data is unusable without the matching key.",
                          "Recovery archives and their signing key. Keep exported archives and a separate safe key copy outside this computer."],
-            "verification_scope": "File hashes, sizes and local SQLite integrity; application-level decryption, external stores and cross-file business invariants are not certified.",
+            "verification_scope": VERIFICATION_SCOPE,
             "live_restore_available": False}
 
 
@@ -473,7 +475,8 @@ def drill(identifier: str, *, actor: str = "local-operator") -> dict:
                       "file_count": selected["file_count"], "restored": True, "post_restore_verified": True,
                       "elapsed_seconds": round(time.perf_counter() - started, 6),
                       "live_workspace_changed": False, "external_stores_tested": False,
-                      "verification_scope": "archived file hashes, sizes and SQLite integrity; no application decryption, cross-file business invariants or external-system acceptance"}
+                      "application_reference_validation": REFERENCE_VALIDATION_SCHEMA,
+                      "verification_scope": VERIFICATION_SCOPE}
         if backup._sha256(_archive(identifier)) != selected["sha256"]:
             raise RecoveryError("The snapshot changed during the restore drill. Verify it again.")
         signed = backup._authenticate_for_write(report, _key())
@@ -707,6 +710,7 @@ def prepare_restore(identifier: str, *, isolated: bool, actor: str) -> dict:
             raise RecoveryError(selected["compatibility"])
         with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
             backup.assert_accounting_unchanged(_archive(identifier))
+            backup.validate_backup_application(_archive(identifier))
         safety = _create("before-restore")
         review = {"review": secrets.token_hex(16), "target": target(), "snapshot": identifier,
                   "actor": actor,
@@ -737,6 +741,7 @@ def apply_restore(review_id: str, expected_target: str, *, isolated: bool, actor
             raise RecoveryError("The selected snapshot changed after review.")
         with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
             backup.assert_accounting_unchanged(_archive(review["snapshot"]))
+            backup.validate_backup_application(_archive(review["snapshot"]))
         _inspect(review["safety_snapshot"])
         with backup.recovery_scope(_root(), current_tenant_id_strict(), _key(), max_expanded_bytes=MAX_EXPANDED_BYTES):
             safety_manifest = backup.read_manifest(_archive(review["safety_snapshot"]))
@@ -756,6 +761,8 @@ def apply_restore(review_id: str, expected_target: str, *, isolated: bool, actor
         report = {"state": "completed", "snapshot": review["snapshot"], "safety_snapshot": review["safety_snapshot"],
                   "actor": actor, "completed_at": time.time(),
                   "restored": True, "post_restore_verified": True, "restart_required": True,
+                  "application_reference_validation": REFERENCE_VALIDATION_SCHEMA,
+                  "verification_scope": VERIFICATION_SCOPE,
                   "elapsed_seconds": round(time.perf_counter() - started, 6), "external_stores_restored": False}
         file_lock.atomic_write_text(_store() / "last-restore.json", json.dumps(backup._authenticate_for_write(report, _key())))
         return report

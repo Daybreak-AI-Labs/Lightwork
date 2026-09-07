@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def _write_json(path: Path, value) -> None:
 class _DurableTickets(FakeJiraTickets):
     """Test-only provider process state, deliberately outside Lightwork's store."""
 
-    def __init__(self, path: Path, *, crash_after_create=False):
+    def __init__(self, path: Path, *, crash_after_create=False, allow_create=False):
         saved = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         state = {(row["tenant"], row["key"]): row["value"] for row in saved.get("tickets", [])}
         super().__init__(state)
@@ -47,6 +48,7 @@ class _DurableTickets(FakeJiraTickets):
         self.creates = saved.get("creates", 0)
         self.reads = saved.get("reads", 0)
         self.crash_after_create = crash_after_create
+        self.allow_create = allow_create
 
     def _persist(self):
         _write_json(self.path, {
@@ -56,17 +58,19 @@ class _DurableTickets(FakeJiraTickets):
         })
 
     def create(self, ctx, payload, operation_id, **kwargs):
-        if not self.crash_after_create:
+        if not (self.crash_after_create or self.allow_create):
             # Persist the attempted retry too: even if the application catches
             # this assertion, the parent must observe the forbidden dispatch.
             self.creates += 1
             self._persist()
             raise AssertionError("recovery is read-only; create must never be retried")
-        super().create(ctx, payload, operation_id, **kwargs)
+        receipt = super().create(ctx, payload, operation_id, **kwargs)
         self._persist()
         # Deliberately bypass every finally block/exception handler. The OS
         # releases the service lock when this interpreter terminates.
-        os._exit(_CRASH_EXIT)
+        if self.crash_after_create:
+            os._exit(_CRASH_EXIT)
+        return receipt
 
     def find(self, ctx, payload, **kwargs):
         self.reads += 1
@@ -93,14 +97,15 @@ def _worker(mode: str, root: Path) -> dict:
     documents = FakeGoogleDriveEvidence({(ctx.tenant, "security-paper"): EvidenceDocument(
         "security-paper", "1", _NOW - 86400, _DOCUMENT,
     )})
-    tickets = _DurableTickets(root / "external-provider.json", crash_after_create=mode == "crash")
+    tickets = _DurableTickets(root / "external-provider.json", crash_after_create=mode == "crash",
+                              allow_create=mode == "execute-race")
     service = VendorOnboardingService(
         documents, tickets,
         lambda context, capability, resource: context.tenant == ctx.tenant and context.actor == ctx.actor,
         clock=lambda: _NOW,
     )
     manifest_path = root / "case-reference.json"
-    if mode == "crash":
+    if mode in {"crash", "prepare"}:
         row = service.intake(ctx, "Synthetic Process Vendor", "security-paper", "VEND", "Offline recovery")
         row = service.collect_evidence(ctx, row["id"], row["revision"])
         row = service.assess(ctx, row["id"], row["revision"])
@@ -108,13 +113,23 @@ def _worker(mode: str, root: Path) -> dict:
         row = service.prepare_action(ctx, row["id"], row["revision"])
         row = service.approve_action(ctx, row["id"], row["revision"])
         _write_json(manifest_path, {"case_id": row["id"], "operation_id": row["operation"]["id"]})
+        if mode == "prepare":
+            return {"case": row}
         service.execute(ctx, row["id"])
         raise AssertionError("fixture must terminate after provider success")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     row = service.get(ctx, manifest["case_id"])
     before = {"state": row["operation"]["state"], "receipt": row["operation"]["receipt"],
               "confirmation": row["operation"]["external_confirmation"], "outcome": row["outcome"]}
-    if mode == "reconcile":
+    if mode == "execute-race":
+        _write_json(root / f"ready-{os.getpid()}.json", {"revision": row["revision"]})
+        deadline = time.monotonic() + 15
+        while not (root / "dispatch-gate").exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("parent did not release the dispatch gate")
+            time.sleep(0.01)
+        row = service.execute(ctx, row["id"])
+    elif mode == "reconcile":
         row = service.execute(ctx, row["id"])
         assert row["operation"]["state"] == "reconciliation_required"
         row = service.reconcile(ctx, row["id"])
@@ -180,6 +195,58 @@ def test_process_loss_after_provider_success_recovers_without_repeating_create(t
     assert final["case"]["operation"]["id"] == proof["case"]["operation"]["id"]
     assert final["creates"] == 1
     assert final["reads"] == 3  # acceptance rechecks the external state
+
+
+def test_two_actual_processes_contend_for_one_approved_intent(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text(
+        "[vendor_onboarding]\nenable=true\n[vendor_management]\nenable=true\n"
+        "[ai_vendor_risk]\nenable=true\n[model_risk_assurance]\nenable=true\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ, MAVERICK_HOME=str(tmp_path / "lightwork-state"),
+               MAVERICK_CONFIG=str(config), MAVERICK_ENTERPRISE="0",
+               MAVERICK_SECURE_DEFAULT="0", MAVERICK_ENCRYPT_AT_REST="0",
+               PYTHONIOENCODING="utf-8")
+    env.pop("MAVERICK_TENANT", None)
+    env.pop("MAVERICK_CLIENT_ID", None)
+    prepared = _child("prepare", tmp_path, env)
+    assert prepared.returncode == 0, prepared.stderr
+    original = json.loads(prepared.stdout)["case"]
+    workers = []
+    try:
+        for _ in range(2):
+            workers.append(subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "--worker", "execute-race", str(tmp_path)],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8",
+            ))
+        deadline = time.monotonic() + 20
+        while len(list(tmp_path.glob("ready-*.json"))) != 2:
+            assert time.monotonic() < deadline, "both workers must reach the same intent before dispatch"
+            assert all(worker.poll() is None for worker in workers), "worker exited before dispatch"
+            time.sleep(0.01)
+        ready = [json.loads(path.read_text(encoding="utf-8")) for path in tmp_path.glob("ready-*.json")]
+        assert [item["revision"] for item in ready] == [original["revision"]] * 2
+        (tmp_path / "dispatch-gate").write_text("ready", encoding="utf-8")
+        results = []
+        for worker in workers:
+            stdout, stderr = worker.communicate(timeout=30)
+            assert worker.returncode == 0, stderr
+            results.append(json.loads(stdout))
+    finally:
+        for worker in workers:
+            if worker.poll() is None:
+                worker.kill()
+            worker.wait(timeout=5)
+    external = json.loads((tmp_path / "external-provider.json").read_text(encoding="utf-8"))
+    assert external["creates"] == 1
+    assert len(external["tickets"]) == 1
+    assert results[0]["pid"] != results[1]["pid"]
+    assert results[0]["case"] == results[1]["case"]
+    assert results[0]["case"]["revision"] == original["revision"] + 2
+    assert results[0]["case"]["operation"]["attempts"] == 1
+    assert results[0]["case"]["operation"]["id"] == original["operation"]["id"]
 
 
 if __name__ == "__main__":

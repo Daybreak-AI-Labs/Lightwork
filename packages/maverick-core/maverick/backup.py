@@ -1346,6 +1346,8 @@ def restore_backup(
     carries world.db, or pass ``force=True`` if you are certain nothing has
     it open. ``allow_unsigned`` is the explicit legacy path and provides
     integrity/bounds checks, not provenance.
+    Supported local application references are validated before publication;
+    force never bypasses that check. Governed stores require full replacement.
     """
     with _verified_archive(tarball) as stream:
         manifest, key = _read_manifest_stream(stream, allow_unsigned=allow_unsigned)
@@ -1381,8 +1383,16 @@ def restore_backup(
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
+            _validate_application_stage(stage)
             lock_target = root / _RESTORE_LOCK_TARGET
             with file_lock.cross_process_lock(lock_target, strict=True):
+                if not replace_existing:
+                    from .restore_validation import RestoreValidationError, guard_additive_restore
+
+                    try:
+                        guard_additive_restore(root, stage, whole_home=_RECOVERY_WHOLE_HOME.get())
+                    except RestoreValidationError as exc:
+                        raise BackupError(str(exc)) from exc
                 _recover_transactions(root, allow_unsigned=allow_unsigned)
                 _apply_transaction(
                     root,
@@ -1411,6 +1421,33 @@ def verify_backup(tarball: str | Path) -> dict[str, Any]:
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
     return manifest
+
+
+def _validate_application_stage(stage: Path) -> dict[str, Any]:
+    from .restore_validation import RestoreValidationError, validate_staged_restore
+
+    try:
+        return validate_staged_restore(stage, tenant=_client_id(), whole_home=_RECOVERY_WHOLE_HOME.get())
+    except RestoreValidationError as exc:
+        raise BackupError(str(exc)) from exc
+
+
+def validate_backup_application(tarball: str | Path) -> dict[str, Any]:
+    """Authenticate a full-replacement candidate and check supported references.
+
+    This stages bytes privately and never opens or changes live application
+    stores. Success describes only the explicitly returned validation scope.
+    """
+    with _verified_archive(tarball) as stream:
+        manifest, _ = _read_manifest_stream(stream, allow_unsigned=False)
+        if manifest.get("client_id") != _client_id():
+            raise BackupError("Application validation requires the matching recovery workspace.")
+        expected = _manifest_files(manifest, allow_legacy_unsigned=False)
+        with _temporary_directory(prefix="mvk-application-verify-") as temporary:
+            stage = file_lock.ensure_private_directory(Path(temporary) / "data")
+            stream.seek(0)
+            _extract_payload_stream(stream, stage, expected=expected)
+            return _validate_application_stage(stage)
 
 
 def _accounting_file(relative: str, path: Path) -> bool:

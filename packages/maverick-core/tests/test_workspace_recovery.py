@@ -46,6 +46,28 @@ def ready_snapshot():
     return recovery.create()
 
 
+@pytest.mark.parametrize("operation", ["drill", "prepare"])
+def test_application_reference_failure_never_reports_accepted_or_prepares_live_restore(isolated_workspace, operation):
+    directory = file_lock.ensure_private_directory(isolated_workspace / "vendor_onboarding")
+    file_lock.atomic_write_text(directory / "VON-broken.json", json.dumps({
+        "id": "VON-broken", "schema": "lightwork.vendor-onboarding.v1", "tenant": "acme",
+        "owner": "buyer", "vendor_id": "VMR-missing", "assessment": None, "renewal_of": None,
+    }))
+    snapshot = ready_snapshot()
+    assert snapshot["authenticated"] and snapshot["payload_verified"]
+    before = (isolated_workspace / "record.json").read_bytes()
+    with pytest.raises(backup.BackupError, match="vendor_id -> vendor_management/VMR-missing"):
+        if operation == "drill":
+            recovery.drill(snapshot["id"])
+        else:
+            recovery.prepare_restore(snapshot["id"], isolated=True, actor="administrator")
+    assert (isolated_workspace / "record.json").read_bytes() == before
+    assert len(recovery.list_snapshots()) == 1
+    assert not (recovery._store() / "review.json").exists()
+    assert not (recovery._store() / "last-restore.json").exists()
+    assert recovery.drill_report(snapshot["id"], actor="local-operator")["state"] == "not_recorded"
+
+
 def test_signed_comparison_is_paged_bound_and_does_not_authorize_restore(isolated_workspace):
     snapshot = ready_snapshot()
     quotas.UsageLedger().record("buyer", 35, 0, 0)
