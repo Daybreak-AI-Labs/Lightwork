@@ -48,8 +48,8 @@ def test_fresh_workspace_nothing_done(monkeypatch, tmp_path):
         lambda: _route_state(False),
     )
     t = _client().get("/start").text
-    assert "Connect your AI service" in t and "Build a workflow or agent" in t
-    assert "0 of 3 done" in t and 'role="progressbar"' in t
+    assert "Connect your AI service" in t and "Choose a workflow or agent" in t
+    assert "0 of 4 done" in t and 'role="progressbar"' in t
     assert "Installation checks" in t
     assert "maverick preflight --json" in t
     assert "SYNTHETIC DEMO DATA" in t
@@ -67,7 +67,7 @@ def test_checklist_reflects_progress(monkeypatch, tmp_path):
         lambda: _route_state(True),
     )
     t = _client().get("/start").text
-    assert "1 of 3 done" in t and "gs__step--done" in t
+    assert "1 of 4 done" in t and "gs__step--done" in t
 
 
 def test_get_started_reachable(monkeypatch, tmp_path):
@@ -103,8 +103,13 @@ def test_runtime_completion_is_gated_separately_from_assurance(monkeypatch):
 
     class World:
         @staticmethod
-        def list_goals(limit=1):
-            return [{"id": 1}][:limit]
+        def list_goals(limit=1, **kwargs):
+            from types import SimpleNamespace
+            return [SimpleNamespace(id=1, title="Reviewed report", domain="general", status="done")][:limit]
+
+        @staticmethod
+        def signoff_for(goal_id):
+            return {"decision":"approved", "decided_by":"user:reviewer", "created_at":1}
 
     monkeypatch.setattr(
         onboarding_state,
@@ -210,7 +215,7 @@ def test_viewer_redirected_from_root_can_read_setup_without_mutation_links(
     setup = client.get("/start")
     assert setup.status_code == 200
     assert "Ask your administrator to connect an AI service." in setup.text
-    assert "An operator can build the first workflow or agent." in setup.text
+    assert "An operator can choose or build the first workflow or agent." in setup.text
     assert 'href="/settings"' not in setup.text
     assert 'href="/workflow-builder"' not in setup.text
     assert 'href="/chat"' not in setup.text

@@ -36,6 +36,9 @@ def check_learning_halt(job: str, phase: str) -> None:
     No exception is swallowed here -- a safety check that cannot refuse the
     phase would be worse than having no shared boundary at all.
     """
+    from .pilot_learning import current_excluded
+    if current_excluded():
+        raise Halted("frozen pilot excludes this task from local learning", "pilot-learning-policy")
     try:
         # Learning checkpoints are infrequent and guard privileged writes.  A
         # fresh read closes the race where a HALT lands during evaluation but
@@ -52,6 +55,9 @@ def learning_write_allowed(job: str, phase: str = "write") -> bool:
     Core promotion paths propagate :class:`Halted`; telemetry-style sinks keep
     their historical non-raising contract and report ``False``/no-op instead.
     """
+    from .pilot_learning import current_excluded
+    if current_excluded():
+        return False
     try:
         # Optional sinks may be on a per-step hot path. Reuse the canonical
         # one/two-second HALT caches while retaining fail-closed shared-authority
