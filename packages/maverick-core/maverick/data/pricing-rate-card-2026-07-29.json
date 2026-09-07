@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "rate_card_version": "2026-07-29.2",
+  "rate_card_version": "2026-09-07.1",
   "retrieved_at": "2026-07-29T16:00:00Z",
   "description": "Primary-source evidence and conservative billing ceilings for Lightwork model pricing. Rates are USD per one million tokens.",
   "entries": [
@@ -23,6 +23,22 @@
         "claude-sonnet-4-6": [3.0, 15.0],
         "claude-haiku-4-5": [1.0, 5.0],
         "claude-haiku-4-5-20251001": [1.0, 5.0]
+      }
+    },
+    {
+      "evidence_id": "anthropic-direct-2026-09-07",
+      "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "retrieved_at": "2026-09-07T00:00:00Z",
+      "as_of": "2026-09-07",
+      "currency": "USD",
+      "confidence": 1.0,
+      "verified": true,
+      "pricing_basis": "USD per 1M input/output tokens; standard direct API list price",
+      "applicability": "Direct Anthropic API; cache discounts and batch pricing excluded",
+      "rates": {
+        "claude-opus-5": [5.0, 25.0],
+        "claude-sonnet-5": [2.0, 10.0],
+        "claude-fable-5-1": [10.0, 50.0]
       }
     },
     {

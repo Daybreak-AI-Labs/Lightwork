@@ -89,6 +89,40 @@ def test_opus_48_defaults_to_adaptive_without_budget():
     assert kwargs.get("thinking", {}).get("type") == "adaptive"
 
 
+def test_current_generation_uses_adaptive_thinking_not_enabled():
+    # W1-9: Opus 5 / Sonnet 5 / Fable 5.1 were unknown to _is_opus_adaptive,
+    # so an explicit thinking_budget took the manual
+    # {"type": "enabled", "budget_tokens": ...} path -- which these models
+    # reject with a 400, the same way Opus 4.7/4.8 do (all "Adaptive"-only
+    # per https://platform.claude.com/docs/en/about-claude/models/overview).
+    from maverick.providers.anthropic_provider import AnthropicClient
+    client = AnthropicClient.__new__(AnthropicClient)
+    for mid in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5-1"):
+        kwargs = client._build_request(
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            thinking_budget=8000,
+            model=mid,
+        )
+        thinking = kwargs.get("thinking", {})
+        assert thinking.get("type") == "adaptive", (
+            f"{mid} must use adaptive thinking, not enabled; got {thinking}"
+        )
+        assert "budget_tokens" not in thinking
+
+        kwargs_no_budget = client._build_request(
+            system="sys",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            thinking_budget=None,
+            model=mid,
+        )
+        assert kwargs_no_budget.get("thinking", {}).get("type") == "adaptive"
+
+
 def test_opus_48_uses_1024_min_cache_threshold():
     # W1-4: Opus 4.8's documented minimum cacheable prompt length is 1,024
     # tokens, not the 4,096 the table previously (wrongly) used for every

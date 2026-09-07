@@ -62,12 +62,23 @@ def _adaptive_max_tokens_floor() -> int:
 
 
 def _is_opus_adaptive(model_id: str) -> bool:
-    """Opus 4.7/4.8 (incl. ``-fast`` variants): the models that ONLY accept
-    adaptive thinking (explicit "enabled" returns 400) and get the auto-
-    adaptive default. The single place to extend when 4.9 lands — the request
-    builder and the budget estimate both key off this predicate."""
+    """Models that ONLY accept adaptive thinking (explicit "enabled" returns
+    400) and get the auto-adaptive default: Opus 4.7/4.8 (incl. ``-fast``
+    variants) and the current generation (Opus 5, Sonnet 5, Fable 5.x), all
+    "Adaptive"-only per each model's own capabilities table at
+    https://platform.claude.com/docs/en/about-claude/models/overview.
+
+    W1-9: this used to match only Opus 4.7/4.8, so an unrecognized
+    current-generation id fell through to the manual
+    ``{"type": "enabled", "budget_tokens": ...}`` path below -- which those
+    models reject with a 400, the same way Opus 4.7/4.8 do. The single
+    place to extend when the next generation lands — the request builder
+    and the budget estimate both key off this predicate."""
     return (model_id.startswith("claude-opus-4-7")
-            or model_id.startswith("claude-opus-4-8"))
+            or model_id.startswith("claude-opus-4-8")
+            or model_id.startswith("claude-opus-5")
+            or model_id.startswith("claude-sonnet-5")
+            or model_id.startswith("claude-fable-5"))
 
 
 def effective_max_tokens(model_id: str, max_tokens: int,
