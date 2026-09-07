@@ -21,7 +21,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,10 @@ def _slug(args: dict) -> tuple[str, str] | str:
     repo = (args.get("repo") or "").strip()
     if not owner or not repo:
         return "ERROR: owner and repo are required"
-    return owner, repo
+    owner_seg, repo_seg = safe_path_segment(owner), safe_path_segment(repo)
+    if owner_seg is None or repo_seg is None:
+        return "ERROR: owner and repo must be valid path segments"
+    return owner_seg, repo_seg
 
 
 def _op_runs(args: dict) -> str:
@@ -107,7 +110,13 @@ def _op_runs(args: dict) -> str:
     owner, repo = res
     workflow = (args.get("workflow") or "").strip()
     base = f"/repos/{owner}/{repo}/actions"
-    path = f"{base}/workflows/{workflow}/runs" if workflow else f"{base}/runs"
+    if workflow:
+        wf_seg = safe_path_segment(workflow)
+        if wf_seg is None:
+            return "ERROR: runs requires a valid workflow"
+        path = f"{base}/workflows/{wf_seg}/runs"
+    else:
+        path = f"{base}/runs"
     params: dict = {"per_page": max(1, min(int(args.get("limit") or 20), 100))}
     if args.get("branch"):
         params["branch"] = args["branch"]
@@ -183,6 +192,9 @@ def _op_dispatch(args: dict) -> str:
     ref = (args.get("ref") or "main").strip()
     if not workflow:
         return "ERROR: dispatch requires workflow"
+    wf_seg = safe_path_segment(workflow)
+    if wf_seg is None:
+        return "ERROR: dispatch requires a valid workflow"
     if not as_bool(args.get("confirm")):
         return (
             f"DRY RUN: would dispatch {workflow}@{ref} in {owner}/{repo}. "
@@ -190,7 +202,7 @@ def _op_dispatch(args: dict) -> str:
         )
     inputs = args.get("inputs") if isinstance(args.get("inputs"), dict) else {}
     code, data = _post(
-        f"/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+        f"/repos/{owner}/{repo}/actions/workflows/{wf_seg}/dispatches",
         {"ref": ref, "inputs": {str(k): str(v) for k, v in inputs.items()}},
     )
     if code >= 400:

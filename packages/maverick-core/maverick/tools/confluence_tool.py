@@ -18,7 +18,7 @@ import os
 import re
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -128,7 +128,10 @@ def _op_page_get(args: dict) -> str:
     pid = (args.get("page_id") or "").strip()
     if not pid:
         return "ERROR: page_get requires page_id"
-    code, data = _get(f"/rest/api/content/{pid}",
+    seg = safe_path_segment(pid)
+    if seg is None:
+        return "ERROR: page_get requires a valid page_id"
+    code, data = _get(f"/rest/api/content/{seg}",
                       {"expand": "body.storage,version,space"})
     if code == 404:
         return f"page {pid} not found"
@@ -172,6 +175,9 @@ def _op_page_update(args: dict) -> str:
     version = int(args.get("version") or 0)
     if not pid or not title or not version:
         return "ERROR: page_update requires page_id, title, version"
+    seg = safe_path_segment(pid)
+    if seg is None:
+        return "ERROR: page_update requires a valid page_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would update page {pid}. Re-run with confirm=true."
     payload = {
@@ -181,7 +187,7 @@ def _op_page_update(args: dict) -> str:
         "version": {"number": version + 1},
         "body": {"storage": {"value": body, "representation": "storage"}},
     }
-    code, data = _put(f"/rest/api/content/{pid}", payload)
+    code, data = _put(f"/rest/api/content/{seg}", payload)
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: page_update ({code}): {data}"
     return f"updated page {pid} -> v{version + 1}"

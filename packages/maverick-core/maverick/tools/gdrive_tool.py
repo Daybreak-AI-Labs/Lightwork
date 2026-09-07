@@ -19,7 +19,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -127,7 +127,10 @@ def _op_get(args: dict) -> str:
     fid = (args.get("file_id") or "").strip()
     if not fid:
         return "ERROR: get requires file_id"
-    code, meta = _get(f"/files/{fid}",
+    seg = safe_path_segment(fid)
+    if seg is None:
+        return "ERROR: get requires a valid file_id"
+    code, meta = _get(f"/files/{seg}",
                        {"fields": "id,name,mimeType,size,parents,modifiedTime,webViewLink"})
     if code == 404:
         return f"file {fid} not found"
@@ -137,7 +140,7 @@ def _op_get(args: dict) -> str:
     # Binary files: just return metadata.
     text_preview = ""
     if mt.startswith("text/") or mt in {"application/json", "application/xml"}:
-        c, text_preview = _get_raw(f"{_API}/files/{fid}", {"alt": "media"})
+        c, text_preview = _get_raw(f"{_API}/files/{seg}", {"alt": "media"})
         if c >= 400:
             text_preview = f"(preview fetch {c})"
     return (
@@ -199,9 +202,12 @@ def _op_delete(args: dict) -> str:
     fid = (args.get("file_id") or "").strip()
     if not fid:
         return "ERROR: delete requires file_id"
+    seg = safe_path_segment(fid)
+    if seg is None:
+        return "ERROR: delete requires a valid file_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would delete {fid}. Re-run with confirm=true."
-    code = _delete_req(f"/files/{fid}")
+    code = _delete_req(f"/files/{seg}")
     if code >= 400:
         return f"ERROR: delete ({code})"
     return f"deleted {fid}"

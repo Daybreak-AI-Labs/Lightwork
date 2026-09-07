@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -134,13 +134,16 @@ def _op_tasks(args: dict) -> str:
     pgid = (args.get("project_gid") or "").strip()
     if not pgid:
         return "ERROR: tasks requires project_gid"
+    seg = safe_path_segment(pgid)
+    if seg is None:
+        return "ERROR: tasks requires a valid project_gid"
     limit = max(1, min(int(args.get("limit") or 25), 100))
     params: dict = {"opt_fields": "name,completed,assignee.name,due_on"}
     if args.get("assignee"):
         params["assignee"] = args["assignee"]
     if args.get("completed_since"):
         params["completed_since"] = args["completed_since"]
-    code, err, rows = _get_paginated(f"/projects/{pgid}/tasks", params, limit)
+    code, err, rows = _get_paginated(f"/projects/{seg}/tasks", params, limit)
     if code >= 400:
         return f"ERROR: tasks ({code}): {err}"
     if not rows:
@@ -157,7 +160,10 @@ def _op_task_get(args: dict) -> str:
     tgid = (args.get("task_gid") or "").strip()
     if not tgid:
         return "ERROR: task_get requires task_gid"
-    code, data = _get(f"/tasks/{tgid}")
+    seg = safe_path_segment(tgid)
+    if seg is None:
+        return "ERROR: task_get requires a valid task_gid"
+    code, data = _get(f"/tasks/{seg}")
     if code == 404:
         return f"task {tgid} not found"
     if code >= 400 or not isinstance(data, dict):
@@ -198,9 +204,12 @@ def _op_task_complete(args: dict) -> str:
     tgid = (args.get("task_gid") or "").strip()
     if not tgid:
         return "ERROR: task_complete requires task_gid"
+    seg = safe_path_segment(tgid)
+    if seg is None:
+        return "ERROR: task_complete requires a valid task_gid"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would mark {tgid} complete. Re-run with confirm=true."
-    code, data = _put(f"/tasks/{tgid}", {"data": {"completed": True}})
+    code, data = _put(f"/tasks/{seg}", {"data": {"completed": True}})
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: task_complete ({code}): {data}"
     return f"completed {tgid}"

@@ -18,7 +18,7 @@ import logging
 import os
 from typing import Any
 
-from . import Tool, as_bool
+from . import Tool, as_bool, safe_path_segment
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,10 @@ def _op_lists(args: dict) -> str:
     bid = (args.get("board_id") or "").strip()
     if not bid:
         return "ERROR: lists requires board_id"
-    code, data = _get(f"/boards/{bid}/lists", {"fields": "name,closed"})
+    seg = safe_path_segment(bid)
+    if seg is None:
+        return "ERROR: lists requires a valid board_id"
+    code, data = _get(f"/boards/{seg}/lists", {"fields": "name,closed"})
     if code >= 400 or not isinstance(data, list):
         return f"ERROR: lists ({code}): {data}"
     return "\n".join(
@@ -110,7 +113,10 @@ def _op_cards(args: dict) -> str:
     lid = (args.get("list_id") or "").strip()
     if not lid:
         return "ERROR: cards requires list_id"
-    code, data = _get(f"/lists/{lid}/cards", {"fields": "name,due,url"})
+    seg = safe_path_segment(lid)
+    if seg is None:
+        return "ERROR: cards requires a valid list_id"
+    code, data = _get(f"/lists/{seg}/cards", {"fields": "name,due,url"})
     if code >= 400 or not isinstance(data, list):
         return f"ERROR: cards ({code}): {data}"
     limit = max(1, min(int(args.get("limit") or 50), 200))
@@ -127,7 +133,10 @@ def _op_card_get(args: dict) -> str:
     cid = (args.get("card_id") or "").strip()
     if not cid:
         return "ERROR: card_get requires card_id"
-    code, data = _get(f"/cards/{cid}", {
+    seg = safe_path_segment(cid)
+    if seg is None:
+        return "ERROR: card_get requires a valid card_id"
+    code, data = _get(f"/cards/{seg}", {
         "fields": "name,desc,due,url,idList,labels",
     })
     if code == 404:
@@ -163,9 +172,12 @@ def _op_card_move(args: dict) -> str:
     lid = (args.get("list_id") or "").strip()
     if not cid or not lid:
         return "ERROR: card_move requires card_id and list_id"
+    seg = safe_path_segment(cid)
+    if seg is None:
+        return "ERROR: card_move requires a valid card_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would move {cid} -> list {lid}. Re-run with confirm=true."
-    code, data = _put(f"/cards/{cid}", {"idList": lid})
+    code, data = _put(f"/cards/{seg}", {"idList": lid})
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: card_move ({code}): {data}"
     return f"moved {cid} -> {lid}"
@@ -176,9 +188,12 @@ def _op_comment(args: dict) -> str:
     text = (args.get("text") or "").strip()
     if not cid or not text:
         return "ERROR: comment requires card_id and text"
+    seg = safe_path_segment(cid)
+    if seg is None:
+        return "ERROR: comment requires a valid card_id"
     if not as_bool(args.get("confirm")):
         return f"DRY RUN: would comment on {cid}. Re-run with confirm=true."
-    code, data = _post(f"/cards/{cid}/actions/comments", {"text": text})
+    code, data = _post(f"/cards/{seg}/actions/comments", {"text": text})
     if code >= 400:
         return f"ERROR: comment ({code}): {data}"
     return f"commented on {cid}"
