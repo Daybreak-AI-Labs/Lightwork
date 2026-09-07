@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -273,6 +274,8 @@ def _default_writer(config: Mapping[str, Any]) -> Callable[..., str]:
             base_url_env=f"{name.upper()}_INSTANCE_URL",
             token_env=f"{name.upper()}_TOKEN",
         )
+    base_url, token = connector._config()
+    request_headers = connector._headers(token)
 
     def write(op: str, path: str, body: Mapping[str, Any]) -> str:
         from .tools._rest_connector import _rest_execute
@@ -285,12 +288,36 @@ def _default_writer(config: Mapping[str, Any]) -> Callable[..., str]:
             path,
             args,
             name=connector.name,
-            config=connector._config,  # noqa: SLF001 - same plumbing as .write
-            headers=connector._headers,  # noqa: SLF001
+            config=lambda: (base_url, token),
+            headers=lambda _token: request_headers,
             norm=connector._norm,  # noqa: SLF001
         )
 
+    write.target_sha256 = _sha256([config, base_url])
     return write
+
+
+def _default_reader(config: Mapping[str, Any]) -> Callable[..., str]:
+    """Read only through the same configured, guarded connector."""
+    from .governed_rest import GOVERNED_REST_FACTORIES, RestConnector
+
+    name = config["connector"]
+    factory = GOVERNED_REST_FACTORIES.get(name)
+    connector = factory() if factory else RestConnector(
+        name=name, base_url_env=f"{name.upper()}_INSTANCE_URL", token_env=f"{name.upper()}_TOKEN",
+    )
+    base_url, token = connector._config()
+    request_headers = connector._headers(token)
+
+    def read(path: str, params: dict) -> str:
+        from .tools._rest_connector import _rest_execute
+
+        return _rest_execute("get", path, {"params": params}, name=connector.name,
+                             config=lambda: (base_url, token), headers=lambda _token: request_headers,
+                             norm=connector._norm)
+
+    read.target_sha256 = _sha256([config, base_url])
+    return read
 
 
 def _remote_id_from(response: str) -> str | None:
@@ -386,6 +413,14 @@ def _deliver_one(
         value["status"] = "dispatching"
         value["attempts"] = int(value.get("attempts") or 0) + 1
         value["last_error"] = _HELD_REASON
+        # Persist the exact attempted content before the remote effect. The
+        # source may change while an uncertain delivery awaits human review.
+        value["dispatch"] = {
+            "operation": op, "path": target_path, "payload": payload,
+            "payload_sha256": payload_sha, "source_sha256": row["content_sha256"],
+            "target_sha256": getattr(writer, "target_sha256", None),
+        }
+        value.pop("inspection", None)
 
     # Claim in the authoritative record *before* the remote side effect. This
     # CAS works for local and shared backends; a process-local lock would not.
@@ -540,9 +575,153 @@ def list_outbound(*, limit: int = 100) -> list[dict[str, Any]]:
             "attempts": row.get("attempts"),
             "last_error": row.get("last_error"),
             "revision": row.get("revision"),
+            "reconciliation": row.get("reconciliation"),
         }
         for row in rows
     ]
+
+
+def _held_delivery(record_id: str, revision: int) -> tuple[dict, dict]:
+    config = _require_config()
+    record = _STORE.get(record_id)
+    if record is None:
+        raise GRCSyncStateError("Outbound delivery was not found in this workspace.")
+    if record.get("revision") != revision:
+        raise RecordConflict("Delivery changed; reload it before reviewing.")
+    if record.get("status") not in {*_HELD_STATUSES, "delivered_unconfirmed"}:
+        raise GRCSyncStateError("Only an uncertain delivery requires reconciliation.")
+    if (record.get("connector") != config["connector"]
+            or record.get("path") != config["paths"].get(record.get("kind"))):
+        raise GRCSyncStateError("The delivery target configuration changed; restore it before review.")
+    return record, config
+
+
+def _attempted_payload(record: dict, config: dict) -> tuple[dict, str]:
+    dispatch = record.get("dispatch")
+    if isinstance(dispatch, dict):
+        payload = dispatch.get("payload")
+        if not isinstance(payload, dict) or _sha256(payload) != dispatch.get("payload_sha256"):
+            raise GRCSyncStateError("The recorded delivery content is unavailable or corrupt.")
+        return payload, dispatch["source_sha256"]
+    # Old records can be reconstructed only if the source and exact content
+    # still match their original digests. A guess must never confirm a write.
+    for row in _source_rows(config):
+        if row["source_id"] == record["source_id"] and row["kind"] == record["kind"]:
+            payload = outbound_payload(row, backlink_base=config["backlink_base"])
+            if (row["content_sha256"] == record["source_sha256"]
+                    and _sha256(payload) == record["payload_sha256"]):
+                return payload, row["content_sha256"]
+    raise GRCSyncStateError("Original delivery content is unavailable; keep the delivery held for review.")
+
+
+def _remote_rows(response: str) -> list[dict]:
+    if not isinstance(response, str) or response.startswith("ERROR:"):
+        raise GRCSyncStateError("The external system could not verify the delivery.")
+    try:
+        value = json.loads(response)
+    except (TypeError, ValueError) as exc:
+        raise GRCSyncStateError("The external system returned an unreadable record.") from exc
+    if isinstance(value, dict) and "result" in value:
+        value = value["result"]
+    rows = value if isinstance(value, list) else [value]
+    if len(rows) > 2 or any(not isinstance(row, dict) for row in rows):
+        raise GRCSyncStateError("The external system returned an unsupported result.")
+    return rows
+
+
+def _inspect_remote(record: dict, config: dict, remote_id: str | None, reader) -> dict:
+    payload, source_sha = _attempted_payload(record, config)
+    binding = getattr(reader, "target_sha256", _sha256(config))
+    original_binding = (record.get("dispatch") or {}).get("target_sha256")
+    if original_binding is not None and binding != original_binding:
+        raise GRCSyncStateError("The external destination changed; restore the recorded target before review.")
+    params: dict[str, Any] = {}
+    path = record["path"]
+    if remote_id:
+        if not _REMOTE_ID_RE.fullmatch(remote_id):
+            raise ValueError("Enter a valid external record ID.")
+        path += "/" + remote_id
+    elif config["connector"] == "servicenow":
+        source_id = record["source_id"]
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", source_id):
+            raise GRCSyncStateError("This record requires an explicit external record ID.")
+        params = {"sysparm_query": "correlation_id=" + source_id, "sysparm_limit": "2",
+                  "sysparm_display_value": "false"}
+    else:
+        raise ValueError("Enter the external record ID for this connector.")
+    rows = _remote_rows(reader(path, params))
+    matched = len(rows) == 1
+    found = rows[0] if matched else {}
+    actual_id = found.get("sys_id", found.get("id"))
+    matched = (matched and isinstance(actual_id, str)
+               and bool(_REMOTE_ID_RE.fullmatch(actual_id))
+               and (not remote_id or actual_id == remote_id))
+    fields = [{"name": key, "expected": value, "actual": found.get(key),
+               "matches": found.get(key) == value} for key, value in payload.items()]
+    matched = bool(matched and all(field["matches"] for field in fields))
+    # Retain only bounded expected fields and equality flags from the external
+    # response; unrelated provider fields and secrets never enter the record/UI.
+    fields = [{**field, "actual": _bounded(field["actual"], 2000)} for field in fields]
+    result = {
+        "matched": matched, "match_count": len(rows), "remote_id": actual_id if matched else None,
+        "fields": fields, "source_sha256": source_sha, "payload_sha256": _sha256(payload),
+        "remote_version": _bounded(found.get("sys_updated_on", found.get("updated_at", "")), 200),
+        "checked_at": time.time(), "target_sha256": binding,
+        "detail": ("Exactly one external record matches the attempted delivery." if matched else
+                   "No unique exact match was verified. The delivery remains held; nothing was resent."),
+    }
+    result["evidence_sha256"] = _sha256({key: value for key, value in result.items()
+                                         if key not in {"checked_at", "detail"}})
+    return result
+
+
+def inspect_delivery(record_id: str, *, expected_revision: int, actor: str,
+                     remote_id: str | None = None, reader=None) -> dict:
+    record, config = _held_delivery(record_id, expected_revision)
+    operator = _text(actor, "reviewer", 256)
+    inspection = _inspect_remote(record, config, remote_id, reader or _default_reader(config))
+    inspection["reviewer"] = operator
+
+    def save(value):
+        value["inspection"] = inspection
+
+    updated = _STORE.update(record_id, save, expected_revision=expected_revision,
+                            action="inspect_grc_delivery", actor=operator)
+    if updated is None:
+        raise GRCSyncStateError("Delivery disappeared during review; reload the workspace.")
+    return {"id": record_id, "revision": updated["revision"], "inspection": inspection}
+
+
+def resolve_delivery(record_id: str, *, expected_revision: int, actor: str, note: str,
+                     evidence_sha256: str | None = None, reader=None) -> dict:
+    record, config = _held_delivery(record_id, expected_revision)
+    operator = _text(actor, "reviewer", 256)
+    rationale = _text(note, "review note", 2000)
+    checked = None
+    if evidence_sha256 is not None:
+        prior = record.get("inspection") or {}
+        if (not prior.get("matched") or prior.get("evidence_sha256") != evidence_sha256
+                or prior.get("reviewer") != operator
+                or not 0 <= time.time() - prior.get("checked_at", 0) <= 300):
+            raise GRCSyncStateError("Inspect the exact delivery again before confirming it.")
+        checked = _inspect_remote(record, config, prior["remote_id"], reader or _default_reader(config))
+        if not checked["matched"] or checked["evidence_sha256"] != evidence_sha256:
+            raise GRCSyncStateError("The external record changed; inspect it again. Delivery remains held.")
+
+    def resolve(value):
+        value["reconciliation"] = {"reviewer": operator, "note": rationale, "at": time.time(),
+                                    "decision": "verified" if checked else "kept_held",
+                                    "evidence_sha256": evidence_sha256}
+        if checked:
+            value.update(status="delivered", remote_id=checked["remote_id"], last_error=None,
+                         source_sha256=checked["source_sha256"], payload_sha256=checked["payload_sha256"])
+        value.pop("inspection", None)
+
+    updated = _STORE.update(record_id, resolve, expected_revision=expected_revision,
+                            action="resolve_grc_delivery", actor=operator)
+    if updated is None:
+        raise GRCSyncStateError("Delivery disappeared during review; reload the workspace.")
+    return {key: updated.get(key) for key in ("id", "revision", "status", "remote_id", "reconciliation")}
 
 
 def sync_status() -> dict[str, Any]:
@@ -565,6 +744,8 @@ __all__ = [
     "enabled",
     "get_grc_sync_config",
     "list_outbound",
+    "inspect_delivery",
+    "resolve_delivery",
     "outbound_payload",
     "run_sync",
     "sync_status",

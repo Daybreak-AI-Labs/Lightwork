@@ -74,7 +74,9 @@ def test_transcribe_503_when_no_backend(monkeypatch, tmp_path):
     )
     r = _post_audio(_client())
     assert r.status_code == 503
-    assert "speech-to-text" in r.json()["detail"]
+    assert "speech-to-text" in r.json()["detail"].lower()
+    assert "/settings#settings-voice" in r.json()["detail"]
+    assert "pip install" not in r.json()["detail"]
 
 
 def test_transcribe_rejects_empty_audio(monkeypatch, tmp_path):
@@ -182,7 +184,7 @@ def test_transcribe_503_with_retry_after_while_warming(monkeypatch, tmp_path):
         voice_mod._WARMING.clear()
     assert r.status_code == 503
     assert r.headers.get("Retry-After") == "5"
-    assert "warming" in r.json()["detail"]
+    assert "preparing" in r.json()["detail"]
 
 
 def test_transcribe_no_retry_after_on_terminal_503(monkeypatch, tmp_path):

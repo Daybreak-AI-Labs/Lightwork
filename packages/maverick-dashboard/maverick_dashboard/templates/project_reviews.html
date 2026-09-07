@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Project team reviews · Lightwork{% endblock %}
+{% block content %}
+<div id="pr-root" data-context="{{ review_context }}">
+  <p><a href="/projects">← Projects</a></p>
+  <h1>Project team reviews</h1>
+  <p>Share a fixed task result with a named workspace reviewer. Their decision applies to that captured result. The owner remains responsible for any changes, final sign-off, or further work on the task.</p>
+  <p id="pr-status" role="status" aria-live="polite">Loading your reviews…</p>
+  <button id="pr-refresh" class="btn" type="button">Refresh reviews</button>
+  <section class="panel" aria-labelledby="pr-inbox-title">
+    <h2 id="pr-inbox-title">Your review packets</h2><p id="pr-counts"></p>
+    <label for="pr-search">Find a review by task or project</label><input id="pr-search" class="input" maxlength="200"><button id="pr-search-button" type="button" class="btn">Search reviews</button>
+    <div id="pr-inbox"></div><p id="pr-page"></p><button id="pr-previous" type="button" class="btn">Previous reviews</button><button id="pr-next" type="button" class="btn">Next reviews</button>
+  </section>
+  <section id="pr-owner" class="panel" hidden aria-labelledby="pr-owner-title">
+    <h2 id="pr-owner-title">Request a review</h2>
+    <label for="pr-project">Your project</label><select id="pr-project" class="input"></select>
+    <div id="pr-setup" hidden>
+      <h3>Project review team</h3>
+      <p>Grant access only to colleagues who should review selected results. Removing a member ends their packet access immediately. Workspace membership and permissions must remain current.</p>
+      <p><a href="/users">Manage workspace members</a></p>
+      <label for="pr-member">Workspace colleague</label><select id="pr-member" class="input"></select>
+      <button id="pr-grant" class="btn" type="button">Grant project review access</button>
+      <ul id="pr-members"></ul>
+      <h3>Select a result to share</h3>
+      <label for="pr-goal">Stopped task with a saved result</label><select id="pr-goal" class="input"></select>
+      <button id="pr-preview" class="btn" type="button">Preview selected result</button>
+      <div id="pr-preview-panel" hidden><h4 id="pr-preview-title"></h4><pre id="pr-preview-text"></pre></div>
+      <form id="pr-send" data-draft-recovery="off">
+        <label for="pr-reviewer">Assigned reviewer</label><select id="pr-reviewer" class="input" required></select>
+        <label for="pr-due">Review due</label><input id="pr-due" class="input" type="datetime-local" required>
+        <label for="pr-note">What should they review?</label><textarea id="pr-note" class="input" rows="3" maxlength="4000" required></textarea>
+        <button id="pr-send-button" class="btn btn--primary" type="submit">Send captured result for review</button>
+      </form>
+    </div>
+  </section>
+  <section id="pr-packet" class="panel" hidden aria-labelledby="pr-packet-title">
+    <h2 id="pr-packet-title" tabindex="-1"></h2><p id="pr-packet-summary"></p><p id="pr-stale" role="status"></p>
+    <h3>Owner's review request</h3><p id="pr-packet-note"></p>
+    <h3>Captured result</h3><pre id="pr-result"></pre>
+    <p id="pr-owner-task"></p>
+    <h3>Comments and decisions</h3><ol id="pr-history"></ol>
+    <form id="pr-respond" data-draft-recovery="off">
+      <label for="pr-action">Response</label><select id="pr-action" class="input"><option value="comment">Add comment</option><option value="approve">Approve captured result</option><option value="request_changes">Request changes</option><option value="cancel">Withdraw review request</option></select>
+      <label for="pr-response-note">Review comment</label><textarea id="pr-response-note" class="input" rows="3" maxlength="4000" required></textarea>
+      <button id="pr-response-button" class="btn btn--primary" type="submit">Save review response</button>
+    </form>
+    <p>Approving this packet does not approve tool use, run the task, or provide its final sign-off.</p>
+  </section>
+</div>
+<style>
+  #pr-root{max-width:68rem}#pr-root .panel{margin-block:var(--space-4)}#pr-root label{display:block;margin-block:var(--space-3) var(--space-1)}
+  #pr-root .input{width:100%;max-width:44rem;min-width:0}#pr-root button{margin-block:var(--space-2);white-space:normal}
+  #pr-root pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto;padding:var(--space-3);border:1px solid var(--border)}
+  #pr-root li,#pr-root p,#pr-root h2{overflow-wrap:anywhere}#pr-root li{margin-block:var(--space-2)}#pr-root [hidden]{display:none!important}
+</style>
+<script src="/static/lightwork-project-reviews.js" defer></script>
+{% endblock %}

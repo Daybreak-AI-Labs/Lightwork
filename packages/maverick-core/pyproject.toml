@@ -148,6 +148,7 @@ embeddings = ["fastembed>=0.3"]
 dev        = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "pyyaml>=6.0.3",  # Installer/workflow regression tests parse real YAML.
     "ruff>=0.5",
     "pre-commit",
     "questionary>=2.0",
