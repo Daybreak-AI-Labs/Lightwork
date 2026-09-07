@@ -119,6 +119,7 @@ class VendorOnboardingService:
                freshness_days=365, renewal_of=None, document_ids=None):
         self._permit(ctx, "intake", ctx.resource_owner)
         name = _text(vendor_name, "vendor_name", 256)
+        validated_purpose = _text(purpose, "purpose")
         ids = self._document_ids(document_ids if document_ids is not None else ([document_id] if document_id else []))
         if document_id and document_id not in ids:
             raise ValueError("primary document must be included in document_ids")
@@ -154,7 +155,7 @@ class VendorOnboardingService:
             "tenant": ctx.tenant, "owner": ctx.resource_owner,
             "vendor_id": vendor_id, "vendor_name": name, "document_id": doc,
             "document_ids": ids, "uploads": uploads,
-            "project": project, "purpose": _text(purpose, "purpose"),
+            "project": project, "purpose": validated_purpose,
             "freshness_days": freshness_days, "renewal_of": renewal_of,
             "stage": "intake", "evidence": None, "assessment": None,
             "review_history": [], "operation": None, "operation_history": [],

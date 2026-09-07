@@ -66,6 +66,20 @@ def _step(client, row, step, **extra):
     return result.json()
 
 
+def test_http_blank_purpose_does_not_leave_a_registered_vendor(web):
+    from maverick import vendor_management
+    from maverick.paths import tenant_scope
+
+    client, service, ctx, tickets = web
+    response = client.post(BASE, json={"vendor_name": "Rejected HTTP intake vendor",
+        "document_id": "security-paper", "project": "VEND", "purpose": "   "})
+    assert response.status_code == 409
+    with tenant_scope(tenant=ctx.tenant):
+        assert vendor_management.list_vendors() == []
+    assert service.list(ctx) == []
+    assert tickets.creates == 0
+
+
 def test_reviewed_file_preview_is_private_nonmutating_and_requires_exact_confirmation(web):
     client, service, ctx, tickets = web
     row = _intake(client)

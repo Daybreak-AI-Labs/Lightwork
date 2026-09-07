@@ -66,6 +66,20 @@ def approved(svc, ctx):
     return svc.approve_action(ctx, row["id"], row["revision"])
 
 
+@pytest.mark.parametrize("purpose", [None, "", " \t\n", "x" * 4001],
+                         ids=["none", "empty", "whitespace", "oversized"])
+def test_invalid_intake_purpose_does_not_register_vendor(setup, purpose):
+    from maverick import vendor_management
+
+    svc, ctx, _, tickets, _ = setup
+    with pytest.raises(ValueError, match="purpose"):
+        svc.intake(ctx, "Rejected intake vendor", "security-paper", "VEND", purpose)
+    with tenant_scope(tenant=ctx.tenant):
+        assert vendor_management.list_vendors() == []
+    assert svc.list(ctx) == []
+    assert tickets.creates == 0
+
+
 def test_multiple_documents_conflicts_and_secondary_version_guard(setup):
     svc, ctx, docs, tickets, _ = setup
     docs.documents[(ctx.tenant, "policy")] = EvidenceDocument("policy", "1", NOW - 100,
