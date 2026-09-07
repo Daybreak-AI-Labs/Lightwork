@@ -130,3 +130,78 @@ def test_set_dispatcher_swaps_and_is_restorable():
     finally:
         runner.set_dispatcher(original)
     assert runner.get_dispatcher() is original
+
+
+# ---------- W1-72: goal execution must not share the loop's default pool ----------
+
+def test_default_asyncio_executor_is_undersized_for_the_advertised_ceiling():
+    """Documents the defect precondition this fix closes: CPython's default
+    ThreadPoolExecutor (what asyncio.to_thread uses) is sized off CPU count,
+    not off MAX_CONCURRENT_GOALS -- on anything with <=12 cores it is smaller
+    than the advertised ceiling of 16, so the ceiling was silently
+    unreachable when goal runs shared that pool."""
+    import os
+
+    default_executor_size = min(32, (os.cpu_count() or 1) + 4)
+    assert default_executor_size < runner.MAX_CONCURRENT_GOALS or os.cpu_count() > 12
+
+
+def test_goal_executor_capacity_covers_max_concurrent_goals():
+    """The dedicated pool must be able to run MAX_CONCURRENT_GOALS goals at
+    once regardless of host core count -- the whole point of not sharing the
+    default executor."""
+    assert runner._goal_executor._max_workers >= runner.MAX_CONCURRENT_GOALS
+
+
+@pytest.mark.asyncio
+async def test_async_dispatch_uses_the_dedicated_goal_executor(monkeypatch):
+    """Regression: run_goal_in_background_async must submit to _goal_executor,
+    not asyncio.to_thread's shared default pool."""
+
+    class FakeDispatcher:
+        def submit(self, goal_id, **kw):
+            return "done"
+
+    monkeypatch.setattr(runner, "_dispatcher", FakeDispatcher())
+
+    calls = []
+    real_submit = runner._goal_executor.submit
+
+    def spying_submit(fn, *a, **kw):
+        calls.append(1)
+        return real_submit(fn, *a, **kw)
+
+    monkeypatch.setattr(runner._goal_executor, "submit", spying_submit)
+
+    out = await runner.run_goal_in_background_async(9)
+    assert out == "done"
+    assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_context_propagates_across_the_dedicated_executor(monkeypatch):
+    """W1-72 regression: switching from asyncio.to_thread (which copies the
+    caller's contextvars.Context into the worker thread) to a custom
+    loop.run_in_executor call must not silently drop that propagation --
+    e.g. the active-tenant contextvar must still be visible inside the
+    threaded dispatcher call."""
+    import contextvars
+
+    probe: contextvars.ContextVar[str] = contextvars.ContextVar("w1_72_probe")
+    seen = {}
+
+    class FakeDispatcher:
+        def submit(self, goal_id, **kw):
+            seen["value"] = probe.get("MISSING")
+            return "done"
+
+    monkeypatch.setattr(runner, "_dispatcher", FakeDispatcher())
+
+    token = probe.set("tenant-42")
+    try:
+        out = await runner.run_goal_in_background_async(10)
+    finally:
+        probe.reset(token)
+
+    assert out == "done"
+    assert seen["value"] == "tenant-42"
