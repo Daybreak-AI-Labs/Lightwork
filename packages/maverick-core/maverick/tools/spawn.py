@@ -452,7 +452,7 @@ async def _swarm_credit_assignment(parent: Agent, children: list, results: list)
 
 
 def _format_swarm_results(parent: Agent, children: list, results: list,
-                          escalated: bool) -> str:
+                          escalated: bool, dropped_specs: list | None = None) -> str:
     """Render the per-child swarm output, withholding sealed children's answers.
 
     Bounded: this string becomes the ``spawn_swarm`` tool result in the
@@ -463,12 +463,35 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
     (MAVERICK_SWARM_RESULTS_TOTAL_CHARS, default 24000) elides the answers of
     trailing children once spent — every child keeps an identity line, and
     full answers remain in the run record.
+
+    W1-29: ``dropped_specs`` are the tail of a requested fan-out that got cut
+    by the per-call cap. The cap is also posted to the blackboard, but a
+    blackboard post is only ever rendered into the FIRST user turn
+    (agent.py's ``bb.render(40)``) -- it never reaches the model again once
+    that turn scrolls by. Without a notice HERE, in the tool result the
+    model's own request produced, a swarm that silently ran fewer children
+    than asked looks complete and the caller synthesizes an answer as if
+    every sub-task ran.
     """
     from ..compaction import excerpt
     child_cap = max(200, env_int("MAVERICK_SWARM_CHILD_RESULT_CHARS", 4000))
     total_cap = max(child_cap, env_int("MAVERICK_SWARM_RESULTS_TOTAL_CHARS", 24_000))
     parts: list[str] = []
     used = 0
+    if dropped_specs:
+        previews = "; ".join(
+            f"{spec.get('role', '?')}: {str(spec.get('task', ''))[:80]!r}"
+            for spec in dropped_specs[:10]
+        )
+        if len(dropped_specs) > 10:
+            previews += f"; ...and {len(dropped_specs) - 10} more"
+        parts.append(
+            f"[swarm] NOTE: {len(dropped_specs)} of "
+            f"{len(children) + len(dropped_specs)} requested agents were NOT "
+            "run (fan-out cap reached). Dropped: "
+            f"{previews}. Re-issue them in a later spawn_swarm call, or do "
+            "them yourself -- do not treat this swarm as having covered them."
+        )
     if escalated:
         parts.append(
             "[swarm] NOTE: the sub-agents disagreed substantially. Do not "
@@ -524,12 +547,14 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
     # explode geometrically (#611). An agent asking for 50 siblings on a
     # trivial sub-goal is almost always confused / under attack too.
     cap = _resolve_swarm_fanout(parent)
+    dropped_specs: list = []
     if len(agents_spec) > cap:
         parent.ctx.blackboard.post(
             parent.name, "error",
             f"swarm fan-out capped: requested {len(agents_spec)}, "
             f"max {cap} at depth {parent.depth}",
         )
+        dropped_specs = agents_spec[cap:]
         agents_spec = agents_spec[:cap]
 
     if not parent.ctx.try_reserve_spawns(len(agents_spec)):
@@ -603,7 +628,8 @@ async def _run_swarm(parent: Agent, args: dict) -> str:
 
     await _swarm_credit_assignment(parent, children, results)
 
-    return _format_swarm_results(parent, children, results, escalated)
+    return _format_swarm_results(
+        parent, children, results, escalated, dropped_specs=dropped_specs)
 
 
 def spawn_swarm_tool(parent: Agent) -> Tool:
