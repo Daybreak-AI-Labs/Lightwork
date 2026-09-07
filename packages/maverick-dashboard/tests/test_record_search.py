@@ -1,0 +1,183 @@
+"""Record discovery does not weaken source permissions or retain source bodies."""
+import json
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from maverick import config, world_model
+from maverick.paths import tenant_scope
+from maverick_dashboard import record_search as search
+from maverick_dashboard import record_search_api as api
+from maverick_dashboard import record_search_sources as sources
+from maverick_dashboard.app import app
+
+
+@pytest.fixture(autouse=True)
+def isolated(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr(api.config, "get_features", lambda: {"record_search": True})
+    monkeypatch.setattr(api.config, "config_source_errors", lambda **kwargs: [])
+    config.reset_config_cache()
+    yield
+    config.reset_config_cache()
+
+
+def record(identifier, title="Acme", kind="vendor"):
+    return search.item(kind, identifier, title, href="/privacy/vendors/" + str(identifier), revision=2)
+
+
+def test_matching_metadata_pagination_and_newer_index_guard():
+    rows = [record(str(i), "Acme " + str(i)) for i in range(6)]
+    loader = {"vendors": lambda: search.Source(rows)}
+    first = search.search(loader, query="acme 5", limit=2)
+    assert [row["id"] for row in first["items"]] == ["5"]
+    first = search.search(loader, query="acme", limit=2)
+    second = search.search(loader, query="acme", offset=first["next_offset"], limit=2, expected_snapshot=first["snapshot"])
+    assert first["total"] == 6 and second["items"][0]["id"] == "2"
+    rows[0]["revision"] = "3"
+    with pytest.raises(ValueError, match="changed while paging"):
+        search.search(loader, query="acme", offset=2, expected_snapshot=first["snapshot"])
+
+
+def test_partial_and_failed_sources_never_imply_exhaustive_results():
+    def denied():
+        raise PermissionError("secret record exists: Acme hidden")
+    model = search.search({"vendors": lambda: search.Source([record(str(i)) for i in range(1001)]),
+                           "restricted": denied}, query="Acme")
+    assert model["total"] == 1000 and model["complete"] is False
+    assert model["coverage"] == [{"source":"vendors", "state":"partial", "indexed":1000},
+                                 {"source":"restricted", "state":"unavailable", "indexed":None}]
+    assert "secret record" not in json.dumps(model)
+
+
+def test_task_owner_and_department_filter_before_search_counts(monkeypatch):
+    from maverick_dashboard import app as app_module
+    calls = []
+    goals = [SimpleNamespace(id=1, title="Visible", status="done", domain="privacy_report", description="NEVER_SEARCH_BODY", result="NEVER_RETURN_RESULT"),
+             SimpleNamespace(id=2, title="Restricted", status="done", domain="sec_report")]
+    monkeypatch.setattr(app_module, "_world", lambda: SimpleNamespace(list_goals=lambda **kw: calls.append(kw) or goals))
+    monkeypatch.setattr(app_module, "_deliverable_specs", lambda: [{"domain":"privacy_report"}])
+    monkeypatch.setattr(sources, "goal_owner_filter", lambda request: "user:alice")
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "suite_allowed", lambda request, suite: suite != "security_ops")
+    projection = sources._tasks(object())
+    assert calls[0]["owner"] == "user:alice" and calls[0]["limit"] == 1001
+    assert [(row["title"], row["kind"]) for row in projection.items] == [("Visible", "report")]
+    value = search.search({"tasks":lambda:projection}, query="NEVER_SEARCH_BODY")
+    assert value["total"] == 0 and "NEVER_RETURN_RESULT" not in json.dumps(value)
+
+
+def test_assessment_suite_filter_precedes_matches_and_counts(monkeypatch):
+    from maverick import assessment
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "suite_allowed", lambda request, suite: suite == "privacy")
+    monkeypatch.setattr(assessment, "custom_template_records", dict)
+    monkeypatch.setattr(assessment, "list_saved_heads", lambda **kw: ((
+        {"id":"visible", "type":"pia", "subject":"Acme", "status":"approved", "revision":4, "answers":{"secret":"body"}},  # pragma: allowlist secret -- synthetic excluded search body
+        {"id":"hidden", "type":"soc2", "subject":"Acme hidden", "status":"approved", "revision":1}), 2))
+    projection = sources._assessments(object())
+    model = search.search({"questionnaires":lambda:projection}, query="Acme", kind="decision")
+    assert model["total"] == 1 and model["coverage"][0]["indexed"] == 1
+    assert model["items"][0]["href"] == "/privacy?assessment=visible"
+    assert "hidden" not in json.dumps(model) and "secret" not in json.dumps(model)
+
+
+def test_denied_source_does_not_open_its_store(monkeypatch):
+    from maverick import vendor_management
+    monkeypatch.setattr(sources, "require_permission", lambda *args: (_ for _ in ()).throw(HTTPException(403)))
+    monkeypatch.setattr(vendor_management, "list_vendors", lambda: pytest.fail("denied source was opened"))
+    model = search.search({"vendors":lambda:sources._vendors(object())}, query="anything")
+    assert model["items"] == [] and model["coverage"][0]["indexed"] is None
+
+
+def test_api_binds_account_and_workspace_before_collection(monkeypatch):
+    context = "a" * 64
+    monkeypatch.setattr(api, "context_for", lambda request: context)
+    calls = []
+    monkeypatch.setattr(api, "sources_for", lambda request, kind: calls.append(kind) or {"vendors":lambda:search.Source([record("v1")])})
+    with TestClient(app, headers={"Origin":"http://testserver"}) as client:
+        rejected = client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context":"b" * 64}, json={"query":"Acme"})
+        assert rejected.status_code == 409 and calls == []
+        found = client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context":context}, json={"query":"Acme", "kind":"vendor"})
+        assert found.status_code == 200, found.text
+        assert found.json()["total"] == 1 and found.headers["cache-control"] == "private, no-store"
+        context = "b" * 64
+        assert client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context":"a" * 64}, json={"query":"Acme"}).status_code == 409
+        monkeypatch.setattr(api.config, "get_features", lambda: {"record_search":False})
+        assert client.post("/api/v1/records/search", headers={"X-Lightwork-Search-Context":context}, json={}).status_code == 403
+    assert calls == ["vendor"]
+
+
+def test_actual_vendor_store_tenant_isolation(monkeypatch):
+    from maverick import vendor_management
+    monkeypatch.setattr(vendor_management, "_require_enabled", lambda: None)
+    monkeypatch.setattr(sources, "require_permission", lambda *args: None)
+    monkeypatch.setattr(sources, "require_suite", lambda *args: None)
+    with tenant_scope(tenant="workspace-a"):
+        vendor_management.register_vendor("Alpha unique", category="AI", criticality="high", owner="alice", actor="user:alice")
+    with tenant_scope(tenant="workspace-b"):
+        vendor_management.register_vendor("Beta unique", category="AI", criticality="high", owner="bob", actor="user:bob")
+        model = search.search({"vendors":lambda:sources._vendors(object())}, query="Alpha")
+        assert model["items"] == [] and model["total"] == 0
+        assert model["coverage"][0]["indexed"] == 1
+
+
+def test_source_selection_does_not_open_unrelated_modules():
+    assert set(sources.sources_for(object(), "task")) == {"tasks"}
+    assert set(sources.sources_for(object(), "decision")) == {"questionnaires", "vendor onboarding", "project reviews"}
+
+
+def test_vault_and_report_use_request_bound_factories_and_project_only_metadata(monkeypatch):
+    from maverick_dashboard import governed_document_vault_api as vault_api
+    from maverick_dashboard import third_party_executive_reports_api as reports_api
+    calls = []
+    monkeypatch.setattr(sources, "require_permission", lambda request, permission: calls.append(("permission", permission)))
+    monkeypatch.setattr(reports_api, "_require_report_permission", lambda request, permission: calls.append(("report-permission", permission)))
+    monkeypatch.setattr(vault_api, "_tenant_id", lambda: "workspace-a")
+    monkeypatch.setattr(reports_api, "_tenant_id", lambda: "workspace-a")
+    document = SimpleNamespace(document_ref="doc1", safe_display_name="Evidence", state="active", content_revision=2,
+                               plaintext="DO_NOT_INDEX_BODY", storage_locator="DO_NOT_RETURN_LOCATOR")
+    report = SimpleNamespace(report_id="report1", brand=SimpleNamespace(report_title="Board report"), state="active", control_revision=3,
+                             snapshot="DO_NOT_RETURN_SNAPSHOT", created_by_ref="PRIVATE_PRINCIPAL")
+    vault = SimpleNamespace(list_documents=lambda **kw: calls.append(("vault-list", kw)) or [document])
+    store = SimpleNamespace(list_reports=lambda **kw: calls.append(("report-list", kw)) or [report])
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        governed_document_vault_enabled_probe=lambda tenant: tenant == "workspace-a",
+        governed_document_vault_store_factory=lambda tenant, req: calls.append((tenant, req is request)) or vault,
+        third_party_executive_reports_runtime_factory=lambda **kw: calls.append((kw["tenant_id"], kw["request"] is request)) or SimpleNamespace(store=store, role_view="operator"))))
+    model = search.search({"vault":lambda:sources._vault(request), "reports":lambda:sources._reports(request)}, query="")
+    assert model["total"] == 2
+    assert ("report-list", {"caller_role":"operator", "limit":500}) in calls
+    assert calls.index(("permission", "view")) < calls.index(("vault-list", {"limit":500}))
+    assert "DO_NOT" not in json.dumps(model) and "PRIVATE_PRINCIPAL" not in json.dumps(model)
+    assert {row["href"] for row in model["items"]} == {"/administration/document-vault?document=doc1", "/third-party/executive-reports?report=report1"}
+
+
+def test_shell_renders_search_context_and_serves_new_assets():
+    with TestClient(app, headers={"Origin":"http://testserver"}) as client:
+        page = client.get("/goals")
+        assert page.status_code == 200, page.text
+        assert 'name="lightwork-search-context"' in page.text and 'id="navfinder-kind"' in page.text
+        for asset in ("lightwork-record-search.js", "lightwork-record-search.css"):
+            response = client.get("/static/" + asset)
+            assert response.status_code == 200
+            assert "html" not in response.headers["content-type"]
+
+
+def test_review_links_reach_registered_pages_with_bounded_references(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT", "workspace-a")
+    with TestClient(app, headers={"Origin":"http://testserver"}) as client:
+        for path, key in (("/third-party/vendor-onboarding", "case"),
+                          ("/administration/document-vault", "document"),
+                          ("/third-party/executive-reports", "report")):
+            response = client.get(path, params={key:"ref-123"})
+            assert response.status_code == 200, (path, response.text)
+        assert client.get("/administration/document-vault?document=../secret").status_code == 404
+        assert client.get("/third-party/executive-reports?report=../secret").status_code == 404
