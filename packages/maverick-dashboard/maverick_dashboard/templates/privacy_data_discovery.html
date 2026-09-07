@@ -48,17 +48,35 @@
     <div>
       <section class="pdd-card">
         <h2>1. Connect an approved source</h2>
+        <p>Choose an enabled provider and a saved connection. <a href="/connections">Manage connections</a> to save credentials securely; use the provider identifier shown here as the connection type. No secret values belong in the source form.</p>
+        <button class="btn" id="pdd-load-setup" type="button" data-requires="admin">Refresh connections and keys</button>
+        <label>Open a saved source<select class="input" id="pdd-source-picker"><option value="">New source</option></select></label>
         <form id="pdd-source" class="pdd-form">
           <label>Source ID<input class="input" name="source_id" required maxlength="128" value="customers"></label>
           <label>Kind<select class="input" name="kind"><option value="structured">Structured rows</option><option value="unstructured">Unstructured documents</option></select></label>
-          <label>Provider integration ID<input class="input" name="provider" required maxlength="64" placeholder="Configured integration"></label>
+          <label>Enabled provider<select class="input" name="provider" required><option value="">Load setup choices</option></select></label>
           <label>Exact public HTTPS origin<input class="input" name="origin" required maxlength="2048" placeholder="https://data.example.com"></label>
           <label>Source resource reference<input class="input" name="resource_ref" required maxlength="128"></label>
-          <label>Credential environment reference<input class="input" name="credential_env" required maxlength="128" value="PRIVACY_SOURCE_TOKEN"></label>
-          <label>Evidence-key environment reference<input class="input" name="evidence_key_env" required maxlength="128" value="PRIVACY_EVIDENCE_HMAC_KEY"></label>
+          <p id="pdd-resource-help" class="pdd-note"></p>
+          <label>Saved connection<select class="input" id="pdd-connection"><option value="">Choose a connection</option></select></label>
+          <label>Evidence key<select class="input" id="pdd-evidence-key"><option value="">Choose or create a key below</option></select></label>
+          <details class="wide"><summary>Advanced: deployment-managed or saved references</summary>
+            <label>Credential reference<input class="input" name="credential_env" required maxlength="128"></label>
+            <label>Evidence-key reference<input class="input" name="evidence_key_env" required maxlength="128"></label>
+            <p>Existing deployment-managed environment names remain supported. Saved references include an exact version; changing provider, connection or key requires saving this source again.</p>
+          </details>
           <label>Current version<input class="input" name="expected_revision" type="number" min="0" value="0" required></label>
           <label class="wide">Request reference (reuse when retrying)<input class="input" name="idempotency_key" required maxlength="192"></label>
-          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Save source settings</button><button class="btn" id="pdd-list-sources" type="button">List sources</button><span class="pdd-note">Enter configured environment-variable names only. Secret values are not accepted by this form.</span></div>
+          <div class="pdd-actions"><button class="btn btn--primary" type="submit" data-requires="admin">Save source settings</button><button class="btn" id="pdd-test-source" type="button" data-requires="admin">Test saved source access</button><button class="btn" id="pdd-list-sources" type="button">List sources</button></div>
+        </form>
+        <h3>Evidence keys</h3>
+        <p>Lightwork generates and seals these keys in this workspace. Rotation pauses scans using the previous version until you explicitly update their source settings. Reports from different key generations cannot be compared as data changes.</p>
+        <form id="pdd-key-form" class="pdd-form">
+          <label>Key to manage<select class="input" id="pdd-key-picker"><option value="">Create a new key</option></select></label>
+          <label>Key name<input class="input" name="name" required pattern="[a-z0-9][a-z0-9_-]{0,63}" maxlength="64" placeholder="privacy-inventory"></label>
+          <input name="expected_revision" type="hidden" value="0">
+          <details><summary>Request details</summary><label>Request reference<input class="input" name="idempotency_key" required maxlength="192"></label></details>
+          <button class="btn" type="submit" data-requires="admin">Create or rotate evidence key</button>
         </form>
       </section>
 

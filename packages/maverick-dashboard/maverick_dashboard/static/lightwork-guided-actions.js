@@ -59,6 +59,90 @@
     disclosure.append(element('summary', title)); container.before(disclosure); disclosure.append(container); return disclosure;
   }
   function json(input) { try { return JSON.parse(input.value || '{}'); } catch (_error) { return undefined; } }
+  function formRecovery(form) {
+    if (!root.mvDraftRecovery || form.__draftRecovery) return;
+    function fields() {
+      return Array.from(form.querySelectorAll('input,select,textarea')).filter(function (field) {
+        return (field.name || field.id) && !/^guided-/.test(field.id) && !/^(password|file|hidden|submit|button)$/.test(field.type) &&
+          !/password|secret|token|confirm/i.test(field.name || field.id);
+      });
+    }
+    function read() {
+      var values = {}, variants = {};
+      fields().forEach(function (field) {
+        var key = field.id || field.name;
+        values[key] = field.type === 'checkbox' ? field.checked : field.value;
+        if (field.__guidedRecovery) variants[key] = field.__guidedRecovery.read();
+      });
+      return {format:1, fields:values, variants:variants};
+    }
+    form.__draftRecovery = root.mvDraftRecovery.create({key:'guided-form:' + root.location.pathname + ':' + (form.id || form.action), host:form,
+      read:read, restore:function (payload) {
+        if (!payload || payload.format !== 1 || !payload.fields || !payload.variants) throw new Error('This recovery copy is not a supported form draft.');
+        var controls = fields();
+        // Select the schema before restoring its original raw payload. This
+        // keeps request references and reviewed version tokens byte-for-byte.
+        controls.sort(function (a,b) { return Number(b.tagName === 'SELECT') - Number(a.tagName === 'SELECT'); });
+        controls.forEach(function (field) {
+          var key = field.id || field.name;
+          if (!Object.prototype.hasOwnProperty.call(payload.fields, key)) return;
+          if (field.type === 'checkbox') field.checked = payload.fields[key] === true; else field.value = payload.fields[key];
+          field.dispatchEvent(new Event('change', {bubbles:true}));
+          if (field.__guidedRecovery && payload.variants[key]) field.__guidedRecovery.restore(payload.variants[key]);
+        });
+        // A restored edit is never an approval or a submitted request.
+        form.querySelectorAll('input[type="checkbox"]').forEach(function (field) {
+          if (/confirm|approv/i.test(field.name || field.id)) { field.checked = false; field.dispatchEvent(new Event('change', {bubbles:true})); }
+        });
+      }});
+  }
+  function guidedPath(control) {
+    var path = [], node = control.parentElement;
+    while (node) {
+      if (node.dataset && node.dataset.guidedField !== undefined) path.unshift(node.dataset.guidedField);
+      if (node.dataset && node.dataset.guidedIndex !== undefined) path.unshift(Number(node.dataset.guidedIndex));
+      node = node.parentElement;
+    }
+    return path;
+  }
+  function validationErrors(form, detail) {
+    form.querySelectorAll('[data-guided-error]').forEach(function (node) { node.remove(); });
+    form.querySelectorAll('[data-guided-invalid]').forEach(function (control) {
+      control.removeAttribute('aria-invalid'); control.removeAttribute('data-guided-invalid');
+      control.setAttribute('aria-describedby', (control.getAttribute('aria-describedby') || '').split(' ').filter(function (id) { return !id.startsWith('guided-error-'); }).join(' '));
+    });
+    var errors = Array.isArray(detail) ? detail : [{loc:[], msg:typeof detail === 'string' ? detail : 'Check the details and try again.'}];
+    var summary = element('div', undefined, 'guided-error-summary'); summary.dataset.guidedError = 'true'; summary.setAttribute('role','alert');
+    summary.append(element('p','This request was not accepted. Correct these details:'));
+    var list = element('ul'); summary.append(list); var first;
+    errors.slice(0, 50).forEach(function (error) {
+      var path = (Array.isArray(error.loc) ? error.loc : []).filter(function (key) { return key !== 'body' && key !== 'query' && key !== 'path'; });
+      var message = typeof error.msg === 'string' ? error.msg : 'Check this detail.';
+      if (/_color$/.test(String(path[path.length-1])) && /pattern/.test(message)) message = 'Enter six hexadecimal characters (0–9, A–F), without #; for example 112233.';
+      var controls = Array.from(form.querySelectorAll('input,select,textarea'));
+      var control = controls.find(function (field) { return JSON.stringify(guidedPath(field)) === JSON.stringify(path) && path.length && /^guided-value-/.test(field.id); }) ||
+        controls.find(function (field) { return path.length === 1 && (field.name === path[0] || field.id === path[0]); });
+      if (!control) control = form.querySelector('textarea[data-guided-endpoint],textarea[data-guided-selector],textarea[id$="-body"]');
+      var caption = path.length ? path.map(function (key) { return typeof key === 'number' ? 'item ' + (key + 1) : label(key); }).join(' → ') + ': ' : '';
+      var item = element('li'); list.append(item);
+      function reveal() {
+        if (!control) return;
+        var parent = control.parentElement; while (parent) { if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement; }
+        control.focus();
+      }
+      if (control) {
+        var link = button(caption + message, reveal); item.append(link);
+        var inline = element('p',message,'guided-field-error'); inline.id = 'guided-error-' + (++sequence); inline.dataset.guidedError = 'true';
+        control.after(inline); control.setAttribute('aria-invalid','true'); control.dataset.guidedInvalid = 'true';
+        control.setAttribute('aria-describedby', [control.getAttribute('aria-describedby'),inline.id].filter(Boolean).join(' '));
+        control.addEventListener('input',function () { inline.remove(); control.removeAttribute('aria-invalid'); control.removeAttribute('data-guided-invalid'); },{once:true});
+        if (!first) first = reveal;
+      } else item.textContent = caption + message;
+    });
+    form.prepend(summary); if (first) first();
+    return 'This request was not accepted. Correct the highlighted details; your entries have been kept.';
+  }
+  root.mvValidation = {show:validationErrors, path:guidedPath};
   function defaultValue(schema) {
     if (schema.type === 'array') return [];
     if (schema.type === 'object' || schema.properties) return {};
@@ -180,7 +264,8 @@
         var itemSchema = resolve(schema.items || {}, definitions);
         var record = {row:row, read:editor(row, itemSchema, initial, definitions, changed, depth + 1, true)};
         rows.push(record); items.append(row);
-        row.append(button('Remove item', function () { rows = rows.filter(function (item) { return item !== record; }); row.remove(); changed(); }));
+        row.dataset.guidedIndex = String(rows.length - 1);
+        row.append(button('Remove item', function () { rows = rows.filter(function (item) { return item !== record; }); row.remove(); rows.forEach(function (item,index) { item.row.dataset.guidedIndex = String(index); }); changed(); }));
       }
       (Array.isArray(value) ? value : []).forEach(addItem);
       host.append(button('Add item', function () { addItem(defaultValue(resolve(schema.items || {}, definitions))); changed(); }));
@@ -211,6 +296,28 @@
     var fieldKey = field ? field.dataset.guidedField : '';
     var inputLabel = element('label', fieldKey ? label(fieldKey) : (schema.title || 'List item'));
     inputLabel.htmlFor = input.id; host.append(inputLabel, input);
+    if (root.mvConsentPicker) {
+      var path = guidedPath(input), key = path[path.length-1];
+      var names = {purpose_id:'purposes',theme_token_id:'themes',translation_catalog_id:'translations',notice:'notices',template:'templates',purposes:'purposes',topics:'topics',custom_preferences:'custom-preferences'};
+      var parentKey = typeof path[path.length-2] === 'number' ? path[path.length-3] : path[path.length-2];
+      var resourceKind = names[key] || (key === 'id' ? names[parentKey] : null);
+      var form = input.closest('form'), rawPayload = form && form.querySelector('textarea[data-guided-selector]');
+      if (resourceKind && rawPayload) root.mvConsentPicker.attach(host, {kind:resourceKind,title:'Choose a saved ' + label(resourceKind).toLowerCase() + ' version',
+        snapshot:function () { return rawPayload.value; }, apply:function (record) {
+          var payload = JSON.parse(rawPayload.value), location = guidedPath(input), parent = payload;
+          location.slice(0,-1).forEach(function (part) { parent = parent[part]; });
+          var fieldName = location[location.length-1]; parent[fieldName] = record.resource_id;
+          if (fieldName === 'id') parent.version = record.version;
+          if (fieldName === 'purpose_id') parent.purpose_version = record.version;
+          if (fieldName === 'theme_token_id') parent.theme_token_version = record.version;
+          if (fieldName === 'translation_catalog_id') {
+            parent.translation_versions = Object.assign({}, parent.translation_versions || {}, {[record.locale]:record.version});
+            parent.locales = Array.from(new Set((parent.locales || []).concat(record.locale)));
+            if (!parent.default_locale) parent.default_locale = record.locale;
+          }
+          rawPayload.value = JSON.stringify(payload);rawPayload.dispatchEvent(new Event('change',{bubbles:true}));rawPayload.dispatchEvent(new Event('input',{bubbles:true}));
+        }});
+    }
     if (fieldKey === 'idempotency_key' && allowsRequestReference(schema)) {
       var generationStatus = element('p', '', 'muted'); generationStatus.setAttribute('role', 'status');
       host.append(button('Generate reference', function () {
@@ -335,6 +442,17 @@
       new MutationObserver(show).observe(output, {childList:true, characterData:true, subtree:true}); show();
     }
     change();
+    if (root.mvDraftRecovery) {
+      var recoveryHost = select.closest('form') || bodyArea.parentElement;
+      root.mvDraftRecovery.create({key:'guided-console:' + root.location.pathname + ':' + prefix, host:recoveryHost,
+        read:function () { var option = select.options[select.selectedIndex]; return {format:1, operation:{path:option.dataset.path, method:option.dataset.method || 'GET'}, paths:paths.value, body:body.value}; },
+        restore:function (payload) {
+          var index = payload && payload.operation && Array.from(select.options).findIndex(function (option) { return option.dataset.path === payload.operation.path && (option.dataset.method || 'GET') === payload.operation.method; });
+          if (!payload || payload.format !== 1 || !Number.isInteger(index) || index < 0 || typeof payload.paths !== 'string' || typeof payload.body !== 'string') throw new Error('This recovery copy is not a supported action draft.');
+          select.selectedIndex = index; paths.value = payload.paths; body.value = payload.body;
+          change(); paths.dispatchEvent(new Event('input', {bubbles:true})); body.dispatchEvent(new Event('input', {bubbles:true}));
+        }});
+    }
     if (select.dataset.guidedApi) {
       var initialRevision = revision; var initialBody = body.value;
       loadDefinitions().then(function (schema) {
@@ -348,6 +466,16 @@
     if (!form) return;
     var selector = input.dataset.guidedSelector && doc.getElementById(input.dataset.guidedSelector);
     var drafts = Object.create(null); var selectedKey = selector ? selector.value : '';
+    input.__guidedRecovery = {
+      read:function () { return {selected:selectedKey, drafts:Object.assign({}, drafts, {[selectedKey]:{value:input.value, open:raw.open}})}; },
+      restore:function (state) {
+        if (!state || typeof state.selected !== 'string' || !state.drafts || (selector && !Array.from(selector.options).some(function (option) { return option.value === state.selected; }))) throw new Error('A resource type in this recovery copy is no longer available.');
+        drafts = Object.assign(Object.create(null), state.drafts); selectedKey = state.selected;
+        if (selector) selector.value = selectedKey;
+        var saved = drafts[selectedKey]; if (saved) { input.value = saved.value; raw.open = !!saved.open; }
+        selectSchema(); render();
+      }
+    };
     var container = input.closest('label') || input;
     var wide = ['wide','ce-wide'].filter(function (name) { return container.classList.contains(name); });
     var title = input.dataset.guidedTitle || label(input.name);
@@ -403,6 +531,7 @@
     }, true);
     form.addEventListener('reset', function () { root.setTimeout(function () { drafts = Object.create(null); selectedKey = selector ? selector.value : ''; selectSchema(); render(); }, 0); });
     render();
+    formRecovery(form);
     var initialValue = input.value;
     loadDefinitions().then(function (document) {
       documentSchema = document;

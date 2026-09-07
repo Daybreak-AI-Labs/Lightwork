@@ -34,11 +34,16 @@ client = TestClient(
     raise_server_exceptions=False,
 )
 failures: list[str] = []
-# Auth-off plus a selected active tenant currently has no route-level gates:
-# all exact PAGES destinations render 200. If a page later adds an intentional
-# redirect or client-error feature gate, document that contract here rather
+# Auth-off plus a selected active tenant renders each enabled destination.
+# If a page adds an intentional redirect or client-error feature gate,
+# document that contract here rather
 # than allowing every 3xx/4xx to conceal a broken destination.
-DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {}
+DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {
+    # These workflows are explicitly opt-in; team reviews also require a
+    # named human account, which this auth-off smoke does not impersonate.
+    "/project-reviews": {403},
+    "/outcome-pilots": {403},
+}
 
 created = client.post(
     "/api/v1/admin/tenants",
