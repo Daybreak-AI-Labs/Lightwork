@@ -112,7 +112,7 @@
       details { margin-top: 1rem; }
       summary { cursor: pointer; }
       summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-      #diagnostics { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 0.78rem; }
+      #diagnostics, #startup-report { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; font-size: 0.78rem; }
 
       @media (prefers-reduced-motion: reduce) {
         .ring .spin { animation: none; opacity: 0.85; }
@@ -151,6 +151,14 @@
           <button id="copy" type="button">Copy details</button>
           <span id="copied" aria-live="polite">Copied</span>
           </div>
+        </details>
+        <details>
+          <summary>Prepare a startup support report</summary>
+          <p>This report includes the app version and startup state. Account data, configuration, local paths and logs are excluded. Full diagnostics are available from Help after sign-in.</p>
+          <button id="prepare-startup-report" type="button">Prepare startup report</button>
+          <p id="startup-report-status" role="status" aria-live="polite">No report has been prepared.</p>
+          <pre id="startup-report" hidden></pre>
+          <button id="download-startup-report" type="button" disabled>Download startup report</button>
         </details>
       </section>
     </main>

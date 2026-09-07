@@ -57,6 +57,8 @@ _OIDC_EXEMPT_PATHS = frozenset(
         "/auth/callback",
         "/auth/logout",
         "/auth/error",
+        "/auth/local-owner",
+        "/auth/local-login",
     }
 )
 
@@ -189,6 +191,7 @@ def non_static_auth_configured() -> bool:
     """
     try:
         from .invites import invites_enabled
+        from .local_owner import claimed
         from .saml import saml_enabled
 
         return any((
@@ -197,6 +200,7 @@ def non_static_auth_configured() -> bool:
             invites_enabled(),
             saml_enabled(),
             _saml_policy_configured(),
+            claimed(),
         ))
     except Exception:
         return True
