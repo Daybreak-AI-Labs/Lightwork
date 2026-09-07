@@ -275,3 +275,21 @@ test("rule groups expose nested typed resource references and preserve server va
   assert.deepEqual(JSON.parse(ui.calls[0].request.body),{version:1,expected_current_version:0,idempotency_key:"rule-retry",rules:[{notice:{id:"notice-main",version:3}}]});
   assert.match(ui.d.getElementById("cpp-status").textContent,/referenced notice version does not exist/);assert.equal(ui.d.getElementById("cpp-result").textContent,"No operation run.");ui.dom.window.close();
 });
+
+test('structured publishing errors identify and focus the invalid field without rebuilding the request',async()=>{
+  const ui=await publishingFixture({themes:{type:'object',properties:{...publishingVersionProperties,primary_color:{type:'string',pattern:'^[0-9a-fA-F]{6}$'},text_color:{type:'string'}},required:['primary_color'],additionalProperties:false}});
+  ui.choose('themes');ui.raw.value=JSON.stringify({version:1,expected_current_version:0,idempotency_key:'same-request',primary_color:'#oops',text_color:'ffffff'});ui.fire(ui.raw,'change');
+  ui.w.fetch=async()=>({ok:false,status:422,json:async()=>({detail:[{loc:['body','primary_color'],msg:"String should match pattern '^[0-9a-fA-F]{6}$'",input:'#oops'}]})});
+  const before=ui.raw.value;ui.submit();await tick();
+  const color=ui.field('primary_color').querySelector('input');
+  assert.equal(ui.d.activeElement,color);assert.equal(color.getAttribute('aria-invalid'),'true');assert.match(ui.form.textContent,/six hexadecimal characters/);assert.equal(ui.raw.value,before);
+  color.value='112233';ui.fire(color);assert.equal(color.hasAttribute('aria-invalid'),false);assert.equal(JSON.parse(ui.raw.value).idempotency_key,'same-request');assert.equal(JSON.parse(ui.raw.value).text_color,'ffffff');ui.dom.window.close();
+});
+
+test('nested validation follows array indices after an item is removed',async()=>{
+  const schema={type:'array',items:{type:'object',properties:{color:{type:'string'}},required:['color'],additionalProperties:false}};
+  const ui=await standaloneFixture(schema,'[{"color":"first"},{"color":"second"}]',{required:true});
+  [...ui.form.querySelectorAll('button')].find(button=>button.textContent==='Remove item').click();
+  ui.w.mvValidation.show(ui.form,[{loc:['body',0,'color'],msg:'This color is unavailable.'}]);
+  assert.equal(ui.d.activeElement.value,'second');assert.equal(ui.d.activeElement.getAttribute('aria-invalid'),'true');assert.deepEqual(JSON.parse(ui.raw.value),[{color:'second'}]);ui.dom.window.close();
+});

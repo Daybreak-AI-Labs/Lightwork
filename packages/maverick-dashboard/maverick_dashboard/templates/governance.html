@@ -626,7 +626,7 @@
   {% if grc_status and grc_status.outbound %}
   <p>Outbound records —
     <span class="gov-chip gov-chip--good">{{ grc_status.outbound.delivered }} delivered</span>
-    <span class="gov-chip gov-chip--warn">{{ grc_status.outbound.delivered_unconfirmed }} unconfirmed</span>
+    <span class="gov-chip gov-chip--warn">{{ grc_status.outbound.delivered_unconfirmed + grc_status.outbound.dispatch_unconfirmed + grc_status.outbound.dispatching }} held for review</span>
     <span class="gov-chip gov-chip--bad">{{ grc_status.outbound.failed }} failed</span>
     <span class="gov-chip">{{ grc_status.outbound.pending }} pending</span></p>
   {% endif %}
@@ -651,6 +651,28 @@
   <p id="gov-grc-status" role="status" aria-live="polite"></p>
   <ul id="gov-grc-problems"></ul>
   <details><summary>Technical details: latest sync result</summary><pre class="gov-render" id="gov-grc-output"></pre></details>
+  <h3>Review an uncertain delivery</h3>
+  <p>Compare the attempted delivery with the external record. An exact match can be
+    confirmed by a signed-in administrator; other outcomes remain held for investigation.</p>
+  <form id="gov-grc-recovery" class="gov-form">
+    <label>Delivery to review<select class="input" name="delivery" required>
+      <option value="">Choose a held delivery</option>
+      {% for row in grc_outbound %}
+      {% if row.status in ['dispatching', 'dispatch_unconfirmed', 'delivered_unconfirmed'] %}
+      <option value="{{ row.id }}" data-revision="{{ row.revision }}">{{ row.kind }} — {{ row.source_id }} ({{ row.status|replace('_', ' ') }})</option>
+      {% endif %}{% endfor %}
+    </select></label>
+    <label>External record ID <span class="gov-help">Optional for ServiceNow; required for other systems.</span>
+      <input class="input" name="remote_id" maxlength="128" autocomplete="off" pattern="[A-Za-z0-9_.:\-]{4,128}"></label>
+    <div class="gov-form__wide"><button type="button" id="gov-grc-inspect">Compare with external record</button></div>
+    <div class="gov-form__wide" id="gov-grc-comparison" tabindex="-1" style="min-width:0;overflow-wrap:anywhere;"></div>
+    <label class="gov-form__wide">Review note<textarea class="input" name="note" required maxlength="2000" rows="3"></textarea></label>
+    <div class="gov-form__wide">
+      <button type="button" id="gov-grc-confirm" disabled>Confirm verified delivery</button>
+      <button type="button" id="gov-grc-keep-held">Save note and keep held</button>
+    </div>
+    <p class="gov-form__wide" id="gov-grc-recovery-status" role="status" aria-live="polite"></p>
+  </form>
   {% endif %}
 </section>
 
@@ -1282,4 +1304,5 @@
   });
 })();
 </script>
+<script src="/static/lightwork-grc-recovery.js" defer></script>
 {% endblock %}

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -794,6 +795,30 @@ def _record_provider_spend(provider: str, dollars: float) -> None:
         pass
 
 
+def _reserve_provider_call(provider, projected_dollars):
+    from .provider_cost_cap import reserve
+    return reserve(provider, projected_dollars)
+
+
+def _finish_provider_call(hold, provider, model, response, budget, baseline, cache_mult):
+    if hold is None:
+        _record_provider_spend(provider, _call_spend(model, response, budget, baseline, cache_mult))
+        return
+    # Only response-local usage can settle this physical attempt. A concurrent
+    # Budget delta or an absent/cancelled response is not evidence of zero cost.
+    from .provider_cost_cap import settle
+    try:
+        actual = _response_call_cost(model, response, cache_mult)
+    except Exception:
+        actual = None
+    try:
+        settle(hold, actual)
+    except Exception:
+        # The durable reservation remains charged if receipt publication fails.
+        # Do not turn a successfully incurred call into a retryable provider error.
+        logging.getLogger(__name__).error("Provider settlement requires reconciliation; its durable reservation was retained.")
+
+
 def _hedge_ms() -> float | None:
     """Tail-latency hedging delay (ms): opt-in, default OFF.
 
@@ -1400,7 +1425,7 @@ class LLM:
         # large call (or concurrent calls seeing the same under-cap spend) can't
         # blow past it.
         _enforce_provider_cap(provider, _safe_cap_projection(
-            model_id, system, messages, tools, max_tokens, thinking_budget))
+            _price_spec, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client = self._get_client(provider)
         # Circuit-breaker enforcement (the breaker was observe-only): if this
@@ -1456,6 +1481,8 @@ class LLM:
         _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
                                         max_tokens, thinking_budget=thinking_budget)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
+        _provider_hold = None
+        _provider_started = False
         try:
             with _trace_span(
                 _gen_ai_span_name("chat", model_id),
@@ -1464,6 +1491,8 @@ class LLM:
                     **_gen_ai_attributes(provider, model_id),
                 },
             ):
+                _provider_hold = _reserve_provider_call(provider, _est_cost)
+                _provider_started = True
                 _resp = client.complete(**kwargs)
                 return _resp
         except Exception:
@@ -1479,7 +1508,9 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            _record_provider_spend(provider, _spent)  # feed the $ ceiling ledger
+            if _provider_started:
+                _finish_provider_call(_provider_hold, provider, _price_spec, _resp, budget, _d0,
+                                      getattr(client, "CACHE_READ_MULT", None))
             try:
                 from .provider_health import get as _h
                 _h().record(provider, model_id,
@@ -1548,7 +1579,7 @@ class LLM:
         # large call (or concurrent calls seeing the same under-cap spend) can't
         # blow past it.
         _enforce_provider_cap(provider, _safe_cap_projection(
-            model_id, system, messages, tools, max_tokens, thinking_budget))
+            _price_spec, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client = self._get_client(provider)
         # Circuit-breaker enforcement -- see complete(). OPEN fast-fails with a
@@ -1608,12 +1639,21 @@ class LLM:
                     if model_effort:
                         _ekw["effort"] = model_effort
 
-                def _call():
-                    return client.complete_async(
-                        system=system, messages=messages, tools=tools, budget=budget,
-                        max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=model_id, **_ekw,
-                    )
+                async def _call():
+                    # Each physical hedge has independent capacity and a receipt.
+                    hold = _reserve_provider_call(provider, _est_cost)
+                    response = None
+                    baseline = budget.dollars if budget is not None else 0.0
+                    try:
+                        response = await client.complete_async(
+                            system=system, messages=messages, tools=tools, budget=budget,
+                            max_tokens=max_tokens, thinking_budget=thinking_budget,
+                            model=model_id, **_ekw,
+                        )
+                        return response
+                    finally:
+                        _finish_provider_call(hold, provider, _price_spec, response, budget, baseline,
+                                              getattr(client, "CACHE_READ_MULT", None))
 
                 hedge = _hedge_ms()
                 if hedge is None:
@@ -1673,7 +1713,6 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            _record_provider_spend(provider, _spent)  # feed the $ ceiling ledger
             try:
                 from .provider_health import get as _h
                 _h().record(provider, model_id,

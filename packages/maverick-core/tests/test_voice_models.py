@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import threading
+from types import SimpleNamespace
+from urllib.request import Request
 
 import pytest
 from maverick import voice_models
@@ -37,7 +41,7 @@ def _serve(monkeypatch, payload: bytes):
         seen.append(url)
         return _FakeResp(payload)
 
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    monkeypatch.setattr(voice_models, "_open_model_url", _fake_urlopen)
     return seen
 
 
@@ -61,6 +65,7 @@ def test_model_path_unknown_name_lists_choices(monkeypatch, tmp_path):
 
 def test_download_rejects_checksum_mismatch(monkeypatch, tmp_path):
     _home(monkeypatch, tmp_path)
+    _pin(monkeypatch, "tiny", b"original bytes")
     _serve(monkeypatch, b"tampered bytes")
     with pytest.raises(ValueError, match="checksum mismatch"):
         voice_models.download_model("tiny")
@@ -93,7 +98,7 @@ def test_download_skips_existing_unless_force(monkeypatch, tmp_path):
     def _boom(url, timeout=0.0):
         raise AssertionError("network hit despite existing file")
 
-    monkeypatch.setattr("urllib.request.urlopen", _boom)
+    monkeypatch.setattr(voice_models, "_open_model_url", _boom)
     assert voice_models.download_model("tiny") == dest
 
     payload = b"fresh copy"
@@ -143,9 +148,89 @@ def test_locate_model_none_when_auto_fetch_disabled(monkeypatch, tmp_path):
     assert voice_models.locate_model() is None
 
 
-def test_auto_fetch_defaults_on_for_standard_deployments(monkeypatch, tmp_path):
+def test_auto_fetch_defaults_off_for_standard_deployments(monkeypatch, tmp_path):
     _home(monkeypatch, tmp_path)
-    assert voice_models.auto_fetch_enabled() is True
+    assert voice_models.auto_fetch_enabled() is False
+    monkeypatch.setattr(voice_models, "download_model", lambda *_: pytest.fail("unreviewed download"))
+    assert voice_models.locate_model() is None
+
+
+@pytest.mark.parametrize("payload", [b"short", b"longer than pinned bytes"])
+def test_download_enforces_pinned_byte_limit(monkeypatch, tmp_path, payload):
+    _home(monkeypatch, tmp_path)
+    _pin(monkeypatch, "tiny", b"eight!!!")
+    _serve(monkeypatch, payload)
+    with pytest.raises(ValueError, match="size"):
+        voice_models.download_model("tiny")
+    assert not voice_models.model_path("tiny").exists()
+    assert not list(voice_models.models_dir().glob("*.part"))
+
+
+def test_download_cancellation_preserves_existing_file(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    _pin(monkeypatch, "tiny", b"new file")
+    _serve(monkeypatch, b"new file")
+    dest = voice_models.model_path("tiny")
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"old file")
+    cancelled = threading.Event()
+    with pytest.raises(voice_models.DownloadCancelled):
+        voice_models.download_model("tiny", force=True, cancel=cancelled,
+                                    progress=lambda *_: cancelled.set())
+    assert dest.read_bytes() == b"old file"
+    assert not list(dest.parent.glob("*.part"))
+
+
+def test_explicit_setup_checks_and_repairs_existing_model(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    payload = b"valid model"
+    _pin(monkeypatch, "tiny", payload)
+    urls = _serve(monkeypatch, payload)
+    dest = voice_models.model_path("tiny")
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"corrupt")
+    assert voice_models.download_model("tiny", verify_existing=True).read_bytes() == payload
+    assert len(urls) == 1
+    voice_models.download_model("tiny", verify_existing=True)
+    assert len(urls) == 1
+
+
+def test_download_policy_preserves_global_floor_and_checks_redirects(monkeypatch):
+    from maverick import config, enterprise
+
+    monkeypatch.setattr(config, "load_global_config", lambda: {"enterprise": {"allowed_hosts": ["huggingface.co"]}})
+    monkeypatch.setattr(config, "config_source_errors", lambda **_: [])
+    monkeypatch.setattr(enterprise, "deployment_enterprise_enabled", lambda: True)
+    # A permissive tenant cannot waive the deployment-wide floor.
+    monkeypatch.setattr(enterprise, "egress_permitted", lambda _: True)
+    url = voice_models._BASE_URL + "ggml-base.bin"
+    assert voice_models.download_egress_permitted(url)
+    redirect = voice_models._ModelRedirect()
+    with pytest.raises(PermissionError, match="network policy"):
+        redirect.redirect_request(Request(url), None, 302, "Found", {}, "https://unapproved.example/weights")
+    with pytest.raises(PermissionError):
+        redirect.redirect_request(Request(url), None, 302, "Found", {}, "http://huggingface.co/weights")
+    monkeypatch.setattr(enterprise, "egress_permitted", lambda _: False)
+    assert not voice_models.download_egress_permitted(url)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows creation-time tunneling")
+def test_verified_file_accepts_different_windows_fd_creation_time(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    payload = b"actual checked file"
+    _pin(monkeypatch, "tiny", payload)
+    dest = voice_models.model_path("tiny")
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(payload)
+    actual_fstat = os.fstat
+    def tunneled(fd):
+        stat = actual_fstat(fd)
+        return SimpleNamespace(st_size=stat.st_size, st_mtime_ns=stat.st_mtime_ns,
+            st_dev=stat.st_dev, st_ino=stat.st_ino, st_ctime_ns=stat.st_ctime_ns + 100_000_000)
+    monkeypatch.setattr(voice_models.os, "fstat", tunneled)
+    assert voice_models.verified_model_fingerprint(dest) == voice_models.model_fingerprint(dest.stat())
+    dest.write_bytes(b"X" * len(payload))
+    assert voice_models.verified_model_fingerprint(dest) is None
 
 
 def test_auto_fetch_defaults_off_under_egress_lock(monkeypatch, tmp_path):
