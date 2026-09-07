@@ -256,6 +256,79 @@ def test_conversation_order_idempotency_and_changed_risk_inputs_fail(monkeypatch
     assert _deliver()["idempotent_replay"] is True
 
 
+def test_failed_signing_does_not_permanently_poison_conversation(monkeypatch):
+    # W4-29: _conversation_reservation reserves the conversation and only
+    # _complete_conversation ever clears it. If rendering or signing raised
+    # after the reservation (signer refusal, segment/capacity error, disk
+    # full), nothing released it -- every later delivery for this
+    # conversation with a DIFFERENT idempotency key raised
+    # ConversationOrderError forever, since real clients mint a fresh key
+    # per attempt rather than resending the exact same one.
+    _enable(monkeypatch)
+    _policy()
+    first = _deliver(idempotency_key="turn-1")
+    assert first["receipt"]["sequence"] == 1
+
+    real_sign_event = gateway._sign_event
+
+    def boom(*args, **kwargs):
+        raise gateway.EvidenceGatewayStateError("audit signer refused evidence")
+
+    monkeypatch.setattr(gateway, "_sign_event", boom)
+    with pytest.raises(gateway.EvidenceGatewayStateError):
+        _deliver(idempotency_key="turn-2")
+    monkeypatch.setattr(gateway, "_sign_event", real_sign_event)
+
+    # A fresh idempotency key (the usual client behaviour on retry) must
+    # recover instead of raising ConversationOrderError forever.
+    retry = _deliver(idempotency_key="turn-2-retry")
+    assert retry["idempotent_replay"] is False
+    assert retry["receipt"]["sequence"] == 2
+    third = _deliver(idempotency_key="turn-3")
+    assert third["receipt"]["sequence"] == 3
+
+    # The abandoned attempt's sequence number was given back -- the chain
+    # stays gapless (1, 2, 3) and correctly linked, exactly what
+    # _conversation_chains_valid requires.
+    assert (
+        third["receipt"]["signed_receipt"]["parent_receipt_hash"]
+        == retry["receipt"]["signed_receipt"]["hash"]
+    )
+    assert (
+        retry["receipt"]["signed_receipt"]["parent_receipt_hash"]
+        == first["receipt"]["signed_receipt"]["hash"]
+    )
+
+
+def test_partial_ledger_write_does_not_abandon_the_reservation(monkeypatch):
+    # If the signed row actually landed in the ledger before a LATER step
+    # failed (e.g. the receipt-store bookkeeping), that sequence number is
+    # legitimately spent. Abandoning it would let a different receipt reuse
+    # the same sequence number -- a chain collision. The only safe recovery
+    # for this narrower case is resending the SAME idempotency key (the
+    # ledger-recovery path this file already tests elsewhere).
+    _enable(monkeypatch)
+    _policy()
+    _deliver(idempotency_key="turn-1")
+
+    real_create = gateway._RECEIPTS.create
+
+    def boom_create(*args, **kwargs):
+        raise RuntimeError("simulated post-sign failure")
+
+    monkeypatch.setattr(gateway._RECEIPTS, "create", boom_create)
+    with pytest.raises(RuntimeError):
+        _deliver(idempotency_key="turn-2")
+    monkeypatch.setattr(gateway._RECEIPTS, "create", real_create)
+
+    with pytest.raises(gateway.ConversationOrderError):
+        _deliver(idempotency_key="turn-2-retry")
+    # The existing same-key ledger-recovery path still works.
+    recovered = _deliver(idempotency_key="turn-2")
+    assert recovered["idempotent_replay"] is True
+    assert recovered["receipt"]["sequence"] == 2
+
+
 def test_every_delivery_gets_disclosure_and_caller_cannot_consume_it_early(
     monkeypatch,
 ):
