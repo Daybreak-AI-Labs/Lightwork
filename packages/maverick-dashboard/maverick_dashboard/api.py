@@ -7543,8 +7543,8 @@ async def voice_transcribe(
         raise HTTPException(
             status_code=503,
             detail=(
-                "local speech-to-text is still warming up "
-                "(first-run model download) — retry in a few seconds."
+                "Local speech-to-text is still preparing. "
+                "Retry shortly; model setup is available in Settings > Models."
             ),
             headers={"Retry-After": "5"},
         )
@@ -7597,10 +7597,9 @@ async def voice_transcribe(
         raise HTTPException(
             status_code=503,
             detail=(
-                "no speech-to-text backend available. Run `maverick voice "
-                "setup` for the built-in local engine (whisper.cpp), set "
-                "OPENAI_API_KEY / GROQ_API_KEY, or install faster-whisper "
-                "(python -m pip install -e './packages/maverick-core[voice]')."
+                "Speech-to-text is not ready. Open Settings > Models > Local voice setup "
+                "(/settings#settings-voice) to check or download the local model. "
+                "If a cloud speech provider is selected, check its provider settings."
             ),
         )
     return JSONResponse({"text": text.strip()})
@@ -10959,6 +10958,26 @@ _MODULE_SWITCHES: dict[str, dict] = {
         "label": "Vendor management",
         "requires": (),
     },
+    "connections": {
+        "label": "Saved connections",
+        "requires": (),
+    },
+    "evidence_graph": {
+        "label": "Evidence records",
+        "requires": (),
+    },
+    "model_risk_assurance": {
+        "label": "Model assurance",
+        "requires": ("evidence_graph",),
+    },
+    "ai_vendor_risk": {
+        "label": "AI vendor risk",
+        "requires": ("evidence_graph", "model_risk_assurance"),
+    },
+    "vendor_onboarding": {
+        "label": "AI vendor onboarding",
+        "requires": ("connections", "vendor_management", "evidence_graph", "model_risk_assurance", "ai_vendor_risk"),
+    },
 }
 
 
@@ -11601,23 +11620,27 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     """Persist a tenant override for ``name``. 403 if pack editing is disabled,
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
-    from maverick.domain_edit import resolved_view, write_override
+    from maverick.domain_edit import OverrideConflict, write_override
 
     try:
-        write_override(name, payload.model_dump(exclude_unset=True))
+        return write_override(name, payload.model_dump(exclude_unset=True, exclude={"expected_generation"}),
+                              expected_generation=payload.expected_generation, return_view=True)
+    except OverrideConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return resolved_view(name)
 
 
 @router.delete("/agents/{name}/override")
-async def delete_agent_override(request: Request, name: str) -> dict:
+async def delete_agent_override(request: Request, name: str, expected_generation: str | None = Query(None, pattern=r"^[0-9a-f]{64}$")) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
-    from maverick.domain_edit import remove_override, resolved_view
+    from maverick.domain_edit import OverrideConflict, remove_override, resolved_view
 
     try:
-        removed = remove_override(name)
+        removed = remove_override(name, expected_generation=expected_generation)
+    except OverrideConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)

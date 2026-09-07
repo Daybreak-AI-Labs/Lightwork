@@ -604,6 +604,37 @@ def test_inventory_and_report_diff_use_digest_only_fingerprints(store) -> None:
     assert all(len(item) == 64 for item in diff.added_finding_sha256)
 
 
+def test_rotating_key_material_never_reports_pseudonym_changes_as_real_data_changes(store):
+    enroll(store)
+    adapter = Rows([discovery.StructuredRecord("row", {"email": "one@example.com"})])
+    first = enqueue_and_run(store, adapter, operation="before-key-rotation")
+    store._evidence_key_resolver = lambda _name: b"changed-evidence-material-32-bytes!"
+    second = enqueue_and_run(store, adapter, operation="after-key-rotation")
+    assert first.evidence_key_fingerprint != second.evidence_key_fingerprint
+    with pytest.raises(discovery.PrivacyDataDiscoveryValidationError, match="different or unverified evidence key"):
+        store.diff_reports("tenant-a", first.report_id, second.report_id)
+
+
+def test_source_updated_during_scan_cannot_publish_report_under_current_source(store):
+    enrolled = enroll(store)
+
+    class ChangedScope:
+        def iter_rows(self, **kwargs):
+            store.enroll_source("tenant-a", source_id=enrolled.source_id, kind="structured", provider="fixture",
+                origin="https://changed.example.com", resource_ref=enrolled.resource_ref, credential_env=enrolled.credential_env,
+                evidence_key_env=enrolled.evidence_key_env, actor_ref="privacy-owner", expected_revision=enrolled.revision,
+                idempotency_key="change-source-during-scan")
+            yield discovery.StructuredRecord("row", {"email": "one@example.com"})
+
+    store.enqueue_scan("tenant-a", enrolled.source_id, limits=discovery.ScanLimits(), actor_ref="privacy-owner",
+                       idempotency_key="scan-current-source", max_attempts=3, retention_seconds=3600)
+    coordinator = discovery.PrivacyDataDiscoveryCoordinator(store, structured_sources={"fixture": ChangedScope()},
+        clock=store._clock, credential_ref_present=lambda _name: True)
+    with pytest.raises(discovery.PrivacyDataDiscoveryConflict, match="source changed during scan"):
+        coordinator.run_once("tenant-a", worker_id="worker")
+    assert store.list_reports("tenant-a") == ()
+
+
 def test_review_requires_fresh_four_eyes_and_calls_only_after_approval(tmp_path, clock) -> None:
     updates: list[discovery.ReviewedClassification] = []
     store = discovery.PrivacyDataDiscoveryStore(

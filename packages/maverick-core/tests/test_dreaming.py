@@ -408,7 +408,10 @@ class TestSharedPromotion:
 
 
 class TestReflexionPruning:
-    def test_dedups_and_caps_keeping_newest(self, tmp_path):
+    @pytest.mark.parametrize("same_timestamp", [False, True])
+    def test_dedups_and_caps_keeping_newest(self, tmp_path, monkeypatch, same_timestamp):
+        if same_timestamp:
+            monkeypatch.setattr(reflexion.time, "time", lambda: 1700000000.0)
         path = tmp_path / "reflexions.ndjson"
         # Two near-identical lessons + one distinct.
         reflexion.record(goal_text="fix the flaky parser test",

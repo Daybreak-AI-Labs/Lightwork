@@ -9,6 +9,14 @@ here.
 > `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
 > `maverick <verb>`.
 
+- **First named local owner** — `maverick_dashboard.local_owner` and
+  `local_owner_routes` let a fresh loopback-only installation create its first
+  administrator inside Start. A salted local passphrase reopens the existing
+  signed invite session; the claim closes anonymous access before role setup.
+  Managed sign-in, existing identities, deployment invite policy, current roles,
+  and SCIM revocation remain authoritative. The installer exposes
+  `[dashboard] local_owner_setup`; see [first run](getting-started.md#first-run).
+
 ## Agent kernel & orchestration
 
 - **Recursive multi-agent swarm** — orchestrator decomposes a goal and spawns
@@ -33,6 +41,14 @@ here.
   guarantee for regulated deployments. Shell-driven mutations are out of
   scope (the audit trail records those commands); default off, wizard step
   under *Workspace journal*.
+- **Reviewed task-file recovery in the app** (`task_file_recovery.py`, the
+  existing `workspace.journal` plus `journal_strict` controls) — a named task
+  owner can enable capture with an administrator, review exact changes and
+  restore the latest captured local file-tool originals from the task page.
+  Encrypted originals bind the real runtime folder; stopped-task checks,
+  process leases, path protection, per-file drift checks and retained requests
+  guard review and interrupted retry. No shell or external-action rollback is
+  claimed. See [task-file recovery](task-file-recovery.md) for limits.
 - **Loop-guard suppression tier** — the long-standing repeated-identical-call
   nudge (`MAVERICK_LOOP_GUARD_THRESHOLD`) now also covers byte-identical
   *successes* (a poll loop whose output never changes is burning budget on
@@ -946,6 +962,14 @@ here.
   duplicate. The payload is a bounded governed pointer — id, type, severity,
   summary, content digest, `correlation_id` round-trip link, optional
   backlink URL; evidence bodies and detail payloads never leave the platform.
+  The dashboard can compare a held delivery with the external record using
+  read-only requests. A named global administrator can confirm one exact
+  match after a fresh second comparison, or retain the hold with a review
+  note. Reconciliation preserves the attempted content and destination,
+  rejects stale revisions, and never resends the delivery. Legacy records
+  without a stored attempt require an unchanged, digest-matching source;
+  their original endpoint cannot be proven retrospectively. Provider-side
+  acceptance is not established by the local synthetic tests.
 - **Governance workspace** (dashboard `/security/governance` +
   `/api/v1/security/governance`, `governance_api.py`/`governance_schemas.py`,
   rides the `[eu_conformity]`/`[ai_literacy]`/`[ai_incident_reporting]`/
@@ -955,15 +979,16 @@ here.
   reference checklist, the Art. 43 route decision and substantial-modification
   marking, Art. 4 literacy requirements/assignments/completions with gap
   chips and a downloadable evidence file, Art. 73 declare/file/withdraw with
-  deadline-aware category picking, and the read-only GRC outbound ledger.
+  deadline-aware category picking, and GRC delivery status and recovery.
   Inventory-backed pickers replace raw record ids; every mutation is
   operate-floor, CSRF-checked, CAS-guarded, and recorded under the caller's
   name. The page opens with the needs-attention digest, adds the Art. 72/49/13
   market-obligation panels, and can download a per-asset audit bundle — one
   JSON file with every governance record and rendered draft for a system.
   FRIA answer bodies stay operate-floor: the view-floor listing carries
-  assertion state only. Nothing on the page transmits anything to an
-  authority or external system.
+  assertion state only. GRC dispatch explicitly requires a named global
+  administrator's confirmation before sending records to the configured
+  external system. GRC recovery contacts that system only to read and compare.
 - **Model-agnostic explainability** (`explainability.py`, opt-in
   `[explainability] enable`, `maverick explainability`) — dependency-free
   implementations of the technical-evaluation battery: seeded permutation
@@ -2071,6 +2096,14 @@ here.
   conditions have a **structured builder** (key / op / value dropdowns over a
   data-key datalist) with a raw-text advanced mode for `and`/`or`.
 
+- **Renewable named accounts** (`connection_oauth`, gated on Connections and the
+  OAuth vault) — sealed per-owner app registration and reviewed provider consent
+  in Connections for Google Drive, Google Cloud Storage discovery and Jira
+  Cloud. Server-held PKCE/state binds the current workspace, account, app and
+  connection versions; renewal preserves the reviewed generation, while a lost
+  rotating-token response requires reconnecting. Vendor/discovery adapters consume
+  the actual named records. External provider registration/consent and live
+  customer acceptance remain separate; see [account authorization](named-account-authorization.md).
 - **Named connections** (`maverick.connections`, gated on `[connections]`) —
   store a connector's base URL + API token under a name, sealed at rest with
   the tenant KMS key like the OAuth vault; a connector resolves a saved
@@ -2106,8 +2139,10 @@ here.
   (whisper.cpp wheels, a maverick-dashboard dependency — dashboard installs
   transcribe out of the box) or a local whisper.cpp binary, both loading the
   checksum-pinned GGML model managed by `voice_models.py`
-  (`maverick voice setup|status|transcribe`; auto-fetch ON by default and
-  OFF under the egress lock, override via `[voice] auto_fetch_model`;
+  (in-app Settings > Models setup with reviewed source/size, progress,
+  cancellation, checksum verification and retry; optional
+  `maverick voice setup|status|transcribe`; auto-fetch OFF unless explicitly
+  enabled via `[voice] auto_fetch_model` or the installer;
   deployment-wide routing via `[voice]
   stt_backend`, where `local` keeps audio on-machine even with keys set) —
   with **voice persona presets** (`[voice.personas]`:
@@ -3606,9 +3641,15 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   Capability.permits; CI `python -m maverick.capability_fuzzer` exits 1 on
   any leak. Run against the real implementation: **0 leaks in ~2000 probes**.
 - **Provider-level cost caps** (`provider_cost_cap.py`, `[budget.provider_caps]`)
-  — per-provider dollar ceilings across ALL runs per UTC day/month (the
-  Budget caps one run; this caps the provider), atomic ledger, enforce()
-  raising ProviderCapExceeded for the LLM path.
+  — provider-period capacity is reserved atomically for each physical LLM call,
+  including hedges, alongside run budgets and principal quotas. Settlement
+  uses response-local usage; crash holds never expire, unknown final charges
+  and unreadable configured accounting block admission. Local files use a
+  required-state marker; shared PostgreSQL uses transactional counters and
+  receipts with no local fallback. Prices remain estimates of external billing.
+  Global administrators can review exact receipts and isolated complete local
+  accounting repair in [Provider spending](provider-spending.md), reached from
+  Workspace recovery; no provider call is automatically retried.
 - **Supply-chain pinning** (`supply_chain.py`) — pin the deployment's Python
   dependency tree (`write_pins` → 0600 JSON), verify drift/missing/unpinned
   (`verify`/`render` PASS-FAIL), opt-in startup warning via
@@ -4906,11 +4947,29 @@ tested without spawning py-spy.
 
 ## Distribution & install
 
+- **Workspace recovery center** (`workspace_recovery.py`, dashboard
+  `/workspace/recovery`): opt-in administrator snapshots, authenticated bounded
+  import/export, separate key custody, real restore drills, and account/build-
+  bound reviews with safety snapshots and transactional rollback. Separate
+  desktop recovery mode holds a fresh control-plane lock and starts no normal
+  background lifespans. Shared/external stores, independent workers, shared
+  administration and cross-build restoration remain excluded. See
+  [Workspace recovery](workspace-recovery.md).
+- **Windows customer package candidate** (`apps/installer-msi/CUSTOMER.md`):
+  complete frozen runtime, desktop and offline WebView2 without customer
+  Git/Python/private checkout; Windows install/repair/upgrade acceptance,
+  protected Authenticode/minisign signing and reviewed in-app maintenance.
+  Protected completed-upgrade rollback retains exact signed installers and
+  restores their matching, quiesced whole-local-home snapshot after verifying
+  the old runtime; interrupted operations keep a startup block, resumable
+  review and in-app logs. Native MSI, signed distribution and clean-machine
+  acceptance remain release gates; fixture checks are not customer acceptance.
+
 - **Packaging** — 8-package lockstep cohort (public PyPI consumption remains
   disabled until every name is reserved), a GHCR image, PyInstaller binaries,
   reduced licensed source archives, checksums, SBOMs, and Sigstore material.
-  Tauri/MSI outputs remain authenticated source-bootstrap/build engineering
-  artifacts rather than customer product installers.
+  Existing source-bootstrap Tauri/MSI outputs retain their engineering boundary;
+  the separate customer candidate and acceptance gates are described above.
 - **Container import-path hardening** — the deploy image sets
   `PYTHONNOUSERSITE=1` for the harness interpreter: system site-packages are
   root-owned, so the only writable import path a model-driven `pip install
@@ -5049,3 +5108,88 @@ tested without spawning py-spy.
   pinch-to-inspect card; read-only, bearer-token honored. Building/tuning
   needs Xcode + the visionOS SDK (and honest on-device verification is
   flagged in the source), per the watch-glance scaffold posture.
+
+## Customer workflow completion and readiness
+
+- **Action Center** (`maverick_dashboard.action_center`, `action_center_api`):
+  permitted approvals, current deliverable sign-offs, assessment review dates
+  and assigned project review packets share a personal list. Account/workspace
+  read and snooze state binds to source versions and optimistic revisions;
+  overdue actions remain visible and missing sources remain explicit.
+- **Guided reviewed outcomes** (`guided_outcome`, `onboarding_state`): setup
+  paths for permitted deliverables, privacy assessments and vendor evidence
+  complete only on a current qualifying human review. Scheduled or completed
+  activity alone never establishes customer success.
+- **Recoverable authoring** (`draft_store`, `draft_api`, `domain_edit`): sealed
+  private recovery copies, source CAS and exact retry identities for supported
+  editors. Credentials and attachments are excluded. Consent catalog/version
+  pickers keep publication decisions bound to explicitly selected content.
+  See [draft recovery](draft-recovery.md).
+- **Current record search** (`record_search`, `record_search_sources`): bounded
+  authorized metadata search in the app page finder. Source failure and scan
+  limits are visible; paging binds to the current result snapshot and account.
+  See [record search](record-search.md).
+- **Privacy source connection setup** (`privacy_discovery_credentials`):
+  saved versioned connection selection, principal/connector/origin checks on
+  transport requests, sealed evidence-key rotation and explicit source probes.
+  See [privacy discovery setup](privacy-discovery-setup.md).
+- **Governed document intake** (`vendor_onboarding_documents`): bounded native
+  Google Docs/PDF/text evidence and reviewed local Word/Excel uploads, with
+  explicit human transcription for unreadable PDFs (no OCR). Transient previews
+  require original comparison before adding evidence; retained hashes and
+  paragraph/page/cell references distinguish extracted and user-supplied text.
+  Multiple sources, contradictory facts, exact source versions and renewal
+  differences remain governed. Live provider and customer
+  acceptance remain deployment-specific. See [vendor onboarding](vendor-onboarding.md).
+- **Held GRC reconciliation** (`grc_sync`): capture the attempted payload and
+  target; compare a remote record read-only; confirm a fresh exact match or
+  keep delivery held with an audited explanation. Confirmation never resends.
+- **Project team reviews** (`project_reviews`, `project_reviews_api`): selected
+  fixed task results, current workspace membership, independent reviewer
+  decisions, comments and revocable access. This grants no live execution or
+  sign-off authority. See [project reviews](project-team-reviews.md).
+- **Workspace recovery** (`workspace_recovery`, `recovery_api`, `recovery_mode`):
+  signed snapshot custody/inspection, measured temporary restore and controlled
+  restoration in an isolated local control plane. External/shared stores and
+  encryption-key dependencies remain explicit. See [workspace recovery](workspace-recovery.md).
+- **Reviewed signing identity bridges** (`release_identity_transition`,
+  `installation_recovery`): default-off global Settings/wizard control, dual
+  updater-key proof, exact publisher/release/hash binding and separate in-app
+  administrator admission. Retained exact-pair resume survives admission expiry;
+  Windows publisher checks and accounting/replay drift refusals remain. Real
+  rotated-publisher installation acceptance is separate. See
+  [signing transitions](windows-signing-identity-transition.md).
+- **Help and diagnostic controls** (`maverick_dashboard.support_api`,
+  `support_center`): `/help` provides in-app status, troubleshooting guidance
+  and reviewed diagnostic exports. Discarded authoring-copy retirement removes
+  retained payloads while preserving their monotonic revision floor. See
+  [help and diagnostics](help-and-diagnostics.md).
+- **Provider spending recovery** (`provider_spending_recovery`): in-app
+  administrator review of unavailable accounting and unresolved reservations,
+  exact-receipt reconciliation and bounded diagnostics. Local corrupt-state
+  repair requires isolated recovery and complete reviewed authoritative totals;
+  unknown costs are not refunded automatically. See
+  [provider spending](provider-spending.md).
+- **Durable usage receipts** (`quotas`, `checkpoint`, `orchestrator`): cumulative
+  atomic ledger receipts, lost-ack reconciliation, safe missing-checkpoint
+  refusal and a private Billing trail. These are internal quota records, not
+  provider invoices. See [runtime recovery](runtime-accounting-recovery.md).
+- **Workflow pilot observations** (`outcome_pilots`, `outcome_pilot_sources`):
+  prepare tasks without running them, freeze case plans, record attributed
+  effort/review/rework/corrections and compare current paired observations.
+  Every planned case remains in the acceptance denominator. Recorded runtime
+  prices, reported full costs, actual provider evidence and controlled held-out
+  acceptance remain separate. Goal-only plans can explicitly exclude holdouts
+  and their child goals from supported automatic local learning paths, retain
+  prior-exposure statements, and request a different named administrator's
+  evidence-bound review. This does not verify prior or provider exposure.
+  See [workflow pilots](workflow-pilots.md).
+- **Workflow readiness** (`workflow_readiness`): an in-app inventory labels
+  available/bounded workflows, live validation requirements, previews,
+  experimental features, prototypes and the Windows release candidate.
+  Effective enablement is shown separately from acceptance and certification.
+
+Each new configurable surface is represented in Settings and the installer
+wizard. Local tests and synthetic browser journeys validate the stated code
+paths; they do not establish native signing, clean-machine installation,
+provider permissions, live external mutations, or customer acceptance.

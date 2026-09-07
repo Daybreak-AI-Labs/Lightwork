@@ -8,6 +8,27 @@ from maverick import support_bundle
 from maverick.file_lock import private_path_is_restricted
 
 
+def test_diagnostic_inventory_matches_release_cohort_even_when_a_package_is_missing(monkeypatch):
+    import importlib.metadata as metadata
+    from pathlib import Path
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
+    manifest = Path(__file__).resolve().parents[3] / "release-cohort.toml"
+    cohort = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    expected = {package["distribution"] for package in cohort["packages"]}
+    def installed_version(name):
+        if name == "maverick-knowledge":
+            raise metadata.PackageNotFoundError(name)
+        return "test-version"
+    monkeypatch.setattr(metadata, "version", installed_version)
+    actual = support_bundle._versions()
+    assert set(actual) == expected
+    assert actual["maverick-knowledge"] == "not installed"
+    assert actual["maverick-evolve"] == "test-version"
+
+
 def test_redacts_secret_named_keys():
     src = {
         "providers": {"anthropic": {"api_key": "sk-ant-SECRETVALUE"}},  # pragma: allowlist secret

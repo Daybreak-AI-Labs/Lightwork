@@ -62,7 +62,8 @@ def distill(trajectories: list[dict], *, top_k: int = 3) -> dict | None:
     most-recent ``top_k`` successful runs, derives a kebab name + triggers from
     their goals, and unions their tools.
     """
-    good = [t for t in (trajectories or []) if t.get("success")]
+    from ..pilot_learning import excluded
+    good = [t for t in (trajectories or []) if t.get("success") and not excluded(t.get("goal_id"))]
     if not good:
         return None
     good.sort(key=lambda t: t.get("t", 0), reverse=True)

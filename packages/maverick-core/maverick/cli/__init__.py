@@ -347,6 +347,12 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     _configure_cli_text_streams()
     _configure_cli_logging()
     ctx.ensure_object(dict)
+    if ctx.invoked_subcommand not in {"dashboard", "installation-maintenance", "version", "doctor", "config-lint"}:
+        from ..installation_recovery import MaintenanceError, assert_normal_start_allowed
+        try:
+            assert_normal_start_allowed()
+        except MaintenanceError as exc:
+            raise click.ClickException(str(exc)) from exc
     if ctx.invoked_subcommand == "mcp":
         from .._mcp_parent_guard import ParentGuardError, arm_from_environment
 
@@ -368,6 +374,7 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
             "doctor",
             "gen-stubs",
             "init",
+            "installation-maintenance",
             "launch-check",
             "license",
             "preflight",
@@ -400,6 +407,75 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     # silently ignored before -- the LLM default got overridden per call).
     if model:
         os.environ["MAVERICK_MODEL_OVERRIDE"] = model
+
+
+@main.command("installation-maintenance", hidden=True)
+@click.argument("step", type=click.Choice(["status", "inspect", "prepare", "execute", "resume", "logs"]))
+def installation_maintenance_cmd(step: str) -> None:
+    """Fixed native maintenance protocol; authorization travels over stdin."""
+    import json
+
+    from .. import installation_recovery as recovery
+    try:
+        raw = sys.stdin.read(65537) if step != "status" else "{}"
+        if len(raw) > 65536:
+            raise recovery.MaintenanceError("The maintenance request exceeds its size limit.")
+        request = json.loads(raw)
+        if step == "status":
+            result = recovery.status()
+        elif step == "logs":
+            result = recovery.logs(request.get("id"))
+        elif step == "inspect":
+            result = recovery.inspect_grant(request.get("authorization"))
+        elif step == "prepare":
+            result = recovery.prepare(request.get("authorization"))
+        elif step == "resume":
+            identifier = request.get("id")
+            token = recovery.resume(identifier)
+            result = recovery.inspect_grant(token) | {"authorization": token}
+        else:
+            # The retained helper must outlive the installed desktop executable.
+            # Wait only for the native parent supplied by our fixed local IPC.
+            import ctypes
+            parent_pid = request.get("parent_pid")
+            if os.name != "nt" or not isinstance(parent_pid, int) or parent_pid <= 0:
+                raise recovery.MaintenanceError("The native maintenance parent is unavailable.")
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.restype = ctypes.c_void_p
+            kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            handle = kernel.OpenProcess(0x00100000, False, parent_pid)
+            if handle:
+                try:
+                    if kernel.WaitForSingleObject(handle, 60000) != 0:
+                        raise recovery.MaintenanceError("Close the previous desktop maintenance window before retrying.")
+                finally:
+                    kernel.CloseHandle(handle)
+            authorization = request.get("authorization")
+            details = recovery.inspect_grant(authorization)
+            directory = recovery._directory(details["id"])
+            try:
+                result = recovery.execute(authorization)
+            finally:
+                record = recovery._read(directory / "record.json")
+                installed = Path(record["installed_runtime"]).parent / "maverick-desktop.exe"
+                desktop = installed if installed.is_file() and record.get("status") in {"upgraded", "rolled_back"} else directory / "maverick-desktop.exe"
+                import subprocess
+                # Native production calls always open their result window.
+                # The disposable CI protocol harness may suppress the window;
+                # this changes no maintenance authority or verification gate.
+                if request.get("open_result") is not False:
+                    # This desktop outlives the onefile helper. Its later
+                    # rollback must unpack a fresh helper, not reuse this
+                    # process's temporary runtime after bootloader cleanup.
+                    subprocess.Popen([str(desktop), "--maintenance-result", details["id"]],
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"},
+                                     creationflags=subprocess.CREATE_NO_WINDOW)
+        click.echo(json.dumps(result))
+    except Exception as exc:
+        # No request bodies, grant tokens, signing keys or workspace payloads.
+        raise click.ClickException(str(exc)) from exc
 
 
 @main.command("gen-stubs")
@@ -2861,7 +2937,8 @@ def runs(ctx, as_json: bool, limit: int, goal_id) -> None:
 @click.option("--port", default=8765, type=int)
 @click.option("--token", default=None,
               help="Bearer token for non-/healthz requests.")
-def dashboard(host: str, port: int, token) -> None:
+@click.option("--recovery-mode", is_flag=True, help="Local isolated recovery: no normal jobs or schedulers.")
+def dashboard(host: str, port: int, token, recovery_mode: bool = False) -> None:
     """Start the local web dashboard + REST API."""
     if token:
         os.environ["MAVERICK_DASHBOARD_TOKEN"] = token
@@ -2891,6 +2968,9 @@ def dashboard(host: str, port: int, token) -> None:
         )
         sys.exit(2)
     import uvicorn
+    if recovery_mode:
+        from maverick_dashboard.recovery_mode import configure
+        configure(fastapi_app, host=host)
     click.echo(f"Lightwork dashboard: http://{host}:{port}")
     click.echo(f"REST API docs:      http://{host}:{port}/docs")
     uvicorn.run(fastapi_app, host=host, port=port, log_level="info")

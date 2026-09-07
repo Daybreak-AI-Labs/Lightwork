@@ -154,6 +154,50 @@ _SECRET_VALUE_RE = re.compile(
 _RISK_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
+def form_contract() -> dict[str, Any]:
+    """Describe the current bounded questionnaire; submission remains authoritative."""
+    from . import model_risk_assurance as authority
+
+    fields = []
+
+    def field(path, label, kind, group, choices=None, limit=None):
+        row = {"path": path, "label": label, "kind": kind, "group": group,
+               "required": path in _REQUIRED_LEAVES}
+        if choices is not None:
+            row["choices"] = sorted(choices)
+        if limit is not None:
+            row["max_length"] = limit
+        fields.append(row)
+
+    for path, label, limit in (("use_case_name", "Use-case name", 256),
+                               ("accountable_owner", "Accountable owner", 256),
+                               ("business_unit", "Business unit", 256),
+                               ("purpose", "What will this AI help people do?", 4000)):
+        field(path, label, "text", "About the use case", limit=limit)
+    field("data_context.categories", "Types of data used", "multiple", "Data", _DATA_CATEGORIES)
+    field("data_context.personal_data", "Does it use personal data?", "boolean", "Data")
+    field("data_context.sensitive_data", "Does it use sensitive personal data?", "boolean", "Data")
+    field("data_context.source_summary", "Where does the data come from?", "text", "Data", limit=500)
+    for path, label, choices in (("stage", "Deployment stage", _STAGES),
+                                 ("audience", "Who will use or be affected by it?", _AUDIENCES),
+                                 ("decision_role", "Role in decisions", _DECISION_ROLES),
+                                 ("transparency_notice", "Are people told AI is involved?", _NOTICE_STATES)):
+        field("deployment_context." + path, label, "choice", "Deployment", choices)
+    for path, label in (("human_oversight", "Can a person review or intervene?"),
+                        ("third_party", "Does a third party supply or operate the AI?"),
+                        ("safety_critical", "Could its failure affect people's safety?")):
+        field("deployment_context." + path, label, "boolean", "Deployment")
+    for path, label, choices in (
+        ("prohibited_signals", "Potential prohibited-practice signals", authority._PROHIBITED_SIGNALS),
+        ("high_risk_domains", "Potential high-risk use areas", authority._HIGH_RISK_DOMAINS),
+        ("transparency_signals", "Transparency signals", authority._TRANSPARENCY_SIGNALS),
+    ):
+        field("regulatory_context." + path, label, "multiple", "Specialist review signals", choices)
+    field("existing_asset_id", "Existing governed asset reference (optional)", "text", "Advanced", limit=64)
+    return {"schema": INTAKE_SCHEMA, "fields": fields, "max_submission_bytes": _MAX_SUBMISSION_BYTES,
+            "notice": NON_DETERMINATION_NOTICE}
+
+
 class AIBusinessIntakeError(RuntimeError):
     """Base failure for the governed AI business-intake core."""
 
@@ -1319,6 +1363,7 @@ __all__ = [
     "METRICS_SCHEMA",
     "NON_DETERMINATION_NOTICE",
     "enabled",
+    "form_contract",
     "get_intake",
     "list_intakes",
     "require_enabled",

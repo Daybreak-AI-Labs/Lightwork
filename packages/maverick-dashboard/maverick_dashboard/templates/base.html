@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0e1320" />
+  {% if draft_recovery_context %}<meta name="lightwork-draft-context" content="{{ draft_recovery_context }}">{% endif %}
+  {% if record_search_context %}<meta name="lightwork-search-context" content="{{ record_search_context }}">{% endif %}
   {% if workspace_tenant_selection %}
   <meta name="lightwork-workspace-tenant" content="{{ workspace_tenant_selection }}" />
   {% endif %}
@@ -100,6 +102,7 @@
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
       </a>
       {% endif %}
+      <a class="iconbtn" href="/help" aria-label="Help and diagnostics" title="Help and diagnostics"><svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-facts"></use></svg></a>
       <details class="prefs" id="prefs-menu">
         <summary class="iconbtn" aria-label="Display preferences" title="Display preferences">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h3.4M10.4 5h3.1M2.5 11h6.3M13.1 11h.4"/><circle cx="7.7" cy="5" r="1.7"/><circle cx="10.8" cy="11" r="1.7"/></svg>
@@ -199,7 +202,7 @@
           aria-labelledby="navfinder-title" aria-describedby="navfinder-help">
     <div class="navfinder__head">
       <div>
-        <h2 id="navfinder-title">Find a page</h2>
+        <h2 id="navfinder-title">Find a page{% if record_search_context %} or record{% endif %}</h2>
         <p class="sr-only" id="navfinder-help">Type to filter pages. Use the up and down arrow keys to choose a result, Enter to open it, and Escape to close.</p>
       </div>
       <button type="button" class="iconbtn navfinder__close" id="navfinder-close" aria-label="Close page finder">
@@ -215,6 +218,14 @@
       <kbd aria-hidden="true">Esc</kbd>
     </div>
     <p class="navfinder__count" id="navfinder-count" role="status" aria-live="polite" aria-atomic="true"></p>
+    {% if record_search_context %}
+    <div class="navfinder-record-controls">
+      <label for="navfinder-kind">Include records</label>
+      <select id="navfinder-kind" class="ctl"><option value="all">All types</option><option value="vendor">Vendors</option><option value="evidence">Evidence</option><option value="assessment">Assessments</option><option value="decision">Decisions</option><option value="task">Tasks</option><option value="report">Reports</option><option value="pages">Pages only</option></select>
+      <button type="button" id="navfinder-search" class="btn">Search records</button>
+    </div>
+    <p id="navfinder-record-status" class="navfinder__count" role="status" aria-live="polite">Search by name or reference. Document contents and private notes are excluded.</p>
+    {% endif %}
     <ul class="navfinder__results" id="navfinder-results" role="listbox" aria-label="Navigation pages">
       {% for _group in finder_pages %}
         {% set _navfinder_group_index = loop.index0 %}
@@ -232,6 +243,10 @@
       {% endfor %}
     </ul>
     <p class="navfinder__empty" id="navfinder-empty" hidden>No matching pages. Try a broader search.</p>
+    {% if record_search_context %}
+    <button type="button" id="navfinder-more" class="btn" hidden>More records</button>
+    <details class="navfinder-record-coverage"><summary>Search coverage</summary><p>Search reads current saved records. A partial source may omit older records; open that workspace to find records outside this bounded index.</p><ul id="navfinder-coverage"></ul></details>
+    {% endif %}
   </dialog>
   <main id="content" tabindex="-1">
     {% block content %}{% endblock %}
@@ -269,9 +284,12 @@
   {% include "_copilot.html" %}
   <script src="/static/lightwork-copilot.js"></script>
   <script src="/static/lightwork-ui.js"></script>
+  <link rel="stylesheet" href="/static/lightwork-draft-recovery.css">
+  <script src="/static/lightwork-draft-recovery.js" defer></script>
   <link rel="stylesheet" href="/static/lightwork-guided-actions.css">
   <script src="/static/lightwork-guided-actions.js" defer></script>
   <script src="/static/lightwork-navfinder.js" defer></script>
+  {% if record_search_context %}<link rel="stylesheet" href="/static/lightwork-record-search.css"><script src="/static/lightwork-record-search.js" defer></script>{% endif %}
   <script src="/static/lightwork-voice.js" defer></script>
   {% block scripts_extra %}{% endblock %}
 </body>

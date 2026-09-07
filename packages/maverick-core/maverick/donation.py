@@ -245,6 +245,9 @@ def write_record(
     """
     if not _donations_enabled():
         return None
+    from .pilot_learning import excluded
+    if excluded(record.goal_id):
+        return None
     # Calibration interlock: if the verifier has drifted (no longer
     # discriminates correct from incorrect on the labeled set), freeze learning
     # rather than harvest trajectories labeled by an untrustworthy evaluator.

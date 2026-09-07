@@ -1,5 +1,8 @@
-"""Workforce value report: the proof an AI workforce paid for itself AND
-got better -- the artifact a POC ends on and a diligence team runs.
+"""Descriptive workforce signals and assumption-based value estimates.
+
+Completed episodes and recorded runtime prices do not establish accepted
+customer outcomes, realized savings, or provider invoice accuracy. Those
+require separate measured baseline, review, and cost evidence.
 
 The platform's compounding advantage (it improves with use, safely) is real
 but latent -- buried across budget receipts, episode history, the hindsight
