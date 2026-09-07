@@ -112,6 +112,62 @@ class TestToOpenAIMessages:
         out = OpenAIClient._to_openai_messages("sys", msgs)
         assert out[1] == {"role": "tool", "tool_call_id": "t1", "content": "line 1\nline 2"}
 
+    def test_image_block_becomes_image_url_part_not_stringified_text(self):
+        # W1-7: an image block used to str()-stringify into the joined text
+        # body -- the base64 payload landed in the prompt as literal text
+        # (a Python dict repr), not an actual image the model could see.
+        msgs = [{"role": "user", "content": [
+            {"type": "text", "text": "what is this?"},
+            {"type": "image", "source": {
+                "type": "base64", "media_type": "image/png", "data": "QUJD",
+            }},
+        ]}]
+        out = OpenAIClient._to_openai_messages("sys", msgs)
+        user_msg = out[1]
+        assert user_msg["role"] == "user"
+        assert isinstance(user_msg["content"], list)
+        parts = {p["type"] for p in user_msg["content"]}
+        assert parts == {"text", "image_url"}
+        text_part = next(p for p in user_msg["content"] if p["type"] == "text")
+        image_part = next(p for p in user_msg["content"] if p["type"] == "image_url")
+        assert "QUJD" not in text_part["text"], "base64 payload leaked into the text part"
+        assert image_part["image_url"]["url"] == "data:image/png;base64,QUJD"
+
+    def test_image_url_source_passed_through_verbatim(self):
+        msgs = [{"role": "user", "content": [
+            {"type": "image", "source": {
+                "type": "url", "url": "https://example.test/cat.png",
+            }},
+        ]}]
+        out = OpenAIClient._to_openai_messages("sys", msgs)
+        image_part = out[1]["content"][0]
+        assert image_part == {
+            "type": "image_url",
+            "image_url": {"url": "https://example.test/cat.png"},
+        }
+
+    def test_text_only_turn_still_collapses_to_a_plain_string(self):
+        # No image in the turn -> keep the pre-existing plain-string shape
+        # (not a single-element content-part list) so nothing downstream
+        # that expects a string for a text-only turn breaks.
+        msgs = [{"role": "user", "content": [
+            {"type": "text", "text": "hello"},
+        ]}]
+        out = OpenAIClient._to_openai_messages("sys", msgs)
+        assert out[1] == {"role": "user", "content": "hello"}
+
+    def test_document_block_raises_instead_of_stringifying(self):
+        # W1-7: OpenAI-family providers have no equivalent to Anthropic's
+        # inline document content type -- reject loudly rather than
+        # silently stringifying a base64 PDF into the prompt text.
+        msgs = [{"role": "user", "content": [
+            {"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf", "data": "JVBERi0x",
+            }},
+        ]}]
+        with pytest.raises(RuntimeError, match="document"):
+            OpenAIClient._to_openai_messages("sys", msgs)
+
 
 class TestToOpenAITools:
     def test_basic(self):
