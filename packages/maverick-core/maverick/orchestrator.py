@@ -14,7 +14,7 @@ from typing import Any
 
 from .agent import Agent
 from .blackboard import Blackboard
-from .budget import Budget, BudgetExceeded
+from .budget import Budget, BudgetExceeded, UnpricedModelError
 from .llm import LLM, model_for_role
 from .mcp_client import load_mcp_specs_from_config, start_mcp_clients, stop_mcp_clients
 from .sandbox import LocalBackend
@@ -192,6 +192,22 @@ def _format_tree_of_thought_plan(winning_plan: str, *, shield: Any | None = None
         "<tree_of_thought_plan>\n"
         f"{plan}\n"
         "</tree_of_thought_plan>"
+    )
+
+
+def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
+    """W1-30: a genuinely unpriced model is not a cap trip -- raising the cap
+    and resuming (``_budget_exceeded_message``'s advice) fails identically,
+    because the real problem is that Lightwork refuses to bill a model with
+    no verified price, not that spend or time ran out.
+    """
+    return (
+        "Stopped: this goal used a model with no verified price, so "
+        "Lightwork refused to bill it rather than guess.\n"
+        f"Detail: {exc}\n"
+        "Fix: add a sourced price for this model to the rate card, or set "
+        "[budget] strict_pricing = false to allow a warning-labelled "
+        f"estimate, then resume: maverick resume {goal_id}"
     )
 
 
@@ -1524,6 +1540,28 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
 
         try:
             result = await root.run()
+        except UnpricedModelError as e:
+            # W1-30: a genuinely unpriced model, not a cap trip -- must be
+            # caught BEFORE the BudgetExceeded clause below (it's a
+            # subclass) or it's reported as "raise your cap and resume",
+            # advice that fails identically since spend was never the issue.
+            _lifecycle.end_episode(f"unpriced model: {e}", "failure")
+            try:  # default-on local failure telemetry; no-op when disabled
+                from . import failure_telemetry as _ft
+                _ft.record_failure("unpriced_model", goal_id=goal_id, detail=str(e))
+            except Exception:  # pragma: no cover -- telemetry never blocks a run
+                pass
+            _maybe_record_reflexion(
+                goal, failure_class="unpriced_model", failure_msg=str(e),
+                blackboard=blackboard, shield=shield, channel=channel,
+                user_id=user_id, domain=domain,
+            )
+            world.set_goal_status(goal_id, "blocked", result=f"unpriced model: {e}")
+            _fire_webhook("goal_finished", {
+                "goal_id": goal_id, "status": "blocked",
+                "result": f"unpriced model: {e}",
+            })
+            return _unpriced_model_message(e, goal_id)
         except BudgetExceeded as e:
             _lifecycle.end_episode(f"budget: {e}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
@@ -1664,6 +1702,28 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     "result": f"budget exceeded: {be}",
                 })
                 return _budget_exceeded_message(budget, goal_id)
+            # W1-30: an unpriced model inside a spawned child is swallowed by
+            # the agent into `result.error` (same reason a budget cap trip
+            # is), not raised -- `budget.check()` above never sees it (it's
+            # not a cap trip). Detect it via agent.py's "unpriced model:"
+            # label and give the pricing remediation, not the "raise your
+            # cap and resume" advice that fails identically.
+            if (result.error or "").startswith("unpriced model:"):
+                _lifecycle.end_episode(result.error, "failure")
+                _maybe_record_reflexion(
+                    goal, failure_class="unpriced_model", failure_msg=result.error,
+                    blackboard=blackboard, shield=shield, channel=channel,
+                    user_id=user_id, domain=domain,
+                )
+                world.set_goal_status(goal_id, "blocked", result=result.error)
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": result.error,
+                })
+                # Strip the "unpriced model: " label back off so the Detail
+                # line reads the same raw pricing message as the direct-raise
+                # handler above, instead of doubling the label.
+                _detail = result.error.split(": ", 1)[-1]
+                return _unpriced_model_message(_detail, goal_id)
             # A halt tripped mid-run surfaces as result.error too. Give the
             # clear unhalt instruction rather than the generic error (whose
             # 'resume' advice would just halt again).

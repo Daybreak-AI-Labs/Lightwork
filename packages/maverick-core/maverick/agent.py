@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 
 from . import killswitch
 from ._envparse import env_float, env_int
-from .budget import BudgetExceeded
+from .budget import BudgetExceeded, UnpricedModelError
 from .llm import model_for_role
 from .swarm import SwarmContext
 from .tools import ToolRegistry, base_registry
@@ -994,6 +994,21 @@ def _tool_call_failed(output: str) -> bool:
     from .tool_results import tool_result_failed
 
     return tool_result_failed(output)
+
+
+def _budget_error_label(e: BudgetExceeded) -> str:
+    """W1-30: distinguish a genuinely unpriced model from a real cap trip.
+
+    ``UnpricedModelError`` is a ``BudgetExceeded`` subclass (so it still
+    aborts the run and skips billing), but it is not a spending/time cap
+    being reached -- it is Lightwork refusing to bill a model with no
+    verified price. Labelling both alike as "budget exceeded" made the
+    orchestrator's "raise your cap and resume" message the reply for a
+    problem raising the cap can never fix, and fed the budget-cap failure
+    class -- poisoning the self-tuning budget learner with a failure that
+    had nothing to do with spend.
+    """
+    return "unpriced model" if isinstance(e, UnpricedModelError) else "budget exceeded"
 
 
 def _audit_summary(value: Any, limit: int = 200) -> str:
@@ -3445,8 +3460,9 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(error=f"halted: {e}", role=self.role, name=self.name)
             except BudgetExceeded as e:
-                bb.post(self.name, "error", f"budget exceeded: {e}")
-                return AgentResult(error=f"budget exceeded: {e}", role=self.role, name=self.name)
+                label = _budget_error_label(e)
+                bb.post(self.name, "error", f"{label}: {e}")
+                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name)
 
             # Long-horizon review checkpoint (opt-in [safety] review_checkpoint):
             # at the root, fire a human-review heartbeat every N dollars / M tool
@@ -3547,8 +3563,9 @@ class Agent:
                     **_effort_kw,
                 )
             except BudgetExceeded as e:
-                bb.post(self.name, "error", f"budget exceeded: {e}")
-                return AgentResult(error=f"budget exceeded: {e}", role=self.role, name=self.name)
+                label = _budget_error_label(e)
+                bb.post(self.name, "error", f"{label}: {e}")
+                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name)
             except killswitch.Halted as e:
                 # The killswitch tripped MID-generation; the in-flight call was
                 # cancelled by _complete_guarded. Stop like a turn-boundary halt.
