@@ -315,6 +315,23 @@ def verify_ed25519(pubkey_hex: str, sig_hex: str, message: bytes) -> bool:
         return False
 
 
+# Domain-separated, versioned prefix for detached-digest signatures (evidence
+# exports). Without this, a detached signature was Ed25519-over-the-raw-32-byte
+# digest -- byte-for-byte what AuditSigner.write() signs for a chain row whose
+# ``hash`` equals that same digest, and what sign_envelope signed for a
+# federation envelope. The same key producing indistinguishable signatures
+# across three protocols is a signing oracle: a detached-digest signature
+# obtained via evidence export could be replayed as a forged audit-chain row
+# (or vice versa) as long as some row's canonical-JSON hash happened to equal
+# the exported digest. Prefixing makes the signed bytes structurally
+# unable to collide with a bare 32-byte row hash or envelope digest.
+DETACHED_DIGEST_MESSAGE_VERSION = "maverick-detached-digest/v1"
+
+
+def _detached_digest_message(digest_hex: str) -> bytes:
+    return DETACHED_DIGEST_MESSAGE_VERSION.encode("utf-8") + b"\x00" + bytes.fromhex(digest_hex)
+
+
 def sign_detached_digest(digest_hex: str) -> dict[str, str]:
     """Sign one SHA-256 digest with the active audit identity.
 
@@ -322,6 +339,10 @@ def sign_detached_digest(digest_hex: str) -> dict[str, str]:
     the same rotating Ed25519 trust registry as audit rows without appending an
     artificial event to the operating log.  The caller remains responsible for
     stating whether the key has independent/off-host custody.
+
+    The signed message is domain-separated (:data:`DETACHED_DIGEST_MESSAGE_VERSION`
+    prefix + a NUL separator + the raw digest bytes), not the bare digest --
+    see :func:`verify_detached_digest`.
     """
     if not isinstance(digest_hex, str) or not re.fullmatch(r"[0-9a-f]{64}", digest_hex):
         raise ValueError("detached audit digest must be lowercase SHA-256 hex")
@@ -342,8 +363,26 @@ def sign_detached_digest(digest_hex: str) -> dict[str, str]:
         "algorithm": "Ed25519-SHA256",
         "digest": digest_hex,
         "key_id": key_id,
-        "signature": signer.sign(bytes.fromhex(digest_hex)).hex(),
+        "message_version": DETACHED_DIGEST_MESSAGE_VERSION,
+        "signature": signer.sign(_detached_digest_message(digest_hex)).hex(),
     }
+
+
+def verify_detached_digest(pubkey_hex: str, digest_hex: str, sig_hex: str) -> bool:
+    """Verify a signature produced by :func:`sign_detached_digest`.
+
+    Recomputes the same domain-separated message. A signature over the bare
+    digest bytes (for example a forged audit-chain row-hash signature, or a
+    federation-envelope signature over the same digest) never verifies here,
+    and a valid detached-digest signature never verifies as a plain
+    ``verify_ed25519(pubkey, sig, bytes.fromhex(digest))`` call either -- that
+    cross-protocol reuse is exactly what the prefix rules out.
+    """
+    if not isinstance(digest_hex, str) or not re.fullmatch(r"[0-9a-f]{64}", digest_hex):
+        return False
+    if not _have_crypto():
+        return False
+    return verify_ed25519(pubkey_hex, sig_hex, _detached_digest_message(digest_hex))
 
 
 def _generate_keypair() -> tuple[bytes, bytes, str]:
@@ -1609,6 +1648,7 @@ def _reanchor_file_locked(
 __all__ = [
     "AuditSigner",
     "sign_detached_digest",
+    "verify_detached_digest",
     "trusted_audit_public_keys",
     "verify_chain",
     "verify_ed25519",

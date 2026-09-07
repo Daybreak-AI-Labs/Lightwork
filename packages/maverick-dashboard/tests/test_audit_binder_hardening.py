@@ -317,15 +317,26 @@ def test_binder_detached_signature_verifies_with_saved_public_key(
     assert artifact["signature_state"] == "signed"
     public_key = (key_dir / f"{artifact['key_id']}.pub").read_bytes().hex()
     digest = bytes.fromhex(str(artifact["digest"]))
-    assert signing.verify_ed25519(
+    assert signing.verify_detached_digest(
         public_key,
+        str(artifact["digest"]),
         str(artifact["signature"]),
-        digest,
     )
+    assert not signing.verify_detached_digest(
+        public_key,
+        str(artifact["digest"]),
+        "00" + str(artifact["signature"])[2:],
+    )
+    # W2-46: the signature is over a domain-separated message, not the bare
+    # digest -- a plain verify_ed25519 against the raw digest bytes (what a
+    # forged AuditSigner chain-row signature, or a federation envelope
+    # signature, over this same digest would look like) must NOT verify.
+    # Before the fix this assertion failed: the detached signature WAS a
+    # valid signature over the bare digest.
     assert not signing.verify_ed25519(
         public_key,
         str(artifact["signature"]),
-        b"\x00" + digest[1:],
+        digest,
     )
 
 
