@@ -47,7 +47,11 @@ fn startup_report_for_url(
     url: &tauri::Url,
     state: &Dashboard,
 ) -> Result<serde_json::Value, String> {
-    if *url != bundled_splash_url() {
+    // Tauri maps the default App(index.html) window to the bundled root;
+    // reconnect navigates to the explicit index.html URL. Admit only those
+    // exact pages (including the custom scheme's empty/slash root forms),
+    // with no query, fragment, credentials or alternate port.
+    if *url != bundled_splash_url() && *url != bundled_root_url() && *url != bundled_page_url("") {
         return Err("Open the app's startup screen to prepare startup diagnostics.".into());
     }
     let facts = state.startup_support()?;
@@ -101,6 +105,13 @@ fn bundled_page_url(page: &str) -> tauri::Url {
 
 fn bundled_splash_url() -> tauri::Url {
     bundled_page_url("index.html")
+}
+
+fn bundled_root_url() -> tauri::Url {
+    let mut url = bundled_splash_url();
+    // Special HTTP URLs retain '/', while Tauri's custom scheme uses no path.
+    url.set_path("");
+    url
 }
 
 fn reconnect_dashboard<R: tauri::Runtime>(
@@ -267,17 +278,47 @@ mod tests {
     #[test]
     fn startup_report_is_allowlisted_and_available_only_from_bundled_splash() {
         let dashboard = Dashboard::default();
-        let report = startup_report_for_url(&bundled_splash_url(), &dashboard).unwrap();
-        assert_eq!(report["schema"], "lightwork.startup-support.v1");
-        assert_eq!(report["process_state"], "not_started");
-        assert_eq!(report.as_object().unwrap().len(), 9);
+        for url in [
+            bundled_root_url(),
+            bundled_page_url(""),
+            bundled_splash_url(),
+        ] {
+            let report = startup_report_for_url(&url, &dashboard).unwrap();
+            assert_eq!(report["schema"], "lightwork.startup-support.v1");
+            assert_eq!(report["process_state"], "not_started");
+            assert_eq!(report.as_object().unwrap().len(), 9);
+        }
         for url in [
             DASHBOARD_URL.parse().unwrap(),
             "https://example.test/".parse().unwrap(),
+            "http://tauri.localhost.example.test/".parse().unwrap(),
+            "http://tauri.localhost:8765/".parse().unwrap(),
+            "http://user@tauri.localhost/".parse().unwrap(),
             bundled_page_url("maintenance.html"),
+            bundled_page_url("recovery.html"),
+            bundled_page_url("?private-query"),
+            bundled_page_url("#private-fragment"),
+            bundled_page_url("index.html?private-query"),
+            bundled_page_url("index.html#private-fragment"),
         ] {
             assert!(startup_report_for_url(&url, &dashboard).is_err());
         }
+    }
+
+    #[test]
+    fn startup_report_accepts_the_framework_resolved_default_window_url() {
+        // Read the real window configuration and let pinned Tauri resolve its
+        // omitted URL. The framework maps App(index.html) to the origin root.
+        let config: tauri::utils::config::Config =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let app = tauri::test::mock_app();
+        let window = tauri::WebviewWindowBuilder::from_config(&app, &config.app.windows[0])
+            .unwrap()
+            .build()
+            .unwrap();
+        let actual = window.url().unwrap();
+        assert_eq!(actual, bundled_root_url());
+        assert!(startup_report_for_url(&actual, &Dashboard::default()).is_ok());
     }
 
     #[test]
