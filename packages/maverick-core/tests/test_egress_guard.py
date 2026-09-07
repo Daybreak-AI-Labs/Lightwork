@@ -457,6 +457,79 @@ def test_a_block_is_audited(guarded, monkeypatch) -> None:
     assert any("api.example.com" in str(kw) for _, kw in seen), seen
 
 
+# -- the tenant egress plane, hooked into this same seam (platform audit W2-69) --
+#
+# Before this, maverick.tenant.egress was consulted directly by exactly one
+# tool (http_fetch) despite its own module docstring claiming it "applies to
+# every tool a tenant's agents run" -- any other tool's raw httpx/requests/
+# urllib call reached a tenant-denied host fine. The tenant plane is
+# independent of enterprise mode (a tenant boundary matters whether or not
+# the separate enterprise allow-list is on), so these tests exercise it with
+# enterprise mode both off and on.
+
+def _tenant_denies(monkeypatch, *hosts):
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"egress": {"deny": list(hosts)}},
+    )
+
+
+def test_tenant_plane_blocks_even_with_enterprise_mode_off(
+    unguarded_mode, monkeypatch,
+) -> None:
+    """The load-bearing case: with enterprise mode off (the default posture),
+    a tenant-denied host must still be refused at this seam -- not just when
+    the one tool (http_fetch) that already called tenant.egress is used."""
+    _tenant_denies(monkeypatch, "denied.example.com")
+    with pytest.raises(EgressBlocked, match="egress policy"):
+        httpx.get("https://denied.example.com/x", timeout=0.5)
+
+
+def test_tenant_plane_with_enterprise_off_permits_a_host_not_denied(
+    unguarded_mode, monkeypatch,
+) -> None:
+    """Negative control: a configured tenant deny-list must not become deny-all."""
+    _tenant_denies(monkeypatch, "denied.example.com")
+    with pytest.raises(httpx.HTTPError):
+        httpx.get(UNROUTABLE, timeout=0.5)
+
+
+def test_tenant_denial_applies_even_when_the_enterprise_allowlist_permits(
+    guarded, monkeypatch,
+) -> None:
+    """The two planes compose with AND: passing the enterprise allow-list is
+    not enough to bypass a tenant deny."""
+    _allowed(monkeypatch, "denied.example.com")
+    _tenant_denies(monkeypatch, "denied.example.com")
+    with pytest.raises(EgressBlocked, match="egress policy"):
+        httpx.get("https://denied.example.com/x", timeout=0.5)
+
+
+def test_tenant_plane_unconfigured_falls_through_to_the_enterprise_decision(
+    guarded,
+) -> None:
+    """No [egress] / [tenancy.egress.<t>] configured -> the tenant plane is
+    allow-all, so the enterprise allow-list alone still decides (no
+    regression for a deployment that only uses enterprise mode)."""
+    with pytest.raises(EgressBlocked, match="enterprise mode"):
+        httpx.get("https://api.example.com/x", timeout=0.5)
+
+
+def test_an_unevaluable_tenant_policy_blocks_rather_than_allows(
+    guarded, monkeypatch,
+) -> None:
+    """"We cannot tell" must not resolve to "let it out", for the tenant plane
+    exactly like it already doesn't for the enterprise one. Allow-list the
+    host under enterprise first, so only the tenant-policy exception -- not
+    enterprise's own independent default-deny -- can explain the block."""
+    _allowed(monkeypatch, "api.example.com")
+    monkeypatch.setattr(
+        "maverick.tenant.egress.host_allowed",
+        lambda host, **k: (_ for _ in ()).throw(RuntimeError("config on fire")))
+    with pytest.raises(EgressBlocked):
+        httpx.get("https://api.example.com/x", timeout=0.5)
+
+
 # -- install/uninstall mechanics -------------------------------------------
 
 #: The attribute the HTTPX-family wrappers actually replace. Named here so these
