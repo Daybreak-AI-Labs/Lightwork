@@ -2727,10 +2727,12 @@ Opus 4.7/4.8: model-gated `output_config.effort` tiered by role (critical roles
 `high`, bulk roles `medium`/`low`), opt-in via `[effort] enabled`.
 
 **Prompt caching** (`providers/anthropic_provider.py`) — frozen system prompt +
-name-sorted tool catalog + a stable-history-prefix breakpoint (with a secondary
-breakpoint on long turns for the 20-block lookback), 1h TTL; opt-in **cache
-pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
-`maverick_llm_cache_tokens_total` hit-rate metric.
+name-sorted tool catalog (1h TTL) + a stable-history-prefix breakpoint (5m TTL,
+with a secondary breakpoint on long turns for the 20-block lookback); billing
+reads Anthropic's per-tier `cache_creation` split (5m vs 1h write surcharge)
+when the response reports it, rather than pricing the whole write at one TTL.
+Opt-in **cache pre-warming** (`max_tokens=0` prefill at orchestrator start)
+and a `maverick_llm_cache_tokens_total` hit-rate metric.
 
 ## MCP & agent interop
 

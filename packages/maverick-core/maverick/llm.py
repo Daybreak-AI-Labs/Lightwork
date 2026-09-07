@@ -1232,18 +1232,27 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
         in_tok -= openai_cached
     in_rate, out_rate = _lookup_price(model_id, estimate_only=True)
     # ``cache_write`` (cache_creation_tokens) is only ever surfaced by the
-    # Anthropic provider, which writes its breakpoints at the configured TTL
-    # (``_default_cache_ttl()`` -- "1h" in interactive mode, billed at 2.0x).
-    # Hardcoding ``None`` here priced every write at the 5m 1.25x rate, so this
-    # cross-run provider-cap ledger under-counted 1h cache-write spend by ~37.5%
-    # vs the authoritative Budget.record_tokens (which receives the real TTL),
-    # letting a deployment overshoot its configured provider cap. Match the TTL
-    # the real per-run path bills at.
-    if cache_write:
-        from .providers.anthropic_provider import _default_cache_ttl
-        write_mult = _cache_write_mult_from_ttl(_default_cache_ttl())
-    else:
-        write_mult = _cache_write_mult_from_ttl(None)
+    # Anthropic provider. A single call can write BOTH the system/tools
+    # breakpoint (``_default_cache_ttl()`` -- 1h in interactive mode, 2.0x)
+    # and the messages breakpoint (5m, 1.25x) at once -- W1-6: billing the
+    # combined total at one multiplier over/undercounts whichever tier
+    # doesn't match. Anthropic reports the real split as
+    # usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens; use it
+    # when present and fall back to the single-multiplier heuristic
+    # (matching Budget.record_tokens's own fallback) otherwise.
+    cache_creation_detail = getattr(usage, "cache_creation", None)
+
+    def _detail(*names) -> int:
+        for n in names:
+            v = getattr(cache_creation_detail, n, None) if cache_creation_detail is not None else None
+            if v is not None:
+                try:
+                    return max(0, int(v))
+                except (TypeError, ValueError):
+                    return 0
+        return 0
+    cache_write_5m = _detail("ephemeral_5m_input_tokens")
+    cache_write_1h = _detail("ephemeral_1h_input_tokens")
     # Per-provider cached-prompt discount, mirroring the authoritative
     # Budget.record_tokens path (openai_provider passes its class
     # CACHE_READ_MULT -- DeepSeek 0.1x, Gemini 0.25x). Hard-coding OpenAI's
@@ -1253,7 +1262,14 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     cost = (in_tok / 1_000_000) * in_rate
     cost += (cache_read / 1_000_000) * in_rate * _CACHE_READ_MULT   # Anthropic 0.1x
     cost += (openai_cached / 1_000_000) * in_rate * openai_mult
-    cost += (cache_write / 1_000_000) * in_rate * write_mult
+    if cache_write_5m or cache_write_1h:
+        from .budget import _CACHE_WRITE_MULT_1H, _CACHE_WRITE_MULT_5M
+        cost += (cache_write_5m / 1_000_000) * in_rate * _CACHE_WRITE_MULT_5M
+        cost += (cache_write_1h / 1_000_000) * in_rate * _CACHE_WRITE_MULT_1H
+    elif cache_write:
+        from .providers.anthropic_provider import _default_cache_ttl
+        write_mult = _cache_write_mult_from_ttl(_default_cache_ttl())
+        cost += (cache_write / 1_000_000) * in_rate * write_mult
     cost += (out_tok / 1_000_000) * out_rate
     return cost
 

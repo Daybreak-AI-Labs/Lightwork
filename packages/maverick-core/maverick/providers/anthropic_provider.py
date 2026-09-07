@@ -569,6 +569,16 @@ class AnthropicClient:
         cache_read = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
         in_tok = _safe_int(getattr(usage, "input_tokens", 0))
         out_tok = _safe_int(getattr(usage, "output_tokens", 0))
+        # W1-6: the system/tools breakpoint writes at _default_cache_ttl()
+        # (1h in interactive mode) while the messages breakpoint writes at
+        # _msg_cache_ttl() (5m) -- a single call can write BOTH tiers at
+        # once. Anthropic reports the real per-tier split as
+        # usage.cache_creation.{ephemeral_5m,ephemeral_1h}_input_tokens when
+        # present; billing the combined total at one multiplier overcharges
+        # (or undercharges) whichever tier isn't the one that TTL matches.
+        cache_creation_detail = getattr(usage, "cache_creation", None)
+        cache_write_5m = _safe_int(getattr(cache_creation_detail, "ephemeral_5m_input_tokens", 0))
+        cache_write_1h = _safe_int(getattr(cache_creation_detail, "ephemeral_1h_input_tokens", 0))
 
         if budget is not None:
             # ``usage.input_tokens`` is non-cached input only. Cache reads
@@ -579,8 +589,11 @@ class AnthropicClient:
                 cache_read_tok=cache_read,
                 cache_write_tok=cache_creation,
                 # Wave 12: pass TTL so write surcharge math matches the
-                # actual breakpoint TTL (5m vs 1h).
+                # actual breakpoint TTL (5m vs 1h) when the per-tier split
+                # below isn't available (older SDK, or a single-tier write).
                 cache_write_ttl=_default_cache_ttl(),
+                cache_write_5m_tok=cache_write_5m,
+                cache_write_1h_tok=cache_write_1h,
             )
 
         # Prometheus token + cache-effectiveness metrics (no-op unless the

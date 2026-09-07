@@ -121,6 +121,41 @@ def test_cache_write_1h_is_two_x_input():
     assert abs(b.dollars - 6.0) < 0.001
 
 
+def test_cache_write_split_bills_each_tier_at_its_own_multiplier():
+    """W1-6: one call can write BOTH a 1h breakpoint (system/tools) and a
+    5m breakpoint (messages) at once. Before this, the combined total was
+    billed at a single multiplier (whichever cache_write_ttl the caller
+    passed) -- forcing the whole write to 2.0x when only part of it was
+    really 1h, or to 1.25x when only part was really 5m. Passing the split
+    counts must bill each tier correctly regardless of one another."""
+    b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
+    # Sonnet: 500k @ 5m ($3 * 1.25 = $3.75/Mtok -> $1.875) +
+    #         500k @ 1h ($3 * 2.0  = $6.00/Mtok -> $3.00) = $4.875.
+    # A single combined-total call (cache_write_tok=1_000_000) at either
+    # ttl alone would give $3.75 or $6.00 -- neither matches.
+    b.record_tokens(
+        0, 0, model=MODEL_SONNET,
+        cache_write_5m_tok=500_000, cache_write_1h_tok=500_000,
+    )
+    assert abs(b.dollars - 4.875) < 0.001
+    assert b.cache_write_tokens == 1_000_000
+
+
+def test_cache_write_split_ignores_stale_combined_fields():
+    """When the split is present, a caller-passed cache_write_tok/ttl (e.g.
+    a stale fallback value computed alongside the split) must not also be
+    billed -- the split is authoritative, not additive."""
+    b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
+    b.record_tokens(
+        0, 0, model=MODEL_SONNET,
+        cache_write_tok=1_000_000, cache_write_ttl="1h",
+        cache_write_5m_tok=1_000_000, cache_write_1h_tok=0,
+    )
+    # Only the 5m split should bill: $3 * 1.25 = $3.75, not the $6.00 the
+    # ignored cache_write_tok=1_000_000/ttl="1h" combination would give.
+    assert abs(b.dollars - 3.75) < 0.001
+
+
 def test_cache_tokens_tracked_separately_from_input_cap():
     """max_input_tokens measures BILLABLE input only — cache reads/writes
     have their own counters. A heavy-caching workload should not be

@@ -184,3 +184,45 @@ def test_anthropic_cache_write_respects_explicit_5m_ttl(monkeypatch):
         + (100 / 1e6) * 25.0
     )
     assert cost == pytest.approx(expected, rel=1e-9)
+
+
+class _CacheCreationDetail:
+    def __init__(self, ephemeral_5m, ephemeral_1h):
+        self.ephemeral_5m_input_tokens = ephemeral_5m
+        self.ephemeral_1h_input_tokens = ephemeral_1h
+
+
+class _UsageAnthropicSplitCache:
+    def __init__(self, inp, out, ephemeral_5m, ephemeral_1h):
+        self.input_tokens = inp
+        self.output_tokens = out
+        self.cache_creation = _CacheCreationDetail(ephemeral_5m, ephemeral_1h)
+
+
+def test_anthropic_cache_write_split_bills_each_tier(monkeypatch):
+    # W1-6: a single call can write BOTH a 1h (system/tools) and a 5m
+    # (messages) breakpoint at once. The interactive default TTL ("1h")
+    # would price the WHOLE cache_creation_tokens total at 2.0x if the split
+    # weren't read -- this must bill each tier at its own rate instead.
+    monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
+    monkeypatch.delenv("MAVERICK_CODING_MODE", raising=False)  # -> "1h" default
+    usage = _UsageAnthropicSplitCache(
+        inp=1_000, out=100, ephemeral_5m=1_000_000, ephemeral_1h=1_000_000,
+    )
+    resp = _Resp(usage, cache_creation=2_000_000)
+    cost = _response_call_cost("claude-opus-4-8", resp)  # (5.0, 25.0)
+    expected = (
+        (1_000 / 1e6) * 5.0
+        + (1_000_000 / 1e6) * 5.0 * 1.25  # 5m tier
+        + (1_000_000 / 1e6) * 5.0 * 2.0   # 1h tier
+        + (100 / 1e6) * 25.0
+    )
+    assert cost == pytest.approx(expected, rel=1e-9)
+    # Guard against the old single-multiplier-for-everything behaviour
+    # (whole 2M billed at the 1h 2.0x default).
+    wrong = (
+        (1_000 / 1e6) * 5.0
+        + (2_000_000 / 1e6) * 5.0 * 2.0
+        + (100 / 1e6) * 25.0
+    )
+    assert cost != pytest.approx(wrong, rel=1e-9)
