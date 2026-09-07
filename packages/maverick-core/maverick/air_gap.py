@@ -88,10 +88,52 @@ def _audit_providers(config: dict) -> list[str]:
 def _audit_egress(config: dict) -> list[str]:
     egress = config.get("egress") or {}
     deny = egress.get("deny") or []
+    violations: list[str] = []
     if "*" not in deny:
-        return ['egress is not deny-all — set [egress] deny = ["*"] to block '
-                "all outbound hosts"]
-    return []
+        violations.append(
+            'egress is not deny-all — set [egress] deny = ["*"] to block '
+            "all outbound hosts")
+
+    # W2-90: [egress] deny is honored only by a handful of callers
+    # (tenant.egress.egress_allowed) — NOT the process-wide runtime guard
+    # (egress_guard.py), which wraps httpx/requests across ~80 connectors
+    # and every provider SDK. That guard's default-deny (enterprise.
+    # egress_permitted) returns True UNCONDITIONALLY whenever enterprise
+    # mode is off, whatever [egress] says. A config could pass the check
+    # above and still leave every connector free to reach the internet.
+    # deployment_enterprise_enabled(config=...) mirrors the runtime's own
+    # enterprise_enabled() precedence (compliance floor > MAVERICK_ENTERPRISE
+    # env > [enterprise] mode) but reads [enterprise] mode from THIS audited
+    # config rather than the live one, keeping the audit a pure function of
+    # its input. Any failure to resolve it flags rather than clears (fail
+    # toward flagging, never toward clean, matching _endpoint_is_local).
+    try:
+        from . import enterprise
+        enterprise_on = enterprise.deployment_enterprise_enabled(
+            config=config, source_errors=())
+    except Exception:
+        enterprise_on = False
+    if not enterprise_on:
+        violations.append(
+            "[enterprise] mode is not enabled for this config (and no "
+            "compliance profile requires the egress lock) — the runtime "
+            "egress guard that wraps httpx/requests across connectors and "
+            'provider SDKs only enforces default-deny when enterprise mode '
+            'is on; [egress] deny = ["*"] alone is honored by a small '
+            "subset of call sites, not the process-wide guard. Set "
+            "[enterprise] mode = true (or an active compliance profile "
+            "requiring the egress lock) to actually block outbound "
+            "requests at the enforced seam.")
+    else:
+        allowed = (config.get("enterprise") or {}).get("allowed_hosts") or []
+        if allowed:
+            hosts = ", ".join(sorted(str(h) for h in allowed))
+            violations.append(
+                f"[enterprise] allowed_hosts is non-empty ({hosts}) — these "
+                "hosts are explicitly permitted outbound tool egress, which "
+                "is incompatible with an air-gapped deployment; clear "
+                "allowed_hosts")
+    return violations
 
 
 def _truthy(val) -> bool:
