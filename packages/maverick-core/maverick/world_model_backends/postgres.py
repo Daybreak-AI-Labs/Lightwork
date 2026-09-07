@@ -1152,6 +1152,25 @@ class PostgresWorldModel:
     def __exit__(self, *exc) -> None:
         self.close()
 
+    def _reconnect_if_broken(self) -> None:
+        """W1-54: reopen the single shared connection (non-pooled mode) after
+        it's been killed out from under us.
+
+        Managed Postgres (RDS/CloudSQL multi-AZ) fails over and resets idle
+        connections; without this, the ``psycopg`` driver had already marked
+        ``self.conn`` closed (from a PREVIOUS ``_tx()`` that caught the break
+        and closed it -- see the ``except`` clause below) and every later
+        call would raise ``OperationalError`` forever, turning a transient DB
+        blip into an outage that needs a process restart. Only checks the
+        cheap, local ``.closed`` flag -- it can't detect a connection the
+        server killed but the client hasn't tried to use since; that case is
+        caught where it actually surfaces, inside ``_tx``'s try block.
+        """
+        if self.conn is not None and not self.conn.closed:
+            return
+        import psycopg
+        self.conn = psycopg.connect(self._dsn, autocommit=False)
+
     @contextmanager
     def _tx(self) -> Iterator:
         """Cursor scope that commits on success and ROLLS BACK on error.
@@ -1161,10 +1180,19 @@ class PostgresWorldModel:
         this (shared, long-lived) connection fails with
         InFailedSqlTransaction until the process restarts. Rolling back
         keeps the connection usable.
+
+        W1-54: a rollback can't save a connection the SERVER killed (a
+        managed-Postgres failover, or an idle-connection reset) -- the
+        rollback itself fails too. In that case, close and drop the
+        connection instead of leaving a dead one in ``self.conn``, so
+        ``_reconnect_if_broken()`` opens a fresh one on the NEXT call rather
+        than repeating ``OperationalError`` forever until the process
+        restarts.
         """
         if self._pool is not None:
             # Pooled: each tx gets its own connection; the pool's context
             # commits on success and rolls back on error, so no shared lock.
+            # psycopg_pool already detects and replaces a broken connection.
             with self._pool.connection() as conn:
                 cur = conn.cursor()
                 try:
@@ -1173,20 +1201,35 @@ class PostgresWorldModel:
                 finally:
                     cur.close()
             return
+        import psycopg
         with self._lock:
-            cur = self.conn.cursor()
+            self._reconnect_if_broken()
+            cur = None
             try:
+                cur = self.conn.cursor()
                 self._set_tenant_guc(cur)
                 yield cur
                 self.conn.commit()
+            except (psycopg.OperationalError, psycopg.InterfaceError):
+                try:
+                    self.conn.close()
+                except Exception:  # pragma: no cover
+                    pass
+                raise
             except Exception:
                 try:
                     self.conn.rollback()
+                except (psycopg.OperationalError, psycopg.InterfaceError):
+                    try:
+                        self.conn.close()
+                    except Exception:  # pragma: no cover
+                        pass
                 except Exception:  # pragma: no cover
                     pass
                 raise
             finally:
-                cur.close()
+                if cur is not None:
+                    cur.close()
 
     def _set_tenant_guc(self, cur) -> None:
         """Under RLS, bind this transaction to the active tenant.
