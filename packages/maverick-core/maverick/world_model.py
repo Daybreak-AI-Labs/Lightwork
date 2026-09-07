@@ -1461,16 +1461,37 @@ class WorldModel:
         try:
             while current < SCHEMA_VERSION:
                 next_version = current + 1
-                for stmt in MIGRATIONS.get(next_version, []):
-                    try:
-                        self.conn.execute(stmt)
-                    except sqlite3.OperationalError as e:
-                        msg = str(e).lower()
-                        if "duplicate column" not in msg:
-                            raise
-                self.conn.execute(
-                    "UPDATE schema_version SET version = ?", (next_version,),
-                )
+                # W1-56: Python's sqlite3 legacy driver auto-commits DDL/
+                # backfill statements one at a time outside any transaction,
+                # so a failing multi-statement migration left EARLIER
+                # statements of the SAME version permanently applied while
+                # schema_version stayed unbumped -- an interrupted upgrade
+                # left the DB in a state no later open could detect or retry
+                # cleanly. Wrap each version in its own explicit transaction
+                # so a failure rolls back every statement of that version.
+                # `commit()` first is a safe no-op except right after a
+                # fresh DB's `_init_schema_version()` INSERT, whose
+                # transaction is still open here (only committed after this
+                # method returns) -- BEGIN inside an open transaction raises
+                # `OperationalError: cannot start a transaction within a
+                # transaction`.
+                self.conn.commit()
+                self.conn.execute("BEGIN IMMEDIATE")
+                try:
+                    for stmt in MIGRATIONS.get(next_version, []):
+                        try:
+                            self.conn.execute(stmt)
+                        except sqlite3.OperationalError as e:
+                            msg = str(e).lower()
+                            if "duplicate column" not in msg:
+                                raise
+                    self.conn.execute(
+                        "UPDATE schema_version SET version = ?", (next_version,),
+                    )
+                    self.conn.commit()
+                except BaseException:
+                    self.conn.rollback()
+                    raise
                 current = next_version
         finally:
             if prior is not None:
