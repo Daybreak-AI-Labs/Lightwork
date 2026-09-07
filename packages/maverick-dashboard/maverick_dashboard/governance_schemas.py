@@ -20,6 +20,21 @@ class GRCSyncRunIn(BaseModel):
         return self
 
 
+class GRCInspectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    remote_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{4,128}$")
+
+
+class GRCResolveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    note: str = Field(..., min_length=1, max_length=2000)
+    evidence_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
 class FRIAOpenIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

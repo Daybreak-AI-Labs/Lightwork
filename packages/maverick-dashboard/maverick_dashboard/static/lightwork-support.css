@@ -1,0 +1,5 @@
+#support-center{max-width:64rem;margin-inline:auto;padding:1rem}
+#support-center h1{font-size:clamp(2rem,5vw,3rem);font-weight:300;line-height:1.15}
+#support-center p{max-width:72ch;overflow-wrap:anywhere}
+#support-preview{max-height:28rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:1rem;border:1px solid var(--border);border-radius:.5rem}
+#support-center button{min-height:2.75rem;max-width:100%;white-space:normal}
