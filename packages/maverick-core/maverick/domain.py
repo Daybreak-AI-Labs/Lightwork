@@ -894,4 +894,10 @@ def agent_from_profile(profile: DomainProfile, ctx, task: str, *,
         knowledge_sources=profile.knowledge_sources,
         domain_effort=profile.effort,
         autonomy=profile.autonomy or default_profile_for(profile.name),
+        # W1-24: the depth-0 call (parent is None -- run_goal's domain-routed
+        # root) owns this goal's FINAL just like the plain "orchestrator"
+        # role does; a nested domain spawn (depth > 0, from spawn.py) does
+        # not. role stays profile.name either way -- this only affects the
+        # kernel mechanics keyed on "am I this goal's root", not the persona.
+        is_goal_root=(depth == 0 and parent is None),
     )
