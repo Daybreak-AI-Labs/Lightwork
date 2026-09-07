@@ -145,3 +145,69 @@ def test_web_search_allows_an_allow_listed_backend(monkeypatch):
     from maverick.tools.web_search import _run_search
     out = _run_search({"query": "x"})
     assert "disabled in enterprise mode" not in out
+
+
+# ---------- browser tool (platform audit W2-88) ----------
+#
+# The browser tool (Playwright) previously had no enterprise/tenant egress
+# check at all -- a prompt-injected page could navigate anywhere even with
+# enterprise mode on, unlike every sibling outbound-request tool.
+
+
+class _FakeBrowserPage:
+    url = "about:blank"
+
+    def goto(self, url, timeout, wait_until):
+        raise AssertionError(
+            "page.goto must not be called once egress denies the URL up front"
+        )
+
+
+class _FakeBrowserSession:
+    def __init__(self):
+        self._page = _FakeBrowserPage()
+
+    @property
+    def page(self):
+        return self._page
+
+    def save_state(self):
+        return True
+
+
+def test_browser_navigate_blocks_egress_under_enterprise(monkeypatch):
+    _enterprise(monkeypatch)
+    monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # isolate the enterprise gate from DNS
+    # Enterprise mode also flips destructive-action consent to ask-by-default
+    # (a separate, already-covered control) -- auto-approve so this test
+    # isolates the egress gate rather than tripping the consent one.
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    from maverick.tools import browser as browser_mod
+    monkeypatch.setattr(browser_mod, "_get_session", lambda: _FakeBrowserSession())
+    out = browser_mod._run_browser_action(
+        {"action": "navigate", "url": "https://exfil.invalid/steal"},
+    )
+    assert out.startswith("ERROR:") and "enterprise mode" in out and "boundary" in out
+
+
+def test_browser_navigate_allows_allow_listed_host_under_enterprise(monkeypatch):
+    _enterprise(monkeypatch, allowed=["api.example.com"])
+    monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    from maverick.tools import browser as browser_mod
+
+    class _AllowedPage(_FakeBrowserPage):
+        def goto(self, url, timeout, wait_until):
+            self.url = url
+
+    class _AllowedSession(_FakeBrowserSession):
+        def __init__(self):
+            self._page = _AllowedPage()
+
+    monkeypatch.setattr(browser_mod, "_get_session", lambda: _AllowedSession())
+    out = browser_mod._run_browser_action(
+        {"action": "navigate", "url": "https://api.example.com/x"},
+    )
+    assert out.startswith("navigated to")

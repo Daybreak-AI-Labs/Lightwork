@@ -71,6 +71,43 @@ def test_http_fetch_uses_tenant_egress(monkeypatch):
     assert isinstance(out, str) and "egress policy blocks" in out
 
 
+def test_browser_navigate_uses_tenant_egress(monkeypatch):
+    # The browser tool previously never consulted the tenant plane at all
+    # (platform audit W2-88) -- it must now refuse a denied host too.
+    import maverick.config as cfg
+    monkeypatch.setattr(cfg, "load_config", lambda: {
+        "egress": {"deny": ["blocked.test"]},
+    })
+    monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
+    monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # isolate the gate from DNS
+    from maverick.tools import browser as browser_mod
+
+    class _FakePage:
+        url = "about:blank"
+
+        def goto(self, url, timeout, wait_until):
+            raise AssertionError(
+                "page.goto must not be called once tenant egress denies the URL"
+            )
+
+    class _FakeSession:
+        def __init__(self):
+            self._page = _FakePage()
+
+        @property
+        def page(self):
+            return self._page
+
+        def save_state(self):
+            return True
+
+    monkeypatch.setattr(browser_mod, "_get_session", lambda: _FakeSession())
+    out = browser_mod._run_browser_action(
+        {"action": "navigate", "url": "https://blocked.test/data"},
+    )
+    assert "egress policy blocks" in out
+
+
 def test_active_tenant_lookup_uses_raw_tenant_id(monkeypatch):
     import maverick.config as cfg
     from maverick.paths import tenant_scope
