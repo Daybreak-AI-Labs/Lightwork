@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from types import SimpleNamespace
+
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from maverick import consent_web_publish_settings as web
 from maverick_dashboard import consent_web_publish_settings_api as api
@@ -60,7 +62,6 @@ def _settings() -> dict[str, object]:
 def _client(monkeypatch, *, ready: bool = True):
     service = _Service()
     monkeypatch.setattr(api, "_tenant_id", lambda: "tenant-a")
-    monkeypatch.setattr(api, "caller_principal", lambda _request: "admin-1")
     monkeypatch.setattr(api, "require_permission", lambda _request, _permission: None)
     deps = api.WebPublishSettingsDependencies(
         service_for=lambda **_kwargs: service,
@@ -68,6 +69,12 @@ def _client(monkeypatch, *, ready: bool = True):
         readiness_probe=lambda _tenant: ready,
     )
     app = FastAPI()
+
+    @app.middleware("http")
+    async def _principal(request: Request, call_next):
+        request.state.principal = SimpleNamespace(principal="admin-1")
+        return await call_next(request)
+
     app.include_router(api.create_consent_web_publish_settings_router(deps))
     return TestClient(app, headers={"Origin": "http://testserver"}), service
 

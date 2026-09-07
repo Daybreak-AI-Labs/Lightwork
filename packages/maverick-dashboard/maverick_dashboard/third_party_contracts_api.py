@@ -26,6 +26,7 @@ from pydantic import (
 )
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import has_global_permission, require_global_permission, require_permission
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
@@ -244,23 +245,11 @@ def _tenant_id() -> str:
 
 
 def _principal(request: Request, tenant_id: str) -> str:
-    verified = getattr(request.state, "principal", None)
-    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        try:
-            from .auth import anonymous_local_access_allowed
-
-            if anonymous_local_access_allowed():
-                subject = "local-operator"
-            else:
-                raise ValueError("authenticated principal missing")
-        except Exception as exc:
-            raise HTTPException(
-                status_code=401,
-                detail="an authenticated principal is required for Contract lifecycle",
-            ) from exc
+    subject = authenticated_subject(
+        request, error_detail="an authenticated principal is required for Contract lifecycle",
+    )
     digest = hashlib.sha256(
-        f"lightwork.third-party-contract.identity.v1:{tenant_id}:{subject.strip()}".encode()
+        f"lightwork.third-party-contract.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"contract-principal-{digest[:32]}"
 

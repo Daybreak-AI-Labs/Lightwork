@@ -22,7 +22,8 @@ from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, require_permission
+from ._shared import authenticated_subject
+from .auth import require_permission
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
 _OPERATION_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$"
@@ -158,9 +159,7 @@ def _tenant_id() -> str:
 
 
 def _actor_ref(request: Request, tenant_id: str) -> str:
-    subject = caller_principal(request)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise HTTPException(status_code=401, detail="an authenticated principal is required")
+    subject = authenticated_subject(request, error_detail="an authenticated principal is required")
     digest = hashlib.sha256(
         f"lightwork.ai-evidence.api-principal.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()

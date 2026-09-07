@@ -18,6 +18,7 @@ from fastapi import Path as ApiPath
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import require_global_permission, require_permission
 
 _ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
@@ -211,13 +212,9 @@ def _tenant_id() -> str:
 
 
 def _principal(request: Request, tenant_id: str) -> str:
-    verified = getattr(request.state, "principal", None)
-    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
-    if not isinstance(subject, str) or not subject:
-        raise HTTPException(
-            status_code=401,
-            detail="an authenticated principal is required for compliance scoping",
-        )
+    subject = authenticated_subject(
+        request, error_detail="an authenticated principal is required for compliance scoping",
+    )
     digest = hashlib.sha256(
         (f"lightwork.compliance-scoping.identity.v1:{tenant_id}:{subject}").encode()
     ).hexdigest()

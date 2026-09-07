@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from .auth import (
+    _dashboard_token_authenticated,
     anonymous_local_access_allowed,
     require_global_permission,
     require_permission,
@@ -253,7 +254,9 @@ def _status_principal(request: Request, tenant_id: str) -> str | None:
     try:
         return _principal(request, tenant_id)
     except HTTPException as exc:
-        if exc.status_code == 401 and anonymous_local_access_allowed():
+        if exc.status_code == 401 and (
+            anonymous_local_access_allowed() or _dashboard_token_authenticated(request)
+        ):
             return None
         raise
 

@@ -21,7 +21,8 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from starlette.concurrency import run_in_threadpool
 
-from .auth import caller_principal, require_permission
+from ._shared import authenticated_subject
+from .auth import require_permission
 
 _MAX_JSON_BYTES = 64 * 1024
 _SECURE_HEADERS = {
@@ -218,14 +219,11 @@ def _tenant_id() -> str:
 
 
 def _principal_ref(request: Request, tenant_id: str) -> str:
-    subject = caller_principal(request)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise HTTPException(
-            status_code=401,
-            detail="an authenticated principal is required for web publish settings",
-        )
+    subject = authenticated_subject(
+        request, error_detail="an authenticated principal is required for web publish settings",
+    )
     digest = hashlib.sha256(
-        f"lightwork.web-publish-settings.identity.v1:{tenant_id}:{subject.strip()}".encode()
+        f"lightwork.web-publish-settings.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"web-settings-admin-{digest[:40]}"
 

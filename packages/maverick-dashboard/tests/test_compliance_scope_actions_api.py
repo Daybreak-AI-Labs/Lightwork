@@ -271,7 +271,9 @@ def _approve_plan(client: TestClient, revision: int = 1) -> dict:
     return response.json()
 
 
-def test_status_is_store_free_honest_default_off_and_requires_principal(environment) -> None:
+def test_status_is_store_free_honest_default_off_and_requires_principal(
+    environment, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     client, _database, state, _applier = environment
     response = client.get(f"{API}/status")
     assert response.status_code == 200
@@ -304,11 +306,27 @@ def test_status_is_store_free_honest_default_off_and_requires_principal(environm
     assert state["factory_calls"] == []
 
     state["enabled"] = True
+    monkeypatch.setattr("maverick_dashboard.auth.anonymous_local_access_allowed", lambda: False)
+    monkeypatch.setattr("maverick_dashboard.auth._dashboard_token_authenticated", lambda _r: False)
     unauthenticated = client.get(
         f"{API}/status",
         headers={"X-Test-No-Principal": "1"},
     )
     assert unauthenticated.status_code == 401
+
+
+def test_status_grants_a_synthetic_operator_ref_under_genuine_auth_off(environment) -> None:
+    """A missing principal is not ALWAYS a 401: genuine local auth-off mode
+    and a valid static dashboard bearer are both already-authenticated
+    shapes require_permission() itself accepts (W3-1) -- so /status (and
+    every other route here) must succeed for them too, not just for a named
+    principal."""
+    client, _database, _state, _applier = environment
+    response = client.get(
+        f"{API}/status",
+        headers={"X-Test-No-Principal": "1"},
+    )
+    assert response.status_code == 200
 
 
 def test_exact_tenant_hashed_principal_and_unicode_isolation(environment) -> None:

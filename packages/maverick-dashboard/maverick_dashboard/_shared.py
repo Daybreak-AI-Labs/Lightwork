@@ -104,6 +104,57 @@ def require_provider_or_400(*, role: str | None = None) -> None:
     )
 
 
+def authenticated_subject(request, *, error_detail: str) -> str:
+    """Resolve the caller's identity subject for a suite API's per-caller
+    principal-ref digest.
+
+    Platform audit **W3-1**: 29 suite-API modules each copied a `_principal`/
+    `_principal_ref` helper that reads `request.state.principal` and 401s
+    when it's empty. But `require_principal` (auth.py) deliberately leaves
+    `request.state.principal` UNSET for two legitimate authenticated shapes,
+    not just a genuinely missing identity: a valid static
+    `MAVERICK_DASHBOARD_TOKEN` bearer (`_dashboard_token_authenticated`
+    returns True; there's no per-user OIDC/session subject to attach) and
+    genuine local single-user auth-off mode (`anonymous_local_access_allowed`).
+    `require_permission`'s own authorization check (`_authorization_principal`)
+    already treats both as authenticated -- these suite modules didn't, so the
+    documented static-token API path and single-user local mode 401'd on
+    every one of them while core routes and 7 other suite modules (which
+    happened to implement this same three-way check themselves) worked fine.
+
+    Returns a named principal's subject when one exists (unchanged from
+    before -- callers keep their own digest namespace/prefix, so an
+    already-authenticated caller's principal ref does not change), else a
+    stable synthetic operator subject for the other two accepted shapes
+    (matching the "authorized-local-operator" / "static-dashboard-operator"
+    strings a few of these modules had already independently landed on), else
+    raises 401 with the caller's own message -- only when NONE of the three
+    shapes require_permission() itself accepts actually authenticated this
+    request.
+
+    Reads ``request.state.principal`` directly (checking both its
+    ``.principal`` and ``.sub`` attributes) rather than going through
+    ``auth.caller_principal`` (which only reads ``.principal``): the two are
+    always in sync on the real ``VerifiedPrincipal`` production attaches
+    (``.principal`` is a derived ``f"user:{sub}"`` property), but most of the
+    22 call sites this replaces made both names acceptable, and this keeps
+    that unchanged instead of narrowing it.
+    """
+    from fastapi import HTTPException
+
+    from .auth import _dashboard_token_authenticated, anonymous_local_access_allowed
+
+    verified = getattr(getattr(request, "state", None), "principal", None)
+    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
+    if isinstance(subject, str) and subject.strip() and len(subject) <= 512:
+        return subject.strip()
+    if anonymous_local_access_allowed():
+        return "authorized-local-operator"
+    if _dashboard_token_authenticated(request):
+        return "static-dashboard-operator"
+    raise HTTPException(status_code=401, detail=error_detail)
+
+
 def _world():
     """Return a per-DB-path cached WorldModel (council perf fix).
 

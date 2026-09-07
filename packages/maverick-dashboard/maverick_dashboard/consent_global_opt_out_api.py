@@ -12,6 +12,7 @@ from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from ._shared import authenticated_subject
 from .auth import require_global_permission
 
 router = APIRouter(prefix="/consent/global-opt-out", tags=["consent-global-opt-out"])
@@ -116,18 +117,15 @@ def _tenant() -> str:
 
 
 def _principal_ref(request: Request, tenant_id: str) -> str:
-    verified = getattr(request.state, "principal", None)
-    subject = getattr(verified, "principal", None) or getattr(verified, "sub", None)
-    if not isinstance(subject, str) or not subject.strip() or len(subject) > 512:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "global_opt_out_principal_required",
-                "message": "authenticated principal authority is unavailable",
-            },
-        )
+    subject = authenticated_subject(
+        request,
+        error_detail={
+            "code": "global_opt_out_principal_required",
+            "message": "authenticated principal authority is unavailable",
+        },
+    )
     digest = hashlib.sha256(
-        f"lightwork.global-opt-out.identity.v1:{tenant_id}:{subject.strip()}".encode()
+        f"lightwork.global-opt-out.identity.v1:{tenant_id}:{subject}".encode()
     ).hexdigest()
     return f"global-opt-out-admin-{digest[:32]}"
 
