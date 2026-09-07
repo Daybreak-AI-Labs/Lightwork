@@ -495,6 +495,40 @@ class TestSkillRetirement:
         assert retired == ["never-won"]
         assert (store / "retired" / "never-won.md").exists()
 
+    def _read_retired_log(self, store):
+        import json
+        lines = (store / "retired" / "retired.ndjson").read_text(
+            encoding="utf-8").splitlines()
+        return {json.loads(ln)["name"]: json.loads(ln) for ln in lines}
+
+    def test_retired_log_reason_matches_the_wilson_bound_rule(self, tmp_path):
+        # The audit-trail "reason" must describe the rule that ACTUALLY fired
+        # (a confidence bound), not the pre-Wilson point-estimate wording --
+        # an operator/auditor reading retired.ndjson must not be misled about
+        # why a skill was retired.
+        store, stats = self._seed(tmp_path, wins=1, losses=19)
+        dreaming.retire_stale_skills(store, min_uses=5, below=0.25, stats_path=stats)
+        rows = self._read_retired_log(store)
+        assert "Wilson" in rows["flaky-skill"]["reason"]
+        assert "win rate" not in rows["flaky-skill"]["reason"].split("Wilson")[0]
+
+    def test_retired_log_reason_distinguishes_probation(self, tmp_path):
+        # Probation is a DIFFERENT rule (0 wins in >= 3 uses, no confidence
+        # bound involved) from the Wilson-gated main path -- it must not
+        # reuse that path's reason text.
+        import json
+        store = tmp_path / "learned-skills"
+        store.mkdir()
+        (store / "never-won.md").write_text("# nw", encoding="utf-8")
+        stats = tmp_path / "skill_stats.json"
+        stats.write_text(json.dumps({
+            "never-won": {"uses": 3, "wins": 0, "losses": 3, "last_used": 1.0},
+        }), encoding="utf-8")
+        dreaming.retire_stale_skills(store, min_uses=5, below=0.25, stats_path=stats)
+        rows = self._read_retired_log(store)
+        assert "probation" in rows["never-won"]["reason"]
+        assert "Wilson" not in rows["never-won"]["reason"]
+
 
 class TestBenchmarkCanary:
     def test_new_skills_quarantined_while_regressing(self, tmp_path, monkeypatch):

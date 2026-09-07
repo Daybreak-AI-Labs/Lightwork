@@ -166,3 +166,19 @@ def test_run_goal_impl_checks_the_freeze_before_distilling():
     frozen_idx = src.index("_skill_distillation_frozen()")
     distill_idx = src.index("distill_and_save_gated(")
     assert frozen_idx < distill_idx
+
+
+def test_run_goal_impl_checks_the_freeze_before_auto_distill():
+    """The SECOND distillation call site in the same function -- the older,
+    LLM-based MAVERICK_AUTO_DISTILL=1 path (``skills.distill``) -- must also
+    refuse while learning is frozen. Only gating the newer local-distillation
+    path left this one, still live behind its opt-in flag, bypassing the
+    same interlock."""
+    import inspect
+
+    import maverick.orchestrator as orchestrator
+
+    src = inspect.getsource(orchestrator._run_goal_impl)
+    frozen_idx = src.index("_skill_distillation_frozen()")
+    auto_distill_idx = src.index("distill(goal.title")
+    assert frozen_idx < auto_distill_idx

@@ -46,6 +46,8 @@ from pathlib import Path
 
 from .learning_guard import Halted, check_learning_halt
 from .paths import data_dir
+from .wilson_score import wilson_lower_bound as _wilson_lower_bound
+from .wilson_score import wilson_upper_bound as _wilson_upper_bound
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +56,14 @@ log = logging.getLogger(__name__)
 # lines is the whole point ("minimal" in the paper).
 _MAX_ADDENDUM_CHARS = 1500
 _MAX_LINES_PER_MODEL = 8
+# The one and only header a block ever legitimately carries. Every writer
+# (``_compose_addendum`` and the two prune/retire re-renders) hard-codes this
+# exact literal rather than deriving it from stored content -- a properly
+# written block's first line is ALWAYS this constant, never untrusted text.
+# ``_rescreen_block`` relies on that: it renders this constant directly
+# instead of trusting whatever text happens to occupy the first line of a
+# block loaded from the store.
+_ADDENDUM_HEADER = "Operating guidance learned for this model:"
 # DoS backstop for mining: greedy clustering is worst-case O(n^2), so an
 # unbounded trace list could hang a pass. Generous -- the runner feeds at most
 # ``limit`` (500) recent traces, so this never trips in normal use; it only
@@ -274,25 +284,38 @@ def _rescreen_block(block: str) -> str:
     model. Mirrors the exact per-line re-screen already used before a line
     crosses models in transfer (see ``_screen_addendum_line`` callers): the
     same ``_sanitize_line`` (control-char strip, whitespace collapse, secret
-    scrub) + ``_erodes_policy`` check, per bullet. A bullet that fails is
-    dropped; the header (a static constant, never user data) is preserved
-    verbatim when at least one bullet survives, and everything reads as
-    empty when none do."""
-    header: str | None = None
-    bullets: list[str] = []
-    for raw in (block or "").splitlines():
-        ln = raw.strip()
-        if not ln:
-            continue
-        if ln.startswith("- "):
-            bullets.append(ln[2:].strip())
-        elif header is None:
-            header = ln
-    screened = [s for s in (_screen_addendum_line(b) for b in bullets) if s]
+    scrub) + ``_erodes_policy`` check, per bullet.
+
+    The header is NEVER read from ``block``: every writer hard-codes the
+    exact same literal (:data:`_ADDENDUM_HEADER`), so an earlier version of
+    this function that captured the block's own first non-bullet line as
+    "the header" and re-emitted it unscreened was itself a bypass -- a
+    tampered/legacy block whose first line has no ``"- "`` prefix rode
+    straight through, exactly the class of injection this function exists to
+    stop. Any such stray non-bullet text is simply discarded, same as any
+    bullet that fails the screen. Renders :data:`_ADDENDUM_HEADER` when at
+    least one bullet survives; empty when none do."""
+    screened = [s for s in (_screen_addendum_line(b) for b in _bullets(block)) if s]
     if not screened:
         return ""
     rendered = "\n".join(f"- {s}" for s in screened)
-    return f"{header}\n{rendered}" if header else rendered
+    return f"{_ADDENDUM_HEADER}\n{rendered}"
+
+
+def screen_stored_line(line: str) -> str | None:
+    """Public entry point for the write-time addendum safety screen
+    (``_sanitize_line`` + the ``_erodes_policy`` check), for callers OUTSIDE
+    this module that read raw stored addenda content and must not surface it
+    to a prompt unscreened.
+
+    ``recall_addendum`` is not the only reader of this store: cortex's
+    cross-model lesson search (``cortex._recall_lessons``'s no-``model_id``
+    fallback) reads ``list_learned()`` directly and, before this function
+    existed, wrapped each raw line straight into a prompt-rendered ``Hit``
+    with no screening at all -- the same class of bypass ``recall_addendum``
+    itself had before recall-time re-screening was added. Returns ``None``
+    when the line fails the screen (drop it), else the screened text."""
+    return _screen_addendum_line(line)
 
 
 def recall_addendum(model_id: str | None, path: Path | None = None, *,
@@ -619,7 +642,7 @@ def forget_addendum(model_id: str, *, line: str | None = None,
                 removed = True
                 touched.append(k)
                 if kept:
-                    header = "Operating guidance learned for this model:"
+                    header = _ADDENDUM_HEADER
                     after[k] = header + "\n" + "\n".join(f"- {ln}" for ln in kept)
                 else:
                     del after[k]
@@ -698,7 +721,7 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
                 if kept == bullets:
                     continue
                 if kept:
-                    header = "Operating guidance learned for this model:"
+                    header = _ADDENDUM_HEADER
                     after[m] = header + "\n" + "\n".join(f"- {x}" for x in kept)
                 else:
                     after.pop(m, None)
@@ -1341,32 +1364,6 @@ ScoreFn = Callable[[str, list[str]], object]
 HoldoutAuthorize = Callable[[str, str, list[str]], float]
 
 
-def _wilson_lower_bound(successes: float, n: int, z: float = 1.96) -> float:
-    """Lower bound of the Wilson score interval for a binomial proportion --
-    the statistically-honest "how good is this, conservatively?" given ``n``
-    observations. A 1-of-1 win has a low bound; a 50-of-50 win a high one."""
-    if n <= 0:
-        return 0.0
-    phat = max(0.0, min(1.0, successes / n))
-    z2 = z * z
-    denom = 1.0 + z2 / n
-    centre = phat + z2 / (2 * n)
-    margin = z * math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n)
-    return max(0.0, (centre - margin) / denom)
-
-
-def _wilson_upper_bound(successes: float, n: int, z: float = 1.96) -> float:
-    """Upper endpoint paired with :func:`_wilson_lower_bound`."""
-    if n <= 0:
-        return 1.0
-    phat = max(0.0, min(1.0, successes / n))
-    z2 = z * z
-    denom = 1.0 + z2 / n
-    centre = phat + z2 / (2 * n)
-    margin = z * math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n)
-    return min(1.0, (centre + margin) / denom)
-
-
 def _difference_ci_lower(candidate_rate: float, baseline_rate: float,
                          candidate_n: int, baseline_n: int,
                          z: float = 1.96) -> float:
@@ -1981,7 +1978,7 @@ def _validate_rotated(
 
 def _compose_addendum(model_id: str, existing: str, line: str) -> str:
     """Append ``line`` to a model's addendum block, bounded + deduped."""
-    header = "Operating guidance learned for this model:"
+    header = _ADDENDUM_HEADER
     lines = []
     for raw in (existing or "").splitlines():
         ln = raw.strip()

@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import threading
 import time
@@ -31,6 +30,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ..paths import data_dir
+from ..wilson_score import wilson_upper_bound as _wilson_upper_bound
 
 log = logging.getLogger(__name__)
 
@@ -212,26 +212,6 @@ def decay_weights(
     except Exception:  # pragma: no cover -- stats never block recall
         return dict.fromkeys(names, 1.0)
     return {n: _weight_from_stat(stats.get(n), min_uses, floor) for n in names}
-
-
-def _wilson_upper_bound(successes: float, n: int, z: float = 1.96) -> float:
-    """Upper endpoint of the Wilson score interval for a binomial proportion.
-
-    Same formula as ``maverick.self_harness._wilson_upper_bound`` (duplicated
-    rather than imported to avoid a skill -> self_harness layering
-    dependency); kept here so eviction has an honest confidence bound instead
-    of the raw point estimate. At small ``n`` the point estimate is nearly
-    meaningless: 1 win in 5 uses (0.2) and 0 wins in 5 uses (0.0) both have a
-    Wilson upper bound well above 0.2, i.e. the data doesn't yet rule out the
-    skill being fine."""
-    if n <= 0:
-        return 1.0
-    phat = max(0.0, min(1.0, successes / n))
-    z2 = z * z
-    denom = 1.0 + z2 / n
-    centre = phat + z2 / (2 * n)
-    margin = z * math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n)
-    return min(1.0, (centre + margin) / denom)
 
 
 def evictable(

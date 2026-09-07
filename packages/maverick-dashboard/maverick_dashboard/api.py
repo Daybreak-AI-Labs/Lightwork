@@ -7849,13 +7849,17 @@ def _transfer_memory() -> dict:
 
 
 def _harness_guidance() -> tuple[list[dict], bool]:
-    """The self-harness per-model operating guidance recalled into prompts.
+    """The self-harness per-model operating guidance, as STORED.
 
     Returns ``([{model_id, lines, provenance, conflicts}], enabled)``. This is
     the self-harness loop's most prompt-impacting output, yet the /learned page
     surfaced only the capability ledger -- an operator could see it ONLY via
-    `maverick self-harness show`. Read-only; ``list_learned`` reads the store
-    regardless of the toggle (so paused guidance is still inspectable), so we
+    `maverick self-harness show`. Read-only; ``list_learned`` reads the RAW
+    store regardless of the toggle (so paused guidance is still inspectable)
+    and does NOT re-apply ``recall_addendum()``'s safety screen -- a line
+    shown here can still be dropped at actual recall time (stale/tampered
+    content is deliberately visible here so an operator can find and `forget`
+    it), so this panel is not a literal preview of a future prompt. We
     return the ``enabled`` flag too -- stored guidance is NOT recalled into
     prompts until the feature is on. Kept in its own try so a self-harness
     failure never blanks the capability ledger, and vice versa."""

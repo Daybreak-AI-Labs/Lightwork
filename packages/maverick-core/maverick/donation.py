@@ -74,12 +74,6 @@ def _default_outbox() -> Path:
     return data_dir("outbox")
 
 
-# Backward-compatible alias for any caller that still reads the module
-# attribute directly. NOT used internally -- internal call sites resolve via
-# :func:`_default_outbox` at call time so tenant scoping is never stale.
-DEFAULT_OUTBOX = _default_outbox()
-
-
 @dataclass
 class TrajectoryRecord:
     """One donated trajectory.

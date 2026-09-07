@@ -250,8 +250,10 @@ here.
   shared insights. Department-scoped failures remain compartment-local and are
   never synthesized into globally recallable `domain=None` insights.
 - **Skill retirement (the forgetting loop)** — a dream phase moves learned
-  skills with a decayed track record (`skill_stats.evictable`: enough uses,
-  win rate under the floor) to `learned-skills/retired/` with a logged
+  skills with a decayed track record (`skill_stats.evictable`: enough uses
+  AND the Wilson-score CONFIDENCE upper bound on win rate under the floor —
+  not the raw win rate, so a thin sample near the floor is not retired on
+  the point estimate alone) to `learned-skills/retired/` with a logged
   reason — out of the recall glob, reversible by moving the file back
   (`[dreaming] retire_skills / retire_min_uses / retire_below`).
 - **Dream-time rehearsal** — dream cycles queue the biggest recurring

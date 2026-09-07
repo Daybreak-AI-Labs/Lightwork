@@ -1946,7 +1946,16 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         auto_distill = os.getenv("MAVERICK_AUTO_DISTILL", "").strip().lower() in {
             "1", "true", "yes", "on",
         }
-        if auto_distill:
+        # Same calibration-freeze interlock as the local distillation path
+        # below (and dreaming._consolidate_learning): a drifted verifier's
+        # success/failure labels must not seed a new, LLM-written, recallable
+        # skill either. This is the second of the two distillation call
+        # sites the freeze needs to reach -- this one is opt-in but still
+        # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
+        if auto_distill and _skill_distillation_frozen():
+            auto_distill = False
+            skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
+        elif auto_distill:
             try:
                 skill = distill(goal.title, summary, blackboard, llm, budget=budget)
                 # A None return means the distiller's output failed the skill
