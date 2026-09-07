@@ -363,6 +363,7 @@ def test_no_guc_is_written_when_rls_is_off(monkeypatch):
     [
         ("purge_episodes_before", "episodes"),
         ("purge_goal_events_before", "goal_events"),
+        ("purge_messages_before", "messages"),
     ],
 )
 def test_retention_purge_uses_exact_active_tenant(monkeypatch, method, table):

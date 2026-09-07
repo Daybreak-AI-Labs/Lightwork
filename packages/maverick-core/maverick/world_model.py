@@ -2412,6 +2412,29 @@ class WorldModel:
             )
             return int(cur.rowcount or 0)
 
+    def purge_messages_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete conversation messages older than an absolute cutoff.
+
+        W1-57: unlike episodes, nothing references ``messages.id`` via a
+        foreign key, so this is a plain age-based delete with no dangling
+        provenance to null out first.
+        """
+        predicate = "ts IS NOT NULL AND ts < ?"
+        with self._writing() as conn:
+            if dry_run:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM messages WHERE {predicate}",
+                    (float(cutoff_ts),),
+                ).fetchone()
+                return int(row[0] or 0)
+            cur = conn.execute(
+                f"DELETE FROM messages WHERE {predicate}",
+                (float(cutoff_ts),),
+            )
+            return int(cur.rowcount or 0)
+
     # ----- facts -----
     @staticmethod
     def _open_temporal_fact(conn, key: str):

@@ -33,6 +33,7 @@ sign = true            # Ed25519 tamper-evident audit chain
 audit_days = 365       # storage limitation (GDPR Art. 5(1)(e)) -- tune to your policy
 episodes_days = 90
 events_days = 365
+messages_days = 365
 """
 
 # Representative providers used to prove the egress policy without contacting
@@ -161,7 +162,7 @@ def verify_deployment() -> list[GuaranteeCheck]:
         "Retention policy",
         retention,
         "configured; enforce with 'maverick retention enforce'" if retention
-        else "set [retention] audit_days / episodes_days / events_days",
+        else "set [retention] audit_days / episodes_days / events_days / messages_days",
     ))
 
     # 6. Sandbox isolation -- agent-generated code must not run unsandboxed on

@@ -4717,6 +4717,28 @@ class PostgresWorldModel:
                 return int(row[0] or 0)
             return int(cur.rowcount or 0)
 
+    def purge_messages_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete old conversation messages in the active tenant.
+
+        W1-57: nothing references ``messages.id`` via foreign key, so this
+        is a plain age-based delete scoped through the owning goal's tenant.
+        """
+        tenant = _required_retention_tenant("message retention")
+        predicate = (
+            "ts IS NOT NULL AND ts < %s "
+            "AND goal_id IN (SELECT id FROM goals WHERE tenant_id = %s)"
+        )
+        params: list = [float(cutoff_ts), tenant]
+        verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
+        with self._tx() as cur:
+            cur.execute(f"{verb} messages WHERE {predicate}", tuple(params))
+            if dry_run:
+                row = cur.fetchone()
+                return int(row[0] or 0)
+            return int(cur.rowcount or 0)
+
     def prune_goal_events(self, older_than_seconds: float = 30 * 24 * 3600) -> int:
         cutoff = time.time() - older_than_seconds
         return self.purge_goal_events_before(cutoff)

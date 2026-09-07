@@ -72,6 +72,8 @@ def _seed_world_db(path: Path) -> None:
                                output_tokens INTEGER, tool_calls INTEGER);
         CREATE TABLE goal_events (id INTEGER PRIMARY KEY, goal_id INTEGER,
                                   agent TEXT, kind TEXT, content TEXT, ts REAL);
+        CREATE TABLE messages (id INTEGER PRIMARY KEY, goal_id INTEGER,
+                               role TEXT, content TEXT, ts REAL);
     """)
     conn.commit()
     conn.close()
@@ -91,6 +93,16 @@ def _insert_event(db: Path, ts: float) -> None:
     conn = sqlite3.connect(str(db))
     conn.execute(
         "INSERT INTO goal_events (goal_id, agent, kind, content, ts) VALUES (1, 'a', 'k', '', ?)",
+        (ts,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _insert_message(db: Path, ts: float) -> None:
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "INSERT INTO messages (goal_id, role, content, ts) VALUES (1, 'user', '', ?)",
         (ts,),
     )
     conn.commit()
@@ -200,6 +212,55 @@ def test_purge_world_events_removes_old(tmp_path: Path):
     assert res["deleted"] == 1
 
 
+def test_purge_world_messages_removes_old(tmp_path: Path):
+    from maverick.audit.retention import purge_world_messages
+    db = tmp_path / "world.db"
+    _seed_world_db(db)
+    now = 1_700_000_000.0
+    _insert_message(db, now - 200 * 86400)  # old
+    _insert_message(db, now - 5 * 86400)    # recent
+
+    res = purge_world_messages(days=30, db_path=db, now=now)
+    assert res["deleted"] == 1
+
+    conn = sqlite3.connect(str(db))
+    (left,) = conn.execute("SELECT COUNT(*) FROM messages").fetchone()
+    conn.close()
+    assert left == 1
+
+
+def test_purge_world_messages_dry_run(tmp_path: Path):
+    from maverick.audit.retention import purge_world_messages
+    db = tmp_path / "world.db"
+    _seed_world_db(db)
+    now = 1_700_000_000.0
+    _insert_message(db, now - 100 * 86400)
+
+    res = purge_world_messages(days=30, db_path=db, now=now, dry_run=True)
+    assert res["deleted"] == 1
+    conn = sqlite3.connect(str(db))
+    (left,) = conn.execute("SELECT COUNT(*) FROM messages").fetchone()
+    conn.close()
+    assert left == 1  # still there
+
+
+def test_purge_messages_before_canonical(tmp_path: Path):
+    """W1-57: the canonical (--db-path-less) route dispatches through the
+    configured world backend, mirroring purge_episodes_before/purge_goal_events_before.
+    Unlike episodes, messages have no dependent FK rows to null out first."""
+    from maverick.world_model import WorldModel
+
+    w = WorldModel(tmp_path / "world.db")
+    gid = w.create_goal("t", "d")
+    w.append_message(gid, "user", "hello")
+    w.conn.execute("UPDATE messages SET ts = ?", (time.time() - 100 * 86400,))
+    w.conn.commit()
+
+    deleted = w.purge_messages_before(time.time())
+
+    assert deleted == 1
+
+
 def test_enforce_no_config_returns_disabled():
     from maverick.audit.retention import enforce
     res = enforce(config={})
@@ -215,14 +276,19 @@ def test_enforce_full_config(tmp_path: Path):
     now = time.mktime(time.strptime("2025-06-30", "%Y-%m-%d"))
     _insert_episode(db, now - 200 * 86400)
     _insert_event(db, now - 365 * 86400)
+    _insert_message(db, now - 400 * 86400)
 
-    cfg = {"audit_days": 30, "episodes_days": 30, "events_days": 90}
+    cfg = {
+        "audit_days": 30, "episodes_days": 30, "events_days": 90,
+        "messages_days": 90,
+    }
     res = enforce(
         config=cfg, audit_dir=audit_dir, db_path=db, now=now,
     )
     assert res["audit"]["removed"] == ["2024-01-01.ndjson"]
     assert res["episodes"]["deleted"] == 1
     assert res["goal_events"]["deleted"] == 1
+    assert res["messages"]["deleted"] == 1
 
 
 @pytest.mark.parametrize("days", [None, 0, -5])
@@ -231,12 +297,14 @@ def test_purge_helpers_disabled_with_bad_days(tmp_path: Path, days):
         purge_audit_files,
         purge_world_episodes,
         purge_world_events,
+        purge_world_messages,
     )
     db = tmp_path / "world.db"
     _seed_world_db(db)
     assert purge_audit_files(days=days, audit_dir=tmp_path)["reason"] == "disabled"
     assert purge_world_episodes(days=days, db_path=db)["reason"] == "disabled"
     assert purge_world_events(days=days, db_path=db)["reason"] == "disabled"
+    assert purge_world_messages(days=days, db_path=db)["reason"] == "disabled"
 
 
 def test_purge_missing_db_safe(tmp_path: Path):
@@ -393,14 +461,16 @@ def test_enforce_writes_retention_marker(tmp_path: Path):
     _make_audit_file(audit_dir, "2024-01-01")
     now = time.mktime(time.strptime("2025-06-30", "%Y-%m-%d"))
     _insert_episode(db, now - 200 * 86400)
+    _insert_message(db, now - 200 * 86400)
 
     res = enforce(
-        config={"audit_days": 30, "episodes_days": 30},
+        config={"audit_days": 30, "episodes_days": 30, "messages_days": 30},
         audit_dir=audit_dir, db_path=db, now=now,
     )
     # The report carries the marker, and a tamper-evident row was written.
     assert res["marker"]["audit_files"] == ["2024-01-01.ndjson"]
     assert res["marker"]["episodes_deleted"] == 1
+    assert res["marker"]["messages_deleted"] == 1
     rows = _read_marker_rows(audit_dir)
     assert len(rows) == 1
     payload = rows[0].get("payload", rows[0])

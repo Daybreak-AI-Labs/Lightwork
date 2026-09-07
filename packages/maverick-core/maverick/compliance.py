@@ -204,7 +204,7 @@ def compliance_report() -> list[ControlCheck]:
         "Storage limitation (retention)", "GDPR Art. 5(1)(e)",
         "active" if retention_on else "action_needed",
         "retention configured; run 'maverick retention enforce'" if retention_on
-        else "set [retention] audit_days / episodes_days / events_days",
+        else "set [retention] audit_days / episodes_days / events_days / messages_days",
     ))
 
     # GDPR Art. 32 / EU AI Act Art. 15 — security: data egress.
