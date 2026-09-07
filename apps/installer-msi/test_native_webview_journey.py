@@ -192,6 +192,96 @@ def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path,
         assert diagnostic["installed_old_process"] == (expected == "process_relaunch")
 
 
+@pytest.mark.parametrize("mode", ["accepted", "refused", "timeout", "malformed"])
+def test_recovery_entry_keeps_controls_and_records_only_bounded_diagnostics(tmp_path, modules, mode):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = tmp_path
+    journey.report = {"phase": "signed-native-upgrade", "checks": []}
+    actions = []
+    journey.menu = lambda label: actions.append(label)
+
+    class View:
+        session = "/session/synthetic"
+
+        def click(self, selector):
+            actions.append(selector)
+
+        def call(self, _method, _path, _payload):
+            if mode == "malformed":
+                return {"private": "excluded input"}
+            return {"page": "/workspace/recovery" if mode == "accepted" else "bundled_recovery",
+                    "reason": "previous_workspace_running" if mode == "refused" else "none",
+                    "controls_present": mode == "accepted", "ready": True}
+
+        def wait(self, condition, **_kwargs):
+            result = condition()
+            if not result:
+                raise RuntimeError("private driver error must not leave the fixture")
+            return result
+
+        def element(self, selector):
+            actions.append(selector)
+
+        def property(self, selector, name):
+            actions.append((selector, name))
+            return False
+
+    journey.view = View()
+    if mode == "accepted":
+        journey.recovery()
+        assert actions[-2:] == ["#wrec-installation-confirm", ("#wrec-refresh", "disabled")]
+    else:
+        with pytest.raises(RuntimeError, match="bounded recovery_entry diagnostics") as error:
+            journey.recovery()
+        assert "private" not in str(error.value)
+        assert "#wrec-installation-confirm" not in actions
+    assert "private" not in json.dumps(journey.report)
+    assert set(journey.report["recovery_entry"]) == {"page", "reason", "controls_present", "ready"}
+    assert journey.report["checks"] == []
+
+
+def test_recovery_diagnostic_classifies_actual_script_without_exporting_private_details(modules):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed for the actual browser-script contract check")
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    scripts = []
+
+    class View:
+        session = "/session/synthetic"
+
+        def call(self, _method, _path, payload):
+            scripts.append(payload["script"])
+            return None
+
+    journey.view = View()
+    assert journey.recovery_diagnostic()["page"] == "unavailable"
+    source = """
+const assert = require('node:assert/strict');
+const inspect = new Function(SCRIPT);
+global.location = {origin:'http://tauri.localhost', pathname:'/recovery.html',search:'?private',hash:'#private'};
+let detail = 'No errors recorded.', controls = true;
+global.document = {readyState:'complete',get cookie(){throw Error('cookie access forbidden')},
+  querySelector(selector){if(selector==='#details')return {textContent:detail};
+    assert.equal(selector,'#wrec-installation-confirm'); return controls?{}:null}};
+assert.deepEqual(inspect(),{page:'bundled_recovery',reason:'none',controls_present:false,ready:true});
+detail = 'The previous workspace is still responding. private excluded context';
+assert.equal(inspect().reason,'previous_workspace_running');
+detail = 'Error: private arbitrary error';
+assert.equal(inspect().reason,'unclassified_refusal');
+assert.equal(JSON.stringify(inspect()).includes('private'),false);
+location.origin='http://127.0.0.1:8765'; location.pathname='/workspace/recovery';
+assert.deepEqual(inspect(),{page:'/workspace/recovery',reason:'none',controls_present:true,ready:true});
+controls=false; assert.equal(inspect().controls_present,false);
+location.origin='https://example.test'; assert.equal(inspect().controls_present,false);
+location.pathname='/private'; assert.equal(inspect().page,'other');
+""".replace("SCRIPT", json.dumps(scripts[0]))
+    result = subprocess.run([node, "-e", source], capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
 def test_transition_page_script_classifies_visible_fixed_messages_without_private_data(modules):
     node = shutil.which("node")
     if not node:

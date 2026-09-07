@@ -172,8 +172,62 @@ class Journey:
     def recovery(self):
         self.menu("Workspace recovery mode")
         self.view.click("#enter-recovery")
-        self.view.wait(lambda: self.view.element("#wrec-installation-confirm"), timeout=120)
+        try:
+            observed = self.view.wait(self.recovery_progress, timeout=120)
+            if observed["reason"] != "none":
+                raise RuntimeError("Recovery mode reported a refusal.")
+        except (OSError, RuntimeError, KeyError):
+            self.report["recovery_entry"] = self.recovery_diagnostic()
+            self.record(self.report["phase"])
+            raise RuntimeError("Native recovery mode did not open; bounded recovery_entry diagnostics were retained.") from None
+        self.report["recovery_entry"] = observed
+        # Keep the actual installation controls and loaded-state requirements.
+        self.view.element("#wrec-installation-confirm")
         self.view.wait(lambda: self.view.property("#wrec-refresh", "disabled") is False)
+
+    def recovery_progress(self):
+        observed = self.recovery_diagnostic()
+        return observed if observed["controls_present"] or observed["reason"] != "none" else None
+
+    def recovery_diagnostic(self):
+        # Inspect fixed visible messages inside the page. Never return raw
+        # error text, startup logs, URLs, credentials or customer input values.
+        script = """
+const native = location.origin === 'http://tauri.localhost' && location.pathname === '/recovery.html';
+const local = location.origin === 'http://127.0.0.1:8765';
+const paths = ['/workspace/recovery','/auth/local-login','/auth/login','/start'];
+const page = native ? 'bundled_recovery' : local && paths.includes(location.pathname) ? location.pathname : 'other';
+const node = native ? document.querySelector('#details') : null;
+const detail = node ? (node.textContent || '').slice(0, 4096) : '';
+const reasons = [
+  ['The previous workspace is still responding.', 'previous_workspace_running'],
+  ['This workspace is managed outside the desktop app.', 'external_workspace'],
+  ['The selected workspace mode did not start.', 'startup_deadline'],
+  ['Lightwork could not start:', 'launch_failed'],
+  ['Open these controls from Lightwork Desktop.', 'native_bridge_unavailable'],
+  ["Review and confirm this action in the app's recovery controls.", 'origin_refused'],
+  ['Startup state is unavailable.', 'state_unavailable']
+];
+let reason = 'none';
+if (native && detail && detail !== 'No errors recorded.') {
+  reason = (reasons.find(([text]) => detail.includes(text)) || ['', 'unclassified_refusal'])[1];
+}
+const controls = local && location.pathname === '/workspace/recovery' &&
+  document.querySelector('#wrec-installation-confirm') !== null;
+return {page, reason, controls_present: controls, ready: document.readyState === 'complete'};
+"""
+        fallback = {"page": "unavailable", "reason": "none", "controls_present": False, "ready": False}
+        try:
+            value = self.view.call("POST", self.view.session + "/execute/sync", {"script": script, "args": []})
+            if (not isinstance(value, dict) or set(value) != set(fallback)
+                    or value["page"] not in {"bundled_recovery", "/workspace/recovery", "/auth/local-login", "/auth/login", "/start", "other"}
+                    or value["reason"] not in {"none", "previous_workspace_running", "external_workspace", "startup_deadline",
+                                               "launch_failed", "native_bridge_unavailable", "origin_refused", "state_unavailable", "unclassified_refusal"}
+                    or type(value["controls_present"]) is not bool or type(value["ready"]) is not bool):
+                return fallback
+            return value
+        except (OSError, RuntimeError, KeyError):
+            return fallback
 
     def authorization(self, *, rollback=False) -> str:
         self.recovery()

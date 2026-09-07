@@ -7,10 +7,11 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const DASHBOARD_URL: &str = "http://127.0.0.1:8765/";
 const MAX_LOG_BYTES: usize = 32 * 1024;
+const OWNED_STOP_DEADLINE: Duration = Duration::from_secs(5);
 
 type Logs = Arc<Mutex<String>>;
 
@@ -36,6 +37,20 @@ pub struct StartupSupport {
 pub fn listening() -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
     TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok()
+}
+
+fn wait_for_listener_exit(mut is_listening: impl FnMut() -> bool, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if !is_listening() {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(25)));
+    }
 }
 
 fn record(logs: &Logs, text: &str) {
@@ -206,7 +221,10 @@ impl Dashboard {
         reap(&mut control)?;
         may_switch_mode(control.child.is_some(), listening())?;
         stop_control(&mut control);
-        if listening() {
+        // Windows can finish the owned bootloader's termination before its
+        // worker's listening socket closes. Observe closure within a bound;
+        // never start recovery while the previous workspace still responds.
+        if !wait_for_listener_exit(listening, OWNED_STOP_DEADLINE) {
             return Err("The previous workspace is still responding. Recovery has not started; retry after it closes.".into());
         }
         control.recovery = recovery;
@@ -245,7 +263,7 @@ impl Dashboard {
         reap(&mut control)?;
         may_switch_mode(control.child.is_some(), listening())?;
         stop_control(&mut control);
-        if listening() {
+        if !wait_for_listener_exit(listening, OWNED_STOP_DEADLINE) {
             return Err("Lightwork is still responding. Installation has not started; retry after it closes.".into());
         }
         Ok(())
@@ -292,6 +310,79 @@ impl Drop for Dashboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_stop_wait_observes_actual_socket_closure_before_continuing() {
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let closed = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&closed);
+        let (trigger, started) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started.recv_timeout(Duration::from_secs(5)).unwrap();
+            let deadline = Instant::now() + Duration::from_millis(100);
+            while Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => drop(stream),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("synthetic listener failed: {error}"),
+                }
+            }
+            drop(listener);
+            observed.store(true, Ordering::SeqCst);
+        });
+        let mut trigger = Some(trigger);
+        assert!(!closed.load(Ordering::SeqCst));
+        assert!(wait_for_listener_exit(
+            || {
+                let responding =
+                    TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok();
+                if responding {
+                    if let Some(trigger) = trigger.take() {
+                        trigger.send(()).unwrap();
+                    }
+                }
+                responding
+            },
+            Duration::from_secs(2),
+        ));
+        worker.join().unwrap();
+        assert!(closed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn owned_stop_wait_refuses_a_listener_that_outlives_the_deadline() {
+        let began = Instant::now();
+        let mut probes = 0;
+        assert!(!wait_for_listener_exit(
+            || {
+                probes += 1;
+                true
+            },
+            Duration::from_millis(60),
+        ));
+        assert!(probes >= 1);
+        assert!(began.elapsed() >= Duration::from_millis(60));
+    }
+
+    #[test]
+    fn owned_stop_wait_does_not_delay_an_already_closed_listener() {
+        let mut probes = 0;
+        assert!(wait_for_listener_exit(
+            || {
+                probes += 1;
+                false
+            },
+            Duration::ZERO,
+        ));
+        assert_eq!(probes, 1);
+    }
 
     #[test]
     fn startup_support_excludes_private_logs_and_reports_pinned_runtime_state() {
