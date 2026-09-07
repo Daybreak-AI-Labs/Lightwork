@@ -374,3 +374,64 @@ class TestOutboxHelpers:
         n = clear_outbox(tmp_path)
         assert n == 2
         assert list(tmp_path.glob("*.json")) == []
+
+
+class TestDefaultOutboxTenantScoping:
+    """DEFAULT_OUTBOX must resolve the ACTIVE tenant at call time, like every
+    other learning store (reflexion, dreaming, self_harness). Binding it once
+    at import time froze it to whatever tenant was active during import --
+    with critique mining on by default, that let one tenant's donated outbox
+    feed another tenant's dream cycle."""
+
+    def test_resolves_current_tenant_directory(self, tmp_path, monkeypatch):
+        from maverick.paths import reset_tenant, set_tenant
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+
+        tok_a = set_tenant("tenant-a")
+        try:
+            outbox_a = donation._default_outbox()
+        finally:
+            reset_tenant(tok_a)
+
+        tok_b = set_tenant("tenant-b")
+        try:
+            outbox_b = donation._default_outbox()
+        finally:
+            reset_tenant(tok_b)
+
+        assert outbox_a != outbox_b
+        assert "tenant-a" in str(outbox_a)
+        assert "tenant-b" in str(outbox_b)
+
+    def test_write_record_lands_in_the_calling_tenants_outbox(
+        self, tmp_path, monkeypatch,
+    ):
+        from maverick.paths import reset_tenant, set_tenant
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+        monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
+        monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)
+        _config(monkeypatch, {"donate_min_entropy": 0})
+
+        tok = set_tenant("acme")
+        try:
+            rec = TrajectoryRecord(
+                task_brief_hash=hash_brief("x"), outcome="success",
+                verifier_confidence=0.9, disagreement_entropy=0.0,
+            )
+            path = write_record(rec)
+            assert path is not None
+            assert "acme" in str(path)
+            # A different tenant must not see this record via the default
+            # (no-argument) outbox resolution.
+            tok2 = set_tenant("other")
+            try:
+                assert list_pending() == []
+            finally:
+                reset_tenant(tok2)
+            assert list_pending() == [path]
+        finally:
+            reset_tenant(tok)

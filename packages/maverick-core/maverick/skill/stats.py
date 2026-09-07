@@ -30,6 +30,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from ..paths import data_dir
+from ..wilson_score import wilson_upper_bound as _wilson_upper_bound
 
 log = logging.getLogger(__name__)
 
@@ -222,9 +223,14 @@ def evictable(
     """Names of skills that have had a fair trial and rarely help.
 
     A skill is evictable when it's been used at least ``min_uses`` times,
-    has a decided outcome, and its win rate is at or below ``max_win_rate``.
-    Callers (e.g. a maintenance command) decide whether to actually delete;
-    this function only identifies candidates and never mutates state.
+    has a decided outcome, and the Wilson-score UPPER bound on its true win
+    rate is at or below ``max_win_rate`` -- i.e. even the most favorable
+    plausible reading of the evidence still says "rarely helps". The raw
+    point estimate (``wins / decided``) is not enough at small n: 1 win in 5
+    uses has a 95% upper bound near 0.62, so a "≤ 0.2" point-estimate rule
+    would evict a skill the data hasn't actually convicted yet. Callers (e.g.
+    a maintenance command) decide whether to actually delete; this function
+    only identifies candidates and never mutates state.
     """
     try:
         with _lock:
@@ -234,7 +240,8 @@ def evictable(
     out: list[str] = []
     for name, st in stats.items():
         decided = st.wins + st.losses
-        if st.uses >= min_uses and decided > 0 and (st.wins / decided) <= max_win_rate:
+        if (st.uses >= min_uses and decided > 0
+                and _wilson_upper_bound(st.wins, decided) <= max_win_rate):
             out.append(name)
     return out
 

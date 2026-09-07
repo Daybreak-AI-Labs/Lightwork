@@ -170,6 +170,38 @@ class TestLearningFrozen:
         assert calibration.learning_frozen(verdict_path=vp) is False
 
 
+class TestLearningFrozenSafe:
+    """The shared fail-open wrapper dreaming.rehearse,
+    dreaming._consolidate_learning, and orchestrator's per-run distillation
+    gate all delegate to, replacing three independent copies of the same
+    try/except."""
+
+    def test_passes_through_when_not_frozen(self, monkeypatch):
+        monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+        assert calibration.learning_frozen_safe() is False
+
+    def test_passes_through_when_frozen(self, monkeypatch):
+        monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+        assert calibration.learning_frozen_safe() is True
+
+    def test_fails_open_on_exception(self, monkeypatch):
+        def _boom():
+            raise RuntimeError("verdict store unreadable")
+        monkeypatch.setattr(calibration, "learning_frozen", _boom)
+        assert calibration.learning_frozen_safe() is False
+
+    def test_takes_no_arguments(self, monkeypatch):
+        # No existing caller has ever needed a custom verdict_path; a
+        # zero-arg replacement (the natural monkeypatch/test-double shape)
+        # must work, not raise a TypeError that then reads as "not frozen"
+        # for the wrong reason.
+        calls = []
+        monkeypatch.setattr(calibration, "learning_frozen",
+                            lambda: calls.append(1) or True)
+        assert calibration.learning_frozen_safe() is True
+        assert calls == [1]
+
+
 class TestCollectFromCoding:
     def test_off_by_default(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_CALIBRATION_COLLECT_CODING", raising=False)

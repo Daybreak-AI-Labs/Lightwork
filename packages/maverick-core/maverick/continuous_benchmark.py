@@ -16,7 +16,6 @@ from pathlib import Path
 
 from .paths import data_dir
 
-_STORE = data_dir("benchmarks")
 _DEFAULT_BASELINE = 5   # runs to average for the baseline
 _DEFAULT_THRESHOLD = 0.05  # 5% relative drop is a regression
 
@@ -105,7 +104,13 @@ _SCHEMA = {
 
 
 def _store_path() -> Path:
-    return _STORE / "history.json"
+    # Resolved at CALL time, not bound to a module-level constant: the same
+    # fix applied to donation._default_outbox() for the identical bug class.
+    # data_dir("benchmarks") defaults to the ACTIVE tenant at the moment it
+    # runs; binding it once at import time would freeze benchmark_regressed()
+    # (dreaming.py's learning-side canary) onto whichever tenant happened to
+    # be active during import, for the life of the process.
+    return data_dir("benchmarks") / "history.json"
 
 
 def _run(args: dict) -> str:

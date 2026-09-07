@@ -125,3 +125,135 @@ def test_skill_distillation_local_gate(monkeypatch, enabled):
     import maverick.skill.distillation_local as sdl
     monkeypatch.setenv("MAVERICK_DISTILL_LOCAL", "1" if enabled else "0")
     assert sdl.enabled() is enabled
+
+
+def test_skill_distillation_frozen_reflects_calibration(monkeypatch):
+    """orchestrator._skill_distillation_frozen() gates per-run local skill
+    distillation on calibration.learning_frozen() -- the same interlock
+    dreaming._consolidate_learning already enforces. Without this, the
+    busiest distillation path (every run, not just the nightly dream cycle)
+    bypassed the freeze entirely."""
+    import maverick.calibration as calibration
+    import maverick.orchestrator as orchestrator
+
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+    assert orchestrator._skill_distillation_frozen() is True
+
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    assert orchestrator._skill_distillation_frozen() is False
+
+
+def test_skill_distillation_frozen_fails_open(monkeypatch):
+    import maverick.calibration as calibration
+    import maverick.orchestrator as orchestrator
+
+    def _boom():
+        raise RuntimeError("calibration unavailable")
+
+    monkeypatch.setattr(calibration, "learning_frozen", _boom)
+    assert orchestrator._skill_distillation_frozen() is False
+
+
+def _split_run_goal_impl_distillation_blocks() -> tuple[str, str]:
+    """(auto_distill block source, local-distillation block source).
+
+    The two distillation call sites both invoke a function literally named
+    ``_skill_distillation_frozen``, just with different arguments (the
+    auto_distill site calls it bare; the local-distillation site passes
+    ``config=``). A single whole-function ``src.index("_skill_distillation_frozen()")``
+    search is fragile: since the substring with empty parens only matches
+    the FIRST (auto_distill) call site, a test checking the SECOND
+    (local-distillation) site's ordering against ITS OWN nearby call would
+    silently pass by finding the unrelated earlier one instead. Splitting on
+    the local-distillation block's own leading comment makes each half
+    unambiguous."""
+    import inspect
+
+    import maverick.orchestrator as orchestrator
+
+    src = inspect.getsource(orchestrator._run_goal_impl)
+    marker = "# Default-on local continuous learning"
+    split_at = src.index(marker)
+    return src[:split_at], src[split_at:]
+
+
+def test_run_goal_impl_checks_the_freeze_before_distilling():
+    """Guard against the gate rotting back out of the call site: the actual
+    per-run LOCAL distillation block in ``_run_goal_impl`` must call
+    ``_skill_distillation_frozen(...)`` before ``distill_and_save_gated``."""
+    _auto_block, local_block = _split_run_goal_impl_distillation_blocks()
+    frozen_idx = local_block.index("_skill_distillation_frozen(")
+    distill_idx = local_block.index("distill_and_save_gated(")
+    assert frozen_idx < distill_idx
+
+
+def test_run_goal_impl_checks_the_freeze_before_auto_distill():
+    """The SECOND distillation call site in the same function -- the older,
+    LLM-based MAVERICK_AUTO_DISTILL=1 path (``skills.distill``) -- must also
+    refuse while learning is frozen. Only gating the newer local-distillation
+    path left this one, still live behind its opt-in flag, bypassing the
+    same interlock."""
+    auto_block, _local_block = _split_run_goal_impl_distillation_blocks()
+    frozen_idx = auto_block.index("_skill_distillation_frozen(")
+    auto_distill_idx = auto_block.index("distill(goal.title")
+    assert frozen_idx < auto_distill_idx
+
+
+def test_skill_distillation_frozen_reuses_passed_config(monkeypatch):
+    """The local-distillation gate (``_sdl.enabled(config=...) and not
+    _skill_distillation_frozen(config=...)``) must load config ONCE and
+    reuse it for both checks, not once per check -- the two checks used to
+    each independently call ``config.load_config()``.
+
+    ``distillation_local.enabled()`` has its OWN unrelated, unavoidable
+    ``load_config()`` call inside ``governed_learning_env_flag`` (it
+    verifies every config source parses cleanly before honoring an env
+    override) -- that one fires with or without this fix and is not what's
+    being tested. The claim this test pins is narrower and unambiguous:
+    the calibration half (``_skill_distillation_frozen`` ->
+    ``learning_frozen_safe`` -> ``learning_frozen`` -> ``_settings`` ->
+    ``get_calibration``), which has no such confounder, makes ZERO calls
+    when given an already-loaded config -- it used to make exactly one."""
+    import maverick.calibration as calibration
+    import maverick.config as config
+    import maverick.orchestrator as orchestrator
+
+    calls = []
+    real_load_config = config.load_config
+
+    def _counting_load_config(*a, **kw):
+        calls.append(1)
+        return real_load_config(*a, **kw)
+
+    _cfg = config.load_config()
+    expected = calibration.learning_frozen()  # real behavior, computed before mocking
+    monkeypatch.setattr(config, "load_config", _counting_load_config)
+    assert orchestrator._skill_distillation_frozen(config=_cfg) is expected
+    assert calls == []
+
+
+def test_distillation_local_enabled_reuses_passed_config_for_the_section_read(
+    monkeypatch,
+):
+    """The other half of the same gate: ``distillation_local.enabled()``'s
+    OWN section read (``get_self_learning``) must reuse a passed-in config
+    instead of loading it again. ``governed_learning_env_flag`` makes its
+    own unrelated, unavoidable ``load_config()`` call first (see the
+    docstring on the sibling test above) -- that's the ONE call this test
+    expects; a second one would mean the fix regressed."""
+    import maverick.config as config
+    import maverick.skill.distillation_local as distillation_local
+
+    monkeypatch.delenv("MAVERICK_DISTILL_LOCAL", raising=False)
+    calls = []
+    real_load_config = config.load_config
+
+    def _counting_load_config(*a, **kw):
+        calls.append(1)
+        return real_load_config(*a, **kw)
+
+    _cfg = config.load_config()
+    expected = distillation_local.enabled()  # real behavior, computed before mocking
+    monkeypatch.setattr(config, "load_config", _counting_load_config)
+    assert distillation_local.enabled(config=_cfg) is expected
+    assert len(calls) == 1  # governed_learning_env_flag's own check, not a second section read

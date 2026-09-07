@@ -1356,7 +1356,7 @@ def get_governed_connectors() -> dict:
     }
 
 
-def get_self_learning() -> dict:
+def get_self_learning(*, config: dict[str, Any] | None = None) -> dict:
     """Return the ``[self_learning]`` section with defaults filled in.
 
     Governed capability learning is on by default. Catalog-skill preflight,
@@ -1367,8 +1367,11 @@ def get_self_learning() -> dict:
     Back-compat: a config that still carries the retired ``add_mcp_servers``
     key is tolerated (it is simply ignored) — agent-driven MCP acquisition
     was removed in #392, so the knob no longer does anything.
+
+    ``config`` lets a caller reuse an already-loaded config snapshot; see
+    :func:`get_calibration` for the same pattern.
     """
-    cfg = load_config().get("self_learning", {})
+    cfg = (load_config() if config is None else config).get("self_learning", {})
     try:
         max_acq = int(cfg.get("max_acquisitions", 5))
     except (TypeError, ValueError):
@@ -1777,7 +1780,7 @@ def get_workforce() -> dict:
     }
 
 
-def get_calibration() -> dict:
+def get_calibration(*, config: dict[str, Any] | None = None) -> dict:
     """Return the ``[calibration]`` section with defaults filled in.
 
     The verifier-calibration interlock (``maverick.calibration``) is OFF by
@@ -1786,8 +1789,13 @@ def get_calibration() -> dict:
     labeled samples before an assessment is trusted; ``min_discrimination`` is
     the floor on mean(confidence|correct) - mean(confidence|incorrect) below
     which the verifier is judged to have drifted.
+
+    ``config`` lets a caller that already loaded config once (e.g. a gate
+    checking two sections back to back) reuse that snapshot instead of
+    calling :func:`load_config` again, the same pattern :func:`get_role_model`
+    already uses.
     """
-    cfg = load_config().get("calibration", {})
+    cfg = (load_config() if config is None else config).get("calibration", {})
 
     def _int(key: str, default: int) -> int:
         try:

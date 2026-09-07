@@ -103,13 +103,29 @@ def test_decay_weights_batch_matches_single(stats_path):
 
 
 def test_evictable_identifies_low_winners(stats_path):
-    # 'bad': 6 uses, all losses -> evictable. 'good': 6 uses, all wins -> not.
-    for _ in range(6):
-        skill_stats.record_use(["bad", "good"], path=stats_path)
+    # 'bad': 16 uses, all losses -> the Wilson upper bound on its win rate
+    # (~0.19) clears the default max_win_rate=0.2 -> evictable.
+    # 'good': 6 uses, all wins -> nowhere close -> not evictable.
+    for _ in range(16):
+        skill_stats.record_use(["bad"], path=stats_path)
         skill_stats.record_outcome(["bad"], success=False, path=stats_path)
+    for _ in range(6):
+        skill_stats.record_use(["good"], path=stats_path)
         skill_stats.record_outcome(["good"], success=True, path=stats_path)
     cands = skill_stats.evictable(path=stats_path)
     assert "bad" in cands and "good" not in cands
+
+
+def test_evictable_requires_more_than_a_lucky_small_sample(stats_path):
+    # 1 win in 5 uses is a 0.2 POINT ESTIMATE (at the default max_win_rate),
+    # but the Wilson upper bound at that n is ~0.62 -- the data doesn't yet
+    # rule out this skill being fine, so it must NOT be evicted on 5 uses.
+    for _ in range(4):
+        skill_stats.record_use(["thin-evidence"], path=stats_path)
+        skill_stats.record_outcome(["thin-evidence"], success=False, path=stats_path)
+    skill_stats.record_use(["thin-evidence"], path=stats_path)
+    skill_stats.record_outcome(["thin-evidence"], success=True, path=stats_path)
+    assert skill_stats.evictable(path=stats_path, min_uses=5) == []
 
 
 def test_evictable_skips_untested(stats_path):

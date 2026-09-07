@@ -28,13 +28,19 @@ _STOPWORDS = {
 }
 
 
-def enabled() -> bool:
+def enabled(*, config: dict | None = None) -> bool:
+    """``config`` lets a caller reuse an already-loaded config snapshot
+    instead of loading it again (see ``maverick.config.get_role_model``).
+    Only ever forwarded when actually given one, so a test double for
+    ``get_self_learning`` that (like most in this codebase) takes no
+    arguments keeps working when this is called the old, plain way."""
     try:
         from ..config import get_self_learning, governed_learning_env_flag
         override = governed_learning_env_flag("MAVERICK_DISTILL_LOCAL")
         if override is not None:
             return override
-        return bool(get_self_learning().get("distill_local", True))
+        sl = get_self_learning() if config is None else get_self_learning(config=config)
+        return bool(sl.get("distill_local", True))
     except Exception:  # pragma: no cover
         return False
 

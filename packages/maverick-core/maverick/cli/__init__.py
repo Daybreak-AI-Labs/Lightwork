@@ -1582,10 +1582,15 @@ def harness_holdout_verify(path: Path | None, as_json: bool) -> None:
 def harness_show(model: str | None, as_json: bool, verbose: bool) -> None:
     """Show the operating-guidance the self-harness loop has learned, per model.
 
-    This is the operator's window into what gets recalled into each model's
-    system prompt. ``--verbose`` adds per-line provenance (signature, held-out
-    delta, samples, learned date) so an operator can judge whether the evidence
-    behind each line is strong. Read-only.
+    This reads the RAW stored addenda, not the recall-time result: unlike
+    ``recall_addendum()`` (what actually reaches a prompt), this command does
+    NOT re-apply the safety screen, deliberately -- an operator investigating
+    a stale/tampered store needs to see exactly what's stored, screen-failing
+    lines included, to find and `forget` them. Do not treat every line shown
+    here as something a model will actually see; a line can be listed here
+    and still be dropped at recall. ``--verbose`` adds per-line provenance
+    (signature, held-out delta, samples, learned date) so an operator can
+    judge whether the evidence behind each line is strong. Read-only.
     """
     import json as _json
 
@@ -5059,7 +5064,11 @@ def skills_stats() -> None:
 @click.option("--min-uses", type=int, default=5, show_default=True,
               help="Only consider skills used at least this many times.")
 @click.option("--max-win-rate", type=float, default=0.2, show_default=True,
-              help="Flag skills whose win rate is at or below this.")
+              help="Flag skills whose win rate's 95% CONFIDENCE upper bound "
+                   "(not the raw win rate) is at or below this -- so a thin "
+                   "sample near the threshold is not flagged on the point "
+                   "estimate alone; e.g. 1 win in 5 uses has an upper bound "
+                   "near 0.62 and needs a larger sample to clear 0.2.")
 def skills_evict(do_apply: bool, min_uses: int, max_win_rate: float) -> None:
     """List (or with --apply, remove) skills that have had a fair trial and rarely help."""
     from ..skill import stats as skill_stats

@@ -41,6 +41,28 @@ def _enrich(label: str):
     except Exception as e:  # pragma: no cover -- enrichment never blocks a run
         log.debug("%s skipped: %s", label, e)
 
+def _skill_distillation_frozen(*, config: dict | None = None) -> bool:
+    """Whether calibration has frozen learning (the verifier drifted and no
+    longer discriminates correct from incorrect).
+
+    ``dreaming._consolidate_learning`` already refuses to distill skills or
+    synthesize insights while frozen; the per-run local distillation below
+    fed the same success/failure labels straight into a saved, recallable
+    skill with no such check, making the interlock a no-op for the busiest
+    distillation path. A thin, unit-testable name for
+    ``calibration.learning_frozen_safe()`` at this call site -- shared with
+    ``dreaming.rehearse`` and ``dreaming._consolidate_learning``, which used
+    to each carry their own copy of the same fail-open try/except.
+
+    ``config`` lets the call site below reuse the config it already loaded
+    for ``distillation_local.enabled()`` instead of loading it a second
+    time; only forwarded when actually given one, so a bare
+    ``_skill_distillation_frozen()`` call (every existing test) is
+    unaffected."""
+    from .calibration import learning_frozen_safe
+    return learning_frozen_safe() if config is None else learning_frozen_safe(config=config)
+
+
 # The "skill distill disabled" opt-in hint is a standing setting, not a
 # per-goal event -- show it at most once per process (see run_goal).
 _WARNED_DISTILL_DISABLED = False
@@ -1995,7 +2017,16 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         auto_distill = os.getenv("MAVERICK_AUTO_DISTILL", "").strip().lower() in {
             "1", "true", "yes", "on",
         }
-        if auto_distill:
+        # Same calibration-freeze interlock as the local distillation path
+        # below (and dreaming._consolidate_learning): a drifted verifier's
+        # success/failure labels must not seed a new, LLM-written, recallable
+        # skill either. This is the second of the two distillation call
+        # sites the freeze needs to reach -- this one is opt-in but still
+        # live wherever an operator has set MAVERICK_AUTO_DISTILL=1.
+        if auto_distill and _skill_distillation_frozen():
+            auto_distill = False
+            skill_note = "\n\n[skill distill skipped: learning is frozen (verifier calibration inadequate)]"
+        elif auto_distill:
             try:
                 skill = distill(goal.title, summary, blackboard, llm, budget=budget)
                 # A None return means the distiller's output failed the skill
@@ -2026,8 +2057,15 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         # the persisted goal history as trajectories, so no extra store is
         # needed. No-op when explicitly disabled; never raises into the run.
         with _enrich("local skill distillation"):
+            # Load config once and reuse it for both checks below (each
+            # otherwise independently calls config.load_config() for its own
+            # section) -- caught by this block's own fail-open _enrich() the
+            # same as a failure inside either check would have been.
+            from .config import load_config as _load_config
             from .skill import distillation_local as _sdl
-            if _sdl.enabled():
+            _cfg = _load_config()
+            if (_sdl.enabled(config=_cfg)
+                    and not _skill_distillation_frozen(config=_cfg)):
                 trajectories = [
                     {"goal_id": g.id, "goal": g.title, "success": True, "tools": [],
                      "t": getattr(g, "updated_at", 0.0)}
