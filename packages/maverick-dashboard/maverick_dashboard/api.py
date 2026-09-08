@@ -10696,7 +10696,7 @@ def _live_feature_switch_states() -> dict[str, bool]:
 async def list_feature_switches(request: Request) -> dict:
     """Every in-app switchable system with its label, plain-language
     description, and current effective state."""
-    require_permission(request, "view")
+    require_global_permission(request, "admin")
     from maverick import config as _cfg
 
     def _read() -> list[dict]:
@@ -13217,16 +13217,16 @@ async def offline_bundle(request: Request) -> dict:
 
 
 @router.get("/perf")
-async def perf_dashboard() -> dict:
-    """Public perf dashboard data: SLA measurements + benchmark history.
+async def perf_dashboard(request: Request) -> dict:
+    """Installation-admin diagnostics: SLA measurements + benchmark history.
 
-    One JSON face for the perf story (roadmap 2027-H1 "public perf
-    dashboard"): the live perf-SLA measurements against their published
+    One JSON face for installation diagnostics: live perf-SLA measurements against published
     thresholds (docs/perf-sla.md), the recorded benchmark score history with
     short-window regression verdicts, and the longitudinal era retrospective.
     Everything is measured/read locally -- nothing fabricated; sections with
     no recorded data say so.
     """
+    require_global_permission(request, "admin")
     out: dict = {"sla": [], "benchmarks": {}, "retrospective": None}
     try:
         sla, error = await _cached_perf_sla()
@@ -13866,8 +13866,9 @@ def _benchmark_snapshot() -> dict:
 
 
 @router.get("/benchmarks")
-async def benchmarks_api() -> dict:
+async def benchmarks_api(request: Request) -> dict:
     """Benchmark history for this deployment (see ``_benchmark_snapshot``)."""
+    require_global_permission(request, "admin")
     snap = _benchmark_snapshot()
     if not snap["suites"]:
         snap["note"] = (
@@ -14352,7 +14353,9 @@ async def learning_api(request: Request) -> dict:
     truth). ``accumulated`` is the non-portable moat: decisions and human
     judgements on the Operating Record, capabilities the workforce taught
     itself, and the grounded outcomes it has learned from -- what a customer
-    would forfeit by leaving. Read-only and owner-scoped."""
+    would forfeit by leaving. The technical control snapshot requires an
+    installation administrator; accumulated records remain owner-scoped."""
+    require_global_permission(request, "admin")
     return _learning_snapshot(request)
 
 

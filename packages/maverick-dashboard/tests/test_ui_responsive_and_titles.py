@@ -62,7 +62,7 @@ def test_mobile_topbar_cannot_widen_the_document(monkeypatch, tmp_path):
 # ---------- page titles ----------
 
 @pytest.mark.parametrize("path,fragment", [
-    ("/goals", "Goals · Lightwork"),
+    ("/goals", "Tasks · Lightwork"),
     ("/facts", "Facts · Lightwork"),
     ("/tools", "Tools · Lightwork"),
     ("/spend", "Spend · Lightwork"),

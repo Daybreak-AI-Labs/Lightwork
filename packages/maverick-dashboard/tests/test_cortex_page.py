@@ -89,9 +89,9 @@ def test_page_renders_the_brain_and_is_hardened(monkeypatch) -> None:
     assert "'unsafe-inline'" not in csp and "style-src 'self' 'nonce-" in csp
     assert "script-src 'self'" in csp
     body = response.text
-    assert "<title>Cortex · Lightwork</title>" in body
+    assert "<title>Knowledge · Lightwork</title>" in body
     assert body.count("<h1") == 1
-    assert "The company brain" in body
+    assert "Search your connected sources" in body
     # the figure: the lattice canvas at its native size, captioned
     assert '<canvas id="cortex-lattice" width="640" height="480"' in body
     assert "<figcaption" in body
@@ -189,7 +189,7 @@ def test_page_is_registered_in_observe_immediately_before_learning() -> None:
     paths = [p["path"] for p in ui_visibility.PAGES]
     assert paths.index(page.PAGE_PATH) == paths.index("/learning") - 1
     entry = next(p for p in ui_visibility.PAGES if p["path"] == page.PAGE_PATH)
-    assert entry["label"] == "Cortex" and entry["group"] == "Observe"
+    assert entry["label"] == "Knowledge" and entry["group"] == "Observe"
     assert entry["floor"] == "view" and entry["default"] == "view"
     base = (Path(page.__file__).parent / "templates" / "base.html").read_text(encoding="utf-8")
     assert f'id="i-{entry["icon"]}"' in base
@@ -235,7 +235,7 @@ def test_mounted_page_renders_through_the_dashboard_shell(monkeypatch, tmp_path)
         client = TestClient(dash_app.app, headers={"Origin": "http://testserver"})
         response = client.get(page.PAGE_PATH)
         assert response.status_code == 200, response.text[:400]
-        assert "<title>Cortex · Lightwork</title>" in response.text
+        assert "<title>Knowledge · Lightwork</title>" in response.text
         assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
         assert '<a href="/cortex" class="active" aria-current="page">' in response.text
         # the real kernel status: every source is on the page, answering or not

@@ -262,18 +262,38 @@ templates.context_processors.append(_record_search_page_context)
 # to the pages the caller's RBAC role may see (defaults + the admin's Settings
 # overrides; see maverick_dashboard.ui_visibility). Auth off -> full nav,
 # exactly as before.
+def _page_role(request: Request, *, global_scope: bool = False) -> str | None:
+    """Reserve None/full navigation for a verified principal-less grant.
+
+    Role resolution also returns None when a signed-in user's policy cannot
+    be read. That case has no permissions, unlike the local/static-token
+    compatibility grant which caller_role validates before returning.
+    """
+    from . import auth
+
+    try:
+        principal = auth.caller_principal(request)
+        role = (
+            auth.global_role_for_principal(principal)
+            if global_scope and principal is not None else caller_role(request)
+        )
+        if role is None and principal is not None:
+            return ""
+        return role
+    except Exception:
+        return ""
+
+
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
     from .api import _shared_halt_backend
 
-    try:
-        role = caller_role(request)
-    except Exception:  # pragma: no cover -- nav must never break a render
-        role = None
-    groups = ui_visibility.nav_groups(role)
+    role = _page_role(request)
+    scope_roles = {"global": _page_role(request, global_scope=True)}
+    groups = ui_visibility.nav_groups(role, scope_roles=scope_roles)
     # The Ctrl+K page finder: same role resolution, but it also indexes pages
     # folded out of the rail (in_nav: False) -- reachable must mean searchable.
-    finder = ui_visibility.finder_pages(role)
+    finder = ui_visibility.finder_pages(role, scope_roles=scope_roles)
     # The topbar's Settings gear follows the same policy as the sidebar entry.
     show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     # A deployment-wide halt backend is a global control even when the caller
@@ -339,11 +359,10 @@ def _workspace_context(request: Request) -> dict:
 
 
 templates.context_processors.append(_workspace_context)
-# Requestless renders (rare; legacy paths) still get a complete sidebar.
-from . import ui_visibility as _ui_visibility  # noqa: E402
-
-templates.env.globals.setdefault("nav_groups", _ui_visibility.nav_groups(None))
-templates.env.globals.setdefault("finder_pages", _ui_visibility.finder_pages(None))
+# Requestless renders cannot prove authority; the request processor supplies
+# permitted destinations, including full navigation in verified local mode.
+templates.env.globals.setdefault("nav_groups", [])
+templates.env.globals.setdefault("finder_pages", [])
 
 
 def _set_theme_cookie(response, theme: str) -> None:
@@ -720,8 +739,8 @@ def enforce_page_visibility(
     page = ui_visibility.page_for(request.url.path)
     if page is None:
         return
-    role = caller_role(request)
-    if role is None or ui_visibility.is_visible(page, role):
+    role = _page_role(request, global_scope=page.get("scope") == "global")
+    if ui_visibility.is_visible(page, role):
         return
     raise HTTPException(status_code=403, detail="this page is not enabled for your role")
 
@@ -2782,7 +2801,7 @@ async def learning_page(request: Request) -> HTMLResponse:
 
 @app.get("/perf", response_class=HTMLResponse)
 async def perf_page(request: Request) -> HTMLResponse:
-    """Public perf dashboard: SLA + benchmark history (data via /api/v1/perf)."""
+    """Admin diagnostics: SLA + benchmark history (data via /api/v1/perf)."""
     return templates.TemplateResponse(request, "perf.html", {})
 
 
@@ -3994,6 +4013,7 @@ async def security_page(request: Request) -> HTMLResponse:
             if row.get("exception_due") or row.get("exception_expired")
         ][:10]
     ctx.update({"records": records, "program": report, "insights": insights})
+    ctx["security_can_manage_hunters"] = has_global_permission(request, "admin")
     return templates.TemplateResponse(request, "security.html", ctx)
 
 

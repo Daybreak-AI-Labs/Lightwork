@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Cortex · Lightwork{% endblock %}
+{% block title %}Knowledge · Lightwork{% endblock %}
 {% block head_extra %}
 <style nonce="{{ csp_style_nonce }}">
   .ctx { display: grid; gap: var(--space-5); }
@@ -70,13 +70,13 @@
 {% endset %}
 <div class="ctx" id="ctx-root" data-api-base="{{ api_base }}" data-copilot-page="{{ page_path }}"
      data-enabled="{{ 'true' if status.enabled else 'false' }}">
-  {% call hero('The company brain', 'Cortex',
-               subtitle='One governed mind',
-               lede='Everything the company knows, in one governed mind: knowledge
-                     with citations, skills, proven lessons, the Operating Record
-                     and team memory — scoped to your workspace, with an audit record for every search.') %}
+  {% call hero('Your workspace', 'Knowledge',
+               subtitle='Search your connected sources',
+               lede='Find information in the knowledge sources available to your
+                     workspace, including cited documents, skills, lessons and
+                     records. Source availability is shown below; searches are audited.') %}
     {{ state('Current state',
-             'Cortex on' if status.enabled else 'Cortex off',
+             'Knowledge search on' if status.enabled else 'Knowledge search off',
              badge=answering ~ ' of ' ~ total ~ ' sources answering',
              badge_class='ok' if status.enabled and answering == total
                          else ('warn' if status.enabled and answering else 'idle'),

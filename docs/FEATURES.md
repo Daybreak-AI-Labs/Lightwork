@@ -19,6 +19,16 @@ here.
 
 ## Agent kernel & orchestration
 
+- **Customer navigation** — Tasks (`/goals`), Connections (`/connections`),
+  Knowledge (`/cortex`), Results (`/deliverables`), and Settings (`/settings`)
+  retain existing routes and data permissions. Navigation and direct page
+  requests deny unreadable role policy. Connections requires workspace admin;
+  Settings and technical Learning/Benchmarks/Performance pages require
+  installation admin. Their JSON snapshots and feature-switch inventory use the
+  same authority. Knowledge describes available workspace sources, not all
+  company data. Existing tenant-scoped customer assessment/benchmark-exchange
+  results retain their own permissions.
+
 - **Recursive multi-agent swarm** — orchestrator decomposes a goal and spawns
   specialist sub-agents (researcher / coder / writer / verifier / revisor /
   reflector), run in parallel (`orchestrator.py`, `agent.py`, `swarm.py`).
@@ -2639,8 +2649,8 @@ deployment-global key byte-for-byte — a BYOK misconfiguration never takes an
 agent offline. BYOK only: no resale, metering, or markup lives here. Distinct
 from per-tenant `[kms]` BYOK (envelope-encryption key custody).
 
-**Public perf dashboard** (`GET /perf` + `GET /api/v1/perf` on the
-dashboard): one page/JSON face for the perf story — the perf-SLA checks
+**Installation performance diagnostics** (`GET /perf` + `GET /api/v1/perf` on
+the dashboard, installation-admin-only): one page/JSON face for the perf story — the perf-SLA checks
 measured live on the host (in a worker thread, against the published
 thresholds), recorded benchmark history with short-window regression
 verdicts, and the longitudinal era retrospective; sections with no recorded
@@ -4755,7 +4765,7 @@ tested without spawning py-spy.
   sparklines/bars; same-origin/token limits documented in the JS header and
   on the demo page; errors render as HTTP status, never fake data.
 - **Benchmark live dashboard** (`/benchmarks` + `GET /api/v1/benchmarks`):
-  per-suite trend sparklines + regression verdicts over the real
+  installation-admin-only per-suite trend sparklines + regression verdicts over the real
   `continuous_benchmark` history (`bench_track`), via the real
   `detect_regression`; honest empty state naming the record command. No
   fabricated competitor numbers — this page is *this deployment's* recorded

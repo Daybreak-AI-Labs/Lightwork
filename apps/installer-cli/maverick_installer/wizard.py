@@ -2754,6 +2754,18 @@ def _pick_evidence_local_parsers(enabled: bool) -> dict[str, Any]:
     return result
 
 
+def _vendor_setup_guidance(enabled: bool) -> None:
+    """Defer new ownership to the app's current-workspace membership checks."""
+    if enabled:
+        console.print(
+            "[dim]Finish vendor setup in the app: select a workspace, choose an "
+            "active workspace member to own vendor reviews, and select your "
+            "named Jira connection. Google Drive is optional when using reviewed "
+            "uploads. Enabling this workflow does not assign ownership or verify "
+            "provider access.[/dim]"
+        )
+
+
 def pick_security_suite() -> dict[str, Any]:
     """Configure the Security/GRC suite and both defensive hunters.
 
@@ -3416,10 +3428,10 @@ def pick_security_suite() -> dict[str, Any]:
         "evidence, named human review, and approved Jira Task creation?",
         default=False,
     )
-    vendor_onboarding_owner = (
-        _q_text("  Enrolled vendor resource owner (principal or team reference)", default="").strip()
-        if vendor_onboarding else ""
-    )
+    # Fresh setup cannot validate workspace membership here. The app chooses
+    # initial ownership; explicit configured/resumed owners remain unchanged.
+    vendor_onboarding_owner = ""
+    _vendor_setup_guidance(vendor_onboarding)
     vendor_reviewed_uploads = (
         _q_confirm("  Allow reviewed local Word, Excel, PDF and text evidence uploads, including explicit PDF transcription?", default=True)
         if vendor_onboarding else False

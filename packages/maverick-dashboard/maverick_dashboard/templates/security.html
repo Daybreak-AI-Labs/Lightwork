@@ -106,6 +106,7 @@
 
 <div class="section-head"><h2>Defensive hunters</h2></div>
 <div class="panel">
+  {% if security_can_manage_hunters %}
   <p class="muted">Lightwork ships two always-defensive hunters. Each one is
     opt-in, reads only telemetry it is allowed to see, and proposes containment
     to the human approval queue &mdash; switching a hunter on never grants it an
@@ -115,6 +116,10 @@
     <p class="sec-empty">Loading hunter switches&hellip;</p>
   </div>
   <p class="muted" id="sec-hunters-status" role="status" aria-live="polite"></p>
+  {% else %}
+  <p class="muted">An installation administrator manages hunter switches.
+    You can continue reviewing the security work available to your workspace.</p>
+  {% endif %}
 </div>
 
 {% if not records.enabled %}
@@ -530,6 +535,7 @@
         .catch(function (error) { status.textContent = error.message; });
     });
   }
+  {% if security_can_manage_hunters %}
   var huntersHost = document.getElementById('sec-hunters');
   if (huntersHost) {
     var hunterConsoles = {
@@ -626,6 +632,7 @@
           'Hunter switches could not be loaded: ' + error.message;
       });
   }
+  {% endif %}
   var controlInitializer = document.querySelector('[data-control-initialize]');
   if (controlInitializer) {
     controlInitializer.addEventListener('submit', function (event) {

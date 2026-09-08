@@ -161,6 +161,61 @@ def test_authority_generation_compare_and_swap_and_stable_resource_owner(client)
     assert stale.status_code == 409
 
 
+def test_validation_then_concurrent_corrections_commit_only_one_binding(client):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    activate(client)
+    records = [credential(name="jira-first"), credential(name="jira-second")]
+    status = client.get("/api/v1/vendor-setup").json()
+    base = {**reviewed(status), "expected_revision": 0, "resource_owner": "user:other"}
+    malformed = client.put("/api/v1/vendor-setup", json={
+        **base, "ticket": "invalid connection name", "ticket_revision": records[0]["revision"],
+    })
+    assert malformed.status_code == 422
+    assert malformed.json()["detail"][0]["loc"] == ["body", "ticket"]
+    assert client.get("/api/v1/vendor-setup").json()["revision"] == 0
+    ready = Barrier(2)
+
+    def submit(record):
+        ready.wait(timeout=10)
+        return client.put("/api/v1/vendor-setup", json={
+            **base, "ticket": record["name"], "ticket_revision": record["revision"],
+        })
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(submit, records))
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    winner = next(response.json() for response in responses if response.status_code == 200)
+    current = client.get("/api/v1/vendor-setup").json()
+    assert current["revision"] == winner["revision"] == 1
+    assert current["binding"] == winner["binding"]
+    assert current["binding"]["resource_owner"] == "user:other"
+
+
+def test_response_failure_after_save_is_recoverable_by_read_only_overview(client, monkeypatch):
+    from fastapi import HTTPException
+
+    activate(client)
+    record = credential()
+    real_overview = api.overview
+
+    def lose_write_response(request, response):
+        if request.method == "PUT":
+            raise HTTPException(503, "Synthetic response failure after local save")
+        return real_overview(request, response)
+
+    monkeypatch.setattr(api, "overview", lose_write_response)
+    interrupted = bind(client, record)
+    assert interrupted.status_code == 503
+    # The GET route and local binding store are real; no second PUT is needed.
+    recovered = client.get("/api/v1/vendor-setup")
+    assert recovered.status_code == 200
+    assert recovered.json()["revision"] == 1
+    assert recovered.json()["binding"]["ticket_connection"] == record["name"]
+    assert recovered.json()["readiness"]["state"] == "configured"
+
+
 def test_false_deployment_connection_override_and_unconfirmed_change_are_not_waived(client, monkeypatch):
     monkeypatch.setenv("LIGHTWORK_CONNECTIONS", "0")
     state = client.get("/api/v1/vendor-setup").json()

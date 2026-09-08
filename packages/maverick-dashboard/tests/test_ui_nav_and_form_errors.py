@@ -22,7 +22,7 @@ def _prep(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("path,label", [
     ("/overview", "Overview"),
-    ("/goals", "Goals"),
+    ("/goals", "Tasks"),
     ("/agents", "Agent Factory"),
     ("/ekko", "Ekko"),
     ("/skills", "Skills"),

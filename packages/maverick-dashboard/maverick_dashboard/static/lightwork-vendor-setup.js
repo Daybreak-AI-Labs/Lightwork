@@ -3,7 +3,7 @@
   'use strict';
   var el = function (id) { return document.getElementById('vs-' + id); };
   if (!el('panel')) return;
-  var state = null, context = null, busy = false, locked = false;
+  var state = null, context = null, busy = false, locked = false, draft = null;
   function ownerLabel(owner) { return owner.startsWith('user:') ? owner.slice(5) : owner; }
   function controls() {
     var blocked = !state || !state.readiness || state.readiness.deployment.supported !== true;
@@ -14,11 +14,60 @@
     el('refresh').disabled = busy || locked;
   }
   function clear(message, lock) {
-    state = null; locked = !!lock; el('ticket').replaceChildren(); el('document').replaceChildren();
+    draft = null; state = null; locked = !!lock; el('ticket').replaceChildren(); el('document').replaceChildren();
     el('resource-owner').replaceChildren();
     el('owner').textContent = ''; el('confirm').checked = false; el('status').textContent = message; controls();
     el('readiness-summary').textContent = 'Setup has not been confirmed.'; el('next-actions').replaceChildren();
     el('deployment').textContent = 'Deployment status has not been confirmed.';
+  }
+  function rememberChoices() {
+    // Keep only nonsecret choices in this page, never reusable authority or confirmation.
+    if (!state) return;
+    draft = {context: state.context, configuration: state.configuration,
+      revision: state.revision, owner: el('resource-owner').value};
+    ['ticket', 'document'].forEach(function (name) {
+      var row = state.connections.find(function (item) { return item.name === el(name).value; });
+      draft[name] = row ? {name: row.name, revision: row.revision} : null;
+    });
+  }
+  function requireRefresh(message) {
+    state = null; el('confirm').checked = false;
+    el('status').textContent = message + ' Refresh setup to check what was saved before retrying. Your choices are kept on this page.';
+    el('readiness-summary').textContent = 'Setup has not been confirmed.'; el('next-actions').replaceChildren();
+    el('deployment').textContent = 'Deployment status has not been confirmed.';
+  }
+  function restoreChoices(data) {
+    var saved = draft; draft = null;
+    if (!saved) return;
+    // A changed revision may be our lost response or another administrator's save.
+    // Render canonical state in either case; never replay an old submission.
+    if (saved.configuration !== data.configuration || saved.revision !== data.revision) {
+      el('status').textContent += ' Current saved settings are shown because setup changed. Review them before making another change.';
+      return;
+    }
+    if (!data.readiness.deployment.supported) return;
+    var removed = [];
+    if ((!data.owner_locked && data.eligible_owners.includes(saved.owner)) ||
+        (data.owner_locked && data.binding.resource_owner === saved.owner)) el('resource-owner').value = saved.owner;
+    else if (saved.owner) removed.push('vendor review owner');
+    ['ticket', 'document'].forEach(function (name) {
+      var selected = saved[name], connector = name === 'ticket' ? 'jira' : 'gdrive';
+      if (!selected) { el(name).value = ''; return; }
+      var current = data.connections.find(function (row) { return row.name === selected.name && row.connector === connector && row.has_token === true && row.revision === selected.revision; });
+      if (current) el(name).value = current.name;
+      else { el(name).value = ''; removed.push(name === 'ticket' ? 'Jira connection' : 'Google Drive connection'); }
+    });
+    el('status').textContent += removed.length ? ' Choose again: ' + removed.join(', ') + '. Access or connection details changed.' : ' Your valid choices were kept. Review and confirm before saving.';
+  }
+  function errorMessage(data, validation) {
+    if (!validation && data && typeof data.detail === 'string') return data.detail;
+    var fields = {resource_owner: 'Vendor review owner', ticket: 'Jira connection',
+      document: 'Google Drive connection', ticket_revision: 'Jira connection',
+      document_revision: 'Google Drive connection', confirm: 'Setup confirmation'};
+    var labels = data && Array.isArray(data.detail) ? data.detail.map(function (error) {
+      return error && Array.isArray(error.loc) && error.loc.length === 2 && error.loc[0] === 'body' && fields[error.loc[1]];
+    }).filter(function (label) { return typeof label === 'string'; }) : [];
+    return labels.length ? 'Check ' + Array.from(new Set(labels)).join(', ') + '.' : 'Setup could not be confirmed.';
   }
   function renderReadiness(readiness) {
     var links = ['/connections', '/users', '#vs-resource-owner', '#vs-ticket', '#vs-enable', '#vs-confirm', '#vs-save', '#vs-deployment'];
@@ -33,7 +82,7 @@
     });
   }
   function render(data) {
-    if (!data || !/^[a-f0-9]{64}$/.test(data.context) || !/^[a-f0-9]{64}$/.test(data.configuration) || !Array.isArray(data.connections) || !data.binding || typeof data.owner_locked !== 'boolean' || !Array.isArray(data.eligible_owners) || data.eligible_owners.some(function (owner) { return typeof owner !== 'string' || !owner.startsWith('user:') || owner.length > 256; }) || typeof data.binding.resource_owner !== 'string' || (data.owner_locked && !data.binding.resource_owner)) throw new Error('Setup response was incomplete.');
+    if (!data || !/^[a-f0-9]{64}$/.test(data.context) || !/^[a-f0-9]{64}$/.test(data.configuration) || !Number.isSafeInteger(data.revision) || data.revision < 0 || typeof data.modules_enabled !== 'boolean' || !Array.isArray(data.connections) || data.connections.some(function (row) { return !row || typeof row.name !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(row.name) || !['jira', 'gdrive'].includes(row.connector) || typeof row.revision !== 'string' || !row.revision || row.revision.length > 64 || typeof row.has_token !== 'boolean'; }) || new Set(data.connections.map(function (row) { return row.name; })).size !== data.connections.length || !data.binding || typeof data.owner_locked !== 'boolean' || !Array.isArray(data.eligible_owners) || data.eligible_owners.some(function (owner) { return typeof owner !== 'string' || !owner.startsWith('user:') || owner.length > 256; }) || typeof data.binding.resource_owner !== 'string' || (data.owner_locked && !data.binding.resource_owner)) throw new Error('Setup response was incomplete. Refresh setup before making changes.');
     if (context && data.context !== context) { clear('Your account or workspace changed. Reload the page.', true); return; }
     renderReadiness(data.readiness);
     state = data; context = data.context; el('confirm').checked = false;
@@ -52,20 +101,29 @@
     });
     owners.value = data.binding.resource_owner;
     el('owner').textContent = data.owner_locked ? 'Existing vendor review owner: ' + ownerLabel(data.binding.resource_owner) + '. This setup cannot transfer ownership.' : 'Choose the owner for this workspace’s vendor records. Your saved credentials remain under your authority.';
-    el('status').textContent = !data.readiness.deployment.supported ? 'Resolve the deployment issue above before changing setup.' : data.modules_enabled ? (data.revision ? 'Workspace setup saved. Connection access and evidence still require verification.' : 'Modules enabled. Choose the owner and connections, then save this workspace setup.') : 'Enable the workflow, then choose the owner and saved connections for this workspace.';
+    el('status').textContent = !data.readiness.deployment.supported ? 'Resolve the deployment issue above before changing setup.' : data.modules_enabled ? (data.revision ? 'Workspace setup saved. Connection access and evidence still require verification.' : 'Workflow enabled. Choose the owner and connections, then save this workspace setup.') : 'Enable the workflow, then choose the owner and saved connections for this workspace.';
   }
   async function call(method, suffix, body) {
     if (busy || locked) return;
-    busy = true; controls();
+    rememberChoices(); busy = true; controls();
+    var response, data;
     try {
       var headers = {'Accept': 'application/json', 'Content-Type': 'application/json'};
       if (context) headers['X-Lightwork-Setup-Context'] = context;
-      var response = await fetch('/api/v1/vendor-setup' + (suffix || ''), {method: method, headers: headers, credentials: 'same-origin', cache: 'no-store', body: body ? JSON.stringify(body) : undefined});
+      response = await fetch('/api/v1/vendor-setup' + (suffix || ''), {method: method, headers: headers, credentials: 'same-origin', cache: 'no-store', body: body ? JSON.stringify(body) : undefined});
       if (response.status === 401 || response.status === 403) { clear('Sign in as an administrator and select a workspace to manage setup.', true); return; }
-      var data = await response.json();
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Setup was not confirmed. Refresh before retrying.');
+      if (method === 'GET' && response.status === 409) { clear('Your account, workspace or setup access changed. Reload the page to review current setup.', true); return; }
+      try { data = await response.json(); }
+      catch (_) { if (response.ok) { clear('Setup response was incomplete. Refresh setup before making changes.', false); return; } }
+      if (response.status === 409) { clear(errorMessage(data) + ' Refresh setup to review current choices.', false); return; }
+      if (!response.ok) { requireRefresh(errorMessage(data, response.status === 422)); return; }
       render(data);
-    } catch (error) { clear(error.message || 'Setup unavailable. Refresh before retrying.', false); }
+      if (!locked && method === 'GET') restoreChoices(data);
+      else draft = null;
+    } catch (error) {
+      if (response && response.ok) clear(error.message || 'Setup response was incomplete. Refresh setup.', false);
+      else requireRefresh('Setup is unavailable.');
+    }
     finally { busy = false; controls(); }
   }
   function reviewed() { return {confirm: true, context: state.context, configuration: state.configuration}; }

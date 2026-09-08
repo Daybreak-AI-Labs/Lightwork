@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Goals · Lightwork{% endblock %}
+{% block title %}Tasks · Lightwork{% endblock %}
 {% block content %}
 <style>
   /* Goals — a clean toolbar (compose + search) over scannable run rows, in the
@@ -34,22 +34,23 @@
 
   {% from "_hero.html" import hero, state %}
   {% set running = goals | selectattr('status', 'equalto', 'running') | list | length %}
-  {% call hero('Your AI workforce', 'Goals',
+  {% call hero('Your AI workforce', 'Tasks',
                subtitle='Every run on record',
                lede='Find your work, read its result, and open a task to review or continue it.') %}
     {{ state('Current state',
              goals | length ~ ' recent run' ~ ('' if goals | length == 1 else 's'),
              badge=(running ~ ' running') if running else ('ready' if goals else 'none yet'),
              badge_class='ok' if goals else 'idle',
-             copy='Start new work from Chat, the Quick Goal form, or the Goal
-                   Map editor — every run lands here with its plan, replay,
-                   and errors.') }}
+             copy='Review recent tasks, including their plans, recorded results
+                   and any errors. Available actions depend on your workspace role.') }}
   {% endcall %}
 
   <div class="g-bar">
-    <a class="btn btn--primary" href="/chat">New goal in Chat</a>
+    {% if can_create_goal %}
+    <a class="btn btn--primary" href="/chat">New task in Chat</a>
     <a class="btn" href="/goal-builder">Quick Goal form</a>
     <a class="btn btn--ghost" href="/graph-editor">Goal Map editor</a>
+    {% endif %}
     {% if goals %}
     <input id="run-search-q" type="search" placeholder="Search across runs…"
            aria-label="Search runs by title or description" autocomplete="off"
@@ -79,9 +80,13 @@
   <button id="run-search-retry" type="button" class="btn" hidden>Retry search</button>
   {% else %}
     <div class="g-empty">
-      <p style="font-weight: var(--font-semibold); margin: 0 0 var(--space-2);">No goals yet</p>
+      <p style="font-weight: var(--font-semibold); margin: 0 0 var(--space-2);">No tasks yet</p>
+      {% if can_create_goal %}
       <p style="margin: 0;">Start your first piece of work from <a href="/chat">Chat</a> — describe what you need in plain English.</p>
-      <a class="btn btn--primary" href="/chat" style="margin-top: var(--space-3);">Start a goal</a>
+      <a class="btn btn--primary" href="/chat" style="margin-top: var(--space-3);">Start a task</a>
+      {% else %}
+      <p style="margin: 0;">Tasks you can view will appear here when work is created.</p>
+      {% endif %}
     </div>
   {% endif %}
 
