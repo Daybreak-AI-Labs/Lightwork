@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hmac
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -18,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .auth import require_permission
+from .draft_api import context_for
 
 router = APIRouter(prefix="/vendor-onboarding", tags=["vendor-onboarding"])
 
@@ -90,6 +92,12 @@ def _error(status, code, message, *, retryable=False, next_action):
 
 def _binding(request: Request):
     require_permission(request, "operate")
+    supplied_context = request.headers.get("X-Lightwork-Vendor-Context")
+    if supplied_context is not None and (len(supplied_context) != 64 or
+            any(char not in "0123456789abcdef" for char in supplied_context) or
+            not hmac.compare_digest(supplied_context, context_for(request))):
+        raise _error(409, "workspace_context_changed", "The workspace or signed-in account changed.",
+                     next_action="Reload this page in the original workspace before reading or changing the request.")
     profile = deployment_readiness()
     if not profile["supported"]:
         raise _error(409, profile["code"], profile["message"], next_action=profile["next_action"])

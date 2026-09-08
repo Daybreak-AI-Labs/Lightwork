@@ -12,7 +12,12 @@ from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import settings_store
-from .auth import caller_principal, require_global_permission
+from .auth import (
+    caller_principal,
+    has_global_permission,
+    require_global_permission,
+    require_permission,
+)
 from .draft_api import context_for
 
 router = APIRouter(prefix="/api/v1/connection-setup", tags=["connection-setup"])
@@ -55,8 +60,10 @@ def _context(request):
     return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
 
 
-def _authority(request, response, payload=None):
-    require_global_permission(request, "admin")
+def _authority(request, response, payload=None, *, operator=False):
+    require_permission(request, "admin")
+    if operator:
+        require_global_permission(request, "admin")
     actor = caller_principal(request)
     if not actor or not actor.startswith("user:") or not current_tenant_id_strict():
         raise HTTPException(403, "Sign in as an administrator and select a workspace to connect accounts.")
@@ -95,24 +102,37 @@ def _call(operation):
         raise HTTPException(503, "Account authorization was not confirmed. Refresh Connections; start a new authorization if needed.") from exc
 
 
+def _applications(actor, can_manage):
+    available = connection_oauth.available_applications(actor)
+    if not can_manage:
+        return available
+    managed = connection_oauth.managed_applications(actor)
+    providers = {row["provider"] for row in managed}
+    # A personal legacy registration remains usable, but its private revision
+    # must never prefill the separate workspace registration editor.
+    return managed + [row for row in available if row["provider"] not in providers]
+
+
 @router.get("")
 def overview(request: Request, response: Response):
     actor, context = _authority(request, response)
     enabled = connection_oauth.enabled()
-    return {"context": context, "enabled": enabled, "connections_enabled": connections.enabled(),
+    can_manage = has_global_permission(request, "admin")
+    return {"context": context, "workspace_context": context_for(request), "can_manage_applications": can_manage,
+        "enabled": enabled, "connections_enabled": connections.enabled(),
         "callback_uri": _callback(request), "profiles": [{"id": key, **value} for key, value in connection_oauth.PROFILES.items()],
-        "applications": _call(lambda: connection_oauth.applications(actor)) if enabled else [],
+        "applications": _call(lambda: _applications(actor, can_manage)) if enabled else [],
         "connections": _call(lambda: connections.list_connections(owner=actor)) if connections.enabled() else [],
         "live_provider_verified": False}
 
 
 @router.post("/enable")
 def enable(request: Request, response: Response, payload: Reviewed):
-    _authority(request, response, payload)
+    _authority(request, response, payload, operator=True)
     if connections.deployment_override() is False or any(config.env_flag(name) is False for name in ("MAVERICK_OAUTH_VAULT", "LIGHTWORK_OAUTH_VAULT")):
         raise HTTPException(409, "Deployment policy disables saved account authorization.")
     with settings_store._locked(strict=True):
-        _authority(request, response, payload)
+        _authority(request, response, payload, operator=True)
         data = settings_store._load_overlay_for_update()
         data.setdefault("connections", {})["enable"] = True
         data.setdefault("oauth", {})["vault"] = True
@@ -126,8 +146,8 @@ def enable(request: Request, response: Response, payload: Reviewed):
 
 @router.put("/application")
 def application(request: Request, response: Response, payload: ApplicationIn):
-    actor, _ = _authority(request, response, payload)
-    _call(lambda: connection_oauth.save_application(actor, provider=payload.provider, client_id=payload.client_id,
+    actor, _ = _authority(request, response, payload, operator=True)
+    _call(lambda: connection_oauth.save_workspace_application(actor, provider=payload.provider, client_id=payload.client_id,
         client_secret=payload.client_secret, expected_revision=payload.expected_revision))
     return overview(request, response)
 

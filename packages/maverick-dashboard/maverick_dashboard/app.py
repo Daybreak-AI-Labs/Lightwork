@@ -22,7 +22,7 @@ from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from fastapi import (
     BackgroundTasks,
@@ -112,6 +112,35 @@ _MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
 _USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
 
 log = logging.getLogger(__name__)
+
+
+class _CallbackAccessLogFilter(logging.Filter):
+    """Remove callback queries before Uvicorn handlers or formatters see them."""
+
+    _lightwork_callback_redaction = True
+
+    def filter(self, record):
+        args = record.args
+        # Both Uvicorn HTTP implementations emit this structured access record.
+        # Keep method, route and status useful without changing the ASGI request:
+        # the authorization handler still needs the original one-time values.
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            path, separator, _query = args[2].partition("?")
+            # Suffix matching also covers an application mounted under a prefix.
+            # Login can carry a nested callback query in its return_to parameter.
+            if separator and unquote(path).rstrip("/").endswith(
+                ("/connections", "/auth/login", "/auth/callback")
+            ):
+                record.args = (*args[:2], f"{path}?[redacted]", *args[3:])
+        return True
+
+
+# Logger filters survive Uvicorn's default dictConfig. Installing at app import
+# covers CLI/desktop (app imported first), direct Uvicorn import strings (logging
+# configured first), and JSON logging with propagation to the configured root.
+_access_logger = logging.getLogger("uvicorn.access")
+if not any(getattr(item, "_lightwork_callback_redaction", False) for item in _access_logger.filters):
+    _access_logger.addFilter(_CallbackAccessLogFilter())
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -2148,6 +2177,36 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             {"path": request.url.path},
             status_code=400,
         )
+    if request.url.path == "/api/v1/connection-setup" or request.url.path.startswith(
+        "/api/v1/connection-setup/"
+    ):
+        # Pydantic may place submitted secrets in input, msg, ctx, or even loc
+        # (for unsupported object keys). Rebuild from fixed field labels before
+        # encoding: malformed binary input must remain a safe 422, not a 500.
+        messages = {
+            "confirm": "Review and confirm the account connection action.",
+            "context": "Refresh Connections before continuing.",
+            "provider": "Select a supported account provider.",
+            "client_id": "Enter a valid application client ID.",
+            "client_secret": "Enter a valid application client secret.",
+            "expected_revision": "Refresh Connections before changing this connection.",
+            "profile": "Select a supported connection profile.",
+            "name": "Use a connection name with lowercase letters, numbers, hyphens or underscores.",
+            "site_url": "Enter a valid workspace site address.",
+            "state": "Start a new authorization from Connections.",
+            "code": "Start a new authorization from Connections.",
+        }
+        errors = []
+        for error in exc.errors()[:32]:
+            loc = error.get("loc", ())
+            field = loc[1] if isinstance(loc, (list, tuple)) and len(loc) == 2 and loc[0] == "body" else None
+            field = field if isinstance(field, str) and field in messages else None
+            errors.append({
+                "type": "value_error",
+                "loc": ["body", field] if field else ["body"],
+                "msg": messages[field] if field else "Check the connection fields and remove unsupported fields.",
+            })
+        return JSONResponse({"detail": errors}, status_code=422, headers={"Cache-Control": "no-store"})
     # exc.errors() can embed the raw request body (bytes) in 'input' when the
     # client sent a wrong/garbage Content-Type; json.dumps can't serialize bytes,
     # so a 422 turned into an opaque 500. jsonable_encoder coerces bytes -> str.

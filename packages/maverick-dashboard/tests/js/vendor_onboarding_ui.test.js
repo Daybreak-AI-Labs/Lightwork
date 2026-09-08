@@ -43,7 +43,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture(records = [], intercept = null, search = "") {
+function fixture(records = [], intercept = null, search = "", returning = null) {
   const document = { elements: new Map(), activeElement: null };
   let now = 2000;
   class Element {
@@ -81,6 +81,9 @@ function fixture(records = [], intercept = null, search = "") {
   };
   const root = add("vendor-onboarding", "section");
   root.dataset.apiBase = "/api/v1/vendor-onboarding";
+  root.dataset.workspaceContext = "f".repeat(64);
+  const storage = new Map(returning ? [["lightwork:connection-task:v1", JSON.stringify(returning)]] : []);
+  const sessionStorage = {getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
   const ids = ["message", "case-title", "case-reference", "status", "scope", "evidence", "assessment",
     "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status"];
   ids.forEach(id => add(`vo-${id}`, "div", root));
@@ -108,7 +111,7 @@ function fixture(records = [], intercept = null, search = "") {
   };
   vm.runInNewContext(fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
-  ), { document, fetch, window: {location: {search}}, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
+  ), { document, fetch, window: {location: {search}, sessionStorage}, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {
       await new Promise(resolve => setImmediate(resolve));
@@ -117,7 +120,7 @@ function fixture(records = [], intercept = null, search = "") {
     throw new Error("UI did not settle");
   }
   return {
-    root, byId, calls, document, settle,
+    root, byId, calls, document, settle, storage,
     advanceTime(milliseconds) { now += milliseconds; },
     caseButton(id) { return byId("cases").children.find(button => button.dataset.caseId === id); },
     async load(id) { this.caseButton(id).listeners.click(); await settle(); },
@@ -174,6 +177,19 @@ test("switching cases clears decision drafts and updates current-request context
   assert.match(ui.byId("case-reference").textContent, /Initial request · two/);
   assert.equal(ui.caseButton("two").getAttribute("aria-current"), "true");
   assert.equal(ui.caseButton("one").getAttribute("aria-current"), "false");
+});
+
+test("a connection detour records only the selected request and its workspace context", async () => {
+  const ui = fixture([record("requested")]);await ui.settle();await ui.load("requested");
+  ui.root.listeners.click({target:{closest:()=>({getAttribute:()=>"/connections"})},preventDefault(){throw new Error("Valid detour must remain usable");}});
+  const saved = JSON.parse(ui.storage.get("lightwork:connection-task:v1"));
+  assert.equal(saved.case_id,"requested");assert.equal(saved.context,"f".repeat(64));assert.equal(typeof saved.created_at,"number");
+  assert.deepEqual(Object.keys(saved).sort(),["case_id","context","created_at"]);assert.ok(ui.calls.every(call=>call.method==="GET"));
+});
+
+test("a returned request is never read under a different workspace even if its ID exists there", async () => {
+  const ui=fixture([record("same-id")],null,"?case=same-id",{case_id:"same-id",context:"e".repeat(64),created_at:Date.now()});await ui.settle();
+  assert.equal(ui.calls.length,0);assert.match(ui.byId("message").textContent,/workspace.*changed/i);assert.equal(ui.byId("execute").disabled,true);
 });
 
 test("the selected case explains the promised outcome and support boundary", async () => {

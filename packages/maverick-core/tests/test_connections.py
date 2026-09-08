@@ -34,6 +34,19 @@ def test_set_list_get_delete_roundtrip():
     assert connections.list_connections() == []
 
 
+def test_reviewed_delete_does_not_remove_replacement_or_reveal_other_owner():
+    old = connections.set_connection("reviewed", owner="user:owner", token="old-fixture")
+    replacement = connections.set_connection("reviewed", owner="user:owner", token="replacement-fixture")
+    before = connections._path().read_bytes()
+    assert not connections.delete_connection("reviewed", "user:other", expected_revision=old["revision"])
+    with pytest.raises(connections.ConnectionVersionConflict, match="changed"):
+        connections.delete_connection("reviewed", "user:owner", expected_revision=old["revision"])
+    assert connections._path().read_bytes() == before
+    assert connections.get_connection("reviewed")["revision"] == replacement["revision"]
+    assert connections.delete_connection("reviewed", "user:owner", expected_revision=replacement["revision"])
+    assert connections.get_connection("reviewed") is None
+
+
 @pytest.mark.parametrize(
     "corrupt_payload",
     (b"not-json", b"[]", b'{"existing":"not-a-record"}'),

@@ -5628,15 +5628,25 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 
 
 @router.delete("/connections/{name}")
-async def delete_connection_endpoint(request: Request, name: str) -> dict:
+async def delete_connection_endpoint(
+    request: Request, name: str,
+    expected_revision: str | None = Query(default=None, min_length=1, max_length=64),
+) -> dict:
     require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
     from maverick import connections
 
+    owner = _request_identity(request)
+    if owner is not None and expected_revision is None:
+        raise HTTPException(
+            status_code=422, detail="Reload Connections and review the current account before removing it.",
+        )
     try:
         deleted = connections.delete_connection(
-            name, owner=_request_identity(request)
+            name, owner=owner, expected_revision=expected_revision,
         )
+    except connections.ConnectionVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except connections.ConnectionStoreUnavailable as exc:
         raise HTTPException(
             status_code=503, detail="connection credential registry is unavailable"

@@ -38,7 +38,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<section id="vendor-onboarding" aria-labelledby="vo-title" data-api-base="/api/v1/vendor-onboarding">
+<section id="vendor-onboarding" aria-labelledby="vo-title" data-api-base="/api/v1/vendor-onboarding" data-workspace-context="{{ connection_workspace_context }}">
   <h1 id="vo-title" class="page-title">AI vendor onboarding</h1>
   {% if offline_demo %}<p role="note"><strong>Offline simulation.</strong> All vendor evidence, reviewer identities and tickets in this demonstration are synthetic.</p>{% endif %}
   <p>Bring in evidence, review the assessment, and approve a verified Jira task. Renewals retain the previous evidence and decisions.</p>

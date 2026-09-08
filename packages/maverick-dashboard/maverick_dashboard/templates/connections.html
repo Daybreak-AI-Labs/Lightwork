@@ -40,11 +40,11 @@
              lede='Connect an account with provider consent, or save a tool’s API
                    token. Your workflows can then refer to the saved connection
                    by name.') %}
-  {{ state('Current state', 'Sealed credential vault',
+  {{ state('Account access', 'Saved connections',
            badge='encrypted at rest', badge_class='ok',
            copy='Tokens are sealed the moment you save and are never shown
-                 again. Managing connections is admin-only; builders
-                 reference a saved connection by name.') }}
+                 again. Workspace administrators manage connections;
+                 workflows use them within the access you approve.') }}
 {% endcall %}
 
 <div class="cx">
@@ -241,8 +241,9 @@
           if (accessLost) return;
           if (!(await mvConfirm('Delete connection “' + c.name + '”?', { okText: 'Delete' }))) return;
           if (accessLost) return;
-          api('/api/v1/connections/' + encodeURIComponent(c.name), { method: 'DELETE' })
-            .then(function () { load(); });
+          api('/api/v1/connections/' + encodeURIComponent(c.name) + '?' + new URLSearchParams({expected_revision:c.revision}), { method: 'DELETE' })
+            .then(function (r) { if (!r.ok) { say(r.status === 409 ? 'This connection changed. Refresh and review it before disconnecting.' : 'Disconnect was not confirmed. Refresh connection status before trying again.', true); } else { say('Connection disconnected. Existing tasks are kept and will require current authorization before they can run.'); } load(); })
+            .catch(function () { say('Disconnect was not confirmed. Refresh connection status before trying again.', true); });
         });
         li.appendChild(edit); li.appendChild(test); li.appendChild(del);
         list.appendChild(li);

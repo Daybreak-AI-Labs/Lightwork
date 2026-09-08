@@ -286,13 +286,22 @@ def get_connection(name: str) -> dict | None:
     return dict(rec) if isinstance(rec, dict) else None
 
 
-def delete_connection(name: str, owner: str | None = None) -> bool:
+def delete_connection(
+    name: str, owner: str | None = None, *, expected_revision: str | None = None,
+) -> bool:
+    """Remove the reviewed generation under the same lock as credential writes.
+
+    Explicit local/programmatic callers may omit the revision for legacy
+    unconditional removal. Authenticated dashboard callers must supply it.
+    """
     slug = normalize_name(name)
     with _mutation_lock():
         data = dict(_load())
         rec = data.get(slug)
         if rec is None or (owner is not None and rec.get("owner", "") != owner):
             return False
+        if expected_revision is not None and rec.get("revision") != expected_revision:
+            raise ConnectionVersionConflict("Connection changed; reload Connections and review removal again.")
         del data[slug]
         _save(data)
     return True

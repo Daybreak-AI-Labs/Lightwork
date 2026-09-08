@@ -3,15 +3,16 @@
   <p>Connect Google Drive, Google Cloud Storage, or Jira Cloud with renewable authorization. You review access on the provider's website, then return here to finish saving the connection.</p>
   <p id="cs-status" role="status" aria-live="polite" tabindex="-1">Loading account connection options…</p>
   <button id="cs-refresh" class="btn" type="button">Refresh account connections</button>
+  <p id="cs-task-return" hidden>Your original request is still saved. <a id="cs-task-link" class="btn">Return to request</a></p>
   <div id="cs-enable" hidden>
     <p>Saved account authorization is off. An administrator can enable it here when deployment policy permits.</p>
     <label class="cs-check"><input id="cs-enable-confirm" type="checkbox">Enable saved connections and renewable account authorization for this app.</label>
     <button id="cs-enable-button" class="btn" type="button" disabled>Enable account connections</button>
   </div>
   <div id="cs-options" hidden>
-    <details id="cs-app-details">
-      <summary>Register the provider application</summary>
-      <p>Your organization must register an application with Google or Atlassian and permit the access listed below. Provider registration and consent happen on their websites. Save that application's credentials here; Lightwork keeps the secret encrypted and never displays it again.</p>
+    <details id="cs-app-details" hidden>
+      <summary>Installation administrator: provider registration</summary>
+      <p>An installation administrator configures the provider application for this workspace. Workspace administrators then connect their accounts using that registration. Save the application's credentials here after approving its return address and permissions with the provider. Lightwork encrypts the secret and never displays it again.</p>
       <label for="cs-callback">Return address to register with the provider</label><input id="cs-callback" class="input" readonly>
       <form id="cs-application" autocomplete="off" data-draft-recovery="off">
         <label for="cs-provider">Provider</label><select id="cs-provider" class="input"><option value="google">Google</option><option value="atlassian">Atlassian</option></select>

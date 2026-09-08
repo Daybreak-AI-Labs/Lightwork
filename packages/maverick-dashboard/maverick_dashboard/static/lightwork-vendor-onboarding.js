@@ -9,6 +9,16 @@
   let reviewedAt = null;
   let busy = false;
   let uploadReview = null, uploadGeneration = 0, uploadDenied = false;
+  const connectionTaskKey = "lightwork:connection-task:v1";
+  root.addEventListener("click", event => {
+    const link = event.target.closest?.("a");
+    if (link?.getAttribute("href") !== "/connections" || !selected) return;
+    if (!/^[a-f0-9]{64}$/.test(root.dataset.workspaceContext) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(selected.id)) {
+      event.preventDefault(); message("Reload this request before opening Connections.", true); return;
+    }
+    try { window.sessionStorage.setItem(connectionTaskKey, JSON.stringify({context:root.dataset.workspaceContext, case_id:selected.id, created_at:Date.now()})); }
+    catch (_) { event.preventDefault(); message("This browser cannot retain the return to your request. Allow session storage, then open Connections again.", true); }
+  });
   const show = (id, value) => { byId(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); };
   const message = (text, error = false) => {
     byId("message").setAttribute("role", error ? "alert" : "status");
@@ -97,7 +107,7 @@
   async function api(path, body) {
     const response = await fetch(base + path, {
       method: body === undefined ? "GET" : "POST", credentials: "same-origin",
-      headers: {"Content-Type": "application/json"},
+      headers: {"Content-Type": "application/json", ...(root.dataset.workspaceContext ? {"X-Lightwork-Vendor-Context": root.dataset.workspaceContext} : {})},
       ...(body === undefined ? {} : {body: JSON.stringify(body)})
     });
     let data;
@@ -318,7 +328,7 @@
   async function uploadRequest(path, body) {
     if (uploadDenied) throw new Error("Sign in and reload this page before uploading evidence.");
     const response = await fetch(base + path, {method:"POST", credentials:"same-origin", cache:"no-store",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      headers:{"Content-Type":"application/json",...(root.dataset.workspaceContext?{"X-Lightwork-Vendor-Context":root.dataset.workspaceContext}:{})},body:JSON.stringify(body)});
     if ([401,403].includes(response.status)) {
       clearUploadReview(true); uploadDenied = true;
       throw new Error("Access to evidence upload is unavailable. Sign in or check permissions, then reload this page.");
@@ -438,11 +448,18 @@
     byId("renewal").value = selected.id;
   }, "Renewal details copied. Review the new request fields, then choose Create request.", "document");
   run(async () => {
-    await refresh();
     const requested = new URLSearchParams(window.location.search).get("case");
+    let returning;try { returning = JSON.parse(window.sessionStorage.getItem(connectionTaskKey)); } catch (_) {}
+    if (returning && requested === returning.case_id) {
+      if (returning.context !== root.dataset.workspaceContext) throw new Error("The workspace or signed-in account changed. Select the original workspace before returning to this request.");
+      if (!Number.isFinite(returning.created_at) || returning.created_at > Date.now()+300000 || Date.now()-returning.created_at >= 86400000)
+        throw new Error("The saved return to this request expired. Select the request again from this workspace.");
+    }
+    await refresh();
     if (requested) {
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(requested)) throw new Error("The request link is invalid. Select a request from this workspace.");
       render(await api("/cases/" + encodeURIComponent(requested)));
+      try { window.sessionStorage.removeItem(connectionTaskKey); } catch (_) {}
       return "Linked request loaded. Review its evidence and current status.";
     }
   }, "Requests loaded. Select a request to begin.");

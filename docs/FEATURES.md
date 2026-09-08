@@ -2107,12 +2107,18 @@ here.
   data-key datalist) with a raw-text advanced mode for `and`/`or`.
 
 - **Renewable named accounts** (`connection_oauth`, gated on Connections and the
-  OAuth vault) — sealed per-owner app registration and reviewed provider consent
+  OAuth vault) — sealed workspace app registration managed by an installation
+  administrator, with reviewed account consent by workspace administrators
   in Connections for Google Drive, Google Cloud Storage discovery and Jira
   Cloud. Server-held PKCE/state binds the current workspace, account, app and
   connection versions; renewal preserves the reviewed generation, while a lost
   rotating-token response requires reconnecting. Vendor/discovery adapters consume
-  the actual named records. External provider registration/consent and live
+  the actual named records. Existing personal registrations stay private. A
+  same-browser connection detour retains the original vendor request; denial
+  and uncertain renewal expose reconnect/return actions without resending work.
+  Authenticated disconnect requires the reviewed credential revision. Callback
+  access logs and connection validation errors redact sensitive inputs.
+  External provider registration/consent and live
   customer acceptance remain separate; see [account authorization](named-account-authorization.md).
 - **Named connections** (`maverick.connections`, gated on `[connections]`) —
   store a connector's base URL + API token under a name, sealed at rest with

@@ -81,13 +81,83 @@ def _app_key(actor, provider):
     return hashlib.sha256(json.dumps([actor, provider]).encode()).hexdigest()
 
 
+def _workspace_app_key(provider):
+    # A distinct namespace in the existing tenant-sealed store. Owner keys
+    # remain private legacy registrations and are never migrated implicitly.
+    return "workspace:" + hashlib.sha256(provider.encode()).hexdigest()
+
+
+def _bound_application(store, actor, provider, binding):
+    key = binding.get("application_key", _app_key(actor, provider))
+    if key not in (_app_key(actor, provider), _workspace_app_key(provider)):
+        return None
+    row = store["applications"].get(key)
+    if not isinstance(row, dict) or row.get("provider") != provider:
+        return None
+    if key == _workspace_app_key(provider):
+        if row.get("scope") != "workspace":
+            return None
+    elif row.get("owner") != actor or row.get("scope", "owner") != "owner":
+        return None
+    return row
+
+
+def _selected_application(store, actor, provider):
+    for key in (_workspace_app_key(provider), _app_key(actor, provider)):
+        row = _bound_application(store, actor, provider, {"application_key": key})
+        if row:
+            return key, row
+    return None, None
+
+
 def applications(actor):
+    """Legacy owner registrations; callers must authorize metadata access."""
     _authority(actor)
     value = _load()["applications"]
-    return [{"provider": row["provider"], "client_id": row["client_id"], "revision": row["revision"], "has_secret": bool(row["client_secret"])} for row in value.values() if row.get("owner") == actor]
+    return [{"provider": row["provider"], "client_id": row["client_id"], "revision": row["revision"], "has_secret": bool(row["client_secret"])} for row in value.values() if row.get("owner") == actor and row.get("scope", "owner") == "owner"]
+
+
+def managed_applications(actor):
+    """Workspace registration metadata for the authorized installation operator."""
+    _authority(actor)
+    store = _load()
+    result = []
+    for provider in ("google", "atlassian"):
+        row = _bound_application(store, actor, provider, {"application_key": _workspace_app_key(provider)})
+        if row:
+            result.append({"provider": provider, "client_id": row["client_id"], "revision": row["revision"],
+                "has_secret": bool(row["client_secret"]), "configured": True, "registration_scope": "workspace"})
+    return result
+
+
+def available_applications(actor):
+    """Customer availability without operator registration identifiers or secrets."""
+    _authority(actor)
+    store = _load()
+    result = []
+    for provider in ("google", "atlassian"):
+        key, row = _selected_application(store, actor, provider)
+        if row:
+            result.append({"provider": provider, "configured": True,
+                "registration_scope": "workspace" if key == _workspace_app_key(provider) else "legacy_owner"})
+    return result
 
 
 def save_application(actor, *, provider, client_id, client_secret, expected_revision):
+    """Retain the owner-only registration contract for explicit legacy callers."""
+    _save_application(actor, provider=provider, client_id=client_id, client_secret=client_secret,
+        expected_revision=expected_revision, workspace=False)
+    return applications(actor)
+
+
+def save_workspace_application(actor, *, provider, client_id, client_secret, expected_revision):
+    """Save operator-managed registration; the API enforces global admin authority."""
+    _save_application(actor, provider=provider, client_id=client_id, client_secret=client_secret,
+        expected_revision=expected_revision, workspace=True)
+    return managed_applications(actor)
+
+
+def _save_application(actor, *, provider, client_id, client_secret, expected_revision, workspace):
     _authority(actor)
     if provider not in {"google", "atlassian"}:
         raise ValueError("Select a supported account provider.")
@@ -97,7 +167,7 @@ def save_application(actor, *, provider, client_id, client_secret, expected_revi
         raise ValueError("Enter the application's client secret, or leave it unchanged.")
     with connections._mutation_lock():
         store = _load()
-        key = _app_key(actor, provider)
+        key = _workspace_app_key(provider) if workspace else _app_key(actor, provider)
         previous = store["applications"].get(key)
         if (previous or {}).get("revision", "") != expected_revision:
             raise connections.ConnectionVersionConflict("Application registration changed. Reload before saving.")
@@ -107,9 +177,9 @@ def save_application(actor, *, provider, client_id, client_secret, expected_revi
         if not previous and len(store["applications"]) >= 1000:
             raise ValueError("Application registration capacity reached.")
         store["applications"][key] = {"provider": provider, "owner": actor, "client_id": client_id,
-            "client_secret": secret, "revision": uuid.uuid4().hex, "saved_at": time.time()}
+            "client_secret": secret, "revision": uuid.uuid4().hex, "saved_at": time.time(),
+            "scope": "workspace" if workspace else "owner"}
         _save(store)
-    return applications(actor)
 
 
 def _network_allowed(url):
@@ -189,9 +259,9 @@ def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", 
     _network_allowed(oauth_providers.get_provider(selected["provider"]).token_url)
     with connections._mutation_lock():
         store = _load()
-        application = store["applications"].get(_app_key(actor, selected["provider"]))
+        application_key, application = _selected_application(store, actor, selected["provider"])
         if not application:
-            raise ValueError("Save the provider's app registration below before authorizing.")
+            raise ValueError("Ask your installation administrator to enable this account provider, then try again.")
         current = connections.get_connection(name)
         if current and current.get("owner") != actor:
             raise PermissionError("This connection name is already owned by another account.")
@@ -207,7 +277,7 @@ def begin(actor, *, profile, name, redirect_uri, context, expected_revision="", 
         if len(store["consents"]) >= 32:
             raise ValueError("Too many account authorizations are pending. Wait ten minutes.")
         store["consents"][key] = {"owner": actor, "profile": profile, "name": name, "context": context,
-            "application_revision": application["revision"], "expected_revision": expected_revision,
+            "application_key": application_key, "application_revision": application["revision"], "expected_revision": expected_revision,
             "redirect_uri": redirect_uri, "site_url": site_url, "verifier": verifier, "expires_at": now + 600}
         _save(store)
     return {"authorize_url": built, "state": state, "expires_in": 600}
@@ -249,7 +319,7 @@ def finish(actor, *, state, code, context, redirect_uri):
                 or consent["redirect_uri"] != redirect_uri or consent["expires_at"] <= time.time()):
             raise PermissionError("Authorization expired or belongs to a different account or workspace. Start again.")
         selected = PROFILES[consent["profile"]]
-        application = store["applications"].get(_app_key(actor, selected["provider"]))
+        application = _bound_application(store, actor, selected["provider"], consent)
         records = connections._load()
         previous = records.get(consent["name"])
         if (not application or application["revision"] != consent["application_revision"]
@@ -277,7 +347,8 @@ def finish(actor, *, state, code, context, redirect_uri):
             "created": (previous or {}).get("created", time.time()), "owner": actor,
             "access": (previous or {}).get("access", "owner"), "allowed_principals": (previous or {}).get("allowed_principals", []),
             "revision": uuid.uuid4().hex,
-            "oauth": {"profile": consent["profile"], "application_revision": application["revision"], "refresh_token": refresh,
+            "oauth": {"profile": consent["profile"], "application_key": consent.get("application_key", _app_key(actor, selected["provider"])),
+                "application_revision": application["revision"], "refresh_token": refresh,
                 "expires_at": expires, "refresh_state": "ready", "api_prefix": prefix, "site_url": consent["site_url"]}}
         connections._save(records)
         return connections._public(records[consent["name"]])
@@ -298,7 +369,7 @@ def renew(record, *, actor):
         selected = PROFILES.get(oauth.get("profile"))
         if (not selected or current.get("connector") != selected["connector"] or current.get("base_url") != selected["origin"]):
             raise PermissionError("Renewable connection destination does not match its authorization.")
-        application = _load()["applications"].get(_app_key(current["owner"], selected["provider"]))
+        application = _bound_application(_load(), current["owner"], selected["provider"], oauth)
         if not application or application["revision"] != oauth.get("application_revision"):
             raise connections.ConnectionVersionConflict("App registration changed. Reconnect this account in Connections.")
         if oauth.get("refresh_state") != "ready":
@@ -325,5 +396,21 @@ def public_status(record):
     value = record.get("oauth")
     if not isinstance(value, dict):
         return None
+    state = value.get("refresh_state")
+    action = "" if state == "ready" else "Reconnect this account in Connections before continuing."
+    try:
+        selected = PROFILES.get(value.get("profile"))
+        if not enabled() or not current_tenant_id_strict():
+            state, action = "unavailable", "Ask your administrator to check saved account authorization settings."
+        elif (not selected or record.get("connector") != selected["connector"]
+                or record.get("base_url") != selected["origin"]):
+            state, action = "reconnect_required", "Reconnect this account in Connections before continuing."
+        else:
+            application = _bound_application(_load(), record.get("owner"), selected["provider"], value)
+            if not application or application.get("revision") != value.get("application_revision"):
+                state, action = "reconnect_required", "Reconnect this account in Connections; its application registration changed."
+    except Exception:
+        state, action = "unavailable", "Ask your administrator to restore account authorization settings, then reconnect."
     return {"profile": value.get("profile"), "expires_at": value.get("expires_at"),
-        "renewal_state": value.get("refresh_state"), "site_url": value.get("site_url", "")}
+        "renewal_state": state, "available": state == "ready", "recovery_action": action,
+        "site_url": value.get("site_url", "")}
