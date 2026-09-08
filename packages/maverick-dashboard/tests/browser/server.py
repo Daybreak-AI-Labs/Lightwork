@@ -302,12 +302,19 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8769)
+    parser.add_argument(
+        "--show-vendor-setup",
+        action="store_true",
+        help="Show setup controls with synthetic browser identity and provider fixtures only",
+    )
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="lightwork-browser-") as temporary:
         directory = Path(temporary)
         environment(directory)
         block_outbound()
         app = build_app(directory)
+        if args.show_vendor_setup:
+            app.state.vendor_onboarding_demo = False
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 

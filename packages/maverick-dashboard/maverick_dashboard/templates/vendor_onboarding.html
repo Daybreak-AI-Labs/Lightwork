@@ -30,8 +30,9 @@
   #vo-upload-review pre {max-height:24rem;min-width:0}
   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
   .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
-  .vo-card #vo-cancellation-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
+  .vo-card #vo-cancellation-confirm,.vo-card #vs-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
   #vo-cancellation-status {white-space:pre-line;overflow-wrap:anywhere}
+  #vs-panel [id] {scroll-margin-top:var(--vs-anchor-offset,calc(var(--shell-topbar-h,56px) + 1rem))}
   #vendor-onboarding:has(#vo-upload-review:not([hidden])) #vo-message {position:static}
   @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
 </style>
@@ -45,15 +46,20 @@
   {% if not offline_demo %}
   <details class="vo-card" id="vs-panel" open>
     <summary>Workspace setup</summary>
+    <p id="vs-readiness-summary" role="status" aria-live="polite">Setup has not been checked.</p>
+    <ul id="vs-next-actions"><li>Ask an administrator to choose a vendor review owner, connect Jira, and save the workspace setup below.</li></ul>
+    <p id="vs-deployment">{{ deployment.message }}{% if not deployment.supported %} {{ deployment.next_action }}{% endif %}</p>
     <p id="vs-status" role="status" aria-live="polite">Loading setup…</p>
     <p>Choose credentials in <a href="/connections">Connections</a>. This saves the workspace's vendor review owner and delivery connection. Provider access is checked by the existing evidence and delivery actions.</p>
+    <p>Google Drive is optional when you upload evidence. Uploads support text, PDF, Word and Excel files; review the extracted text before using it. A verified ticket still needs an explicit customer acceptance decision.</p>
+    <details><summary>Storage and recovery support</summary><p>This workflow uses one persistent Lightwork installation. Its workers share the same local records and coordination locks. Workspace recovery covers supported local records; it does not undo changes in Drive or Jira. Review <a href="/workspace/recovery">workspace recovery</a> before changing installations.</p></details>
     <p id="vs-owner"></p>
     <form id="vs-form">
       <label for="vs-resource-owner">Vendor review owner</label><select id="vs-resource-owner" required disabled aria-describedby="vs-owner-help"></select>
       <p id="vs-owner-help">For initial setup, choose an active workspace member who can manage vendor reviews. Manage workspace membership in <a href="/users">Users</a>. Existing ownership stays fixed. Choosing an owner grants no permissions or connection access.</p>
       <label for="vs-ticket">Jira connection</label><select id="vs-ticket" required disabled></select>
       <label for="vs-document">Google Drive connection (optional for uploaded evidence)</label><select id="vs-document" disabled></select>
-      <label><input type="checkbox" id="vs-confirm" style="display:inline;width:auto" disabled> I reviewed the owner, connection choices and this setup change.</label>
+      <label class="vo-upload-confirm-label"><input type="checkbox" id="vs-confirm" disabled> <span>I reviewed the owner, connection choices and this setup change.</span></label>
       <div class="vo-actions"><button id="vs-save" type="submit" disabled>Save workspace setup</button><button id="vs-enable" type="button" disabled>Enable vendor workflow</button><button id="vs-refresh" type="button">Refresh setup</button></div>
     </form>
     <p>Enable vendor workflow turns on Connections, vendor management, AI vendor risk, model assurance and evidence records for this installation. It grants no colleague access, starts no provider request, and approves no action.</p>

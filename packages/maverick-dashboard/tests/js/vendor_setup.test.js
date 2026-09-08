@@ -2,7 +2,8 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{JSDOM}=require('jsdom');
 const folder=path.resolve(__dirname,'../../maverick_dashboard');
 const markup=fs.readFileSync(path.join(folder,'templates/vendor_onboarding.html'),'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');
-const initial={context:'a'.repeat(64),configuration:'b'.repeat(64),revision:0,binding:{resource_owner:''},owner_locked:false,owner_source:'initial',eligible_owners:['user:other','user:owner'],principal:'user:owner',modules_enabled:true,connections:[{name:'jira',connector:'jira',revision:'j1',has_token:true},{name:'drive',connector:'gdrive',revision:'d1',has_token:true}]};
+const readiness={state:'setup_required',configuration_complete:false,actions:[{id:'owner',label:'Choose a vendor review owner.',href:'#vs-resource-owner'}],deployment:{supported:true,message:'One persistent Lightwork installation.'},live_provider_verified:false};
+const initial={context:'a'.repeat(64),configuration:'b'.repeat(64),revision:0,binding:{resource_owner:''},owner_locked:false,owner_source:'initial',eligible_owners:['user:other','user:owner'],principal:'user:owner',modules_enabled:true,connections:[{name:'jira',connector:'jira',revision:'j1',has_token:true},{name:'drive',connector:'gdrive',revision:'d1',has_token:true}],readiness};
 async function fixture(intercept=()=>initial){
   const dom=new JSDOM(markup,{url:'https://app.example/vendor-onboarding',runScripts:'outside-only'}),calls=[],w=dom.window;
   w.fetch=async(url,options)=>{calls.push({url,options});const value=await intercept(url,options);return value instanceof Response?value:new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});};
@@ -48,4 +49,24 @@ test('existing owner is fixed while reviewed connection updates keep its exact i
   assert.equal(JSON.parse(ui.calls[1].options.body).expected_revision,2);
   const legacy=await fixture(()=>({...fixed,binding:{...fixed.binding,resource_owner:'Procurement team'}}));t.after(()=>legacy.w.close());
   assert.equal(legacy.el('resource-owner').selectedOptions[0].textContent,'Procurement team');assert.match(legacy.el('owner').textContent,/Procurement team/);
+});
+
+test('unsupported deployment disables setup writes and malformed readiness clears prior controls',async t=>{
+  const blocked={...initial,readiness:{...readiness,state:'blocked',deployment:{supported:false,message:'Deployment needs attention.'},actions:[{id:'deployment',label:'Use one persistent installation.',href:'#vs-deployment'}]}};
+  const ui=await fixture(()=>blocked);t.after(()=>ui.w.close());
+  assert.match(ui.el('readiness-summary').textContent,/Deployment needs attention/);
+  assert.equal(ui.el('status').textContent,'Resolve the deployment issue above before changing setup.');
+  assert.equal(ui.el('save').disabled,true);assert.equal(ui.el('enable').disabled,true);assert.equal(ui.el('confirm').disabled,true);
+  ui.el('enable').click();assert.equal(ui.calls.length,1);
+  const broken=await fixture(()=>({...initial,readiness:undefined}));t.after(()=>broken.w.close());
+  assert.match(broken.el('status').textContent,/readiness was incomplete/);assert.equal(broken.el('save').disabled,true);
+  assert.equal(broken.el('ticket').options.length,0);
+});
+
+test('setup checklist renders text safely and failed refresh removes stale readiness',async t=>{
+  let fail=false;const ui=await fixture(()=>fail?new Response('Unavailable',{status:503}):{...initial,readiness:{...readiness,actions:[{id:'owner',label:'Choose <img src=x> owner',href:'#vs-resource-owner'}]}});t.after(()=>ui.w.close());
+  assert.equal(ui.el('next-actions').querySelector('img'),null);assert.match(ui.el('next-actions').textContent,/<img src=x>/);
+  fail=true;ui.el('refresh').click();await ui.settle();
+  assert.equal(ui.el('next-actions').children.length,0);assert.equal(ui.el('readiness-summary').textContent,'Setup has not been confirmed.');
+  assert.equal(ui.el('deployment').textContent,'Deployment status has not been confirmed.');
 });

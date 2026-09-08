@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from maverick.paths import current_tenant_id_strict
+from maverick.vendor_onboarding import deployment_readiness
 
 from .auth import require_permission
 
@@ -24,6 +25,7 @@ def create_vendor_onboarding_page_router(templates: Jinja2Templates) -> APIRoute
         response = templates.TemplateResponse(request, "vendor_onboarding.html", {
             "csp_style_nonce": nonce,
             "offline_demo": getattr(request.app.state, "vendor_onboarding_demo", False) is True,
+            "deployment": deployment_readiness(),
         })
         response.headers.update({
             "Cache-Control": "no-store, private",

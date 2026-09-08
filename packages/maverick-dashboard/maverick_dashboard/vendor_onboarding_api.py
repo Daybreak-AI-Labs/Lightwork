@@ -9,7 +9,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from maverick.governed_operations import ActionReviewRequiredError, ApprovalBindingError
 from maverick.governed_records import RecordConflict
 from maverick.platform_contracts import PlatformContractError
-from maverick.vendor_onboarding import VendorOnboardingContractError
+from maverick.vendor_onboarding import (
+    VendorOnboardingContractError,
+    VendorOnboardingDeploymentError,
+    deployment_readiness,
+)
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -86,6 +90,9 @@ def _error(status, code, message, *, retryable=False, next_action):
 
 def _binding(request: Request):
     require_permission(request, "operate")
+    profile = deployment_readiness()
+    if not profile["supported"]:
+        raise _error(409, profile["code"], profile["message"], next_action=profile["next_action"])
     factory = getattr(request.app.state, "vendor_onboarding_binding_factory", None)
     if not callable(factory):
         raise _error(503, "composition_unavailable", "Vendor onboarding is unavailable for this workspace.",
@@ -108,6 +115,8 @@ def _call(binding, operation: str, *args, **kwargs):
         return getattr(binding.service, operation)(binding.context, *args, **kwargs)
     except HTTPException:
         raise
+    except VendorOnboardingDeploymentError as exc:
+        raise _error(409, exc.code, str(exc), next_action=exc.next_action) from exc
     except (ActionReviewRequiredError, ApprovalBindingError) as exc:
         raise _error(
             409,

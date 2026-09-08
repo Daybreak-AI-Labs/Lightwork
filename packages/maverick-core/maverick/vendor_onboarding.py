@@ -12,6 +12,7 @@ import copy
 import functools
 import hashlib
 import math
+import os
 import re
 import threading
 import time
@@ -101,6 +102,68 @@ class VendorOnboardingContractError(ValueError):
         self.code = code
 
 
+class VendorOnboardingDeploymentError(ValueError):
+    """The current installation cannot safely operate the supplier saga."""
+
+    def __init__(self, readiness):
+        super().__init__(readiness["message"])
+        self.code = readiness["code"]
+        self.next_action = readiness["next_action"]
+
+
+def deployment_readiness() -> dict:
+    """Read deployment policy without taking a lease or opening any store.
+
+    This is configuration admission, not proof of a live replica count, durable
+    storage or usable connections. A shared governed-record backend does not
+    make the supplier saga's local cross-process lock work across hosts.
+    """
+    from .config import config_source_errors, load_global_config
+    from .control_plane_lease import OVERRIDE_ENV
+    from .governed_records import _replica_count
+
+    result = {
+        "supported": False, "profile": "single_persistent_application_replica",
+        "code": "deployment_configuration_unavailable",
+        "message": "Supplier workflow settings could not be verified for this installation.",
+        "next_action": "Ask an administrator to review installation settings, then retry.",
+    }
+    try:
+        current = load_global_config()
+        if not isinstance(current, dict) or config_source_errors(include_tenant=False):
+            return result
+        section = current.get("deployment", {})
+        if not isinstance(section, dict):
+            return result
+        raw = os.environ.get(OVERRIDE_ENV)
+        if raw is None:
+            multiple = section.get("allow_multiple_control_planes", False)
+            if type(multiple) is not bool:
+                return result
+        else:
+            normalized = raw.strip().lower()
+            if normalized not in {"", "0", "false", "no", "off", "1", "true", "yes", "on"}:
+                return result
+            multiple = normalized in {"1", "true", "yes", "on"}
+        replicas = _replica_count()
+    except Exception:
+        # Configuration exception text may contain paths or private values.
+        return result
+    if replicas != 1 or multiple:
+        return dict(result, code="unsupported_deployment",
+                    message="The supplier workflow is unavailable for this installation.",
+                    next_action="Ask an administrator to use one persistent application instance with single-instance protection enabled, then retry.")
+    return dict(result, supported=True, code="deployment_supported",
+                message="Configured for one persistent Lightwork installation.",
+                next_action="Complete workspace setup and review connection access before starting work.")
+
+
+def _require_supported_deployment():
+    readiness = deployment_readiness()
+    if not readiness["supported"]:
+        raise VendorOnboardingDeploymentError(readiness)
+
+
 def _text(value, name, limit=4000):
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(f"{name} must be a nonempty string of at most {limit} characters")
@@ -118,6 +181,7 @@ def _scoped(method):
     def call(self, ctx, *args, **kwargs):
         if not isinstance(ctx, ServiceContext):
             raise TypeError("explicit ServiceContext required")
+        _require_supported_deployment()
         if not enabled():
             raise RuntimeError("vendor onboarding requires [vendor_onboarding] enable = true")
         with tenant_scope(tenant=ctx.tenant):
@@ -137,11 +201,13 @@ class VendorOnboardingService:
 
     def check_renewal(self, ctx, case_id):
         """Application boundary used by the dashboard for current renewal status."""
+        _require_supported_deployment()
         from .vendor_evidence_evolution import EvidenceRenewalEvolution
 
         return EvidenceRenewalEvolution(self.authorize, clock=self.clock).run_for_case(ctx, self, case_id)
 
     def _permit(self, ctx, capability, resource, *, human=False):
+        _require_supported_deployment()
         if human and not ctx.human:
             audit_authority_denial(ctx, capability, resource, "authenticated_human_required")
             raise PermissionError("this decision requires an authenticated human")
@@ -270,6 +336,7 @@ class VendorOnboardingService:
         return dict(row, journey_contract=reference, work_item=work_item)
 
     def _save(self, ctx, row, *, audit_action="vendor_onboarding_changed", **changes):
+        _require_supported_deployment()
         self._contract(row)
         result = _CASES.update(
             row["id"], lambda value: value.update(changes),
@@ -596,6 +663,7 @@ class VendorOnboardingService:
         return {key: item.get(key) for key in ("document_id", "version", "modified_at", "mime")}
 
     def current_evidence_version(self, ctx, row, *, verify_bytes=False):
+        _require_supported_deployment()
         evidence = row["evidence"]
         observed = []
         items = sorted(evidence.get("documents") or [evidence],

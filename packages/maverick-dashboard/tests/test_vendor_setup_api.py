@@ -67,6 +67,46 @@ def bind(client, record, *, owner=None):
     return client.put("/api/v1/vendor-setup", json={**reviewed(status), "expected_revision": status["revision"], "ticket": record["name"], "ticket_revision": record["revision"], "resource_owner": owner if owner is not None else status["binding"]["resource_owner"] or "user:owner"})
 
 
+def test_fresh_workspace_has_actionable_setup_and_upload_only_has_no_drive_requirement(client):
+    fresh = client.get("/api/v1/vendor-setup")
+    assert fresh.status_code == 200, fresh.text
+    readiness = fresh.json()["readiness"]
+    assert readiness["state"] == "setup_required" and not readiness["configuration_complete"]
+    assert {action["id"] for action in readiness["actions"]} == {"enable", "owner", "jira", "save"}
+    assert next(action for action in readiness["actions"] if action["id"] == "jira")["href"] == "/connections"
+    assert readiness["live_provider_verified"] is False
+    activate(client)
+    saved = bind(client, credential())
+    assert saved.status_code == 200, saved.text
+    ready = saved.json()["readiness"]
+    assert ready["state"] == "configured" and ready["configuration_complete"]
+    assert ready["actions"] == [] and ready["live_provider_verified"] is False
+
+
+def test_unsupported_profile_shows_recovery_action_without_entering_records(client, monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Unsupported deployment entered workflow storage or composition")
+
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "2")
+    monkeypatch.setattr(setup, "current", forbidden)
+    monkeypatch.setattr(setup, "owner_policy", forbidden)
+    monkeypatch.setattr(connections, "list_connections", forbidden)
+    monkeypatch.setattr(client.app.state, "vendor_onboarding_binding_factory", forbidden)
+    before = client.get("/api/v1/vendor-setup")
+    assert before.status_code == 200, before.text
+    state = before.json()
+    assert state["readiness"]["state"] == "blocked"
+    assert state["readiness"]["actions"][0]["href"] == "#vs-deployment"
+    assert not state["readiness"]["configuration_complete"]
+    denied = client.post("/api/v1/vendor-setup/enable", json=reviewed(state))
+    assert denied.status_code == 409
+    assert not config.dashboard_overrides_path().exists()
+    denied = client.post("/api/v1/vendor-onboarding/cases", json={"vendor_name": "Blocked vendor", "project": "VEND", "purpose": "Unsupported topology"})
+    assert denied.status_code == 409, denied.text
+    assert denied.json()["detail"]["next_action"]
+    assert denied.json()["detail"]["retryable"] is False
+
+
 def test_activation_and_upload_only_binding_are_real_and_tenant_private(client):
     state = activate(client)
     assert state["modules_enabled"] and state["connections_enabled"]

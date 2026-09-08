@@ -28,6 +28,8 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_REPLICA_COUNT", raising=False)
+    monkeypatch.delenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", raising=False)
     (tmp_path / "config.toml").write_text(
         "[vendor_onboarding]\nenable=true\n[vendor_management]\nenable=true\n"
         "[ai_vendor_risk]\nenable=true\n[model_risk_assurance]\nenable=true\n",
@@ -69,6 +71,154 @@ def approved(svc, ctx):
     row = reviewed(svc, ctx)
     row = svc.prepare_action(ctx, row["id"], row["revision"])
     return svc.approve_action(ctx, row["id"], row["revision"])
+
+
+@pytest.mark.parametrize("action", ["intake", "get", "list", "execute", "reconcile", "cancel", "renewal", "evidence_version"])
+def test_unsupported_deployment_blocks_before_saga_storage_or_provider_access(setup, monkeypatch, tmp_path, action):
+    from maverick import governed_records, vendor_onboarding
+
+    service, ctx, _, tickets, _ = setup
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "2")
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
+    monkeypatch.setenv("MAVERICK_PG_DSN", "postgresql://synthetic.invalid/unused")
+    # A valid shared-store selection must not be mistaken for a supported
+    # supplier saga topology. Selection itself does not contact Postgres.
+    assert governed_records._selection().kind == "postgres"
+    assert governed_records._selection().shared_required is True
+    touched = []
+
+    def forbidden(*args, **kwargs):
+        touched.append(True)
+        raise AssertionError("unsupported deployment reached local saga or external access")
+
+    monkeypatch.setattr(vendor_onboarding, "cross_process_lock", forbidden)
+    monkeypatch.setattr(vendor_onboarding._CASES, "_backend", forbidden)
+    monkeypatch.setattr(service.documents, "version", forbidden)
+    operations = {
+        "intake": lambda: service.intake(ctx, "Unsupported request", "security-paper", "VEND", "Stop before mutation"),
+        "get": lambda: service.get(ctx, "VON-unused"),
+        "list": lambda: service.list(ctx),
+        "execute": lambda: service.execute(ctx, "VON-unused"),
+        "reconcile": lambda: service.reconcile(ctx, "VON-unused"),
+        "cancel": lambda: service.cancel(ctx, "VON-unused", 1, "No supported topology"),
+        "renewal": lambda: service.check_renewal(ctx, "VON-unused"),
+        "evidence_version": lambda: service.current_evidence_version(ctx, {"document_id": "security-paper"}),
+    }
+    before = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")}
+    with pytest.raises(ValueError, match="installation") as error:
+        operations[action]()
+    assert error.value.code == "unsupported_deployment"
+    assert error.value.next_action
+    assert touched == []
+    assert {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")} == before
+    assert tickets.creates == 0
+
+
+@pytest.mark.parametrize("value", ["2", "3", "0", "-1", "1.0", "two", ""])
+def test_deployment_readiness_rejects_unsupported_or_invalid_replica_count(setup, monkeypatch, value):
+    from maverick import vendor_onboarding
+
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", value)
+    state = vendor_onboarding.deployment_readiness()
+    assert state["supported"] is False
+    assert state["code"] in {"unsupported_deployment", "deployment_configuration_unavailable"}
+    assert state["message"] and state["next_action"]
+
+
+@pytest.mark.parametrize("origin", ["environment", "global_config", "invalid_config", "unreadable_config"])
+def test_deployment_readiness_uses_global_override_and_fails_closed(setup, monkeypatch, tmp_path, origin):
+    from maverick import vendor_onboarding
+
+    if origin == "environment":
+        monkeypatch.setenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", "yes")
+    else:
+        path = tmp_path / "config.toml"
+        suffix = ("\n[deployment]\nallow_multiple_control_planes=true\n" if origin == "global_config" else
+                  "\n[deployment]\nallow_multiple_control_planes='invalid'\n" if origin == "invalid_config" else
+                  "\n[broken-private-token\n")
+        path.write_text(path.read_text() + suffix)
+        config.reset_config_cache()
+    # A tenant overlay cannot hide a global unsupported topology.
+    tenant_directory = tmp_path / "tenants/customer-a"
+    tenant_directory.mkdir(parents=True, exist_ok=True)
+    (tenant_directory / "config.toml").write_text("[deployment]\nallow_multiple_control_planes=false\n")
+    with tenant_scope(tenant="customer-a"):
+        state = vendor_onboarding.deployment_readiness()
+    assert state["supported"] is False
+    assert "broken-private-token" not in str(state)
+    assert "config.toml" not in str(state)
+    assert state["next_action"]
+
+
+def test_supported_deployment_readiness_is_read_only_and_is_not_connection_readiness(setup, monkeypatch, tmp_path):
+    from maverick import vendor_onboarding
+
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
+    monkeypatch.setenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", "false")
+    before = {path.relative_to(tmp_path).as_posix(): path.read_bytes()
+              for path in tmp_path.rglob("*") if path.is_file()}
+    state = vendor_onboarding.deployment_readiness()
+    assert state["supported"] is True
+    assert state["profile"] == "single_persistent_application_replica"
+    assert "connection" in state["next_action"].lower()
+    assert {path.relative_to(tmp_path).as_posix(): path.read_bytes()
+            for path in tmp_path.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("point", ["after_claim", "after_create"])
+def test_deployment_drift_preserves_durable_uncertainty_without_more_effects(setup, monkeypatch, point):
+    from maverick import vendor_onboarding
+
+    service, ctx, _, tickets, _ = setup
+    row = approved(service, ctx)
+    if point == "after_claim":
+        save = service._save
+
+        def drift_after_claim(*args, **kwargs):
+            saved = save(*args, **kwargs)
+            if kwargs.get("stage") == "executing":
+                monkeypatch.setenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", "true")
+            return saved
+
+        monkeypatch.setattr(service, "_save", drift_after_claim)
+    else:
+        create = tickets.create
+
+        def drift_after_create(*args, **kwargs):
+            receipt = create(*args, **kwargs)
+            monkeypatch.setenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", "true")
+            return receipt
+
+        monkeypatch.setattr(tickets, "create", drift_after_create)
+    with pytest.raises(vendor_onboarding.VendorOnboardingDeploymentError):
+        service.execute(ctx, row["id"])
+    # No fallback reconciliation/audit write is allowed under the unsupported
+    # configuration. Its previously durable claim remains the uncertainty.
+    monkeypatch.delenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES")
+    persisted = service.get(ctx, row["id"])
+    assert persisted["stage"] == "executing"
+    assert persisted["revision"] == row["revision"] + 1
+    assert persisted["operation"]["attempts"] == 1
+    assert persisted["operation"]["receipt"] is None
+    assert persisted["work_item"]["technical_effect"] == "indeterminate"
+    expected_creates = int(point == "after_create")
+    assert tickets.creates == expected_creates
+    assert service.execute(ctx, row["id"])["stage"] == "reconciliation_required"
+    recovered = service.reconcile(ctx, row["id"])
+    assert recovered["work_item"]["technical_effect"] == ("verified" if expected_creates else "indeterminate")
+    assert tickets.creates == expected_creates
+
+
+def test_environment_single_instance_protection_has_canonical_precedence(setup, monkeypatch, tmp_path):
+    from maverick import vendor_onboarding
+
+    path = tmp_path / "config.toml"
+    path.write_text(path.read_text() + "\n[deployment]\nallow_multiple_control_planes=true\n")
+    config.reset_config_cache()
+    monkeypatch.setenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", "false")
+    assert vendor_onboarding.deployment_readiness()["supported"] is True
+    monkeypatch.setenv("MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES", "invalid")
+    assert vendor_onboarding.deployment_readiness()["code"] == "deployment_configuration_unavailable"
 
 
 @pytest.mark.parametrize("phase", ["intake", "prepared", "approved"])
