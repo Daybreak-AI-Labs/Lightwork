@@ -24,6 +24,10 @@ if ($TransitionDirectory) {
     $TransitionDirectory = $transitionRoot.FullName
     $transition = Get-Content -Raw -LiteralPath (Join-Path $TransitionDirectory 'bridge.json') | ConvertFrom-Json
 }
+. (Join-Path $PSScriptRoot 'msi-acceptance-preflight.ps1')
+$preflight=Initialize-AcceptancePreflight $BaseMsi $CandidateMsi $Inventory $Report 'lightwork.completed-upgrade-rollback-acceptance.v1'
+$packageExpectations=$preflight.expectations
+$metadata=$preflight.metadata
 $fixtureRoot = Join-Path $env:RUNNER_TEMP ('lw-rollback-' + [guid]::NewGuid().ToString('N'))
 $fixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
 if (-not $fixtureRoot.StartsWith($runnerRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Acceptance fixture escaped RUNNER_TEMP.' }
@@ -31,7 +35,6 @@ New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
 $installPath = Join-Path $fixtureRoot 'app'
 $statePath = Join-Path $fixtureRoot 'state'
 New-Item -ItemType Directory -Path $statePath | Out-Null
-$metadata = Get-Content -Raw -LiteralPath $Inventory | ConvertFrom-Json
 $expectedPublicKey = (Get-Content -Raw -LiteralPath $PublicKeyFile).Trim()
 $baseVersion = [version]$metadata.version
 $newVersion = '{0}.{1}.{2}' -f $baseVersion.Major,$baseVersion.Minor,($baseVersion.Build + 1)
@@ -41,7 +44,7 @@ Get-ChildItem Env: | Where-Object { $_.Name -match '^(MAVERICK_|LIGHTWORK_)' } |
     Remove-Item -LiteralPath ('Env:' + $_.Name)
 }
 $originalPath = $env:PATH
-$observed = [ordered]@{schema='lightwork.completed-upgrade-rollback-acceptance.v1'; clean_virtual_machine=$false; publicly_recognized_publisher=$false; synthetic_fixture_versions=$true; same_frozen_runtime_fixture=$true; native_webview_automated=$false}
+$observed=$preflight.report
 if ($transition) {
     $observed.schema = 'lightwork.publisher-transition-acceptance.v1'
     $observed.same_updater_key = $true
@@ -50,10 +53,7 @@ if ($transition) {
 $server = $null
 
 function Invoke-Msi([string]$package,[string]$action) {
-    # Canonicalize PowerShell paths before passing them to Windows Installer.
-    $packageFile = Get-Item -LiteralPath $package -ErrorAction Stop
-    if ($packageFile.PSProvider.Name -ne 'FileSystem' -or $packageFile.PSIsContainer) { throw 'The MSI package must be an existing file.' }
-    $package = [IO.Path]::GetFullPath($packageFile.FullName)
+    $package = (Confirm-AcceptanceMsi $package $packageExpectations).path
     $log = Join-Path $env:RUNNER_TEMP ('lightwork-msi-' + [guid]::NewGuid().ToString('N') + '.log')
     $arguments = @($action,('"' + $package + '"'),'/qn','/norestart','/L*v',('"' + $log + '"'),('INSTALLDIR="' + $installPath + '"'))
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/msiexec.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden

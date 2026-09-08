@@ -17,8 +17,11 @@ if (-not $installPath.StartsWith($runnerRoot, [StringComparison]::OrdinalIgnoreC
 foreach ($candidate in @($BaseMsi, $CandidateMsi, $installPath, $Report)) {
     if ($candidate -match '["\r\n]') { throw 'Unsupported installer argument.' }
 }
-$metadata = Get-Content -Raw -LiteralPath $Inventory | ConvertFrom-Json
-$observed = [ordered]@{ schema = 'lightwork.windows-package-acceptance.v1'; clean_virtual_machine = $false }
+. (Join-Path $PSScriptRoot 'msi-acceptance-preflight.ps1')
+$preflight=Initialize-AcceptancePreflight $BaseMsi $CandidateMsi $Inventory $Report 'lightwork.windows-package-acceptance.v1'
+$metadata=$preflight.metadata
+$packageExpectations=$preflight.expectations
+$observed=$preflight.report
 $originalPath = $env:PATH
 $originalHome = $env:MAVERICK_HOME
 $originalNoIndex = $env:PIP_NO_INDEX
@@ -28,11 +31,8 @@ $marker = Join-Path $homePath 'customer-data-preserved.txt'
 [IO.File]::WriteAllText($marker, 'synthetic customer data must survive maintenance')
 
 function Invoke-Msi([string]$Package, [string]$Action, [string[]]$Properties = @(), [switch]$ExpectFailure) {
-    # MSI rejects mixed-separator paths that PowerShell accepts (1324/1619).
-    # Resolve relative paths against the shell location before native launch.
-    $packageFile = Get-Item -LiteralPath $Package -ErrorAction Stop
-    if ($packageFile.PSProvider.Name -ne 'FileSystem' -or $packageFile.PSIsContainer) { throw 'The MSI package must be an existing file.' }
-    $Package = [IO.Path]::GetFullPath($packageFile.FullName)
+    # Recheck the exact admitted bytes for install, repair and cleanup alike.
+    $Package = (Confirm-AcceptanceMsi $Package $packageExpectations).path
     $log = Join-Path $env:RUNNER_TEMP ('lightwork-msi-' + [guid]::NewGuid().ToString('N') + '.log')
     $arguments = @($Action, ('"' + $Package + '"'), '/qn', '/norestart', '/L*v', ('"' + $log + '"')) + $Properties
     $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/msiexec.exe') -ArgumentList $arguments -PassThru -WindowStyle Hidden
@@ -53,6 +53,8 @@ function Invoke-Msi([string]$Package, [string]$Action, [string[]]$Properties = @
 
 function Assert-Runtime {
     $runtime = Join-Path $installPath 'maverick.exe'
+    if ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant() -cne $metadata.runtime.sha256 -or
+        (Get-Item -LiteralPath $runtime).Length -ne $metadata.runtime.bytes) {throw 'Installed frozen runtime bytes differ from the admitted inventory.'}
     $output = & $runtime version
     if ($LASTEXITCODE -ne 0) { throw 'The installed frozen runtime could not start.' }
     foreach ($package in $metadata.packages) {
