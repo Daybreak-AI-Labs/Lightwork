@@ -602,6 +602,9 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
         self.recovery_binary.write_bytes(b"synthetic corrupt retained native shell")
         self.recovery_installer.unlink()
         self.start()
+        # The primary application opens on the dashboard; its maintenance page
+        # is reached through the real menu, as the signed upgrade journey does.
+        self.menu("Install & updates")
         self.view.wait(lambda: self.view.text("#installed-version") == self.metadata["version"], timeout=120)
         self.view.click("#repair-install")
         self.view.wait(lambda: "Repair version " + self.metadata["version"] in self.view.text("#update-version"), timeout=60)
