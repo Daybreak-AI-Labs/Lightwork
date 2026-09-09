@@ -685,7 +685,8 @@ class HoldoutQueryLedger:
         else:
             limitation = (
                 "owner and mode were verified, but same-uid processes remain in "
-                "the same custody boundary"
+                "the same custody boundary; independent custody needs a separate "
+                "evaluator identity"
             )
         return LedgerCustodyStatus(
             local_path_identity_verified=True,

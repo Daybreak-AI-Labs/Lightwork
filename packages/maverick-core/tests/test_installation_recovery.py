@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -246,10 +247,21 @@ def test_repair_msi_requests_a_complete_same_product_reinstall(
     assert kwargs["timeout"] == 1800
 
 
+def _simulate_windows(monkeypatch):
+    """The registered-installer lookup is Windows-only by design; the tests
+    below exercise its PowerShell contract with the OS probe and the
+    Windows-only subprocess flag stubbed, while subprocess.run is faked."""
+    monkeypatch.setattr(
+        maintenance, "os", SimpleNamespace(name="nt", environ=os.environ),
+    )
+    monkeypatch.setattr(maintenance.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+
+
 def test_registered_installer_lookup_uses_the_fixed_product_family_and_os_powershell(
     installation, tmp_path, monkeypatch,
 ):
     _, runtime, _ = installation
+    _simulate_windows(monkeypatch)
     calls = []
 
     def run(arguments, **kwargs):
@@ -286,6 +298,7 @@ def test_registered_installer_lookup_rejects_non_object_output(
     installation, tmp_path, monkeypatch,
 ):
     _, runtime, _ = installation
+    _simulate_windows(monkeypatch)
     monkeypatch.setattr(
         maintenance.subprocess,
         "run",

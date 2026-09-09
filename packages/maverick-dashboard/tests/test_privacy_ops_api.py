@@ -601,8 +601,11 @@ def test_static_dashboard_token_document_access_uses_only_its_saved_connection(
         "https://graph.microsoft.com/v1.0/search/query",
         "dashboard-scoped-token",
     )]
+    current = client.get("/api/v1/connections", headers=headers).json()
     deleted = client.delete(
-        "/api/v1/connections/dashboard-token-graph", headers=headers,
+        "/api/v1/connections/dashboard-token-graph",
+        headers=headers,
+        params={"expected_revision": current["connections"][0]["revision"]},
     )
     assert deleted.status_code == 200, deleted.text
     assert client.get("/api/v1/connections", headers=headers).json() == {

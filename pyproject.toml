@@ -94,6 +94,9 @@ max-complexity = 20
 # parametrize helpers read as "unused" to static analysis.
 min_confidence = 80
 paths = ["packages", "apps", "benchmarks"]
+# Protocol method parameters are interface, not dead code: the stub body is
+# ``...`` so the name is never read in the file that declares it.
+ignore_names = ["stage_receipt"]
 exclude = ["*/tests/*", "*/test_*.py"]
 
 [tool.pytest.ini_options]

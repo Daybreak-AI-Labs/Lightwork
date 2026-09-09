@@ -43,6 +43,11 @@ DOCUMENTED_STATUS_GATES: dict[str, set[int]] = {
     # named human account, which this auth-off smoke does not impersonate.
     "/project-reviews": {403},
     "/outcome-pilots": {403},
+    # Research jobs and governed knowledge access bind every page view to a
+    # named account plus a selected workspace, so the auth-off smoke is
+    # refused by design.
+    "/research": {403},
+    "/knowledge-access": {403},
 }
 
 created = client.post(

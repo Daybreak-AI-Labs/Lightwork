@@ -313,7 +313,9 @@ def test_a_purge_preserves_the_coordination_sidecar(purged) -> None:
     """The stable lock inode prevents an unlink/recreate ABA race."""
     leftovers = sorted(
         p.name for p in purged.iterdir()
-        if p.name.endswith(".lock") and p.name.startswith(_day(40)[:7])
+        # Both purged days may straddle a month boundary; match either month.
+        if p.name.endswith(".lock")
+        and p.name.startswith((_day(40)[:7], _day(39)[:7]))
     )
     assert leftovers == sorted(
         [f"{_day(40)}.ndjson.lock", f"{_day(39)}.ndjson.lock"]

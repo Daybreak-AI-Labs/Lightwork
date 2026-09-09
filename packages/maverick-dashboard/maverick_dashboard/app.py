@@ -2203,7 +2203,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "context": "Refresh Connections before continuing.",
             "provider": "Select a supported account provider.",
             "client_id": "Enter a valid application client ID.",
-            "client_secret": "Enter a valid application client secret.",
+            "client_secret": "Enter a valid application client secret.",  # pragma: allowlist secret
             "expected_revision": "Refresh Connections before changing this connection.",
             "profile": "Select a supported connection profile.",
             "name": "Use a connection name with lowercase letters, numbers, hyphens or underscores.",

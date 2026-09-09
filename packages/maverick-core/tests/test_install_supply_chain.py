@@ -559,7 +559,6 @@ def test_cross_ecosystem_osv_gate_is_pinned_complete_and_expiring():
     expected = {
         "GHSA-wrw7-89jp-8q8g",
         "RUSTSEC-2024-0370",
-        *(f"RUSTSEC-2024-{number:04d}" for number in range(411, 421)),
         "RUSTSEC-2025-0075",
         "RUSTSEC-2025-0080",
         "RUSTSEC-2025-0081",

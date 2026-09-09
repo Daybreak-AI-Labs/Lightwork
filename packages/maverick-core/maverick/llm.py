@@ -2048,7 +2048,7 @@ class LLM:
                             )
                         return response
                     finally:
-                        tracker.finalize(response, sys.exception())
+                        tracker.finalize(response, sys.exc_info()[1])
 
                 hedge = _hedge_ms()
                 if hedge is None:

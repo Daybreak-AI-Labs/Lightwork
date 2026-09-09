@@ -192,6 +192,7 @@ def cap_evaluator(home: Path) -> str:
         AnchorItem,
         EvaluatorRecord,
         EvaluatorSlot,
+        anchor_fingerprint,
         consider_promotion,
     )
     from maverick.self_improvement import PromotionLedger, SelfImprovementController
@@ -200,9 +201,12 @@ def cap_evaluator(home: Path) -> str:
     incumbent = {i.id: (not i.label) for i in anchor.items}   # always wrong
     challenger = {"chal-1": {i.id: i.label for i in anchor.items}}  # always right
     ctrl = SelfImprovementController(frozen_fn=lambda: False, ledger=PromotionLedger())
+    # Promotion only scores against a locked anchor; this in-process anchor is
+    # locked by its own fingerprint, exactly as a released anchor would be.
     res = consider_promotion(EvaluatorSlot("reviewer", "incumbent"), incumbent, challenger,
                              anchor, records=[EvaluatorRecord("r1", "incumbent")],
-                             approved=True, controller=ctrl)
+                             approved=True, lock=anchor_fingerprint({"reviewer": anchor}),
+                             controller=ctrl)
     assert res.promoted, f"better evaluator not promoted: {getattr(res, 'reason', '')}"
     assert res.new_epoch == 2, f"epoch did not advance: {res.new_epoch}"
     assert len(res.erased) == 1, "displaced evaluator's records not selectively erased"

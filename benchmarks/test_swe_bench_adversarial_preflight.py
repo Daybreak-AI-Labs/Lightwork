@@ -130,7 +130,7 @@ def test_adv_defensive_blocks_tests_edit(tmp_path):
 
 # ---- 5. Shell tool blocks curl to github.com in opaque mode ----
 
-def test_adv_shell_blocks_github_curl(tmp_path, monkeypatch):
+def test_adv_shell_blocks_github_curl(tmp_path, monkeypatch, fresh_human_decision):
     """The most common cheating vector is the agent curl-ing the
     upstream fix PR off github.com and transcribing. Shell tool must
     refuse such commands in benchmark opaque mode."""
@@ -164,7 +164,7 @@ def test_adv_shell_blocks_github_curl(tmp_path, monkeypatch):
 
 # ---- Bonus: pip install -e blocked in opaque mode (Karpathy bug) ----
 
-def test_adv_shell_blocks_pip_install_e(tmp_path, monkeypatch):
+def test_adv_shell_blocks_pip_install_e(tmp_path, monkeypatch, fresh_human_decision):
     """May 26 council fix: ALL package-install commands are blocked
     in opaque mode (not just `-e`). The prior Wave 11 fix only
     blocked `pip install -e` but `pip install <pkg>` could still

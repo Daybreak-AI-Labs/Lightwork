@@ -719,11 +719,36 @@ def test_dry_run_resume_never_upgrades_to_real_executors(monkeypatch, tmp_path):
         "flow_id": flow.id, "run_id": rid, "dry_run": False,
         "owner": "user:attacker", "data": {"path": "production.txt"},
     }))
-    assert store.load_run(rid).status == "paused_approval"
+    paused = store.load_run(rid)
+    assert paused.status == "paused_approval"
 
+    # A resume is only honoured when it answers this exact pause with an
+    # authenticated decision; the attacker's payload still asks for a real run.
+    from maverick.flow.approvals import (
+        flow_decision_attestation_material,
+        paused_operation_binding,
+    )
+    from maverick_dashboard.approval_authority import issue_flow_decision_attestation
+
+    authority_binding = aq.flow_approval_binding(paused)
+    material = flow_decision_attestation_material(
+        paused,
+        inputs={},
+        operation_binding_sha256=paused_operation_binding(paused, inputs={}),
+        authority_binding_sha256=authority_binding,
+        decision="approved",
+        decided_by="system:test",
+    )
+    attestation = issue_flow_decision_attestation(
+        None,
+        material=material,
+        expires_at=float(paused.human["approval_card"]["expires_at"]),
+    )
     aq._handle_flow_resume(_Job({
         "flow_id": flow.id, "run_id": rid, "decision": "approved",
         "decided_by": "system:test",
+        "approval_binding_sha256": authority_binding,
+        "approval_decision_attestation": attestation,
         "dry_run": False, "owner": "user:attacker",
     }))
     done = store.load_run(rid)

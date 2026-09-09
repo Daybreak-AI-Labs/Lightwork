@@ -347,7 +347,12 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     _configure_cli_text_streams()
     _configure_cli_logging()
     ctx.ensure_object(dict)
-    if ctx.invoked_subcommand not in {"dashboard", "installation-maintenance", "version", "doctor", "config-lint"}:
+    # Diagnostic commands must keep running on a broken installation so they
+    # can report it; everything else stays behind the recovery gate.
+    if ctx.invoked_subcommand not in {
+        "dashboard", "installation-maintenance", "version", "doctor",
+        "config-lint", "preflight",
+    }:
         from ..installation_recovery import MaintenanceError, assert_normal_start_allowed
         try:
             assert_normal_start_allowed()

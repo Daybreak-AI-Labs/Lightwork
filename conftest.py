@@ -249,3 +249,38 @@ def _isolate_default_audit_writers():
         yield
     finally:
         _reset()
+
+
+@pytest.fixture
+def fresh_human_decision(monkeypatch):
+    """Stand in for the fresh human decision an exact-operation permit needs.
+
+    The shell and clipboard tools pass ``allow_auto_approve=False``, so
+    ``MAVERICK_CONSENT_MODE=auto-approve`` no longer grants them. Tests whose
+    subject is the tool rather than the gate use this fixture to supply one
+    reviewed decision through the production card and one-use permit path; the
+    consent-gate suites keep exercising denial explicitly.
+    """
+    import time
+
+    import maverick.safety.consent as consent
+
+    def decide(
+        action,
+        *,
+        risk="medium",
+        scope=None,
+        detail=None,
+        provenance=None,
+        raise_on_deny=False,
+        allow_auto_approve=True,
+        consult_ledger=True,
+        approval_card=None,
+    ):
+        del scope, detail, provenance, raise_on_deny
+        del allow_auto_approve, consult_ledger, approval_card
+        return consent.ConsentDecision(
+            True, "dashboard", risk, time.time(), actor="user:reviewer",
+        )
+
+    monkeypatch.setattr(consent, "require_consent", decide)
