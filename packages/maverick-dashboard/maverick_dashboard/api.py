@@ -2566,12 +2566,17 @@ async def import_onetrust_vendors(request: Request,
     registered here stay untouched (this register is the record of truth)."""
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    imported = await run_in_threadpool(
+    result = await run_in_threadpool(
         vm.import_onetrust_vendors, body.csv_text,
         imported_by=_request_actor(request),
     )
+    imported = result["imported"]
+    # ``skipped`` is structured (row, name, reason, detail) so the operator
+    # can tell an already-registered vendor from a rejected or dropped row;
+    # a 1,500-row export that silently lost rows used to look like success.
     return {"imported": len(imported),
-            "vendors": [e["name"] for e in imported]}
+            "vendors": [e["name"] for e in imported],
+            "skipped": result["skipped"]}
 
 
 @router.get("/vendors/contracts/renewals")

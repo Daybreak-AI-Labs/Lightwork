@@ -619,45 +619,78 @@ _CRITICALITY_ALIASES = {
 }
 
 
+#: Why an import row was not registered. ``duplicate`` rows are the vendors
+#: already here (left untouched on purpose); the rest are real rejections an
+#: operator must act on -- a truncated import must never look like success.
+IMPORT_SKIP_REASONS = ("missing_name", "duplicate", "invalid", "capacity", "error")
+
+
 def import_onetrust_vendors(
     csv_text: str, *, imported_by: str = "",
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Import a OneTrust third-party export into the vendor register.
 
     Tolerant of column drift; rows without a recognizable vendor name are
     skipped rather than guessed at, unknown criticalities default to
     ``medium``, and a vendor already registered is left untouched (their
     record here is the record of truth once it exists).
+
+    Returns ``{"imported": [records], "skipped": [{"row", "name", "reason",
+    "detail"}]}``. ``row`` is the 1-based data row (header excluded);
+    ``reason`` is one of :data:`IMPORT_SKIP_REASONS`, so a caller can tell
+    'already present' from 'rejected' from 'register full'.
     """
 
     _require_enabled()
     from .csv_alias import alias_rows
+    from .governed_records import GovernedRecordCapacityError, RecordConflict
 
-    imported = []
-    for entry in alias_rows(csv_text, _ONETRUST_VENDOR_HEADERS, limit=2000):
-        if not entry.get("name"):
+    imported: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    def _skip(row: int, name: str, reason: str, detail: str) -> None:
+        skipped.append({
+            "row": row, "name": name[:256], "reason": reason, "detail": detail[:256],
+        })
+
+    rows = alias_rows(csv_text, _ONETRUST_VENDOR_HEADERS, limit=2000)
+    for row_number, entry in enumerate(rows, 1):
+        name = entry.get("name") or ""
+        if not name:
+            _skip(row_number, "", "missing_name", "no recognizable vendor name column")
             continue
         criticality = _CRITICALITY_ALIASES.get(
             entry.get("criticality", "").lower(), "medium",
         )
         try:
             saved = register_vendor(
-                entry["name"],
+                name,
                 category=entry.get("category") or "unclassified",
                 criticality=criticality,
                 owner=entry.get("owner") or "unassigned",
                 actor=imported_by or "import:onetrust",
                 source="onetrust",
             )
-        except Exception:
+        except RecordConflict:
+            _skip(row_number, name, "duplicate", "vendor already registered; left untouched")
+            continue
+        except GovernedRecordCapacityError as exc:
+            _skip(row_number, name, "capacity", str(exc))
+            continue
+        except ValueError as exc:
+            _skip(row_number, name, "invalid", str(exc))
+            continue
+        except Exception as exc:  # a backend/audit outage is still one row, not the whole import
+            _skip(row_number, name, "error", f"{type(exc).__name__}: {exc}")
             continue
         imported.append(saved)
-    return imported
+    return {"imported": imported, "skipped": skipped}
 
 
 __all__ = [
     "CONTRACT_KINDS",
     "CRITICALITIES",
+    "IMPORT_SKIP_REASONS",
     "LINK_KINDS",
     "STATUSES",
     "VENDOR_SCHEMA",

@@ -2116,10 +2116,14 @@ def vendor_import_onetrust(csv_file, actor) -> None:
     except OSError as e:
         raise click.ClickException(f"could not read {csv_file}: {e}") from e
     try:
-        imported = vm.import_onetrust_vendors(text, imported_by=actor)
+        result = vm.import_onetrust_vendors(text, imported_by=actor)
     except (ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
-    click.echo(f"imported {len(imported)} vendors")
+    skipped = result["skipped"]
+    click.echo(f"imported {len(result['imported'])} vendors, skipped {len(skipped)}")
+    for row in skipped:
+        label = f" {row['name']}" if row.get("name") else ""
+        click.echo(f"  row {row['row']}{label}: {row['reason']} -- {row['detail']}")
 
 
 @main.group("consent")
