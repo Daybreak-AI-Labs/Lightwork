@@ -175,3 +175,53 @@ def test_facts_page_renders(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     resp = client.get("/facts")
     assert resp.status_code == 200
+
+
+def test_shell_assets_are_fingerprinted_and_long_cached(tmp_path, monkeypatch):
+    """W3-77: the shell CSS/JS links carry a content hash and the versioned
+    URL is cached for a year; unversioned or stale requests keep the short
+    cache so an upgrade can never pin an old bundle."""
+    import re
+
+    from maverick import world_model
+    from maverick_dashboard.app import STATIC_IMMUTABLE_CACHE, STATIC_SHORT_CACHE, static_version
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    page = client.get("/overview").text
+    links = re.findall(r'/static/(lightwork[\w.-]+)\?v=([0-9a-f]{8})', page)
+    assert links, "no fingerprinted shell asset links rendered"
+    assert ("lightwork.css", static_version("lightwork.css")) in links
+    assert ("lightwork-ui.js", static_version("lightwork-ui.js")) in links
+    for name, version in links:
+        assert version == static_version(name)
+
+    versioned = client.get(f"/static/lightwork.css?v={static_version('lightwork.css')}")
+    assert versioned.status_code == 200
+    assert versioned.headers["cache-control"] == STATIC_IMMUTABLE_CACHE
+    plain = client.get("/static/lightwork.css")
+    assert plain.headers["cache-control"] == STATIC_SHORT_CACHE
+    stale = client.get("/static/lightwork.css?v=00000000")
+    assert stale.headers["cache-control"] == STATIC_SHORT_CACHE
+    assert static_version("does-not-exist.js") == ""
+
+
+def test_responses_are_gzipped_when_the_client_accepts_it(tmp_path, monkeypatch):
+    from maverick import world_model
+    from maverick_dashboard import app as app_module
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    r = client.get("/static/lightwork.css", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers.get("content-encoding") == "gzip"
+    assert "lightwork" in r.text                      # transparently decoded
+    # The knob: env wins, then [dashboard] compress, default on.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_COMPRESS", "0")
+    assert app_module._compress_enabled() is False
+    monkeypatch.setenv("MAVERICK_DASHBOARD_COMPRESS", "1")
+    assert app_module._compress_enabled() is True
+    monkeypatch.delenv("MAVERICK_DASHBOARD_COMPRESS")
+    import maverick.config as cfg
+    monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {"compress": False}})
+    assert app_module._compress_enabled() is False
+    monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {}})
+    assert app_module._compress_enabled() is True

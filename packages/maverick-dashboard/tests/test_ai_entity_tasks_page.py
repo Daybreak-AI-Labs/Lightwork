@@ -88,7 +88,7 @@ def test_workbench_is_store_free_no_store_and_csp_closed(client: TestClient) -> 
     assert "Each task keeps a verification fingerprint linking it to the reviewed inventory record" in response.text
     assert 'data-api-base="/api/v1/ai-entity-tasks"' in response.text
     assert 'data-copilot-page="/ai-entity-tasks"' in response.text
-    assert 'src="/static/lightwork-copilot.js"' in response.text
+    assert 'src="/static/lightwork-copilot.js' in response.text
     assert 'src="/static/lightwork-ai-entity-tasks.js"' in response.text
 
     parser = _Markup()

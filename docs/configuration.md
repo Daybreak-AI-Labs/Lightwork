@@ -141,6 +141,14 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # and flow-approval links. MAVERICK_PUBLIC_URL overrides.
 # public_url = "https://dashboard.example.com"
 
+# Gzip responses over 1 KB (pages, JSON, the shell CSS/JS). On by default so a
+# dashboard behind a bare uvicorn or a default ingress does not ship ~160 KB
+# of uncompressed shell assets per cold load; set false when a proxy in front
+# already compresses. MAVERICK_DASHBOARD_COMPRESS=0|1 overrides. Shell assets
+# are also served with a content hash in the URL and a one-year cache, so an
+# upgrade restyles on the next page load without a hard refresh.
+# compress = true
+
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
 # Finance specialists). Unset = unrestricted — scoping is opt-in per user.

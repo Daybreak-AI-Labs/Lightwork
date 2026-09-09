@@ -79,7 +79,7 @@ def test_workbench_is_store_free_closed_and_copilot_enabled(client: TestClient) 
     assert "Checking status does not replenish job credits" in response.text
     assert 'data-api-base="/api/v1/consent/bulk-jobs"' in response.text
     assert 'data-copilot-page="/consent/bulk-jobs"' in response.text
-    assert 'src="/static/lightwork-copilot.js"' in response.text
+    assert 'src="/static/lightwork-copilot.js' in response.text
     assert 'src="/static/lightwork-consent-bulk-jobs.js"' in response.text
     parser = _Markup()
     parser.feed(response.text)

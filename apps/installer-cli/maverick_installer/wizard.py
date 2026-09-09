@@ -4999,6 +4999,13 @@ def pick_advanced() -> dict[str, Any]:
     # Department (job-function) scoping only bites once sign-in is on, so it is
     # offered right after — writes under [dashboard]. Returns {} when declined.
     advanced["department_access"] = pick_department_access(bool(advanced["oidc"].get("enabled")))
+    # Response compression is on by default ([dashboard] compress); the only
+    # reason to turn it off is a reverse proxy that already compresses.
+    advanced["dashboard_compress"] = _q_confirm(
+        "Compress dashboard responses (gzip)? Say no only if a proxy in front "
+        "of Lightwork already compresses.",
+        default=True,
+    )
     return advanced
 
 
@@ -7775,9 +7782,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             if val:
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
+    compress_off = advanced.get("dashboard_compress") is False
     if isinstance(dept, dict) and (
         dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced
+        or "local_owner_setup" in advanced or compress_off
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
@@ -7786,6 +7794,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[dashboard]")
         if "local_owner_setup" in advanced:
             _emit_kv(lines, "local_owner_setup", advanced["local_owner_setup"] is True)
+        if compress_off:
+            # Default-on in the app; only a deliberate "no" is written.
+            lines.append("# Response compression off: a proxy in front already compresses.")
+            _emit_kv(lines, "compress", False)
         if dept.get("default_suites"):
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))

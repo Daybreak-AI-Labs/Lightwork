@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -145,6 +146,80 @@ templates.env.globals.setdefault("density", "comfortable")
 templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
+
+# Fingerprinted static URLs (W3-77). The shell CSS/JS links in base.html carry
+# a content hash (``/static/x.js?v=<sha256[:8]>``) computed once per process
+# from the file bytes, so a versioned request can be cached for a year while
+# an upgrade changes the URL and takes effect on the next page load -- no more
+# five minutes of mismatched CSS/JS against new HTML. Unversioned requests
+# (older pages, direct links) keep the short cache.
+_SHELL_STATIC_DIR = Path(__file__).parent / "static"
+_STATIC_VERSIONS: dict[str, str] = {}
+STATIC_IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
+STATIC_SHORT_CACHE = "public, max-age=300"
+
+
+def static_version(name: str) -> str:
+    """Short content hash of a bundled static asset ("" when unreadable, so
+    the link stays unversioned and short-cached rather than breaking)."""
+    cached = _STATIC_VERSIONS.get(name)
+    if cached is not None:
+        return cached
+    version = ""
+    if name and "/" not in name and not name.startswith("."):
+        try:
+            version = hashlib.sha256((_SHELL_STATIC_DIR / name).read_bytes()).hexdigest()[:8]
+        except OSError:
+            version = ""
+    _STATIC_VERSIONS[name] = version
+    return version
+
+
+def static_url(name: str) -> str:
+    """``/static/<name>?v=<hash>`` for a bundled asset (plain path if unknown)."""
+    version = static_version(name)
+    return f"/static/{name}?v={version}" if version else f"/static/{name}"
+
+
+templates.env.globals["static_url"] = static_url
+
+
+class StaticCacheMiddleware:
+    """Long-cache a ``/static/`` response only when its ``?v=`` matches the
+    asset's current content hash; every other static request keeps the route's
+    own short ``Cache-Control``. Pure ASGI so the 60+ static routes stay as
+    they are."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http" or not scope.get("path", "").startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+        name = scope["path"].rsplit("/", 1)[-1]
+        query = scope.get("query_string", b"").decode("latin-1")
+        wanted = static_version(name)
+        immutable = bool(wanted) and any(
+            part == f"v={wanted}" for part in query.split("&")
+        )
+        if not immutable:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_immutable(message) -> None:
+            if message.get("type") == "http.response.start" and message.get("status") == 200:
+                headers = [
+                    (k, v) for k, v in message.get("headers", [])
+                    if k.lower() != b"cache-control"
+                ]
+                headers.append((b"cache-control", STATIC_IMMUTABLE_CACHE.encode("ascii")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_immutable)
+
+
 from .i18n import t as _i18n_t  # noqa: E402
 from .themes import custom_themes, theme_css  # noqa: E402
 
@@ -961,6 +1036,37 @@ app.include_router(support_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
+
+
+def _compress_enabled() -> bool:
+    """``[dashboard] compress`` (default on), overridden by
+    ``MAVERICK_DASHBOARD_COMPRESS``. Response compression for a self-hosted
+    dashboard behind a bare uvicorn or a default ingress (W3-77); turn it off
+    when a proxy in front already compresses."""
+    env = os.environ.get("MAVERICK_DASHBOARD_COMPRESS", "").strip().lower()
+    if env:
+        return env in {"1", "true", "yes", "on"}
+    try:
+        from maverick.config import load_config
+
+        value = ((load_config() or {}).get("dashboard") or {}).get("compress")
+    except Exception:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return True
+
+
+# Versioned static assets get the long cache; then gzip (outermost, so it
+# compresses every response including the static bundles). Starlette's
+# middleware skips text/event-stream and already-compressed media types.
+app.add_middleware(StaticCacheMiddleware)
+if _compress_enabled():
+    from starlette.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
 )

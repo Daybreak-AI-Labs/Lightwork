@@ -1168,3 +1168,12 @@ def test_signing_identity_admission_is_an_explicit_installer_opt_in(tmp_path, mo
     assert features["workspace_recovery"] is True
     disabled = _write(tmp_path, monkeypatch, {"allow_signing_identity_transition": False})
     assert tomllib.loads(disabled).get("features", {}).get("signing_identity_transition", False) is False
+
+
+def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
+    # W3-77: response compression is default-on in the app, so only a
+    # deliberate "no" (a proxy already compresses) reaches config.toml.
+    off = _write(tmp_path, monkeypatch, {"dashboard_compress": False})
+    assert tomllib.loads(off)["dashboard"]["compress"] is False
+    on = _write(tmp_path, monkeypatch, {"dashboard_compress": True})
+    assert "compress" not in on

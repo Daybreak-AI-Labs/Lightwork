@@ -109,14 +109,15 @@ def test_workbench_has_only_closed_evidence_controls(client: TestClient) -> None
                 if isinstance((value := attrs.get(name)), str)
             )
 
-    script_sources = {item.get("src") for item in scripts}
+    # Shell assets carry a content-hash query (W3-77); compare the paths.
+    script_sources = {(item.get("src") or "").split("?")[0] for item in scripts}
     assert {
         "/static/lightwork-copilot.js",
         "/static/lightwork-ui.js",
         "/static/lightwork-voice.js",
         "/static/lightwork-ai-evidence-analysis.js",
     }.issubset(script_sources)
-    style_sources = {item.get("href") for item in styles}
+    style_sources = {(item.get("href") or "").split("?")[0] for item in styles}
     assert {
         "/static/lightwork.css",
         "/static/lightwork-ai-evidence-analysis.css",

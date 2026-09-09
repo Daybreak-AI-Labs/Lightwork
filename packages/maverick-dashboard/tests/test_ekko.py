@@ -130,7 +130,7 @@ def test_ekko_initial_render_runs_after_shared_ui_helpers(tmp_path, monkeypatch,
     _isolate(tmp_path, monkeypatch, enabled=enabled)
     page = client.get("/ekko")
     assert page.status_code == 200
-    shared_helpers = page.text.index('<script src="/static/lightwork-ui.js">')
+    shared_helpers = page.text.index('<script src="/static/lightwork-ui.js')
     client_start = page.text.index("var initial = JSON.parse(document.getElementById('ekko-initial')")
     initial_render = page.text.index("renderStatus(initial);", client_start)
     assert shared_helpers < client_start < initial_render
@@ -262,7 +262,7 @@ def test_ekko_inline_script_runs_after_shared_ui_helpers_load(tmp_path, monkeypa
     assert page.status_code == 200
     html = page.text
 
-    ui_tag = '<script src="/static/lightwork-ui.js">'
+    ui_tag = '<script src="/static/lightwork-ui.js'
     bootstrap_tag = '<script id="ekko-initial" type="application/json">'
     assert ui_tag in html
     assert bootstrap_tag in html
