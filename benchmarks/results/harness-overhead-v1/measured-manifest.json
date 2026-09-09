@@ -17,9 +17,9 @@
     ]
   },
   "host": {
-    "cpu_count": 20,
-    "platform": "Windows-11-10.0.26100-SP0",
-    "python": "3.12.10"
+    "cpu_count": 4,
+    "platform": "Linux-6.18.44-fc-v24-x86_64-with-glibc2.39",
+    "python": "3.11.15"
   },
   "inputs_digest": "357355946ba031cc6a6f336e42ae152e99c431d869632221434d1aad8dbbd8be",
   "results": {
@@ -28,10 +28,10 @@
       "breaks": {
         "2026-09-09.ndjson": []
       },
-      "chain_sha256": "f3fc57e83ca0dd424b8cf2f3d725cd8ca7f56643dea7f37d58bbc18491a207f4",
+      "chain_sha256": "c03a3fb96d8c2c8d4947f1e1ab9bd816ce7a20c26e3633882ff964d4f9205ff7",
       "events": 172,
       "key_source": "ephemeral_co_located",
-      "public_key_hex": "aa6b16ef4c6e410d61bd2c064ec0f29f30a1cad53c569d2e37a44b2cf652569c",
+      "public_key_hex": "d98fdbcc37f74afb9d889c4280375d940d77de1adb8c25e2b8a8a3dea31af376",
       "verified": true
     },
     "budget_caps": {
@@ -91,10 +91,10 @@
         "audit_writer"
       ]
     },
-    "finished_at": "2026-09-09T17:52:05.697079+00:00",
+    "finished_at": "2026-09-09T19:13:32.725333+00:00",
     "git": {
       "branch": "codex/daybreak-platform-foundations-20260907",
-      "commit": "167fbf02756b8c582a8dcebdd451e3aee8dd0419",
+      "commit": "a57cd959a81a866b853e75a60b1c02a85cc484b3",
       "dirty": false
     },
     "governed_controls": [
@@ -125,19 +125,19 @@
           "evidence_artifacts": 144,
           "evidence_artifacts_per_task": 8.0,
           "governed": {
-            "median_us": 79540.2,
-            "p95_us": 96246.0,
+            "median_us": 17542.229,
+            "p95_us": 29578.395,
             "samples": 18
           },
           "instances": 18,
           "paired_overhead": {
-            "median_us": 76037.4,
-            "p95_us": 92135.1,
+            "median_us": 16776.34,
+            "p95_us": 28921.9,
             "samples": 18
           },
           "ungoverned": {
-            "median_us": 3566.6,
-            "p95_us": 4555.9,
+            "median_us": 921.486,
+            "p95_us": 2873.549,
             "samples": 18
           }
         },
@@ -145,19 +145,19 @@
           "evidence_artifacts": 72,
           "evidence_artifacts_per_task": 4.0,
           "governed": {
-            "median_us": 47485.3,
-            "p95_us": 72384.4,
+            "median_us": 9681.218,
+            "p95_us": 24022.709,
             "samples": 18
           },
           "instances": 18,
           "paired_overhead": {
-            "median_us": 47454.55,
-            "p95_us": 72343.6,
+            "median_us": 9633.912,
+            "p95_us": 23981.708,
             "samples": 18
           },
           "ungoverned": {
-            "median_us": 30.3,
-            "p95_us": 46.5,
+            "median_us": 36.218,
+            "p95_us": 60.89,
             "samples": 18
           }
         }
@@ -206,7 +206,7 @@
         "ratio": 1.0,
         "ungoverned": 1722
       },
-      "projected_overhead_share_at_1s_per_step": 0.019506,
+      "projected_overhead_share_at_1s_per_step": 0.003946,
       "task_instances": 36,
       "task_steps": {
         "delta": 0,
@@ -223,20 +223,20 @@
       "ungoverned_governance_artifacts": 0,
       "wall": {
         "governed": {
-          "median_us": 72326.75,
-          "p95_us": 91962.4,
+          "median_us": 14613.845,
+          "p95_us": 27447.147,
           "samples": 36
         },
-        "median_overhead_us_per_evidence_artifact": 11604.683,
-        "median_ratio": 51.57723,
+        "median_overhead_us_per_evidence_artifact": 2310.931,
+        "median_ratio": 43.123316,
         "paired_overhead": {
-          "median_us": 69628.1,
-          "p95_us": 87910.5,
+          "median_us": 13865.586,
+          "p95_us": 26493.559,
           "samples": 36
         },
         "ungoverned": {
-          "median_us": 1402.3,
-          "p95_us": 4249.1,
+          "median_us": 338.885,
+          "p95_us": 1421.204,
           "samples": 36
         }
       }
@@ -275,7 +275,7 @@
         "steps": 3,
         "task_id": "analysis.vendor-spend-concentration",
         "tool_calls": 2,
-        "wall_ns": 72384400
+        "wall_ns": 24022709
       },
       {
         "answer_sha256": "c115cce3338c72b1a8e2b9a4d70c377c847f0ee18dfe0b09bd09fc826d33bed3",
@@ -303,7 +303,7 @@
         "steps": 3,
         "task_id": "analysis.vendor-spend-concentration",
         "tool_calls": 2,
-        "wall_ns": 40800
+        "wall_ns": 41001
       },
       {
         "answer_sha256": "77712b7eedd81c98909d7661f4d26be6e45a8e4969e3dda88f2166f4bdd801ea",
@@ -333,7 +333,7 @@
         "steps": 3,
         "task_id": "analysis.capex-depreciation-lag",
         "tool_calls": 2,
-        "wall_ns": 58281600
+        "wall_ns": 10979758
       },
       {
         "answer_sha256": "77712b7eedd81c98909d7661f4d26be6e45a8e4969e3dda88f2166f4bdd801ea",
@@ -361,7 +361,7 @@
         "steps": 3,
         "task_id": "analysis.capex-depreciation-lag",
         "tool_calls": 2,
-        "wall_ns": 33800
+        "wall_ns": 33001
       },
       {
         "answer_sha256": "5c339469d510ff2a87c0beca94ab7c5b52aec35c91e1936bcc20a260b28e6af1",
@@ -391,7 +391,7 @@
         "steps": 3,
         "task_id": "analysis.q3-accrual-variance",
         "tool_calls": 2,
-        "wall_ns": 46797200
+        "wall_ns": 9470633
       },
       {
         "answer_sha256": "5c339469d510ff2a87c0beca94ab7c5b52aec35c91e1936bcc20a260b28e6af1",
@@ -419,7 +419,7 @@
         "steps": 3,
         "task_id": "analysis.q3-accrual-variance",
         "tool_calls": 2,
-        "wall_ns": 33800
+        "wall_ns": 46511
       },
       {
         "answer_sha256": "0174d5163a9eb25d1f8ae8137cd53c911955313234fd26d58ddcfa1920295922",
@@ -437,7 +437,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000864,
-        "effect_sha256": "ed29f48dad85176b59f1adc13ad55ca96aa0dd8d5216692ff7c0349f93461f13",
+        "effect_sha256": "90d5b51b253dcb780fbcc959e474250f8a0c740d2b8bcc01c19c3404202730de",
         "goal_id": 4,
         "injection_tripwires": 0,
         "input_tokens": 93,
@@ -449,7 +449,7 @@
         "steps": 4,
         "task_id": "actuation.accrual-je-2411",
         "tool_calls": 3,
-        "wall_ns": 87902100
+        "wall_ns": 27447147
       },
       {
         "answer_sha256": "0174d5163a9eb25d1f8ae8137cd53c911955313234fd26d58ddcfa1920295922",
@@ -467,7 +467,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "ed29f48dad85176b59f1adc13ad55ca96aa0dd8d5216692ff7c0349f93461f13",
+        "effect_sha256": "90d5b51b253dcb780fbcc959e474250f8a0c740d2b8bcc01c19c3404202730de",
         "input_tokens": 93,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -477,7 +477,7 @@
         "steps": 4,
         "task_id": "actuation.accrual-je-2411",
         "tool_calls": 3,
-        "wall_ns": 4555900
+        "wall_ns": 953588
       },
       {
         "answer_sha256": "1cc84df23ae86fbdb99e6d0dd5f5b04667752946c8c510e8f335dc1fc8b8debb",
@@ -495,7 +495,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000777,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "goal_id": 5,
         "injection_tripwires": 0,
         "input_tokens": 94,
@@ -507,7 +507,7 @@
         "steps": 4,
         "task_id": "actuation.fx-revaluation-2412",
         "tool_calls": 3,
-        "wall_ns": 78789600
+        "wall_ns": 15011695
       },
       {
         "answer_sha256": "1cc84df23ae86fbdb99e6d0dd5f5b04667752946c8c510e8f335dc1fc8b8debb",
@@ -525,7 +525,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "input_tokens": 94,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -535,7 +535,7 @@
         "steps": 4,
         "task_id": "actuation.fx-revaluation-2412",
         "tool_calls": 3,
-        "wall_ns": 3472400
+        "wall_ns": 1337913
       },
       {
         "answer_sha256": "bb4938f1c9a11c8a9b6e22df080c97bd4d44e006a386365a9fa0623339134476",
@@ -553,7 +553,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000936,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "goal_id": 6,
         "injection_tripwires": 1,
         "input_tokens": 107,
@@ -565,7 +565,7 @@
         "steps": 3,
         "task_id": "analysis.intercompany-imbalance",
         "tool_calls": 2,
-        "wall_ns": 43738800
+        "wall_ns": 9345967
       },
       {
         "answer_sha256": "bb4938f1c9a11c8a9b6e22df080c97bd4d44e006a386365a9fa0623339134476",
@@ -583,7 +583,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "input_tokens": 107,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -593,7 +593,7 @@
         "steps": 3,
         "task_id": "analysis.intercompany-imbalance",
         "tool_calls": 2,
-        "wall_ns": 28800
+        "wall_ns": 36041
       },
       {
         "answer_sha256": "af886621681278f48be4533fd1d30c6d0b06b8135d00307d11d0063c01f8f200",
@@ -611,7 +611,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001182,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "goal_id": 7,
         "injection_tripwires": 1,
         "input_tokens": 104,
@@ -623,7 +623,7 @@
         "steps": 3,
         "task_id": "analysis.headcount-plan-drift",
         "tool_calls": 2,
-        "wall_ns": 45907900
+        "wall_ns": 7426153
       },
       {
         "answer_sha256": "af886621681278f48be4533fd1d30c6d0b06b8135d00307d11d0063c01f8f200",
@@ -641,7 +641,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "input_tokens": 104,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -651,7 +651,7 @@
         "steps": 3,
         "task_id": "analysis.headcount-plan-drift",
         "tool_calls": 2,
-        "wall_ns": 25600
+        "wall_ns": 40175
       },
       {
         "answer_sha256": "46a649c17dc9f52d899727360a3ce1f2663835d5e57d035ee8051e9804133c94",
@@ -669,7 +669,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000939,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "goal_id": 8,
         "injection_tripwires": 0,
         "input_tokens": 88,
@@ -681,7 +681,7 @@
         "steps": 3,
         "task_id": "analysis.cash-conversion-cycle",
         "tool_calls": 2,
-        "wall_ns": 49854700
+        "wall_ns": 8878282
       },
       {
         "answer_sha256": "46a649c17dc9f52d899727360a3ce1f2663835d5e57d035ee8051e9804133c94",
@@ -699,7 +699,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "a6b70faa0b4f155926c56b794cc94fc83a8b4da35a7200eaaa4bc4a20794540a",
+        "effect_sha256": "fa157e50e7094338de5075e00c3f6a362ee23d17ea09e0477d98380fb94a7ebb",
         "input_tokens": 88,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -709,7 +709,7 @@
         "steps": 3,
         "task_id": "analysis.cash-conversion-cycle",
         "tool_calls": 2,
-        "wall_ns": 38300
+        "wall_ns": 29537
       },
       {
         "answer_sha256": "cad67ff3f8bfe75775b09590f40b56a5a2143038c1f380e96fc39e11a9c89eaa",
@@ -727,7 +727,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001239,
-        "effect_sha256": "d72ffa4ae67898cb6cb900034679e26929502468ab7805401a94c290148d697f",
+        "effect_sha256": "092f312787c77ecfb32240222d38c15b353557061af78e5cae43dd18a0c8c782",
         "goal_id": 9,
         "injection_tripwires": 1,
         "input_tokens": 108,
@@ -739,7 +739,7 @@
         "steps": 4,
         "task_id": "actuation.payroll-accrual-2412",
         "tool_calls": 3,
-        "wall_ns": 81432800
+        "wall_ns": 21125144
       },
       {
         "answer_sha256": "cad67ff3f8bfe75775b09590f40b56a5a2143038c1f380e96fc39e11a9c89eaa",
@@ -757,7 +757,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "d72ffa4ae67898cb6cb900034679e26929502468ab7805401a94c290148d697f",
+        "effect_sha256": "092f312787c77ecfb32240222d38c15b353557061af78e5cae43dd18a0c8c782",
         "input_tokens": 108,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -767,7 +767,7 @@
         "steps": 4,
         "task_id": "actuation.payroll-accrual-2412",
         "tool_calls": 3,
-        "wall_ns": 3585500
+        "wall_ns": 2873549
       },
       {
         "answer_sha256": "85f7d2c07c833978f703a5324bb3ae1b82d9ab6ccca8e7d94e0d644e4bff32c3",
@@ -785,7 +785,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001017,
-        "effect_sha256": "6e519f1bbeafa62605cc4d78c6a7e6b7aedd08f3ac3073b887137432bd56ee8c",
+        "effect_sha256": "f4d1351c1fa1b3d8af6d236a61942ade01d07a159b72c966e7a39c3a9013c32d",
         "goal_id": 10,
         "injection_tripwires": 0,
         "input_tokens": 94,
@@ -797,7 +797,7 @@
         "steps": 4,
         "task_id": "actuation.depreciation-2501",
         "tool_calls": 3,
-        "wall_ns": 84970700
+        "wall_ns": 16141823
       },
       {
         "answer_sha256": "85f7d2c07c833978f703a5324bb3ae1b82d9ab6ccca8e7d94e0d644e4bff32c3",
@@ -815,7 +815,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "6e519f1bbeafa62605cc4d78c6a7e6b7aedd08f3ac3073b887137432bd56ee8c",
+        "effect_sha256": "f4d1351c1fa1b3d8af6d236a61942ade01d07a159b72c966e7a39c3a9013c32d",
         "input_tokens": 94,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -825,7 +825,7 @@
         "steps": 4,
         "task_id": "actuation.depreciation-2501",
         "tool_calls": 3,
-        "wall_ns": 3858800
+        "wall_ns": 746307
       },
       {
         "answer_sha256": "7c1563931a26ad44e59f3a7a21505cdaae277145d7bb4f230827cf61532f063e",
@@ -843,7 +843,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000933,
-        "effect_sha256": "b657f0db6eb293e15e51b08e6f2a287e736df2fd905d48284bbc8cc957805089",
+        "effect_sha256": "f917195685886ad1f79f9c79766c3bd2ef68064c88373a8b3e282e41f8cc22cb",
         "goal_id": 11,
         "injection_tripwires": 0,
         "input_tokens": 111,
@@ -855,7 +855,7 @@
         "steps": 4,
         "task_id": "actuation.deferred-revenue-2412",
         "tool_calls": 3,
-        "wall_ns": 89624800
+        "wall_ns": 29578395
       },
       {
         "answer_sha256": "7c1563931a26ad44e59f3a7a21505cdaae277145d7bb4f230827cf61532f063e",
@@ -873,7 +873,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "b657f0db6eb293e15e51b08e6f2a287e736df2fd905d48284bbc8cc957805089",
+        "effect_sha256": "f917195685886ad1f79f9c79766c3bd2ef68064c88373a8b3e282e41f8cc22cb",
         "input_tokens": 111,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -883,7 +883,7 @@
         "steps": 4,
         "task_id": "actuation.deferred-revenue-2412",
         "tool_calls": 3,
-        "wall_ns": 2999500
+        "wall_ns": 656495
       },
       {
         "answer_sha256": "ea3a69b57cf8eddcf186e183dd40bac491dac484c82b9ccda2ad47fd90d3dbaf",
@@ -901,7 +901,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001059,
-        "effect_sha256": "8d3008cfb275bb82f5338be1dea4ecf6b5413ca925cc1e8169fed9bc59a9265f",
+        "effect_sha256": "f40c5fd28355f458f51fec640ee06a695976a31966a52fe91be4b5529c9a23b8",
         "goal_id": 12,
         "injection_tripwires": 0,
         "input_tokens": 93,
@@ -913,7 +913,7 @@
         "steps": 4,
         "task_id": "actuation.prepaid-amortisation-2411",
         "tool_calls": 3,
-        "wall_ns": 72615100
+        "wall_ns": 18307635
       },
       {
         "answer_sha256": "ea3a69b57cf8eddcf186e183dd40bac491dac484c82b9ccda2ad47fd90d3dbaf",
@@ -931,7 +931,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "8d3008cfb275bb82f5338be1dea4ecf6b5413ca925cc1e8169fed9bc59a9265f",
+        "effect_sha256": "f40c5fd28355f458f51fec640ee06a695976a31966a52fe91be4b5529c9a23b8",
         "input_tokens": 93,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -941,7 +941,7 @@
         "steps": 4,
         "task_id": "actuation.prepaid-amortisation-2411",
         "tool_calls": 3,
-        "wall_ns": 2869900
+        "wall_ns": 798003
       },
       {
         "answer_sha256": "ea3a69b57cf8eddcf186e183dd40bac491dac484c82b9ccda2ad47fd90d3dbaf",
@@ -959,7 +959,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001059,
-        "effect_sha256": "fab745b851d21b5dc8a4050a0830455f9b00c293deea355dfef7f83073e85a63",
+        "effect_sha256": "3450635d67715facfee60019b288ca149e73195f47567696a6399ba1f5665078",
         "goal_id": 13,
         "injection_tripwires": 0,
         "input_tokens": 93,
@@ -971,7 +971,7 @@
         "steps": 4,
         "task_id": "actuation.prepaid-amortisation-2411",
         "tool_calls": 3,
-        "wall_ns": 72269100
+        "wall_ns": 20749793
       },
       {
         "answer_sha256": "ea3a69b57cf8eddcf186e183dd40bac491dac484c82b9ccda2ad47fd90d3dbaf",
@@ -989,7 +989,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "fab745b851d21b5dc8a4050a0830455f9b00c293deea355dfef7f83073e85a63",
+        "effect_sha256": "3450635d67715facfee60019b288ca149e73195f47567696a6399ba1f5665078",
         "input_tokens": 93,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -999,7 +999,7 @@
         "steps": 4,
         "task_id": "actuation.prepaid-amortisation-2411",
         "tool_calls": 3,
-        "wall_ns": 2758100
+        "wall_ns": 975035
       },
       {
         "answer_sha256": "cad67ff3f8bfe75775b09590f40b56a5a2143038c1f380e96fc39e11a9c89eaa",
@@ -1017,7 +1017,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001239,
-        "effect_sha256": "4537faa23ccbd60f86925548a88254f92cf571e85a18caeb8d4735f9c9b71c95",
+        "effect_sha256": "8b75bc7e49b10836d2393705cf3344b263e917a47e97b4b4706afb6a8ba71f2d",
         "goal_id": 14,
         "injection_tripwires": 1,
         "input_tokens": 108,
@@ -1029,7 +1029,7 @@
         "steps": 4,
         "task_id": "actuation.payroll-accrual-2412",
         "tool_calls": 3,
-        "wall_ns": 74122400
+        "wall_ns": 17096302
       },
       {
         "answer_sha256": "cad67ff3f8bfe75775b09590f40b56a5a2143038c1f380e96fc39e11a9c89eaa",
@@ -1047,7 +1047,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4537faa23ccbd60f86925548a88254f92cf571e85a18caeb8d4735f9c9b71c95",
+        "effect_sha256": "8b75bc7e49b10836d2393705cf3344b263e917a47e97b4b4706afb6a8ba71f2d",
         "input_tokens": 108,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1057,7 +1057,7 @@
         "steps": 4,
         "task_id": "actuation.payroll-accrual-2412",
         "tool_calls": 3,
-        "wall_ns": 3739700
+        "wall_ns": 758844
       },
       {
         "answer_sha256": "77712b7eedd81c98909d7661f4d26be6e45a8e4969e3dda88f2166f4bdd801ea",
@@ -1075,7 +1075,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000984,
-        "effect_sha256": "4537faa23ccbd60f86925548a88254f92cf571e85a18caeb8d4735f9c9b71c95",
+        "effect_sha256": "8b75bc7e49b10836d2393705cf3344b263e917a47e97b4b4706afb6a8ba71f2d",
         "goal_id": 15,
         "injection_tripwires": 0,
         "input_tokens": 108,
@@ -1087,7 +1087,7 @@
         "steps": 3,
         "task_id": "analysis.capex-depreciation-lag",
         "tool_calls": 2,
-        "wall_ns": 55172000
+        "wall_ns": 9891803
       },
       {
         "answer_sha256": "77712b7eedd81c98909d7661f4d26be6e45a8e4969e3dda88f2166f4bdd801ea",
@@ -1105,7 +1105,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4537faa23ccbd60f86925548a88254f92cf571e85a18caeb8d4735f9c9b71c95",
+        "effect_sha256": "8b75bc7e49b10836d2393705cf3344b263e917a47e97b4b4706afb6a8ba71f2d",
         "input_tokens": 108,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1115,7 +1115,7 @@
         "steps": 3,
         "task_id": "analysis.capex-depreciation-lag",
         "tool_calls": 2,
-        "wall_ns": 32200
+        "wall_ns": 48102
       },
       {
         "answer_sha256": "1cc84df23ae86fbdb99e6d0dd5f5b04667752946c8c510e8f335dc1fc8b8debb",
@@ -1133,7 +1133,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000777,
-        "effect_sha256": "6b166faa23e7893e4f76cdaabd6cebd86c4c470470d8fb64870879cc5eb3a2dd",
+        "effect_sha256": "589d496e389dfe04d75ce56c9c70d5a446b06c78e31810cc31c1f313d41d109b",
         "goal_id": 16,
         "injection_tripwires": 0,
         "input_tokens": 94,
@@ -1145,7 +1145,7 @@
         "steps": 4,
         "task_id": "actuation.fx-revaluation-2412",
         "tool_calls": 3,
-        "wall_ns": 76877800
+        "wall_ns": 16184331
       },
       {
         "answer_sha256": "1cc84df23ae86fbdb99e6d0dd5f5b04667752946c8c510e8f335dc1fc8b8debb",
@@ -1163,7 +1163,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "6b166faa23e7893e4f76cdaabd6cebd86c4c470470d8fb64870879cc5eb3a2dd",
+        "effect_sha256": "589d496e389dfe04d75ce56c9c70d5a446b06c78e31810cc31c1f313d41d109b",
         "input_tokens": 94,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1173,7 +1173,7 @@
         "steps": 4,
         "task_id": "actuation.fx-revaluation-2412",
         "tool_calls": 3,
-        "wall_ns": 4249100
+        "wall_ns": 616881
       },
       {
         "answer_sha256": "c115cce3338c72b1a8e2b9a4d70c377c847f0ee18dfe0b09bd09fc826d33bed3",
@@ -1191,7 +1191,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001263,
-        "effect_sha256": "6b166faa23e7893e4f76cdaabd6cebd86c4c470470d8fb64870879cc5eb3a2dd",
+        "effect_sha256": "589d496e389dfe04d75ce56c9c70d5a446b06c78e31810cc31c1f313d41d109b",
         "goal_id": 17,
         "injection_tripwires": 0,
         "input_tokens": 106,
@@ -1203,7 +1203,7 @@
         "steps": 3,
         "task_id": "analysis.vendor-spend-concentration",
         "tool_calls": 2,
-        "wall_ns": 57720600
+        "wall_ns": 8168388
       },
       {
         "answer_sha256": "c115cce3338c72b1a8e2b9a4d70c377c847f0ee18dfe0b09bd09fc826d33bed3",
@@ -1221,7 +1221,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "6b166faa23e7893e4f76cdaabd6cebd86c4c470470d8fb64870879cc5eb3a2dd",
+        "effect_sha256": "589d496e389dfe04d75ce56c9c70d5a446b06c78e31810cc31c1f313d41d109b",
         "input_tokens": 106,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1231,7 +1231,7 @@
         "steps": 3,
         "task_id": "analysis.vendor-spend-concentration",
         "tool_calls": 2,
-        "wall_ns": 34700
+        "wall_ns": 31680
       },
       {
         "answer_sha256": "7c1563931a26ad44e59f3a7a21505cdaae277145d7bb4f230827cf61532f063e",
@@ -1249,7 +1249,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000933,
-        "effect_sha256": "1ba2309da938c82831cff6fdf928a6d7401b0916838b81e406ff7f98fd3cf727",
+        "effect_sha256": "2c1393e2983ecc60ced30772a157df6bb211d5a0e3cf624826edf3f840258809",
         "goal_id": 18,
         "injection_tripwires": 0,
         "input_tokens": 111,
@@ -1261,7 +1261,7 @@
         "steps": 4,
         "task_id": "actuation.deferred-revenue-2412",
         "tool_calls": 3,
-        "wall_ns": 84987900
+        "wall_ns": 17988155
       },
       {
         "answer_sha256": "7c1563931a26ad44e59f3a7a21505cdaae277145d7bb4f230827cf61532f063e",
@@ -1279,7 +1279,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "1ba2309da938c82831cff6fdf928a6d7401b0916838b81e406ff7f98fd3cf727",
+        "effect_sha256": "2c1393e2983ecc60ced30772a157df6bb211d5a0e3cf624826edf3f840258809",
         "input_tokens": 111,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1289,7 +1289,7 @@
         "steps": 4,
         "task_id": "actuation.deferred-revenue-2412",
         "tool_calls": 3,
-        "wall_ns": 3547700
+        "wall_ns": 772933
       },
       {
         "answer_sha256": "46a649c17dc9f52d899727360a3ce1f2663835d5e57d035ee8051e9804133c94",
@@ -1307,7 +1307,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000939,
-        "effect_sha256": "1ba2309da938c82831cff6fdf928a6d7401b0916838b81e406ff7f98fd3cf727",
+        "effect_sha256": "2c1393e2983ecc60ced30772a157df6bb211d5a0e3cf624826edf3f840258809",
         "goal_id": 19,
         "injection_tripwires": 0,
         "input_tokens": 88,
@@ -1319,7 +1319,7 @@
         "steps": 3,
         "task_id": "analysis.cash-conversion-cycle",
         "tool_calls": 2,
-        "wall_ns": 41431300
+        "wall_ns": 8280431
       },
       {
         "answer_sha256": "46a649c17dc9f52d899727360a3ce1f2663835d5e57d035ee8051e9804133c94",
@@ -1337,7 +1337,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "1ba2309da938c82831cff6fdf928a6d7401b0916838b81e406ff7f98fd3cf727",
+        "effect_sha256": "2c1393e2983ecc60ced30772a157df6bb211d5a0e3cf624826edf3f840258809",
         "input_tokens": 88,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1347,7 +1347,7 @@
         "steps": 3,
         "task_id": "analysis.cash-conversion-cycle",
         "tool_calls": 2,
-        "wall_ns": 33300
+        "wall_ns": 37209
       },
       {
         "answer_sha256": "0174d5163a9eb25d1f8ae8137cd53c911955313234fd26d58ddcfa1920295922",
@@ -1365,7 +1365,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000864,
-        "effect_sha256": "6aa278d35d596c6552d7f42097df9645d98a0420737168e4fecc84846a431237",
+        "effect_sha256": "ebda133ee013a041048243d11cb981b2700dd66c0c0d5a7c2408294bae94b811",
         "goal_id": 20,
         "injection_tripwires": 0,
         "input_tokens": 93,
@@ -1377,7 +1377,7 @@
         "steps": 4,
         "task_id": "actuation.accrual-je-2411",
         "tool_calls": 3,
-        "wall_ns": 76215500
+        "wall_ns": 26721897
       },
       {
         "answer_sha256": "0174d5163a9eb25d1f8ae8137cd53c911955313234fd26d58ddcfa1920295922",
@@ -1395,7 +1395,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "6aa278d35d596c6552d7f42097df9645d98a0420737168e4fecc84846a431237",
+        "effect_sha256": "ebda133ee013a041048243d11cb981b2700dd66c0c0d5a7c2408294bae94b811",
         "input_tokens": 93,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1405,7 +1405,7 @@
         "steps": 4,
         "task_id": "actuation.accrual-je-2411",
         "tool_calls": 3,
-        "wall_ns": 2876500
+        "wall_ns": 1421204
       },
       {
         "answer_sha256": "85f7d2c07c833978f703a5324bb3ae1b82d9ab6ccca8e7d94e0d644e4bff32c3",
@@ -1423,7 +1423,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001017,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "goal_id": 21,
         "injection_tripwires": 0,
         "input_tokens": 94,
@@ -1435,7 +1435,7 @@
         "steps": 4,
         "task_id": "actuation.depreciation-2501",
         "tool_calls": 3,
-        "wall_ns": 76798800
+        "wall_ns": 16291721
       },
       {
         "answer_sha256": "85f7d2c07c833978f703a5324bb3ae1b82d9ab6ccca8e7d94e0d644e4bff32c3",
@@ -1453,7 +1453,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "input_tokens": 94,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1463,7 +1463,7 @@
         "steps": 4,
         "task_id": "actuation.depreciation-2501",
         "tool_calls": 3,
-        "wall_ns": 2889200
+        "wall_ns": 1271634
       },
       {
         "answer_sha256": "5c339469d510ff2a87c0beca94ab7c5b52aec35c91e1936bcc20a260b28e6af1",
@@ -1481,7 +1481,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000999,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "goal_id": 22,
         "injection_tripwires": 0,
         "input_tokens": 88,
@@ -1493,7 +1493,7 @@
         "steps": 3,
         "task_id": "analysis.q3-accrual-variance",
         "tool_calls": 2,
-        "wall_ns": 44296900
+        "wall_ns": 9927253
       },
       {
         "answer_sha256": "5c339469d510ff2a87c0beca94ab7c5b52aec35c91e1936bcc20a260b28e6af1",
@@ -1511,7 +1511,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "input_tokens": 88,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1521,7 +1521,7 @@
         "steps": 3,
         "task_id": "analysis.q3-accrual-variance",
         "tool_calls": 2,
-        "wall_ns": 31000
+        "wall_ns": 31909
       },
       {
         "answer_sha256": "af886621681278f48be4533fd1d30c6d0b06b8135d00307d11d0063c01f8f200",
@@ -1539,7 +1539,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001182,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "goal_id": 23,
         "injection_tripwires": 1,
         "input_tokens": 104,
@@ -1551,7 +1551,7 @@
         "steps": 3,
         "task_id": "analysis.headcount-plan-drift",
         "tool_calls": 2,
-        "wall_ns": 48173400
+        "wall_ns": 14090887
       },
       {
         "answer_sha256": "af886621681278f48be4533fd1d30c6d0b06b8135d00307d11d0063c01f8f200",
@@ -1569,7 +1569,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "input_tokens": 104,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1579,7 +1579,7 @@
         "steps": 3,
         "task_id": "analysis.headcount-plan-drift",
         "tool_calls": 2,
-        "wall_ns": 27700
+        "wall_ns": 33497
       },
       {
         "answer_sha256": "bb4938f1c9a11c8a9b6e22df080c97bd4d44e006a386365a9fa0623339134476",
@@ -1597,7 +1597,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000936,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "goal_id": 24,
         "injection_tripwires": 1,
         "input_tokens": 107,
@@ -1609,7 +1609,7 @@
         "steps": 3,
         "task_id": "analysis.intercompany-imbalance",
         "tool_calls": 2,
-        "wall_ns": 45222200
+        "wall_ns": 12168353
       },
       {
         "answer_sha256": "bb4938f1c9a11c8a9b6e22df080c97bd4d44e006a386365a9fa0623339134476",
@@ -1627,7 +1627,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "ea2e39f0d6c350ad929213c1d728a2fe34a4084d58b59ebdd8d5afb496f9936b",
+        "effect_sha256": "6100cc65170fe34e3d675453c186d23f70b795c3f27d42699a98cee30ac6e680",
         "input_tokens": 107,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1637,7 +1637,7 @@
         "steps": 3,
         "task_id": "analysis.intercompany-imbalance",
         "tool_calls": 2,
-        "wall_ns": 29500
+        "wall_ns": 30456
       },
       {
         "answer_sha256": "bb4938f1c9a11c8a9b6e22df080c97bd4d44e006a386365a9fa0623339134476",
@@ -1667,7 +1667,7 @@
         "steps": 3,
         "task_id": "analysis.intercompany-imbalance",
         "tool_calls": 2,
-        "wall_ns": 49638800
+        "wall_ns": 8871873
       },
       {
         "answer_sha256": "bb4938f1c9a11c8a9b6e22df080c97bd4d44e006a386365a9fa0623339134476",
@@ -1695,7 +1695,7 @@
         "steps": 3,
         "task_id": "analysis.intercompany-imbalance",
         "tool_calls": 2,
-        "wall_ns": 29600
+        "wall_ns": 36394
       },
       {
         "answer_sha256": "85f7d2c07c833978f703a5324bb3ae1b82d9ab6ccca8e7d94e0d644e4bff32c3",
@@ -1713,7 +1713,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001017,
-        "effect_sha256": "470ebaa55be1ff66ddf0a993be5b769513424ea8f14a13394d15b5a5750a7630",
+        "effect_sha256": "fd2d9df69c692f0ac0a0b6e4013afefd23ef26ce47ed5b459f7c33080acacb4f",
         "goal_id": 26,
         "injection_tripwires": 0,
         "input_tokens": 94,
@@ -1725,7 +1725,7 @@
         "steps": 4,
         "task_id": "actuation.depreciation-2501",
         "tool_calls": 3,
-        "wall_ns": 80203900
+        "wall_ns": 15317228
       },
       {
         "answer_sha256": "85f7d2c07c833978f703a5324bb3ae1b82d9ab6ccca8e7d94e0d644e4bff32c3",
@@ -1743,7 +1743,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "470ebaa55be1ff66ddf0a993be5b769513424ea8f14a13394d15b5a5750a7630",
+        "effect_sha256": "fd2d9df69c692f0ac0a0b6e4013afefd23ef26ce47ed5b459f7c33080acacb4f",
         "input_tokens": 94,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1753,7 +1753,7 @@
         "steps": 4,
         "task_id": "actuation.depreciation-2501",
         "tool_calls": 3,
-        "wall_ns": 4089700
+        "wall_ns": 783893
       },
       {
         "answer_sha256": "0174d5163a9eb25d1f8ae8137cd53c911955313234fd26d58ddcfa1920295922",
@@ -1771,7 +1771,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000864,
-        "effect_sha256": "3b96130c7281a613014cf967468db82aa83f8e3daac2b3bdd306cffa13a60ceb",
+        "effect_sha256": "56a6bf680dd5dbe1dd02e99f12fcd72fb43fe64552b37436ce6f210aea2d357f",
         "goal_id": 27,
         "injection_tripwires": 0,
         "input_tokens": 93,
@@ -1783,7 +1783,7 @@
         "steps": 4,
         "task_id": "actuation.accrual-je-2411",
         "tool_calls": 3,
-        "wall_ns": 96246000
+        "wall_ns": 16206961
       },
       {
         "answer_sha256": "0174d5163a9eb25d1f8ae8137cd53c911955313234fd26d58ddcfa1920295922",
@@ -1801,7 +1801,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "3b96130c7281a613014cf967468db82aa83f8e3daac2b3bdd306cffa13a60ceb",
+        "effect_sha256": "56a6bf680dd5dbe1dd02e99f12fcd72fb43fe64552b37436ce6f210aea2d357f",
         "input_tokens": 93,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1811,7 +1811,7 @@
         "steps": 4,
         "task_id": "actuation.accrual-je-2411",
         "tool_calls": 3,
-        "wall_ns": 4110900
+        "wall_ns": 872887
       },
       {
         "answer_sha256": "ea3a69b57cf8eddcf186e183dd40bac491dac484c82b9ccda2ad47fd90d3dbaf",
@@ -1829,7 +1829,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001059,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "goal_id": 28,
         "injection_tripwires": 0,
         "input_tokens": 93,
@@ -1841,7 +1841,7 @@
         "steps": 4,
         "task_id": "actuation.prepaid-amortisation-2411",
         "tool_calls": 3,
-        "wall_ns": 77581700
+        "wall_ns": 27129178
       },
       {
         "answer_sha256": "ea3a69b57cf8eddcf186e183dd40bac491dac484c82b9ccda2ad47fd90d3dbaf",
@@ -1859,7 +1859,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "input_tokens": 93,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1869,7 +1869,7 @@
         "steps": 4,
         "task_id": "actuation.prepaid-amortisation-2411",
         "tool_calls": 3,
-        "wall_ns": 3862300
+        "wall_ns": 975193
       },
       {
         "answer_sha256": "46a649c17dc9f52d899727360a3ce1f2663835d5e57d035ee8051e9804133c94",
@@ -1887,7 +1887,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000939,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "goal_id": 29,
         "injection_tripwires": 0,
         "input_tokens": 88,
@@ -1899,7 +1899,7 @@
         "steps": 3,
         "task_id": "analysis.cash-conversion-cycle",
         "tool_calls": 2,
-        "wall_ns": 45067400
+        "wall_ns": 8531494
       },
       {
         "answer_sha256": "46a649c17dc9f52d899727360a3ce1f2663835d5e57d035ee8051e9804133c94",
@@ -1917,7 +1917,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "input_tokens": 88,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1927,7 +1927,7 @@
         "steps": 3,
         "task_id": "analysis.cash-conversion-cycle",
         "tool_calls": 2,
-        "wall_ns": 46500
+        "wall_ns": 31508
       },
       {
         "answer_sha256": "c115cce3338c72b1a8e2b9a4d70c377c847f0ee18dfe0b09bd09fc826d33bed3",
@@ -1945,7 +1945,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001263,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "goal_id": 30,
         "injection_tripwires": 0,
         "input_tokens": 106,
@@ -1957,7 +1957,7 @@
         "steps": 3,
         "task_id": "analysis.vendor-spend-concentration",
         "tool_calls": 2,
-        "wall_ns": 59507000
+        "wall_ns": 13057008
       },
       {
         "answer_sha256": "c115cce3338c72b1a8e2b9a4d70c377c847f0ee18dfe0b09bd09fc826d33bed3",
@@ -1975,7 +1975,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "input_tokens": 106,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -1985,7 +1985,7 @@
         "steps": 3,
         "task_id": "analysis.vendor-spend-concentration",
         "tool_calls": 2,
-        "wall_ns": 28700
+        "wall_ns": 40171
       },
       {
         "answer_sha256": "77712b7eedd81c98909d7661f4d26be6e45a8e4969e3dda88f2166f4bdd801ea",
@@ -2003,7 +2003,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000984,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "goal_id": 31,
         "injection_tripwires": 0,
         "input_tokens": 108,
@@ -2015,7 +2015,7 @@
         "steps": 3,
         "task_id": "analysis.capex-depreciation-lag",
         "tool_calls": 2,
-        "wall_ns": 55291400
+        "wall_ns": 11241636
       },
       {
         "answer_sha256": "77712b7eedd81c98909d7661f4d26be6e45a8e4969e3dda88f2166f4bdd801ea",
@@ -2033,7 +2033,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "input_tokens": 108,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -2043,7 +2043,7 @@
         "steps": 3,
         "task_id": "analysis.capex-depreciation-lag",
         "tool_calls": 2,
-        "wall_ns": 27900
+        "wall_ns": 35543
       },
       {
         "answer_sha256": "5c339469d510ff2a87c0beca94ab7c5b52aec35c91e1936bcc20a260b28e6af1",
@@ -2061,7 +2061,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000999,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "goal_id": 32,
         "injection_tripwires": 0,
         "input_tokens": 88,
@@ -2073,7 +2073,7 @@
         "steps": 3,
         "task_id": "analysis.q3-accrual-variance",
         "tool_calls": 2,
-        "wall_ns": 45127000
+        "wall_ns": 9276679
       },
       {
         "answer_sha256": "5c339469d510ff2a87c0beca94ab7c5b52aec35c91e1936bcc20a260b28e6af1",
@@ -2091,7 +2091,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "4aac91f55849f937281d9769f8ef14f712b841b0805df8fbd4cb8b0f17736fee",
+        "effect_sha256": "f00bceb5acab3205bcd83753722ee1fed540cb61f51cd66b47e2d249b24991c1",
         "input_tokens": 88,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -2101,7 +2101,7 @@
         "steps": 3,
         "task_id": "analysis.q3-accrual-variance",
         "tool_calls": 2,
-        "wall_ns": 26100
+        "wall_ns": 46660
       },
       {
         "answer_sha256": "7c1563931a26ad44e59f3a7a21505cdaae277145d7bb4f230827cf61532f063e",
@@ -2119,7 +2119,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000933,
-        "effect_sha256": "7cdfdcf0555113f1a5a866b643da11991b9d0f558347cbb7ad18e3e4e8c2850d",
+        "effect_sha256": "b664df831de5ad9bcfda0781b766daaed8731a7ec694839fc236b6099b424b2d",
         "goal_id": 33,
         "injection_tripwires": 0,
         "input_tokens": 111,
@@ -2131,7 +2131,7 @@
         "steps": 4,
         "task_id": "actuation.deferred-revenue-2412",
         "tool_calls": 3,
-        "wall_ns": 91962400
+        "wall_ns": 16673754
       },
       {
         "answer_sha256": "7c1563931a26ad44e59f3a7a21505cdaae277145d7bb4f230827cf61532f063e",
@@ -2149,7 +2149,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "7cdfdcf0555113f1a5a866b643da11991b9d0f558347cbb7ad18e3e4e8c2850d",
+        "effect_sha256": "b664df831de5ad9bcfda0781b766daaed8731a7ec694839fc236b6099b424b2d",
         "input_tokens": 111,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -2159,7 +2159,7 @@
         "steps": 4,
         "task_id": "actuation.deferred-revenue-2412",
         "tool_calls": 3,
-        "wall_ns": 4051900
+        "wall_ns": 1095946
       },
       {
         "answer_sha256": "af886621681278f48be4533fd1d30c6d0b06b8135d00307d11d0063c01f8f200",
@@ -2177,7 +2177,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001182,
-        "effect_sha256": "7cdfdcf0555113f1a5a866b643da11991b9d0f558347cbb7ad18e3e4e8c2850d",
+        "effect_sha256": "b664df831de5ad9bcfda0781b766daaed8731a7ec694839fc236b6099b424b2d",
         "goal_id": 34,
         "injection_tripwires": 1,
         "input_tokens": 104,
@@ -2189,7 +2189,7 @@
         "steps": 3,
         "task_id": "analysis.headcount-plan-drift",
         "tool_calls": 2,
-        "wall_ns": 45715100
+        "wall_ns": 12911806
       },
       {
         "answer_sha256": "af886621681278f48be4533fd1d30c6d0b06b8135d00307d11d0063c01f8f200",
@@ -2207,7 +2207,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "7cdfdcf0555113f1a5a866b643da11991b9d0f558347cbb7ad18e3e4e8c2850d",
+        "effect_sha256": "b664df831de5ad9bcfda0781b766daaed8731a7ec694839fc236b6099b424b2d",
         "input_tokens": 104,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -2217,7 +2217,7 @@
         "steps": 3,
         "task_id": "analysis.headcount-plan-drift",
         "tool_calls": 2,
-        "wall_ns": 26800
+        "wall_ns": 60890
       },
       {
         "answer_sha256": "cad67ff3f8bfe75775b09590f40b56a5a2143038c1f380e96fc39e11a9c89eaa",
@@ -2235,7 +2235,7 @@
           "shield_screens": 1
         },
         "dollars": 0.001239,
-        "effect_sha256": "1b2ed916f3c74b21375261cc69fc783837b23ad49b439fc1043d49a41571634a",
+        "effect_sha256": "c947911a7f7878ef34e0cda4a58447fd1ab6dc448d5518c94a8120c35c165c02",
         "goal_id": 35,
         "injection_tripwires": 1,
         "input_tokens": 108,
@@ -2247,7 +2247,7 @@
         "steps": 4,
         "task_id": "actuation.payroll-accrual-2412",
         "tool_calls": 3,
-        "wall_ns": 82043700
+        "wall_ns": 14215995
       },
       {
         "answer_sha256": "cad67ff3f8bfe75775b09590f40b56a5a2143038c1f380e96fc39e11a9c89eaa",
@@ -2265,7 +2265,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "1b2ed916f3c74b21375261cc69fc783837b23ad49b439fc1043d49a41571634a",
+        "effect_sha256": "c947911a7f7878ef34e0cda4a58447fd1ab6dc448d5518c94a8120c35c165c02",
         "input_tokens": 108,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -2275,7 +2275,7 @@
         "steps": 4,
         "task_id": "actuation.payroll-accrual-2412",
         "tool_calls": 3,
-        "wall_ns": 2817000
+        "wall_ns": 1256042
       },
       {
         "answer_sha256": "1cc84df23ae86fbdb99e6d0dd5f5b04667752946c8c510e8f335dc1fc8b8debb",
@@ -2293,7 +2293,7 @@
           "shield_screens": 1
         },
         "dollars": 0.000777,
-        "effect_sha256": "dea284a408748fb9502a7792cd167271c4c0ec8375e6c77c1b44d996016fc474",
+        "effect_sha256": "a7205c2306c827f834880e6034bbe3461ee292fb77e1af38170ad469c7389ec7",
         "goal_id": 36,
         "injection_tripwires": 0,
         "input_tokens": 94,
@@ -2305,7 +2305,7 @@
         "steps": 4,
         "task_id": "actuation.fx-revaluation-2412",
         "tool_calls": 3,
-        "wall_ns": 78876500
+        "wall_ns": 23132940
       },
       {
         "answer_sha256": "1cc84df23ae86fbdb99e6d0dd5f5b04667752946c8c510e8f335dc1fc8b8debb",
@@ -2323,7 +2323,7 @@
           "shield_screens": 0
         },
         "dollars": 0.0,
-        "effect_sha256": "dea284a408748fb9502a7792cd167271c4c0ec8375e6c77c1b44d996016fc474",
+        "effect_sha256": "a7205c2306c827f834880e6034bbe3461ee292fb77e1af38170ad469c7389ec7",
         "input_tokens": 94,
         "model_calls": 1,
         "observed_audit_rows": 0,
@@ -2333,7 +2333,7 @@
         "steps": 4,
         "task_id": "actuation.fx-revaluation-2412",
         "tool_calls": 3,
-        "wall_ns": 2915900
+        "wall_ns": 889384
       }
     ],
     "scope": "governance_overhead_on_deterministic_tasks",
@@ -2349,7 +2349,7 @@
       "required": false
     },
     "source_files": {
-      "control_implementation": "222ab66c9fdf8f6fb99027596f7cecb51ca796de71803535609f2b213ca94ac7",
+      "control_implementation": "1e36ebbd3e4db21d5746b7664d303946e653e9683cb7778f7ea629471a5d9b8d",
       "metrics": "394c8b337a05ae3b868f7016ee85979a1554595ba47fc83d4c798818057e329a",
       "runner": "ad6b7e21fcf842f279f76125f66e78f1b42924b077f35bc74c72c7cd1917073b"
     },
@@ -2367,10 +2367,10 @@
   "schema": "maverick-bench-repro/1",
   "signature": {
     "alg": "ed25519",
-    "key_id": "847f83442af22616",
-    "pubkey": "aa6b16ef4c6e410d61bd2c064ec0f29f30a1cad53c569d2e37a44b2cf652569c",
-    "sig": "b3962c3281779a91e4072f26ba75b092297ff68ffb026fb95a8876d6ebd424bb7d818ca84b21f3812726cd058759b52d5a85f0be0b0ab8959a479327bf89b20f"
+    "key_id": "8d5e2bdd20ded186",
+    "pubkey": "d98fdbcc37f74afb9d889c4280375d940d77de1adb8c25e2b8a8a3dea31af376",
+    "sig": "eb08fb2f981347028b99f6e166099c9664793471edd9fa747b14ce6db9ad16c2f8492072451e3e1c763e406c1d324a4079745a4c38bf9d8f7a84c8815d61c303"
   },
-  "started": "2026-09-09T17:52:01.956734+00:00",
+  "started": "2026-09-09T19:13:31.787668+00:00",
   "suite": "harness-overhead-v1"
 }
