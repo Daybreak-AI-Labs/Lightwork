@@ -8,6 +8,8 @@ from maverick.paths import data_dir
 from maverick.quotas import UsageLedger
 from maverick.tenant.registry import (
     create_tenant,
+    release_tenant_reservation,
+    reserve_tenant_budget,
     set_quota,
     suspend_tenant,
     tenant_over_quota,
@@ -41,6 +43,26 @@ def test_tenant_over_quota_fires_at_cap(monkeypatch, tmp_path):
     ledger.record("user:bob", 1.5, 1, 1)
     reason = tenant_over_quota("acme")
     assert reason and "daily spend cap" in reason and "$5.50" in reason
+
+
+def test_tenant_over_quota_counts_in_flight_reservations(monkeypatch, tmp_path):
+    """W2-83: holds taken by runs in flight are allowance already committed.
+    The gate must refuse when spend + holds reach the cap, not only when
+    recorded spend does -- otherwise the run is admitted with a $0 cap and
+    dies on its first model call."""
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    create_tenant("acme")
+    set_quota("acme", 5.0)
+    ledger = UsageLedger(data_dir("usage", "ledger.json", tenant="acme"))
+    ledger.record("user:alice", 2.0, 1, 1)
+    assert tenant_over_quota("acme") is None
+    assert reserve_tenant_budget("acme", 3.0, 600.0, "run-1") == 3.0
+    reason = tenant_over_quota("acme")
+    assert reason and "held by runs in flight" in reason
+    assert "$2.00" in reason and "$3.00" in reason and "$5.00" in reason
+    # The hold is released once that run settles: the allowance is back.
+    release_tenant_reservation("acme", "run-1")
+    assert tenant_over_quota("acme") is None
 
 
 def test_explicit_zero_cap_means_no_enforcement(monkeypatch, tmp_path):

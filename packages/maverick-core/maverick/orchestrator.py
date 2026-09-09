@@ -1434,6 +1434,12 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         _tenant_reason = tenant_over_quota(_tenant_id)
     except Exception as exc:
         _tenant_reason = f"tenant policy unavailable or inactive: {exc}"
+    if not _tenant_reason:
+        # W2-83: budget_from_config clamps a run to $0 when the tenant's
+        # allowance is exhausted by in-flight holds (or unreadable) and says
+        # why. Refuse here, before the run starts, rather than admit a
+        # $0-cap run that dies on its first model call.
+        _tenant_reason = getattr(budget, "_tenant_refusal", None)
     if _tenant_reason:
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_tenant_reason}")
         log.warning("goal #%s refused: %s", goal_id, _tenant_reason)

@@ -805,20 +805,30 @@ def budget_from_config(*, defaults: dict | None = None,
     for key, val in overrides.items():
         if val is not None and key in _BUDGET_KEY_TYPES:
             kwargs[key] = val
-    reservation_id = _clamp_to_tenant_remainder(kwargs)
+    reservation_id, refusal = _clamp_to_tenant_remainder(kwargs)
     budget = Budget(**kwargs)
     if reservation_id:
         # Handle so the run can release the tenant hold when it records its
         # actual spend: ``quotas.record_usage(..., reservation_id=b._tenant_reservation_id)``.
         budget._tenant_reservation_id = reservation_id
+    if refusal:
+        # W2-83: the tenant allowance is exhausted (or unreadable), so this
+        # budget was clamped to $0. Carry the reason so the run gate refuses
+        # cleanly BEFORE the goal starts instead of admitting a run that dies
+        # on its first model call with "budget exceeded".
+        budget._tenant_refusal = refusal
     return budget
 
 
-def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
+def _clamp_to_tenant_remainder(kwargs: dict) -> tuple[str | None, str | None]:
     """Clamp ``kwargs['max_dollars']`` to the active tenant's remaining daily
     allowance (#78) in place, and RESERVE that clamped cap against the tenant so
-    concurrent runs coordinate (finding #2). Returns the reservation id, or
-    ``None`` when no reservation was made (no active tenant / no cap / clamp 0).
+    concurrent runs coordinate (finding #2). Returns ``(reservation_id,
+    refusal_reason)``: the reservation id is ``None`` when no reservation was
+    made (no active tenant / no cap / clamp 0); the refusal reason is set
+    exactly when the run was clamped to $0 by tenant policy (allowance
+    exhausted, policy unreadable, reservation failed) so callers can refuse
+    the start with a human-readable reason instead of running it into a wall.
 
     Highest precedence: the tenant's aggregate daily ceiling is a billing
     guarantee, so it overrides even an explicit ``--max-dollars``. Without it the
@@ -842,9 +852,9 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
         # rather than treating that policy outage as "unlimited".
         log.error("tenant budget policy unavailable; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, f"tenant budget policy unavailable: {exc}"
     if not tenant:
-        return None
+        return None, None
 
     # When no max_dollars was set, the requested amount is Budget's own default
     # (not "unbounded"). The atomic allocator can therefore only lower it.
@@ -856,10 +866,12 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
     except (TypeError, ValueError, OverflowError) as exc:
         log.error("tenant budget request is invalid; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, f"tenant budget request is invalid: {exc}"
     if not math.isfinite(requested) or requested <= 0:
+        # The caller asked for nothing (or nonsense); that is its own choice,
+        # not a tenant refusal.
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, None
 
     try:
         from .tenant.registry import reserve_tenant_budget
@@ -876,14 +888,19 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
         reservation_id = uuid.uuid4().hex
         granted = reserve_tenant_budget(tenant, requested, ttl, reservation_id)
         if granted is None:
-            return None
+            return None, None
         kwargs["max_dollars"] = granted
         if granted <= 0:
-            return None
-        return reservation_id
+            return None, (
+                f"workspace {tenant!r} has no daily spend allowance left for "
+                "this run: today's spend plus the amounts held by runs in "
+                "flight reach its cap; retry when those runs finish or after "
+                "midnight UTC"
+            )
+        return reservation_id, None
     except Exception as exc:
         # Running after a failed reservation reopens the concurrent overspend
         # window. Deny this start; a later retry can reserve after state heals.
         log.error("tenant budget reservation failed; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, f"tenant budget reservation failed: {exc}"
