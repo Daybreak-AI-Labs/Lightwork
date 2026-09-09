@@ -93,6 +93,7 @@ def staged_repair(installation, monkeypatch, *, prepare=True):
             "product_code": PRODUCT_CODE,
             "package_code": PACKAGE_CODE,
             "install_directory": str(runtime.parent.absolute()),
+            "package_name": "Lightwork.msi",
         },
     )
     monkeypatch.setattr(
@@ -152,6 +153,7 @@ def staged_reviewed_repair(
             "product_code": PRODUCT_CODE,
             "package_code": PACKAGE_CODE,
             "install_directory": str(runtime.parent.absolute()),
+            "package_name": "Lightwork.msi",
         },
     )
     monkeypatch.setattr(
@@ -225,26 +227,64 @@ def fake_repair_installer(runtime, events):
     return install
 
 
-def test_repair_msi_requests_a_complete_same_product_reinstall(
-    installation, monkeypatch,
+@pytest.mark.parametrize("registered_name", ["Lightwork.msi", "new.msi"])
+@pytest.mark.parametrize("returncode", [0, 1603])
+def test_repair_msi_reinstalls_the_verified_package_under_its_registered_name(
+    installation, monkeypatch, registered_name, returncode,
 ):
+    # Windows Installer resolves a maintenance-mode (REINSTALL) source as the
+    # launched-from directory plus the product's registered PackageName. A
+    # package launched under any other file name fails source resolution with
+    # error 1316 during ProcessComponents (observed as 1603 on the hosted
+    # acceptance VM), so the verified bytes must be offered under that name.
     grant, directory = staged_repair(installation, monkeypatch)
+    record = maintenance._read(directory / "record.json")
+    record["old"]["package_name"] = registered_name
+    maintenance._write(directory / "record.json", record)
+    launched = directory / registered_name
     calls = []
 
     def run(arguments, **kwargs):
         calls.append((arguments, kwargs))
-        return SimpleNamespace(returncode=0)
+        assert launched.is_file() and not launched.is_symlink()
+        assert launched.read_bytes() == (directory / "new.msi").read_bytes()
+        return SimpleNamespace(returncode=returncode)
 
     monkeypatch.setattr(maintenance.subprocess, "run", run)
-    maintenance._msiexec(directory, "/i", "new")
+    if returncode:
+        with pytest.raises(maintenance.MaintenanceError, match="could not finish"):
+            maintenance._msiexec(directory, "/i", "new")
+    else:
+        maintenance._msiexec(directory, "/i", "new")
     arguments, kwargs = calls[0]
-    assert arguments[1:3] == ["/i", maintenance.installer_path(directory / "new.msi")]
+    assert arguments[1:3] == ["/i", maintenance.installer_path(launched)]
     assert "REINSTALL=ALL" in arguments
     assert "REINSTALLMODE=vamus" in arguments
-    install_directory = Path(maintenance._read(directory / "record.json")["installed_runtime"]).parent
+    install_directory = Path(record["installed_runtime"]).parent
     assert "INSTALLDIR=" + maintenance.installer_path(install_directory) in arguments
+    assert arguments[6] == maintenance.installer_path(directory / "i-new.log")
     assert kwargs["check"] is False
     assert kwargs["timeout"] == 1800
+    # The verified candidate stays for finalization and recovery; only the
+    # transient registered-name copy is removed, whatever msiexec returned.
+    assert (directory / "new.msi").is_file()
+    assert launched.exists() == (registered_name == "new.msi")
+
+
+def test_repair_msi_refuses_a_record_without_the_registered_package_name(
+    installation, monkeypatch,
+):
+    grant, directory = staged_repair(installation, monkeypatch)
+    record = maintenance._read(directory / "record.json")
+    del record["old"]["package_name"]
+    maintenance._write(directory / "record.json", record)
+    monkeypatch.setattr(
+        maintenance.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("msiexec must not start without the registered name"),
+    )
+    with pytest.raises(maintenance.MaintenanceError, match="registered package name"):
+        maintenance._msiexec(directory, "/i", "new")
+    assert (directory / "new.msi").is_file()
 
 
 def _simulate_windows(monkeypatch):
@@ -272,6 +312,7 @@ def test_registered_installer_lookup_uses_the_fixed_product_family_and_os_powers
                 "ProductCode": PRODUCT_CODE.lower(),
                 "PackageCode": PACKAGE_CODE.lower(),
                 "InstallLocation": str(runtime.parent),
+                "PackageName": "Lightwork.msi",
             }),
         )
 
@@ -283,12 +324,15 @@ def test_registered_installer_lookup_uses_the_fixed_product_family_and_os_powers
         "product_code": PRODUCT_CODE,
         "package_code": PACKAGE_CODE,
         "install_directory": str(runtime.parent.absolute()),
+        "package_name": "Lightwork.msi",
     }
     arguments, kwargs = calls[0]
     assert arguments[-2:] == ["-Version", "1.0.0"]
-    assert "AB5BC260-7EC9-4B70-AF78-28F4067BC530" in (
-        scratch / "inspect-registered-installer.ps1"
-    ).read_text()
+    script = (scratch / "inspect-registered-installer.ps1").read_text()
+    assert "AB5BC260-7EC9-4B70-AF78-28F4067BC530" in script
+    # Windows Installer resolves a maintenance-mode source as the launched-from
+    # directory plus the registered PackageName; the lookup must report it.
+    assert "'PackageName'" in script
     assert "LocalPackage" not in (scratch / "inspect-registered-installer.ps1").read_text()
     assert kwargs["env"]["PSModulePath"] != str(tmp_path / "untrusted-modules")
     assert kwargs["check"] is False
@@ -308,6 +352,31 @@ def test_registered_installer_lookup_rejects_non_object_output(
         maintenance._registered_product_identity("1.0.0", tmp_path / "scratch", runtime)
 
 
+@pytest.mark.parametrize("package_name", [
+    None, "", "Lightwork", "..\\Lightwork.msi", "sub/Lightwork.msi", "C:\\Lightwork.msi",
+    "..", "Light\"work.msi", "x" * 252 + ".msi",
+])
+def test_registered_installer_lookup_rejects_unsafe_package_names(
+    installation, tmp_path, monkeypatch, package_name,
+):
+    _, runtime, _ = installation
+    _simulate_windows(monkeypatch)
+    response = {
+        "ProductCode": PRODUCT_CODE,
+        "PackageCode": PACKAGE_CODE,
+        "InstallLocation": str(runtime.parent),
+    }
+    if package_name is not None:
+        response["PackageName"] = package_name
+    monkeypatch.setattr(
+        maintenance.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=json.dumps(response)),
+    )
+    with pytest.raises(maintenance.MaintenanceError, match="identity or installation directory"):
+        maintenance._registered_product_identity("1.0.0", tmp_path / "scratch", runtime)
+
+
 def test_registered_product_is_rechecked_before_repair(
     installation, tmp_path, monkeypatch,
 ):
@@ -320,18 +389,20 @@ def test_registered_product_is_rechecked_before_repair(
             "product_code": PRODUCT_CODE,
             "package_code": PACKAGE_CODE,
             "install_directory": str(runtime.parent.absolute()),
+            "package_name": "Lightwork.msi",
         },
     }
-    monkeypatch.setattr(
-        maintenance,
-        "_registered_product_identity",
-        lambda *_: {
-            **record["old"],
-            "package_code": "{FFFFFFFF-EEEE-DDDD-CCCC-BBBBBBBBBBBB}",
-        },
-    )
-    with pytest.raises(maintenance.MaintenanceError, match="package or location"):
-        maintenance._verify_repair_registration(directory, record)
+    for drift in (
+        {"package_code": "{FFFFFFFF-EEEE-DDDD-CCCC-BBBBBBBBBBBB}"},
+        {"package_name": "Renamed.msi"},
+    ):
+        monkeypatch.setattr(
+            maintenance,
+            "_registered_product_identity",
+            lambda *_, drift=drift: {**record["old"], **drift},
+        )
+        with pytest.raises(maintenance.MaintenanceError, match="package or location"):
+            maintenance._verify_repair_registration(directory, record)
 
 
 def test_unknown_or_mismatched_repair_operation_is_refused_before_msi(
@@ -492,6 +563,7 @@ def test_missing_recovery_copy_refuses_before_creating_repair_authorization(
             "product_code": PRODUCT_CODE,
             "package_code": PACKAGE_CODE,
             "install_directory": str(runtime.parent.absolute()),
+            "package_name": "Lightwork.msi",
         },
     )
     (runtime.parent / "Lightwork-recovery.msi").write_bytes(b"same-version-repair-msi")
@@ -528,6 +600,7 @@ def test_signed_current_manifest_uses_primary_pair_to_repair_broken_recovery_pai
             "product_code": PRODUCT_CODE,
             "package_code": PACKAGE_CODE,
             "install_directory": str(runtime.parent.absolute()),
+            "package_name": "Lightwork.msi",
         },
     )
     monkeypatch.setattr(
@@ -620,6 +693,7 @@ def test_primary_repair_fallback_requires_exact_signed_manifest_identity(
             "product_code": PRODUCT_CODE,
             "package_code": PACKAGE_CODE,
             "install_directory": str(runtime.parent.absolute()),
+            "package_name": "Lightwork.msi",
         },
     )
     monkeypatch.setattr(

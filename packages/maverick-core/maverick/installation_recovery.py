@@ -58,6 +58,7 @@ foreach ($product in @($engine.RelatedProducts($upgrade))) {
             ProductCode = $product
             PackageCode = $engine.ProductInfo($product, 'PackageCode')
             InstallLocation = $engine.ProductInfo($product, 'InstallLocation')
+            PackageName = $engine.ProductInfo($product, 'PackageName')
         }
     } catch { throw }
 }
@@ -244,6 +245,18 @@ def _native_channel(
     return {"native_sha256": digest, "public_key": public_key}
 
 
+def _valid_package_name(name: object) -> bool:
+    """One ordinary MSI file name, as Windows Installer registers it for a product."""
+    return (
+        isinstance(name, str)
+        and 4 < len(name) <= 255
+        and name.lower().endswith(".msi")
+        and not name.endswith((" ", "."))
+        and not any(char in '\\/:*?"<>|' or ord(char) < 32 for char in name)
+        and Path(name).name == name
+    )
+
+
 def _registered_product_identity(version: str, scratch: Path, installed_runtime: Path) -> dict:
     """Read the registered package identity without using Windows' private cache as source."""
     if os.name != "nt" or not _VERSION.fullmatch(str(version)):
@@ -278,13 +291,15 @@ def _registered_product_identity(version: str, scratch: Path, installed_runtime:
             raise ValueError("invalid registered product response")
         product_code = value.get("ProductCode")
         package_code = value.get("PackageCode")
+        package_name = value.get("PackageName")
         install_location = Path(value.get("InstallLocation", ""))
         guid = r"\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}"
         expected_location = installed_runtime.parent.absolute()
         if (not re.fullmatch(guid, product_code or "")
                 or not re.fullmatch(guid, package_code or "")
                 or not install_location.is_absolute() or install_location.is_symlink()
-                or install_location.absolute() != expected_location):
+                or install_location.absolute() != expected_location
+                or not _valid_package_name(package_name)):
             raise ValueError("invalid registered product")
     except (OSError, TypeError, ValueError) as exc:
         raise MaintenanceError(
@@ -294,6 +309,9 @@ def _registered_product_identity(version: str, scratch: Path, installed_runtime:
         "product_code": product_code.upper(),
         "package_code": package_code.upper(),
         "install_directory": str(install_location.absolute()),
+        # Windows Installer resolves a maintenance-mode source as the
+        # launched-from directory plus this registered file name.
+        "package_name": package_name,
     }
 
 
@@ -302,8 +320,8 @@ def _verify_repair_registration(directory: Path, record: dict) -> None:
         record["old_version"], directory, Path(record["installed_runtime"]),
     )
     expected = record["old"]
-    if any(registered[name] != expected[name] for name in (
-        "product_code", "package_code", "install_directory",
+    if any(registered[name] != expected.get(name) for name in (
+        "product_code", "package_code", "install_directory", "package_name",
     )):
         raise MaintenanceError(
             "The installed Windows product, package or location differs from the reviewed repair. Recovery remains blocked."
@@ -998,18 +1016,51 @@ def prepare(token: str) -> dict:
         return {"id": record["id"], "helper": str(directory / "maverick.exe"), "operation": record["operation"]}
 
 
+def _registered_package_copy(directory: Path, record: dict, package: Path) -> Path | None:
+    """Offer the verified repair package under the product's registered file name.
+
+    Windows Installer resolves a maintenance-mode (REINSTALL) source as the
+    launched-from directory plus the registered PackageName. A package launched
+    under any other file name fails source resolution (error 1316) and the
+    reinstall dies in ProcessComponents with 1603. The copy is transient and
+    byte-verified against the reviewed candidate; the candidate itself stays
+    for finalization and recovery.
+    """
+    registered = (record.get("old") or {}).get("package_name")
+    if not _valid_package_name(registered):
+        raise MaintenanceError(
+            "The registered package name for this repair is unavailable. Review the repair again in Install & updates."
+        )
+    if registered.lower() == package.name.lower():
+        return None
+    transient = directory / registered
+    if transient.is_symlink() or (transient.exists() and not transient.is_file()):
+        raise MaintenanceError("The registered-name repair package path is not one ordinary file.")
+    transient.unlink(missing_ok=True)
+    _copy_retained_source(package, transient, record["new"]["sha256"])
+    return transient
+
+
 def _msiexec(directory: Path, action: str, name: str) -> None:
     executable = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "msiexec.exe"
     from .windows_installer_verification import installer_path
     record = _read(directory / "record.json")
-    arguments = [str(executable), action, installer_path(directory / (name + ".msi")), "/passive", "/norestart",
+    package = directory / (name + ".msi")
+    transient = None
+    if action == "/i" and record.get("operation") == "repair":
+        transient = _registered_package_copy(directory, record, package)
+    arguments = [str(executable), action, installer_path(transient or package), "/passive", "/norestart",
                  "/L*v", installer_path(directory / (action.strip("/") + "-" + name + ".log"))]
     if action == "/i":
         arguments.append("INSTALLDIR=" + installer_path(Path(record["installed_runtime"]).parent))
         if record.get("operation") == "repair":
             arguments.extend(("REINSTALL=ALL", "REINSTALLMODE=vamus"))
-    result = subprocess.run(arguments,
-                            check=False, timeout=1800, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        result = subprocess.run(arguments,
+                                check=False, timeout=1800, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    finally:
+        if transient is not None:
+            transient.unlink(missing_ok=True)
     if result.returncode not in ((0, 3010, 1605) if action == "/x" else (0, 3010)):
         raise MaintenanceError("Windows Installer could not finish. The recovery point and installation logs have been kept.")
 

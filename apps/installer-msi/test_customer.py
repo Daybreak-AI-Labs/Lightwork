@@ -304,7 +304,10 @@ def test_customer_recovery_fragment_uses_exact_msi_files_and_fixed_app_shortcut(
         for node in root.findall("w:Fragment/w:InstallExecuteSequence/w:Custom", ns)
     }
     assert set(scheduled) == {"LightworkRetainInstaller", "LightworkRetainInstallerRollback"}
-    assert all(node.text == "NOT Installed" for node in scheduled.values())
+    assert scheduled["LightworkRetainInstallerRollback"].text == "NOT Installed"
+    # The in-app repair reinstalls the same version with REINSTALL=ALL from the
+    # verified package; the retained copy must follow that package as well.
+    assert scheduled["LightworkRetainInstaller"].text == "NOT Installed OR REINSTALL"
     shortcut = components["LightworkRepairShortcut"].find("w:Shortcut", ns)
     assert shortcut.attrib["Name"] == "Repair Lightwork"
     assert shortcut.attrib["Target"] == "[INSTALLDIR]maverick-recovery-desktop.exe"
