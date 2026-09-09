@@ -59,7 +59,7 @@ _LOCK = threading.RLock()
 _PROJECT = re.compile(r"[A-Z][A-Z0-9_]{1,31}\Z")
 _SUBMISSION_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}\Z")
 _CASE_ID = re.compile(r"VON-[A-Za-z0-9_-]{1,59}\Z")
-_QUEUE_VIEWS = frozenset({"all", "active", "unresolved", "closed"})
+_QUEUE_VIEWS = frozenset({"all", "active", "unresolved", "renewal", "closed"})
 _MAX_QUEUE_CURSOR = 768
 _MAX_QUEUE_PAGE = 100
 _MAX_QUEUE_SCAN = 400
@@ -461,7 +461,79 @@ class VendorOnboardingService:
             due_at=due_at,
             journey_contract=reference,
             work_item=work_item,
+            attention=self._attention(row),
         )
+
+    def _attention(self, row):
+        """Describe one customer-visible queue state from persisted dates.
+
+        This projection is intentionally computed at read time.  Opening the
+        renewal queue must never rewrite a frozen acceptance merely because its
+        evidence deadline passed.
+        """
+        now = float(self.clock())
+        stage = row.get("stage")
+        outcome = row.get("outcome") or {}
+        if stage in {"executing", "reconciliation_required"}:
+            operation = row.get("operation") or {}
+            return {
+                "state": "needs_reconciliation",
+                "kind": "external_effect",
+                "requires_attention": True,
+                "effective_at": operation.get("started_at") or row.get("updated_at"),
+                "as_of": now,
+            }
+        if stage == "acceptance_reevaluation_required":
+            evidence_check = row.get("acceptance_evidence_check") or {}
+            return {
+                "state": "renewal_required",
+                "kind": "evidence",
+                "requires_attention": True,
+                "effective_at": evidence_check.get("checked_at") or row.get("updated_at"),
+                "as_of": now,
+            }
+        if outcome.get("accepted") is False or stage == "customer_rejected":
+            return {
+                "state": "rejected",
+                "kind": "business_decision",
+                "requires_attention": False,
+                "effective_at": outcome.get("decided_at") or outcome.get("accepted_at"),
+                "as_of": now,
+            }
+        if stage == "cancelled":
+            cancellation = row.get("cancellation") or {}
+            return {
+                "state": "cancelled",
+                "kind": "workflow",
+                "requires_attention": False,
+                "effective_at": cancellation.get("requested_at") or row.get("updated_at"),
+                "as_of": now,
+            }
+        if outcome.get("accepted") is True or stage == "accepted":
+            renewal_due_at = _optional_due_at(outcome.get("renewal_due_at"))
+            return {
+                "state": "overdue" if renewal_due_at is not None and renewal_due_at <= now else "due",
+                "kind": "evidence_renewal",
+                "requires_attention": renewal_due_at is not None and renewal_due_at <= now,
+                "effective_at": renewal_due_at,
+                "as_of": now,
+            }
+        due_at = _optional_due_at(row.get("due_at"))
+        if due_at is not None:
+            return {
+                "state": "overdue" if due_at <= now else "due",
+                "kind": "requested_completion",
+                "requires_attention": due_at <= now,
+                "effective_at": due_at,
+                "as_of": now,
+            }
+        return {
+            "state": "current",
+            "kind": "workflow",
+            "requires_attention": False,
+            "effective_at": row.get("updated_at"),
+            "as_of": now,
+        }
 
     def _save(self, ctx, row, *, audit_action="vendor_onboarding_changed", **changes):
         _require_supported_deployment()
@@ -896,6 +968,10 @@ class VendorOnboardingService:
             return False
         if view == "unresolved":
             return stage in {"executing", "reconciliation_required"}
+        if view == "renewal":
+            return bool(row.get("renewal_of")) or stage in {
+                "accepted", "acceptance_reevaluation_required",
+            }
         if view == "closed":
             return stage in {"accepted", "customer_rejected", "cancelled"}
         if view == "active":
@@ -929,6 +1005,7 @@ class VendorOnboardingService:
             "blocker": blocker,
             "next_action": presented["work_item"]["next_action"],
             "work_item": presented["work_item"],
+            "attention": presented["attention"],
         }
         if presented.get("reconciliation"):
             summary["reconciliation"] = presented["reconciliation"]
@@ -1199,9 +1276,27 @@ class VendorOnboardingService:
                 scope=scope,
                 view=view,
             )
+        counts = {
+            "admitted": len(cases),
+            "accepted": sum(
+                item["work_item"]["business_outcome"] == "accepted" for item in cases
+            ),
+            "rejected": sum(
+                item["work_item"]["business_outcome"] == "rejected" for item in cases
+            ),
+            "needs_reconciliation": sum(
+                item["attention"]["state"] == "needs_reconciliation" for item in cases
+            ),
+            "renewal_attention": sum(
+                item["attention"]["kind"] == "evidence_renewal"
+                and item["attention"]["requires_attention"]
+                for item in cases
+            ),
+        }
         return {
             "schema": "lightwork.vendor-onboarding.case-page.v1",
             "cases": cases,
+            "page_counts": counts,
             "view": view,
             "limit": limit,
             "has_more": has_more,
@@ -1618,7 +1713,8 @@ class VendorOnboardingService:
                 "rationale": self._safe_export_text(
                     outcome.get("rationale") or review.get("rationale"), 4000,
                 ),
-                "decided_at": outcome.get("accepted_at") or review.get("at"),
+                "decided_at": outcome.get("decided_at") or outcome.get("accepted_at")
+                              or review.get("at"),
             },
             "claims": claims,
             "manifest": {
@@ -2186,8 +2282,10 @@ class VendorOnboardingService:
             # source can change while another provider is being verified, so
             # the first successful check alone is not acceptance authority.
             evidence_check = self._require_current_acceptance_evidence(ctx, row)
+        decided_at = self.clock()
         outcome = {"accepted": accepted, "reviewer": ctx.actor, "rationale": why,
-                   "accepted_at": self.clock(), "execution_completed": True,
+                   "decided_at": decided_at, "accepted_at": decided_at,
+                   "execution_completed": True,
                    "validation": "verified_external_record", "released": False,
                    "journey_contract": copy.deepcopy(row["journey_contract"]),
                    "external_confirmation": observed,

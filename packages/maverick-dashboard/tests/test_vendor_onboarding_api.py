@@ -503,12 +503,58 @@ def test_http_workflow_review_correction_external_confirmation_and_acceptance(we
     assert check.status_code == 200, check.text
     assert check.json()["classification"] == "human_fallback"
     assert tickets.creates == 1  # Readiness never triggers another external action.
+    renewal_page = client.get(BASE, params={"view": "renewal"})
+    assert renewal_page.status_code == 200, renewal_page.text
+    assert [item["id"] for item in renewal_page.json()["cases"]] == [row["id"]]
+    assert renewal_page.json()["cases"][0]["attention"]["kind"] == "evidence_renewal"
     assert client.post(f"{BASE}/{row['id']}/check-renewal", json={
         "expected_revision": row["revision"], "now": 0, "customer_accepted": True,
     }).status_code == 422
     assert client.post(f"{BASE}/{row['id']}/check-renewal", json={
         "expected_revision": row["revision"] - 1,
     }).status_code == 409
+
+
+def test_http_business_rejection_remains_in_admitted_results_with_verified_effect(web):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Reviewed the current evidence and stated gaps",
+    )
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
+    row = _step(client, row, "execute", confirm=True)
+    rejected = _step(
+        client,
+        row,
+        "accept",
+        accepted=False,
+        rationale="The verified delivery does not meet the current business need",
+    )
+
+    assert rejected["stage"] == "customer_rejected"
+    assert rejected["outcome"]["reviewer"] == ctx.actor
+    assert rejected["outcome"]["rationale"] == (
+        "The verified delivery does not meet the current business need"
+    )
+    assert rejected["work_item"]["technical_effect"] == "verified"
+    assert rejected["work_item"]["business_outcome"] == "rejected"
+    assert rejected["attention"]["state"] == "rejected"
+
+    results = client.get(BASE, params={"view": "closed"})
+    assert results.status_code == 200, results.text
+    page = results.json()
+    assert page["page_counts"]["admitted"] == 1
+    assert page["page_counts"]["rejected"] == 1
+    assert page["cases"][0]["id"] == rejected["id"]
+    assert page["cases"][0]["work_item"]["technical_effect"] == "verified"
+    assert page["cases"][0]["work_item"]["business_outcome"] == "rejected"
+    assert service.get(ctx, rejected["id"])["outcome"] == rejected["outcome"]
+    assert tickets.creates == 1
 
 
 def test_http_acceptance_reports_changed_evidence_and_opens_reevaluation(web):

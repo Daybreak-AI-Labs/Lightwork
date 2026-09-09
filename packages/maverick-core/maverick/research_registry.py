@@ -628,6 +628,59 @@ class ResearchRegistry:
             raise ValueError(f"{label} must be unique and sorted")
         return refs
 
+    def preflight_dataset_ingestion(
+        self,
+        tenant: str,
+        *,
+        dataset_id: str,
+        allowed_purposes: Sequence[str],
+        data_use_action: str,
+        data_use_decision_id: str,
+        data_use_decision_sha256: str,
+        consent_record_id: str | None = None,
+        consent_evidence_sha256: str | None = None,
+    ) -> None:
+        """Resolve source authority before an ingestion adapter may read bytes.
+
+        A caller that must inspect an installed source to derive its content
+        commitment uses this preflight first.  Durable registration repeats
+        the same checks after inspection so a revocation in between cannot
+        produce a registry record.
+        """
+
+        canonical = canonical_tenant_id(tenant)
+        action = _text(data_use_action, "data_use_action", 32)
+        if action not in _ACTIONS:
+            raise ValueError("data_use_action is unsupported")
+        if (consent_record_id is None) != (consent_evidence_sha256 is None):
+            raise ValueError("consent record and evidence digest must be supplied together")
+        manifest = {
+            "asset_id": _identifier(dataset_id, "dataset_id"),
+            "allowed_purposes": list(_purposes(allowed_purposes)),
+            "data_use_action": action,
+            "data_use_decision_id": _identifier(
+                data_use_decision_id,
+                "data_use_decision_id",
+            ),
+            "data_use_decision_sha256": _sha(
+                data_use_decision_sha256,
+                "data_use_decision_sha256",
+            ),
+            "consent_record_id": (
+                None
+                if consent_record_id is None
+                else _identifier(consent_record_id, "consent_record_id")
+            ),
+            "consent_evidence_sha256": (
+                None
+                if consent_evidence_sha256 is None
+                else _sha(consent_evidence_sha256, "consent_evidence_sha256")
+            ),
+        }
+        with tenant_scope(tenant=canonical), self.effect_fence():
+            for purpose in manifest["allowed_purposes"]:
+                self._validate_dataset_authority(canonical, manifest, purpose)
+
     def register_dataset(
         self,
         tenant: str,
@@ -717,9 +770,6 @@ class ResearchRegistry:
             if provenance == "derived" and not parents:
                 raise ValueError("derived dataset provenance requires parent lineage")
             synthetic = None
-        with tenant_scope(tenant=canonical):
-            for parent in parents:
-                self._get(canonical, parent)
         manifest = {
             "kind": "dataset",
             "asset_id": _identifier(dataset_id, "dataset_id"),
@@ -747,7 +797,24 @@ class ResearchRegistry:
             "provenance_kind": provenance,
             "synthetic_provenance": synthetic,
         }
-        return self._reference(self._create(canonical, actor, "dataset", manifest))
+        # Registering a dataset is the registry's ingestion boundary.  A draft
+        # cannot by itself be used by a run, but accepting an unresolvable
+        # rights claim here would still let unsupported source metadata enter
+        # the governed catalogue.  Resolve every declared purpose, consent
+        # authority, and parent with the same action before the durable write.
+        # Approval, queue, worker start, export, and promotion repeat these
+        # checks because this admission is deliberately not cached.
+        with tenant_scope(tenant=canonical), self.effect_fence():
+            for purpose in manifest["allowed_purposes"]:
+                self._validate_dataset_authority(canonical, manifest, purpose)
+                for parent in parents:
+                    self.resolve_dataset(
+                        canonical,
+                        parent,
+                        purpose=purpose,
+                        action=action,
+                    )
+            return self._reference(self._create(canonical, actor, "dataset", manifest))
 
     def register_model(
         self,
@@ -973,6 +1040,7 @@ class ResearchRegistry:
                     "registry approval requires a different named reviewer"
                 )
             if current["kind"] == "dataset":
+                effective_action = str(current["manifest"]["data_use_action"])
                 for purpose in current["manifest"]["allowed_purposes"]:
                     self._validate_dataset_authority(canonical, current["manifest"], purpose)
                     for raw in current["manifest"].get("parent_datasets", ()):
@@ -982,6 +1050,7 @@ class ResearchRegistry:
                             canonical,
                             ResearchAssetRef(**raw),
                             purpose=purpose,
+                            action=effective_action,
                         )
             else:
                 for purpose in current["manifest"]["allowed_purposes"]:
@@ -1120,6 +1189,10 @@ class ResearchRegistry:
             raise ResearchRegistryConflict("model lineage is malformed")
         if dataset_rows and not isinstance(dataset_purpose, str):
             raise ResearchRegistryConflict("model dataset lineage purpose is unavailable")
+        provenance = manifest.get("provenance_kind", "external")
+        if provenance not in {"external", "trained"}:
+            raise ResearchRegistryConflict("model provenance kind is unsupported")
+        dataset_action = "train" if provenance == "trained" else None
         datasets: list[DatasetAdmission] = []
         for raw in dataset_rows:
             if not isinstance(raw, dict):
@@ -1132,6 +1205,7 @@ class ResearchRegistry:
                     tenant,
                     reference,
                     purpose=str(dataset_purpose),
+                    action=dataset_action,
                 )
             )
         models: list[ModelAdmission] = []
@@ -1142,7 +1216,6 @@ class ResearchRegistry:
             if reference.kind != "model":
                 raise ResearchRegistryConflict("model lineage has the wrong registry kind")
             models.append(self.resolve_model(tenant, reference, purpose=model_purpose))
-        provenance = manifest.get("provenance_kind", "external")
         if provenance == "external":
             if any(
                 manifest.get(field) is not None
@@ -1156,8 +1229,6 @@ class ResearchRegistry:
                     "external model carries unexpected training receipt material"
                 )
             return None
-        if provenance != "trained":
-            raise ResearchRegistryConflict("model provenance kind is unsupported")
         try:
             receipt_id = str(manifest["training_receipt_id"])
             receipt_sha256 = str(manifest["training_receipt_sha256"])

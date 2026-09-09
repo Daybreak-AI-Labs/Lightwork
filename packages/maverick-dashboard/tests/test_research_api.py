@@ -813,7 +813,7 @@ def test_installed_source_registration_binds_the_current_projected_checksum(
     from maverick_dashboard import research_workspace_api
 
     customer, _ = client
-    _governed_workspace_services(monkeypatch)
+    _, _, governance = _governed_workspace_services(monkeypatch)
     projected_sha256 = "9" * 64
     inspected = []
 
@@ -853,6 +853,16 @@ def test_installed_source_registration_binds_the_current_projected_checksum(
     assert created.json()["content_sha256"] == projected_sha256
     assert created.json()["source_ref"] == source_ref
     assert inspected == [("research-a", source_ref)]
+
+    governance["rights"] = False
+    blocked_before_projection = customer.post(
+        BASE + "/registry/datasets",
+        json=payload("installed-revoked", source_ref),
+    )
+    assert blocked_before_projection.status_code == 409
+    assert "revoked" in blocked_before_projection.json()["detail"]
+    assert inspected == [("research-a", source_ref)]
+    governance["rights"] = True
 
     changed = customer.post(
         BASE + "/registry/datasets",

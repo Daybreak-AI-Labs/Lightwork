@@ -690,6 +690,66 @@ def test_production_builder_fails_closed_when_independent_custody_is_required(
         )
 
 
+def test_configured_custody_and_image_reach_the_production_builder(
+    tmp_path, monkeypatch,
+):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+
+    ledger_path = tmp_path / "holdout.db"
+    HoldoutQueryLedger.provision(ledger_path)
+    image_id = "sha256:" + "a" * 64
+    monkeypatch.delenv(
+        "MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY", raising=False,
+    )
+    monkeypatch.delenv("MAVERICK_SELF_HARNESS_EVALUATOR_IMAGE", raising=False)
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "self_harness": {
+            "holdout_ledger": str(ledger_path),
+            "holdout_container_image": image_id,
+            "holdout_require_independent_custody": True,
+            "holdout_family_alpha": 0.05,
+            "holdout_query_alpha": 0.025,
+            "holdout_max_queries": 2,
+            "judge_samples": 3,
+            "metamorphic": False,
+            "eval_budget_dollars": 5.0,
+        },
+    })
+    settings = config.get_self_harness()
+    assert settings["holdout_container_image"] == image_id
+    assert settings["holdout_require_independent_custody"] is True
+    kwargs = {
+        "corpus_path": "unused.json",
+        "model_id": "M",
+        "evaluation_system": "deployed prompt",
+        "verifier_model": "verifier-v1",
+        "corpus_manifest": {"M": [{"goal": "sealed", "expected": "ok"}]},
+    }
+    with pytest.raises(HoldoutLedgerError, match="independent evaluator custody"):
+        runner._build_holdout_authorizer(settings, **kwargs)
+
+    # The image choice is also consumed from resolved config, rather than only
+    # from an environment variable or a hand-built unit-test settings mapping.
+    settings["holdout_require_independent_custody"] = False
+    authorizer = runner._build_holdout_authorizer(settings, **kwargs)
+    assert authorizer.image == image_id
+
+
+@pytest.mark.parametrize(
+    "configured",
+    [None, "", "   ", 7, "python:3.12-slim", "sha256:" + "A" * 64],
+)
+def test_invalid_configured_holdout_image_fails_closed(monkeypatch, configured):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda: {
+        "self_harness": {"holdout_container_image": configured},
+    })
+    with pytest.raises(ValueError, match="immutable local sha256 image ID"):
+        config.get_self_harness()
+
+
 def test_metamorphic_check_continues_same_reserved_final_query(
     tmp_path, monkeypatch,
 ):
@@ -818,6 +878,61 @@ def evaluate(observations):
     assert b"candidate-artifact-must-not-cross" not in ledger_bytes
     assert b"candidate-console-must-not-cross-boundary" not in ledger_bytes
     assert result.receipt.actual_cost.compute_millis > 0
+
+
+@pytest.mark.skipif(
+    not _RUN_DOCKER,
+    reason="set LIGHTWORK_RUN_RESEARCH_CONTAINER_TESTS=1 for real Docker tests",
+)
+def test_real_docker_records_enumeration_and_socket_creation_probes(tmp_path):
+    """F08-A1: successful read-only probes remain visible in the audit receipt."""
+    image = os.environ.get("LIGHTWORK_RESEARCH_TEST_IMAGE", "python:3.12-slim")
+    candidate = ResearchContainerCandidate(
+        candidate_identity="enumerating-candidate",
+        image=image,
+        files={
+            "main.py": b'''
+import os
+import socket
+
+def evaluate(observations):
+    os.listdir("/")
+    os.environ.copy()
+    probe = socket.socket()
+    probe.close()
+    return {"answer": sum(observations["operands"])}
+''',
+        },
+    )
+    ledger = HoldoutQueryLedger.provision(tmp_path / "holdout.db")
+    protocol = _protocol()
+    private_task = {
+        "question": "Add.", "operands": [7, 8], "answer_key": 15,
+    }
+
+    result = IsolatedEvaluator(
+        ledger=ledger,
+        policy=AlphaBudget(),
+        evaluator_identity="evaluator-worker",
+        final_set_generator_identity="final-set-generator",
+    ).evaluate(
+        query=_query(private_task, protocol),
+        private_task=private_task,
+        protocol=protocol,
+        sandbox=candidate,
+        evaluator=lambda task, output: EvaluatorVerdict(
+            output["answer"] == task["answer_key"]),
+    )
+
+    assert result.accepted is True
+    with sqlite3.connect(ledger.path) as connection:
+        events = [json.loads(row[0]) for row in connection.execute(
+            "SELECT payload FROM events")]
+    surfaces = {
+        event["surface"] for event in events
+        if event["event"] == "boundary_attempt"
+    }
+    assert {"filesystem", "environment", "network"}.issubset(surfaces)
 
 
 @pytest.mark.skipif(

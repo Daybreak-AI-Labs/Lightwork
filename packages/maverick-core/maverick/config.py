@@ -1456,6 +1456,17 @@ def get_self_harness() -> dict:
         except (OverflowError, TypeError, ValueError):
             return default
 
+    def _holdout_image() -> str | None:
+        if "holdout_container_image" not in cfg:
+            return None
+        value = cfg.get("holdout_container_image")
+        if (type(value) is not str
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", value.strip())):
+            raise ValueError(
+                "holdout_container_image must be an immutable local sha256 image ID"
+            )
+        return value.strip()
+
     raw_by_class = cfg.get("min_support_by_class", {})
     by_class = {}
     if isinstance(raw_by_class, dict):
@@ -1603,6 +1614,20 @@ def get_self_harness() -> dict:
         # runtime code never creates it because deletion must not reset budget.
         "holdout_ledger": (str(cfg["holdout_ledger"])
                            if cfg.get("holdout_ledger") else None),
+        # Local container evaluation is development evidence unless a separate
+        # evaluator custodian is installed.  Keep this as a strict boolean so a
+        # malformed dashboard/config value cannot accidentally disable a
+        # deployment's fail-closed confirmatory posture.
+        "holdout_require_independent_custody": _strict_config_bool(
+            cfg,
+            "holdout_require_independent_custody",
+            False,
+            invalid=True,
+        ),
+        # An operator may pin the already-reviewed local evaluator image in
+        # config instead of relying on the environment-only override. A present
+        # malformed value must not silently select an environment/default image.
+        "holdout_container_image": _holdout_image(),
         "holdout_family_alpha": family_alpha,
         "holdout_query_alpha": query_alpha,
         "holdout_max_queries": holdout_max_queries,

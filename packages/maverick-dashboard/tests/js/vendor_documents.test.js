@@ -12,7 +12,9 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 function record(id="one", extra={}) {
   return {id, vendor_name:`Synthetic ${id}`, revision:1, document_id:"", document_ids:[], uploads:[],
     owner:"user:procurement", updated_at:1800000000,
-    stage:"intake", evidence:null, assessment:null, operation:null, outcome:null, metrics:{}, ...extra};
+    stage:"intake", evidence:null, assessment:null, operation:null, outcome:null, metrics:{},
+    attention:{state:"current",kind:"workflow",requires_attention:false,effective_at:1800000000,as_of:1800000000},
+    work_item:{technical_effect:"not_verified",business_outcome:"pending"}, ...extra};
 }
 async function fixture(records, intercept=()=>undefined) {
   const dom = new JSDOM(markup, {url:"https://lightwork.example/third-party/vendor-onboarding",runScripts:"outside-only"});

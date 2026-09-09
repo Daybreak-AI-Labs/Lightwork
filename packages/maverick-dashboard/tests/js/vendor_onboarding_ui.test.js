@@ -14,6 +14,8 @@ function record(id, overrides = {}) {
     project: "VEND", purpose: "Support replies", freshness_days: 365,
     due_at: 1802592000,
     stage: "assessment_ready", outcome: null,
+    attention: {state:"due",kind:"requested_completion",requires_attention:false,
+      effective_at:1802592000,as_of:1800000000},
     work_item: {
       process: { id: "supplier-evidence-onboarding", version: 1, sha256: "a".repeat(64) },
       supported_deployment: { topology: "single_persistent_application_replica" },
@@ -159,7 +161,7 @@ function fixture(records = [], intercept = null, search = "", returning = null, 
   const sessionStorage = {getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
   const localStorage = {getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
   const ids = ["message", "case-title", "case-reference", "status", "scope", "evidence", "assessment",
-    "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status", "page-status",
+    "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status", "page-status", "attention-summary",
     "acceptance-evidence-check", "export-status", "export-manifest"];
   ids.forEach(id => add(`vo-${id}`, "div", root));
   const caseFilter = add("vo-case-filter", "select", root); caseFilter.value = "all";
@@ -605,10 +607,13 @@ test("verified cancellation reports retained ticket and offers only current read
   const ui = fixture([record("one", {stage: "cancelled", operation: {
     state: "verified", external_confirmation: {verified: true, key: "VEND-1"}}, cancellation: {
     requested_by: "reviewer", requested_at: 1800000000, rationale: "Priorities changed",
-    dispatch_state_at_cancellation: "possibly_dispatched", effect_reversal: "not_requested"}})]);
+    dispatch_state_at_cancellation: "possibly_dispatched", effect_reversal: "not_requested"},
+    attention: {state:"cancelled",kind:"workflow",requires_attention:false,
+      effective_at:1800000000,as_of:1800000100}})]);
   await ui.settle(); await ui.load("one");
   assert.match(ui.byId("cancellation-status").textContent, /VEND-1.*remains/);
   assert.match(ui.byId("outcome").textContent, /Cancelled.*no acceptance decision/);
+  assert.match(ui.byId("status").textContent, /Attention: cancelled/);
   assert.equal(ui.byId("reconcile").disabled, false);
   for (const id of ["cancel", "execute", "accept", "reject", "collect", "prepare"])
     assert.equal(ui.byId(id).disabled, true, id);
@@ -1052,6 +1057,69 @@ test("renewal readiness reports a check without implying customer acceptance was
   await ui.click("check-renewal");
   assert.match(ui.byId("message").textContent, /^Renewal readiness checked/);
   assert.match(ui.byId("renewal-status").textContent, /human fallback.*Evidence changed/);
+});
+
+test("renewal queue exposes persisted due state and page-level attention", async () => {
+  const expired = record("expired", {
+    stage: "accepted",
+    outcome: {accepted:true,reviewer:"user:reviewer",rationale:"Accepted last year",
+      decided_at:1768464000,accepted_at:1768464000,renewal_due_at:1800000000,
+      external_confirmation:{key:"VEND-42",confirmed_at:1768463900}},
+    attention: {state:"overdue",kind:"evidence_renewal",requires_attention:true,
+      effective_at:1800000000,as_of:1800000100},
+    operation: {state:"verified",external_confirmation:{key:"VEND-42",confirmed_at:1768463900}},
+    work_item: {...record("template").work_item,technical_effect:"verified",business_outcome:"accepted"},
+  });
+  const ui = fixture([expired], call => {
+    const url = new URL(call.url, "https://lightwork.test");
+    if (call.method === "GET" && url.pathname.endsWith("/cases") && url.searchParams.get("view") === "renewal")
+      return response({schema:"lightwork.vendor-onboarding.case-page.v1",view:"renewal",
+        cases:[expired],has_more:false,next_cursor:null});
+    return undefined;
+  });
+  await ui.settle();
+  await ui.filter("renewal");
+  assert.match(ui.byId("page-status").textContent, /renewal view/);
+  assert.match(ui.caseButton("expired").textContent, /overdue/);
+  assert.equal(ui.caseButton("expired").dataset.attention, "true");
+  assert.match(ui.byId("attention-summary").textContent, /1 admitted request.*1 accepted.*1 overdue renewal/);
+  await ui.load("expired");
+  assert.match(ui.byId("renewal-status").textContent, /Renewal status: overdue/);
+  assert.match(ui.byId("renewal-status").textContent, /linked request.*fresh review and approval/);
+});
+
+test("business rejection stays admitted and shows rationale apart from verified effect", async () => {
+  const rejected = record("rejected", {
+    stage:"customer_rejected",
+    outcome:{accepted:false,reviewer:"user:procurement",rationale:"Does not meet the business need",
+      decided_at:1800000000,accepted_at:1800000000,renewal_due_at:null,
+      external_confirmation:{key:"VEND-91",confirmed_at:1799999990}},
+    attention:{state:"rejected",kind:"business_decision",requires_attention:false,
+      effective_at:1800000000,as_of:1800000100},
+    operation:{state:"verified",external_confirmation:{key:"VEND-91",confirmed_at:1799999990}},
+    work_item:{...record("template").work_item,technical_effect:"verified",business_outcome:"rejected"},
+  });
+  const ui = fixture([rejected]);
+  await ui.settle();
+  assert.match(ui.byId("attention-summary").textContent, /1 admitted request.*1 rejected/);
+  await ui.load("rejected");
+  const outcome = ui.byId("outcome").textContent;
+  assert.match(outcome, /Technical effect: verified/);
+  assert.match(outcome, /Verified Jira result: VEND-91/);
+  assert.match(outcome, /Customer decision: Rejected/);
+  assert.match(outcome, /Decision reviewer: user:procurement/);
+  assert.match(outcome, /Reason: Does not meet the business need/);
+  assert.match(ui.byId("history").textContent, /Business rejected.*Technical effect retained as verified/s);
+});
+
+test("mismatched admitted page counts fail closed", async () => {
+  const ui = fixture([record("one")], call => call.method === "GET" && call.url.endsWith("/cases")
+    ? response({schema:"lightwork.vendor-onboarding.case-page.v1",view:"all",cases:[record("one")],
+      has_more:false,next_cursor:null,page_counts:{admitted:0,accepted:0,rejected:0,
+        needs_reconciliation:0,renewal_attention:0}}) : undefined);
+  await ui.settle();
+  assert.match(ui.byId("message").textContent, /counts did not match the admitted cases/);
+  assert.equal(ui.byId("message").getAttribute("role"), "alert");
 });
 
 test("missing cost remains unmeasured while an explicit zero remains zero", async () => {

@@ -1042,7 +1042,7 @@ def test_declared_usage_constraints_block_the_exact_operation(
 
 
 def test_parent_lineage_must_allow_the_same_effective_action(access):
-    service, registry, rights, calls = access
+    _service, registry, rights, calls = access
     parent = _dataset(
         registry,
         rights,
@@ -1051,25 +1051,72 @@ def test_parent_lineage_must_allow_the_same_effective_action(access):
         action="read",
         usage_constraints=("tenant_only",),
     )
-    child = _dataset(
+
+    with pytest.raises(
+        ResearchRegistryDenied,
+        match="stale or does not match|requested action",
+    ):
+        _dataset(
+            registry,
+            rights,
+            "tenant-a",
+            "train-child",
+            action="train",
+            parent_datasets=(parent,),
+            usage_constraints=("tenant_only",),
+        )
+    assert all(
+        row["reference"]["asset_id"] != "train-child"
+        for row in registry.list("tenant-a")
+    )
+    assert calls == []
+
+
+def test_parent_action_is_rechecked_before_a_derived_version_is_approved(access):
+    _service, registry, rights, calls = access
+    parent = _dataset(
         registry,
         rights,
         "tenant-a",
-        "train-child",
+        "training-parent",
         action="train",
-        parent_datasets=(parent,),
         usage_constraints=("tenant_only",),
     )
+    rights[("tenant-a", "training-child")] = {
+        "allowed": True,
+        "action": "train",
+        "expires_at": FUTURE,
+        "epoch": "v1",
+    }
+    child = registry.register_dataset(
+        "tenant-a",
+        "user:source-owner",
+        dataset_id="training-child",
+        version="v1",
+        source_ref="catalog:tenant-a/training-child/v1",
+        content_sha256=_sha("content:tenant-a:training-child"),
+        license_id="customer-authorized",
+        license_evidence_sha256=_sha("license:tenant-a:training-child"),
+        allowed_purposes=(PURPOSE,),
+        usage_constraints=("tenant_only",),
+        data_use_action="train",
+        data_use_decision_id="decision-training-child",
+        data_use_decision_sha256=_sha("tenant-a:decision-training-child"),
+        parent_datasets=(parent,),
+    )
 
-    with pytest.raises(ResearchRegistryDenied, match="requested action"):
-        service.materialize_at_job_start(
+    rights[("tenant-a", "training-parent")].update(action="read", epoch="v2")
+    with pytest.raises(
+        ResearchRegistryDenied,
+        match="stale or does not match|requested action",
+    ):
+        registry.approve(
             "tenant-a",
-            "worker:research",
-            (child,),
-            purpose=PURPOSE,
-            action="train",
-            job_id="lineage-train",
+            "user:independent-reviewer",
+            child,
+            expected_revision=1,
         )
+    assert registry.inspect("tenant-a", child)["state"] == "draft"
     assert calls == []
 
 

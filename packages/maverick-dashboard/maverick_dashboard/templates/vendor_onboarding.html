@@ -30,6 +30,8 @@
   .vo-queue-controls label {margin:0}
   .vo-page-actions {display:flex; gap:.4rem; flex-wrap:wrap}
   #vo-page-status {overflow-wrap:anywhere; color:var(--muted)}
+  #vo-attention-summary {overflow-wrap:anywhere; border-left:3px solid var(--accent); padding-left:.7rem}
+  #vo-cases button[data-attention="true"] {border-left:4px solid var(--warn,var(--accent))}
   #vo-case-reference {overflow-wrap:anywhere; color:var(--muted)}
   #vo-upload-review pre {max-height:24rem;min-width:0}
   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
@@ -81,12 +83,14 @@
               <option value="all">All requests</option>
               <option value="active">Active requests</option>
               <option value="unresolved">Needs reconciliation</option>
+              <option value="renewal">Renewals and reevaluations</option>
               <option value="closed">Finished requests</option>
             </select>
           </label>
           <button id="vo-refresh" type="button">Refresh requests</button>
         </div>
         <div id="vo-cases" aria-live="polite"></div>
+        <p id="vo-attention-summary" role="status" aria-live="polite">Loading request attention…</p>
         <p id="vo-page-status" role="status">Loading requests…</p>
         <div class="vo-page-actions" aria-label="Vendor request pages">
           <button id="vo-page-previous" type="button" disabled>Previous page</button>

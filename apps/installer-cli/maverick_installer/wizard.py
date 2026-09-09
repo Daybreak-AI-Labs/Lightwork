@@ -3936,6 +3936,35 @@ def _ask_governed_execution_followups(advanced: dict[str, Any]) -> None:
         advanced["harness_refine_require_approval"] = False
 
 
+def _ask_self_harness_evaluation_boundary(advanced: dict[str, Any]) -> None:
+    """Collect the durable ledger, container pin, and custody posture."""
+    ledger = _q_text(
+        "    Existing provisioned holdout query-ledger path "
+        "(required for live confirmation; blank = keep failing closed)",
+        default="",
+    ).strip()
+    if ledger:
+        advanced["self_harness_holdout_ledger"] = ledger
+    while True:
+        image_id = _q_text(
+            "    Reviewed local evaluator image ID (optional; sha256: plus "
+            "64 lowercase hex; blank = resolve the local default image)",
+            default="",
+        ).strip()
+        if not image_id or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            break
+        console.print(
+            "[yellow]Enter an immutable local sha256 image ID or leave it blank.[/yellow]"
+        )
+    if image_id:
+        advanced["self_harness_holdout_container_image"] = image_id
+    advanced["self_harness_require_independent_custody"] = _q_confirm(
+        "    Require independent evaluator custody for confirmatory results? "
+        "Local-only installs fail closed until a separate custodian exists.",
+        default=False,
+    )
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -4869,6 +4898,7 @@ def pick_advanced() -> dict[str, Any]:
                     default=5.0,
                 ),
             )
+            _ask_self_harness_evaluation_boundary(advanced)
         if _q_confirm("    Mine and scope guidance per department (domain)?", default=False):
             advanced["self_harness_bucket_domain"] = True
         advanced["self_harness_semantic_mining"] = _q_confirm(
@@ -7621,6 +7651,20 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             eval_budget = advanced.get("self_harness_eval_budget")
             if eval_budget and eval_budget > 0:
                 lines.append(f"eval_budget_dollars = {float(eval_budget)}")
+        if advanced.get("self_harness_holdout_ledger"):
+            _emit_kv(
+                lines,
+                "holdout_ledger",
+                advanced["self_harness_holdout_ledger"],
+            )
+        if advanced.get("self_harness_holdout_container_image"):
+            _emit_kv(
+                lines,
+                "holdout_container_image",
+                advanced["self_harness_holdout_container_image"],
+            )
+        if advanced.get("self_harness_require_independent_custody"):
+            lines.append("holdout_require_independent_custody = true")
         if advanced.get("self_harness_bucket_domain"):
             lines.append('mine_bucket_by = ["domain"]')
         if advanced.get("self_harness_semantic_mining"):

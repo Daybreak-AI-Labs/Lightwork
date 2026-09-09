@@ -640,6 +640,7 @@ async def workspace_overview(request: Request, tenant: str, actor: str) -> dict:
 @router.post("/registry/datasets", status_code=201)
 async def register_dataset(payload: DatasetRegistration, request: Request, response: Response):
     tenant, actor, _ = _binding(request, response, payload)
+    registry = _registry_service(request.app.state)
     values = payload.model_dump(exclude={"context", "confirm", "parent_datasets"})
     source_ref = payload.source_ref.strip()
     if source_ref.startswith(
@@ -656,6 +657,17 @@ async def register_dataset(payload: DatasetRegistration, request: Request, respo
                 403,
                 "An installation administrator must inspect an installed knowledge source",
             )
+        await _call(
+            registry.preflight_dataset_ingestion,
+            tenant,
+            dataset_id=payload.dataset_id,
+            allowed_purposes=tuple(payload.allowed_purposes),
+            data_use_action=payload.data_use_action,
+            data_use_decision_id=payload.data_use_decision_id,
+            data_use_decision_sha256=payload.data_use_decision_sha256,
+            consent_record_id=payload.consent_record_id,
+            consent_evidence_sha256=payload.consent_evidence_sha256,
+        )
         inspected = await _call(inspect_existing_source, tenant, source_ref)
         resolved_sha256 = str(inspected["content_sha256"])
         if payload.content_sha256 is not None and not hmac.compare_digest(
@@ -675,12 +687,12 @@ async def register_dataset(payload: DatasetRegistration, request: Request, respo
     values["source_ref"] = source_ref
     values["parent_datasets"] = tuple(item.exact() for item in payload.parent_datasets)
     reference = await _call(
-        _registry_service(request.app.state).register_dataset,
+        registry.register_dataset,
         tenant,
         actor,
         **values,
     )
-    view = await _call(_registry_service(request.app.state).inspect, tenant, reference)
+    view = await _call(registry.inspect, tenant, reference)
     return _asset_projection(view)
 
 

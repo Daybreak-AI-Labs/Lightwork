@@ -116,6 +116,8 @@ def settings() -> dict:
                 "max_promotions_per_cycle": 1,
                 "holdout_rotations": 1, "judge_samples": 3,
                 "holdout_ledger": None, "holdout_family_alpha": 0.05,
+                "holdout_require_independent_custody": False,
+                "holdout_container_image": None,
                 "holdout_query_alpha": 0.05, "holdout_max_queries": 1,
                 "metamorphic": True, "metamorphic_tolerance": 0.0,
                 "calibrate_judge": True, "calibration_max_age_hours": 24.0,

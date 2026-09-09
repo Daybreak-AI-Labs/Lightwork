@@ -1,6 +1,7 @@
 """Offline acceptance of approval/evidence/effect/customer boundaries."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -496,6 +497,29 @@ def test_cancellation_before_dispatch_freezes_intent_without_external_effect(set
         reopened.execute(ctx, row["id"])
     repeated = reopened.cancel(ctx, row["id"], cancelled["revision"], "No longer required")
     assert repeated["revision"] == cancelled["revision"]
+    assert tickets.creates == 0
+
+
+def test_cancelled_request_is_not_reopened_as_overdue_attention(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = svc.intake(
+        ctx,
+        "Cancelled overdue request",
+        "security-paper",
+        "VEND",
+        "Stop this expired request",
+        due_at=NOW - 1,
+    )
+    cancelled = svc.cancel(ctx, row["id"], row["revision"], "No longer required")
+
+    assert cancelled["stage"] == "cancelled"
+    assert cancelled["attention"] == {
+        "state": "cancelled",
+        "kind": "workflow",
+        "requires_attention": False,
+        "effective_at": cancelled["cancellation"]["requested_at"],
+        "as_of": NOW,
+    }
     assert tickets.creates == 0
 
 
@@ -1075,6 +1099,128 @@ def test_complete_workflow_keeps_execution_acceptance_and_release_separate(setup
     assert renewal["renewal_of"] == row["id"]
     assert renewal["vendor_id"] == row["vendor_id"]
     assert renewal["outcome"] is None
+
+
+def test_expired_acceptance_opens_linked_renewal_with_fresh_review_and_approval(setup):
+    svc, ctx, docs, tickets, _ = setup
+    clock = [NOW]
+    svc.clock = lambda: clock[0]
+    accepted = approved(svc, ctx)
+    accepted = svc.execute(ctx, accepted["id"])
+    accepted = svc.accept(
+        ctx,
+        accepted["id"],
+        accepted["revision"],
+        True,
+        "Accepted against the reviewed current result",
+    )
+    original_binding = accepted["operation"]["approval_card"]["binding_sha256"]
+    clock[0] = accepted["outcome"]["renewal_due_at"] + 1
+    source = docs.documents[(ctx.tenant, "security-paper")]
+    docs.documents[(ctx.tenant, "security-paper")] = replace(
+        source,
+        version="2",
+        modified_at=clock[0],
+        content=source.content + b" Annual evidence refresh.",
+    )
+
+    frozen_parent = copy.deepcopy(svc.get(ctx, accepted["id"]))
+    assert frozen_parent["attention"] == {
+        "state": "overdue",
+        "kind": "evidence_renewal",
+        "requires_attention": True,
+        "effective_at": accepted["outcome"]["renewal_due_at"],
+        "as_of": clock[0],
+    }
+    renewal_page = svc.list_page(ctx, view="renewal")
+    assert [item["id"] for item in renewal_page["cases"]] == [accepted["id"]]
+    assert renewal_page["page_counts"]["admitted"] == 1
+    assert renewal_page["page_counts"]["renewal_attention"] == 1
+
+    renewal = svc.intake(
+        ctx,
+        accepted["vendor_name"],
+        "security-paper",
+        accepted["project"],
+        "Annual evidence renewal",
+        renewal_of=accepted["id"],
+    )
+    assert renewal["renewal_of"] == accepted["id"]
+    assert renewal["work_item"]["parent_work_item_id"] == accepted["id"]
+    assert renewal["assessment"] is None
+    assert renewal["review_history"] == []
+    assert renewal["operation"] is None
+    assert renewal["outcome"] is None
+    renewal_items = svc.list_page(ctx, view="renewal")["cases"]
+    assert {item["id"] for item in renewal_items} == {accepted["id"], renewal["id"]}
+
+    renewal = svc.collect_evidence(ctx, renewal["id"], renewal["revision"])
+    evidence_change = renewal["evidence"]["changes"]["documents"]
+    assert len(evidence_change) == 1
+    assert evidence_change[0]["source"] == "gdrive"
+    assert evidence_change[0]["document_id"] == "security-paper"
+    assert evidence_change[0]["change"] == "changed"
+    assert evidence_change[0]["before_version"] == "1"
+    assert evidence_change[0]["after_version"] == "2"
+    renewal = svc.assess(ctx, renewal["id"], renewal["revision"])
+    renewal = svc.review(
+        ctx,
+        renewal["id"],
+        renewal["revision"],
+        "approved",
+        "Reviewed the renewed source and its changed evidence",
+    )
+    renewal = svc.prepare_action(ctx, renewal["id"], renewal["revision"])
+    assert renewal["operation"]["approval_card"]["binding_sha256"] != original_binding
+    assert renewal["operation"]["state"] == "prepared"
+    renewal = svc.approve_action(
+        ctx,
+        renewal["id"],
+        renewal["revision"],
+        renewal["operation"]["approval_card"]["binding_sha256"],
+    )
+    assert renewal["operation"]["state"] == "approved"
+    assert renewal["operation"]["approval"]["reviewer"] == ctx.actor
+    assert svc.get(ctx, accepted["id"]) == frozen_parent
+    assert tickets.creates == 1
+
+
+def test_business_rejection_retains_admission_rationale_and_verified_effect(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    row = svc.execute(ctx, row["id"])
+    rejected = svc.accept(
+        ctx,
+        row["id"],
+        row["revision"],
+        False,
+        "The verified task does not satisfy the current procurement need",
+    )
+
+    assert rejected["stage"] == "customer_rejected"
+    assert rejected["outcome"]["accepted"] is False
+    assert rejected["outcome"]["rationale"] == (
+        "The verified task does not satisfy the current procurement need"
+    )
+    assert rejected["outcome"]["reviewer"] == ctx.actor
+    assert rejected["outcome"]["decided_at"] == NOW
+    assert rejected["work_item"]["technical_effect"] == "verified"
+    assert rejected["work_item"]["business_outcome"] == "rejected"
+    assert rejected["attention"]["state"] == "rejected"
+    assert rejected["attention"]["requires_attention"] is False
+
+    page = svc.list_page(ctx, view="all")
+    assert [item["id"] for item in page["cases"]] == [rejected["id"]]
+    assert page["page_counts"] == {
+        "admitted": 1,
+        "accepted": 0,
+        "rejected": 1,
+        "needs_reconciliation": 0,
+        "renewal_attention": 0,
+    }
+    assert page["cases"][0]["work_item"]["technical_effect"] == "verified"
+    assert page["cases"][0]["work_item"]["business_outcome"] == "rejected"
+    assert tickets.creates == 1
 
 
 @pytest.mark.parametrize(

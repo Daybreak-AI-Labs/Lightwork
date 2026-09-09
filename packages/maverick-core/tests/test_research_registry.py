@@ -166,6 +166,32 @@ def test_dataset_version_requires_independent_approval_and_current_authority(reg
         service.resolve_dataset(TENANT, approved, purpose="research_evaluation")
 
 
+def test_dataset_registration_rejects_unavailable_rights_before_durable_ingestion(
+    registry,
+):
+    service, state = registry
+    state["rights"] = False
+
+    with pytest.raises(ResearchRegistryDenied, match="rights revoked"):
+        service.register_dataset(
+            TENANT,
+            "user:maker",
+            dataset_id="dataset-one",
+            version="v1",
+            source_ref="catalog:datasets/one/v1",
+            content_sha256=_sha("dataset bytes"),
+            license_id="customer-research-license",
+            license_evidence_sha256=_sha("license"),
+            allowed_purposes=("research_evaluation",),
+            usage_constraints=("tenant only",),
+            data_use_action="analyze",
+            data_use_decision_id="decision-one",
+            data_use_decision_sha256=_sha("decision-one"),
+        )
+
+    assert service.list(TENANT) == []
+
+
 def test_consent_reference_is_revalidated_and_forged_or_cross_tenant_refs_fail(registry):
     service, state = registry
     reference = _dataset(service, with_consent=True)

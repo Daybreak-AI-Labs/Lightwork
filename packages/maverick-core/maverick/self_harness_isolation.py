@@ -140,6 +140,18 @@ _CONTAINER_BOOTSTRAP = textwrap.dedent(
             _note("environment")
             return super().values()
 
+        def copy(self):
+            _note("environment")
+            return super().copy()
+
+        def __len__(self):
+            _note("environment")
+            return super().__len__()
+
+        def __repr__(self):
+            _note("environment")
+            return super().__repr__()
+
     _safe_environment = dict(os.environ)
 
     def _audit(event, args):
@@ -166,11 +178,18 @@ _CONTAINER_BOOTSTRAP = textwrap.dedent(
                     "/usr/lib/python", "/etc/ld.so", "/dev/null")))
                   or ":\\" in text):
                 _note("filesystem")
-        elif event in {"socket.connect", "socket.connect_ex", "socket.getaddrinfo"}:
-            target = args[1] if len(args) > 1 else ""
-            host = target[0] if isinstance(target, tuple) and target else target
-            if str(host) not in {"127.0.0.1", "::1", "localhost", ""}:
-                _note("network")
+        elif event in {
+                "os.chdir", "os.chroot", "os.listdir", "os.scandir",
+                "os.truncate", "os.walk"}:
+            _note("filesystem")
+        elif event.startswith("socket."):
+            # Network namespaces enforce the boundary.  Record every socket
+            # probe, including loopback and socket construction, because a
+            # denied attempt is still material evaluator-boundary evidence.
+            _note("network")
+        elif event in {"os.exec", "os.posix_spawn", "os.spawn", "os.system",
+                       "subprocess.Popen"}:
+            _note("control_path")
 
     sys.addaudithook(_audit)
     os.environ = _ObservedEnvironment(_safe_environment)

@@ -279,7 +279,7 @@ def cases(
     request: Request,
     limit: int = Query(default=25, ge=1, le=100),
     cursor: str = Query(default="", max_length=768),
-    view: Literal["all", "active", "unresolved", "closed"] = "all",
+    view: Literal["all", "active", "unresolved", "renewal", "closed"] = "all",
 ):
     return _call(
         _binding(request), "list_page", limit=limit, cursor=cursor, view=view,

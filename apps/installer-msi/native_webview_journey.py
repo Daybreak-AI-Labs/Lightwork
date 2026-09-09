@@ -84,6 +84,7 @@ class Journey:
         self.debugger_port, self.driver_port = available_port(), available_port()
         self.view = WebView(self.driver_port)
         self.driver = None
+        self.driver_path = None
         self.app = None
         self.driver_log = None
         self.thumbprint = ""
@@ -132,6 +133,52 @@ class Journey:
         allowed = {0, 3010} | ({1605, 1614} if action == "/x" else set())
         if result.returncode not in allowed:
             raise RuntimeError(f"Native fixture installer failed ({result.returncode}); MSI log retained.")
+
+    def start_driver(self, path: Path, *, append=False):
+        port = available_port() if append else self.driver_port
+        view = WebView(port)
+        log = (self.directory / "driver.log").open("ab" if append else "wb")
+        try:
+            if append:
+                log.write(b"\n--- WebDriver restarted after native relaunch ---\n")
+                log.flush()
+            driver = subprocess.Popen([str(path), f"--port={port}"], env=self.env,
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+        except BaseException:
+            log.close()
+            raise
+        self.driver_path, self.driver_port = path, port
+        self.view, self.driver, self.driver_log = view, driver, log
+
+    def stop_driver(self):
+        driver, log = self.driver, self.driver_log
+        self.driver = self.driver_log = None
+        primary = None
+        try:
+            if driver:
+                with contextlib.suppress(OSError):
+                    driver.kill()
+                driver.wait(timeout=15)
+        except BaseException as error:
+            primary = error
+        finally:
+            if log:
+                log.close()
+        if primary:
+            raise primary
+
+    def restart_driver_after_relaunch(self):
+        if not self.driver_path:
+            raise RuntimeError("The signed WebView driver path is unavailable.")
+        # The previous native process can disappear before WebDriver accepts a
+        # DELETE for its now-dead browser target. Reusing that driver leaves a
+        # stale session which cannot attach to the replacement WebView. End the
+        # local driver process without sending another browser command, then
+        # attach a fresh driver to the same installed app debugging endpoint.
+        self.view.session = ""
+        self.stop_driver()
+        self.start_driver(self.driver_path, append=True)
+        self.attach()
 
     def start(self, binary: Path | None = None, *arguments: str):
         self.active_binary = binary or self.binary
@@ -396,8 +443,8 @@ return {ready: document.readyState === 'complete', path, form_rejected: !!alert,
             observed = self.view.wait(lambda: self.transition_progress(old_pids), timeout=600)
             if observed != "replacement_ready":
                 raise RuntimeError("The native page reported an unsuccessful operation.")
-            self.view.close()
-            self.attach()
+            stage = "driver_reconnect"
+            self.restart_driver_after_relaunch()
             stage = "version_verification"
             self.assert_version(version if rollback else newer)
             stage = "completion_receipt"
@@ -516,8 +563,8 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
                 raise RuntimeError("The repaired native application did not reopen.")
             if app_windows(self.recovery_binary):
                 raise RuntimeError("The retained recovery application remained active after repair.")
-            self.view.close()
-            self.attach()
+            stage = "driver_reconnect"
+            self.restart_driver_after_relaunch()
             self.active_binary = self.binary
             stage = "core_byte_verification"
             self.assert_version(self.metadata["version"])
@@ -572,8 +619,8 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
             )
             if not observed:
                 raise RuntimeError("The repaired primary application did not reopen.")
-            self.view.close()
-            self.attach()
+            stage = "driver_reconnect"
+            self.restart_driver_after_relaunch()
             self.active_binary = self.binary
             stage = "recovery_byte_verification"
             self.assert_version(self.metadata["version"])
@@ -650,9 +697,7 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
             observed_driver = verified_driver_version(self.directory, version, command([str(driver_path), "--version"], timeout=15))
             self.report.update(driver_version=observed_driver, webview_runtime_version=version, driver_sha256=digest(driver_path),
                                base_msi_sha256=digest(self.base), candidate_msi_sha256=digest(self.candidate))
-            self.driver_log = (self.directory / "driver.log").open("wb")
-            self.driver = subprocess.Popen([str(driver_path), f"--port={self.driver_port}"], env=self.env,
-                stdin=subprocess.DEVNULL, stdout=self.driver_log, stderr=subprocess.STDOUT)
+            self.start_driver(driver_path)
             self.thumbprint = make_tls(self.directory)
             self.trust("trust")
             hosts = Path(os.environ["SystemRoot"]) / "System32/drivers/etc/hosts"
@@ -690,14 +735,8 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
                         ("base-uninstall", lambda: self.msi(self.base, "/x"))]
             for name, operation in cleanup:
                 self.cleanup_step(name, operation)
-            if self.driver:
-                def stop_driver():
-                    with contextlib.suppress(OSError):
-                        self.driver.kill()
-                    self.driver.wait(timeout=15)
-                self.cleanup_step("webview-driver", stop_driver)
-            if self.driver_log:
-                self.cleanup_step("driver-log", self.driver_log.close)
+            if self.driver or self.driver_log:
+                self.cleanup_step("webview-driver", self.stop_driver)
             self.password = ""
             self.report["journey_passed"] = self.report["passed"]
             self.report["passed"] = self.report["passed"] and not self.report["cleanup_errors"]

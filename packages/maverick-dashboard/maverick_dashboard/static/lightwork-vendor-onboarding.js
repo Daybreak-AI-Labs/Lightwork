@@ -233,6 +233,41 @@
     }
     return value;
   }
+  function validatedAttention(value) {
+    const fail = () => { throw new Error("The request attention status was incomplete. Reload requests before deciding."); };
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        Object.keys(value).length !== 5 ||
+        !["state","kind","requires_attention","effective_at","as_of"].every(key =>
+          Object.prototype.hasOwnProperty.call(value, key)) ||
+        !["current","due","overdue","rejected","cancelled","needs_reconciliation","renewal_required"].includes(value.state) ||
+        !["workflow","requested_completion","business_decision","external_effect","evidence_renewal","evidence"].includes(value.kind) ||
+        typeof value.requires_attention !== "boolean" ||
+        !(value.effective_at === null || value.effective_at === undefined ||
+          (Number.isFinite(value.effective_at) && value.effective_at > 0)) ||
+        !Number.isFinite(value.as_of) || value.as_of <= 0 ||
+        (["overdue","needs_reconciliation","renewal_required"].includes(value.state) &&
+          value.requires_attention !== true) ||
+        (["current","due","rejected","cancelled"].includes(value.state) && value.requires_attention !== false)) fail();
+    return value;
+  }
+  function validatedPageCounts(value, records) {
+    const calculated = {
+      admitted: records.length,
+      accepted: records.filter(item => item.work_item?.business_outcome === "accepted").length,
+      rejected: records.filter(item => item.work_item?.business_outcome === "rejected").length,
+      needs_reconciliation: records.filter(item => item.attention?.state === "needs_reconciliation").length,
+      renewal_attention: records.filter(item => item.attention?.kind === "evidence_renewal" &&
+        item.attention?.requires_attention === true).length,
+    };
+    if (value === undefined) return calculated;
+    const keys = Object.keys(calculated);
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        Object.keys(value).length !== keys.length || !keys.every(key =>
+          Object.prototype.hasOwnProperty.call(value, key) &&
+          Number.isInteger(value[key]) && value[key] >= 0 && value[key] === calculated[key]))
+      throw new Error("Request counts did not match the admitted cases on this page. Reload requests before relying on the totals.");
+    return value;
+  }
   function validatedReconciliation(value, businessOwner) {
     const fail = () => { throw new Error("The uncertain action status was incomplete. Reload this request before checking Jira."); };
     const closed = (item, keys) => {
@@ -446,6 +481,7 @@
         (record.due_at !== null && record.due_at !== undefined && (!Number.isFinite(record.due_at) || record.due_at <= 0)))
       throw new Error("Case response is incomplete; refresh requests before continuing.");
     const acceptanceCheck = validatedAcceptanceCheck(record.acceptance_evidence_check);
+    const attention = validatedAttention(record.attention);
     const operation = record.operation || {};
     const payload = operation.payload;
     let nextApprovalCardCurrent = false;
@@ -512,6 +548,7 @@
     for (const label of ["Stage: " + friendly(record.stage), "Version: " + record.revision,
       "External action: " + friendly(operation.state || operation.status || "not prepared"),
       "Customer acceptance: " + (outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : record.cancellation ? "cancelled; no decision" : "pending"),
+      "Attention: " + friendly(attention.state) + (attention.effective_at ? " · " + date(attention.effective_at) : ""),
       "Requested completion: " + date(record.due_at)]) {
       const span = document.createElement("span"); span.textContent = label; byId("status").append(span);
     }
@@ -582,10 +619,24 @@
     const metrics = record.metrics || {};
     const timedReviews = (record.review_history || []).filter(review => review.review_seconds !== null && review.review_seconds !== undefined);
     const reviewTime = timedReviews.length ? `${Number(metrics.human_review_seconds).toFixed(1)} seconds reported` : "Unmeasured";
-    show("outcome", `Customer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : cancellation ? "Cancelled request; no acceptance decision" : "Pending"}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate approval required`);
-    show("renewal-status", "Check current evidence and ticket versions before starting a renewal.");
-    show("history", [...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
-      ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item))].join("\n\n") || "No reviewer decisions or exceptions yet.");
+    const confirmation = outcome.external_confirmation || operation.external_confirmation || {};
+    show("outcome", `Technical effect: ${friendly(work.technical_effect || "not verified")}\nVerified Jira result: ${confirmation.key || "Not recorded"}\nReadback checked: ${date(confirmation.confirmed_at)}\nCustomer decision: ${outcome.accepted === true ? "Accepted" : outcome.accepted === false ? "Rejected" : cancellation ? "Cancelled request; no acceptance decision" : "Pending"}\nDecision reviewer: ${outcome.reviewer || "Not yet recorded"}\nDecision time: ${date(outcome.decided_at || outcome.accepted_at)}\nReason: ${outcome.rationale || "Not yet recorded"}\nNext renewal: ${date(outcome.renewal_due_at)}\nHuman review time: ${reviewTime}\nExecution cost: ${metrics.execution_cost_usd == null ? "unmeasured" : "$" + metrics.execution_cost_usd}\nPrevious case: ${record.renewal_of || "First onboarding"}\nRelease: separate approval required`);
+    show("renewal-status", attention.kind === "evidence_renewal" || attention.state === "renewal_required"
+      ? `Renewal status: ${friendly(attention.state)}${attention.effective_at ? ` · ${date(attention.effective_at)}` : ""}. Start a linked request to preserve this decision and require fresh review and approval.`
+      : "Check current evidence and ticket versions before starting a renewal.");
+    const history = [
+      ...(record.review_history || []).map(review => `${date(review.at)} · ${review.reviewer}\n${friendly(review.decision)}: ${review.rationale}\n${Object.keys(review.corrections || {}).length} corrected answers; supersedes assessment ${review.supersedes?.id || "none"}.`),
+      ...(outcome.accepted === true || outcome.accepted === false ? [
+        `${date(outcome.decided_at || outcome.accepted_at)} · ${outcome.reviewer || "Reviewer unavailable"}\nBusiness ${outcome.accepted ? "accepted" : "rejected"}: ${outcome.rationale || "Rationale unavailable"}\nTechnical effect retained as ${friendly(work.technical_effect)}.`,
+      ] : []),
+      ...(record.cancellation ? [
+        `${date(record.cancellation.requested_at)} · ${record.cancellation.requested_by || "Requester unavailable"}\nCancelled local work: ${record.cancellation.rationale || "Rationale unavailable"}\nTechnical effect retained as ${friendly(work.technical_effect)}.`,
+      ] : []),
+      ...(record.renewal_of ? [`Linked renewal of ${record.renewal_of}; the previous case remains unchanged.`] : []),
+      ...(record.reconciliation_history || []).map(item => `${date(item.checked_at)} · Read-only Jira check: ${friendly(item.outcome)}.`),
+      ...(record.exceptions || []).map(item => typeof item === "string" ? item : JSON.stringify(item)),
+    ];
+    show("history", history.join("\n\n") || "No reviewer decisions or exceptions yet.");
     buttons();
     if (sameCase && !sameReview)
       return "The request or assessment changed. Draft answers, notes, and decision reasons were reset. Review the current version before deciding.";
@@ -605,6 +656,8 @@
         (!hasMore && result.next_cursor !== undefined && result.next_cursor !== null))
       throw new Error("Request pagination is unavailable. Reload requests before continuing.");
     queueNext = hasMore ? result.next_cursor : null;
+    for (const record of result.cases) validatedAttention(record.attention);
+    const counts = validatedPageCounts(result.page_counts, result.cases);
     byId("cases").replaceChildren();
     for (const record of result.cases) {
       if (!record || typeof record.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(record.id) ||
@@ -613,9 +666,11 @@
         throw new Error("A request summary was incomplete. Reload requests before continuing.");
       const button = document.createElement("button"); button.type = "button";
       button.dataset.caseId = record.id;
+      button.dataset.attention = String(record.attention.requires_attention);
       button.textContent = `${record.vendor_name} · ${record.renewal_of ? "Renewal" : "Initial request"} · ${friendly(record.stage)}` +
         ` · Owner ${record.owner} · Last progress ${date(record.updated_at)}` +
         (record.due_at ? ` · Due ${date(record.due_at)}` : "") +
+        ` · ${friendly(record.attention.state)}` +
         (record.blocker ? ` · Blocked: ${friendly(record.blocker)}` : "") +
         (record.next_action ? ` · Next: ${friendly(record.next_action)}` : "");
       button.addEventListener("click", () => run(async () => render(await api("/cases/" + encodeURIComponent(record.id))), "Request loaded. Review its evidence and current status."));
@@ -624,6 +679,7 @@
     if (!result.cases.length) byId("cases").textContent = hasMore
       ? "No matching requests in this queue window. Continue to the next page."
       : "No matching vendor requests in this workspace.";
+    show("attention-summary", `This page: ${counts.admitted} admitted request${counts.admitted === 1 ? "" : "s"} · ${counts.accepted} accepted · ${counts.rejected} rejected · ${counts.needs_reconciliation} need reconciliation · ${counts.renewal_attention} overdue renewals.`);
     if (byId("page-status")) show("page-status", `Page ${queueHistory.length + 1} · ${result.cases.length} request${result.cases.length === 1 ? "" : "s"} shown · ${friendly(queueView)} view${hasMore ? " · more available" : " · end of queue"}`);
     buttons();
   }
@@ -686,7 +742,7 @@
   }, "Previous request page loaded."));
   byId("case-filter")?.addEventListener("change", () => run(async () => {
     const requested = byId("case-filter").value;
-    if (!["all", "active", "unresolved", "closed"].includes(requested))
+    if (!["all", "active", "unresolved", "renewal", "closed"].includes(requested))
       throw new Error("Choose a supported request filter.");
     const before = {cursor: queueCursor, history: queueHistory, next: queueNext, view: queueView};
     queueCursor = ""; queueHistory = []; queueNext = null; queueView = requested;
