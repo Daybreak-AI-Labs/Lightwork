@@ -43,9 +43,9 @@ self-improvement governance spine rather than beside it.
    inverted by bisection — there is no scipy in the tree).
 2. **Anchor (`Anchor` / `load_anchor` / `score_on_anchor`)** — a role's fixed,
    held-out ground-truth set. An evaluator is scored by its *agreement* with the
-   anchor, never by self-report. The checksum pins `(id, label)` per item;
-   editing the artifact text shown to a judge is allowed, flipping a label or
-   dropping an item is not.
+   anchor, never by self-report. The checksum pins every evaluator-visible
+   `(id, label, prompt)` item; editing any of those fields, re-labeling an item,
+   or dropping an item changes the released measurement and is refused.
 3. **Controlled utility evolution (`EvaluatorSlot` / epochs / `selective_erasure`)**
    — each evaluator slot carries an epoch index that advances on every swap. On a
    swap, only the learning records the displaced evaluator produced are erased;
@@ -64,21 +64,34 @@ self-improvement governance spine rather than beside it.
 5. **The anchor is the guardrail, so the anchor is governed.** Released anchors
    are immutable, pinned by checksum in a committed
    `evaluator_anchors.lock.json`, exactly as released world-model migrations are.
-   `verify_anchor_integrity` refuses to promote against an anchor whose checksum
-   no longer matches the lock (tampering / weakening). Surfaced as a CI gate:
+   `verify_anchor_integrity` refuses to promote against a missing, malformed,
+   unregistered, or changed anchor before scoring. Surfaced as a CI gate:
    `python -m maverick.evaluator_evolution --ci` (`--regen` after an intentional
    anchor addition).
+
+The committed `self_harness_protocol_v1` anchor is a balanced synthetic
+regression set for evaluator-boundary decisions. It makes the repository lock
+and CI check non-vacuous. It is protocol test data, not deployment ground truth,
+and cannot establish evaluator quality, external custody, or production
+qualification.
 
 ## Posture
 
 ON by default with governed self-improvement, and a no-op when explicitly
 paused. Promotion runs only when `[self_improvement] enable` **and**
-`[self_improvement] evaluator_evolution` are true. The anchor governance fails
-*open* when no lock has been baked (an
-ungoverned deployment) but *closed* once a role is locked. Everything in the
+`[self_improvement] evaluator_evolution` are true. The promotion path requires a
+complete matching release lock and fails closed for an unregistered role or a
+missing or malformed lock. Everything in the
 module is pure and dependency-injected — it never calls an evaluator agent; the
 caller supplies each evaluator's verdicts on the anchor — so the whole mechanism
 is deterministic and testable without a live model.
+
+Arbitrary evaluator-candidate Python is separately brokered by
+`maverick.self_harness_isolation` through the strict local Linux research
+container. That protects the controller from candidate code but does not make a
+Windows host an independent custodian: the same host account still controls the
+ledger and Docker daemon. Confirmatory mode fails closed until a separately
+administered custodian is available.
 
 ## What this is not
 

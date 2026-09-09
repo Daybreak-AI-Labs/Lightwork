@@ -17,6 +17,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Request
 from maverick import cortex
+from maverick.knowledge_access import KnowledgeAccessDenied, KnowledgeAccessService
+from maverick.paths import current_tenant_id_strict
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
@@ -88,10 +90,72 @@ def _status() -> dict:
     return {"schema": STATUS_SCHEMA, **cortex.status(world=_world_or_none())}
 
 
-def _recall(body: RecallIn, caller: cortex.Caller) -> dict:
+def _governed_recall(
+    body: RecallIn,
+    caller: cortex.Caller,
+    service: KnowledgeAccessService | None,
+) -> dict:
+    """Compose Cortex's non-document memories with APP10-governed knowledge.
+
+    The legacy knowledge adapter is deliberately never called.  Exact source
+    versions come from ``KnowledgeAccessService`` or the knowledge source is
+    marked denied; an unavailable registry/projector cannot fall back to raw
+    vector recall.
+    """
+
     sources = tuple(dict.fromkeys(body.sources)) if body.sources else cortex.SOURCES
-    result = cortex.recall(body.query.strip(), caller=caller, sources=sources,
-                           domain=body.domain, k=body.k, world=_world_or_none())
+    def governed_knowledge(query: str, limit: int) -> tuple[list[cortex.Hit], str | None]:
+        try:
+            if service is None:
+                raise KnowledgeAccessDenied("governed knowledge access is unavailable")
+            tenant = current_tenant_id_strict()
+            if not tenant or not caller.principal.startswith("user:"):
+                raise KnowledgeAccessDenied(
+                    "a named user and selected workspace are required"
+                )
+            governed = service.search(
+                tenant,
+                caller.principal,
+                query=query,
+                purpose="product_research",
+                limit=limit,
+            )
+            knowledge_hits: list[cortex.Hit] = []
+            for item in governed["items"]:
+                reference = item["reference"]
+                knowledge_hits.append(
+                    cortex.Hit(
+                        "knowledge",
+                        str(item["source"]["provenance_kind"]),
+                        str(item["summary"]),
+                        str(item["source"]["source_ref"]),
+                        1.0,
+                        {
+                            "title": str(item["title"]),
+                            "registry_reference": dict(reference),
+                            "claim_state": str(item["claim_state"]),
+                            "fresh_until": item["eligibility"]["fresh_until"],
+                            "actor_authorization_sha256": item["eligibility"][
+                                "actor_authorization_sha256"
+                            ],
+                        },
+                    )
+                )
+            return knowledge_hits, None
+        except Exception:  # fail closed; never disclose adapter or registry internals
+            return [], (
+                "Current source access could not be revalidated. "
+                "Open Knowledge and request fresh access or evidence."
+            )
+    result = cortex.recall(
+        body.query.strip(),
+        caller=caller,
+        sources=sources,
+        domain=body.domain,
+        k=body.k,
+        world=_world_or_none(),
+        knowledge_reader=governed_knowledge,
+    )
     return {"schema": RECALL_SCHEMA, **result.to_dict()}
 
 
@@ -125,10 +189,25 @@ def create_cortex_router() -> APIRouter:
 
     @router.post("/recall")
     async def recall(request: Request, body: RecallIn):
+        # Recall remains a read operation.  The APP10 service independently
+        # binds the named principal, selected tenant, purpose, and read action;
+        # this route cannot turn a view grant into export or training authority.
         require_permission(request, "view")
         if not body.query.strip():
             raise HTTPException(status_code=422, detail="query is blank")
-        return await _call(_recall, body, _caller(request))
+        from .knowledge_access_api import _service as knowledge_service
+
+        try:
+            service = knowledge_service(request)
+        except Exception:  # source is marked denied inside the composition helper
+            service = None
+
+        return await _call(
+            _governed_recall,
+            body,
+            _caller(request),
+            service,
+        )
 
     @router.post("/deposit")
     async def deposit(request: Request, body: DepositIn):

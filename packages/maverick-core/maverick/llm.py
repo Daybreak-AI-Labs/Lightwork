@@ -21,9 +21,12 @@ import hashlib
 import json
 import logging
 import os
+import sys
+import threading
+import uuid
 from collections import OrderedDict
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from .budget import Budget, BudgetExceeded, _cache_write_mult_from_ttl
@@ -419,6 +422,10 @@ class LLMResponse:
     # None for providers that don't emit interleaved thinking (they
     # fall back to the bucketed reconstruction).
     content_blocks: list[dict] | None = None
+    # Exact JSON-safe projection returned by provider_cost_cap.settle() for
+    # this physical provider call.  None preserves the response contract when
+    # no provider cap is configured or settlement publication is unavailable.
+    provider_cost_receipt: dict[str, Any] | None = None
 
     def __post_init__(self):
         if self.thinking_blocks is None:
@@ -749,6 +756,12 @@ def _is_provider_transport_failure(exc: BaseException) -> bool:
     return classify_error(exc) in _TRANSPORT_FAILURE_CLASSES
 
 
+def _provider_failure_flag(exc: BaseException) -> bool:
+    """Classify normal errors while treating process cancellation as failure."""
+
+    return _is_provider_transport_failure(exc) if isinstance(exc, Exception) else True
+
+
 def _feed_circuit(provider: str, error: bool) -> None:
     """Record a provider call's outcome on its circuit breaker so repeated
     failures trip it (observable via ``maverick diag circuits``). This is the
@@ -835,28 +848,263 @@ def _record_provider_spend(provider: str, dollars: float) -> None:
         pass
 
 
-def _reserve_provider_call(provider, projected_dollars):
+class _ProviderAttemptSequence:
+    """One monotonic physical-attempt sequence for a logical LLM operation."""
+
+    def __init__(
+        self,
+        *,
+        operation_id: str,
+        category: str,
+        service: str | None,
+    ):
+        self.operation_id = operation_id
+        self.category = category
+        self.service = service
+        self._attempt_no = 0
+        self._lock = threading.Lock()
+
+    def next(self, *, default_service: str) -> dict[str, object]:
+        with self._lock:
+            self._attempt_no += 1
+            attempt_no = self._attempt_no
+        return {
+            "operation_id": self.operation_id,
+            "category": self.category if attempt_no == 1 else "retry",
+            "parent_category": self.category,
+            "attempt_no": attempt_no,
+            "service": self.service or default_service,
+        }
+
+
+def _new_provider_attempt_sequence(
+    *,
+    default_category: str,
+    operation_prefix: str,
+) -> _ProviderAttemptSequence:
+    from .provider_cost_cap import current_provider_operation
+
+    context = current_provider_operation()
+    return _ProviderAttemptSequence(
+        operation_id=(
+            context.operation_id
+            if context is not None
+            else f"{operation_prefix}-{uuid.uuid4().hex}"
+        ),
+        category=context.category if context is not None else default_category,
+        service=context.service if context is not None else None,
+    )
+
+
+def _reserve_provider_call(
+    provider,
+    projected_dollars,
+    *,
+    sequence: _ProviderAttemptSequence,
+    service: str,
+):
     from .provider_cost_cap import reserve
-    return reserve(provider, projected_dollars)
+    return reserve(
+        provider,
+        projected_dollars,
+        **sequence.next(default_service=service),
+    )
 
 
-def _finish_provider_call(hold, provider, model, response, budget, baseline, cache_mult):
+def _provider_attempt_state(error: BaseException | None) -> str:
+    if error is None:
+        return "succeeded"
+    try:
+        import asyncio
+
+        if isinstance(error, asyncio.CancelledError):
+            return "cancelled"
+    except Exception:  # pragma: no cover - stdlib import cannot normally fail
+        pass
+    return "cancelled" if isinstance(error, (GeneratorExit, KeyboardInterrupt)) else "failed"
+
+
+def _finish_provider_call(
+    hold,
+    provider,
+    model,
+    response,
+    budget,
+    baseline,
+    cache_mult,
+    *,
+    error: BaseException | None = None,
+):
     if hold is None:
         _record_provider_spend(provider, _call_spend(model, response, budget, baseline, cache_mult))
-        return
+        return True
     # Only response-local usage can settle this physical attempt. A concurrent
     # Budget delta or an absent/cancelled response is not evidence of zero cost.
-    from .provider_cost_cap import settle
     try:
-        actual = _response_call_cost(model, response, cache_mult)
+        actual, cost_basis, pricing_evidence = _response_call_accounting(
+            model,
+            response,
+            cache_mult,
+        )
     except Exception:
-        actual = None
+        actual = cost_basis = pricing_evidence = None
+    attempt_state = _provider_attempt_state(error)
     try:
-        settle(hold, actual)
+        from .provider_cost_cap import settle
+
+        snapshot = settle(
+            hold,
+            actual,
+            cost_basis=cost_basis,
+            pricing_evidence=pricing_evidence,
+            attempt_state=attempt_state,
+        )
     except Exception:
-        # The durable reservation remains charged if receipt publication fails.
-        # Do not turn a successfully incurred call into a retryable provider error.
-        logging.getLogger(__name__).error("Provider settlement requires reconciliation; its durable reservation was retained.")
+        # Preserve an explicitly unknown receipt when price/evidence settlement
+        # fails. If even this write cannot reach the authority, callers with a
+        # provider error must replace it with ProviderAccountingUnavailable so
+        # failover cannot dispatch another paid request.
+        try:
+            from .provider_cost_cap import settle
+
+            snapshot = settle(hold, None, attempt_state=attempt_state)
+        except Exception:
+            logging.getLogger(__name__).error(
+                "Provider settlement requires reconciliation; its durable "
+                "reservation was retained."
+            )
+            return False
+        logging.getLogger(__name__).error(
+            "Provider cost is unresolved; an unknown receipt was retained for "
+            "reconciliation."
+        )
+    if response is None:
+        return True
+    try:
+        receipt = asdict(snapshot)
+        # Keep this field safe for checkpoints, APIs, and outcome-accounting
+        # callers without coupling them to the provider ledger's dataclass.
+        json.dumps(receipt, allow_nan=False)
+        response.provider_cost_receipt = receipt
+    except Exception:
+        # The provider call and durable settlement are already complete.  A
+        # projection failure must not escape into failover and incur a retry.
+        logging.getLogger(__name__).error(
+            "Provider settlement completed, but its response receipt could not be published."
+        )
+    return True
+
+
+@dataclass
+class _ProviderAttemptTicket:
+    hold: object
+    baseline: float
+    raw_response: object | None = None
+    finished: bool = False
+
+
+class _ProviderAttemptTracker:
+    """Give every provider retry its own durable reservation and receipt."""
+
+    def __init__(
+        self,
+        provider,
+        model,
+        budget,
+        cache_mult,
+        projected,
+        *,
+        sequence: _ProviderAttemptSequence,
+        service: str,
+    ):
+        self.provider = provider
+        self.model = model
+        self.budget = budget
+        self.cache_mult = cache_mult
+        self.projected = projected
+        self.sequence = sequence
+        self.service = service
+        self.initial_ticket = self._new_ticket()
+        self.initial_used = False
+        self.pending: _ProviderAttemptTicket | None = None
+        self.finalized = False
+
+    def _new_ticket(self):
+        return _ProviderAttemptTicket(
+            hold=_reserve_provider_call(
+                self.provider,
+                self.projected,
+                sequence=self.sequence,
+                service=self.service,
+            ),
+            baseline=self.budget.dollars if self.budget is not None else 0.0,
+        )
+
+    def before_attempt(self):
+        if not self.initial_used:
+            ticket = self.initial_ticket
+            self.initial_used = True
+        else:
+            ticket = self._new_ticket()
+        return ticket
+
+    def after_attempt(self, ticket, response, error):
+        if not isinstance(ticket, _ProviderAttemptTicket) or ticket.finished:
+            from .provider_cost_cap import ProviderAccountingUnavailable
+
+            raise ProviderAccountingUnavailable
+        if error is None:
+            ticket.raw_response = response
+            self.pending = ticket
+            return
+        ticket.finished = True
+        if not _finish_provider_call(
+            ticket.hold,
+            self.provider,
+            self.model,
+            None,
+            self.budget,
+            ticket.baseline,
+            self.cache_mult,
+            error=error,
+        ) and ticket.hold is not None:
+            # A failed physical request is eligible for retry only after its
+            # durable unknown receipt is retained. Otherwise another call could
+            # run outside the accounting authority.
+            from .provider_cost_cap import ProviderAccountingUnavailable
+
+            raise ProviderAccountingUnavailable
+
+    def finalize(self, response, error: BaseException | None = None):
+        if self.finalized:
+            return
+        self.finalized = True
+        ticket = self.pending
+        if ticket is None and not self.initial_used:
+            # Providers without internal retry instrumentation still consume the
+            # envelope reservation as one physical dispatch.
+            ticket = self.initial_ticket
+            self.initial_used = True
+        if ticket is None or ticket.finished:
+            return
+        ticket.finished = True
+        published = _finish_provider_call(
+            ticket.hold,
+            self.provider,
+            self.model,
+            response if response is not None else ticket.raw_response,
+            self.budget,
+            ticket.baseline,
+            self.cache_mult,
+            error=error,
+        )
+        if not published and ticket.hold is not None and error is not None:
+            # The provider error is otherwise eligible for failover. Replace it
+            # with the accounting control signal so a second paid request cannot
+            # run after this attempt's receipt failed to publish.
+            from .provider_cost_cap import ProviderAccountingUnavailable
+
+            raise ProviderAccountingUnavailable
 
 
 def _hedge_ms() -> float | None:
@@ -1218,7 +1466,12 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
         _cache_write_mult_from_ttl,
         _lookup_price,
     )
-    usage = getattr(getattr(resp, "raw", None), "usage", None)
+    raw_response = getattr(resp, "raw", None)
+    usage = getattr(raw_response, "usage", None)
+    if usage is None:
+        # Physical-attempt observers see the SDK response before the provider
+        # adapter builds LLMResponse (for example prompt-cache prewarm).
+        usage = getattr(resp, "usage", None)
 
     def _u(*names) -> int:
         for n in names:
@@ -1239,8 +1492,16 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
     # the budget_dollars metric. Mirror the provider's billing split.
     in_tok = _u("input_tokens", "prompt_tokens")
     out_tok = _u("output_tokens", "completion_tokens")
-    cache_read = int(getattr(resp, "cache_read_tokens", 0) or 0)
-    cache_write = int(getattr(resp, "cache_creation_tokens", 0) or 0)
+    cache_read = int(
+        getattr(resp, "cache_read_tokens", None)
+        or _u("cache_read_input_tokens")
+        or 0
+    )
+    cache_write = int(
+        getattr(resp, "cache_creation_tokens", None)
+        or _u("cache_creation_input_tokens")
+        or 0
+    )
     if not (in_tok or out_tok or cache_read or cache_write):
         return None
     # OpenAI/DeepSeek cached-prompt split (only when the response didn't already
@@ -1291,6 +1552,23 @@ def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) ->
         cost += (cache_write / 1_000_000) * in_rate * write_mult
     cost += (out_tok / 1_000_000) * out_rate
     return cost
+
+
+def _response_call_accounting(model_id, resp, cache_read_mult=None):
+    """Return response-local cost plus its rate assurance classification."""
+
+    cost = _response_call_cost(model_id, resp, cache_read_mult)
+    if cost is None:
+        return None, None, None
+    try:
+        from .budget import _lookup_price_quote
+
+        evidence = _lookup_price_quote(model_id, estimate_only=True).metadata()
+    except Exception:
+        # The amount remains a bounded local estimate, but absent provenance can
+        # never be promoted to observed or invoice-settled evidence.
+        return cost, "estimated", None
+    return cost, "observed" if evidence["verified"] else "estimated", evidence
 
 
 def _call_spend(model_id, resp, budget, dollars_baseline, cache_read_mult=None) -> float:
@@ -1457,7 +1735,12 @@ class LLM:
         on_delta=None,
         effort: str | None = None,
         _no_failover: bool = False,
+        _provider_sequence: _ProviderAttemptSequence | None = None,
     ) -> LLMResponse:
+        _provider_sequence = _provider_sequence or _new_provider_attempt_sequence(
+            default_category="inference",
+            operation_prefix="llm",
+        )
         raw_requested_model = model or self.model
         requested_model = require_model_allowed(raw_requested_model)
         # Provider failover (opt-in, default off): when a fallback chain is
@@ -1478,7 +1761,8 @@ class LLM:
                     (m, (lambda m=m: self.complete(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, on_delta=on_delta, effort=effort, _no_failover=True)))
+                        model=m, on_delta=on_delta, effort=effort, _no_failover=True,
+                        _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -1544,11 +1828,11 @@ class LLM:
             )
         except ImportError:  # pragma: no cover
             import contextlib
-            def _trace_span(*a, **kw):  # type: ignore
+            def _trace_span(*a, **_kw):  # type: ignore
                 return contextlib.nullcontext()
             def _gen_ai_span_name(op, model):  # type: ignore
                 return f"{op} {model}"
-            def _gen_ai_attributes(*a, **kw):  # type: ignore
+            def _gen_ai_attributes(*a, **_kw):  # type: ignore
                 return {}
         _t0 = _time.monotonic()
         _d0 = budget.dollars if budget else 0.0
@@ -1562,8 +1846,9 @@ class LLM:
         _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
                                         max_tokens, thinking_budget=thinking_budget)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
-        _provider_hold = None
+        _provider_tracker = None
         _provider_started = False
+        _provider_error: BaseException | None = None
         try:
             with _trace_span(
                 _gen_ai_span_name("chat", model_id),
@@ -1572,12 +1857,24 @@ class LLM:
                     **_gen_ai_attributes(provider, model_id),
                 },
             ):
-                _provider_hold = _reserve_provider_call(provider, _est_cost)
+                _provider_tracker = _ProviderAttemptTracker(
+                    provider,
+                    _price_spec,
+                    budget,
+                    getattr(client, "CACHE_READ_MULT", None),
+                    _est_cost,
+                    sequence=_provider_sequence,
+                    service=_price_spec,
+                )
                 _provider_started = True
-                _resp = client.complete(**kwargs)
+                from .retry import observe_physical_attempts
+
+                with observe_physical_attempts(_provider_tracker):
+                    _resp = client.complete(**kwargs)
                 return _resp
-        except Exception as _exc:
-            _err = _is_provider_transport_failure(_exc)
+        except BaseException as _exc:
+            _provider_error = _exc
+            _err = _provider_failure_flag(_exc)
             raise
         finally:
             if _held:
@@ -1589,9 +1886,11 @@ class LLM:
             # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
             _spent = _call_spend(_price_spec, _resp, budget, _d0,
                                  getattr(client, "CACHE_READ_MULT", None))
-            if _provider_started:
-                _finish_provider_call(_provider_hold, provider, _price_spec, _resp, budget, _d0,
-                                      getattr(client, "CACHE_READ_MULT", None))
+            if _provider_started and _provider_tracker is not None:
+                _provider_tracker.finalize(
+                    _resp,
+                    _provider_error,
+                )
             try:
                 from .provider_health import get as _h
                 _h().record(provider, model_id,
@@ -1623,7 +1922,12 @@ class LLM:
         model: str | None = None,
         effort: str | None = None,
         _no_failover: bool = False,
+        _provider_sequence: _ProviderAttemptSequence | None = None,
     ) -> LLMResponse:
+        _provider_sequence = _provider_sequence or _new_provider_attempt_sequence(
+            default_category="inference",
+            operation_prefix="llm",
+        )
         raw_requested_model = model or self.model
         requested_model = require_model_allowed(raw_requested_model)
         # Provider failover (opt-in, default off) — see complete(). No configured
@@ -1640,7 +1944,8 @@ class LLM:
                     (m, (lambda m=m: self.complete_async(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, effort=effort, _no_failover=True)))
+                        model=m, effort=effort, _no_failover=True,
+                        _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -1687,11 +1992,11 @@ class LLM:
             )
         except ImportError:  # pragma: no cover
             import contextlib
-            def _trace_span(*a, **kw):  # type: ignore
+            def _trace_span(*a, **_kw):  # type: ignore
                 return contextlib.nullcontext()
             def _gen_ai_span_name(op, model):  # type: ignore
                 return f"{op} {model}"
-            def _gen_ai_attributes(*a, **kw):  # type: ignore
+            def _gen_ai_attributes(*a, **_kw):  # type: ignore
                 return {}
         _t0 = _time.monotonic()
         _d0 = budget.dollars if budget else 0.0
@@ -1722,19 +2027,28 @@ class LLM:
 
                 async def _call():
                     # Each physical hedge has independent capacity and a receipt.
-                    hold = _reserve_provider_call(provider, _est_cost)
                     response = None
-                    baseline = budget.dollars if budget is not None else 0.0
+                    tracker = _ProviderAttemptTracker(
+                        provider,
+                        _price_spec,
+                        budget,
+                        getattr(client, "CACHE_READ_MULT", None),
+                        _est_cost,
+                        sequence=_provider_sequence,
+                        service=_price_spec,
+                    )
                     try:
-                        response = await client.complete_async(
-                            system=system, messages=messages, tools=tools, budget=budget,
-                            max_tokens=max_tokens, thinking_budget=thinking_budget,
-                            model=model_id, **_ekw,
-                        )
+                        from .retry import observe_physical_attempts
+
+                        with observe_physical_attempts(tracker):
+                            response = await client.complete_async(
+                                system=system, messages=messages, tools=tools, budget=budget,
+                                max_tokens=max_tokens, thinking_budget=thinking_budget,
+                                model=model_id, **_ekw,
+                            )
                         return response
                     finally:
-                        _finish_provider_call(hold, provider, _price_spec, response, budget, baseline,
-                                              getattr(client, "CACHE_READ_MULT", None))
+                        tracker.finalize(response, sys.exception())
 
                 hedge = _hedge_ms()
                 if hedge is None:
@@ -1781,8 +2095,8 @@ class LLM:
                     # classification upstream sees the provider's exception, not
                     # the race wrapper.
                     raise (e.__cause__ or e) from None
-        except Exception as _exc:
-            _err = _is_provider_transport_failure(_exc)
+        except BaseException as _exc:
+            _err = _provider_failure_flag(_exc)
             raise
         finally:
             if _held:
@@ -1848,15 +2162,35 @@ class LLM:
             # multiplier before dispatch so zero/low dollar caps cannot be
             # bypassed by opt-in prewarming. The provider records exact usage.
             # Estimate on the provider-qualified spec -- see complete().
-            _held = budget.reserve(
-                _estimate_call_cost(f"{provider}:{model_id}", system, messages, tools, 0)
+            estimate = (
+                _estimate_call_cost(
+                    f"{provider}:{model_id}", system, messages, tools, 0,
+                )
                 * _cache_write_mult_from_ttl("1h")
-            ) if budget is not None else 0.0
+            )
+            _held = budget.reserve(estimate) if budget is not None else 0.0
+            provider_sequence = _new_provider_attempt_sequence(
+                default_category="storage",
+                operation_prefix="prewarm",
+            )
+            tracker = _ProviderAttemptTracker(
+                provider,
+                f"{provider}:{model_id}",
+                budget,
+                getattr(client, "CACHE_READ_MULT", None),
+                estimate,
+                sequence=provider_sequence,
+                service=f"{provider}:{model_id}:prompt-cache",
+            )
             try:
-                if budget is not None:
-                    return bool(warm(system, tools, model_id, budget=budget))
-                return bool(warm(system, tools, model_id))
+                from .retry import observe_physical_attempts
+
+                with observe_physical_attempts(tracker):
+                    if budget is not None:
+                        return bool(warm(system, tools, model_id, budget=budget))
+                    return bool(warm(system, tools, model_id))
             finally:
+                tracker.finalize(None)
                 if _held:
                     budget.release(_held)
         except Exception:  # pragma: no cover -- prewarm is best-effort

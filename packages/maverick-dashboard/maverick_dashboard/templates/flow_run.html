@@ -9,6 +9,11 @@
   .fr__status.failed, .fr__status.rejected { color: var(--danger, #dc2626); }
   .fr__status.paused_approval, .fr__status.paused_delay, .fr__status.queued, .fr__status.running { color: #d97706; }
   .fr__actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin: var(--space-3) 0; }
+  .fr__review { flex: 1 0 100%; border: 1px solid var(--border); border-radius: var(--radius-lg);
+                padding: var(--space-3); background: var(--surface-sunken); }
+  .fr__review h3, .fr__review h4 { margin: var(--space-2) 0; }
+  .fr__review p, .fr__review ul { margin: var(--space-1) 0 var(--space-2); }
+  .fr__review code { overflow-wrap: anywhere; }
   .fr__msg { font-size: var(--text-sm); color: var(--muted); }
   .fr__error { color: var(--danger, #dc2626); font-size: var(--text-sm); margin: var(--space-2) 0;
                white-space: pre-wrap; word-break: break-word; }
@@ -125,31 +130,133 @@
       b.className = 'btn ' + (primary ? 'btn--primary' : 'btn--ghost'); b.type = 'button';
       b.textContent = label; b.addEventListener('click', onClick); box.appendChild(b);
     }
+    function addText(parent, tag, text) {
+      var node = document.createElement(tag); node.textContent = text; parent.appendChild(node);
+      return node;
+    }
+    function addList(parent, title, values) {
+      addText(parent, 'h4', title);
+      var ul = document.createElement('ul');
+      (values && values.length ? values : ['None recorded.']).forEach(function (value) {
+        addText(ul, 'li', String(value));
+      });
+      parent.appendChild(ul);
+    }
+    function renderApprovalCard(card) {
+      var review = document.createElement('section');
+      review.className = 'fr__review'; review.setAttribute('aria-label', 'Exact approval review');
+      addText(review, 'strong', 'Recommendation only — prediction does not grant authority.');
+      addText(review, 'h3', card.summary || 'Approval details');
+      addText(review, 'p', 'Target: ' + ((card.target && card.target.label) || 'Unavailable'));
+      addText(review, 'p', 'Target commitment: ' + ((card.target && card.target.sha256) || 'Unavailable'));
+      var authority = card.authority || {};
+      addText(review, 'p', 'Actor: ' + (authority.actor || 'Unavailable')
+        + ' · Workspace: ' + (authority.workspace || 'Unavailable')
+        + ' · Role: ' + (authority.role || 'Unavailable'));
+      var currentAuthority = run.approval_authority || {};
+      addText(review, 'p', 'Current execution authority: role '
+        + (currentAuthority.role || 'Unavailable') + ' · tenant '
+        + (currentAuthority.tenant || 'local') + ' · role revision '
+        + (currentAuthority.role_permissions_sha256 || 'Unavailable'));
+      addText(review, 'p', 'Credential revision: '
+        + (currentAuthority.credential_inventory_sha256 || 'Unavailable')
+        + ' · budget revision: '
+        + (currentAuthority.budget_authority_sha256 || 'Unavailable'));
+      addText(review, 'p', 'Expires: ' + String(card.expires_at || 'Unavailable'));
+      addList(review, 'Exact inputs', card.parameters && card.parameters.summary);
+      var preview = card.preview || {};
+      addText(review, 'p', 'Before: ' + (preview.before || 'Unavailable'));
+      addText(review, 'p', 'After: ' + (preview.after || 'Unavailable'));
+      var consequences = card.consequences || {};
+      addList(review, 'Known effects', consequences.known_effects);
+      addList(review, 'Unresolved assumptions', consequences.unresolved_assumptions);
+      addText(review, 'p', 'Irreversible or uncertain: '
+        + (consequences.irreversible ? 'yes' : 'no'));
+      addText(review, 'p', 'Budget: ' + JSON.stringify(card.budget || {}));
+      box.appendChild(review);
+    }
     if (run.status === 'paused_approval') {
       // Prefer the pause-time snapshot (run.human): it is what the node
       // declared when it paused, immune to flow edits made while waiting.
       var node = (run.human && Object.keys(run.human).length)
         ? run.human
         : ((flowNodes || []).filter(function (n) { return n.id === run.cursor; })[0] || {});
+      var card = node.approval_card;
+      var canDecide = run.approval_card_status === 'current'
+        && typeof run.approval_binding_sha256 === 'string'
+        && run.approval_binding_sha256.length === 64 && card;
+      if (card) renderApprovalCard(card);
+      if (!canDecide) {
+        addText(box, 'p', 'This operation cannot be approved until current, integrity-checked details are available. Reload or request a fresh review.');
+      }
       if (run.prompt) { var p = document.createElement('span'); p.className = 'fr__msg'; p.textContent = '“' + run.prompt + '” '; box.appendChild(p); }
       if (node.assignee) { var as = document.createElement('span'); as.className = 'fr__msg'; as.textContent = '· for ' + node.assignee + ' '; box.appendChild(as); }
       // optional form fields collected on sign-off (merged into flow data on resume)
-      var inputs = {};
+      var inputs = {}, formFields = [], reviewedInputs = null, reviewPending = false;
+      var inputReview = document.createElement('section');
+      inputReview.className = 'fr__review'; inputReview.hidden = true;
+      inputReview.setAttribute('aria-label', 'Submitted approval inputs');
+      function clearInputReview() {
+        reviewedInputs = null; inputReview.hidden = true; inputReview.textContent = '';
+      }
       (node.form || []).forEach(function (fld) {
         if (!fld.name) return;
+        formFields.push({ name: fld.name, label: fld.label || fld.name });
         var wrap = document.createElement('div'); wrap.style.margin = '4px 0';
         var lab = document.createElement('label'); lab.style.cssText = 'display:block;font-size:12px;color:var(--muted);';
         lab.textContent = fld.label || fld.name;
         var inp = document.createElement('input'); inp.className = 'input';
-        inp.addEventListener('input', function () { inputs[fld.name] = inp.value; });
+        inp.addEventListener('input', function () {
+          inputs[fld.name] = inp.value; clearInputReview();
+        });
         wrap.appendChild(lab); wrap.appendChild(inp); box.appendChild(wrap);
       });
-      btn('✅ Approve', true, function () { resume('approved', inputs); });
+      if (formFields.length) box.appendChild(inputReview);
+      function reviewThenResume(decision) {
+        if (!formFields.length) {
+          resume(decision, inputs, run.approval_binding_sha256); return;
+        }
+        var fingerprint = JSON.stringify(inputs);
+        if (reviewedInputs && reviewedInputs.fingerprint === fingerprint) {
+          resume(decision, inputs, reviewedInputs.binding); return;
+        }
+        if (reviewPending) return;
+        reviewPending = true;
+        say('Binding the entered values to this exact operation…');
+        api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/approval-preview',
+            { method: 'POST', body: JSON.stringify({ inputs: inputs }) })
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+            if (!r.ok || typeof j.approval_binding_sha256 !== 'string'
+                || !/^[0-9a-f]{64}$/.test(j.approval_binding_sha256)) {
+              throw new Error(typeof j.detail === 'string' ? j.detail : 'Could not bind these inputs.');
+            }
+            if (fingerprint !== JSON.stringify(inputs)) return;
+            reviewedInputs = { fingerprint: fingerprint, binding: j.approval_binding_sha256 };
+            inputReview.textContent = '';
+            addText(inputReview, 'strong', 'Exact submitted inputs — review before confirming.');
+            formFields.forEach(function (field) {
+              var value = Object.prototype.hasOwnProperty.call(inputs, field.name)
+                ? String(inputs[field.name]) : '';
+              addText(inputReview, 'p', field.label + ': ' + (value || '(empty)'));
+            });
+            inputReview.hidden = false;
+            say('Inputs are bound. Review them above, then click the decision again to confirm.');
+          }); })
+          .catch(function (error) { say(error.message || 'Could not bind these inputs.'); })
+          .finally(function () { reviewPending = false; });
+      }
+      if (canDecide) btn('Approve exact operation', true, function () {
+        reviewThenResume('approved');
+      });
       // any declared choice verdicts become their own buttons (routed by a switch)
       (node.choices || []).forEach(function (ch) {
-        btn(ch, false, function () { resume(ch, inputs); });
+        if (canDecide) btn(ch, false, function () {
+          reviewThenResume(ch);
+        });
       });
-      btn('🚫 Reject', false, function () { resume('rejected', inputs); });
+      if (canDecide) btn('Reject / request revision', false, function () {
+        reviewThenResume('rejected');
+      });
     }
     if (run.status === 'paused_event') {
       if (run.prompt) { var pe = document.createElement('span'); pe.className = 'fr__msg'; pe.textContent = '📥 ' + run.prompt + ' '; box.appendChild(pe); }
@@ -163,10 +270,15 @@
     }
   }
 
-  function resume(decision, inputs) {
+  function resume(decision, inputs, approvalBinding) {
     api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/resume',
-        { method: 'POST', body: JSON.stringify({ decision: decision, inputs: inputs || {} }) })
-      .then(function (r) { say(r.ok ? (decision === 'rejected' ? 'Rejected.' : '‘' + decision + '’ — resuming…') : 'Could not resume.'); poll(8); })
+        { method: 'POST', body: JSON.stringify({ decision: decision, inputs: inputs || {},
+          approval_binding_sha256: approvalBinding || '' }) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+        say(r.ok ? (decision === 'rejected' ? 'Rejected.' : '‘' + decision + '’ — resuming…')
+          : (typeof j.detail === 'string' ? j.detail : 'Could not resume.'));
+        poll(8);
+      }); })
       .catch(function () { say('Could not resume.'); });
   }
   function retry(fromFailure) {

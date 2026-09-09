@@ -26,12 +26,18 @@
   #vo-message[role="alert"] {color:var(--err); border-color:currentColor}
   #vo-cases button {display:block; width:100%; text-align:left; margin:.4rem 0}
   #vo-cases button[aria-current="true"] {border-color:var(--accent); background:var(--surface-2)}
+  .vo-queue-controls {display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end}
+  .vo-queue-controls label {margin:0}
+  .vo-page-actions {display:flex; gap:.4rem; flex-wrap:wrap}
+  #vo-page-status {overflow-wrap:anywhere; color:var(--muted)}
   #vo-case-reference {overflow-wrap:anywhere; color:var(--muted)}
   #vo-upload-review pre {max-height:24rem;min-width:0}
   .vo-card .vo-upload-confirm-label {display:flex;align-items:flex-start;gap:.6rem}
   .vo-card #vo-upload-confirm {width:auto;flex:0 0 auto}
-  .vo-card #vo-cancellation-confirm,.vo-card #vs-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
+  .vo-card #vo-cancellation-confirm,.vo-card #vo-export-confirm,.vo-card #vs-confirm {width:auto;flex:0 0 auto;margin:.2rem 0 0;padding:0}
   #vo-cancellation-status {white-space:pre-line;overflow-wrap:anywhere}
+  #vo-export-status,#vo-acceptance-evidence-check {white-space:pre-line;overflow-wrap:anywhere}
+  #vo-export-manifest li {overflow-wrap:anywhere}
   #vs-panel [id] {scroll-margin-top:var(--vs-anchor-offset,calc(var(--shell-topbar-h,56px) + 1rem))}
   #vendor-onboarding:has(#vo-upload-review:not([hidden])) #vo-message {position:static}
   @media(max-width:800px) {.vo-layout {grid-template-columns:1fr}}
@@ -69,8 +75,23 @@
     <aside>
       <section class="vo-card" aria-labelledby="vo-list-title">
         <h2 id="vo-list-title">Vendor requests</h2>
-        <button id="vo-refresh" type="button">Refresh requests</button>
-        <div id="vo-cases"></div>
+        <div class="vo-queue-controls">
+          <label for="vo-case-filter">Show
+            <select id="vo-case-filter">
+              <option value="all">All requests</option>
+              <option value="active">Active requests</option>
+              <option value="unresolved">Needs reconciliation</option>
+              <option value="closed">Finished requests</option>
+            </select>
+          </label>
+          <button id="vo-refresh" type="button">Refresh requests</button>
+        </div>
+        <div id="vo-cases" aria-live="polite"></div>
+        <p id="vo-page-status" role="status">Loading requests…</p>
+        <div class="vo-page-actions" aria-label="Vendor request pages">
+          <button id="vo-page-previous" type="button" disabled>Previous page</button>
+          <button id="vo-page-next" type="button" disabled>Next page</button>
+        </div>
       </section>
       <section class="vo-card" aria-labelledby="vo-intake-title">
         <h2 id="vo-intake-title">New request</h2>
@@ -85,7 +106,8 @@
           <label for="vo-project">Jira project key</label><input id="vo-project" required maxlength="32">
           <label for="vo-purpose">Intended use</label><textarea id="vo-purpose" required maxlength="2000"></textarea>
           <label for="vo-freshness">Evidence validity in days</label><input id="vo-freshness" type="number" value="365" min="1" max="730" required>
-          <label for="vo-renewal">Previous request ID (renewals only)</label><input id="vo-renewal" maxlength="128">
+          <label for="vo-due">Requested completion date</label><input id="vo-due" type="date" required>
+          <label for="vo-renewal">Previous request ID (renewal or reevaluation)</label><input id="vo-renewal" maxlength="128">
           <button type="submit">Create request</button>
         </form>
         <p>Select up to eight Google Docs, UTF-8 text files, or supported digital PDFs. You can also create a request first and upload evidence below.</p>
@@ -98,10 +120,19 @@
         <div id="vo-status" class="vo-status"></div>
         <h3>What this request delivers</h3>
         <p id="vo-scope">Select a request to see its promised result and support boundary.</p>
+        <details>
+          <summary>Edit request details</summary>
+          <p>Saving a changed intended use or evidence-validity period restarts evidence review. Changing the Jira project requires a new action review. Changing only the requested completion date keeps completed technical work.</p>
+          <label for="vo-case-project">Jira project key</label><input id="vo-case-project" maxlength="32" disabled>
+          <label for="vo-case-purpose">Intended use</label><textarea id="vo-case-purpose" maxlength="2000" disabled></textarea>
+          <label for="vo-case-freshness">Evidence validity in days</label><input id="vo-case-freshness" type="number" min="1" max="730" disabled>
+          <label for="vo-case-due">Requested completion date</label><input id="vo-case-due" type="date" disabled>
+          <button id="vo-save-draft" type="button" disabled>Save request details</button>
+        </details>
         <div class="vo-actions">
           <button id="vo-collect" type="button" disabled>Obtain current evidence</button>
           <button id="vo-assess" type="button" disabled>Build assessment</button>
-          <button id="vo-renew" type="button" disabled>Start renewal request</button>
+          <button id="vo-renew" type="button" disabled>Start renewal or reevaluation</button>
         </div>
         <h3>Evidence and source</h3><pre id="vo-evidence">No request selected.</pre>
         <div id="vo-evidence-controls">
@@ -131,7 +162,17 @@
           <p>Extraction and transcription are not independent verification. Upload bytes and full text are processed temporarily; retained evidence contains source fingerprints, extraction limits and short redacted quotations. Replacing evidence clears the assessment and any pending action approval.</p>
         </div>
         <h3>Changes since previous evidence</h3><div id="vo-evidence-changes">Collect evidence to compare retained versions.</div>
+        <h3>Acceptance evidence check</h3><div id="vo-acceptance-evidence-check" role="status">Evidence is checked again before acceptance.</div>
         <h3>Assessment, source references and gaps</h3><div id="vo-assessment"></div>
+        <section aria-labelledby="vo-export-title">
+          <h3 id="vo-export-title">Export reviewed evidence</h3>
+          <p>Create a safe JSON export containing bounded redacted quotations and stable evidence references. Source files and full extracted text are never included. If current source access is unavailable, the export records an opaque withheld dependency.</p>
+          <button id="vo-export-preview" type="button" disabled>Preview export contents</button>
+          <p id="vo-export-status" role="status" aria-live="polite">Review a case assessment before preparing an export.</p>
+          <ul id="vo-export-manifest" aria-label="Evidence export manifest"></ul>
+          <label class="vo-upload-confirm-label"><input id="vo-export-confirm" type="checkbox" disabled> <span>I reviewed which evidence will be included or withheld.</span></label>
+          <button id="vo-export-download" type="button" disabled>Download reviewed JSON export</button>
+        </section>
       </section>
       <section class="vo-card" aria-labelledby="vo-review-title">
         <h2 id="vo-review-title">Human review</h2>

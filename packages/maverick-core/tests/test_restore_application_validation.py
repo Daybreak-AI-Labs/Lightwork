@@ -129,7 +129,12 @@ def test_service_created_accepted_case_and_renewal_restore_and_reopen(tmp_path, 
         case = service.assess(ctx, case["id"], case["revision"])
         case = service.review(ctx, case["id"], case["revision"], "approved", "Approved synthetic pilot")
         case = service.prepare_action(ctx, case["id"], case["revision"])
-        case = service.approve_action(ctx, case["id"], case["revision"])
+        case = service.approve_action(
+            ctx,
+            case["id"],
+            case["revision"],
+            case["operation"]["approval_card"]["binding_sha256"],
+        )
         case = service.execute(ctx, case["id"])
         accepted = service.accept(ctx, case["id"], case["revision"], True, "Accepted synthetic deliverable")
         renewal = service.intake(ctx, "Synthetic Acme", "security-paper", "VEND", "Annual renewal",

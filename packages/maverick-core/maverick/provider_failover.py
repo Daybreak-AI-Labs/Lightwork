@@ -56,6 +56,11 @@ def should_retry_llm_error(exc: Exception) -> bool:
     except Exception:  # pragma: no cover
         pass
     try:
+        from .provider_cost_cap import ProviderAccountingUnavailable
+        non_retryable.append(ProviderAccountingUnavailable)
+    except Exception:  # pragma: no cover
+        pass
+    try:
         from .llm import ModelNotAllowedError
         non_retryable.append(ModelNotAllowedError)
     except Exception:  # pragma: no cover

@@ -75,8 +75,9 @@ def _serialized(fn):
     self-deadlock."""
     @functools.wraps(fn)
     def _wrap(*args, **kwargs):
+        from .authority_effects import authority_effect_fence
         from .file_lock import cross_process_lock
-        with _OVERRIDE_LOCK, cross_process_lock(OVERRIDES_PATH):
+        with authority_effect_fence(), _OVERRIDE_LOCK, cross_process_lock(OVERRIDES_PATH):
             previous = getattr(_mutation_context, "strict_reads", False)
             _mutation_context.strict_reads = True
             try:

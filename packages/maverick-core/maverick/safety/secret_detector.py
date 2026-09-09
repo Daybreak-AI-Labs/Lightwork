@@ -58,6 +58,15 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     ("slack_bot_token",    re.compile(r"\bxox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,}\b")),
     ("stripe_live_key",    re.compile(r"\bsk_live_[0-9a-zA-Z]{24,}\b")),
     ("stripe_test_key",    re.compile(r"\bsk_test_[0-9a-zA-Z]{24,}\b")),
+    # Lightwork-issued external-agent bearer credentials and signed flow
+    # decision links are capabilities even though they do not resemble a
+    # third-party API key or a three-segment JWT.
+    ("lightwork_agent_token", re.compile(
+        r"(?<![A-Za-z0-9_-])lw-(?:rest|mcp)-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"
+    )),
+    ("lightwork_flow_approval_token", re.compile(
+        r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{16,}\.[0-9a-fA-F]{64}(?![0-9a-fA-F])"
+    )),
     # JWTs: header.payload.signature, all base64url-without-padding.
     ("jwt",                re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")),
     # Generic private key blocks. One pattern, one span: match the WHOLE block

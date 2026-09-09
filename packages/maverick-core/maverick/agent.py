@@ -1575,6 +1575,105 @@ class Agent:
         """
         return f"{self.role}-{self.depth}"
 
+    def _knowledge_runtime_principal(self) -> str:
+        """Return the current capability principal for governed knowledge."""
+
+        cap = self._effective_capability("knowledge_search")
+        principal = getattr(cap, "principal", None)
+        if isinstance(principal, str) and principal.startswith(("agent:", "worker:", "user:")):
+            return principal
+        return f"agent:{self.name}"
+
+    def _knowledge_actor_authority(
+        self,
+        tenant: str,
+        principal: str,
+        action: str,
+        purpose: str,
+    ):
+        """Resolve the agent's live roster/capability into an exact authority."""
+
+        from .knowledge_access import KnowledgeActorAuthority
+        from .paths import canonical_tenant_id
+
+        canonical = canonical_tenant_id(tenant)
+        if not self.ctx.knows_bus_agent(self.name):
+            raise PermissionError("agent is no longer in the current run roster")
+        if principal != self._knowledge_runtime_principal():
+            raise PermissionError("knowledge actor changed during the operation")
+        cap = self._effective_capability("knowledge_search")
+        capability_sha256 = "capability-enforcement-off"
+        if cap is not None:
+            if not cap.permits("knowledge_search"):
+                raise PermissionError("current capability does not allow knowledge search")
+            from .revocation import revoked_principal
+
+            principals = (
+                cap.revocation_principals()
+                if hasattr(cap, "revocation_principals")
+                else (cap.principal,)
+            )
+            if revoked_principal(principals) is not None:
+                raise PermissionError("current knowledge principal is revoked")
+            try:
+                capability_sha256 = hashlib.sha256(cap.signing_bytes()).hexdigest()
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise PermissionError("current knowledge capability is malformed") from exc
+        material = {
+            "schema": "lightwork.agent-knowledge-authorization.v1",
+            "tenant": canonical,
+            "principal": principal,
+            "action": action,
+            "purpose": purpose,
+            "agent_instance": self.name,
+            "role": self.role,
+            "domain": self.domain,
+            "goal_id": self.ctx.goal_id,
+            "episode_id": getattr(self.ctx, "episode_id", 0),
+            "source_selectors": list(self.knowledge_sources),
+            "capability_sha256": capability_sha256,
+        }
+        authorization_sha256 = hashlib.sha256(
+            json.dumps(
+                material,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        return KnowledgeActorAuthority(
+            tenant=canonical,
+            principal=principal,
+            action=action,
+            purpose=purpose,
+            authorization_sha256=authorization_sha256,
+        )
+
+    def _governed_knowledge_service(self):
+        """Lazily bind the installed APP10 registry/projector to this agent."""
+
+        current = getattr(self, "_knowledge_access_service", None)
+        if current is not None:
+            return current
+        from .knowledge_access import KnowledgeAccessService
+
+        base = getattr(self.ctx, "knowledge_access_service", None)
+        if isinstance(base, KnowledgeAccessService):
+            current = base.bind_actor_authority(self._knowledge_actor_authority)
+        else:
+            from .knowledge_content_projection import ExistingKnowledgeContentProjector
+            from .research_registry import ResearchRegistry
+
+            current = KnowledgeAccessService(
+                registry=ResearchRegistry(),
+                content_resolver=ExistingKnowledgeContentProjector(
+                    knowledge_base=getattr(self.ctx, "knowledge", None),
+                ),
+                actor_authority_resolver=self._knowledge_actor_authority,
+            )
+        self._knowledge_access_service = current
+        return current
+
     def _build_tools(self) -> ToolRegistry:
         # Honor [capabilities] from config: these gate the optional
         # high-impact tools (computer_use / browser / web_search / mobile).
@@ -1620,13 +1719,34 @@ class Agent:
             # attenuated envelope), and discover what's available.
             reg.register(spawn_specialist_tool(self))
             reg.register(list_specialists_tool(self))
-        # Per-domain document knowledge: bind a knowledge_search tool to this
-        # agent's collections when a knowledge base is configured for the run.
-        kb = getattr(self.ctx, "knowledge", None)
+        # Per-domain knowledge is served only through APP10's current registry
+        # boundary. The legacy vector handle may still exist for ingestion and
+        # migration, but it is never a model-visible retrieval shortcut.
         sources = self.knowledge_sources or ([self.domain] if self.domain else [])
-        if kb is not None and sources:
+        try:
+            from .config import knowledge_access_enabled
+
+            governed_knowledge_enabled = knowledge_access_enabled()
+        except Exception:
+            governed_knowledge_enabled = False
+        if sources and governed_knowledge_enabled:
+            from .paths import current_tenant_id_strict
             from .tools.knowledge import knowledge_search_tool
-            reg.register(knowledge_search_tool(kb, sources))
+
+            reg.register(
+                knowledge_search_tool(
+                    self._governed_knowledge_service,
+                    sources,
+                    tenant_resolver=current_tenant_id_strict,
+                    actor_resolver=self._knowledge_runtime_principal,
+                    purpose="product_research",
+                    job_id_resolver=lambda: (
+                        "knowledge-"
+                        f"{self.ctx.goal_id}-{getattr(self.ctx, 'episode_id', 0)}-"
+                        f"{uuid.uuid4().hex}"
+                    ),
+                )
+            )
         # Self-learning: bound to this agent so governed capability discovery
         # can run by default. Executable tool creation and MCP acquisition stay
         # behind their separate high-authority opt-ins.

@@ -185,24 +185,27 @@ def test_page_requires_a_template_authority() -> None:
         page.create_cortex_page_router(object())  # type: ignore[arg-type]
 
 
-def test_page_is_registered_in_observe_immediately_before_learning() -> None:
+def test_page_is_a_hidden_read_only_compatibility_console() -> None:
     paths = [p["path"] for p in ui_visibility.PAGES]
-    assert paths.index(page.PAGE_PATH) == paths.index("/learning") - 1
+    assert paths.index("/knowledge-access") == paths.index("/learning") - 1
     entry = next(p for p in ui_visibility.PAGES if p["path"] == page.PAGE_PATH)
-    assert entry["label"] == "Knowledge" and entry["group"] == "Observe"
+    assert entry["label"] == "Cortex memory diagnostics"
+    assert entry["group"] == "Advanced tools"
     assert entry["floor"] == "view" and entry["default"] == "view"
+    assert entry["in_nav"] is False
     base = (Path(page.__file__).parent / "templates" / "base.html").read_text(encoding="utf-8")
     assert f'id="i-{entry["icon"]}"' in base
-    # a read-only page: every role, viewer included, sees it in the sidebar
+    # Compatibility is reachable directly but does not duplicate the primary
+    # Knowledge destination in the sidebar.
     for role in (None, "viewer", "auditor", "operator", "admin"):
         hrefs = {ln["href"] for g in ui_visibility.nav_groups(role) for ln in g["links"]}
-        assert page.PAGE_PATH in hrefs, role
+        assert page.PAGE_PATH not in hrefs, role
 
 
 def test_nav_entry_is_rendered_and_marked_current(monkeypatch) -> None:
     body = _app(monkeypatch).get(page.PAGE_PATH).text
-    assert '<a href="/cortex" class="active" aria-current="page">' in body
-    assert body.count('aria-current="page"') == 1
+    assert '<a href="/cortex"' not in body
+    assert 'aria-current="page"' not in body
 
 
 def test_template_and_rendered_page_pass_the_static_a11y_audit(monkeypatch) -> None:
@@ -237,7 +240,8 @@ def test_mounted_page_renders_through_the_dashboard_shell(monkeypatch, tmp_path)
         assert response.status_code == 200, response.text[:400]
         assert "<title>Knowledge · Lightwork</title>" in response.text
         assert "style-src 'self' 'nonce-" in response.headers["content-security-policy"]
-        assert '<a href="/cortex" class="active" aria-current="page">' in response.text
+        assert '<a href="/cortex"' not in response.text
+        assert '<a href="/knowledge-access"' in response.text
         # the real kernel status: every source is on the page, answering or not
         for source in ("knowledge", "skills", "lessons", "record", "fleet"):
             assert f'data-source="{source}"' in response.text

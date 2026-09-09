@@ -151,23 +151,62 @@ def consent_review(event: CheckpointEvent, *, goal_id: int | None = None) -> boo
     silent auto-approve and prior-ledger fast paths: a long-horizon checkpoint
     is a fresh human-in-the-loop review, not a reusable capability grant.
     """
-    from .safety import require_consent
+    from .approval_cards import ApprovalCardError
+    from .safety import (
+        ConsentDenied,
+        consume_operation_consent,
+        require_operation_consent,
+    )
 
     scope = f"goal:{goal_id}" if goal_id is not None else "goal"
     detail = (
         f"Long-horizon review checkpoint reached {event.reason}="
         f"{event.value:g} (interval {event.threshold:g}). Continue the run?"
     )
-    decision = require_consent(
-        "review-checkpoint",
-        risk="medium",
-        scope=scope,
-        detail=detail,
-        provenance="review_checkpoint",
-        allow_auto_approve=False,
-        consult_ledger=False,
-    )
-    return bool(decision.granted)
+    parameters = {
+        "goal_id": goal_id,
+        "reason": event.reason,
+        "value": event.value,
+        "threshold": event.threshold,
+    }
+    try:
+        permit = require_operation_consent(
+            "review-checkpoint",
+            risk="medium",
+            scope=scope,
+            detail=detail,
+            provenance="review_checkpoint",
+            target={"goal_id": goal_id},
+            parameters=parameters,
+            parameter_summary=[
+                "Continue this exact goal after the displayed checkpoint threshold."
+            ],
+            known_effects=[
+                "Allows the current run to continue beyond this checkpoint."
+            ],
+            unresolved_assumptions=[
+                "Later work remains subject to its own tool and budget controls."
+            ],
+            before="The run is paused at the reviewed checkpoint.",
+            after="The run may continue from this checkpoint.",
+            irreversible=False,
+            parameters_provider=lambda: dict(parameters),
+            credential_versions_provider=lambda: {
+                "state": "not_applicable",
+                "boundary": "review-checkpoint",
+            },
+            budget_provider=lambda: {
+                "checkpoint_reason": event.reason,
+                "checkpoint_value": event.value,
+                "checkpoint_threshold": event.threshold,
+            },
+            allow_auto_approve=False,
+            consult_ledger=False,
+        )
+        with consume_operation_consent(permit):
+            return True
+    except (ConsentDenied, ApprovalCardError):
+        return False
 
 
 def from_config(review: Callable[[CheckpointEvent], bool] | None = None) -> ReviewCheckpoint:

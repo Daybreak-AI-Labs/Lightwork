@@ -1125,10 +1125,30 @@ def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, own
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "PARTIAL_STATE_PATH", tmp_path / "wizard-partial.json")
     # Other completed steps are carried unchanged through the real resume loop.
-    keys = ("safety", "signed_skills", "budget", "sandbox", "capabilities",
-            "self_learning", "ekko", "automation_import", "event_triggers", "flows",
-            "knowledge", "oauth", "governed_connectors", "durable", "workspace",
-            "finance", "value", "assessments", "advanced")
+    keys = (
+        "safety",
+        "signed_skills",
+        "budget",
+        "sandbox",
+        "research_execution",
+        "candidate_promotion",
+        "knowledge_access",
+        "capabilities",
+        "self_learning",
+        "ekko",
+        "automation_import",
+        "event_triggers",
+        "flows",
+        "knowledge",
+        "oauth",
+        "governed_connectors",
+        "durable",
+        "workspace",
+        "finance",
+        "value",
+        "assessments",
+        "advanced",
+    )
     saved = dict.fromkeys(keys, {"enable": False})
     saved["security_suite"] = {
         "vendor_onboarding": True, "vendor_onboarding_owner": owner,
@@ -1176,6 +1196,8 @@ def test_vendor_onboarding_opt_in_writes_all_runtime_dependencies(tmp_path, monk
     assert settings.document_connection == "gdrive"
     assert settings.ticket_connection == "jira"
     assert settings.document_connection != settings.ticket_connection
+    assert settings.safe_read_attempts == 3
+    assert settings.safe_read_backoff_seconds == 0.25
     for dependency in (
         "vendor_management", "connections", "evidence_graph", "model_risk_assurance", "ai_vendor_risk",
     ):

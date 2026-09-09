@@ -1,19 +1,30 @@
 """Offline acceptance of approval/evidence/effect/customer boundaries."""
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from maverick import config
-from maverick.governed_operations import ServiceContext, digest, operation_binding
+from maverick import config, provider_cost_cap, vendor_onboarding
+from maverick.governed_operations import (
+    ApprovalBindingError,
+    ServiceContext,
+    digest,
+    operation_binding,
+)
 from maverick.governed_records import RecordConflict
 from maverick.paths import tenant_scope
 from maverick.vendor_onboarding import VendorOnboardingService
 from maverick.vendor_onboarding_adapters import (
+    CredentialAuthorityChanged,
     EvidenceDocument,
     FakeGoogleDriveEvidence,
     FakeJiraTickets,
+    ProviderMultipleMatches,
 )
 
 NOW = 1_800_000_000.0
@@ -70,7 +81,229 @@ def reviewed(svc, ctx):
 def approved(svc, ctx):
     row = reviewed(svc, ctx)
     row = svc.prepare_action(ctx, row["id"], row["revision"])
-    return svc.approve_action(ctx, row["id"], row["revision"])
+    return svc.approve_action(
+        ctx,
+        row["id"],
+        row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
+
+
+def test_case_provider_calls_are_bound_to_the_vendor_work_item(setup, monkeypatch):
+    service, ctx, docs, *_ = setup
+    ledger = Path(os.environ["MAVERICK_HOME"]) / "provider-spend-test.json"
+    monkeypatch.setattr(provider_cost_cap, "_ledger_path", lambda: ledger)
+    monkeypatch.setattr(provider_cost_cap, "_shared_world", lambda: None)
+    original_fetch = docs.fetch
+    calls = 0
+
+    def metered_fetch(bound_ctx, document_id):
+        nonlocal calls
+        calls += 1
+        held = provider_cost_cap.reserve(
+            "gdrive", 0.25, request_id=f"document-read-{calls}",
+        )
+        provider_cost_cap.settle(held, 0.2)
+        return original_fetch(bound_ctx, document_id)
+
+    monkeypatch.setattr(docs, "fetch", metered_fetch)
+    row = service.intake(
+        ctx, "Attributed vendor", "security-paper", "VEND", "Attribute evidence cost",
+    )
+    service.collect_evidence(ctx, row["id"], row["revision"])
+
+    with tenant_scope(tenant=ctx.tenant):
+        receipts = provider_cost_cap.reservations_for_work_item(
+            f"vendor:{row['id']}", path=ledger,
+        )
+    assert len(receipts.receipts) == 1
+    assert receipts.receipts[0].provider == "gdrive"
+    assert receipts.receipts[0].state == "settled"
+
+
+def test_intake_submission_key_is_durable_under_replay_and_concurrency(setup):
+    service, ctx, _, tickets, _ = setup
+    arguments = dict(
+        vendor_name="Idempotent synthetic vendor",
+        document_id="security-paper",
+        project="VEND",
+        purpose="One stable intake despite a lost response",
+        submission_key="customer-submit-0001",
+    )
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda _index: service.intake(ctx, **arguments), range(6)))
+    assert len({row["id"] for row in results}) == 1
+    assert len({row["revision"] for row in results}) == 1
+    assert len(service.list(ctx)) == 1
+    assert tickets.creates == 0
+    with tenant_scope(tenant=ctx.tenant):
+        stored = vendor_onboarding._CASES.get(results[0]["id"])
+    assert stored["intake_idempotency"]["key_sha256"] == hashlib.sha256(
+        arguments["submission_key"].encode("utf-8")
+    ).hexdigest()
+    assert arguments["submission_key"] not in str(stored)
+    assert results[0]["intake_idempotency"] == {
+        "state": "bound", "scope": "tenant_resource_owner",
+    }
+
+    with pytest.raises(
+        vendor_onboarding.VendorOnboardingIdempotencyConflict,
+        match="different vendor request",
+    ):
+        service.intake(ctx, **dict(arguments, purpose="Changed customer objective"))
+    assert len(service.list(ctx)) == 1
+
+
+@pytest.mark.parametrize("submission_key", ["short", "contains a space key", "x" * 129, None])
+def test_intake_submission_key_validation_and_legacy_compatibility(setup, submission_key):
+    service, ctx, *_ = setup
+    arguments = dict(
+        vendor_name="Submission key validation vendor",
+        document_id="security-paper",
+        project="VEND",
+        purpose="Validate intake identity",
+        submission_key=submission_key,
+    )
+    if submission_key is None:
+        first = service.intake(ctx, **arguments)
+        second = service.intake(ctx, **arguments)
+        assert first["id"] != second["id"]
+        return
+    with pytest.raises(ValueError, match="submission_key"):
+        service.intake(ctx, **arguments)
+
+
+def test_submission_keys_and_queue_cursors_are_tenant_scoped(setup):
+    service, ctx, *_ = setup
+    arguments = dict(
+        vendor_name="Tenant scoped request",
+        document_id="security-paper",
+        project="VEND",
+        purpose="Keep request identity inside one tenant",
+        submission_key="same-customer-key-0001",
+    )
+    first = service.intake(ctx, **arguments)
+    service.intake(
+        ctx,
+        **dict(arguments, vendor_name="Tenant scoped request two",
+               submission_key="same-customer-key-0002"),
+    )
+    page = service.list_page(ctx, limit=1)
+    assert page["has_more"] is True
+
+    other = replace(ctx, tenant="customer-b", workspace_authority="workspace-generation-b")
+    second = service.intake(other, **arguments)
+    assert second["id"] != first["id"]
+    assert [row["id"] for row in service.list(other)] == [second["id"]]
+    with pytest.raises(ValueError, match="cursor"):
+        service.list_page(other, limit=1, cursor=page["next_cursor"])
+
+
+def test_queue_pagination_and_unresolved_filter_cover_three_pages_without_duplicates(setup):
+    from maverick import vendor_onboarding
+    from maverick.paths import tenant_scope
+
+    service, ctx, *_ = setup
+    created = []
+    unresolved = set()
+    for index in range(9):
+        row = service.intake(
+            ctx,
+            f"Paged vendor {index}",
+            "security-paper",
+            "VEND",
+            f"Stable page {index}",
+            submission_key=f"paged-submission-{index:04d}",
+        )
+        created.append(row["id"])
+        if index % 2 == 0:
+            unresolved.add(row["id"])
+            with tenant_scope(tenant=ctx.tenant):
+                vendor_onboarding._CASES.update(
+                    row["id"],
+                    lambda value: value.update(
+                        stage="reconciliation_required",
+                        operation={"state": "reconciliation_required"},
+                    ),
+                    expected_revision=row["revision"],
+                    action="test_unresolved_queue_fixture",
+                    actor=ctx.actor,
+                )
+
+    def collect(view):
+        cursor, seen, pages = "", [], 0
+        while True:
+            page = service.list_page(ctx, limit=2, cursor=cursor, view=view)
+            pages += 1
+            assert page["schema"] == "lightwork.vendor-onboarding.case-page.v1"
+            assert page["record_reads"] <= 8
+            seen.extend(item["id"] for item in page["cases"])
+            if not page["has_more"]:
+                assert page["next_cursor"] is None
+                break
+            assert page["next_cursor"] and page["next_cursor"] != cursor
+            cursor = page["next_cursor"]
+            assert pages < 20
+        assert len(seen) == len(set(seen))
+        return seen, pages
+
+    all_ids, all_pages = collect("all")
+    unresolved_ids, unresolved_pages = collect("unresolved")
+    assert set(all_ids) == set(created)
+    assert set(unresolved_ids) == unresolved
+    assert all_pages >= 3 and unresolved_pages >= 3
+    for cursor in ["not base64!", "e30", "x" * 769]:
+        with pytest.raises(ValueError, match="cursor"):
+            service.list_page(ctx, cursor=cursor)
+
+
+def test_draft_edits_are_revision_bound_and_restart_only_affected_review(setup):
+    service, ctx, *_ = setup
+    row = reviewed(service, ctx)
+    original_revision = row["revision"]
+
+    rescheduled = service.update_draft(
+        ctx,
+        row["id"],
+        original_revision,
+        project=row["project"],
+        purpose=row["purpose"],
+        freshness_days=row["freshness_days"],
+        due_at=NOW + 30 * 86400,
+    )
+    assert rescheduled["revision"] == original_revision + 1
+    assert rescheduled["stage"] == row["stage"]
+    assert rescheduled["evidence"] == row["evidence"]
+    assert rescheduled["assessment"] == row["assessment"]
+    assert rescheduled["due_at"] == NOW + 30 * 86400
+
+    changed = service.update_draft(
+        ctx,
+        row["id"],
+        rescheduled["revision"],
+        project="RISK",
+        purpose="Assess a newly declared customer use",
+        freshness_days=180,
+        due_at=NOW + 45 * 86400,
+    )
+    assert changed["stage"] == "intake"
+    assert changed["evidence"] is None and changed["assessment"] is None
+    assert changed["operation"] is None
+
+    with pytest.raises(RecordConflict):
+        service.update_draft(
+            ctx,
+            row["id"],
+            original_revision,
+            project="OPS",
+            purpose="A stale tab must not overwrite current details",
+            freshness_days=90,
+            due_at=NOW + 60 * 86400,
+        )
+    current = service.get(ctx, row["id"])
+    assert current["revision"] == changed["revision"]
+    assert current["project"] == "RISK"
+    assert current["purpose"] == "Assess a newly declared customer use"
 
 
 @pytest.mark.parametrize("action", ["intake", "get", "list", "execute", "reconcile", "cancel", "renewal", "evidence_version"])
@@ -229,7 +462,10 @@ def test_cancellation_before_dispatch_freezes_intent_without_external_effect(set
     if phase != "intake":
         row = svc.prepare_action(ctx, row["id"], row["revision"])
     if phase == "approved":
-        row = svc.approve_action(ctx, row["id"], row["revision"])
+        row = svc.approve_action(
+            ctx, row["id"], row["revision"],
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
     original = row.get("operation")
     cancelled = svc.cancel(ctx, row["id"], row["revision"], "No longer required")
     assert cancelled["stage"] == "cancelled"
@@ -250,7 +486,12 @@ def test_cancellation_before_dispatch_freezes_intent_without_external_effect(set
     assert reopened.get(ctx, row["id"])["cancellation"] == cancelled["cancellation"]
     for method in ("collect_evidence", "assess", "prepare_action", "approve_action"):
         with pytest.raises(ValueError, match="cancelled"):
-            getattr(reopened, method)(ctx, row["id"], cancelled["revision"])
+            args = (
+                (ctx, row["id"], cancelled["revision"], None)
+                if method == "approve_action"
+                else (ctx, row["id"], cancelled["revision"])
+            )
+            getattr(reopened, method)(*args)
     with pytest.raises(ValueError, match="cancelled"):
         reopened.execute(ctx, row["id"])
     repeated = reopened.cancel(ctx, row["id"], cancelled["revision"], "No longer required")
@@ -378,7 +619,9 @@ def test_cancellation_arriving_during_dispatch_cannot_overwrite_new_effect_state
     assert tickets.creates == 1 and len(tickets.state) == 1
 
 
-def test_cancellation_after_claim_without_proven_dispatch_does_not_assert_absence(setup, monkeypatch):
+def test_authority_revoked_after_claim_forces_fresh_review_without_dispatch(
+    setup, monkeypatch,
+):
     svc, ctx, _, tickets, denied = setup
     row = approved(svc, ctx)
     original = svc._save
@@ -390,13 +633,16 @@ def test_cancellation_after_claim_without_proven_dispatch_does_not_assert_absenc
         return saved
 
     monkeypatch.setattr(svc, "_save", revoke_after_claim)
-    row = svc.execute(ctx, row["id"])
+    with pytest.raises(ApprovalBindingError, match="prepare and review"):
+        svc.execute(ctx, row["id"])
     assert tickets.creates == 0
-    row = svc.cancel(ctx, row["id"], row["revision"], "Stop uncertain claimed work")
-    assert row["cancellation"]["dispatch_state_at_cancellation"] == "possibly_dispatched"
-    row = svc.reconcile(ctx, row["id"])
-    assert row["work_item"]["technical_effect"] == "indeterminate"
-    assert row["stage"] == "reconciliation_required"
+    row = svc.get(ctx, row["id"])
+    assert row["stage"] == "review_approved"
+    assert row["operation"] is None
+    assert row["operation_history"][-1]["state"] == "invalidated"
+    assert row["operation_history"][-1]["invalidated_reason"] == (
+        "approval_authority_changed"
+    )
     assert tickets.creates == 0
 
 
@@ -516,13 +762,16 @@ def test_unknown_case_or_journey_contract_cannot_reach_mutation(setup):
     ("executing", "Running", "wait_or_reconcile"),
     ("reconciliation_required", "Needs reconciliation", "reconcile"),
     ("execution_completed", "Verified", "accept_or_reject"),
+    ("acceptance_reevaluation_required", "Awaiting approval", "start_reevaluation_request"),
     ("accepted", "Accepted", "check_renewal"),
     ("customer_rejected", "Failed", "closed"),
 ])
 def test_every_case_stage_has_an_explicit_work_item_state(setup, stage, lifecycle, next_action):
     svc, ctx, *_ = setup
     row = svc.intake(ctx, "Synthetic state map", "security-paper", "VEND", "Map state")
-    operation = {"state": "verified"} if stage in {"execution_completed", "accepted", "customer_rejected"} else None
+    operation = {"state": "verified"} if stage in {
+        "execution_completed", "acceptance_reevaluation_required", "accepted", "customer_rejected"
+    } else None
     outcome = {"accepted": stage == "accepted"} if stage in {"accepted", "customer_rejected"} else None
     projected = svc._present(dict(row, stage=stage, operation=operation, outcome=outcome))
     assert projected["work_item"]["lifecycle"] == lifecycle
@@ -548,11 +797,117 @@ def test_multiple_documents_conflicts_and_secondary_version_guard(setup):
     assert "Conflicting" in row["assessment"]["answers"]["aiv_provenance"]["note"]
     row = svc.review(ctx, row["id"], row["revision"], "approved", "Human accepts documented unresolved conflict")
     row = svc.prepare_action(ctx, row["id"], row["revision"])
-    row = svc.approve_action(ctx, row["id"], row["revision"])
     docs.documents[(ctx.tenant, "policy")] = replace(docs.documents[(ctx.tenant, "policy")], version="2")
-    with pytest.raises(ValueError) as rejected:
-        svc.execute(ctx, row["id"])
-    assert rejected.value.code == "approval_preconditions_changed"
+    with pytest.raises(
+        vendor_onboarding.VendorOnboardingEvidenceReviewRequired,
+        match="prior review cannot be reused",
+    ) as rejected:
+        svc.approve_action(
+            ctx, row["id"], row["revision"],
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
+    assert rejected.value.code == "evidence_reevaluation_required"
+    invalidated = svc.get(ctx, row["id"])
+    assert invalidated["stage"] == "acceptance_reevaluation_required"
+    assert invalidated["operation"] is None
+    assert invalidated["operation_history"][-1]["invalidated_reason"] == "evidence_reevaluation_required"
+    assert invalidated["review_history"] == row["review_history"]
+    check = invalidated["acceptance_evidence_check"]
+    assert check["status"] == "reevaluation_required"
+    assert [(item["document_id"], item["status"]) for item in check["documents"]] == [
+        ("exception", "current"),
+        ("policy", "changed"),
+    ]
+    assert invalidated["exceptions"][-1]["source_references"] == [
+        check["documents"][1]["reference"],
+    ]
+    assert invalidated["exceptions"][-1]["decision_point"] == "action_authorization"
+    blocked_revision = invalidated["revision"]
+    with pytest.raises(vendor_onboarding.VendorOnboardingEvidenceReviewRequired):
+        svc.prepare_action(ctx, row["id"], blocked_revision)
+    assert svc.get(ctx, row["id"])["revision"] == blocked_revision
+
+    reevaluation = svc.intake(
+        ctx,
+        invalidated["vendor_name"],
+        invalidated["document_id"],
+        invalidated["project"],
+        "Reevaluate changed evidence",
+        document_ids=invalidated["document_ids"],
+        renewal_of=invalidated["id"],
+    )
+    assert reevaluation["renewal_of"] == invalidated["id"]
+    assert reevaluation["review_history"] == []
+    reevaluated = svc.collect_evidence(
+        ctx, reevaluation["id"], reevaluation["revision"],
+    )
+    assert reevaluated["assessment"] is None
+    assert any(change["change"] == "changed"
+               for change in reevaluated["evidence"]["changes"]["documents"])
+    assert tickets.creates == 0
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        ("version", "changed"),
+        ("bytes", "changed"),
+        ("expired", "expired"),
+        ("unavailable", "unavailable"),
+    ],
+)
+def test_action_approval_records_source_specific_reevaluation_without_stale_review(
+        setup, failure, expected_status):
+    svc, ctx, docs, tickets, _ = setup
+    now = [NOW]
+    svc.clock = lambda: now[0]
+    row = reviewed(svc, ctx)
+    row = svc.prepare_action(ctx, row["id"], row["revision"])
+    prepared_operation = row["operation"]
+    source = docs.documents[(ctx.tenant, "security-paper")]
+    if failure == "version":
+        docs.documents[(ctx.tenant, "security-paper")] = replace(
+            source, version="2", modified_at=NOW,
+        )
+    elif failure == "bytes":
+        docs.documents[(ctx.tenant, "security-paper")] = replace(
+            source, content=b"Changed bytes with the reviewed source version retained.",
+        )
+    elif failure == "expired":
+        now[0] = row["evidence"]["fresh_until"]
+    else:
+        docs.unavailable = True
+
+    with pytest.raises(
+        vendor_onboarding.VendorOnboardingEvidenceReviewRequired,
+        match="approval or acceptance",
+    ) as rejected:
+        svc.approve_action(
+            ctx,
+            row["id"],
+            row["revision"],
+            prepared_operation["approval_card"]["binding_sha256"],
+        )
+    assert rejected.value.code == "evidence_reevaluation_required"
+    current = svc.get(ctx, row["id"])
+    assert current["stage"] == "acceptance_reevaluation_required"
+    assert current["operation"] is None
+    assert current["operation_history"][-1]["id"] == prepared_operation["id"]
+    assert current["operation_history"][-1]["state"] == "invalidated"
+    assert current["operation_history"][-1]["invalidated_reason"] == "evidence_reevaluation_required"
+    assert current["assessment"]["assessment_sha256"] == row["assessment"]["assessment_sha256"]
+    assert current["review_history"] == row["review_history"]
+    check = current["acceptance_evidence_check"]
+    assert check["status"] == "reevaluation_required"
+    assert len(check["documents"]) == 1
+    assert check["documents"][0]["document_id"] == "security-paper"
+    assert check["documents"][0]["status"] == expected_status
+    assert current["exceptions"][-1]["decision_point"] == "action_authorization"
+    assert current["exceptions"][-1]["source_references"] == [
+        check["documents"][0]["reference"],
+    ]
+    assert current["work_item"]["next_action"] == "start_reevaluation_request"
+    assert current["work_item"]["technical_effect"] == "not_verified"
     assert tickets.creates == 0
 
 
@@ -655,7 +1010,10 @@ def test_uploaded_only_case_preserves_evidence_for_renewal_and_rechecks_snapshot
     row = svc.review(ctx, row["id"], row["revision"], "approved", "Synthetic reviewer accepts cited assertions")
     row = svc.prepare_action(ctx, row["id"], row["revision"])
     assert row["operation"]["preconditions"]["document_credential_version"] == "not_applicable:retained_uploads"
-    row = svc.approve_action(ctx, row["id"], row["revision"])
+    row = svc.approve_action(
+        ctx, row["id"], row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
     row = svc.execute(ctx, row["id"])
     row = svc.accept(ctx, row["id"], row["revision"], True, "Synthetic acceptance")
     evolution = EvidenceRenewalEvolution(svc.authorize, clock=svc.clock)
@@ -717,6 +1075,169 @@ def test_complete_workflow_keeps_execution_acceptance_and_release_separate(setup
     assert renewal["renewal_of"] == row["id"]
     assert renewal["vendor_id"] == row["vendor_id"]
     assert renewal["outcome"] is None
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        ("version", "changed"),
+        ("bytes", "changed"),
+        ("expired", "expired"),
+        ("unavailable", "unavailable"),
+    ],
+)
+def test_acceptance_rechecks_every_reviewed_source_without_reusing_stale_review(
+        setup, failure, expected_status):
+    svc, ctx, docs, tickets, _ = setup
+    now = [NOW]
+    svc.clock = lambda: now[0]
+    row = approved(svc, ctx)
+    row = svc.execute(ctx, row["id"])
+    reviewed_assessment = row["assessment"]["assessment_sha256"]
+    reviewed_history = list(row["review_history"])
+    source = docs.documents[(ctx.tenant, "security-paper")]
+    if failure == "version":
+        docs.documents[(ctx.tenant, "security-paper")] = replace(
+            source, version="2", modified_at=NOW,
+        )
+    elif failure == "bytes":
+        docs.documents[(ctx.tenant, "security-paper")] = replace(
+            source, content=b"Source bytes changed without an honest version increment.",
+        )
+    elif failure == "expired":
+        now[0] = source.modified_at + 365 * 86400
+    else:
+        docs.unavailable = True
+
+    with pytest.raises(
+        vendor_onboarding.VendorOnboardingEvidenceReviewRequired,
+        match="start a reevaluation",
+    ) as rejected:
+        svc.accept(ctx, row["id"], row["revision"], True, "Accept stale evidence")
+    assert rejected.value.code == "evidence_reevaluation_required"
+    current = svc.get(ctx, row["id"])
+    assert current["stage"] == "acceptance_reevaluation_required"
+    assert current["operation"]["state"] == "verified"
+    assert current["operation"]["id"] == row["operation"]["id"]
+    assert current["outcome"] is None
+    assert current["assessment"]["assessment_sha256"] == reviewed_assessment
+    assert current["review_history"] == reviewed_history
+    assert current["acceptance_evidence_check"]["status"] == "reevaluation_required"
+    assert len(current["acceptance_evidence_check"]["documents"]) == 1
+    assert current["acceptance_evidence_check"]["documents"][0]["status"] == expected_status
+    assert current["acceptance_evidence_check"]["documents"][0]["document_id"] == "security-paper"
+    assert current["work_item"]["technical_effect"] == "verified"
+    assert current["work_item"]["business_outcome"] == "pending"
+    assert tickets.creates == 1
+
+    blocked_revision = current["revision"]
+    with pytest.raises(vendor_onboarding.VendorOnboardingEvidenceReviewRequired):
+        svc.accept(ctx, current["id"], current["revision"], True, "Retry old review")
+    assert svc.get(ctx, current["id"])["revision"] == blocked_revision
+    reevaluation = svc.intake(
+        ctx,
+        current["vendor_name"],
+        "security-paper",
+        "VEND",
+        "Reevaluate current evidence",
+        renewal_of=current["id"],
+    )
+    assert reevaluation["renewal_of"] == current["id"]
+    assert reevaluation["assessment"] is None
+    assert reevaluation["review_history"] == []
+    assert tickets.creates == 1
+
+
+def test_evidence_export_withholds_lost_source_and_redacts_human_secret(setup, monkeypatch):
+    svc, ctx, docs, tickets, denied = setup
+    private_id = "private-source-never-export"
+    private_content = (
+        b"WITHHELD-SOURCE-CONTENT. Model provenance is documented with provider and version."
+    )
+    docs.documents[(ctx.tenant, private_id)] = EvidenceDocument(
+        private_id, "private-v1", NOW - 100, private_content,
+    )
+    row = svc.intake(
+        ctx,
+        "Synthetic export vendor",
+        "",
+        "VEND",
+        "Review a two-source packet",
+        document_ids=["security-paper", private_id],
+    )
+    row = svc.collect_evidence(ctx, row["id"], row["revision"])
+    row = svc.assess(ctx, row["id"], row["revision"])
+    row = svc.review(
+        ctx, row["id"], row["revision"], "approved",
+        "Reviewed every cited claim and retained each unsupported answer as unknown",
+    )
+    row = svc.prepare_action(ctx, row["id"], row["revision"])
+    row = svc.approve_action(
+        ctx, row["id"], row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
+    row = svc.execute(ctx, row["id"])
+    secret = "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"  # pragma: allowlist secret
+    row = svc.accept(
+        ctx, row["id"], row["revision"], True,
+        f"Accepted reviewed limits; API_TOKEN={secret}",
+    )
+
+    fetch = docs.fetch
+
+    def partially_denied(context, document_id):
+        if document_id == private_id:
+            raise PermissionError("private source credential value must not escape")
+        return fetch(context, document_id)
+
+    monkeypatch.setattr(docs, "fetch", partially_denied)
+    preview = svc.preview_evidence_export(ctx, row["id"], row["revision"])
+    assert preview["schema"] == vendor_onboarding.EVIDENCE_EXPORT_SCHEMA
+    assert preview["manifest"]["included_count"] == 1
+    assert preview["manifest"]["withheld_count"] == 1
+    assert preview["manifest"]["complete"] is False
+    withheld = preview["manifest"]["withheld"][0]
+    assert set(withheld) == {"reference", "dependency_type", "disposition", "reason"}
+    assert withheld["reference"].startswith("EVR-")
+    assert withheld["reason"] == "current_source_access_unavailable"
+    serialized = json.dumps(preview, sort_keys=True)
+    assert private_id not in serialized
+    assert private_content.decode() not in serialized
+    assert secret not in serialized
+    assert "private source credential" not in serialized
+    assert "[REDACTED:" in serialized
+
+    claim_ids = {claim["claim_id"] for claim in preview["claims"]}
+    assert claim_ids == set(row["assessment"]["answers"])
+    included_refs = {item["reference"] for item in preview["manifest"]["included"]}
+    withheld_refs = {item["reference"] for item in preview["manifest"]["withheld"]}
+    for claim in preview["claims"]:
+        assert set(claim["evidence_refs"]) <= included_refs
+        assert set(claim["withheld_evidence_refs"]) <= withheld_refs
+        assert claim["evidence_refs"] or claim["review_justification"]
+        assert {citation["evidence_ref"] for citation in claim["citations"]} <= included_refs
+
+    downloaded = svc.download_evidence_export(
+        ctx,
+        row["id"],
+        row["revision"],
+        confirm=True,
+        expected_export_sha256=preview["binding_sha256"],
+    )
+    assert downloaded["binding_sha256"] == preview["binding_sha256"]
+    monkeypatch.setattr(docs, "fetch", fetch)
+    with pytest.raises(ValueError, match="changed; preview"):
+        svc.download_evidence_export(
+            ctx,
+            row["id"],
+            row["revision"],
+            confirm=True,
+            expected_export_sha256=preview["binding_sha256"],
+        )
+    denied.add("evidence.export")
+    with pytest.raises(PermissionError, match="evidence.export"):
+        svc.preview_evidence_export(ctx, row["id"], row["revision"])
+    assert tickets.creates == 1
 
 
 def test_model_is_never_human_approval(setup):
@@ -836,6 +1357,18 @@ def test_unavailable_verifier_and_changed_downstream_state_do_not_accept(setup):
         svc.accept(ctx, row["id"], row["revision"], True, "Must not accept")
 
 
+def test_malformed_verification_receipt_never_becomes_a_verified_effect(setup, monkeypatch):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    monkeypatch.setattr(tickets, "verify", lambda *args, **kwargs: {"verified": True})
+    row = svc.execute(ctx, row["id"])
+    assert row["stage"] == "reconciliation_required"
+    assert row["operation"]["state"] == "reconciliation_required"
+    assert row["operation"]["external_confirmation"] is None
+    assert row["outcome"] is None
+    assert tickets.creates == 1
+
+
 def test_corrections_link_superseded_evidence_and_invalidate_action(setup):
     svc, ctx, docs, tickets, _ = setup
     row = approved(svc, ctx)
@@ -876,13 +1409,16 @@ def test_tenant_scope_ignores_ambient_and_never_pools_customer_data(setup, monke
     )
 
 
-def test_approval_from_another_intent_cannot_be_replayed(setup):
+@pytest.mark.parametrize("expired", [False, True])
+def test_approval_from_another_intent_cannot_be_replayed(setup, expired):
     from maverick import vendor_onboarding
 
     svc, ctx, _, tickets, _ = setup
     first = approved(svc, ctx)
     second = approved(svc, ctx)
     replayed = dict(second["operation"], approval=dict(first["operation"]["approval"]))
+    if expired:
+        svc.clock = lambda: second["operation"]["expires_at"] + 1
     with tenant_scope(tenant=ctx.tenant):
         vendor_onboarding._CASES.update(
             second["id"],
@@ -912,11 +1448,186 @@ def test_optional_shield_absence_keeps_kernel_authority_enforced(setup, monkeypa
     row = svc.execute(ctx, row["id"])
     assert row["operation"]["state"] == "verified"
     assert tickets.creates == 1
-
     blocked = approved(svc, ctx)
     denied.add("action.execute")
     with pytest.raises(PermissionError, match="action.execute"):
         svc.execute(ctx, blocked["id"])
+    assert tickets.creates == 1
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_reason", "match_count"),
+    [
+        ("no_match", "no_matching_effect_observed", 0),
+        ("multiple_matches", "multiple_matching_effects_observed", 2),
+        ("access_unavailable", "current_connection_access_unavailable", None),
+    ],
+)
+def test_uncertain_reconciliation_records_safe_observations_without_replaying_write(
+    setup, monkeypatch, outcome, expected_reason, match_count,
+):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+
+    def lose_create_receipt(bound_ctx, payload, operation_id, *, expected_credential_version=None):
+        tickets._credential(expected_credential_version)
+        tickets.creates += 1
+        raise TimeoutError("synthetic result unavailable before a receipt was retained")
+
+    monkeypatch.setattr(tickets, "create", lose_create_receipt)
+    row = svc.execute(ctx, row["id"])
+    assert row["stage"] == "reconciliation_required"
+    assert tickets.creates == 1
+    payload = row["operation"]["payload"]
+    if outcome == "multiple_matches":
+        tickets.state[(ctx.tenant, "VEND-1")] = {"payload": payload, "version": "1"}
+        tickets.state[(ctx.tenant, "VEND-2")] = {"payload": payload, "version": "1"}
+    elif outcome == "access_unavailable":
+        tickets.version = "synthetic-jira-credential-v2"
+
+    row = svc.reconcile(ctx, row["id"])
+    assert row["stage"] == "reconciliation_required"
+    assert row["operation"]["last_reconciliation"]["outcome"] == outcome
+    assert row["reconciliation_history"][-1]["read_only"] is True
+    assert row["reconciliation_history"][-1]["checked_by"] == ctx.actor
+    assert tickets.creates == 1
+    assert svc.execute(ctx, row["id"])["stage"] == "reconciliation_required"
+    assert tickets.creates == 1
+
+    summary = svc.list_page(ctx, limit=10, view="unresolved")["cases"][0]["reconciliation"]
+    assert summary["uncertainty"] == {
+        "state": "unresolved",
+        "reason": expected_reason,
+        "explanation": summary["uncertainty"]["explanation"],
+    }
+    assert summary["safe_next_check"]["mode"] == "read_only"
+    assert summary["responsible_operator"]["principal"] == ctx.actor
+    assert summary["resolution"]["automatic_compensation_supported"] is False
+    assert summary["resolution"]["unreviewed_replacement_allowed"] is False
+    assert summary["resolution"]["requires_separate_review"] is True
+    readback = next(
+        observation for observation in summary["known_observations"]
+        if observation["kind"] == "authoritative_readback"
+    )
+    assert readback["state"] == outcome
+    if match_count is None:
+        assert "match_count" not in readback
+    else:
+        assert readback["match_count"] == match_count
+
+
+def test_bounded_provider_continuation_records_a_truthful_match_lower_bound(
+    setup, monkeypatch,
+):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    tickets.timeout_after_success = True
+    uncertain = svc.execute(ctx, row["id"])
+    assert uncertain["stage"] == "reconciliation_required"
+
+    calls = []
+
+    def multiple(*args, **kwargs):
+        calls.append("find")
+        raise ProviderMultipleMatches(minimum=3)
+
+    monkeypatch.setattr(tickets, "find", multiple)
+    result = svc.reconcile(ctx, row["id"])
+    observation = result["operation"]["last_reconciliation"]
+    assert observation["outcome"] == "multiple_matches"
+    assert observation["match_count_lower_bound"] == 3
+    assert "match_count" not in observation
+    summary = result["reconciliation"]
+    readback = next(
+        item for item in summary["known_observations"]
+        if item["kind"] == "authoritative_readback"
+    )
+    assert readback["state"] == "multiple_matches"
+    assert readback["match_count_lower_bound"] == 3
+    assert "match_count" not in readback
+    assert summary["safe_next_check"]["kind"] == "review_ambiguity"
+    assert calls == ["find"]
+    assert tickets.creates == 1
+
+
+@pytest.mark.parametrize("loss", ["permission", "credential"])
+def test_current_authority_loss_projects_an_access_path_without_provider_reads(
+    setup, monkeypatch, loss,
+):
+    svc, ctx, _, tickets, denied = setup
+    row = approved(svc, ctx)
+    tickets.timeout_after_success = True
+    uncertain = svc.execute(ctx, row["id"])
+    assert uncertain["stage"] == "reconciliation_required"
+    if loss == "permission":
+        denied.add("action.reconcile")
+    else:
+        tickets.version = "synthetic-jira-credential-v2"
+
+    provider_calls = []
+    monkeypatch.setattr(
+        tickets, "find", lambda *args, **kwargs: provider_calls.append("find") or [],
+    )
+    monkeypatch.setattr(
+        tickets, "verify", lambda *args, **kwargs: provider_calls.append("verify") or {},
+    )
+    projected = svc.get(ctx, row["id"])
+    queued = svc.list_page(ctx, limit=10, view="unresolved")["cases"][0]
+    for visible in (projected, queued):
+        summary = visible["reconciliation"]
+        assert summary["uncertainty"]["reason"] == "current_connection_access_unavailable"
+        assert summary["safe_next_check"] == {
+            "kind": "restore_access",
+            "label": "Restore the original Jira connection access, then check status",
+            "mode": "read_only",
+            "href": "/connections",
+        }
+    assert provider_calls == []
+    assert tickets.creates == 1
+    if loss == "permission":
+        with pytest.raises(PermissionError, match="action.reconcile"):
+            svc.reconcile(ctx, row["id"])
+        assert provider_calls == []
+        assert tickets.creates == 1
+
+
+def test_successful_reconciliation_retains_read_only_observation_history(setup):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+    tickets.timeout_after_success = True
+    row = svc.execute(ctx, row["id"])
+    assert row["operation"]["state"] == "reconciliation_required"
+    row = svc.reconcile(ctx, row["id"])
+    assert row["operation"]["state"] == "verified"
+    assert row["operation"]["last_reconciliation"]["outcome"] == "exact_match_verified"
+    assert row["reconciliation_history"][-1] == row["operation"]["last_reconciliation"]
+    assert row["reconciliation_history"][-1]["match_count"] == 1
+    assert row["reconciliation_history"][-1]["read_only"] is True
+    assert tickets.creates == 1
+
+
+def test_credential_change_after_create_stays_ambiguous_and_is_not_retried(
+    setup, monkeypatch,
+):
+    svc, ctx, _, tickets, _ = setup
+    row = approved(svc, ctx)
+
+    def changed_before_readback(*args, **kwargs):
+        raise CredentialAuthorityChanged(
+            "credential rotated after the provider accepted the create"
+        )
+
+    monkeypatch.setattr(tickets, "verify", changed_before_readback)
+    uncertain = svc.execute(ctx, row["id"])
+    assert tickets.creates == 1
+    assert uncertain["stage"] == "reconciliation_required"
+    assert uncertain["operation"]["state"] == "reconciliation_required"
+    assert uncertain["operation"]["receipt"]["key"] == "VEND-1"
+    assert uncertain["operation"]["failure_kind"] == "CredentialAuthorityChanged"
+    assert uncertain["operation_history"] == []
+
+    still_uncertain = svc.execute(ctx, row["id"])
+    assert still_uncertain["stage"] == "reconciliation_required"
     assert tickets.creates == 1
 
 
@@ -1025,7 +1736,10 @@ def test_stale_prepared_authority_returns_case_to_reviewable_state(setup):
     changed = replace(ctx, workspace_authority="new-generation")
     svc.authorize = lambda candidate, *_: candidate.binding() == changed.binding()
     with pytest.raises(PermissionError, match="(?i)authority changed"):
-        svc.approve_action(changed, row["id"], row["revision"])
+        svc.approve_action(
+            changed, row["id"], row["revision"],
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
     reopened = svc.get(changed, row["id"])
     assert reopened["stage"] == "review_approved"
     assert reopened["operation"] is None
@@ -1034,16 +1748,22 @@ def test_stale_prepared_authority_returns_case_to_reviewable_state(setup):
     assert tickets.creates == 0
 
 
-def test_changed_source_before_approval_allows_fresh_review_in_app(setup):
+def test_changed_source_before_approval_opens_source_specific_reevaluation(setup):
     svc, ctx, docs, tickets, _ = setup
     row = reviewed(svc, ctx)
     row = svc.prepare_action(ctx, row["id"], row["revision"])
     docs.documents[(ctx.tenant, "security-paper")] = EvidenceDocument("security-paper", "2", NOW, TEXT)
-    with pytest.raises(ValueError):
-        svc.approve_action(ctx, row["id"], row["revision"])
+    with pytest.raises(vendor_onboarding.VendorOnboardingEvidenceReviewRequired):
+        svc.approve_action(
+            ctx, row["id"], row["revision"],
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
     reopened = svc.get(ctx, row["id"])
     assert reopened["operation"] is None
-    assert reopened["stage"] == "review_approved"
+    assert reopened["stage"] == "acceptance_reevaluation_required"
+    assert reopened["acceptance_evidence_check"]["documents"][0]["status"] == "changed"
+    assert reopened["acceptance_evidence_check"]["documents"][0]["document_id"] == "security-paper"
+    assert reopened["work_item"]["next_action"] == "start_reevaluation_request"
     assert tickets.creates == 0
 
 

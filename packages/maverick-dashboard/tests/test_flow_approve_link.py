@@ -24,11 +24,13 @@ def _as_actor(monkeypatch, principal="user:alice"):
     import importlib
 
     app_module = importlib.import_module("maverick_dashboard.app")
+    auth_module = importlib.import_module("maverick_dashboard.auth")
     monkeypatch.setattr(app_module, "caller_principal", lambda _request: principal)
+    monkeypatch.setattr(auth_module, "caller_principal", lambda _request: principal)
 
 
 def _paused_run(rid="r1", fid="f1", *, owner="user:alice", assignee="@alice"):
-    from maverick.flow import store
+    from maverick.flow import execution, store
     from maverick.flow.ir import Flow, FlowNode
     saved = store.save_flow(Flow(
         id=fid,
@@ -44,26 +46,41 @@ def _paused_run(rid="r1", fid="f1", *, owner="user:alice", assignee="@alice"):
         expected_version=saved.version,
         expected_revision=saved.revision,
     )
-    store.save_run(store.FlowRun(run_id=rid, flow_id=fid, status="paused_approval",
-                                 prompt="ok?", cursor="a", owner=owner,
-                                 human={"choices": [], "assignee": assignee, "form": []},
-                                 definition_digest=release["definition_digest"],
-                                 release_digest=release["release_digest"],
-                                 release_id=release["release_id"],
-                                 definition_version=release["definition_version"],
-                                 definition_revision=release["definition_revision"],
-                                 subflow_digests=release["subflow_digests"]))
+    store.save_run(store.FlowRun(
+        run_id=rid,
+        flow_id=fid,
+        status="queued",
+        owner=owner,
+        input_data={},
+        definition_digest=release["definition_digest"],
+        release_digest=release["release_digest"],
+        release_id=release["release_id"],
+        definition_version=release["definition_version"],
+        definition_revision=release["definition_revision"],
+        subflow_digests=release["subflow_digests"],
+    ))
+    paused = execution.execute(
+        saved,
+        agent_runner=lambda *args: ("unused", 1.0),
+        action_runner=lambda *args: ("unused", 1.0),
+        run_id=rid,
+        owner=owner,
+        record_outcomes=True,
+    )
+    assert paused.status == "paused_approval"
     return rid, fid
 
 
 def _tok(rid, decision):
     from maverick.flow import store
     from maverick.flow.approvals import mint_token
+    from maverick_dashboard import automation_queue as aq
     run = store.load_run(rid)
     return mint_token(rid, decision, cursor=run.cursor, prompt=run.prompt,
                       updated=run.updated,
                       assignee=str((run.human or {}).get("assignee") or ""),
-                      owner=run.owner)
+                      owner=run.owner,
+                      binding_sha256=aq.flow_approval_binding(run))
 
 
 def test_get_shows_confirm_page_without_resuming(monkeypatch, tmp_path):
@@ -74,7 +91,10 @@ def test_get_shows_confirm_page_without_resuming(monkeypatch, tmp_path):
     rid, _ = _paused_run()
     r = _client().get("/flow/approve", params={"token": _tok(rid, "approved")})
     assert r.status_code == 200
-    assert "Confirm" in r.text
+    assert "Confirm exact operation" in r.text
+    assert "Known effects" in r.text
+    assert "Unresolved assumptions" in r.text
+    assert "prediction does not grant authority" in r.text
     # the GET must NOT have enqueued a resume (defeats link prefetchers)
     from maverick.flow import store
     assert store.load_run(rid).status == "paused_approval"

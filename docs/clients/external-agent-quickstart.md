@@ -3,7 +3,10 @@
 Bring an agent that runs on **any** other stack — an OpenAI tool-loop,
 LangChain, a scheduled job, a home-grown runtime — under Lightwork
 governance through the [external-agent gateway](../external-agents.md).
-The pattern is **screen-then-act, report-after**:
+The screen-only pattern is **screen-then-act, report-after**. Its approval is
+advisory because the external runtime performs the effect itself. Use
+`POST /api/v1/external/execute` (and its commit endpoint for parked writes)
+when Lightwork must enforce the effect:
 
 1. **Screen** every consequential action *before* taking it —
    `POST /api/v1/external/screen` applies the enrolled ceilings (tools,
@@ -69,8 +72,9 @@ class Lightwork:
     def memory_recall(self, query: str, domain: str = "") -> dict:
         return self._post("/memory/recall", {"query": query, "domain": domain})
 
-    def approval(self, approval_id: int) -> dict:
+    def approval(self, approval_id: int, binding_sha256: str) -> dict:
         r = requests.get(f"{self.base}/approvals/{approval_id}",
+                         params={"binding_sha256": binding_sha256},
                          headers=self.headers, timeout=15)
         r.raise_for_status()
         return r.json()
@@ -81,8 +85,13 @@ Semantics worth knowing:
 - `screen()` raises `PermissionError` on a **hard deny** — the message
   carries the gateway's `rule` and `reason` (e.g. `capability: tool
   send_contract is denied`). An approval-floor park is *returned*, not
-  raised: check `requires_approval` and poll `approval(v["approval_id"])`
-  until `status` is `approved` or `denied`.
+  raised: check `requires_approval` and poll
+  `approval(v["approval_id"], v["approval_binding_sha256"])`
+  until `status` is `approved` or `denied`. Pass the
+  `approval_binding_sha256` returned by `screen()` on every poll; a 409 means
+  the reviewed request is stale and must be screened again. An `approved`
+  screen result remains advisory. Route the operation through
+  `/api/v1/external/execute` when Lightwork must enforce the external write.
 - `report()` / `finish()` take an `idempotency_key` — send a stable key per
   logical run and a retried report returns the original record instead of
   double-counting spend.
@@ -153,8 +162,9 @@ export class Lightwork {
     return this.post("/memory/recall", { query, domain });
   }
 
-  async approval(approvalId: number) {
-    const r = await fetch(`${this.base}/approvals/${approvalId}`,
+  async approval(approvalId: number, bindingSha256: string) {
+    const query = new URLSearchParams({ binding_sha256: bindingSha256 });
+    const r = await fetch(`${this.base}/approvals/${approvalId}?${query}`,
                           { headers: this.headers });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     return r.json();

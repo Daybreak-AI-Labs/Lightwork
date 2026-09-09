@@ -100,6 +100,7 @@ from .api_schemas import (
     FleetCreateIn,
     FleetRunIn,
     FlowApplyIn,
+    FlowApprovalPreviewIn,
     FlowAutonomyIn,
     FlowChatIn,
     FlowDraftIn,
@@ -5093,7 +5094,41 @@ async def assessment_memory_similar(
     suggestions = {}
     if type:
         suggestions = await run_in_threadpool(assessment_memory.suggest_answers, type, subject, k=k)
-    lessons = await run_in_threadpool(assessment_memory.lessons, subject, k=k)
+    governed_reader = None
+    try:
+        from maverick.paths import current_tenant_id_strict
+
+        from .knowledge_access_api import _service as knowledge_access_service
+
+        tenant = current_tenant_id_strict()
+        principal = caller_principal(request) or ""
+        service = knowledge_access_service(request)
+        assessment_prefix = f"catalog:vector-knowledge/{assessment_memory.KNOWLEDGE_COLLECTION}/"
+
+        def governed_reader(query: str, limit: int) -> list[str]:
+            result = service.search(
+                tenant,
+                principal,
+                query=query,
+                purpose="product_research",
+                limit=limit,
+                source_selectors=(assessment_prefix,),
+            )
+            return [
+                str(item["summary"])
+                for item in result["items"]
+            ][:limit]
+    except Exception:
+        # The deterministic assessment history remains available, but semantic
+        # content never falls back to the raw vector store when current APP10
+        # authority cannot be resolved.
+        governed_reader = None
+    lessons = await run_in_threadpool(
+        assessment_memory.lessons,
+        subject,
+        k=k,
+        reader=governed_reader,
+    )
     return {
         "enabled": assessment_memory.enabled(),
         "similar": sim,
@@ -6357,6 +6392,38 @@ def _run_out(run) -> dict:
     d.pop("release_id", None)
     d.pop("definition_version", None)
     d.pop("subflow_digests", None)
+    if run.status == "paused_approval":
+        from maverick.approval_cards import (
+            ApprovalCardError,
+            require_current_approval_card,
+        )
+
+        human = dict(d.get("human") or {})
+        try:
+            human["approval_card"] = require_current_approval_card(
+                (run.human or {}).get("approval_card")
+            )
+        except ApprovalCardError as exc:
+            # Never echo a malformed structured object as though it were safe
+            # review content.  The paused run remains inspectable and blocked.
+            human.pop("approval_card", None)
+            d["approval_card_status"] = (
+                "expired" if "expired" in str(exc) else "invalid"
+            )
+            d["approval_binding_sha256"] = ""
+        else:
+            from maverick_dashboard import automation_queue as aq
+
+            try:
+                human["approval_card"] = aq.current_flow_approval_card(run)
+                d["approval_authority"] = aq._flow_approval_authority(run)
+                d["approval_binding_sha256"] = aq.flow_approval_binding(run)
+            except Exception:
+                d["approval_binding_sha256"] = ""
+                d["approval_card_status"] = "stale_or_authority_unavailable"
+            else:
+                d["approval_card_status"] = "current"
+        d["human"] = human
     return d
 
 
@@ -6467,12 +6534,60 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     )
 
 
+@router.post("/flows/runs/{run_id}/approval-preview")
+async def preview_flow_approval_endpoint(
+    request: Request,
+    run_id: str,
+    payload: FlowApprovalPreviewIn,
+) -> dict:
+    """Bind the currently visible form values before a final approval click."""
+    _require_flows()
+    run = _load_owned_run(request, run_id)
+    if run.status != "paused_approval":
+        raise HTTPException(
+            status_code=409,
+            detail=f"run is not awaiting approval (status {run.status})",
+        )
+    from .approval_authority import require_approval_authority
+
+    require_approval_authority(
+        request,
+        action="flow.approval.preview",
+        resource=run_id,
+    )
+    from maverick.approval_cards import digest
+    from maverick.flow import store
+
+    from maverick_dashboard import automation_queue as aq
+
+    inputs = dict(payload.inputs or {})
+    try:
+        aq.current_flow_approval_card(run)
+        binding = aq.flow_approval_binding(run, inputs=inputs)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "approval_binding_sha256": binding,
+        "inputs_sha256": digest(inputs),
+    }
+
+
 @router.post("/flows/runs/{run_id}/resume")
 async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowResumeIn) -> dict:
     """Resume a paused flow run with a human decision (approve/reject)."""
-    require_permission(request, "operate")
     _require_flows()
     run = _load_owned_run(request, run_id)
+    decision_authority = None
+    if run.status == "paused_approval":
+        from .approval_authority import require_approval_authority
+
+        decision_authority = require_approval_authority(
+            request,
+            action="flow.approval.decide",
+            resource=run_id,
+        )
+    else:
+        require_permission(request, "operate")
     # Only a paused run may be resumed -- resuming a completed/rejected run would
     # re-run the flow or run a rejected node (409, not a silent no-op).
     from maverick.flow.runner import PAUSED_STATUSES
@@ -6494,6 +6609,11 @@ async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowR
                 status_code=403,
                 detail="an authenticated approver identity is required",
             )
+        if not payload.approval_binding_sha256:
+            raise HTTPException(
+                status_code=409,
+                detail="approval changed or was not reviewed; reload the run",
+            )
     from maverick.flow import store
 
     from maverick_dashboard import automation_queue as aq
@@ -6506,13 +6626,20 @@ async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowR
             run.owner,
             decided_by=decided_by,
             inputs=dict(payload.inputs or {}),
+            approval_binding_sha256=payload.approval_binding_sha256,
+            decision_authority=decision_authority,
         )
     except store.FlowSnapshotError as exc:
         if "approver" in str(exc) or "approval decision" in str(exc):
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        detail = str(exc)
         raise HTTPException(
             status_code=409,
-            detail="run release is no longer active",
+            detail=(
+                detail
+                if "approval" in detail
+                else "run release is no longer active"
+            ),
         ) from exc
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
@@ -12217,12 +12344,19 @@ async def external_agent_mint(
     require_permission(request, "admin")
     from maverick import external_agents as xa
 
+    from .approval_authority import require_approval_authority
+
     try:
+        mint_authority = require_approval_authority(
+            request,
+            action="external_agents.credential_mint",
+            resource=f"{agent_id}:{payload.surface}",
+        )
         token = xa.mint_token(
             agent_id,
             payload.surface,
-            minted_by=caller_principal(request) or "admin",
             mint_approval_id=payload.approval_id,
+            mint_authority=mint_authority,
         )
     except xa.MintApprovalPending as e:
         return JSONResponse(
@@ -12262,6 +12396,33 @@ async def simulate(request: Request, surface: str, action: str, target: str = ""
     from .control_plane import simulate_action
 
     return simulate_action(surface, action, target)
+
+
+@router.post("/simulate/research")
+async def simulate_research(
+    request: Request,
+    component: str = Query(default="tabular", max_length=32),
+) -> dict:
+    """Run the actual isolated F09 synthetic study under named-human approval."""
+    from maverick.research_simulator import ResearchSimulationError
+
+    from .control_plane import run_isolated_research_simulation
+    from .simulation_authority import authenticated_human_identity
+
+    identity = authenticated_human_identity(request)
+    try:
+        return await run_in_threadpool(
+            run_isolated_research_simulation,
+            identity,
+            component_name=component,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ResearchSimulationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="the isolated research simulator is unavailable",
+        ) from exc
 
 
 def _build_compliance_packet_body() -> str:
@@ -12384,22 +12545,80 @@ async def list_approvals(request: Request) -> dict:
     """
     require_permission(request, "operate")
     w = _world()
+    return {"approvals": [_approval_api_row(a) for a in w.pending_approvals()]}
+
+
+def _approval_api_row(approval) -> dict:
+    """Project one approval without exposing a malformed structured envelope."""
+    from maverick.approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+    )
+    from maverick.safety.secret_detector import redact
+
+    def safe(value: object, *, fallback: str = "") -> str:
+        try:
+            text, _matches = redact(" ".join(str(value or "").split()))
+            return text[:2000]
+        except Exception:
+            return fallback
+
+    card = None
+    card_status = "legacy"
+    detail = safe(approval.detail)
+    try:
+        card = decode_approval_detail(approval.detail)
+    except ApprovalCardError:
+        detail = "Structured approval details failed their integrity check."
+        card_status = "invalid"
+    if card is not None:
+        detail = card["summary"]
+        card_status = "expired" if time.time() >= card["expires_at"] else "current"
     return {
-        "approvals": [
-            {
-                "id": a.id,
-                "action": a.action,
-                "risk": a.risk,
-                "scope": a.scope,
-                "detail": a.detail,
-                "requested_at": a.requested_at,
-                # Collaborative supervision: who is handling this review.
-                "claimed_by": getattr(a, "claimed_by", None),
-                "claimed_at": getattr(a, "claimed_at", None),
-            }
-            for a in w.pending_approvals()
-        ],
+        "id": approval.id,
+        "action": safe(approval.action, fallback="reviewed operation"),
+        "risk": approval.risk,
+        "scope": safe(approval.scope, fallback="reviewed target"),
+        "detail": detail,
+        "requested_at": approval.requested_at,
+        "approval_card": card,
+        "approval_card_status": card_status,
+        # Collaborative supervision: who is handling this review.
+        "claimed_by": getattr(approval, "claimed_by", None),
+        "claimed_at": getattr(approval, "claimed_at", None),
     }
+
+
+def _require_current_decision_card(world, approval_id: int, request: Request) -> None:
+    """Reject a stale page, expired card, or corrupted structured approval."""
+    from maverick.approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+        require_current_approval_card,
+    )
+
+    approval = world.get_approval(approval_id)
+    if approval is None or approval.status != "pending":
+        return
+    try:
+        card = decode_approval_detail(approval.detail)
+        if card is None:
+            raise ApprovalCardError(
+                "this approval predates exact-operation review; reject it and "
+                "ask the requester to prepare a fresh review"
+            )
+        if not hmac.compare_digest(card["action"], approval.action):
+            raise ApprovalCardError(
+                "the approval card does not match the queued action; request a fresh review"
+            )
+        supplied = request.headers.get("X-Lightwork-Approval-Binding", "")
+        if not supplied:
+            raise ApprovalCardError(
+                "review the current approval card before submitting this decision"
+            )
+        require_current_approval_card(card, expected_binding=supplied)
+    except ApprovalCardError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _supervisor(request: Request) -> str:
@@ -12633,9 +12852,14 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
 async def approve_approval(request: Request, approval_id: int) -> Response:
     """Record an approval vote; once the required quorum of distinct approvers is
     met the polling consent path proceeds (N-of-M dual control)."""
-    require_permission(request, "operate")
+    from .approval_authority import require_approval_authority
+
+    require_approval_authority(
+        request, action="approval.approve", resource=str(approval_id),
+    )
     who = _supervisor(request)
     world = _world()
+    _require_current_decision_card(world, approval_id, request)
     event = _record_vote_or_raise(world, approval_id, "approved", who)
     return _approval_decision_response(
         world,
@@ -12666,7 +12890,11 @@ async def approve_approval(request: Request, approval_id: int) -> Response:
 async def deny_approval(request: Request, approval_id: int) -> Response:
     """Deny a parked action (a single deny rejects it); the polling consent path
     then refuses it."""
-    require_permission(request, "operate")
+    from .approval_authority import require_approval_authority
+
+    require_approval_authority(
+        request, action="approval.deny", resource=str(approval_id),
+    )
     who = _supervisor(request)
     world = _world()
     event = _record_vote_or_raise(world, approval_id, "denied", who)
@@ -12674,6 +12902,84 @@ async def deny_approval(request: Request, approval_id: int) -> Response:
         world,
         event,
         _audit_approval_decision(world, event),
+    )
+
+
+@router.post("/approvals/{approval_id}/revise")
+async def revise_approval(request: Request, approval_id: int) -> Response:
+    """Supersede one request and record why its producer must regenerate it."""
+    from maverick.approval_cards import ApprovalCardError, decode_approval_detail
+
+    from .approval_authority import require_approval_authority
+
+    require_approval_authority(
+        request, action="approval.revise", resource=str(approval_id),
+    )
+    try:
+        payload = await request.json()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="a revision rationale is required") from None
+    rationale = " ".join(str(
+        payload.get("rationale", "") if isinstance(payload, dict) else ""
+    ).split())
+    if not rationale:
+        raise HTTPException(status_code=422, detail="a revision rationale is required")
+    if len(rationale) > 2_000:
+        raise HTTPException(status_code=422, detail="revision rationale is too long")
+    try:
+        from maverick.safety.secret_detector import redact
+
+        rationale, _matches = redact(rationale)
+    except Exception:
+        rationale = "Revision requested; rationale was removed because redaction failed."
+
+    world = _world()
+    row = world.get_approval(approval_id)
+    if row is None or row.status != "pending":
+        raise HTTPException(status_code=404, detail="no such pending approval")
+    old_binding = ""
+    try:
+        card = decode_approval_detail(row.detail)
+        old_binding = str(card["binding_sha256"]) if card is not None else ""
+    except (ApprovalCardError, KeyError, TypeError, ValueError):
+        pass
+    who = _supervisor(request)
+    event = _record_vote_or_raise(world, approval_id, "denied", who)
+    delivered = _audit_approval_decision(world, event)
+    if not delivered:
+        return _approval_decision_response(world, event, False)
+
+    from maverick import audit
+
+    recorded = audit.audit_event(
+        audit.EventKind.CONSENT_RESULT,
+        agent=who,
+        action="approval_revision_requested",
+        approval_id=approval_id,
+        superseded_binding_sha256=old_binding,
+        producer=row.provenance or "consent",
+        original_action=row.action,
+        rationale=rationale,
+    )
+    if not recorded:
+        raise HTTPException(
+            status_code=503,
+            detail="approval was superseded but the revision request audit is unavailable",
+        )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "superseded",
+            "superseded_approval_id": approval_id,
+            "superseded_binding_sha256": old_binding,
+            "producer": row.provenance or "consent",
+            "original_action": row.action,
+            "rationale": rationale,
+            "fresh_card_required": True,
+            "next_action": (
+                "The originating producer must submit a fresh exact-operation card."
+            ),
+        },
     )
 
 
@@ -14015,6 +14321,27 @@ async def resume_goal(
             status_code=400,
             detail=f"The spending limit for this attempt cannot exceed ${DEFAULT_MAX_DOLLARS:g}.",
         )
+    from maverick.outcome_pilot_start_gate import (
+        OutcomePilotAdmissionRequired,
+        require_work_item_admission,
+    )
+
+    try:
+        require_work_item_admission("goal", str(goal_id))
+    except OutcomePilotAdmissionRequired as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "schema": "lightwork.error.v1",
+                "code": exc.code,
+                "message": str(exc),
+                "retryable": True,
+                "next_action": (
+                    "Open the outcome pilot in the app and retry its admission "
+                    "recovery before starting this task."
+                ),
+            },
+        ) from exc
     w.set_goal_status(goal_id, "pending", result=None)
     from maverick.runner import run_goal_in_background_async
 

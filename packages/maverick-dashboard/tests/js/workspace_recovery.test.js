@@ -29,7 +29,7 @@ async function harness(handler, overrides = {}) {
 }
 
 test('restore needs prepared target-bound review and explicit checkbox; changing selection invalidates it', async () => {
-  const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3 } : {});
+  const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3, restore_mode: 'ordinary' } : {});
   h.select();
   h.get('prepare').click(); await tick();
   assert.equal(h.get('restore').disabled, true);
@@ -43,7 +43,7 @@ test('restore needs prepared target-bound review and explicit checkbox; changing
 });
 
 test('failed restore consumes displayed review and keeps the failure visible', async () => {
-  const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3 } : { error: 'Workspace files changed. Prepare a fresh review.' });
+  const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3, restore_mode: 'ordinary' } : { error: 'Workspace files changed. Prepare a fresh review.' });
   h.select(); h.get('prepare').click(); await tick();
   h.get('confirm').checked = true; h.get('confirm').dispatchEvent(new h.dom.window.Event('change'));
   h.get('restore').click(); await tick();
@@ -182,7 +182,7 @@ for (const deniedStatus of [401, 403]) {
 }
 
 test('service interruption preserves safe inputs and selection but invalidates all confirmations', async () => {
-  const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3 } : {});
+  const h = await harness(async url => url.endsWith('/prepare') ? { review: 'review-a', target: 'target-a', tenant: 'acme', application_version: '1.0.0', file_count: 3, restore_mode: 'ordinary' } : {});
   h.select(); h.get('prepare').click(); await tick();
   h.get('key-input').value = 'synthetic pending recovery key';
   for (const name of ['confirm', 'retire-confirm', 'encryption-confirm', 'installation-confirm', 'installation-retire-confirm']) h.get(name).checked = true;
@@ -616,4 +616,203 @@ for (const status of [401, 403]) test(`HTML ${status} revokes bridge review befo
   assert.equal(h.get('installation-transition-details').textContent, '');
   assert.equal(h.get('installation-transition-confirm').checked, false);
   assert.equal(h.get('installation-authorize').disabled, true); h.dom.window.close();
+});
+
+function reconciliationItem(overrides = {}) {
+  return {
+    id: '1'.repeat(32), category: 'queued_work', source: 'jobs.sqlite', record_id: 'job-1',
+    prior_state: 'queued', safe_state: 'reconciliation_required', requires_external_readback: false,
+    state: 'unresolved', ...overrides,
+  };
+}
+
+function reconciliationReport(items, overrides = {}) {
+  return {
+    state: 'reconciliation_required', items, unresolved: items.filter(item => item.state === 'unresolved').length,
+    protected_authority: {
+      classification_complete: true, file_count: 12, classified_count: 12, state_sha256: '9'.repeat(64),
+    },
+    ...overrides,
+  };
+}
+
+function chooseCustodyInstall(h, bytes = custodyBytes) {
+  const input = h.get('custody-install-file');
+  const file = new h.dom.window.File([bytes], 'exact-tested-keys.zip', { type: 'application/zip' });
+  file.arrayBuffer = async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  let value = 'synthetic-install-selection';
+  Object.defineProperty(input, 'value', { configurable: true, get: () => value, set: next => { value = next; } });
+  Object.defineProperty(input, 'files', { configurable: true, get: () => value ? [file] : [] });
+  Object.defineProperty(h.dom.window.crypto, 'subtle', { configurable: true, value: require('node:crypto').webcrypto.subtle });
+  input.dispatchEvent(new h.dom.window.Event('change'));
+  return file;
+}
+
+test('new-install recovery requires the source-offline declaration and sends only the bounded bootstrap request', async () => {
+  const h = await harness(async url => url.endsWith('/bootstrap/prepare')
+    ? { state: 'prepared', bootstrap_id: 'a'.repeat(32) } : {}, { recovery_mode: true });
+  assert.equal(h.get('bootstrap-prepare').disabled, true);
+  h.get('bootstrap-prepare').dispatchEvent(new h.dom.window.Event('click')); await tick();
+  assert.equal(h.calls.some(call => call.url.endsWith('/bootstrap/prepare')), false);
+  h.get('bootstrap-source-offline').checked = true;
+  h.get('bootstrap-source-offline').dispatchEvent(new h.dom.window.Event('change'));
+  assert.equal(h.get('bootstrap-prepare').disabled, false);
+  h.get('bootstrap-prepare').click(); await tick(); await tick();
+  const calls = h.calls.filter(call => call.url.endsWith('/bootstrap/prepare'));
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { confirm: true, source_offline: true });
+  assert.equal(calls[0].init.headers['X-Lightwork-Recovery-Context'], 'account-context');
+  assert.equal(calls[0].init.headers['X-Lightwork-Expected-Tenant'], 'acme');
+  assert.equal(h.get('bootstrap-source-offline').checked, false);
+  h.dom.window.close();
+});
+
+test('interrupted bootstrap recovery resumes once and exposes held work without automatic completion', async () => {
+  const bootstrap = { state: 'restore_pending' };
+  const held = reconciliationReport([reconciliationItem()]);
+  const h = await harness(async (url, init) => {
+    if (url.endsWith('/bootstrap/resume')) { bootstrap.state = 'reconciliation_required'; return { state: 'reconciliation_required' }; }
+    if (url.endsWith('/reconciliation')) return bootstrap.state === 'restore_pending'
+      ? { state: 'restore_pending', items: [], unresolved: 0 } : held;
+    return {};
+  }, { recovery_mode: true, bootstrap });
+  assert.equal(h.get('bootstrap-resume').disabled, false);
+  h.get('bootstrap-resume').click(); h.get('bootstrap-resume').click(); await tick(); await tick();
+  const calls = h.calls.filter(call => call.url.endsWith('/bootstrap/resume'));
+  assert.equal(calls.length, 1);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { confirm: true });
+  assert.equal(h.get('reconciliation').hidden, false);
+  assert.match(h.get('reconciliation-status').textContent, /1 restored item remains unresolved/);
+  assert.equal(h.calls.some(call => call.url.endsWith('/reconciliation/complete')), false);
+  h.dom.window.close();
+});
+
+test('key installation rechecks the exact tested ZIP and binds snapshot, report and fresh consent', async () => {
+  const bootstrap = { state: 'prepared', retained_keys: { state: 'not_installed' } };
+  const h = await harness(async (url, init) => {
+    if (url.endsWith('/reconciliation')) return { state: 'prepared', items: [], unresolved: 0 };
+    if (url.endsWith('/custody-test/report')) return custodyReport();
+    if (url.endsWith('/retained-keys/install')) {
+      bootstrap.retained_keys = { state: 'installed' };
+      return { state: 'installed', file_count: 2, key_set_sha256: '8'.repeat(64) };
+    }
+    return {};
+  }, { recovery_mode: true, bootstrap });
+  h.select(); h.get('custody-report-load').click(); await settleCustody();
+  assert.equal(h.get('custody-install-panel').hidden, false);
+  const file = chooseCustodyInstall(h);
+  assert.equal(h.get('custody-install').disabled, true);
+  h.get('custody-install').dispatchEvent(new h.dom.window.Event('click')); await settleCustody();
+  assert.equal(h.calls.some(call => call.url.endsWith('/retained-keys/install')), false);
+  h.get('custody-install-confirm').checked = true;
+  h.get('custody-install-confirm').dispatchEvent(new h.dom.window.Event('change'));
+  h.get('custody-install').click(); h.get('custody-install').click(); await settleCustody();
+  const calls = h.calls.filter(call => call.url.endsWith('/retained-keys/install'));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.body, file);
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/octet-stream');
+  assert.equal(calls[0].init.headers['X-Lightwork-Confirm-Key-Install'], 'true');
+  assert.equal(calls[0].init.headers['X-Lightwork-Snapshot-SHA256'], 'a'.repeat(64));
+  assert.equal(calls[0].init.headers['X-Lightwork-Custody-Report'], 'e'.repeat(32));
+  assert.equal(h.get('custody-install-file').value, '');
+  assert.equal(h.get('custody-install-confirm').checked, false);
+  h.dom.window.close();
+});
+
+test('a different key ZIP cannot reuse retained-key evidence or send an install request', async () => {
+  const h = await harness(async url => url.endsWith('/reconciliation')
+    ? { state: 'prepared', items: [], unresolved: 0 }
+    : url.endsWith('/custody-test/report') ? custodyReport() : {}, {
+    recovery_mode: true, bootstrap: { state: 'prepared', retained_keys: { state: 'not_installed' } },
+  });
+  h.select(); h.get('custody-report-load').click(); await settleCustody();
+  chooseCustodyInstall(h, Buffer.from('different key bytes'));
+  h.get('custody-install-confirm').checked = true;
+  h.get('custody-install-confirm').dispatchEvent(new h.dom.window.Event('change'));
+  h.get('custody-install').click(); await settleCustody();
+  assert.equal(h.calls.some(call => call.url.endsWith('/retained-keys/install')), false);
+  assert.match(h.get('status').textContent, /does not match the signed retained-key test/);
+  assert.equal(h.get('custody-install-file').value, '');
+  assert.equal(h.get('custody-install-confirm').checked, false);
+  h.dom.window.close();
+});
+
+test('restored work renders as text and records each disposition without completing recovery', async () => {
+  const report = reconciliationReport([
+    reconciliationItem({ category: '<img src=x onerror=alert(1)>', source: '<script>source</script>' }),
+    reconciliationItem({ id: '2'.repeat(32), category: 'external_action', source: 'provider/<img src=x>', record_id: 'attempt-2',
+      prior_state: 'executing', safe_state: 'failed', requires_external_readback: true }),
+  ]);
+  const h = await harness(async (url, init) => {
+    if (url.endsWith('/reconciliation')) return report;
+    if (url.includes('/reconciliation/items/')) {
+      const id = url.split('/').pop(), item = report.items.find(row => row.id === id);
+      item.state = 'resolved'; item.disposition = JSON.parse(init.body).disposition; report.unresolved--;
+      return { state: 'resolved', unresolved: report.unresolved };
+    }
+    return {};
+  }, { recovery_mode: true, bootstrap: { state: 'reconciliation_required' } });
+  assert.equal(h.get('reconciliation-items').querySelector('img'), null);
+  assert.equal(h.get('reconciliation-items').querySelector('script'), null);
+  assert.match(h.get('reconciliation-items').textContent, /<img/);
+  let retire = [...h.get('reconciliation-items').querySelectorAll('button')].find(button => /Retire restored request/.test(button.textContent));
+  retire.click(); await tick(); await tick();
+  let call = h.calls.find(row => row.url.endsWith('/' + '1'.repeat(32)));
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'retire_and_create_new_request', evidence_reference: null });
+  const evidence = h.get('reconciliation-items').querySelector('input[type="text"]');
+  evidence.value = 'ticket-12345';
+  const record = [...h.get('reconciliation-items').querySelectorAll('button')].find(button => /Record the existing external effect/.test(button.textContent));
+  record.click(); await tick(); await tick();
+  call = h.calls.find(row => row.url.endsWith('/' + '2'.repeat(32)));
+  assert.deepEqual(JSON.parse(call.init.body), { confirm: true, disposition: 'external_effect_recorded', evidence_reference: 'ticket-12345' });
+  assert.equal(report.unresolved, 0);
+  assert.equal(h.get('reconciliation-complete').disabled, true);
+  assert.equal(h.calls.some(row => row.url.endsWith('/reconciliation/complete')), false);
+  h.dom.window.close();
+});
+
+test('an unclassified authority keeps startup blocked and offers only in-app support', async () => {
+  const report = reconciliationReport([reconciliationItem({
+    category: 'unclassified_authority', source: 'unknown.sqlite', record_id: '', prior_state: 'unknown',
+    safe_state: 'global_start_blocked', requires_external_readback: false,
+  })]);
+  const h = await harness(async url => url.endsWith('/reconciliation') ? report : {}, {
+    recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+  });
+  assert.equal(h.get('reconciliation-blocked').hidden, false);
+  assert.equal(h.get('reconciliation-items').querySelectorAll('button').length, 0);
+  assert.equal(h.get('reconciliation-confirm').disabled, true);
+  assert.equal(h.get('reconciliation-complete').disabled, true);
+  assert.equal(h.get('reconciliation-blocked').querySelector('a').getAttribute('href'), '/help');
+  assert.equal(h.calls.some(call => call.url.includes('/reconciliation/items/')), false);
+  h.dom.window.close();
+});
+
+test('malformed restored-work inventory stays fail-closed with no disposition controls', async () => {
+  const malformed = reconciliationReport([reconciliationItem()], { unresolved: 0 });
+  const h = await harness(async url => url.endsWith('/reconciliation') ? malformed : {}, {
+    recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+  });
+  assert.equal(h.get('reconciliation-items').children.length, 0);
+  assert.equal(h.get('reconciliation-confirm').disabled, true);
+  assert.equal(h.get('reconciliation-complete').disabled, true);
+  assert.match(h.get('reconciliation-status').textContent, /count changed/);
+  h.dom.window.close();
+});
+
+for (const status of [401, 403]) test(`HTML ${status} clears reconciliation evidence before parsing and revokes every action`, async () => {
+  const report = reconciliationReport([reconciliationItem({ requires_external_readback: true })]);
+  const h = await harness(async url => url.endsWith('/reconciliation') ? report : {}, {
+    recovery_mode: true, bootstrap: { state: 'reconciliation_required' },
+  });
+  const evidence = h.get('reconciliation-items').querySelector('input[type="text"]'); evidence.value = 'ticket-private-123';
+  let parsed = 0, requests = 0;
+  h.dom.window.fetch = async () => { requests++; return { ok: false, status, json: async () => { parsed++; throw new Error('HTML denial'); } }; };
+  const actionButton = h.get('reconciliation-items').querySelector('button'); actionButton.click(); await tick(); await tick();
+  assert.equal(requests, 1); assert.equal(parsed, 0);
+  assert.equal(h.get('reconciliation').hidden, true);
+  assert.equal(h.get('reconciliation-items').children.length, 0);
+  assert.equal(evidence.value, '');
+  for (const button of h.dom.window.document.querySelectorAll('#workspace-recovery button')) assert.equal(button.disabled, true);
+  h.dom.window.close();
 });

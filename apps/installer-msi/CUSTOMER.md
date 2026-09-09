@@ -24,10 +24,16 @@ compiled public key before Windows Installer can run. Remote dashboard content
 cannot choose the installer, key, download address, or native maintenance page.
 
 **Repair installation** uses the immutable `versions/<installed-version>.json`
-manifest beside the configured feed. It remains available when `latest.json`
-advances, and when the runtime is missing or damaged. The exact old manifest
-and installer must remain hosted. A retained, signed original MSI also supports
-Windows Installer repair. File repair preserves workspace data.
+manifest beside the configured feed. The MSI installs byte-identical recovery
+runtime and native-shell copies, retains the exact signed source MSI, and adds a
+**Repair Lightwork** Start-menu entry. That recovery application can open the
+same in-app maintenance controls when either primary executable is missing or
+damaged. The app still downloads and verifies the exact current-version package
+with the compiled updater key, then requires its SHA-256, Authenticode
+publisher, ProductCode and PackageCode to match the retained registered source
+before Windows Installer can run. The exact version manifest and package must
+therefore remain hosted; this is not an offline-repair claim. File repair
+preserves workspace data.
 
 An upgrade that fails inside the MSI transaction is expected to restore the
 previous application files. A fault-injection fixture tests this separately
@@ -108,8 +114,15 @@ Use `.github/workflows/windows-customer.yml` on a disposable Windows build
 runner. Build tools run only there. Python dependencies come from the reviewed
 constraints and regular installs of `release-cohort.toml`; Rust and frontend
 dependencies use committed locks. `build/maverick.spec` freezes the complete
-runtime. `stage_customer.py` executes its version, provider-runtime, dashboard
-and MCP checks in an empty temporary home before recording its size and SHA-256.
+runtime. `stage_customer.py` rejects invalid MSI versions and existing staging
+directories before executing its version, provider-runtime, dashboard and MCP
+checks. Those checks use a disposable working directory, explicit empty config,
+profile and cache paths, and an OS environment allowlist; they do not inherit
+operator credentials, configuration overrides or the developer PATH. The runtime
+size and SHA-256 are streamed before the checks, rechecked after each command,
+and compared with the staged copy before its inventory is written. These checks
+detect input drift; they do not provide atomic admission against hostile writers
+or containment for untrusted binaries. Installed acceptance remains separate.
 The customer desktop pins the sibling `maverick.exe` and never falls back to
 another executable from PATH or an environment override.
 

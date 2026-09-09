@@ -233,6 +233,97 @@ def test_retained_key_report_routes_require_current_context_and_strict_request(m
     assert client.post(endpoint + "/download", headers=headers, json=report).status_code == 403
 
 
+def test_bootstrap_key_install_resume_and_reconciliation_routes_are_strict_and_bound(
+    monkeypatch,
+):
+    client = api_client()
+    headers = context(client)
+    monkeypatch.setattr(recovery_api, "isolated", lambda app: True)
+    calls = []
+
+    def prepared(**kwargs):
+        calls.append(("prepare", kwargs))
+        return {"state": "prepared", "bootstrap_id": "a" * 32}
+
+    def installed(identifier, payload, **kwargs):
+        calls.append(("install", identifier, payload, kwargs))
+        return {"state": "installed", "file_count": 1, "key_set_sha256": "b" * 64}
+
+    def resumed(**kwargs):
+        calls.append(("resume", kwargs))
+        return {"state": "prepared", "outcome": "rolled_back_to_empty"}
+
+    def status(*, actor):
+        calls.append(("status", actor))
+        return {"state": "reconciliation_required", "items": [], "unresolved": 0}
+
+    def resolve(item_id, disposition, **kwargs):
+        calls.append(("resolve", item_id, disposition, kwargs))
+        return {"state": "resolved", "item_id": item_id, "unresolved": 0}
+
+    def complete(**kwargs):
+        calls.append(("complete", kwargs))
+        return {"state": "completed", "post_restore_verified": True}
+
+    monkeypatch.setattr(recovery_api.recovery, "prepare_bootstrap", prepared)
+    monkeypatch.setattr(recovery_api.recovery, "install_retained_keys", installed)
+    monkeypatch.setattr(recovery_api.recovery, "resume_bootstrap_restore", resumed)
+    monkeypatch.setattr(recovery_api.recovery, "reconciliation_status", status)
+    monkeypatch.setattr(recovery_api.recovery, "resolve_reconciliation", resolve)
+    monkeypatch.setattr(recovery_api.recovery, "complete_reconciliation", complete)
+
+    assert client.post("/api/v1/recovery/bootstrap/prepare", json={
+        "confirm": True, "source_offline": True,
+    }).status_code == 409
+    assert client.post("/api/v1/recovery/bootstrap/prepare", headers=headers, json={
+        "confirm": True, "source_offline": False,
+    }).status_code == 400
+    assert client.post("/api/v1/recovery/bootstrap/prepare", headers=headers, json={
+        "confirm": True, "source_offline": "true",
+    }).status_code == 422
+    assert client.post("/api/v1/recovery/bootstrap/prepare", headers=headers, json={
+        "confirm": True, "source_offline": True,
+    }).status_code == 200
+
+    install_path = "/api/v1/recovery/snapshots/" + "c" * 32 + "/retained-keys/install"
+    key_headers = {
+        **headers,
+        "Content-Type": "application/octet-stream",
+        "X-Lightwork-Confirm-Key-Install": "true",
+        "X-Lightwork-Snapshot-SHA256": "d" * 64,
+        "X-Lightwork-Custody-Report": "e" * 32,
+    }
+    assert client.post(install_path, headers=headers, content=b"keys").status_code == 400
+    assert client.post(install_path, headers={**key_headers, "X-Lightwork-Custody-Report": "bad"}, content=b"keys").status_code == 400
+    assert client.post(install_path, headers=key_headers, content=b"").status_code == 400
+    installed_response = client.post(install_path, headers=key_headers, content=b"keys")
+    assert installed_response.status_code == 200
+    assert calls[-1] == ("install", "c" * 32, b"keys", {
+        "expected_sha256": "d" * 64,
+        "report_id": "e" * 32,
+        "isolated": True,
+        "actor": headers["X-Lightwork-Recovery-Context"],
+    })
+
+    assert client.post("/api/v1/recovery/bootstrap/resume", headers=headers, json={"confirm": False}).status_code == 400
+    assert client.post("/api/v1/recovery/bootstrap/resume", headers=headers, json={"confirm": True}).status_code == 200
+    reconciled = client.get("/api/v1/recovery/reconciliation")
+    assert reconciled.status_code == 200 and reconciled.headers["cache-control"] == "private, no-store"
+    assert reconciled.json()["state"] == "reconciliation_required"
+    item = "f" * 32
+    body = {"confirm": True, "disposition": "external_effect_absent", "evidence_reference": "ticket-123"}
+    assert client.post(f"/api/v1/recovery/reconciliation/items/{item}", headers=headers, json={**body, "force": True}).status_code == 422
+    assert client.post(f"/api/v1/recovery/reconciliation/items/{item}", headers=headers, json=body).status_code == 200
+    assert calls[-1] == ("resolve", item, "external_effect_absent", {
+        "evidence_reference": "ticket-123", "isolated": True,
+        "actor": headers["X-Lightwork-Recovery-Context"],
+    })
+    assert client.post("/api/v1/recovery/reconciliation/complete", headers=headers, json={"confirm": True}).status_code == 200
+    assert calls[-1] == ("complete", {
+        "isolated": True, "actor": headers["X-Lightwork-Recovery-Context"],
+    })
+
+
 def test_disabled_feature_refuses_recovery_api(monkeypatch):
     monkeypatch.setattr(config, "get_features", lambda: {"workspace_recovery": False})
     assert api_client().get("/api/v1/recovery/status").status_code == 403
@@ -382,6 +473,14 @@ def test_isolated_startup_skips_all_composed_normal_lifespans_and_blocks_work(wo
         assert client.get("/get-started").status_code == 503
         assert client.post("/api/v1/goals", json={}).status_code == 503
         assert client.get("/workspace/recovery").status_code == 200
+        support = client.get("/help")
+        assert support.status_code == 200
+        assert "Prepare support report" in support.text
+        assert support.headers["cache-control"] == "private, no-store"
+        # Recovery middleware admits the in-app support API. Feature or
+        # authority policy may still refuse the operation, but normal-work
+        # middleware must not replace that decision with its blanket 503.
+        assert client.post("/api/v1/support/preview", json={}).status_code != 503
         headers, identifier = setup_snapshot(client)
         (workspace / "record.json").write_text("after")
         response = client.post("/api/v1/recovery/snapshots/" + identifier + "/prepare", json={"confirm": True}, headers=headers)

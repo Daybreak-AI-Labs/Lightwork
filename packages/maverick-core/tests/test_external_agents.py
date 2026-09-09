@@ -3,7 +3,9 @@ credentials, run ingest onto the Operating Record, fail-closed screening,
 and the digest-bound governed-execution tier."""
 from __future__ import annotations
 
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from maverick import external_agents as xa
@@ -35,6 +37,18 @@ def _enroll(**kw):
             "enrolled_by": "admin@corp.test"}
     args.update(kw)
     return xa.enroll("sf-quotebot", "agentforce", **args)
+
+
+def test_exception_text_redacts_lightwork_agent_credentials():
+    token = "lw-rest-" + "A" * 43
+
+    visible = xa._safe_exception_text(
+        RuntimeError(f"provider rejected credential {token}"),
+        fallback="provider failed",
+    )
+
+    assert token not in visible
+    assert "REDACTED:lightwork_agent_token" in visible
 
 
 def test_enroll_writes_trust_entry_and_sidecar():
@@ -98,6 +112,25 @@ def test_mint_gate_off_by_default_mints_directly():
     assert count == 0
 
 
+def test_mint_policy_load_failure_refuses_without_rotating_credential(monkeypatch):
+    _enroll()
+    original = xa.mint_token("sf-quotebot", "rest")
+    from maverick import config
+
+    def unavailable():
+        raise RuntimeError("configuration backend unavailable")
+
+    monkeypatch.setattr(config, "get_external_agents", unavailable)
+    with pytest.raises(xa.ExternalAgentsError, match="policy is unavailable"):
+        xa.mint_token("sf-quotebot", "rest", minted_by="admin@corp.test")
+
+    assert agent_for_token(original, "rest").id == "sf-quotebot"
+    from maverick.world_model import WorldModel
+    assert WorldModel().conn.execute(
+        "SELECT COUNT(*) FROM approvals"
+    ).fetchone()[0] == 0
+
+
 def test_gated_mint_parks_an_approval_and_refuses(tmp_path):
     _enroll()
     _mint_gate_on(tmp_path)
@@ -113,6 +146,12 @@ def test_gated_mint_parks_an_approval_and_refuses(tmp_path):
     assert approval.action == "mint-credential:sf-quotebot:rest"
     assert approval.provenance == "external_agents"
     assert approval.requested_by == "admin@corp.test"
+    from maverick.approval_cards import decode_approval_detail
+    card = decode_approval_detail(approval.detail)
+    assert card is not None
+    assert card["action"] == approval.action
+    assert card["credentials"]["agent_trust_sha256"]
+    assert card["consequences"]["irreversible"] is True
 
 
 def test_gated_mint_succeeds_with_an_approved_id(tmp_path):
@@ -213,6 +252,65 @@ def test_mint_approval_action_mismatch_refuses(tmp_path):
     assert agent_for_token(token, "rest").id == "sf-quotebot"
 
 
+def test_gated_mint_refuses_actor_drift_without_spending_approval(tmp_path):
+    _enroll()
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as pending:
+        xa.mint_token("sf-quotebot", "rest", minted_by="user:alice")
+    from maverick.world_model import WorldModel
+
+    WorldModel().decide_approval(
+        pending.value.approval_id,
+        "approved",
+        decided_by="admin@corp.test",
+    )
+    with pytest.raises(xa.ExternalAgentsError, match="different actor"):
+        xa.mint_token(
+            "sf-quotebot",
+            "rest",
+            minted_by="user:mallory",
+            mint_approval_id=pending.value.approval_id,
+        )
+
+    token = xa.mint_token(
+        "sf-quotebot",
+        "rest",
+        minted_by="user:alice",
+        mint_approval_id=pending.value.approval_id,
+    )
+    assert agent_for_token(token, "rest").id == "sf-quotebot"
+
+
+def test_mint_approval_requires_current_credential_generation(tmp_path):
+    _enroll()
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as exc:
+        xa.mint_token("sf-quotebot", "rest")
+    stale_id = exc.value.approval_id
+    from maverick.agent_trust import put_agent
+    from maverick.world_model import WorldModel
+
+    current = lookup("sf-quotebot")
+    entry = xa._entry_from_agent(current)
+    entry["rest_token"] = "out-of-band-rotation"
+    put_agent(entry)
+    WorldModel().decide_approval(
+        stale_id, "approved", decided_by="admin@corp.test"
+    )
+    with pytest.raises(xa.ExternalAgentsError, match="current credential"):
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=stale_id)
+
+    with pytest.raises(xa.MintApprovalPending) as fresh:
+        xa.mint_token("sf-quotebot", "rest")
+    WorldModel().decide_approval(
+        fresh.value.approval_id, "approved", decided_by="admin@corp.test"
+    )
+    token = xa.mint_token(
+        "sf-quotebot", "rest", mint_approval_id=fresh.value.approval_id
+    )
+    assert agent_for_token(token, "rest").id == "sf-quotebot"
+
+
 def test_record_run_lands_on_the_operating_record():
     _enroll()
     out = xa.record_run("sf-quotebot", {
@@ -279,14 +377,50 @@ def test_screen_parks_an_approval_at_the_floor():
                         detail="issue the renewal contract", risk="high")
     assert verdict["allowed"] is False
     assert verdict["requires_approval"] is True
-    status = xa.approval_status(verdict["approval_id"])
+    status = xa.approval_status(
+        "sf-quotebot",
+        verdict["approval_id"],
+        expected_binding_sha256=verdict["approval_binding_sha256"],
+    )
     assert status["status"] == "pending" and status["risk"] == "high"
+    assert status["approval_binding_sha256"] == verdict["approval_binding_sha256"]
     from maverick.world_model import WorldModel
     approval = WorldModel().get_approval(verdict["approval_id"])
     assert approval.requested_by == "agent:sf-quotebot"
     assert approval.provenance == "external_agents"
     with pytest.raises(xa.ExternalAgentsError):
-        xa.approval_status(999999)
+        xa.approval_status("sf-quotebot", 999999)
+
+
+def test_screen_approval_poll_is_owner_scoped_and_rejects_stale_binding():
+    _enroll(max_risk="high")
+    xa.enroll(
+        "other-agent",
+        "custom",
+        description="other",
+        owner="other@corp.test",
+        department="sales",
+        max_risk="high",
+        max_dollars=5.0,
+    )
+    verdict = xa.screen("sf-quotebot", "send_contract", risk="high")
+
+    with pytest.raises(xa.ExternalAgentsError, match="unknown approval"):
+        xa.approval_status("other-agent", verdict["approval_id"])
+    with pytest.raises(xa.ApprovalBindingMismatch, match="binding changed"):
+        xa.approval_status(
+            "sf-quotebot",
+            verdict["approval_id"],
+            expected_binding_sha256="0" * 64,
+        )
+
+    current = xa.approval_status(
+        "sf-quotebot",
+        verdict["approval_id"],
+        expected_binding_sha256=verdict["approval_binding_sha256"],
+    )
+    assert current["target_sha256"]
+    assert current["parameters_sha256"]
 
 
 def test_screen_fails_closed_on_scanner_error_and_shield_block():
@@ -727,6 +861,195 @@ def test_execute_read_runs_immediately_and_is_audited(monkeypatch):
     assert fired[0]["outcome"] == "executed"
 
 
+def test_revocation_winning_final_fence_blocks_direct_provider_call(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll()
+    from maverick import governed_actions
+    from maverick.agent_trust import lookup, set_revoked
+    from maverick.authority_effects import authority_effect_fence
+
+    prepared = threading.Event()
+    real_record = governed_actions.record_tool_lineage
+
+    def observe_prepare(*args, **kwargs):
+        result = real_record(*args, **kwargs)
+        if kwargs.get("phase") == "prepare":
+            prepared.set()
+        return result
+
+    monkeypatch.setattr(governed_actions, "record_tool_lineage", observe_prepare)
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        with authority_effect_fence():
+            future = executor.submit(
+                xa.execute,
+                "sf-quotebot",
+                {
+                    "connector": "fakecrm",
+                    "op": "get",
+                    "path": "/opportunities",
+                },
+            )
+            assert prepared.wait(5), "execution did not reach its provider fence"
+            # Same-thread nesting is intentional: the global fence must be
+            # re-entrant while the trust store keeps its own inner lock.
+            assert set_revoked("sf-quotebot", True) is True
+            assert lookup("sf-quotebot").revoked is True
+        verdict = future.result(timeout=10)
+    finally:
+        executor.shutdown(wait=True)
+
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "revoked"
+    assert conn.reads == []
+
+
+def test_credential_rotation_winning_claim_fence_voids_approved_commit(
+    monkeypatch,
+):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    from maverick.authority_effects import authority_effect_fence
+    from maverick.world_model import WorldModel
+
+    assert WorldModel().decide_approval(
+        parked["approval_id"], "approved", decided_by="admin@corp.test"
+    ) is True
+    claiming = threading.Event()
+    real_claim = xa._claim_execution
+
+    def observe_claim(agent_id, execution_id):
+        claiming.set()
+        return real_claim(agent_id, execution_id)
+
+    monkeypatch.setattr(xa, "_claim_execution", observe_claim)
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        with authority_effect_fence():
+            future = executor.submit(
+                xa.execute_commit,
+                "sf-quotebot",
+                parked["execution_id"],
+                _write_request(),
+            )
+            assert claiming.wait(5), "commit did not reach its claim fence"
+            rotated = xa.mint_token("sf-quotebot", "rest")
+            assert agent_for_token(rotated, "rest").id == "sf-quotebot"
+        verdict = future.result(timeout=10)
+    finally:
+        executor.shutdown(wait=True)
+
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "approval_mismatch"
+    assert verdict["status"] == "denied"
+    assert conn.writes == []
+
+
+def test_provider_boundary_holds_fence_until_effect_returns(monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    mutation_done = threading.Event()
+
+    class _BlockingConn(_FakeConn):
+        def read(self, params):
+            self.reads.append(dict(params))
+            entered.set()
+            assert release.wait(10), "test did not release provider boundary"
+            return "42 open opportunities"
+
+    conn = _wire_fakecrm(monkeypatch, _BlockingConn())
+    _enroll()
+    from maverick.agent_trust import set_revoked
+
+    def revoke():
+        try:
+            return set_revoked("sf-quotebot", True)
+        finally:
+            mutation_done.set()
+
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        execute_future = executor.submit(
+            xa.execute,
+            "sf-quotebot",
+            {"connector": "fakecrm", "op": "get", "path": "/opportunities"},
+        )
+        assert entered.wait(5), "provider call did not start"
+        revoke_future = executor.submit(revoke)
+        assert not mutation_done.wait(0.25), (
+            "trust mutation crossed the live provider authority fence"
+        )
+        release.set()
+        verdict = execute_future.result(timeout=10)
+        assert revoke_future.result(timeout=10) is True
+    finally:
+        release.set()
+        executor.shutdown(wait=True)
+
+    assert verdict["status"] == "executed"
+    assert conn.reads == [{"path": "/opportunities"}]
+    assert mutation_done.is_set()
+
+
+def test_server_runtime_revalidator_blocks_both_execution_paths(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    context = "c" * 64
+    read_request = {
+        "connector": "fakecrm",
+        "op": "get",
+        "path": "/opportunities",
+        "_runtime_context_sha256": context,
+    }
+
+    direct = xa.execute(
+        "sf-quotebot", read_request, runtime_revalidator=lambda: False
+    )
+    assert direct["allowed"] is False
+    assert direct["rule"] == "runtime_authority_changed"
+    assert conn.reads == []
+
+    write_request = _write_request(_runtime_context_sha256=context)
+    parked = xa.execute("sf-quotebot", write_request)
+    from maverick.world_model import WorldModel
+
+    assert WorldModel().decide_approval(
+        parked["approval_id"], "approved", decided_by="admin@corp.test"
+    ) is True
+    committed = xa.execute_commit(
+        "sf-quotebot",
+        parked["execution_id"],
+        write_request,
+        runtime_revalidator=lambda: False,
+    )
+    assert committed["allowed"] is False
+    assert committed["rule"] == "runtime_authority_changed"
+    assert committed["status"] == "denied"
+    assert conn.writes == []
+
+
+def test_caller_supplied_runtime_digest_without_server_recheck_is_denied(
+    monkeypatch,
+):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll()
+
+    verdict = xa.execute(
+        "sf-quotebot",
+        {
+            "connector": "fakecrm",
+            "op": "get",
+            "path": "/opportunities",
+            "_runtime_context_sha256": "d" * 64,
+        },
+    )
+
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "runtime_authority_unavailable"
+    assert conn.reads == []
+
+
 def test_execute_denies_when_shield_blocks_the_request(monkeypatch):
     """PLATFORM_IMPROVEMENT_AUDIT.md W2-32: _screen_execute_request checked
     `getattr(verdict, "blocked", False)`, which is never a real ShieldVerdict
@@ -783,6 +1106,15 @@ def test_write_parks_a_digest_bound_approval(monkeypatch):
     assert approval is not None and approval.status == "pending"
     assert approval.provenance == "external_agents"
     assert approval.requested_by == "agent:sf-quotebot"
+    from maverick.approval_cards import decode_approval_detail
+    card = decode_approval_detail(approval.detail)
+    assert card is not None
+    assert card["action"] == approval.action
+    parked_digest = xa._load_sidecar()["sf-quotebot"]["executions"][
+        verdict["execution_id"]
+    ]["digest"]
+    assert card["inputs"] == {"request_sha256": parked_digest}
+    assert card["consequences"]["irreversible"] is True
 
 
 def test_idempotent_replay_reconciles_crash_after_approval_creation(monkeypatch):
@@ -875,6 +1207,10 @@ def test_commit_digest_mismatch_voids_and_counts_toward_containment(
     _enroll(max_risk="high")
     parked = xa.execute("sf-quotebot", _write_request())
     eid = parked["execution_id"]
+    from maverick.world_model import WorldModel
+    WorldModel().decide_approval(
+        parked["approval_id"], "approved", decided_by="admin@corp.test"
+    )
     assert xa._load_sidecar()["sf-quotebot"].get("denials", []) == []
     verdict = xa.execute_commit(
         "sf-quotebot", eid, _write_request(body={"stage": "closed-lost"}))

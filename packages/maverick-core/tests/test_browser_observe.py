@@ -10,6 +10,7 @@ uses (``.title()``, ``.url``, ``.accessibility.snapshot()``, ``query_selector_al
 from __future__ import annotations
 
 import json
+import logging
 
 from maverick.safety import action_gate
 from maverick.tools import browser
@@ -155,3 +156,68 @@ def test_dispatch_routes_observe_to_handler():
     )
     data = json.loads(out)
     assert data["title"] == "Dispatch" and data["url"] == "https://example.com/d"
+
+
+def test_observe_and_current_url_redact_flow_decision_tokens(caplog):
+    token = "eyJ" + "A" * 32 + "." + "b" * 64
+    page = _FakePage(
+        title=f"Review {token}",
+        url=f"https://example.com/flow/approve?token={token}",
+        ax={"role": "WebArea", "name": token},
+        els=[_FakeEl(tag="a", attrs={"href": f"?token={token}"}, text=token)],
+    )
+
+    with caplog.at_level(logging.INFO, logger=browser.__name__):
+        observed = browser._browser_observe(page)
+    current = browser._dispatch_browser_action(
+        "current_url", session=None, page=page, args={}, timeout=30_000,
+        allow_hosts=(),
+    )
+
+    assert token not in observed + current + caplog.text
+    assert "REDACTED:lightwork_flow_approval_token" in observed + current
+
+
+def test_extract_text_redacts_lightwork_tokens():
+    token = "lw-rest-" + "C" * 43
+
+    class _Body:
+        @staticmethod
+        def inner_text():
+            return f"connection capability: {token}"
+
+    class _Page:
+        @staticmethod
+        def query_selector(_selector):
+            return _Body()
+
+    result = browser._browser_extract_text(_Page(), {})
+
+    assert token not in result
+    assert "REDACTED:lightwork_agent_token" in result
+
+
+def test_observe_redacts_tokens_from_degraded_exception_logs(caplog):
+    token = "eyJ" + "D" * 32 + "." + "e" * 64
+
+    class _Broken:
+        url = "https://example.com/"
+
+        @staticmethod
+        def title():
+            return "Review"
+
+        class accessibility:  # noqa: N801 - mimic Playwright attribute
+            @staticmethod
+            def snapshot():
+                raise RuntimeError(f"approval failed for {token}")
+
+        @staticmethod
+        def query_selector_all(_selector):
+            raise RuntimeError(f"selector failed for {token}")
+
+    with caplog.at_level(logging.DEBUG, logger=browser.__name__):
+        browser._browser_observe(_Broken())
+
+    assert token not in caplog.text
+    assert "REDACTED:lightwork_flow_approval_token" in caplog.text

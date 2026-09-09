@@ -362,6 +362,7 @@ class _Scanner:
 def _run(job: Path) -> dict:
     request, key, _home = _validate_job(job)
     from . import crypto_at_rest as crypto
+    from . import workspace_recovery
     from .paths import current_tenant_id_strict, data_dir
 
     if current_tenant_id_strict() != request["tenant"]:
@@ -370,7 +371,13 @@ def _run(job: Path) -> dict:
     sys.addaudithook(_deny_external)
     with backup.recovery_scope(root, request["tenant"], key, max_expanded_bytes=MAX_EXPANDED_BYTES):
         keys = _escrow(_read(job / "custody.zip", MAX_CUSTODY_BYTES), request["tenant"])
-        backup.restore_backup(job / "snapshot.tgz", replace_existing=True)
+        backup.restore_backup(
+            job / "snapshot.tgz",
+            replace_existing=True,
+            _record_decryptor=workspace_recovery._record_decryptor_from_keys(
+                keys, request["tenant"]
+            ),
+        )
     custody = job / "encryption-keys"
     custody.mkdir(mode=0o700)
     file_lock.ensure_private_directory(custody)

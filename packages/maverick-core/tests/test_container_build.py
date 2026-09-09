@@ -1,6 +1,8 @@
 """container_build: sandbox-mediated, workspace-confined docker build."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from maverick.tools.container_build import container_build
 
 
@@ -29,10 +31,22 @@ def _ctx(tmp_path, name="ctx"):
     return name  # workspace-relative
 
 
+def _approve_as_human(monkeypatch):
+    import maverick.safety.consent as consent
+
+    monkeypatch.setattr(
+        consent,
+        "require_consent",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            granted=True, source="dashboard", actor="user:reviewer",
+        ),
+    )
+
+
 def test_build_issues_validated_docker_command(tmp_path, monkeypatch):
     # This test is about command construction, not the consent gate (covered
-    # below); grant consent explicitly so the secure default can't veto it.
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    # below); model one explicit human decision around the effect.
+    _approve_as_human(monkeypatch)
     sb = _FakeSandbox(tmp_path)
     out = container_build(sb).fn(
         {
@@ -49,7 +63,7 @@ def test_build_issues_validated_docker_command(tmp_path, monkeypatch):
 
 
 def test_build_reports_failure(tmp_path, monkeypatch):
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    _approve_as_human(monkeypatch)
     sb = _FakeSandbox(tmp_path, _Res(code=1, out="step 2/3", err="boom"))
     out = container_build(sb).fn(
         {"op": "build", "context": _ctx(tmp_path), "tag": "x:y"}
@@ -114,7 +128,41 @@ def test_consent_denial_blocks_docker_build(tmp_path, monkeypatch):
         {"op": "build", "context": _ctx(tmp_path), "tag": "x:y"}
     )
 
-    assert "Container build denied by consent policy" in out
+    assert "container build was not approved" in out
+    assert sb.cmd is None
+
+
+def test_silent_auto_approve_does_not_start_docker_build(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    sb = _FakeSandbox(tmp_path)
+
+    out = container_build(sb).fn(
+        {"op": "build", "context": _ctx(tmp_path), "tag": "x:y"}
+    )
+
+    assert "container build was not approved" in out
+    assert sb.cmd is None
+
+
+def test_context_change_after_approval_blocks_docker(tmp_path, monkeypatch):
+    import maverick.safety.consent as consent
+
+    context_name = _ctx(tmp_path)
+    dockerfile = tmp_path / context_name / "Dockerfile"
+    sb = _FakeSandbox(tmp_path)
+
+    def approve(*_args, **_kwargs):
+        dockerfile.write_text("FROM scratch\nLABEL changed=yes\n")
+        return SimpleNamespace(
+            granted=True, source="dashboard", actor="user:reviewer",
+        )
+
+    monkeypatch.setattr(consent, "require_consent", approve)
+    out = container_build(sb).fn({
+        "op": "build", "context": context_name, "tag": "reviewed:test",
+    })
+
+    assert "target or approval authority changed" in out
     assert sb.cmd is None
 
 

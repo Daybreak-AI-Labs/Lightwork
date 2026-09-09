@@ -135,7 +135,7 @@ _MAX_CONTRACT_BYTES = 1024 * 1024
 _MAX_CONTRACT_DEPTH = 64
 _MAX_CONTRACT_NODES = 65_536
 _MONEY_PATHS = frozenset({("budget", "limit"), ("budget", "spent"), ("cost", "amount")})
-_WORK_OPTIONAL_EXPORT_FIELDS = frozenset({"objective", "contract_binding"})
+_WORK_OPTIONAL_EXPORT_FIELDS = frozenset({"objective", "contract_binding", "due_at"})
 
 
 class PlatformContractError(ValueError):
@@ -381,6 +381,8 @@ def _validate_work_item(record: dict[str, Any]) -> None:
         record["parent_work_item_id"] = _text(
             record["parent_work_item_id"], "parent_work_item_id", 128,
         )
+    if record.get("due_at") is not None:
+        record["due_at"] = _timestamp(record["due_at"], "due_at")
 
 
 def _validate_action_intent(record: dict[str, Any]) -> None:

@@ -6,11 +6,14 @@ from __future__ import annotations
 
 def test_steps_list_is_ordered_and_unique():
     from maverick_installer import wizard
-    assert len(wizard.STEPS) == 35
+    assert len(wizard.STEPS) == 38
     keys = [k for k, _ in wizard.STEPS]
     assert keys[0] == "deployment"
     assert keys[-1] == "a2a"
-    assert keys[21:24] == ["assessments", "security_suite", "advanced"]
+    assert keys[8] == "research_execution"
+    assert keys[9] == "candidate_promotion"
+    assert keys[10] == "knowledge_access"
+    assert keys[24:27] == ["assessments", "security_suite", "advanced"]
     assert len(set(keys)) == len(keys)  # no dupes
 
 
@@ -19,14 +22,14 @@ def test_steps_list_is_ordered_and_unique():
 def test_step_indicator_formats_step_n_of_m():
     from maverick_installer import wizard
     out = wizard._step_indicator(3)
-    assert "Step 3/35" in out
+    assert "Step 3/38" in out
     assert wizard.STEPS[2][1] in out  # the label
 
 
 def test_step_indicator_includes_breadcrumb_of_done_labels():
     from maverick_installer import wizard
     out = wizard._step_indicator(3, done=["Deployment", "Providers"])
-    assert "Step 3/35" in out
+    assert "Step 3/38" in out
     assert "Deployment" in out
     assert "Providers" in out
 
@@ -34,7 +37,7 @@ def test_step_indicator_includes_breadcrumb_of_done_labels():
 def test_step_indicator_no_breadcrumb_when_done_empty():
     from maverick_installer import wizard
     out = wizard._step_indicator(1, done=[])
-    assert "Step 1/35" in out
+    assert "Step 1/38" in out
     assert "›" not in out
 
 
@@ -70,6 +73,9 @@ def test_run_prints_step_indicators(monkeypatch):
     monkeypatch.setattr(wizard, "pick_signed_skills", dict)
     monkeypatch.setattr(wizard, "pick_budget", dict)
     monkeypatch.setattr(wizard, "pick_sandbox", dict)
+    monkeypatch.setattr(wizard, "pick_research_execution", lambda: {"enable": False})
+    monkeypatch.setattr(wizard, "pick_candidate_promotion", lambda: {"enable": False})
+    monkeypatch.setattr(wizard, "pick_knowledge_access", lambda: {"enable": True})
     monkeypatch.setattr(wizard, "pick_capabilities", dict)
     monkeypatch.setattr(wizard, "pick_ekko", lambda: {"enable": False})
     monkeypatch.setattr(wizard, "pick_security_suite", dict)
@@ -101,9 +107,9 @@ def test_run_prints_step_indicators(monkeypatch):
     assert rc == 0
 
     out = wizard.console.file.getvalue()
-    assert "Step 1/35" in out
-    assert "Step 3/35" in out
-    assert "Step 23/35 Security & GRC" in out
-    assert "Step 35/35" in out
+    assert "Step 1/38" in out
+    assert "Step 3/38" in out
+    assert "Step 26/38 Security & GRC" in out
+    assert "Step 38/38" in out
     # Breadcrumb of earlier answers trails later steps.
     assert "Deployment" in out

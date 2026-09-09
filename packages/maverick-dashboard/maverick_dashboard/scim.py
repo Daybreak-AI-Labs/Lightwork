@@ -167,8 +167,11 @@ def _store_path() -> Path:
 
 def _locked_users():
     """Serialize the entire user-store load/modify/save across all workers."""
+    from maverick.authority_effects import authority_effect_fence
+
     ensure_private_directory(maverick_home())
     stack = ExitStack()
+    stack.enter_context(authority_effect_fence())
     stack.enter_context(_USERS_LOCK)
     stack.enter_context(cross_process_lock(_store_path()))
     return stack
@@ -789,8 +792,11 @@ _GROUPS_LOCK = threading.Lock()
 
 
 def _locked_groups():
+    from maverick.authority_effects import authority_effect_fence
+
     ensure_private_directory(maverick_home())
     stack = ExitStack()
+    stack.enter_context(authority_effect_fence())
     stack.enter_context(_GROUPS_LOCK)
     stack.enter_context(cross_process_lock(_groups_path()))
     return stack

@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..approval_cards import ApprovalCardError
 from ..budget import BudgetExceeded
 from ..killswitch import Halted
 from .ir import (
@@ -505,6 +506,10 @@ class FlowRunResult:
     error: str = ""
 
 
+class FlowApprovalStale(ApprovalCardError):
+    """The authority behind a paused approval changed before an effect."""
+
+
 # Executor signatures (injected):
 #   agent_fn(node, rendered_brief, data) -> (result: str, outcome: float | None)
 #   action_fn(node, rendered_params, data) -> (result, outcome: float | None)
@@ -647,7 +652,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
-        except (BudgetExceeded, Halted):
+        except (BudgetExceeded, Halted, FlowApprovalStale):
             raise
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
@@ -1052,7 +1057,7 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
             return
         try:
             cursor = _run_node(node, data, ctx)
-        except (_Pause, _Reject, _NodeError, _Indeterminate):
+        except (_Pause, _Reject, _NodeError, _Indeterminate, FlowApprovalStale):
             raise
         except Exception as e:
             raise _NodeError(node.id, e) from e
@@ -1156,7 +1161,7 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         return FlowRunResult(status=STATUS_INDETERMINATE, data=data,
                               error=_safe_error_text(e, limit=2000),
                               cursor=e.node_id)
-    except (BudgetExceeded, Halted):
+    except (BudgetExceeded, Halted, FlowApprovalStale):
         raise
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller
         return FlowRunResult(
@@ -1166,7 +1171,7 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
 
 
 __all__ = [
-    "run_flow", "render", "eval_condition", "FlowRunResult",
+    "run_flow", "render", "eval_condition", "FlowRunResult", "FlowApprovalStale",
     "STATUS_QUEUED", "STATUS_CLAIMED", "STATUS_RUNNING", "STATUS_RESUMING",
     "STATUS_COMPLETED", "STATUS_PAUSED_APPROVAL", "STATUS_PAUSED_DELAY",
     "STATUS_PAUSED_EVENT", "STATUS_REJECTED", "STATUS_FAILED", "STATUS_INDETERMINATE",

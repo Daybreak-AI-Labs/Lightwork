@@ -1,0 +1,778 @@
+"""Canonical classification of local state that can authorize work or spend.
+
+Backup comparison and bootstrap restore must agree on this list.  Keeping the
+classification pure (it receives the already-detected SQLite bit) avoids a
+dependency cycle with :mod:`maverick.backup` while still giving tests one
+closed registry to audit.
+"""
+from __future__ import annotations
+
+from pathlib import PurePosixPath
+
+# Tenant-local governed record stores whose restored rows do not yet have a
+# store-specific, authenticated reconciliation protocol.  These rows can feed
+# approvals, external delivery, regulated status, trust, or execution gates.
+# Keeping the mapping closed and exported lets an acceptance test compare it
+# with every literal GovernedRecordStore/_RecordStore declaration in source.
+GLOBAL_START_JSON_AUTHORITY_POLICIES = {
+    "ai_bank_mrm_packages": "bank_mrm_package_authority",
+    "ai_benchmark_cohort_reports": "benchmark_cohort_authority",
+    "ai_benchmark_contributions": "benchmark_contribution_authority",
+    "ai_business_intakes": "business_intake_authority",
+    "ai_discovery_sensor_observations": "sensor_observation_authority",
+    "ai_dynamic_risk_signals": "dynamic_risk_signal_authority",
+    "ai_dynamic_risk_snapshots": "dynamic_risk_snapshot_authority",
+    "ai_explanations": "explainability_authority",
+    "ai_insurability_profiles": "insurability_profile_authority",
+    "ai_inventory_assets": "ai_inventory_asset_authority",
+    "ai_inventory_runs": "ai_inventory_run_authority",
+    "ai_inventory_status": "ai_inventory_status_authority",
+    "ai_media_provenance": "media_provenance_authority",
+    "ai_policy_evaluations": "policy_evaluation_authority",
+    "ai_provider_cost_observations": "provider_cost_observation_authority",
+    "ai_provider_cost_receipts": "provider_cost_receipt_authority",
+    "ai_registry": "privacy_ai_registry_authority",
+    "ai_regulated_vertical_packages": "regulated_vertical_authority",
+    "ai_regulatory_notices": "regulatory_notice_authority",
+    "ai_regulatory_staleness": "regulatory_staleness_authority",
+    "ai_roi_assumptions": "roi_assumption_authority",
+    "ai_serious_incidents": "serious_incident_authority",
+    "assessment_evidence_proposals": "assessment_evidence_authority",
+    "data_map": "privacy_data_map_record_authority",
+    "dpa_reviews": "dpa_review_authority",
+    "dsar_requests": "dsar_request_authority",
+    "eu_ai_article_73_incidents": "eu_incident_authority",
+    "eu_ai_conformity_evidence_bindings": "conformity_evidence_authority",
+    "eu_ai_conformity_readiness_cases": "conformity_readiness_authority",
+    "eu_annex_iv": "eu_annex_iv_authority",
+    "eu_art43_routes": "eu_conformity_route_authority",
+    "eu_deployer": "eu_deployer_authority",
+    "eu_fria": "eu_fria_authority",
+    "eu_gpai": "eu_gpai_authority",
+    "eu_ifu": "eu_instruction_for_use_authority",
+    "eu_pmm_plans": "eu_post_market_monitoring_authority",
+    "eu_registrations": "eu_registration_authority",
+    "finance_anomaly_cases": "finance_anomaly_case_authority",
+    "finance_screening_cases": "finance_screening_case_authority",
+    "model_risk_portfolio_snapshots": "model_risk_portfolio_authority",
+    "outcome_value_evidence": "outcome_value_evidence_authority",
+    "paper_reviews": "paper_review_authority",
+    "privacy_incidents": "privacy_incident_authority",
+    "red_team_campaign_product_drifts": "red_team_drift_authority",
+    "red_team_campaign_product_reports": "red_team_report_authority",
+    "ropa": "ropa_authority",
+    "security_audits": "security_audit_authority",
+    "security_clock_packs": "security_clock_authority",
+    "security_controls": "security_control_authority",
+    "security_evidence": "security_evidence_authority",
+    "security_incidents": "security_incident_authority",
+    "security_poam": "security_poam_authority",
+    "security_policies": "security_policy_authority",
+    "security_risks": "security_risk_authority",
+    "security_vendors": "security_vendor_authority",
+    "vendor_renewal_observations": "vendor_renewal_observation_authority",
+}
+
+# These customer records are part of the supported application-level restore
+# proof.  Backup validation authenticates/decrypts their bounded schemas and
+# verifies their cross-record links before publication, so they are protected
+# without creating an additional external-work blocker.
+APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES = {
+    "ai_vendor_risk": "validated_ai_vendor_risk_record",
+    "vendor_management": "validated_vendor_record",
+}
+
+# The two identity-governance factories use a bounded ``sink`` f-string rather
+# than literal namespace declarations.  Both supported sinks are enumerated so
+# restored request/outcome delivery state cannot fall through the literal-store
+# completeness check.
+DYNAMIC_JSON_AUTHORITY_POLICIES = {
+    "identity_governance_alert_outcomes": "identity_delivery_outcome_authority",
+    "identity_governance_alert_requests": "identity_change_request",
+    "identity_governance_dynamic_risk_outcomes": (
+        "identity_delivery_outcome_authority"
+    ),
+    "identity_governance_dynamic_risk_requests": "identity_change_request",
+}
+
+
+def _contains(parts: tuple[str, ...], *sequence: str) -> bool:
+    width = len(sequence)
+    return any(parts[index:index + width] == sequence for index in range(len(parts) - width + 1))
+
+
+def authority_policy(relative: str, *, is_sqlite: bool) -> str | None:  # noqa: C901
+    """Return the one recovery policy for ``relative``, or ``None``.
+
+    Paths are archive-style POSIX paths and comparison is case-insensitive so
+    a snapshot created on a case-sensitive host cannot bypass Windows recovery
+    policy with a mixed-case namespace.  Unknown SQLite is deliberately still
+    protected and receives a blocking policy rather than becoming ordinary
+    data.
+    """
+    parts = tuple(part.casefold() for part in PurePosixPath(relative).parts)
+    if not parts:
+        return None
+    name = parts[-1]
+
+    # A file that is itself SQLite remains authority even if its custom name
+    # resembles a lock sidecar.  Ordinary lock files carry no durable state.
+    if not is_sqlite and name.endswith(".lock"):
+        return None
+
+    if (
+        _contains(parts, "connections", "connections.sealed")
+        or _contains(parts, "connections", "oauth-setup.sealed")
+        or _contains(parts, "oauth", "tokens.sealed")
+        or _contains(parts, "partner", "tenants.sealed")
+        or _contains(parts, "privacy_automation", "evidence-keys.sealed")
+    ):
+        return "credential"
+    if (
+        _contains(parts, "partner", "tenants.json")
+        or _contains(parts, "partner", "tenants.json.migrated-plaintext")
+    ):
+        return "plaintext_credential_residue"
+    # Browser-vault keys do not use a ``.key`` suffix, so snapshot key filters
+    # cannot identify them.  Treat every file below the vault namespace as
+    # credential authority; bootstrap either needs authenticated retained
+    # custody or must explicitly discard the restored vault before publication.
+    if "vault" in parts[:-1]:
+        return "browser_vault_credential_authority"
+    # This deployment HMAC key normally lives outside a named tenant workspace.
+    # Classifying the path still fails closed for legacy or crafted snapshots
+    # that place a copy inside the workspace archive.
+    if _contains(parts, "keys", "anon.salt"):
+        return "privacy_identity_key_authority"
+    if _contains(parts, "keys", "dek.wrapped"):
+        return "wrapped_tenant_dek"
+    tenant_scoped_root = len(parts) == 1 or (
+        len(parts) >= 3 and parts[-3] == "tenants"
+    )
+    if tenant_scoped_root and name in {
+        "config.toml", "runtime-overrides.toml", "roles.toml",
+    }:
+        return {
+            "config.toml": "tenant_configuration_authority",
+            "runtime-overrides.toml": "runtime_override_authority",
+            "roles.toml": "role_instruction_authority",
+        }[name]
+    if len(parts) == 1 and name in {
+        "dashboard-config.toml",
+        "dashboard-event-triggers.toml",
+        "dashboard-triggers.toml",
+    }:
+        return {
+            "dashboard-config.toml": "dashboard_configuration_authority",
+            "dashboard-event-triggers.toml": "event_trigger_scheduler_authority",
+            "dashboard-triggers.toml": "webhook_trigger_authority",
+        }[name]
+    if _contains(parts, "model_improvement", "training_receipts.ndjson"):
+        return "training_approval_authority"
+    if _contains(parts, "keys", "consent-experiments.key"):
+        return "consent_experiment_key_authority"
+    if "generated_tools" in parts[:-1]:
+        return "generated_tool_authority"
+    if "learned-skills" in parts[:-1]:
+        return "learned_skill_authority"
+    if "skills" in parts[:-1]:
+        return "skill_instruction_authority"
+    if name == "reflexions.ndjson":
+        return "reflexion_instruction_authority"
+    if name == "factory_corrections.ndjson":
+        return "factory_prompt_authority"
+    if name == "jit_experience.ndjson":
+        return "jit_selection_authority"
+    if name == "learning_cache.json":
+        return "learned_result_authority"
+    if "dreams" in parts[:-1] and name in {
+        "insights.ndjson", "rehearsals.ndjson", "user_notes.ndjson",
+    }:
+        return "dream_instruction_authority"
+    if "fleet-memory" in parts[:-1]:
+        return (
+            "fleet_agent_identity_authority"
+            if name == "agents.ndjson"
+            else "external_learning_input_authority"
+        )
+    if "event-input" in parts[:-1]:
+        return "event_input_authority"
+    if _contains(parts, "assessments", "templates.json"):
+        return "assessment_instruction_authority"
+    if _contains(parts, "assessments", "register.json"):
+        return "assessment_review_authority"
+    if "custom_templates" in parts[:-1]:
+        return "assessment_template_authority"
+    if "task_graphs" in parts[:-1]:
+        return "task_graph_authority"
+    if "templates" in parts[:-1]:
+        return "goal_template_authority"
+    if "forms" in parts[:-1]:
+        return "form_event_authority"
+    if "repl" in parts[:-1]:
+        return "repl_execution_authority"
+    if "adapters" in parts[:-1]:
+        return "adapter_runtime_authority"
+    if _contains(parts, "privacy", "clause_playbook.json"):
+        return "clause_policy_authority"
+    if _contains(parts, "registers", "licenses.json"):
+        return "regulatory_license_authority"
+    if _contains(parts, "content_provenance", "manifest_attestations.ndjson"):
+        return "content_provenance_authority"
+    if _contains(parts, "model_risk_assurance", "pack_attestations.ndjson"):
+        return "model_risk_pack_trust_authority"
+    if _contains(parts, "ai_evidence_gateway", "interaction_receipts.ndjson"):
+        return "evidence_delivery_receipt_authority"
+    if "ai_evidence_gateway" in parts[:-1] and (
+        "interaction_receipts" in parts[:-1]
+        or name == "interaction_receipts.index-state.json"
+    ):
+        return "evidence_delivery_receipt_authority"
+    if "ai_evidence_gateway" in parts[:-1] and (
+        "assurance_packets" in parts[:-1]
+        or name == "assurance_packets.ndjson"
+        or name == "assurance_packets.index-state.json"
+    ):
+        return "evidence_trust_authority"
+    if "task-file-recovery" in parts[:-1]:
+        return "task_file_recovery"
+
+    if _contains(parts, "flows", "runs"):
+        return "flow_run"
+    if _contains(parts, "flows", "published"):
+        return (
+            "flow_publication_history"
+            if name.endswith(".revoked")
+            else "flow_publication"
+        )
+    if _contains(parts, "flows", "idempotency"):
+        return "flow_idempotency"
+    if _contains(parts, "llm_gateway_team_budget", "team_budget.json"):
+        return "llm_team_budget"
+    if _contains(parts, "mcp_sidecar", "call_budget.json"):
+        return "mcp_call_budget"
+    if _contains(parts, "browser", "state.json"):
+        return "browser_session"
+    if _contains(parts, "keys", "plugin_ca", "revocations.json"):
+        return "plugin_ca_revocations"
+    if _contains(parts, "unified-audit", "custody-state.json"):
+        return "unified_audit_delivery_state"
+    if _contains(parts, "governance_agents", "reference-custody-keyring.json"):
+        return "governance_reference_keyring"
+    if _contains(parts, "governance_inventory", "integrity.key"):
+        return "governance_inventory_key"
+    if _contains(parts, "tech_risk_compliance", "grc-studio", "integrity.key"):
+        return "grc_studio_integrity_key"
+    if _contains(parts, "harness", "addenda.json"):
+        return "harness_instruction_authority"
+    if "harness-refine" in parts[:-1] and name in {
+        "proposals.json", "refinements.json",
+    }:
+        return "harness_refinement_authority"
+
+    exact_names = {
+        "external_agents.json": "external_agents",
+        "agent_trust.json": "agent_trust",
+        "capability_revocations.json": "capability_revocations",
+        "external-replay.json": "external_replay",
+        "channel_federation_outbox.json": "federation_outbox",
+        "channel_replay.json": "federation_replay",
+        "channel_rate.json": "federation_rate",
+        "consent.ledger": "consent_authority",
+        "consent.ledger.key": "consent_authority_key",
+        "handoff_nonces.json": "handoff_nonce",
+        "provider_spend.json": "provider_spend",
+        "provider_spend.json.required": "provider_spend_required",
+        "tenant_registry.json": "tenant_registry",
+        "dashboard-owner.json": "dashboard_owner",
+        "saml-consumed-assertions.json": "saml_replay",
+        "session-revocations.json": "session_revocation",
+        "oidc-subjects.json": "oidc_subject_directory",
+        "oidc-retired-subjects.json": "oidc_subject_tombstone",
+        "dashboard-users.json": "dashboard_user_roles",
+        "dashboard-custom-roles.json": "dashboard_custom_roles",
+        "dashboard-tenant-roles.json": "dashboard_tenant_roles",
+        "dashboard-invites.json": "dashboard_invites",
+        "dashboard-user-suites.json": "dashboard_suite_grants",
+        "dashboard-session.key": "dashboard_session_secret",
+        "scim_users.json": "scim_user_directory",
+        "scim_groups.json": "scim_group_directory",
+        "scim_groups.audit-outbox.json": "scim_audit_delivery",
+        "push_devices.json": "push_device_registry",
+        "push_deliveries.json": "push_delivery_ledger",
+        "privacy-discovery-remediation-scheduler.json": "privacy_remediation_scheduler",
+        "privacy-notice-publication-scheduler.json": "privacy_notice_scheduler",
+        "trusted_evidence_registry.json": "trusted_evidence_registry",
+        "plugins.lock.json": "plugin_lock",
+        "config_proposals.json": "config_proposal",
+        "control_plane_timeboxes.json": "control_plane_timebox",
+        "license.json": "license_entitlement",
+        "voice_profiles.json": "voice_identity_profile",
+        "marketplace_federation_imports.json": "marketplace_federation_replay",
+        "shield_rules.json": "shield_rule_authority",
+        "calibration_verdict.json": "calibration_authority",
+        "self_harness_calibration_receipt.json": "self_harness_calibration_authority",
+        "budget_tuning.json": "learned_budget_authority",
+        "speculative_ledger.json": "speculative_spend_authority",
+        "router_bandit.json": "provider_routing_authority",
+        "planning_stats.json": "planning_budget_authority",
+        "guardrails.json": "learned_guardrail_authority",
+        "voice_macros.json": "voice_macro_authority",
+        "calibration.ndjson": "calibration_evidence_authority",
+        "consequence_cards.ndjson": "earned_autonomy_evidence",
+        "consequences.ndjson": "earned_autonomy_outcomes",
+        "outcome_links.ndjson": "earned_autonomy_outcome_links",
+        "earned_autonomy.ndjson": "earned_autonomy_ledger",
+        "self_improvement.json": "self_improvement_authority",
+        "self_improvement.json.journal": "self_improvement_authority",
+        "supply_chain_pins.json": "supply_chain_trust_authority",
+        "dashboard-ui-visibility.json": "dashboard_visibility_authority",
+        "dashboard-workspace-tenants.json": "dashboard_workspace_authority",
+        "computer_calibration.json": "computer_action_calibration_authority",
+        "procedural_memory.json": "procedural_instruction_authority",
+        "role_stats.json": "role_routing_authority",
+        "skill_stats.json": "skill_ranking_authority",
+        "skill_embeddings.json": "skill_retrieval_authority",
+        "compaction_hybrid.json": "compaction_strategy_authority",
+        "compaction_hybrid_weights.json": "compaction_strategy_authority",
+        "codebook.json": "coordination_codec_authority",
+        "token_codebook.json": "coordination_codec_authority",
+        "tool_cache_snapshot.jsonl": "external_read_cache_authority",
+        "release_canary.json": "release_gate_authority",
+        "factory_outcomes.ndjson": "factory_learning_input_authority",
+        "trajectories.ndjson": "trajectory_learning_input_authority",
+        "compaction_stream.json": "compaction_prompt_state_authority",
+        "compaction_ledger.json": "compaction_selection_authority",
+        "redteam_results.json": "red_team_certification_authority",
+        "reliability_cert.json": "reliability_certification_authority",
+        "tool_outcomes.json": "tool_outcome_learning_authority",
+    }
+    exact = exact_names.get(name)
+    if exact is not None:
+        return exact
+    if name.startswith("budget_receipts."):
+        return "budget_receipt"
+    if name == "retention.index" and "draft-recovery" in parts[:-1]:
+        return "draft_recovery_retention"
+    if "flows" in parts[:-1] and name in {
+        "evolution.ndjson", "node-outcomes.ndjson", "node-tools.ndjson",
+    }:
+        return "flow_learning_input_authority"
+
+    namespace_policies = {
+        **GLOBAL_START_JSON_AUTHORITY_POLICIES,
+        **APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES,
+        **DYNAMIC_JSON_AUTHORITY_POLICIES,
+        "usage": "usage_ledger",
+        "grc_sync_outbound": "grc_delivery",
+        "grc_outbound_sync_states": "grc_delivery_state",
+        "grc_outbound_sync_events": "grc_delivery_history",
+        "vendor_onboarding": "vendor_operation",
+        "evidence_graph": "evidence_trust_authority",
+        "incident_attachment_metadata": "incident_attachment_authority",
+        "ai_evidence_conversations": "evidence_delivery_state_authority",
+        "ai_evidence_receipts": "evidence_delivery_receipt_authority",
+        "ai_evidence_policy_snapshots": "evidence_policy_snapshot_authority",
+        "model_risk_observations": "model_risk_asset_authority",
+        "model_risk_declarations": "model_risk_declaration_authority",
+        "model_risk_evidence": "model_risk_evidence_authority",
+        "model_risk_incidents": "model_risk_incident_authority",
+        "model_drift_baselines": "model_drift_baseline_authority",
+        "ai_literacy_requirements": "literacy_requirement_authority",
+        "ai_literacy_assignments": "literacy_assignment_authority",
+        "ai_literacy_completions": "literacy_completion_authority",
+        "ai_literacy_waivers": "literacy_waiver_authority",
+        "ai_literacy_role_requirements": "literacy_role_requirement_authority",
+        "ai_literacy_role_assignments": "literacy_role_assignment_authority",
+        "ai_literacy_role_completions": "literacy_role_completion_authority",
+        "outcome_accounting": "outcome_accounting_authority",
+        "finance_screening_lists": "finance_screening_list_authority",
+        "finance_screening_list_metadata": "finance_screening_metadata_authority",
+        "dsar_fulfillment": "dsar_delivery_authority",
+        "discovery_containment_bindings": "containment_binding",
+        "discovery_containment_actions": "containment_action",
+        "provider_accounting_reviews": "provider_accounting_review",
+        "pilot_learning_exclusions": "learning_exclusion",
+        "identity_governance_scheduler": "identity_scheduler",
+        "identity_governance_change_coupling": "identity_change_delivery",
+        "identity_governance_purview_writeback": "identity_purview_writeback",
+        "identity_governance_authority_registry": "identity_authority_registry",
+        "red_team_schedules": "red_team_schedule",
+        "red_team_campaigns": "red_team_campaign",
+        "red_team_results": "red_team_result",
+        "ai_discovery_sensor_identities": "sensor_identity_authority",
+        "ai_evidence_packet_replays": "evidence_packet_replay_authority",
+        "ai_evidence_policies": "evidence_policy_authority",
+        "ai_evidence_policy_modes": "evidence_policy_mode_authority",
+        "ai_operational_policies": "operational_policy_authority",
+        "ai_policy_exceptions": "policy_exception_authority",
+        "ai_regulatory_impacts": "regulatory_impact_authority",
+        "ai_vendor_portal_invitations": "vendor_portal_identity_authority",
+        "ai_vendor_portal_submissions": "vendor_portal_submission_authority",
+        "candidate-promotions": "candidate_promotion_authority",
+        "consent_application_scans": "consent_scan_authority",
+        "consent_applications": "consent_application_authority",
+        "consent_global_opt_out": "consent_opt_out_authority",
+        "consent_notices": "consent_notice_authority",
+        "consent_registry": "consent_receipt_authority",
+        "finance_control_cycles": "finance_control_execution_authority",
+        "finance_control_reconcile_state": "finance_delivery_authority",
+        "identity_governance_ai_asset_bindings": "identity_asset_binding_authority",
+        "identity_governance_conditional_access_decisions": (
+            "conditional_access_authority"
+        ),
+        "knowledge-correction-sources": "knowledge_correction_authority",
+        "knowledge-rights-requests": "knowledge_access_authority",
+        "llm_gateway": "llm_caller_authority",
+        "model_risk_decisions": "model_risk_decision_authority",
+        "model_risk_deployments": "model_deployment_authority",
+        "outcome_pilot_admission_index": "outcome_pilot_admission_authority",
+        "outcome_pilots": "outcome_pilot_execution_authority",
+        "policy_pack_attestations": "policy_pack_trust_authority",
+        "policy_pack_catalog": "policy_pack_catalog_authority",
+        "policy_pack_channels": "policy_pack_channel_authority",
+        "policy_pack_subscriptions": "policy_pack_subscription_authority",
+        "project_review_packets": "project_review_authority",
+        "project_review_teams": "project_review_identity_authority",
+        "red_team_campaign_product_runs": "red_team_product_execution_authority",
+        "red_team_campaign_product_specs": "red_team_product_schedule_authority",
+        "research-jobs": "research_job_authority",
+        "research-registry": "research_component_authority",
+        "research-runs": "research_run_authority",
+        "vendor_onboarding_setup": "vendor_setup_authority",
+        "vendor_renewal_activation": "vendor_renewal_activation_authority",
+        "vendor_renewal_candidates": "vendor_renewal_candidate_authority",
+    }
+    for namespace, policy in namespace_policies.items():
+        if namespace in parts[:-1]:
+            return policy
+
+    if is_sqlite:
+        normalized = "/".join(parts)
+        sqlite_policies = {
+            "jobs.db": "jobs",
+            "world.db": "world",
+            "knowledge.db": "passive_sqlite",
+            "entity_graph/graph.db": "passive_sqlite",
+            "privacy_automation/privacy-data-discovery.sqlite3": "privacy_discovery",
+            "privacy_automation/privacy-discovery-remediation.sqlite3": "privacy_remediation",
+            "privacy_automation/privacy-discovery-data-map.sqlite3": "privacy_data_map",
+        }
+        return sqlite_policies.get(normalized, "unknown_sqlite")
+    return None
+
+
+def protected_authority(relative: str, *, is_sqlite: bool) -> bool:
+    """Whether backup comparison must treat this path as authority."""
+    return authority_policy(relative, is_sqlite=is_sqlite) is not None
+
+
+# These stores cannot be authenticated from the reviewed retained workspace
+# key set.  Bootstrap therefore removes them before publication and binds the
+# exact source hash plus the resulting absence into its signed reconciliation
+# inventory.  The application creates fresh local custody on first use.
+DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES = {
+    "vault/key": "browser_vault_credential_authority",
+    "vault/browser.json": "browser_vault_credential_authority",
+    "vault/authorities/authority-a/key": "browser_vault_credential_authority",
+    "vault/authorities/authority-a/browser.json": (
+        "browser_vault_credential_authority"
+    ),
+    "keys/anon.salt": "privacy_identity_key_authority",
+    "factory_outcomes.ndjson": "factory_learning_input_authority",
+    "trajectories.ndjson": "trajectory_learning_input_authority",
+    "flows/evolution.ndjson": "flow_learning_input_authority",
+    "flows/node-outcomes.ndjson": "flow_learning_input_authority",
+    "flows/node-tools.ndjson": "flow_learning_input_authority",
+    "compaction_stream.json": "compaction_prompt_state_authority",
+    "compaction_ledger.json": "compaction_selection_authority",
+    "tool_outcomes.json": "tool_outcome_learning_authority",
+}
+
+
+# These stores carry replay, revocation, identity, trust, scheduler, delivery,
+# or executable-instruction state.  Bootstrap currently has no store-specific
+# readback protocol for them, so every restored copy must remain a visible
+# global-start blocker until an administrator records a disposition.
+GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES = {
+    "config.toml": "tenant_configuration_authority",
+    "runtime-overrides.toml": "runtime_override_authority",
+    "roles.toml": "role_instruction_authority",
+    "tenants/tenant-a/config.toml": "tenant_configuration_authority",
+    "tenants/tenant-a/runtime-overrides.toml": "runtime_override_authority",
+    "tenants/tenant-a/roles.toml": "role_instruction_authority",
+    "dashboard-config.toml": "dashboard_configuration_authority",
+    "dashboard-event-triggers.toml": "event_trigger_scheduler_authority",
+    "dashboard-triggers.toml": "webhook_trigger_authority",
+    "model_improvement/training_receipts.ndjson": "training_approval_authority",
+    "keys/consent-experiments.key": "consent_experiment_key_authority",
+    "generated_tools/recovered.py": "generated_tool_authority",
+    "learned-skills/recovered/SKILL.md": "learned_skill_authority",
+    "skills/recovered/SKILL.md": "skill_instruction_authority",
+    "capability_revocations.json": "capability_revocations",
+    "external-replay.json": "external_replay",
+    "browser/state.json": "browser_session",
+    "keys/plugin_ca/revocations.json": "plugin_ca_revocations",
+    "unified-audit/custody-state.json": "unified_audit_delivery_state",
+    "governance_agents/reference-custody-keyring.json": "governance_reference_keyring",
+    "governance_inventory/integrity.key": "governance_inventory_key",
+    "tech_risk_compliance/grc-studio/integrity.key": "grc_studio_integrity_key",
+    "harness/addenda.json": "harness_instruction_authority",
+    "harness-refine/proposals.json": "harness_refinement_authority",
+    "harness-refine/refinements.json": "harness_refinement_authority",
+    "saml-consumed-assertions.json": "saml_replay",
+    "session-revocations.json": "session_revocation",
+    "oidc-subjects.json": "oidc_subject_directory",
+    "oidc-retired-subjects.json": "oidc_subject_tombstone",
+    "dashboard-users.json": "dashboard_user_roles",
+    "dashboard-custom-roles.json": "dashboard_custom_roles",
+    "dashboard-tenant-roles.json": "dashboard_tenant_roles",
+    "dashboard-invites.json": "dashboard_invites",
+    "dashboard-user-suites.json": "dashboard_suite_grants",
+    "dashboard-session.key": "dashboard_session_secret",
+    "scim_users.json": "scim_user_directory",
+    "scim_groups.json": "scim_group_directory",
+    "scim_groups.audit-outbox.json": "scim_audit_delivery",
+    "push_devices.json": "push_device_registry",
+    "push_deliveries.json": "push_delivery_ledger",
+    "privacy_automation/privacy-discovery-remediation-scheduler.json": (
+        "privacy_remediation_scheduler"
+    ),
+    "privacy_automation/privacy-notice-publication-scheduler.json": (
+        "privacy_notice_scheduler"
+    ),
+    "tenants/tenant-a/model_improvement/trusted_evidence_registry.json": (
+        "trusted_evidence_registry"
+    ),
+    "plugins.lock.json": "plugin_lock",
+    "config_proposals.json": "config_proposal",
+    "control_plane_timeboxes.json": "control_plane_timebox",
+    "license.json": "license_entitlement",
+    "voice_profiles.json": "voice_identity_profile",
+    "marketplace_federation_imports.json": "marketplace_federation_replay",
+    "shield_rules.json": "shield_rule_authority",
+    "calibration_verdict.json": "calibration_authority",
+    "self_harness_calibration_receipt.json": "self_harness_calibration_authority",
+    "budget_tuning.json": "learned_budget_authority",
+    "speculative_ledger.json": "speculative_spend_authority",
+    "router_bandit.json": "provider_routing_authority",
+    "planning_stats.json": "planning_budget_authority",
+    "guardrails.json": "learned_guardrail_authority",
+    "voice_macros.json": "voice_macro_authority",
+    "calibration.ndjson": "calibration_evidence_authority",
+    "consequence_cards.ndjson": "earned_autonomy_evidence",
+    "consequences.ndjson": "earned_autonomy_outcomes",
+    "outcome_links.ndjson": "earned_autonomy_outcome_links",
+    "earned_autonomy.ndjson": "earned_autonomy_ledger",
+    "self_improvement.json": "self_improvement_authority",
+    "self_improvement.json.journal": "self_improvement_authority",
+    "supply_chain_pins.json": "supply_chain_trust_authority",
+    "dashboard-ui-visibility.json": "dashboard_visibility_authority",
+    "dashboard-workspace-tenants.json": "dashboard_workspace_authority",
+    "computer_calibration.json": "computer_action_calibration_authority",
+    "procedural_memory.json": "procedural_instruction_authority",
+    "role_stats.json": "role_routing_authority",
+    "skill_stats.json": "skill_ranking_authority",
+    "skill_embeddings.json": "skill_retrieval_authority",
+    "compaction_hybrid.json": "compaction_strategy_authority",
+    "compaction_hybrid_weights.json": "compaction_strategy_authority",
+    "codebook.json": "coordination_codec_authority",
+    "token_codebook.json": "coordination_codec_authority",
+    "tool_cache_snapshot.jsonl": "external_read_cache_authority",
+    "release_canary.json": "release_gate_authority",
+    "reflexions.ndjson": "reflexion_instruction_authority",
+    "factory_corrections.ndjson": "factory_prompt_authority",
+    "jit_experience.ndjson": "jit_selection_authority",
+    "learning_cache.json": "learned_result_authority",
+    "dreams/insights.ndjson": "dream_instruction_authority",
+    "dreams/rehearsals.ndjson": "dream_instruction_authority",
+    "dreams/user_notes.ndjson": "dream_instruction_authority",
+    "fleet-memory/agents.ndjson": "fleet_agent_identity_authority",
+    "fleet-memory/inbox/entry.json": "external_learning_input_authority",
+    "event-input/incoming/event.json": "event_input_authority",
+    "assessments/templates.json": "assessment_instruction_authority",
+    "assessments/register.json": "assessment_review_authority",
+    "custom_templates/recovered.json": "assessment_template_authority",
+    "task_graphs/recovered.json": "task_graph_authority",
+    "templates/recovered.md": "goal_template_authority",
+    "forms/recovered.ndjson": "form_event_authority",
+    "repl/recovered/session.json": "repl_execution_authority",
+    "adapters/active.json": "adapter_runtime_authority",
+    "adapters/payloads/adapter-a/weights.gguf": "adapter_runtime_authority",
+    "privacy/clause_playbook.json": "clause_policy_authority",
+    "ai_evidence_gateway/interaction_receipts.ndjson": (
+        "evidence_delivery_receipt_authority"
+    ),
+    "ai_evidence_gateway/interaction_receipts/seg-1.ndjson": (
+        "evidence_delivery_receipt_authority"
+    ),
+    "ai_evidence_gateway/interaction_receipts.index-state.json": (
+        "evidence_delivery_receipt_authority"
+    ),
+    "ai_evidence_gateway/assurance_packets/seg-1.ndjson": (
+        "evidence_trust_authority"
+    ),
+    "ai_evidence_gateway/assurance_packets.ndjson": "evidence_trust_authority",
+    "ai_evidence_gateway/assurance_packets.index-state.json": (
+        "evidence_trust_authority"
+    ),
+    "registers/licenses.json": "regulatory_license_authority",
+    "content_provenance/manifest_attestations.ndjson": (
+        "content_provenance_authority"
+    ),
+    "model_risk_assurance/pack_attestations.ndjson": (
+        "model_risk_pack_trust_authority"
+    ),
+    "redteam_results.json": "red_team_certification_authority",
+    "reliability_cert.json": "reliability_certification_authority",
+    "ai_evidence_conversations/AIC-a.json": "evidence_delivery_state_authority",
+    "ai_evidence_receipts/AIR-a.json": "evidence_delivery_receipt_authority",
+    "ai_evidence_policy_snapshots/AIS-a.json": "evidence_policy_snapshot_authority",
+    "evidence_graph/EGN-a.json": "evidence_trust_authority",
+    "incident_attachment_metadata/IAT-a.json": "incident_attachment_authority",
+    "model_risk_observations/MRO-a.json": "model_risk_asset_authority",
+    "model_risk_declarations/MRD-a.json": "model_risk_declaration_authority",
+    "model_risk_evidence/MRE-a.json": "model_risk_evidence_authority",
+    "model_risk_incidents/MRI-a.json": "model_risk_incident_authority",
+    "model_drift_baselines/MDB-a.json": "model_drift_baseline_authority",
+    "ai_literacy_requirements/ALR-a.json": "literacy_requirement_authority",
+    "ai_literacy_assignments/ALA-a.json": "literacy_assignment_authority",
+    "ai_literacy_completions/ALC-a.json": "literacy_completion_authority",
+    "ai_literacy_waivers/ALW-a.json": "literacy_waiver_authority",
+    "ai_literacy_role_requirements/ALR-role.json": (
+        "literacy_role_requirement_authority"
+    ),
+    "ai_literacy_role_assignments/ALA-role.json": (
+        "literacy_role_assignment_authority"
+    ),
+    "ai_literacy_role_completions/ALC-role.json": (
+        "literacy_role_completion_authority"
+    ),
+    "outcome_accounting/OAC-a.json": "outcome_accounting_authority",
+    "finance_screening_lists/FSL-a.json": "finance_screening_list_authority",
+    "finance_screening_list_metadata/FLM-a.json": (
+        "finance_screening_metadata_authority"
+    ),
+    "dsar_fulfillment/DSF-a.json": "dsar_delivery_authority",
+    "ai_discovery_sensor_identities/SEN-a.json": "sensor_identity_authority",
+    "ai_evidence_packet_replays/AIP-a.json": "evidence_packet_replay_authority",
+    "ai_evidence_policies/AIP-a.json": "evidence_policy_authority",
+    "ai_evidence_policy_modes/AIM-a.json": "evidence_policy_mode_authority",
+    "ai_operational_policies/AOP-a.json": "operational_policy_authority",
+    "ai_policy_exceptions/AOE-a.json": "policy_exception_authority",
+    "ai_regulatory_impacts/AIR-a.json": "regulatory_impact_authority",
+    "ai_vendor_portal_invitations/AVI-a.json": "vendor_portal_identity_authority",
+    "ai_vendor_portal_submissions/AVS-a.json": "vendor_portal_submission_authority",
+    "candidate-promotions/CPR-a.json": "candidate_promotion_authority",
+    "consent_application_scans/CAS-a.json": "consent_scan_authority",
+    "consent_applications/CAP-a.json": "consent_application_authority",
+    "consent_global_opt_out/CGO-a.json": "consent_opt_out_authority",
+    "consent_notices/CCN-a.json": "consent_notice_authority",
+    "consent_registry/CCR-a.json": "consent_receipt_authority",
+    "finance_control_cycles/FCC-a.json": "finance_control_execution_authority",
+    "finance_control_reconcile_state/FCR-a.json": "finance_delivery_authority",
+    "identity_governance_ai_asset_bindings/IGA-a.json": (
+        "identity_asset_binding_authority"
+    ),
+    "identity_governance_conditional_access_decisions/IGC-a.json": (
+        "conditional_access_authority"
+    ),
+    "knowledge-correction-sources/KCS-a.json": "knowledge_correction_authority",
+    "knowledge-rights-requests/KRR-a.json": "knowledge_access_authority",
+    "llm_gateway/LGC-a.json": "llm_caller_authority",
+    "model_risk_decisions/MRD-a.json": "model_risk_decision_authority",
+    "model_risk_deployments/MRP-a.json": "model_deployment_authority",
+    "outcome_pilot_admission_index/OPA-a.json": "outcome_pilot_admission_authority",
+    "outcome_pilots/OPL-a.json": "outcome_pilot_execution_authority",
+    "policy_pack_attestations/PPA-a.json": "policy_pack_trust_authority",
+    "policy_pack_catalog/PPC-a.json": "policy_pack_catalog_authority",
+    "policy_pack_channels/PPH-a.json": "policy_pack_channel_authority",
+    "policy_pack_subscriptions/PPS-a.json": "policy_pack_subscription_authority",
+    "project_review_packets/PRP-a.json": "project_review_authority",
+    "project_review_teams/PRT-a.json": "project_review_identity_authority",
+    "red_team_campaign_product_runs/RTR-a.json": "red_team_product_execution_authority",
+    "red_team_campaign_product_specs/RTS-a.json": "red_team_product_schedule_authority",
+    "research-jobs/RSJ-a.json": "research_job_authority",
+    "research-registry/RSC-a.json": "research_component_authority",
+    "research-runs/RSR-a.json": "research_run_authority",
+    "vendor_onboarding_setup/VOS-a.json": "vendor_setup_authority",
+    "vendor_renewal_activation/VEA-a.json": "vendor_renewal_activation_authority",
+    "vendor_renewal_candidates/VEC-a.json": "vendor_renewal_candidate_authority",
+    **{
+        f"{namespace}/recovered.json": policy
+        for namespace, policy in GLOBAL_START_JSON_AUTHORITY_POLICIES.items()
+    },
+    **{
+        f"{namespace}/recovered.json": policy
+        for namespace, policy in DYNAMIC_JSON_AUTHORITY_POLICIES.items()
+        if policy != "identity_change_request"
+    },
+}
+
+
+# Representative paths form a reviewable completeness contract.  The runtime
+# classifier remains the source of truth; tests assert every sample maps to the
+# declared policy and that no protected sample is silently unclassified.
+AUTHORITY_SAMPLES = {
+    "jobs.db": "jobs",
+    "world.db": "world",
+    "connections/connections.sealed": "credential",
+    "connections/oauth-setup.sealed": "credential",
+    "oauth/tokens.sealed": "credential",
+    "partner/tenants.sealed": "credential",
+    "privacy_automation/evidence-keys.sealed": "credential",
+    "partner/tenants.json": "plaintext_credential_residue",
+    "partner/tenants.json.migrated-plaintext": "plaintext_credential_residue",
+    "flows/runs/run.json": "flow_run",
+    "flows/published/flow.json": "flow_publication",
+    "flows/idempotency/claim.json": "flow_idempotency",
+    "external_agents.json": "external_agents",
+    "agent_trust.json": "agent_trust",
+    "capability_revocations.json": "capability_revocations",
+    "external-replay.json": "external_replay",
+    "consent.ledger": "consent_authority",
+    "consent.ledger.key": "consent_authority_key",
+    "handoff_nonces.json": "handoff_nonce",
+    "identity_governance_scheduler/IGS-a.json": "identity_scheduler",
+    "identity_governance_change_coupling/IGCC-a.json": "identity_change_delivery",
+    "identity_governance_purview_writeback/IGPW-a.json": "identity_purview_writeback",
+    "identity_governance_authority_registry/IGAR-a.json": "identity_authority_registry",
+    "identity_governance_dynamic_risk_requests/IGRQ-a.json": "identity_change_request",
+    "red_team_schedules/RTS-a.json": "red_team_schedule",
+    "red_team_campaigns/RTC-a.json": "red_team_campaign",
+    "red_team_results/RTR-a.json": "red_team_result",
+    "channel_federation_outbox.json": "federation_outbox",
+    "federation/channel_replay.json": "federation_replay",
+    "federation/channel_rate.json": "federation_rate",
+    "llm_gateway_team_budget/team_budget.json": "llm_team_budget",
+    "mcp_sidecar/call_budget.json": "mcp_call_budget",
+    "pilot_learning_exclusions/PLE-a.json": "learning_exclusion",
+    "pilot_learning_exclusions/PLE-a.required": "learning_exclusion",
+    "budget_receipts.jsonl": "budget_receipt",
+    "provider_spend.json": "provider_spend",
+    "provider_spend.json.required": "provider_spend_required",
+    "tenant_registry.json": "tenant_registry",
+    "dashboard-owner.json": "dashboard_owner",
+    "privacy_automation/privacy-data-discovery.sqlite3": "privacy_discovery",
+    "privacy_automation/privacy-discovery-remediation.sqlite3": "privacy_remediation",
+    "privacy_automation/privacy-discovery-data-map.sqlite3": "privacy_data_map",
+    "keys/dek.wrapped": "wrapped_tenant_dek",
+    **{
+        f"{namespace}/recovered.json": policy
+        for namespace, policy in APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES.items()
+    },
+    **DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES,
+    **GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES,
+}
+
+
+__all__ = [
+    "APPLICATION_VALIDATED_JSON_AUTHORITY_POLICIES",
+    "AUTHORITY_SAMPLES",
+    "DISCARD_BEFORE_PUBLICATION_AUTHORITY_SAMPLES",
+    "DYNAMIC_JSON_AUTHORITY_POLICIES",
+    "GLOBAL_START_BLOCKED_AUTHORITY_SAMPLES",
+    "GLOBAL_START_JSON_AUTHORITY_POLICIES",
+    "authority_policy",
+    "protected_authority",
+]

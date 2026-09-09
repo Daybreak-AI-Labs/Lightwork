@@ -103,7 +103,8 @@ def manifests(base: Path, candidate: Path, metadata: dict) -> dict:
     result = {}
     for filename, package, release in (("base.msi", base, version), ("next.msi", candidate, next_version)):
         value = {"version": release, "notes": "Disposable signed native acceptance fixture.",
-                 "runtime_sha256": metadata["runtime"]["sha256"], "platforms": {"windows-x86_64": {
+                 "runtime_sha256": metadata["runtime"]["sha256"], "installer_sha256": digest(package),
+                 "platforms": {"windows-x86_64": {
                      "url": f"https://{HOST}/{filename}",
                      "signature": Path(str(package) + ".sig").read_text(encoding="utf-8").strip()}}}
         result[f"/versions/{release}.json"] = json.dumps(value).encode()

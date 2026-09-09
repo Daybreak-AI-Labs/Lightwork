@@ -644,9 +644,15 @@ class DataUseGovernanceStore:
         request: Mapping[str, Any],
         mutate: Callable[[sqlite3.Connection, float], dict[str, Any]],
     ) -> dict[str, Any]:
+        from .authority_effects import authority_effect_fence
+
         _key, key_sha256 = self._idem(idempotency_key)
         request_sha256 = _sha256(dict(request))
-        with self._transaction() as conn:
+        # Use the same local control-plane fence held across research process
+        # admission. A rights/consent/policy mutation that commits first is
+        # observed by that admission; one that loses the fence cannot land
+        # between the final authority read and the candidate effect boundary.
+        with authority_effect_fence(), self._transaction() as conn:
             replay = self._idempotent_result(
                 conn,
                 tenant=tenant,

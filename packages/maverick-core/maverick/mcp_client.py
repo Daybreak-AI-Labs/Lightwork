@@ -221,6 +221,14 @@ class MCPServerSpec:
             _validate_subprocess_inputs(self)
 
 
+@dataclass
+class _ApprovedElicitation:
+    """Internal response whose exact permit is spent at transport write."""
+
+    result: dict[str, Any]
+    permit: Any
+
+
 _DENY_CHARS = ("\n", "\r", "\0")
 _DENY_SHELL_METAS = (";", "|", "&", "$(", "`", ">", "<")
 
@@ -684,7 +692,14 @@ class MCPClient:
         try:
             if method == "elicitation/create":
                 result = await self._handle_elicitation(msg.get("params") or {})
-                await self._send_response(req_id, result=result)
+                if isinstance(result, _ApprovedElicitation):
+                    await self._send_response(
+                        req_id,
+                        result=result.result,
+                        operation_permit=result.permit,
+                    )
+                else:
+                    await self._send_response(req_id, result=result)
             else:
                 # roots/list, sampling/createMessage, etc. -- we don't advertise
                 # these, so decline cleanly instead of leaving the server hanging.
@@ -703,6 +718,7 @@ class MCPClient:
     async def _send_response(
         self, req_id: object, *, result: dict | None = None,
         error: dict | None = None,
+        operation_permit: Any = None,
     ) -> None:
         payload: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id}
         if error is not None:
@@ -712,12 +728,30 @@ class MCPClient:
         try:
             async with self._lock:
                 self._check_alive()
-                await self._send(payload)
+                if operation_permit is None:
+                    await self._send(payload)
+                else:
+                    from .approval_cards import ApprovalCardError
+                    from .safety import consume_operation_consent
+
+                    try:
+                        # Spend the exact permit at the byte-write boundary,
+                        # after any time the operator spent filling the form.
+                        with consume_operation_consent(operation_permit):
+                            await self._send(payload)
+                    except ApprovalCardError:
+                        await self._send({
+                            "jsonrpc": "2.0",
+                            "id": req_id,
+                            "result": {"action": "cancel"},
+                        })
         except Exception as e:  # noqa: BLE001 -- server gone/unwritable; drop it
             log.debug("MCP %s could not send response for id %s: %s",
                       self.spec.name, req_id, e)
 
-    async def _handle_elicitation(self, params: dict) -> dict:
+    async def _handle_elicitation(
+        self, params: dict,
+    ) -> dict | _ApprovedElicitation:
         """Decide an inbound elicitation/create per policy + shield.
 
         Returns an MCP elicitation result:
@@ -751,19 +785,9 @@ class MCPClient:
             self._collect_elicitation_blocking, scan.cleaned, schema)
 
     def _collect_elicitation_blocking(self, message: str, schema: dict) -> dict:
-        """Gate + collect typed elicitation input on a worker thread."""
-        from .safety.consent import require_consent
-
-        decision = require_consent(
-            "mcp-elicitation", risk="medium",
-            scope=self.spec.name, detail=message,
-            allow_auto_approve=False,
-        )
-        if not decision.granted:
-            return {"action": "cancel"}
+        """Collect typed input, then bind it to a one-use transport permit."""
         if not sys.stdin.isatty():
-            # Permitted, but there's no interactive surface to collect input on.
-            return {"action": "decline"}
+            return {"action": "cancel"}
 
         props = schema.get("properties") if isinstance(schema, dict) else None
         required = set(schema.get("required") or []) if isinstance(schema, dict) else set()
@@ -787,7 +811,80 @@ class MCPClient:
                     return {"action": "cancel"}
                 continue
             content[key] = _coerce_scalar(raw, field_spec.get("type"))
-        return {"action": "accept", "content": content}
+
+        from .approval_cards import ApprovalCardError, digest
+        from .safety import ConsentDenied, require_operation_consent
+
+        def target() -> dict[str, Any]:
+            return {
+                "server": self.spec.name,
+                "transport": "http" if self.spec.is_http else "stdio",
+                "endpoint": self.spec.url or self.spec.command,
+            }
+
+        def credentials() -> dict[str, str]:
+            # ``to_dict`` may contain bearer/OAuth material. Only its aggregate
+            # digest enters the card, never the secret-bearing configuration.
+            return {
+                "server_spec_sha256": digest(self.spec.to_dict()),
+            }
+
+        parameters = {
+            "message": message,
+            "schema": schema,
+            "content": content,
+        }
+        field_summary = ", ".join(
+            f"{key} ({len(str(value))} chars)"
+            for key, value in sorted(content.items())
+        ) or "no response fields"
+        try:
+            permit = require_operation_consent(
+                "mcp-elicitation",
+                risk="medium",
+                scope=self.spec.name,
+                detail=f"Return reviewed form values to MCP server {self.spec.name}.",
+                provenance="mcp-elicitation",
+                target=target(),
+                parameters=parameters,
+                parameter_summary=[f"Return {field_summary}."],
+                known_effects=[
+                    "Sends the exact committed field values to the named MCP server."
+                ],
+                unresolved_assumptions=[
+                    "The remote server controls how it stores and uses the submitted values."
+                ],
+                before="The MCP server has not received these form values.",
+                after="The MCP server has received these form values once.",
+                irreversible=True,
+                target_provider=target,
+                parameters_provider=lambda: {
+                    "message": message,
+                    "schema": schema,
+                    "content": dict(content),
+                },
+                input_versions_provider=lambda: {
+                    "elicitation_sha256": digest({
+                        "message": message,
+                        "schema": schema,
+                    }),
+                    "content_sha256": digest(content),
+                },
+                credential_versions_provider=credentials,
+                budget_provider=lambda: {
+                    "response_bytes": len(
+                        json.dumps(content, sort_keys=True).encode("utf-8")
+                    )
+                },
+                allow_auto_approve=False,
+                consult_ledger=False,
+            )
+        except (ConsentDenied, ApprovalCardError):
+            return {"action": "cancel"}
+        return _ApprovedElicitation(
+            result={"action": "accept", "content": content},
+            permit=permit,
+        )
 
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
         resp = await self._request("tools/call", {

@@ -36,6 +36,7 @@ import tarfile
 import tempfile
 import time
 import unicodedata
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
@@ -1410,6 +1411,8 @@ def restore_backup(
     force: bool = False,
     allow_unsigned: bool = False,
     replace_existing: bool = False,
+    _stage_transform: Callable[[Path], set[str] | None] | None = None,
+    _record_decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
 ) -> Path:
     """Authenticate, verify and transactionally restore one backup.
 
@@ -1443,7 +1446,35 @@ def restore_backup(
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
             _validate_restore_schemas(stage, manifest)
-            _validate_application_stage(stage)
+            _validate_application_stage(stage, decryptor=_record_decryptor)
+            if _stage_transform is not None:
+                # Recovery bootstrap may conservatively retire queued work before
+                # any restored byte becomes live.  The signed archive is always
+                # authenticated and application-validated first.  Re-stage the
+                # transformed tree to re-apply the same path/type/size bounds,
+                # require the exact file set, and bind the transaction's
+                # post-write verification to the resulting bytes.
+                allowed_removed = _stage_transform(stage) or set()
+                if (not isinstance(allowed_removed, set)
+                        or any(not isinstance(name, str) for name in allowed_removed)):
+                    raise BackupError("restore reconciliation returned invalid path authority")
+                reconciled = file_lock.ensure_private_directory(
+                    Path(temporary) / "reconciled"
+                )
+                transformed = _stage(stage, reconciled, include_keys=True)
+                removed = set(expected) - set(transformed)
+                added = set(transformed) - set(expected)
+                if added or removed != allowed_removed:
+                    raise BackupError(
+                        "restore reconciliation changed the authenticated file set"
+                    )
+                expected = {
+                    name: (metadata["sha256"], metadata["size"])
+                    for name, metadata in transformed.items()
+                }
+                stage = reconciled
+                _validate_restore_schemas(stage, manifest)
+                _validate_application_stage(stage, decryptor=_record_decryptor)
             file_lock.ensure_private_directory(root)
             if not force and "world.db" in expected:
                 _refuse_if_world_appears_live(root)
@@ -1486,16 +1517,29 @@ def verify_backup(tarball: str | Path) -> dict[str, Any]:
     return manifest
 
 
-def _validate_application_stage(stage: Path) -> dict[str, Any]:
+def _validate_application_stage(
+    stage: Path,
+    *,
+    decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
+) -> dict[str, Any]:
     from .restore_validation import RestoreValidationError, validate_staged_restore
 
     try:
-        return validate_staged_restore(stage, tenant=_client_id(), whole_home=_RECOVERY_WHOLE_HOME.get())
+        return validate_staged_restore(
+            stage,
+            tenant=_client_id(),
+            whole_home=_RECOVERY_WHOLE_HOME.get(),
+            decryptor=decryptor,
+        )
     except RestoreValidationError as exc:
         raise BackupError(str(exc)) from exc
 
 
-def validate_backup_application(tarball: str | Path) -> dict[str, Any]:
+def validate_backup_application(
+    tarball: str | Path,
+    *,
+    _record_decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
+) -> dict[str, Any]:
     """Authenticate a full-replacement candidate and check supported references.
 
     This stages bytes privately and never opens or changes live application
@@ -1512,32 +1556,13 @@ def validate_backup_application(tarball: str | Path) -> dict[str, Any]:
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
             _validate_restore_schemas(stage, manifest)
-            return _validate_application_stage(stage)
+            return _validate_application_stage(stage, decryptor=_record_decryptor)
 
 
 def _accounting_file(relative: str, path: Path) -> bool:
-    parts = PurePosixPath(relative).parts
-    lowered = tuple(part.casefold() for part in parts)
-    name = lowered[-1]
-    # Custom database names are not a format boundary. Only ordinary lock
-    # sidecars may be ignored, never SQLite payloads whose name ends in .lock.
-    if _is_sqlite_file(path):
-        return True
-    if name.endswith(".lock"):
-        return False
-    return (
-        # Claims and completed/unconfirmed external-action records are replay
-        # authority: a valid older JSON record (or its absence) can permit the
-        # same action again. Cover workspace and whole-home paths.
-        bool({"usage", "llm_gateway_team_budget", "mcp_sidecar", "grc_sync_outbound",
-              "grc_outbound_sync_states", "grc_outbound_sync_events", "vendor_onboarding",
-              "discovery_containment_actions", "provider_accounting_reviews", "pilot_learning_exclusions",
-              "task-file-recovery"}.intersection(lowered[:-1]))
-        or name in {"provider_spend.json", "provider_spend.json.required", "tenant_registry.json", "dashboard-owner.json"}
-        or (name == "retention.index" and "draft-recovery" in lowered)
-        or (name in {"connections.sealed", "oauth-setup.sealed"} and "connections" in lowered)
-        or name.startswith("budget_receipts.")
-    )
+    from .recovery_authorities import protected_authority
+
+    return protected_authority(relative, is_sqlite=_is_sqlite_file(path))
 
 
 def compare_backup(tarball: str | Path) -> dict[str, Any]:

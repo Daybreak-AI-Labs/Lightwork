@@ -1,9 +1,4 @@
-"""Governing enterprise-connector WRITES in the live tool path (opt-in).
-
-A write is previewed + approval-gated against a standing operator approver (the
-agent can't self-approve); reads pass through. Off by default leaves the
-registry untouched.
-"""
+"""Fresh-human and conditional-revision governance for connector writes."""
 from __future__ import annotations
 
 import asyncio
@@ -23,9 +18,15 @@ _SCHEMA = {
     "properties": {
         "op": {"type": "string", "enum": ["get", "post", "put", "patch", "delete"]},
         "path": {"type": "string"},
+        "if_match": {"type": "string"},
         "confirm": {"type": "boolean"},
     },
     "required": ["op", "path"],
+    "x-lightwork-conditional-revision": {
+        "field": "if_match",
+        "header": "If-Match",
+        "operations": ["put", "patch", "delete"],
+    },
 }
 
 
@@ -34,6 +35,18 @@ def _fake_tool(calls):
         calls.append(dict(args))
         return f"DID {args.get('op')} {args.get('path')} confirm={args.get('confirm')}"
     return Tool(name="acme", description="Acme connector", input_schema=_SCHEMA, fn=_fn)
+
+
+def _grant_human(monkeypatch):
+    import maverick.safety.consent as consent
+
+    monkeypatch.setattr(
+        consent,
+        "require_consent",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            granted=True, source="dashboard", actor="user:reviewer",
+        ),
+    )
 
 
 
@@ -136,21 +149,80 @@ class TestWrap:
         wrapped = wrap_connector_tool(_fake_tool(calls))
         out = wrapped.fn({"op": "post", "path": "/accounts", "body": {"n": 1}})
         assert "REFUSED (governed)" in out
-        assert "approver" in out
+        assert "approval was denied" in out
         assert calls == []  # the underlying write never ran
 
-    def test_write_with_approver_commits(self, monkeypatch):
-        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops@corp")
-        # The approver-of-record IS the consent in standard mode; pin the
-        # consent primitive to auto-approve so the secure default (which
-        # demands an interactive decision for high risk) doesn't veto it.
-        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    def test_write_with_fresh_human_decision_commits(self, monkeypatch):
+        _grant_human(monkeypatch)
         calls = []
         wrapped = wrap_connector_tool(_fake_tool(calls))
         out = wrapped.fn({"op": "post", "path": "/accounts"})
         # The original write ran, with confirm forced true (approval cleared it).
         assert calls and calls[0]["confirm"] is True
         assert "DID post /accounts" in out
+
+    def test_success_result_redacts_lightwork_capability_token(self, monkeypatch):
+        import maverick.governed_actions as actions
+
+        _grant_human(monkeypatch)
+        monkeypatch.setattr(actions, "record_tool_lineage", lambda *a, **k: True)
+        token = "lw-rest-" + "R" * 43
+        tool = Tool(
+            name="acme",
+            description="Acme connector",
+            input_schema=_SCHEMA,
+            fn=lambda _args: f"created with credential {token}",
+        )
+
+        out = wrap_connector_tool(tool).fn({"op": "post", "path": "/accounts"})
+
+        assert token not in out
+        assert "REDACTED:lightwork_agent_token" in out
+
+    def test_existing_record_write_requires_atomic_remote_revision(
+        self, monkeypatch,
+    ):
+        import maverick.safety.consent as consent
+
+        monkeypatch.setattr(
+            consent,
+            "require_consent",
+            lambda *_args, **_kwargs: pytest.fail(
+                "approval must not start without a revision precondition"
+            ),
+        )
+        calls = []
+
+        out = wrap_connector_tool(_fake_tool(calls)).fn({
+            "op": "patch", "path": "/accounts/7", "body": {"role": "admin"},
+        })
+
+        assert out.startswith("REFUSED (governed)")
+        assert "ETag/revision is required" in out
+        assert calls == []
+
+    def test_wildcard_precondition_cannot_authorize_existing_record_write(
+        self, monkeypatch,
+    ):
+        import maverick.safety.consent as consent
+
+        monkeypatch.setattr(
+            consent,
+            "require_consent",
+            lambda *_args, **_kwargs: pytest.fail(
+                "approval must not start with an unconditional wildcard"
+            ),
+        )
+        calls = []
+
+        out = wrap_connector_tool(_fake_tool(calls)).fn({
+            "op": "delete", "path": "/accounts/7", "if_match": "*",
+        })
+
+        assert out.startswith("REFUSED (governed)")
+        assert "ETag/revision is required" in out
+        assert "/accounts/7" in out
+        assert calls == []
 
     def test_description_marks_governed(self):
         wrapped = wrap_connector_tool(_fake_tool([]))
@@ -209,26 +281,26 @@ class TestWrap:
         assert "REFUSED (governed)" in out
         assert calls == []
 
-    def test_graphql_mutation_with_approver_commits(self, monkeypatch):
-        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops@corp")
-        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    def test_graphql_mutation_without_conditional_contract_fails_closed(self, monkeypatch):
+        _grant_human(monkeypatch)
         calls = []
         wrapped = wrap_connector_tool(_graphql_tool(calls))
         out = wrapped.fn({"op": "query", "query": "mutation { create_item { id } }"})
-        assert "GQL query" in out
-        assert calls and calls[0]["confirm"] is True
+        assert "REFUSED (governed)" in out
+        assert "revision/ETag contract" in out
+        assert calls == []
 
 
 class TestApply:
-    def test_off_by_default_is_noop(self, monkeypatch):
+    def test_disable_configuration_cannot_remove_boundary(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_GOVERNED_CONNECTORS", raising=False)
         import maverick.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": False, "connectors": ["acme"], "approver": ""})
         reg = ToolRegistry()
         reg.register(_fake_tool([]))
-        assert apply_governed_connectors(reg) == []
-        assert "governed" not in reg.get("acme").description
+        assert apply_governed_connectors(reg) == ["acme"]
+        assert "governed" in reg.get("acme").description
 
     def test_enabled_wraps_configured(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "1")
@@ -281,19 +353,20 @@ class TestThroughRegistryRun:
     def test_governed_write_runs_via_registry(self, monkeypatch):
         # End-to-end through ToolRegistry.run (async), proving the wrapper's sync
         # fn executes correctly in the agent's tool-execution path.
-        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops")
-        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+        _grant_human(monkeypatch)
         calls = []
         reg = ToolRegistry()
         reg.register(wrap_connector_tool(_fake_tool(calls)))
-        out = asyncio.run(reg.run("acme", {"op": "put", "path": "/x"}))
+        out = asyncio.run(reg.run(
+            "acme", {"op": "put", "path": "/x", "if_match": '"rev-7"'},
+        ))
         assert "DID put /x" in out and calls[0]["confirm"] is True
 
-    def test_governance_enabled_flag(self, monkeypatch):
+    def test_governance_cannot_be_disabled_by_legacy_flag(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "1")
         assert governance_enabled() is True
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "0")
-        assert governance_enabled() is False
+        assert governance_enabled() is True
 
 
 class TestEnterpriseBoundary:
@@ -689,6 +762,33 @@ class TestEnterpriseBoundary:
         assert receipts[0][1]["approver"] == "user:reviewer"
         assert receipts[0][0][2]["body"] == {"role": "viewer"}
 
+    def test_credential_rotation_after_approval_blocks_external_write(
+        self, monkeypatch,
+    ):
+        import maverick.governed_actions as actions
+        import maverick.safety.consent as consent
+
+        monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops@corp")
+        monkeypatch.setenv("ACME_TOKEN", "generation-one")
+
+        def approve(*_args, **_kwargs):
+            monkeypatch.setenv("ACME_TOKEN", "generation-two")
+            return SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            )
+
+        monkeypatch.setattr(consent, "require_consent", approve)
+        monkeypatch.setattr(actions, "record_tool_lineage", lambda *a, **k: True)
+        calls = []
+
+        out = wrap_connector_tool(
+            _fake_tool(calls), enterprise=True,
+        ).fn({"op": "post", "path": "/accounts", "body": {"n": 1}})
+
+        assert out.startswith("REFUSED (governed)")
+        assert "operation or its authority changed" in out
+        assert calls == []
+
     def test_prepare_failure_refuses_before_external_effect(self, monkeypatch):
         import maverick.governed_actions as actions
         import maverick.safety.consent as consent
@@ -702,7 +802,7 @@ class TestEnterpriseBoundary:
         monkeypatch.setattr(actions, "record_tool_lineage", lambda *a, **k: False)
         calls = []
         out = wrap_connector_tool(_fake_tool(calls), enterprise=True).fn({
-            "op": "delete", "path": "/accounts/1",
+            "op": "delete", "path": "/accounts/1", "if_match": '"rev-7"',
         })
         assert out.startswith("REFUSED (governed)")
         assert "PREPARE" in out
@@ -725,7 +825,7 @@ class TestEnterpriseBoundary:
         monkeypatch.setattr(actions, "record_tool_lineage", _record)
         calls = []
         out = wrap_connector_tool(_fake_tool(calls), enterprise=True).fn({
-            "op": "put", "path": "/accounts/1",
+            "op": "put", "path": "/accounts/1", "if_match": '"rev-7"',
         })
         assert calls and calls[-1]["confirm"] is True
         assert out.startswith("INDETERMINATE (governed)")
@@ -786,7 +886,7 @@ class TestEnterpriseBoundary:
             name="acme", description="Acme", input_schema=_SCHEMA, fn=_fail,
         )
         out = wrap_connector_tool(tool, enterprise=True).fn({
-            "op": "delete", "path": "/accounts/1",
+            "op": "delete", "path": "/accounts/1", "if_match": '"rev-7"',
         })
         assert out.startswith("INDETERMINATE (governed)")
         assert "reconcile" in out
@@ -815,7 +915,9 @@ class TestEnterpriseBoundary:
 
         out = wrap_connector_tool(Tool(
             name="acme", description="Acme", input_schema=_SCHEMA, fn=_fail,
-        ), enterprise=True).fn({"op": "delete", "path": "/accounts/1"})
+        ), enterprise=True).fn({
+            "op": "delete", "path": "/accounts/1", "if_match": '"rev-7"',
+        })
 
         assert out.startswith("INDETERMINATE (governed)")
         assert "super-secret" not in out

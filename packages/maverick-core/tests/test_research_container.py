@@ -19,6 +19,7 @@ from maverick.sandbox.research import (
     ResearchContainerRunner,
     ResearchLimits,
     _capture,
+    _digest,
     _host_environment,
     _input_digest,
     _inputs,
@@ -123,11 +124,78 @@ def test_malformed_inspection_returns_stable_refusal(tmp_path, monkeypatch, meta
         runner._verify_created("owned-name", tmp_path, "main.py")
 
 
+@pytest.mark.parametrize("stage,metadata", [
+    ("context", value) for value in (None, [], [{}], [None], [{"Endpoints": []}])
+] + [
+    ("image", value) for value in (None, [], [None], [{"Os": "linux", "Config": None}],
+                                  [{"Os": "linux", "Id": []}], [{"Os": "linux"}])
+])
+def test_malformed_constructor_metadata_returns_stable_refusal(monkeypatch, stage, metadata):
+    from maverick.sandbox import research
+
+    monkeypatch.setattr(research.shutil, "which", lambda name: "docker")
+    monkeypatch.setattr(ResearchContainerRunner, "_control", lambda *args, **kwargs:
+                        research._Capture(0, b"linux", b"", "completed"))
+    context = [{"Endpoints": {"docker": {"Host": "unix:///var/run/docker.sock"}}}]
+    image = [{"Os": "linux", "Id": "sha256:" + "1" * 64, "Config": {}}]
+    monkeypatch.setattr(ResearchContainerRunner, "_json", lambda self, args, **kwargs:
+                        metadata if args[0] == stage else context if args[0] == "context" else image)
+    runner = ResearchContainerRunner("reviewed-image")
+    with pytest.raises(ResearchContainerError, match="metadata"):
+        runner._initialize(budget=Budget(max_wall_seconds=30))
+
+
+def test_docker_readiness_subprocesses_are_lazy_and_wall_capped(monkeypatch):
+    from maverick.sandbox import research
+
+    calls = []
+
+    def capture(args, env, *, timeout, limit):
+        calls.append((args, timeout))
+        command = args[-2:]
+        if command == ["context", "show"]:
+            output = b"default"
+        elif "context" in args and "inspect" in args:
+            output = json.dumps([{"Endpoints": {"docker": {
+                "Host": "unix:///var/run/docker.sock"}}}]).encode()
+        elif "info" in args:
+            output = b"linux"
+        else:
+            output = json.dumps([{"Os": "linux", "Id": "sha256:" + "1" * 64,
+                                  "Config": {}}]).encode()
+        return research._Capture(0, output, b"", "completed")
+
+    monkeypatch.setattr(research.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(research, "_capture", capture)
+    runner = ResearchContainerRunner("reviewed-image")
+    assert calls == []
+    budget = Budget(max_wall_seconds=30)
+    monkeypatch.setattr(budget, "remaining_wall", lambda: 0.25)
+    runner._initialize(budget=budget)
+    assert len(calls) == 4
+    assert all(timeout == 0.25 for _, timeout in calls)
+    assert runner.image_id == "sha256:" + "1" * 64
+
+
+def test_exhausted_setup_budget_starts_no_docker_subprocess(monkeypatch):
+    from maverick.sandbox import research
+
+    monkeypatch.setattr(research.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(research, "_capture", lambda *args, **kwargs:
+                        pytest.fail("Docker subprocess must not start"))
+    runner = ResearchContainerRunner("reviewed-image")
+    budget = Budget(max_wall_seconds=30)
+    monkeypatch.setattr(budget, "remaining_wall", lambda: 0)
+    with pytest.raises(ResearchContainerError, match="wall budget"):
+        runner._initialize(budget=budget)
+
+
 def test_attached_client_spawn_failure_is_wrapped_and_cleans_snapshot(monkeypatch):
     from maverick.sandbox import research
 
     runner = object.__new__(ResearchContainerRunner)
     runner.limits = ResearchLimits()
+    runner._requested_image = "reviewed-image"
     runner.image_id = "sha256:" + "1" * 64
     runner._base, runner._env = ["synthetic-controller"], {}
     roots, cleaned = [], []
@@ -141,6 +209,7 @@ def test_attached_client_spawn_failure_is_wrapped_and_cleans_snapshot(monkeypatc
         raise OSError("synthetic attached-client launch failure")
 
     monkeypatch.setattr(research, "_write_snapshot", remember_root)
+    monkeypatch.setattr(runner, "_initialize", lambda *, budget: None)
     monkeypatch.setattr(research, "_capture", unavailable)
     monkeypatch.setattr(runner, "_control", lambda *args, **kwargs: None)
     monkeypatch.setattr(runner, "_verify_created", lambda *args, **kwargs: {})
@@ -149,6 +218,62 @@ def test_attached_client_spawn_failure_is_wrapped_and_cleans_snapshot(monkeypatc
         runner.run({"main.py": b"pass"}, budget=Budget(max_wall_seconds=30))
     assert len(cleaned) == 1 and len(roots) == 1
     assert not roots[0].exists()
+
+
+@pytest.mark.parametrize("output,reason", [(b"ok", "completed"), (b"\xff", "invalid_utf8_output")])
+def test_authenticated_tenant_snapshot_materializes_under_its_owned_directory(tmp_path, monkeypatch, output, reason):
+    from maverick.paths import data_dir, tenant_scope
+    from maverick.sandbox import research
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    runner = object.__new__(ResearchContainerRunner)
+    runner.limits, runner.image_id = ResearchLimits(), "sha256:" + "1" * 64
+    runner._requested_image = "reviewed-image"
+    runner._base, runner._env = ["synthetic-controller"], {}
+    roots = []
+    original = research._write_snapshot
+
+    def capture(root, files):
+        roots.append(root)
+        original(root, files)
+
+    monkeypatch.setattr(research, "_write_snapshot", capture)
+    monkeypatch.setattr(runner, "_initialize", lambda *, budget: None)
+    monkeypatch.setattr(research, "_capture", lambda *a, **kw: research._Capture(0, output, b"", "completed"))
+    monkeypatch.setattr(runner, "_control", lambda *a, **kw: None)
+    monkeypatch.setattr(runner, "_verify_created", lambda *a, **kw: {})
+    monkeypatch.setattr(runner, "_cleanup", lambda name: True)
+    with tenant_scope(tenant="research-tenant"):
+        expected = data_dir() / "research-snapshots"
+        result = runner.run({"main.py": b"pass"}, budget=Budget(max_wall_seconds=30))
+    assert len(roots) == 1 and roots[0].parent == expected.resolve()
+    assert not roots[0].exists()
+    assert result.reason == reason
+
+
+def test_policy_digest_binds_inspected_effective_policy_and_entrypoint(tmp_path, monkeypatch):
+    from maverick.sandbox import research
+
+    runner = object.__new__(ResearchContainerRunner)
+    runner.limits, runner.image_id = ResearchLimits(), "sha256:" + "1" * 64
+    runner._requested_image = "reviewed-image"
+    runner._base, runner._env = ["synthetic-controller"], {}
+    inspected = {"image_id": runner.image_id, "user": "65532:65532", "network": "none",
+                 "readonly_root": True, "mounts": [], "security_opt": ["no-new-privileges"],
+                 "cap_drop": ["ALL"], "tmpfs": {"/scratch": "noexec"}, "shm_bytes": 1024,
+                 "command": ["python3", "/candidate/worker.py"], "limits": asdict(runner.limits)}
+    monkeypatch.setattr(runner, "_initialize", lambda *, budget: None)
+    monkeypatch.setattr(runner, "_control", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "_verify_created", lambda *args, **kwargs: dict(inspected))
+    monkeypatch.setattr(runner, "_cleanup", lambda name: True)
+    monkeypatch.setattr(research, "_capture", lambda *args, **kwargs:
+                        research._Capture(0, b"ok", b"", "completed"))
+    result = runner.run({"worker.py": b"print('ok')"},
+                        budget=Budget(max_wall_seconds=30), entrypoint="worker.py")
+    assert result.policy_sha256 == _digest(result.inspect_policy)
+    assert result.entrypoint == result.inspect_policy["entrypoint"] == "worker.py"
+    changed = dict(result.inspect_policy, network="bridge")
+    assert _digest(changed) != result.policy_sha256
 
 
 def test_controller_capture_bounds_bytes_before_retention():

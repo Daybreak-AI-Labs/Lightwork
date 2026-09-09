@@ -20,6 +20,8 @@ v0.1.1 additions (council UX feedback):
 
 from __future__ import annotations
 
+import hashlib
+import math
 import os
 import re
 import secrets
@@ -153,6 +155,9 @@ STEPS: list[tuple[str, str]] = [
     ("signed_skills", "Signed skills"),
     ("budget", "Budget"),
     ("sandbox", "Sandbox"),
+    ("research_execution", "Research lab"),
+    ("candidate_promotion", "Candidate promotion"),
+    ("knowledge_access", "Governed knowledge"),
     ("capabilities", "Capabilities"),
     ("self_learning", "Self-learning"),
     ("ekko", "Ekko work discovery"),
@@ -1486,7 +1491,10 @@ def pick_oauth_vault() -> dict[str, Any]:
         "consent screen. Provider registration and consent remain external "
         "requirements. OFF by default.[/dim]"
     )
-    return {"vault": _q_confirm("Seal OAuth tokens in the per-tenant vault?", default=False)}
+    vault = _q_confirm("Seal OAuth tokens in the per-tenant vault?", default=False)
+    desktop_return = vault and _q_confirm(
+        "Enable system-browser account sign-in returns to the desktop app? An administrator must also register and confirm http://127.0.0.1:8766/connections for each provider in Connections.", default=False)
+    return {"vault": vault, "desktop_return": desktop_return}
 
 
 def pick_governed_connectors() -> dict[str, Any]:
@@ -5259,6 +5267,105 @@ def pick_sandbox() -> dict[str, Any]:
     return cfg
 
 
+def pick_research_execution() -> dict[str, Any]:
+    """Configure the installation-owned, exact-output research controller.
+
+    This remains off by default. The wizard collects one deterministic
+    evaluator without retaining its expected output text; administrators can
+    add or replace evaluators later from the Research lab page.
+    """
+    console.print()
+    console.print(
+        "[dim]The Research lab runs submitted Python source in a reviewed, "
+        "locally present Linux container after an installation administrator "
+        "opens the exact source. Results are checked against an exact expected "
+        "output. No image is downloaded and there is no host-process fallback.[/dim]"
+    )
+    if not _q_confirm("Enable bounded Research lab execution?", default=False):
+        return {"enable": False}
+
+    image_id = ""
+    while not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+        image_id = _q_text(
+            "  Immutable ID of a reviewed local Linux image (sha256: plus 64 lowercase hex)",
+            default="",
+        ).strip()
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            console.print("[yellow]Enter the immutable sha256 image ID shown by your container runtime.[/yellow]")
+
+    evaluator_id = _q_text("  Evaluator name", default="smoke").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", evaluator_id):
+        console.print("[yellow]Using the safe evaluator name 'smoke'.[/yellow]")
+        evaluator_id = "smoke"
+    version = _q_text("  Evaluator version", default="v1").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", version):
+        console.print("[yellow]Using the safe evaluator version 'v1'.[/yellow]")
+        version = "v1"
+    expected = _q_text(
+        "  One exact output line that a passing candidate must print",
+        default="ok",
+    )
+    stdout_sha256 = hashlib.sha256((expected + "\n").encode("utf-8")).hexdigest()
+    queue_seconds = max(30, min(86400, _safe_int(
+        _q_text("  How many seconds may a submission wait for review?", default="3600"),
+        default=3600,
+    )))
+    return {
+        "enable": True,
+        "image_id": image_id,
+        "queue_seconds": queue_seconds,
+        "evaluators": {
+            evaluator_id: {"version": version, "stdout_sha256": stdout_sha256},
+        },
+    }
+
+
+def pick_candidate_promotion() -> dict[str, Any]:
+    """Choose the guarded research-to-production promotion surface."""
+
+    console.print()
+    console.print(
+        "[dim]Candidate promotion lets named administrators review an exact "
+        "research result, stage it behind a canary, activate it, and recover "
+        "or roll it back from inside Lightwork. Enable it only after the "
+        "installation has a reviewed promotion policy, artifact resolver, "
+        "and deployment adapter; missing authorities always fail closed.[/dim]"
+    )
+    if not _q_confirm("Enable governed candidate promotion in the app?", default=False):
+        return {"enable": False}
+    target_id = _q_text("  Deployment target name", default="installed-lightwork").strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", target_id) is None:
+        console.print("[yellow]Using the safe target name 'installed-lightwork'.[/yellow]")
+        target_id = "installed-lightwork"
+    return {
+        "enable": True,
+        "allowed_targets": [target_id],
+        "review_ttl_seconds": 3600,
+        "canary_metric": "error_rate",
+        "canary_comparison": "at_most",
+        "canary_threshold": 0.05,
+    }
+
+
+def pick_knowledge_access() -> dict[str, bool]:
+    """Choose the in-app current-rights organizational-memory surface."""
+
+    console.print()
+    console.print(
+        "[dim]Governed Knowledge shows only exact registry versions whose "
+        "source checksum, approval, purpose, current data-use authority, "
+        "consent, and parent lineage pass at read time. It also provides "
+        "correction, exclusion, deletion, recovery, and evidence-export flows "
+        "inside the app.[/dim]"
+    )
+    return {
+        "enable": _q_confirm(
+            "Enable governed Knowledge in the app (recommended)?",
+            default=True,
+        )
+    }
+
+
 # ---------- new wizard steps (council parity pass) ----------
 
 
@@ -6069,6 +6176,101 @@ def _cfg_self_learning(self_learning: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_research_execution(research_execution: dict[str, Any] | None) -> list[str]:
+    """Emit the controller profile accepted by ``ResearchProfile`` exactly."""
+    if research_execution is None:
+        return []
+    if research_execution == {"enable": False}:
+        return ["", "[research_execution]", "enable = false"]
+
+    from dataclasses import asdict
+
+    from maverick.research_jobs import ResearchProfile
+
+    profile = ResearchProfile.from_config(research_execution)
+    lines = [
+        "", "[research_execution]", "enable = true",
+        f"image_id = {_toml_str(profile.image_id)}",
+        f"queue_seconds = {profile.queue_seconds}",
+    ]
+    for evaluator in profile.evaluators:
+        lines.extend((
+            "", f"[research_execution.evaluators.{evaluator.id}]",
+            f"version = {_toml_str(evaluator.version)}",
+            f"stdout_sha256 = {_toml_str(evaluator.stdout_sha256)}",
+        ))
+    lines.extend(("", "[research_execution.limits]"))
+    for name, value in asdict(profile.limits).items():
+        _emit_kv(lines, name, value)
+    return lines
+
+
+def _cfg_candidate_promotion(candidate_promotion: dict[str, Any] | None) -> list[str]:
+    if candidate_promotion is None:
+        return []
+    enabled = candidate_promotion.get("enable")
+    if type(enabled) is not bool:
+        raise ValueError("candidate promotion enable must be boolean")
+    if enabled is False:
+        if candidate_promotion != {"enable": False}:
+            raise ValueError("disabled candidate promotion cannot retain active policy")
+        return ["", "[candidate_promotion]", "enable = false"]
+    expected = {
+        "enable",
+        "allowed_targets",
+        "review_ttl_seconds",
+        "canary_metric",
+        "canary_comparison",
+        "canary_threshold",
+    }
+    if set(candidate_promotion) != expected:
+        raise ValueError("candidate promotion policy is incomplete or unsupported")
+    targets = candidate_promotion["allowed_targets"]
+    if (
+        not isinstance(targets, list)
+        or not targets
+        or targets != sorted(set(targets))
+        or any(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None for value in targets)
+    ):
+        raise ValueError("candidate promotion targets must be unique safe names")
+    ttl = candidate_promotion["review_ttl_seconds"]
+    if isinstance(ttl, bool) or not isinstance(ttl, int) or not 60 <= ttl <= 604800:
+        raise ValueError("candidate promotion review lifetime is outside its bound")
+    metric = candidate_promotion["canary_metric"]
+    comparison = candidate_promotion["canary_comparison"]
+    threshold = candidate_promotion["canary_threshold"]
+    if not isinstance(metric, str) or re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", metric) is None:
+        raise ValueError("candidate promotion canary metric is invalid")
+    if comparison not in {"at_least", "at_most"}:
+        raise ValueError("candidate promotion canary comparison is invalid")
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, int | float)
+        or not math.isfinite(float(threshold))
+    ):
+        raise ValueError("candidate promotion canary threshold must be numeric")
+    lines = ["", "[candidate_promotion]"]
+    for key in (
+        "enable",
+        "allowed_targets",
+        "review_ttl_seconds",
+        "canary_metric",
+        "canary_comparison",
+        "canary_threshold",
+    ):
+        _emit_kv(lines, key, candidate_promotion[key])
+    return lines
+
+
+def _cfg_knowledge_access(knowledge_access: dict[str, Any] | None) -> list[str]:
+    if knowledge_access is None:
+        return []
+    enabled = knowledge_access.get("enable")
+    if type(enabled) is not bool:
+        raise ValueError("knowledge access enable must be boolean")
+    return ["", "[knowledge_access]", f"enable = {str(enabled).lower()}"]
+
+
 def _cfg_ekko(ekko: dict[str, Any] | None) -> list[str]:
     if not ekko:
         return []
@@ -6127,7 +6329,7 @@ def _cfg_oauth(oauth: dict[str, Any] | None) -> list[str]:
     if not (oauth and oauth.get("vault")):
         return []
     # Seal captured OAuth tokens in the per-tenant vault (encrypted at rest).
-    return ["", "[oauth]", "vault = true"]
+    return ["", "[oauth]", "vault = true", f"desktop_return = {'true' if oauth.get('desktop_return') is True else 'false'}"]
 
 
 def _cfg_governed_connectors(governed_connectors: dict[str, Any] | None) -> list[str]:
@@ -7979,6 +8181,9 @@ def write_config(
     keys: dict[str, str],
     capabilities: dict[str, bool] | None = None,
     *,
+    research_execution: dict[str, Any] | None = None,
+    candidate_promotion: dict[str, Any] | None = None,
+    knowledge_access: dict[str, Any] | None = None,
     advanced: dict[str, Any] | None = None,
     mcp_servers: dict[str, dict[str, Any]] | None = None,
     mcp_registries: list[str] | None = None,
@@ -8111,6 +8316,9 @@ def write_config(
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
     lines += _cfg_skills(skills)
+    lines += _cfg_research_execution(research_execution)
+    lines += _cfg_candidate_promotion(candidate_promotion)
+    lines += _cfg_knowledge_access(knowledge_access)
     lines += _cfg_self_learning(self_learning)
     lines += _cfg_ekko(ekko)
     lines += _cfg_automation_import(automation_import)
@@ -8133,6 +8341,8 @@ def write_config(
             f"reviewed_uploads = {'true' if security_suite.get('vendor_reviewed_uploads', True) else 'false'}",
             'document_connection = "gdrive"',
             'ticket_connection = "jira"',
+            "safe_read_attempts = 3",
+            "safe_read_backoff_seconds = 0.25",
         ]
 
     capability_config = dict(capabilities or {})
@@ -8993,6 +9203,27 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    research_execution = state.get("research_execution")
+    if research_execution is None:
+        research_execution = pick_research_execution()
+        state["research_execution"] = research_execution
+        _save_partial(state)
+
+    _announce()
+    candidate_promotion = state.get("candidate_promotion")
+    if candidate_promotion is None:
+        candidate_promotion = pick_candidate_promotion()
+        state["candidate_promotion"] = candidate_promotion
+        _save_partial(state)
+
+    _announce()
+    knowledge_access = state.get("knowledge_access")
+    if knowledge_access is None:
+        knowledge_access = pick_knowledge_access()
+        state["knowledge_access"] = knowledge_access
+        _save_partial(state)
+
+    _announce()
     capabilities = state.get("capabilities") or pick_capabilities()
     state["capabilities"] = capabilities
     _save_partial(state)
@@ -9088,6 +9319,9 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "signed_skills": signed_skills,
         "budget": budget,
         "sandbox": sandbox,
+        "research_execution": research_execution,
+        "candidate_promotion": candidate_promotion,
+        "knowledge_access": knowledge_access,
         "capabilities": capabilities,
         "self_learning": self_learning,
         "ekko": ekko,
@@ -9289,6 +9523,9 @@ def run(fast: bool = False, resume: bool = False) -> int:
     signed_skills = _simple["signed_skills"]
     budget = _simple["budget"]
     sandbox = _simple["sandbox"]
+    research_execution = _simple["research_execution"]
+    candidate_promotion = _simple["candidate_promotion"]
+    knowledge_access = _simple["knowledge_access"]
     capabilities = _simple["capabilities"]
     self_learning = _simple["self_learning"]
     ekko = _simple["ekko"]
@@ -9393,6 +9630,9 @@ def run(fast: bool = False, resume: bool = False) -> int:
         sandbox,
         keys,
         capabilities,
+        research_execution=research_execution,
+        candidate_promotion=candidate_promotion,
+        knowledge_access=knowledge_access,
         advanced=advanced,
         mcp_servers=mcp_servers,
         plugins=plugins,

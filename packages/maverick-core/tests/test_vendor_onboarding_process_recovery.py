@@ -112,7 +112,12 @@ def _matrix_crash(ctx, service, root, point):
 
     service._save = crash_at_transition
     row = service.prepare_action(ctx, row["id"], row["revision"])
-    row = service.approve_action(ctx, row["id"], row["revision"])
+    row = service.approve_action(
+        ctx,
+        row["id"],
+        row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
     row = service.execute(ctx, row["id"])
     service.accept(ctx, row["id"], row["revision"], True, "Procurement accepted verified ticket")
     raise AssertionError(f"fixture must terminate at {point}")
@@ -128,7 +133,12 @@ def _matrix_resume(ctx, service, tickets, root):
     if row.get("operation") is None:
         row = service.prepare_action(ctx, row["id"], row["revision"])
     if row["operation"]["state"] == "prepared":
-        row = service.approve_action(ctx, row["id"], row["revision"])
+        row = service.approve_action(
+            ctx,
+            row["id"],
+            row["revision"],
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
     row = service.execute(ctx, row["id"])
     if row["operation"]["state"] == "reconciliation_required":
         row = service.reconcile(ctx, row["id"])
@@ -179,7 +189,12 @@ def _worker(mode: str, root: Path) -> dict:
         row = service.assess(ctx, row["id"], row["revision"])
         row = service.review(ctx, row["id"], row["revision"], "approved", "Restricted synthetic pilot")
         row = service.prepare_action(ctx, row["id"], row["revision"])
-        row = service.approve_action(ctx, row["id"], row["revision"])
+        row = service.approve_action(
+            ctx,
+            row["id"],
+            row["revision"],
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
         _write_json(manifest_path, {"case_id": row["id"], "operation_id": row["operation"]["id"]})
         if mode == "prepare":
             return {"case": row}

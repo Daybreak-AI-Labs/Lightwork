@@ -7,10 +7,15 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from maverick import backup, config, control_plane_lease
 from maverick import installation_recovery as maintenance
+
+PRODUCT_CODE = "{11111111-2222-3333-4444-555555555555}"
+PACKAGE_CODE = "{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}"
+PUBLISHER = "C" * 40
 
 
 def digest(value):
@@ -31,9 +36,18 @@ def installation(tmp_path, monkeypatch):
     runtime = installed / "maverick.exe"
     runtime.write_bytes(b"old-runtime")
     (installed / "maverick-desktop.exe").write_bytes(b"native-ui-fixture")
+    (installed / "maverick-recovery.exe").write_bytes(b"old-runtime")
+    (installed / "maverick-recovery-desktop.exe").write_bytes(b"native-ui-fixture")
     active = [runtime]
     monkeypatch.setattr(maintenance, "_runtime", lambda: active[0])
-    monkeypatch.setattr(maintenance, "_native_channel", lambda runtime, **kwargs: {"native_sha256": digest(b"native-ui-fixture"), "public_key": "fixture-only"})
+    monkeypatch.setattr(maintenance, "_executing_runtime", lambda: active[0])
+    monkeypatch.setattr(maintenance, "_native_channel", lambda runtime, **kwargs: {
+        "native_sha256": backup._sha256(
+            kwargs.get("native_path") or runtime.parent / "maverick-desktop.exe"
+        ),
+        "public_key": "fixture-only",
+        "publisher_thumbprint": PUBLISHER,
+    })
     (home / "config.toml").write_text("# local configuration\n")
     for tenant in ("alpha", "beta"):
         root = home / "tenants" / tenant
@@ -66,6 +80,127 @@ def staged(installation, monkeypatch, *, prepare=True):
     return grant, directory
 
 
+def staged_repair(installation, monkeypatch, *, prepare=True):
+    _, runtime, active = installation
+    (runtime.parent / "Lightwork-recovery.msi").write_bytes(
+        b"same-version-repair-msi"
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: {
+            "product_code": PRODUCT_CODE,
+            "package_code": PACKAGE_CODE,
+            "install_directory": str(runtime.parent.absolute()),
+        },
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "inspect_signed_msi",
+        lambda *_args, **_kwargs: {
+            "ProductVersion": "1.0.0",
+            "ProductCode": PRODUCT_CODE,
+            "PackageCode": PACKAGE_CODE,
+            "UpgradeCode": "{AB5BC260-7EC9-4B70-AF78-28F4067BC530}",
+            "PublisherThumbprint": PUBLISHER,
+        },
+    )
+    grant = maintenance.authorize_repair(
+        actor="native-desktop-repair", confirm_all_workspaces=True,
+    )
+    directory = maintenance._directory(grant["id"])
+    candidate = directory / "new.msi"
+    candidate.write_bytes(b"same-version-repair-msi")
+    metadata = {
+        "public_key": "fixture-only",
+        "identity_transition": None,
+        "new": {
+            "version": "1.0.0",
+            "runtime_sha256": digest(b"old-runtime"),
+            "installer_sha256": backup._sha256(candidate),
+        },
+    }
+    (directory / "downloads.json").write_text(json.dumps(metadata))
+    monkeypatch.setattr(maintenance, "_installer", lambda directory, metadata, label: {
+        **metadata[label],
+        "sha256": backup._sha256(directory / (label + ".msi")),
+        "product_code": PRODUCT_CODE,
+        "package_code": PACKAGE_CODE,
+        "publisher_thumbprint": PUBLISHER,
+    })
+    if prepare:
+        maintenance.prepare(grant["authorization"])
+        active[0] = directory / "maverick.exe"
+    return grant, directory
+
+
+def staged_reviewed_repair(
+    installation, monkeypatch, *, retained_installer: bytes | None, prepare=True,
+):
+    _, runtime, active = installation
+    candidate_bytes = b"same-version-repair-msi"
+    retained = runtime.parent / "Lightwork-recovery.msi"
+    if retained_installer is None:
+        retained.unlink(missing_ok=True)
+    else:
+        retained.write_bytes(retained_installer)
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: {
+            "product_code": PRODUCT_CODE,
+            "package_code": PACKAGE_CODE,
+            "install_directory": str(runtime.parent.absolute()),
+        },
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "inspect_signed_msi",
+        lambda *_args, **_kwargs: {
+            "ProductVersion": "1.0.0",
+            "ProductCode": PRODUCT_CODE,
+            "PackageCode": PACKAGE_CODE,
+            "UpgradeCode": "{AB5BC260-7EC9-4B70-AF78-28F4067BC530}",
+            "PublisherThumbprint": PUBLISHER,
+        },
+    )
+    expected = {
+        "expected_runtime_sha256": digest(b"old-runtime"),
+        "expected_installer_sha256": digest(candidate_bytes),
+        "expected_public_key": "fixture-only",
+        "expected_version": "1.0.0",
+    }
+    capability = maintenance.repair_capability(**expected)
+    grant = maintenance.authorize_repair(
+        actor="native-desktop-repair",
+        confirm_all_workspaces=True,
+        **expected,
+    )
+    directory = maintenance._directory(grant["id"])
+    (directory / "new.msi").write_bytes(candidate_bytes)
+    metadata = {
+        "public_key": "fixture-only",
+        "identity_transition": None,
+        "new": {
+            "version": "1.0.0",
+            "runtime_sha256": digest(b"old-runtime"),
+            "installer_sha256": digest(candidate_bytes),
+        },
+    }
+    (directory / "downloads.json").write_text(json.dumps(metadata))
+    monkeypatch.setattr(maintenance, "_installer", lambda directory, metadata, label: {
+        **metadata[label],
+        "sha256": backup._sha256(directory / (label + ".msi")),
+        "product_code": PRODUCT_CODE,
+        "package_code": PACKAGE_CODE,
+        "publisher_thumbprint": PUBLISHER,
+    })
+    if prepare:
+        maintenance.prepare(grant["authorization"])
+        active[0] = directory / "maverick.exe"
+    return grant, directory, capability
+
+
 def fake_installer(runtime, events):
     def install(directory, action, label):
         events.append((action, label))
@@ -74,6 +209,138 @@ def fake_installer(runtime, events):
         else:
             runtime.unlink(missing_ok=True)
     return install
+
+
+def fake_repair_installer(runtime, events):
+    def install(_directory, action, label):
+        events.append((action, label))
+        if action == "/i":
+            runtime.write_bytes(b"old-runtime")
+            (runtime.parent / "maverick-recovery.exe").write_bytes(b"old-runtime")
+            (runtime.parent / "maverick-desktop.exe").write_bytes(b"native-ui-fixture")
+            (runtime.parent / "maverick-recovery-desktop.exe").write_bytes(
+                b"native-ui-fixture"
+            )
+    return install
+
+
+def test_repair_msi_requests_a_complete_same_product_reinstall(
+    installation, monkeypatch,
+):
+    grant, directory = staged_repair(installation, monkeypatch)
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(maintenance.subprocess, "run", run)
+    maintenance._msiexec(directory, "/i", "new")
+    arguments, kwargs = calls[0]
+    assert arguments[1:3] == ["/i", maintenance.installer_path(directory / "new.msi")]
+    assert "REINSTALL=ALL" in arguments
+    assert "REINSTALLMODE=vamus" in arguments
+    install_directory = Path(maintenance._read(directory / "record.json")["installed_runtime"]).parent
+    assert "INSTALLDIR=" + maintenance.installer_path(install_directory) in arguments
+    assert kwargs["check"] is False
+    assert kwargs["timeout"] == 1800
+
+
+def test_registered_installer_lookup_uses_the_fixed_product_family_and_os_powershell(
+    installation, tmp_path, monkeypatch,
+):
+    _, runtime, _ = installation
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append((arguments, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "ProductCode": PRODUCT_CODE.lower(),
+                "PackageCode": PACKAGE_CODE.lower(),
+                "InstallLocation": str(runtime.parent),
+            }),
+        )
+
+    monkeypatch.setenv("PSModulePath", str(tmp_path / "untrusted-modules"))
+    monkeypatch.setattr(maintenance.subprocess, "run", run)
+    scratch = tmp_path / "scratch"
+    result = maintenance._registered_product_identity("1.0.0", scratch, runtime)
+    assert result == {
+        "product_code": PRODUCT_CODE,
+        "package_code": PACKAGE_CODE,
+        "install_directory": str(runtime.parent.absolute()),
+    }
+    arguments, kwargs = calls[0]
+    assert arguments[-2:] == ["-Version", "1.0.0"]
+    assert "AB5BC260-7EC9-4B70-AF78-28F4067BC530" in (
+        scratch / "inspect-registered-installer.ps1"
+    ).read_text()
+    assert "LocalPackage" not in (scratch / "inspect-registered-installer.ps1").read_text()
+    assert kwargs["env"]["PSModulePath"] != str(tmp_path / "untrusted-modules")
+    assert kwargs["check"] is False
+
+
+def test_registered_installer_lookup_rejects_non_object_output(
+    installation, tmp_path, monkeypatch,
+):
+    _, runtime, _ = installation
+    monkeypatch.setattr(
+        maintenance.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="[]"),
+    )
+    with pytest.raises(maintenance.MaintenanceError, match="identity or installation directory"):
+        maintenance._registered_product_identity("1.0.0", tmp_path / "scratch", runtime)
+
+
+def test_registered_product_is_rechecked_before_repair(
+    installation, tmp_path, monkeypatch,
+):
+    _, runtime, _ = installation
+    directory = maintenance.file_lock.ensure_private_directory(tmp_path / "retained")
+    record = {
+        "old_version": "1.0.0",
+        "installed_runtime": str(runtime),
+        "old": {
+            "product_code": PRODUCT_CODE,
+            "package_code": PACKAGE_CODE,
+            "install_directory": str(runtime.parent.absolute()),
+        },
+    }
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: {
+            **record["old"],
+            "package_code": "{FFFFFFFF-EEEE-DDDD-CCCC-BBBBBBBBBBBB}",
+        },
+    )
+    with pytest.raises(maintenance.MaintenanceError, match="package or location"):
+        maintenance._verify_repair_registration(directory, record)
+
+
+def test_unknown_or_mismatched_repair_operation_is_refused_before_msi(
+    installation, monkeypatch,
+):
+    grant, directory = staged_repair(installation, monkeypatch, prepare=False)
+    record = maintenance._read(directory / "record.json")
+    record["operation"] = "future-operation"
+    maintenance._write(directory / "record.json", record)
+    with pytest.raises(maintenance.MaintenanceError, match="unsupported"):
+        maintenance.prepare(grant["authorization"])
+    assert not (maintenance._store() / "active.json").exists()
+
+    grant, directory = staged_repair(installation, monkeypatch)
+    record = maintenance._read(directory / "record.json")
+    record["finalization"] = "upgraded"
+    maintenance._write(directory / "record.json", record)
+    calls = []
+    monkeypatch.setattr(maintenance, "_msiexec", lambda *_: calls.append("msi"))
+    with pytest.raises(maintenance.MaintenanceError, match="does not match"):
+        maintenance.execute(grant["authorization"])
+    assert calls == []
 
 
 def test_completed_upgrade_rollback_reinstalls_exact_old_binary_before_old_state(installation, monkeypatch):
@@ -162,6 +429,556 @@ def test_changed_source_and_expired_grant_refuse_before_installers(installation,
     monkeypatch.setattr(maintenance.time, "time", lambda: grant["expires_at"] + 1)
     with pytest.raises(maintenance.MaintenanceError, match="expired"):
         maintenance.inspect_grant(grant["authorization"])
+
+
+def test_same_version_repair_uses_signed_snapshot_and_startup_gate(
+    installation, monkeypatch,
+):
+    home, runtime, _ = installation
+    grant, directory = staged_repair(installation, monkeypatch)
+    record = maintenance._read(directory / "record.json")
+    assert record["operation"] == "repair"
+    assert record["old"]["product_code"] == record["new"]["product_code"]
+    assert record["old"]["publisher_thumbprint"] == record["new"]["publisher_thumbprint"]
+    assert (directory / "before.tgz").is_file()
+    with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
+        maintenance.assert_normal_start_allowed()
+    events = []
+    monkeypatch.setattr(maintenance, "_msiexec", fake_repair_installer(runtime, events))
+    assert maintenance.execute(grant["authorization"])["status"] == "repaired"
+    assert events == [("/i", "new")]
+    assert (home / "tenants" / "alpha" / "ledger.json").read_text() == "old-state"
+    maintenance.assert_normal_start_allowed()
+
+
+def test_recovery_copies_repair_missing_runtime_and_corrupt_native_shell(
+    installation, monkeypatch,
+):
+    _, runtime, _ = installation
+    runtime.unlink()
+    (runtime.parent / "maverick-desktop.exe").write_bytes(b"damaged-native-shell")
+    grant, directory = staged_repair(installation, monkeypatch)
+    record = maintenance._read(directory / "record.json")
+    assert record["damaged_core_files"] == ["maverick-desktop.exe", "maverick.exe"]
+    events = []
+    monkeypatch.setattr(maintenance, "_msiexec", fake_repair_installer(runtime, events))
+    assert maintenance.execute(grant["authorization"])["status"] == "repaired"
+    assert runtime.read_bytes() == b"old-runtime"
+    assert (runtime.parent / "maverick-desktop.exe").read_bytes() == b"native-ui-fixture"
+    assert events == [("/i", "new")]
+
+
+def test_missing_recovery_copy_refuses_before_creating_repair_authorization(
+    installation, monkeypatch,
+):
+    _, runtime, _ = installation
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: {
+            "product_code": PRODUCT_CODE,
+            "package_code": PACKAGE_CODE,
+            "install_directory": str(runtime.parent.absolute()),
+        },
+    )
+    (runtime.parent / "Lightwork-recovery.msi").write_bytes(b"same-version-repair-msi")
+    monkeypatch.setattr(
+        maintenance,
+        "inspect_signed_msi",
+        lambda *_args, **_kwargs: {
+            "ProductVersion": "1.0.0",
+            "ProductCode": PRODUCT_CODE,
+            "PackageCode": PACKAGE_CODE,
+            "UpgradeCode": "{AB5BC260-7EC9-4B70-AF78-28F4067BC530}",
+            "PublisherThumbprint": PUBLISHER,
+        },
+    )
+    (runtime.parent / "maverick-recovery.exe").unlink()
+    with pytest.raises(maintenance.MaintenanceError, match="Neither installed application copy"):
+        maintenance.authorize_repair(
+            actor="native-desktop-repair", confirm_all_workspaces=True,
+        )
+    assert maintenance._records() == []
+
+
+@pytest.mark.parametrize("restore_recovery_pair", [True, False])
+def test_signed_current_manifest_uses_primary_pair_to_repair_broken_recovery_pair(
+    installation, monkeypatch, restore_recovery_pair,
+):
+    _, runtime, active = installation
+    retained_installer = runtime.parent / "Lightwork-recovery.msi"
+    retained_installer.write_bytes(b"same-version-repair-msi")
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: {
+            "product_code": PRODUCT_CODE,
+            "package_code": PACKAGE_CODE,
+            "install_directory": str(runtime.parent.absolute()),
+        },
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "inspect_signed_msi",
+        lambda *_args, **_kwargs: {
+            "ProductVersion": "1.0.0",
+            "ProductCode": PRODUCT_CODE,
+            "PackageCode": PACKAGE_CODE,
+            "UpgradeCode": "{AB5BC260-7EC9-4B70-AF78-28F4067BC530}",
+            "PublisherThumbprint": PUBLISHER,
+        },
+    )
+    (runtime.parent / "maverick-recovery.exe").unlink()
+    (runtime.parent / "maverick-recovery-desktop.exe").write_bytes(b"broken-recovery-shell")
+    installer_sha256 = backup._sha256(retained_installer)
+    grant = maintenance.authorize_repair(
+        actor="native-desktop-repair",
+        confirm_all_workspaces=True,
+        expected_runtime_sha256=digest(b"old-runtime"),
+        expected_installer_sha256=installer_sha256,
+        expected_public_key="fixture-only",
+        expected_version="1.0.0",
+    )
+    directory = maintenance._directory(grant["id"])
+    candidate = directory / "new.msi"
+    candidate.write_bytes(b"same-version-repair-msi")
+    metadata = {
+        "public_key": "fixture-only",
+        "identity_transition": None,
+        "new": {
+            "version": "1.0.0",
+            "runtime_sha256": digest(b"old-runtime"),
+            "installer_sha256": installer_sha256,
+        },
+    }
+    (directory / "downloads.json").write_text(json.dumps(metadata))
+    monkeypatch.setattr(maintenance, "_installer", lambda directory, metadata, label: {
+        **metadata[label],
+        "sha256": backup._sha256(directory / (label + ".msi")),
+        "product_code": PRODUCT_CODE,
+        "package_code": PACKAGE_CODE,
+        "publisher_thumbprint": PUBLISHER,
+    })
+
+    maintenance.prepare(grant["authorization"])
+    record = maintenance._read(directory / "record.json")
+    assert record["damaged_core_files"] == [
+        "maverick-recovery-desktop.exe", "maverick-recovery.exe",
+    ]
+    active[0] = directory / "maverick.exe"
+    events = []
+
+    def install_primary_only(_directory, action, label):
+        events.append((action, label))
+        runtime.write_bytes(b"old-runtime")
+        (runtime.parent / "maverick-desktop.exe").write_bytes(b"native-ui-fixture")
+        if restore_recovery_pair:
+            (runtime.parent / "maverick-recovery.exe").write_bytes(b"old-runtime")
+            (runtime.parent / "maverick-recovery-desktop.exe").write_bytes(
+                b"native-ui-fixture"
+            )
+
+    monkeypatch.setattr(maintenance, "_msiexec", install_primary_only)
+    if restore_recovery_pair:
+        assert maintenance.execute(grant["authorization"])["status"] == "repaired"
+    else:
+        with pytest.raises(maintenance.MaintenanceError, match="recovery copy"):
+            maintenance.execute(grant["authorization"])
+        assert maintenance._read(directory / "record.json")["status"] == "incomplete"
+        with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
+            maintenance.assert_normal_start_allowed()
+        authorization = maintenance.resume(grant["id"])
+        assert maintenance.execute(authorization)["status"] == "repair_recovered"
+    assert events == [("/i", "new")]
+    assert (runtime.parent / "maverick-recovery.exe").read_bytes() == b"old-runtime"
+    assert (runtime.parent / "maverick-recovery-desktop.exe").read_bytes() == b"native-ui-fixture"
+
+
+def test_primary_repair_fallback_requires_exact_signed_manifest_identity(
+    installation, monkeypatch,
+):
+    _, runtime, _ = installation
+    retained_installer = runtime.parent / "Lightwork-recovery.msi"
+    retained_installer.write_bytes(b"same-version-repair-msi")
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: {
+            "product_code": PRODUCT_CODE,
+            "package_code": PACKAGE_CODE,
+            "install_directory": str(runtime.parent.absolute()),
+        },
+    )
+    monkeypatch.setattr(
+        maintenance,
+        "inspect_signed_msi",
+        lambda *_args, **_kwargs: {
+            "ProductVersion": "1.0.0",
+            "ProductCode": PRODUCT_CODE,
+            "PackageCode": PACKAGE_CODE,
+            "UpgradeCode": "{AB5BC260-7EC9-4B70-AF78-28F4067BC530}",
+            "PublisherThumbprint": PUBLISHER,
+        },
+    )
+    (runtime.parent / "maverick-recovery.exe").unlink()
+    with pytest.raises(maintenance.MaintenanceError, match="Neither installed application copy"):
+        maintenance.authorize_repair(
+            actor="native-desktop-repair",
+            confirm_all_workspaces=True,
+            expected_runtime_sha256="f" * 64,
+            expected_installer_sha256=backup._sha256(retained_installer),
+            expected_public_key="fixture-only",
+            expected_version="1.0.0",
+        )
+    assert maintenance._records() == []
+
+
+@pytest.mark.parametrize("retained_installer", [None, b"corrupt-retained-msi"])
+def test_signed_primary_repairs_a_missing_or_corrupt_retained_installer(
+    installation, monkeypatch, retained_installer,
+):
+    _, runtime, active = installation
+    grant, directory, capability = staged_reviewed_repair(
+        installation,
+        monkeypatch,
+        retained_installer=retained_installer,
+        prepare=False,
+    )
+    assert capability["runtime_role"] == "primary"
+    assert capability["retained_installer_available"] is False
+    record = maintenance._read(directory / "record.json")
+    assert record["old"]["publisher_thumbprint"] is None
+    assert record["retained_installer_available_at_authorization"] is False
+
+    maintenance.prepare(grant["authorization"])
+    active[0] = directory / "maverick.exe"
+    assert (directory / "repair-source.msi").read_bytes() == b"same-version-repair-msi"
+    prepared = maintenance._read(directory / "record.json")
+    assert prepared["old"]["publisher_thumbprint"] == PUBLISHER
+
+    def repair(_directory, action, label):
+        assert (action, label) == ("/i", "new")
+        runtime.write_bytes(b"old-runtime")
+        (runtime.parent / "maverick-recovery.exe").write_bytes(b"old-runtime")
+        (runtime.parent / "maverick-desktop.exe").write_bytes(b"native-ui-fixture")
+        (runtime.parent / "maverick-recovery-desktop.exe").write_bytes(
+            b"native-ui-fixture"
+        )
+        (runtime.parent / "Lightwork-recovery.msi").write_bytes(
+            b"same-version-repair-msi"
+        )
+
+    monkeypatch.setattr(maintenance, "_msiexec", repair)
+    assert maintenance.execute(grant["authorization"])["status"] == "repaired"
+    assert (runtime.parent / "Lightwork-recovery.msi").read_bytes() == (
+        b"same-version-repair-msi"
+    )
+    maintenance.assert_normal_start_allowed()
+
+
+def test_failed_repair_recovers_missing_installer_from_verified_candidate_without_replay(
+    installation, monkeypatch,
+):
+    home, runtime, _ = installation
+    grant, directory, _ = staged_reviewed_repair(
+        installation, monkeypatch, retained_installer=None,
+    )
+    calls = []
+
+    def fail_candidate(_directory, action, label):
+        calls.append((action, label))
+        runtime.write_bytes(b"failed-candidate-runtime")
+        (runtime.parent / "maverick-desktop.exe").write_bytes(b"failed-native")
+        (runtime.parent / "maverick-recovery.exe").unlink(missing_ok=True)
+        (runtime.parent / "maverick-recovery-desktop.exe").unlink(missing_ok=True)
+        (runtime.parent / "Lightwork-recovery.msi").write_bytes(b"failed-msi")
+        (home / "tenants" / "alpha" / "ledger.json").write_text("failed-state")
+        raise maintenance.MaintenanceError("synthetic repair failure")
+
+    monkeypatch.setattr(maintenance, "_msiexec", fail_candidate)
+    with pytest.raises(maintenance.MaintenanceError, match="synthetic repair"):
+        maintenance.execute(grant["authorization"])
+
+    authorization = maintenance.resume(grant["id"])
+    monkeypatch.setattr(
+        maintenance,
+        "_msiexec",
+        lambda *_: pytest.fail("failed candidate must not be replayed during recovery"),
+    )
+    assert maintenance.execute(authorization)["status"] == "repair_recovered"
+    assert calls == [("/i", "new")]
+    assert runtime.read_bytes() == b"old-runtime"
+    assert (runtime.parent / "maverick-recovery.exe").read_bytes() == b"old-runtime"
+    assert (runtime.parent / "maverick-desktop.exe").read_bytes() == b"native-ui-fixture"
+    assert (runtime.parent / "maverick-recovery-desktop.exe").read_bytes() == (
+        b"native-ui-fixture"
+    )
+    assert (runtime.parent / "Lightwork-recovery.msi").read_bytes() == (
+        b"same-version-repair-msi"
+    )
+    assert (home / "tenants" / "alpha" / "ledger.json").read_text() == "old-state"
+    maintenance.assert_normal_start_allowed()
+
+
+def test_interrupted_repair_resume_restores_registered_package_and_saved_state(
+    installation, monkeypatch,
+):
+    home, runtime, _ = installation
+    grant, directory = staged_repair(installation, monkeypatch)
+    events = []
+
+    def fail_candidate(_directory, action, label):
+        events.append((action, label))
+        runtime.write_bytes(b"corrupt-repair-runtime")
+        (runtime.parent / "maverick-desktop.exe").write_bytes(b"corrupt-native-shell")
+        (runtime.parent / "maverick-recovery.exe").unlink()
+        (runtime.parent / "maverick-recovery-desktop.exe").write_bytes(
+            b"corrupt-recovery-native-shell"
+        )
+        (runtime.parent / "Lightwork-recovery.msi").unlink()
+        (home / "tenants" / "alpha" / "ledger.json").write_text("changed-by-failed-repair")
+        raise maintenance.MaintenanceError("synthetic repair failure")
+
+    monkeypatch.setattr(maintenance, "_msiexec", fail_candidate)
+    with pytest.raises(maintenance.MaintenanceError, match="synthetic repair"):
+        maintenance.execute(grant["authorization"])
+    assert maintenance._read(directory / "record.json")["status"] == "incomplete"
+    with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
+        maintenance.assert_normal_start_allowed()
+
+    authorization = maintenance.resume(grant["id"])
+    assert maintenance.execute(authorization)["status"] == "repair_recovered"
+    assert events == [("/i", "new")]
+    assert runtime.read_bytes() == b"old-runtime"
+    assert (runtime.parent / "maverick-desktop.exe").read_bytes() == b"native-ui-fixture"
+    assert (runtime.parent / "maverick-recovery.exe").read_bytes() == b"old-runtime"
+    assert (runtime.parent / "maverick-recovery-desktop.exe").read_bytes() == b"native-ui-fixture"
+    assert (runtime.parent / "Lightwork-recovery.msi").read_bytes() == b"same-version-repair-msi"
+    assert (home / "tenants" / "alpha" / "ledger.json").read_text() == "old-state"
+    maintenance.assert_normal_start_allowed()
+
+
+def test_failed_upgrade_identity_resumes_by_recovering_old_release_not_replaying_candidate(
+    installation, monkeypatch,
+):
+    home, runtime, _ = installation
+    grant, directory = staged(installation, monkeypatch)
+    events = []
+
+    def fail_candidate(_directory, action, label):
+        events.append((action, label))
+        runtime.write_bytes(b"candidate-with-wrong-identity")
+        (home / "tenants" / "alpha" / "ledger.json").write_text(
+            "changed-during-interrupted-upgrade"
+        )
+
+    monkeypatch.setattr(maintenance, "_msiexec", fail_candidate)
+    with pytest.raises(maintenance.MaintenanceError, match="verified release"):
+        maintenance.execute(grant["authorization"])
+    assert maintenance._read(directory / "record.json")["status"] == "incomplete"
+
+    authorization = maintenance.resume(grant["id"])
+    monkeypatch.setattr(maintenance, "_msiexec", fake_installer(runtime, events))
+    assert maintenance.execute(authorization)["status"] == "upgrade_recovered"
+    assert events == [("/i", "new"), ("/x", "new"), ("/i", "old")]
+    assert runtime.read_bytes() == b"old-runtime"
+    assert (home / "tenants" / "alpha" / "ledger.json").read_text() == "old-state"
+    maintenance.assert_normal_start_allowed()
+
+
+def test_failed_repair_refuses_tampered_install_time_source_without_replaying_candidate(
+    installation, monkeypatch,
+):
+    _, runtime, _ = installation
+    grant, directory = staged_repair(installation, monkeypatch)
+    events = []
+
+    def fail_candidate(_directory, action, label):
+        events.append((action, label))
+        runtime.write_bytes(b"candidate-with-wrong-identity")
+        raise maintenance.MaintenanceError("synthetic repair failure")
+
+    monkeypatch.setattr(maintenance, "_msiexec", fail_candidate)
+    with pytest.raises(maintenance.MaintenanceError, match="synthetic repair"):
+        maintenance.execute(grant["authorization"])
+    (directory / "repair-source.msi").write_bytes(b"tampered-retained-installer")
+
+    authorization = maintenance.resume(grant["id"])
+    with pytest.raises(maintenance.MaintenanceError, match="install-time repair package"):
+        maintenance.execute(authorization)
+    assert events == [("/i", "new")]
+    assert runtime.read_bytes() == b"candidate-with-wrong-identity"
+    with pytest.raises(maintenance.MaintenanceError, match="unfinished"):
+        maintenance.assert_normal_start_allowed()
+
+
+def test_prepared_repair_without_active_marker_resumes_candidate_once(
+    installation, monkeypatch,
+):
+    _, runtime, active = installation
+    grant, directory = staged_repair(installation, monkeypatch, prepare=False)
+    original = maintenance._write
+
+    def fail_marker(path, record):
+        if path == maintenance._store() / "active.json":
+            raise OSError("synthetic marker write failure")
+        original(path, record)
+
+    monkeypatch.setattr(maintenance, "_write", fail_marker)
+    with pytest.raises(OSError, match="marker"):
+        maintenance.prepare(grant["authorization"])
+    assert maintenance._read(directory / "record.json")["status"] == "prepared"
+    assert not (maintenance._store() / "active.json").exists()
+
+    monkeypatch.setattr(maintenance, "_write", original)
+    authorization = maintenance.resume(grant["id"])
+    active[0] = directory / "maverick.exe"
+    events = []
+    monkeypatch.setattr(maintenance, "_msiexec", fake_repair_installer(runtime, events))
+    assert maintenance.execute(authorization)["status"] == "repaired"
+    assert events == [("/i", "new")]
+
+
+def test_terminal_repair_receipt_survives_active_marker_removal_failure(
+    installation, monkeypatch,
+):
+    _, runtime, _ = installation
+    grant, directory = staged_repair(installation, monkeypatch)
+    events = []
+    monkeypatch.setattr(maintenance, "_msiexec", fake_repair_installer(runtime, events))
+    marker = maintenance._store() / "active.json"
+    original_unlink = Path.unlink
+
+    def fail_active(path, *args, **kwargs):
+        if path == marker:
+            raise OSError("synthetic marker removal failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_active)
+    with pytest.raises(maintenance.MaintenanceError, match="startup block"):
+        maintenance.execute(grant["authorization"])
+    assert maintenance._read(directory / "record.json")["status"] == "repaired"
+    assert marker.exists()
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    authorization = maintenance.resume(grant["id"])
+    assert maintenance.execute(authorization)["status"] == "repaired"
+    assert events == [("/i", "new")]
+    maintenance.assert_normal_start_allowed()
+
+
+@pytest.mark.parametrize(
+    "changed,match",
+    [
+        ("key", "verification key"),
+        ("transition", "signing identity"),
+        ("version", "does not match"),
+        ("runtime", "does not match"),
+        ("installer", "does not match"),
+        ("product", "does not match"),
+        ("package", "does not match"),
+        ("publisher", "does not match"),
+    ],
+)
+def test_repair_refuses_release_or_installed_identity_drift_before_startup_block(
+    installation, monkeypatch, changed, match,
+):
+    _, runtime, _ = installation
+    grant, directory = staged_repair(installation, monkeypatch, prepare=False)
+    protected = {
+        path.name: backup._sha256(path)
+        for path in (
+            runtime,
+            runtime.parent / "maverick-desktop.exe",
+            runtime.parent / "maverick-recovery.exe",
+            runtime.parent / "maverick-recovery-desktop.exe",
+            runtime.parent / "Lightwork-recovery.msi",
+        )
+    }
+    metadata_path = directory / "downloads.json"
+    metadata = json.loads(metadata_path.read_text())
+    if changed == "key":
+        metadata["public_key"] = "different-key"
+    elif changed == "transition":
+        metadata["identity_transition"] = {"policy": {}}
+    elif changed == "version":
+        metadata["new"]["version"] = "1.0.1"
+    elif changed == "runtime":
+        metadata["new"]["runtime_sha256"] = "f" * 64
+    elif changed == "installer":
+        metadata["new"]["installer_sha256"] = "f" * 64
+    else:
+        original = maintenance._installer
+        monkeypatch.setattr(
+            maintenance,
+            "_installer",
+            lambda directory, metadata, label: original(directory, metadata, label) | {
+                (
+                    "product_code" if changed == "product"
+                    else "package_code" if changed == "package"
+                    else "publisher_thumbprint"
+                ): (
+                    "{DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD}"
+                    if changed in {"product", "package"}
+                    else "D" * 40
+                ),
+            },
+        )
+    metadata_path.write_text(json.dumps(metadata))
+    with pytest.raises(maintenance.MaintenanceError, match=match):
+        maintenance.prepare(grant["authorization"])
+    assert not (maintenance._store() / "active.json").exists()
+    assert protected == {
+        path.name: backup._sha256(path)
+        for path in (
+            runtime,
+            runtime.parent / "maverick-desktop.exe",
+            runtime.parent / "maverick-recovery.exe",
+            runtime.parent / "maverick-recovery-desktop.exe",
+            runtime.parent / "Lightwork-recovery.msi",
+        )
+    }
+
+
+def test_repair_requires_registered_package_before_creating_a_grant(
+    installation, monkeypatch,
+):
+    monkeypatch.setattr(
+        maintenance,
+        "_registered_product_identity",
+        lambda *_: (_ for _ in ()).throw(
+            maintenance.MaintenanceError("registered package unavailable")
+        ),
+    )
+    with pytest.raises(maintenance.MaintenanceError, match="registered package"):
+        maintenance.authorize_repair(
+            actor="native-desktop-repair", confirm_all_workspaces=True,
+        )
+    assert maintenance._records() == []
+
+
+def test_repair_completion_receipt_crash_finalizes_without_second_install(
+    installation, monkeypatch,
+):
+    _, runtime, _ = installation
+    grant, _ = staged_repair(installation, monkeypatch)
+    events = []
+    monkeypatch.setattr(maintenance, "_msiexec", fake_repair_installer(runtime, events))
+    original = maintenance._write
+
+    def crash(path, record):
+        original(path, record)
+        if record.get("status") == "repaired":
+            raise SystemExit("synthetic repair receipt crash")
+
+    monkeypatch.setattr(maintenance, "_write", crash)
+    with pytest.raises(SystemExit, match="repair receipt"):
+        maintenance.execute(grant["authorization"])
+    monkeypatch.setattr(maintenance, "_write", original)
+    authorization = maintenance.resume(grant["id"])
+    assert maintenance.execute(authorization)["status"] == "repaired"
+    assert events == [("/i", "new")]
+    maintenance.assert_normal_start_allowed()
 
 
 def test_whole_home_archive_excludes_live_lease_and_nested_recovery_keys(installation):

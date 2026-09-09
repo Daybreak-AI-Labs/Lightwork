@@ -96,7 +96,16 @@ def _workspace_authority(request: Request, actor: str, tenant: str) -> str:
 
 
 def _context(request: Request) -> ServiceContext:
-    require_permission(request, "operate")
+    # Execute constructs the changed caller context once so the domain service
+    # can durably retire a stale approval.  The request-local marker is cleared
+    # before the service's authorization callback re-resolves this context.
+    revalidating = bool(getattr(
+        getattr(request, "state", None),
+        "_lightwork_vendor_execution_revalidation",
+        False,
+    ))
+    if not revalidating:
+        require_permission(request, "operate")
     tenant = current_tenant_id_strict()
     if not tenant:
         raise HTTPException(409, "Select an active tenant")
@@ -155,6 +164,7 @@ def bind_request(request: Request) -> WorkflowBinding:
     from maverick.vendor_onboarding_adapters import GoogleDriveEvidence, JiraTickets
 
     ctx = _context(request)
+    enrolled = settings()
 
     def authorize(candidate: ServiceContext, _operation: str, _resource: str) -> bool:
         # Re-resolve current enrollment and RBAC at every sensitive boundary.
@@ -164,7 +174,15 @@ def bind_request(request: Request) -> WorkflowBinding:
         return candidate.binding() == current.binding() and (not candidate.human or current.human)
 
     return WorkflowBinding(VendorOnboardingService(
-        documents=GoogleDriveEvidence(), tickets=JiraTickets(), authorize=authorize,
+        documents=GoogleDriveEvidence(
+            safe_read_attempts=enrolled.safe_read_attempts,
+            safe_read_backoff_seconds=enrolled.safe_read_backoff_seconds,
+        ),
+        tickets=JiraTickets(
+            safe_read_attempts=enrolled.safe_read_attempts,
+            safe_read_backoff_seconds=enrolled.safe_read_backoff_seconds,
+        ),
+        authorize=authorize,
     ), ctx)
 
 

@@ -38,6 +38,12 @@
     <details><summary>Retire a local snapshot</summary><p>Export and verify an external copy first if retention is required. This deletes only the selected local archive. Snapshots retained for a current or recent restore cannot be removed.</p><label class="wrec-confirm"><input id="wrec-retire-confirm" type="checkbox">I have reviewed retention and want to delete this local archive.</label><button id="wrec-retire" type="button" disabled>Retire selected local snapshot</button></details>
     <details><summary>Import a saved snapshot</summary><label for="wrec-file">Lightwork snapshot archive</label><input id="wrec-file" type="file" accept=".tgz,.gz,application/gzip"><button id="wrec-import" type="button" disabled>Import and verify</button><p>Maximum archive size: 256 MiB compressed and 1 GiB expanded. Only a snapshot signed with the configured recovery key and bound to this workspace can be imported.</p></details>
   </section>
+  <section><h2>Restore on a new installation</h2>
+    <p>Use this only in local recovery mode on an empty installation. Shut down the source installation first so two copies cannot act for the same workspace. Restored requests and uncertain external work stay held until you review them here.</p>
+    <p id="wrec-bootstrap-status" role="status" aria-live="polite"></p>
+    <label class="wrec-confirm"><input id="wrec-bootstrap-source-offline" type="checkbox">I confirmed the source installation is offline and this workspace is empty.</label>
+    <div class="wrec-actions"><button id="wrec-bootstrap-prepare" type="button" disabled>Prepare this empty installation</button><button id="wrec-bootstrap-resume" type="button" disabled>Recover interrupted restore</button></div>
+  </section>
   <section><h2>Test separately retained encryption keys</h2>
     <p>Select a snapshot above, then choose the local encryption-key ZIP you previously kept separately. This tests recognized encrypted formats in a fresh temporary process using your uploaded copy. It does not install shared keys, change the live workspace or authorize recovery.</p>
     <label for="wrec-custody-file">Previously saved encryption-key ZIP</label><input id="wrec-custody-file" type="file" accept=".zip,application/zip" aria-describedby="wrec-custody-help" data-draft-recovery="off">
@@ -53,6 +59,13 @@
       <details><summary>Format counts and verification details</summary><ul id="wrec-custody-checks"></ul><p id="wrec-custody-coverage"></p><p id="wrec-custody-identity"></p></details>
       <button id="wrec-custody-report-download" type="button" disabled>Download signed retained-key test</button>
     </div>
+    <div id="wrec-custody-install-panel" hidden>
+      <h3>Install the tested keys for new-install recovery</h3>
+      <p>After a successful test, choose that exact ZIP again. Lightwork checks its bytes against the signed test before installing any key. An interrupted install resumes only with the same reviewed copy.</p>
+      <label for="wrec-custody-install-file">Exact tested encryption-key ZIP</label><input id="wrec-custody-install-file" type="file" accept=".zip,application/zip" data-draft-recovery="off">
+      <label class="wrec-confirm"><input id="wrec-custody-install-confirm" type="checkbox">I authorize installing this exact tested key copy into this empty recovery installation.</label>
+      <button id="wrec-custody-install" type="button" disabled>Install exact tested keys</button>
+    </div>
   </section>
   <section><h2>Review differences before recovery</h2>
     <p>Compare the selected snapshot with the current workspace. This helps an administrator review why recovery may be refused. It does not change files, reconcile spending or external actions, or authorize a restore.</p>
@@ -67,10 +80,18 @@
       <ul id="wrec-comparison-items"></ul>
     </div>
   </section>
-  <section><h2>Restore this workspace</h2><p>Restoring replaces workspace files with the selected snapshot and removes files created afterwards. A verified safety snapshot is kept first. Other workspaces, shared administration and external stores are excluded. The exact application build must match the snapshot; a different build requires a reviewed compatibility procedure.</p>
+  <section><h2>Restore this workspace</h2><p>Restoring replaces workspace files with the selected snapshot and removes files created afterwards. Ordinary recovery first keeps a verified safety snapshot; an empty new installation uses its signed empty-state recovery point. Other workspaces, shared administration and external stores are excluded. The exact application build must match the snapshot; a different build requires a reviewed compatibility procedure.</p>
     <p>Live restore is refused if spending records, budget holds, protected external-action history or database files differ from the snapshot. An administrator must reconcile that history first. You can still export the snapshot and test it in a temporary workspace.</p>
     <button id="wrec-prepare" type="button" disabled>Prepare restore and safety snapshot</button>
-    <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</label><button id="wrec-restore" type="button" disabled>Restore reviewed snapshot</button></div>
+    <div id="wrec-review" hidden><p id="wrec-review-text"></p><label class="wrec-confirm"><input id="wrec-confirm" type="checkbox"><span id="wrec-confirm-text">I reviewed the workspace and snapshot, and understand that newer local work will be replaced.</span></label><button id="wrec-restore" type="button" disabled>Restore reviewed snapshot</button></div>
+  </section>
+  <section id="wrec-reconciliation" hidden><h2>Review restored work before returning to normal use</h2>
+    <p id="wrec-reconciliation-status" role="status" aria-live="polite"></p>
+    <p>Nothing listed here runs automatically. Pending requests must be retired and recreated under current authority. Work that may have reached an external system requires an authoritative readback reference.</p>
+    <ul id="wrec-reconciliation-items"></ul>
+    <p id="wrec-reconciliation-blocked" hidden>This build cannot safely classify or rewrite at least one restored authority. Keep recovery mode active and <a href="/help">create a redacted support report in the app</a>.</p>
+    <label class="wrec-confirm"><input id="wrec-reconciliation-confirm" type="checkbox">I reviewed every restored item and authorize returning this workspace to normal use after restart.</label>
+    <button id="wrec-reconciliation-complete" type="button" disabled>Complete restored-work review</button>
   </section>
   <section><h2>Protect an application update</h2><p>Windows installation changes affect every local workspace and shared administration. Lightwork pauses before capturing a verified pre-upgrade snapshot and retains the exact signed old installer. Rolling back a completed upgrade replaces the application and all local state with that snapshot; newer work is kept in a separate safety snapshot. External services are excluded.</p>
     <p>A completed update can be rolled back here only when accounting, protected external-action history and database files still match its original snapshot. New spending, budget holds, action outcomes or database changes require coordinated reconciliation before returning to the old release.</p>

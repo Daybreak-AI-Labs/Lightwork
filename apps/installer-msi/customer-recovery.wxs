@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Physical recovery copies are created from the exact MSI File rows. This keeps
+  them byte-identical to the installed, package-patched binaries without adding
+  a second frozen runtime or native shell to the cabinet.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="LightworkRecoveryCopies" Guid="B7C12026-66EA-4954-86AA-CCBA8413B13A" Win64="yes">
+        <RegistryValue Root="HKLM" Key="Software\Daybreak AI Labs\Lightwork" Name="RecoveryCopies" Type="integer" Value="1" KeyPath="yes" />
+        <CopyFile Id="LightworkRecoveryRuntime" FileId="Bin_maverick.exe" DestinationDirectory="INSTALLDIR" DestinationName="maverick-recovery.exe" />
+        <CopyFile Id="LightworkRecoveryDesktop" FileId="Path" DestinationDirectory="INSTALLDIR" DestinationName="maverick-recovery-desktop.exe" />
+        <!-- OriginalDatabase is the invoked full MSI path. The app invokes
+             repairs with REINSTALLMODE=v so this remains the exact, signed,
+             registered source rather than Windows Installer's private cache. -->
+        <CopyFile Id="LightworkRecoveryInstaller" SourceProperty="OriginalDatabase" DestinationDirectory="INSTALLDIR" DestinationName="Lightwork-recovery.msi" />
+        <RemoveFile Id="RemoveLightworkRecoveryInstaller" Name="Lightwork-recovery.msi" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="LightworkRepairShortcut" Guid="33CB594E-5A4F-44CA-AE65-454F4E9D33D1" Win64="yes">
+        <Shortcut Id="LightworkRepairShortcutEntry" Name="Repair Lightwork" Description="Repair Lightwork from its retained recovery application" Target="[INSTALLDIR]maverick-recovery-desktop.exe" Arguments="--maintenance-result" WorkingDirectory="INSTALLDIR" Icon="ProductIcon" />
+        <RegistryValue Root="HKLM" Key="Software\Daybreak AI Labs\Lightwork" Name="RepairShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

@@ -10,6 +10,24 @@ function value(extra={}) {
     coverage:[{kind:"assessment",status:"current"},{kind:"approval",status:"unavailable"}],
     counts:{unread:1,overdue:1,snoozed:0},total:1,limit:50,has_more:false, ...extra};
 }
+function reconciliation() {
+  return {
+    schema:"lightwork.vendor-onboarding.reconciliation-summary.v1",
+    attempted_action:{operation_id:"VOP-"+"1".repeat(32),action:"jira.create",attempt_count:1,
+      started_at:80,target:{provider:"jira",project:"VEND"}},
+    known_observations:[
+      {kind:"execution_attempt",state:"recorded",count:1,observed_at:80},
+      {kind:"provider_receipt",state:"not_recorded"},
+      {kind:"authoritative_readback",state:"no_match",match_count:0,observed_at:85},
+    ],
+    uncertainty:{state:"unresolved",reason:"no_matching_effect_observed",
+      explanation:"No matching Jira task was observed; absence is not proof of no effect."},
+    safe_next_check:{kind:"check_status",mode:"read_only",label:"Check the original Jira destination again"},
+    responsible_operator:{principal:"user:alice",business_owner:"procurement"},
+    resolution:{automatic_compensation_supported:false,unreviewed_replacement_allowed:false,
+      requires_separate_review:true,explanation:"Any supported resolution requires a separate reviewed action."},
+  };
+}
 async function setup(replies) {
   const dom = new JSDOM(`<div id="action-center" data-context="current-account"><form id="ac-filters"><select name="view"><option value="active">Active</option><option value="snoozed">Snoozed</option></select><select name="kind"><option value="all">All</option></select><select name="assignment"><option value="all">All</option></select><button type="submit">Refresh</button></form><div id="ac-items"></div><ul id="ac-coverage"></ul><p id="ac-summary"></p><p id="ac-status"></p><p id="ac-page"></p><button id="ac-previous">Previous</button><button id="ac-next">Next</button></div>`, {url:"https://lightwork.test", runScripts:"outside-only"});
   const w = dom.window, calls = [], d = w.document;
@@ -36,6 +54,88 @@ test("inbox escapes source titles, reports missing sources, and opens the govern
   assert.equal(ui.calls.length,1);
   assert.equal(ui.calls[0].options.headers["X-Lightwork-Action-Context"],"current-account");
   ui.dom.window.close();
+});
+
+test("uncertain external action explains observations and offers only a read-only check", async () => {
+  const item = {
+    id:"reconciliation1", kind:"vendor_reconciliation", title:"Resolve uncertain Jira task for Northstar AI",
+    assignment:"mine", read:false, overdue:false, reason:"No matching Jira task was observed; absence is not proof of no effect.",
+    href:"/third-party/vendor-onboarding?case=VON-uncertain", source_version:"b".repeat(64), snoozed:false,
+    reconciliation:reconciliation()
+  };
+  const ui = await setup([value({items:[item],coverage:[{kind:"vendor_reconciliation",status:"current"}],
+    counts:{unread:1,overdue:0,snoozed:0}})]);
+  const text = ui.d.getElementById("ac-items").textContent;
+  assert.match(text,/Attempted action: jira.create/);
+  assert.match(text,/authoritative readback: no match · 0 matches/);
+  assert.match(text,/read-only and cannot create another Jira task/);
+  assert.match(text,/Responsible operator: user:alice/);
+  assert.match(text,/separate reviewed action/);
+  assert.equal(ui.d.querySelector("img"),null);
+  assert.equal(ui.d.querySelector("a.btn--primary").getAttribute("href"),item.href);
+  ui.dom.window.close();
+});
+
+test("known multiple matches retain a lower bound without claiming an exact count", async () => {
+  const detail = reconciliation();
+  detail.known_observations[2] = {kind:"authoritative_readback",state:"multiple_matches",
+    match_count_lower_bound:3,observed_at:85};
+  detail.uncertainty = {state:"unresolved",reason:"multiple_matching_effects_observed",
+    explanation:"At least three Jira tasks may match, so no result was selected."};
+  detail.safe_next_check = {kind:"review_ambiguity",mode:"read_only",
+    label:"Review possible Jira results before any separate resolution"};
+  const item = {id:"reconciliation2",kind:"vendor_reconciliation",title:"Resolve uncertain Jira task",
+    assignment:"mine",read:false,overdue:false,reason:detail.uncertainty.explanation,
+    href:"/third-party/vendor-onboarding?case=VON-uncertain",source_version:"b".repeat(64),snoozed:false,
+    reconciliation:detail};
+  const ui = await setup([value({items:[item],coverage:[{kind:"vendor_reconciliation",status:"current"}],
+    counts:{unread:1,overdue:0,snoozed:0}})]);
+  assert.match(ui.d.getElementById("ac-items").textContent,/at least 3 matches/);
+  assert.doesNotMatch(ui.d.getElementById("ac-items").textContent,/multiple matches · 3 matches/i);
+  ui.dom.window.close();
+});
+
+test("lost Jira authority offers the in-app connection path and no retry write control", async () => {
+  const detail = reconciliation();
+  detail.uncertainty = {state:"unresolved",reason:"current_connection_access_unavailable",
+    explanation:"Current Jira access is unavailable; no provider request was made."};
+  detail.safe_next_check = {kind:"restore_access",mode:"read_only",
+    label:"Restore the original Jira connection access, then check status",href:"/connections"};
+  const item = {id:"reconciliation3",kind:"vendor_reconciliation",title:"Resolve uncertain Jira task",
+    assignment:"mine",read:false,overdue:false,reason:detail.uncertainty.explanation,
+    href:"/third-party/vendor-onboarding?case=VON-uncertain",source_version:"c".repeat(64),snoozed:false,
+    reconciliation:detail};
+  const ui = await setup([value({items:[item],coverage:[{kind:"vendor_reconciliation",status:"current"}],
+    counts:{unread:1,overdue:0,snoozed:0}})]);
+  const links = [...ui.d.querySelectorAll("a")];
+  assert.equal(links.find(link=>link.textContent === "Resolve connection access").getAttribute("href"),"/connections");
+  assert.equal(ui.button("Retry"),undefined);
+  assert.match(ui.d.getElementById("ac-items").textContent,/read-only and cannot create another Jira task/);
+  assert.equal(ui.calls.length,1);
+  ui.dom.window.close();
+});
+
+test("malformed reconciliation projections clear the queue without rendering private fields or controls", async () => {
+  const mutations = [
+    detail=>{detail.known_observations[0]=null;},
+    detail=>{detail.known_observations[2].provider_body="PRIVATE_PROVIDER_BODY";},
+    detail=>{detail.attempted_action.target.project="VEND<img src=x>";},
+    detail=>{detail.resolution.requires_separate_review=false;},
+  ];
+  for (const mutate of mutations) {
+    const detail = reconciliation(); mutate(detail);
+    const item = {id:"broken",kind:"vendor_reconciliation",title:"Uncertain action",assignment:"mine",
+      read:false,overdue:false,reason:"Uncertain",href:"/vendor",source_version:"d".repeat(64),snoozed:false,
+      reconciliation:detail};
+    const ui = await setup([value({items:[item],coverage:[{kind:"vendor_reconciliation",status:"current"}],
+      counts:{unread:1,overdue:0,snoozed:0}})]);
+    assert.equal(ui.d.querySelectorAll("article").length,0);
+    assert.match(ui.d.getElementById("ac-status").textContent,/details were incomplete/i);
+    assert.doesNotMatch(ui.d.body.textContent,/PRIVATE_PROVIDER_BODY/);
+    assert.equal(ui.d.querySelector("img"),null);
+    assert.equal(ui.calls.length,1);
+    ui.dom.window.close();
+  }
 });
 
 test("read preference is an explicit context/version-bound action and repeated clicks do not duplicate it", async () => {

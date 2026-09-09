@@ -24,6 +24,8 @@ import threading
 import uuid as _uuid
 from collections.abc import Callable
 
+from ._provider_accounting import metered_transport_call
+
 log = logging.getLogger(__name__)
 
 _TABLE = "mvk_vectors"
@@ -174,20 +176,39 @@ class PgVectorStore:
         # Precomputed vectors (at-rest mode) let the caller store a SEALED
         # document while the vector came from the plaintext; else embed here.
         vecs = embeddings if embeddings is not None else self._embed(documents)
-        self._ensure_vector_column(self._dim or len(vecs[0]))
+        if len(vecs) != len(documents):
+            raise ValueError(
+                f"embedding count {len(vecs)} != documents length {len(documents)}"
+            )
+        vector_dim = self._dim or len(vecs[0])
         tenant_id = _active_tenant()
-        with self._lock, self._conn.cursor() as cur:
-            for i, doc in enumerate(documents):
-                vec = "[" + ",".join(repr(float(x)) for x in vecs[i]) + "]"
-                meta = json.dumps(metadatas[i]) if metadatas else None
-                cur.execute(
-                    f"INSERT INTO {_TABLE} "
-                    "(id, collection, tenant_id, document, metadata, embedding) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (collection, id) DO UPDATE SET "
-                    "tenant_id = EXCLUDED.tenant_id, document = EXCLUDED.document, "
-                    "metadata = EXCLUDED.metadata, embedding = EXCLUDED.embedding",
-                    (self._stored_id(ids[i], tenant_id), self._collection, tenant_id, doc, meta, vec))
+
+        def dispatch() -> None:
+            self._ensure_vector_column(vector_dim)
+            with self._lock, self._conn.cursor() as cur:
+                for i, doc in enumerate(documents):
+                    vec = "[" + ",".join(repr(float(x)) for x in vecs[i]) + "]"
+                    meta = json.dumps(metadatas[i]) if metadatas else None
+                    cur.execute(
+                        f"INSERT INTO {_TABLE} "
+                        "(id, collection, tenant_id, document, metadata, embedding) "
+                        "VALUES (%s, %s, %s, %s, %s, %s) "
+                        "ON CONFLICT (collection, id) DO UPDATE SET "
+                        "tenant_id = EXCLUDED.tenant_id, "
+                        "document = EXCLUDED.document, "
+                        "metadata = EXCLUDED.metadata, "
+                        "embedding = EXCLUDED.embedding",
+                        (
+                            self._stored_id(ids[i], tenant_id),
+                            self._collection,
+                            tenant_id,
+                            doc,
+                            meta,
+                            vec,
+                        ),
+                    )
+
+        metered_transport_call("pgvector", dispatch, category="storage")
 
     def query(self, text: str | None = None, *, top_k: int = 5,
               embedding: list[float] | None = None) -> list[dict]:
@@ -201,13 +222,24 @@ class PgVectorStore:
             return []
         qvec = "[" + ",".join(repr(float(x)) for x in vec) + "]"
         tenant_sql, tenant_params, tenant_id = self._tenant_predicate()
-        with self._lock, self._conn.cursor() as cur:
-            cur.execute(
-                f"SELECT id, document, metadata, embedding <=> %s AS distance "
-                f"FROM {_TABLE} WHERE collection = %s AND {tenant_sql} "
-                "ORDER BY embedding <=> %s LIMIT %s",
-                (qvec, self._collection, *tenant_params, qvec, max(1, min(top_k, 100))))
-            rows = cur.fetchall()
+
+        def dispatch():
+            with self._lock, self._conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT id, document, metadata, embedding <=> %s AS distance "
+                    f"FROM {_TABLE} WHERE collection = %s AND {tenant_sql} "
+                    "ORDER BY embedding <=> %s LIMIT %s",
+                    (
+                        qvec,
+                        self._collection,
+                        *tenant_params,
+                        qvec,
+                        max(1, min(top_k, 100)),
+                    ),
+                )
+                return cur.fetchall()
+
+        rows = metered_transport_call("pgvector", dispatch, category="retrieval")
         # Strip the tenant namespace prefix so the caller gets back its ORIGINAL
         # doc id (mirroring qdrant_store.query). Without this a query->delete
         # round-trip re-prefixes ('tenant:t:tenant:t:x') and silently deletes
@@ -226,26 +258,46 @@ class PgVectorStore:
         if not ids:
             return
         tenant_sql, tenant_params, tenant_id = self._tenant_predicate()
-        with self._lock, self._conn.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM {_TABLE} "
-                f"WHERE collection = %s AND {tenant_sql} AND id = ANY(%s)",
-                (self._collection, *tenant_params, [self._stored_id(i, tenant_id) for i in ids]))
+
+        def dispatch() -> None:
+            with self._lock, self._conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {_TABLE} "
+                    f"WHERE collection = %s AND {tenant_sql} AND id = ANY(%s)",
+                    (
+                        self._collection,
+                        *tenant_params,
+                        [self._stored_id(i, tenant_id) for i in ids],
+                    ),
+                )
+
+        metered_transport_call("pgvector", dispatch, category="update")
 
     def count(self) -> int:
         tenant_sql, tenant_params, _ = self._tenant_predicate()
-        with self._lock, self._conn.cursor() as cur:
-            cur.execute(
-                f"SELECT count(*) FROM {_TABLE} WHERE collection = %s AND {tenant_sql}",
-                (self._collection, *tenant_params))
-            return int(cur.fetchone()[0])
+
+        def dispatch() -> int:
+            with self._lock, self._conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT count(*) FROM {_TABLE} "
+                    f"WHERE collection = %s AND {tenant_sql}",
+                    (self._collection, *tenant_params),
+                )
+                return int(cur.fetchone()[0])
+
+        return metered_transport_call("pgvector", dispatch, category="retrieval")
 
     def reset(self) -> None:
         tenant_sql, tenant_params, _ = self._tenant_predicate()
-        with self._lock, self._conn.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM {_TABLE} WHERE collection = %s AND {tenant_sql}",
-                (self._collection, *tenant_params))
+
+        def dispatch() -> None:
+            with self._lock, self._conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {_TABLE} WHERE collection = %s AND {tenant_sql}",
+                    (self._collection, *tenant_params),
+                )
+
+        metered_transport_call("pgvector", dispatch, category="update")
 
     def close(self) -> None:
         try:

@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import sys
 import types
+from hashlib import sha256
 
 import pytest
-from maverick_knowledge import KnowledgeBase, SqliteVectorStore
+from maverick_knowledge import DeterministicEmbedder, KnowledgeBase, SqliteVectorStore
 from maverick_knowledge.store import QdrantStore
 
 # ---- store layer -------------------------------------------------------------
@@ -90,9 +91,10 @@ def test_collections_lists_all():
 # ---- Qdrant adapter against a fake client ------------------------------------
 
 class _FakePoint:
-    def __init__(self, score, payload):
+    def __init__(self, score, payload, point_id="point"):
         self.score = score
         self.payload = payload
+        self.id = point_id
 
 
 class _FakeQdrantClient:
@@ -145,6 +147,23 @@ class _FakeQdrantClient:
             return types.SimpleNamespace(count=len(col))
         n = sum(1 for v in col.values() if self._matches(v["payload"], count_filter))
         return types.SimpleNamespace(count=n)
+
+    def scroll(
+        self,
+        collection_name,
+        scroll_filter,
+        limit,
+        with_payload=True,
+        with_vectors=False,
+    ):
+        del with_payload, with_vectors
+        col = self._collections.get(collection_name, {})
+        points = [
+            _FakePoint(1.0, value["payload"], point_id)
+            for point_id, value in col.items()
+            if self._matches(value["payload"], scroll_filter)
+        ][:limit]
+        return points, None
 
     def close(self):
         pass
@@ -203,6 +222,8 @@ def test_qdrant_store_full_governance_cycle(monkeypatch):
     assert {h.text for h in hits} == {"alice", "bob"}
     assert hits[0].meta.get("subject") in {"u:alice", "u:bob"}
     assert store.count_where("itgrc", "subject", "u:alice") == 1
+    exact = store.read_where("itgrc", "subject", "u:alice", limit=10)
+    assert [(row.text, row.meta["source"]) for row in exact] == [("alice", "a")]
     assert store.delete_where("itgrc", "subject", "u:alice") == 1
     assert store.count_where("itgrc", "subject", "u:alice") == 0
     assert store.count("itgrc") == 1
@@ -210,6 +231,28 @@ def test_qdrant_store_full_governance_cycle(monkeypatch):
     store2 = QdrantStore(url="http://fake:6333", dim=2, namespace="ws2")
     store2._client = store._client  # share the fake backend
     assert store2.count("itgrc") == 0
+
+
+def test_qdrant_backend_contract_preserves_exact_idempotent_document(monkeypatch):
+    _install_fake_qdrant(monkeypatch)
+    store = QdrantStore(url="http://fake:6333", dim=8, namespace="tenant-a")
+    kb = KnowledgeBase(
+        store=store,
+        embedder=DeterministicEmbedder(dim=8),
+        chunk_size=18,
+        chunk_overlap=4,
+    )
+    text = "alpha beta gamma delta epsilon zeta eta theta"
+    digest = sha256(text.encode("utf-8")).hexdigest()
+
+    count = kb.ingest_text("finance", text, source="quarterly.txt")
+    assert kb.ingest_text("finance", text, source="quarterly.txt") == count
+    assert store.count_where("finance", "doc_sha256", digest) == count
+    assert kb.exact_document("finance", digest)["text"] == text
+
+    other = QdrantStore(url="http://fake:6333", dim=8, namespace="tenant-b")
+    other._client = store._client
+    assert other.read_where("finance", "doc_sha256", digest, limit=10) == []
 
 
 def test_qdrant_dim_mismatch_raises(monkeypatch):

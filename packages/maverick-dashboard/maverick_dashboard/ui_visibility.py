@@ -46,6 +46,8 @@ PAGES: tuple[dict, ...] = (
      "icon": "check", "floor": "view", "default": "view"},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/research", "label": "Research lab", "aliases": "experiments candidates evaluation",
+     "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
@@ -299,18 +301,27 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
-    # Cortex, the company brain: one governed recall surface over knowledge,
-    # skills, lessons, the Operating Record and fleet memory. Read-only at
-    # the page (every read is audited by the kernel); the audit tail it shows
-    # is a separate "audit" grant, and deposits need "operate" at the API.
+    # The legacy multi-source Cortex console remains a governed compatibility
+    # route, but Knowledge access is the single customer-facing navigation
+    # destination. Its document results use the APP10 registry boundary.
     {
         "path": "/cortex",
-        "label": "Knowledge",
-        "aliases": "cortex company knowledge memory",
-        "group": "Observe",
+        "label": "Cortex memory diagnostics",
+        "aliases": "legacy cortex company memory diagnostics",
+        "group": "Advanced tools",
         "icon": "learned",
         "floor": "view",
         "default": "view",
+        "in_nav": False,
+    },
+    {
+        "path": "/knowledge-access",
+        "label": "Knowledge",
+        "aliases": "cortex company source freshness corrections exclusion deletion lineage rights",
+        "group": "Observe",
+        "icon": "learned",
+        "floor": "operate",
+        "default": "operate",
     },
     {
         "path": "/learning",

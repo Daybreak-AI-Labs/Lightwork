@@ -20,6 +20,7 @@ import threading
 import time
 import uuid
 from collections.abc import Mapping
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -106,13 +107,15 @@ def _local_endpoint(endpoint: str) -> bool:
     )
 
 
-def _capture(args, env, *, timeout, limit) -> _Capture:
+def _capture(args, env, *, timeout, limit, effect_guard=None) -> _Capture:
     """Drain concurrently; retained bytes are bounded before appending."""
     if not math.isfinite(timeout) or timeout <= 0:
         raise ResearchContainerError("process wall budget is exhausted")
-    process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               close_fds=True)
+    guard = nullcontext() if effect_guard is None else effect_guard()
+    with guard:
+        process = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   close_fds=True)
     buffers = [bytearray(), bytearray()]
     lock, exceeded = threading.Lock(), threading.Event()
     captured = 0
@@ -245,11 +248,12 @@ def _snapshot_matches(root: Path, files: Mapping[str, bytes]) -> bool:
     return observed == files
 
 
-def _delete_snapshot(root: Path) -> None:
+def _delete_snapshot(root: Path, *, parent: Path | None = None) -> None:
     # Only our generated, private temp root is ever removed. Candidate receives
     # a read-only mount and cannot insert links, files or parents into it.
     resolved = root.resolve()
-    if (resolved.parent != Path(tempfile.gettempdir()).resolve()
+    allowed = Path(tempfile.gettempdir()).resolve() if parent is None else parent.resolve()
+    if (resolved.parent != allowed
             or not resolved.name.startswith("lightwork-research-")):
         raise ResearchContainerError("refusing cleanup outside the owned temporary snapshot")
     for path in [*_snapshot_entries(resolved), resolved]:
@@ -261,47 +265,71 @@ class ResearchContainerRunner:
     """Trusted-caller primitive; deliberately absent from user config/factory.
 
     It does not implement exec_authenticated_tests or advertise evaluator
-    readiness. Image provisioning and researcher authorization belong to the
-    forthcoming submission/controller integration.
+    readiness. Image provisioning belongs to the operator; the research_jobs
+    controller separately authenticates submissions and owns its evaluator.
     """
 
     def __init__(self, image: str, *, limits: ResearchLimits | None = None):
         self.limits = limits or ResearchLimits()
+        if (type(image) is not str or len(image) > 256
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", image)):
+            raise ValueError("a locally present reviewed image is required")
+        # Docker readiness and image resolution are deliberately lazy. ``run``
+        # owns the caller's Budget, so no controller subprocess may start in
+        # this constructor before that budget can cap it.
+        self._requested_image = image
+        self._env: dict[str, str] = {}
+        self._base: list[str] = []
+        self.image_id = ""
+
+    def _initialize(self, *, budget: Budget) -> None:
+        if not isinstance(budget, Budget):
+            raise TypeError("an explicit Budget is required")
+        try:
+            self._initialize_with_budget(budget)
+        except (KeyError, IndexError, TypeError, AttributeError, UnicodeDecodeError) as exc:
+            raise ResearchContainerError("Docker setup metadata is incomplete or invalid") from exc
+
+    def _initialize_with_budget(self, budget: Budget) -> None:
+        budget.check()
         self._env = _host_environment()
         executable = shutil.which("docker")
         if not executable:
             raise ResearchContainerError("Docker is required; no host fallback is allowed")
         self._base = [str(Path(executable).resolve())]
-        context = self._control(["context", "show"]).out.decode().strip()
-        descriptor = self._json(["context", "inspect", context])[0]
+        context = self._control(["context", "show"], budget=budget).out.decode().strip()
+        descriptor = self._json(["context", "inspect", context], budget=budget)[0]
         endpoint = descriptor["Endpoints"]["docker"]["Host"]
         if not _local_endpoint(endpoint):
             raise ResearchContainerError("research requires a local Linux Docker engine")
         self._base.extend(["--host", endpoint])
-        if self._control(["info", "--format", "{{.OSType}}"]).out.strip() != b"linux":
+        if self._control(["info", "--format", "{{.OSType}}"], budget=budget).out.strip() != b"linux":
             raise ResearchContainerError("research requires Linux containers")
-        if (type(image) is not str or len(image) > 256
-                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:@-]*", image)):
-            raise ValueError("a locally present reviewed image is required")
-        metadata = self._json(["image", "inspect", image])[0]
+        metadata = self._json(["image", "inspect", self._requested_image], budget=budget)[0]
         if metadata.get("Os") != "linux" or metadata.get("Config", {}).get("Volumes"):
             raise ResearchContainerError("image must be Linux with no implicit writable volumes")
         self.image_id = metadata["Id"]
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.image_id):
             raise ResearchContainerError("image has no immutable local ID")
 
-    def _control(self, args, *, check=True, timeout=15) -> _Capture:
+    def _control(self, args, *, check=True, timeout=15, budget: Budget | None = None,
+                 effect_guard=None) -> _Capture:
+        if budget is not None:
+            timeout = min(timeout, self._control_time(budget))
         try:
-            result = _capture([*self._base, *args], self._env, timeout=min(15, timeout), limit=256 * 1024)
+            kwargs = {"timeout": min(15, timeout), "limit": 256 * 1024}
+            if effect_guard is not None:
+                kwargs["effect_guard"] = effect_guard
+            result = _capture([*self._base, *args], self._env, **kwargs)
         except (OSError, subprocess.SubprocessError) as exc:
             raise ResearchContainerError(f"Docker control unavailable: {args[0]}") from exc
         if result.reason != "completed" or (check and result.code):
             raise ResearchContainerError(f"Docker control unavailable: {args[0]} ({result.reason}/{result.code})")
         return result
 
-    def _json(self, args, *, timeout=15):
+    def _json(self, args, *, timeout=15, budget: Budget | None = None):
         try:
-            return json.loads(self._control(args, timeout=timeout).out)
+            return json.loads(self._control(args, timeout=timeout, budget=budget).out)
         except (ValueError, KeyError, IndexError) as exc:
             raise ResearchContainerError("Docker metadata is unavailable") from exc
 
@@ -382,30 +410,41 @@ class ResearchContainerRunner:
         return min(15, remaining)
 
     def run(self, files: Mapping[str, bytes], *, budget: Budget,
-            entrypoint: str = "main.py") -> ResearchResult:
+            entrypoint: str = "main.py", effect_guard=None) -> ResearchResult:
         if not isinstance(budget, Budget):
             raise TypeError("an explicit Budget is required")
         copied = _inputs(files, entrypoint)
         budget.record_tool_call()
+        self._initialize(budget=budget)
         remaining = budget.remaining_wall()
         if not math.isfinite(remaining) or remaining <= 0:
             raise ResearchContainerError("research wall budget is exhausted")
         timeout = min(self.limits.timeout_seconds, remaining)
         name = "lightwork-research-" + uuid.uuid4().hex
-        root = Path(tempfile.mkdtemp(prefix="lightwork-research-")).resolve()
+        from ..file_lock import ensure_private_directory
+        from ..paths import current_tenant_id_strict, data_dir
+
+        parent = Path(tempfile.gettempdir()).resolve()
+        if current_tenant_id_strict():
+            parent = (data_dir() / "research-snapshots").resolve()
+            ensure_private_directory(parent)
+        root = Path(tempfile.mkdtemp(prefix="lightwork-research-", dir=parent)).resolve()
         cleanup = False
         try:
             _write_snapshot(root, copied)
-            self._control(self._create_args(name, root, entrypoint), timeout=self._control_time(budget))
+            self._control(self._create_args(name, root, entrypoint),
+                          timeout=self._control_time(budget), effect_guard=effect_guard)
             policy = self._verify_created(name, root, entrypoint, timeout=self._control_time(budget))
             if not _snapshot_matches(root, copied):
                 raise ResearchContainerError("candidate snapshot changed before execution")
+            policy.update(schema="lightwork.research-linux-container-policy.v2",
+                          entrypoint=entrypoint)
             budget.check()
             started = time.monotonic()
             try:
                 result = _capture([*self._base, "start", "--attach", name], self._env,
                                   timeout=min(timeout, budget.remaining_wall()),
-                                  limit=self.limits.output_bytes)
+                                  limit=self.limits.output_bytes, effect_guard=effect_guard)
             except (OSError, subprocess.SubprocessError) as exc:
                 raise ResearchContainerError("could not start research container") from exc
             # Always remove the whole container, including background children.
@@ -415,19 +454,20 @@ class ResearchContainerRunner:
             if not _snapshot_matches(root, copied):
                 raise ResearchContainerError("read-only candidate snapshot changed")
             policy["elapsed_seconds"] = round(time.monotonic() - started, 6)
+            policy_sha256 = _digest(policy)
+            stdout = result.out.decode("utf-8", "replace")
+            reason = result.reason if stdout.encode("utf-8") == result.out else "invalid_utf8_output"
             return ResearchResult(name, self.image_id, _input_digest(copied),
-                                  _digest({"schema": "lightwork.research-linux-container.v1",
-                                           "image_id": self.image_id, "limits": asdict(self.limits),
-                                           "user": _USER, "env": _ENV}),
+                                  policy_sha256,
                                   entrypoint,
-                                  result.code, result.reason, result.out.decode("utf-8", "replace"),
+                                  result.code, reason, stdout,
                                   result.err.decode("utf-8", "replace"), len(result.out) + len(result.err),
                                   True, policy)
         finally:
             if not cleanup:
                 cleanup = self._cleanup(name)
             if cleanup:
-                _delete_snapshot(root)
+                _delete_snapshot(root, parent=parent)
             else:
                 raise ResearchContainerError(
                     f"container cleanup remains unverified: {name}; retained snapshot: {root}"

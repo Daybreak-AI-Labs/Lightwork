@@ -15,7 +15,7 @@ into working memory:
     the canonical JSON record, it distills the assessment into the governed
     knowledge plane (collection ``assessments``) when knowledge RAG is
     enabled, so agents and future assessments can recall lessons
-    semantically. Fail-open: no knowledge package, nothing breaks.
+    semantically. Retrieval still requires a caller-supplied governed reader.
 
 Similarity is transparent token overlap (Jaccard over subject words, with a
 same-template bonus) -- the goal is recall of the org's OWN precedents, not
@@ -131,20 +131,27 @@ def suggest_answers(assessment_type: str, subject: str, *, k: int = 3,
     return out
 
 
-def lessons(subject: str, *, k: int = 3) -> list[str]:
+def lessons(subject: str, *, k: int = 3, reader=None) -> list[str]:
     """Semantic recall from the knowledge plane's ``assessments`` collection
-    (past findings/ratings distilled at record time). Empty when knowledge
-    RAG is off -- the deterministic :func:`similar` path still works."""
-    if not enabled():
+    (past findings/ratings distilled at record time).
+
+    The caller must supply an APP10-governed reader bound to the current
+    tenant, actor, purpose, and source versions.  Missing or malformed readers
+    return no semantic lessons; this legacy helper never falls back to raw
+    vector-store access.  The deterministic :func:`similar` path remains
+    available under its assessment-record controls.
+    """
+    if not enabled() or not callable(reader):
         return []
     try:
-        from .knowledge_admin import open_knowledge_base
-        kb = open_knowledge_base()
-        if kb is None:
+        values = reader(subject, k)
+        if (
+            not isinstance(values, (tuple, list))
+            or len(values) > k
+            or any(not isinstance(value, str) for value in values)
+        ):
             return []
-        hits = kb.search(KNOWLEDGE_COLLECTION, subject, k=k)
-        return [str(getattr(h, "text", "")).strip()
-                for h in hits if str(getattr(h, "text", "")).strip()]
+        return [value.strip()[:8_192] for value in values if value.strip()]
     except Exception as e:  # noqa: BLE001 -- recall never breaks the caller
         log.debug("assessment_memory: lessons recall failed: %s", e)
         return []

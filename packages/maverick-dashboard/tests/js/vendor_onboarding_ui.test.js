@@ -10,7 +10,9 @@ const vm = require("node:vm");
 function record(id, overrides = {}) {
   return {
     id, revision: 1, vendor_name: `Vendor ${id}`, document_id: `document-${id}`,
+    owner: "user:procurement", updated_at: 1800000000,
     project: "VEND", purpose: "Support replies", freshness_days: 365,
+    due_at: 1802592000,
     stage: "assessment_ready", outcome: null,
     work_item: {
       process: { id: "supplier-evidence-onboarding", version: 1, sha256: "a".repeat(64) },
@@ -37,14 +39,79 @@ function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, async json() { return body; } };
 }
 
+function evidenceExport(caseId, revision, overrides = {}) {
+  const reference = "EVR-" + "1".repeat(32);
+  return {
+    schema: "lightwork.vendor-onboarding.evidence-export.v1",
+    prepared_at: 1800000000,
+    binding_sha256: "b".repeat(64),
+    case: {id:caseId,revision,workflow_schema:"lightwork.vendor-onboarding.v1",
+      evidence_sha256:"c".repeat(64),assessment_id:"AIV-reviewed",assessment_revision:2,
+      assessment_sha256:"d".repeat(64)},
+    decision: {state:"accepted",reviewer:"user:reviewer",rationale:"Reviewed current evidence",decided_at:1800000000},
+    claims: [{claim_id:"training",answer:"unknown",note:"No current statement",source_basis:"document",
+      evidence_refs:[reference],withheld_evidence_refs:[],citations:[{evidence_ref:reference,quote:"We do not train on customer data.",location:{paragraph:1}}],review_justification:null}],
+    manifest: {schema:"lightwork.vendor-onboarding.evidence-export-manifest.v1",
+      included:[{reference,dependency_type:"connected_source_evidence",disposition:"included",source_type:"connected_document",
+        reviewed_version:"v1",modified_at:1799990000,fresh_until:1809990000,freshness:"current",
+        content_sha256:"e".repeat(64),extraction_method:"plain_text"}],withheld:[],included_count:1,withheld_count:0,complete:true},
+    limitations:["Source provenance does not establish truth."],
+    ...overrides,
+  };
+}
+
+function approvalCard(overrides = {}) {
+  return {
+    schema: "lightwork.approval-card.v1",
+    binding_sha256: "1".repeat(64),
+    authorization: {state: "recommendation_only", authority_required: true,
+      prediction_grants_authority: false},
+    summary: "Create the reviewed Jira task",
+    target: {label: "VEND project", sha256: "2".repeat(64)},
+    parameters: {sha256: "3".repeat(64), summary: ["One Task in VEND"]},
+    authority: {actor: "user:reviewer", workspace: "tenant-a", role: "operator"},
+    inputs: {case_revision: 4},
+    credentials: {jira_revision: "jira-v2"},
+    budget: {currency: "USD", maximum_dollars: 0.25},
+    expires_at: 1800000300,
+    consequences: {irreversible: true,
+      known_effects: ["Creates one externally persistent Jira task."],
+      unresolved_assumptions: ["Jira automation may notify project members."]},
+    preview: {before: "No Jira task exists.", after: "The reviewed task exists once."},
+    ...overrides,
+  };
+}
+
+function reconciliationSummary(overrides = {}) {
+  return {
+    schema: "lightwork.vendor-onboarding.reconciliation-summary.v1",
+    attempted_action: {operation_id:"VOP-"+"1".repeat(32),action:"jira.create",
+      attempt_count:1,started_at:1799999900,target:{provider:"jira",project:"VEND"}},
+    known_observations: [
+      {kind:"execution_attempt",state:"recorded",count:1,observed_at:1799999900},
+      {kind:"provider_receipt",state:"not_recorded"},
+      {kind:"authoritative_readback",state:"no_match",match_count:0,observed_at:1800000000},
+    ],
+    uncertainty: {state:"unresolved",reason:"no_matching_effect_observed",
+      explanation:"No matching Jira task was observed; absence is not proof of no effect."},
+    safe_next_check: {kind:"check_status",mode:"read_only",
+      label:"Check the original Jira destination again"},
+    responsible_operator: {principal:"user:reviewer",business_owner:"user:procurement"},
+    resolution: {automatic_compensation_supported:false,unreviewed_replacement_allowed:false,
+      requires_separate_review:true,explanation:"Any supported resolution requires a separate reviewed action."},
+    ...overrides,
+  };
+}
+
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
   return { promise, resolve };
 }
 
-function fixture(records = [], intercept = null, search = "", returning = null) {
+function fixture(records = [], intercept = null, search = "", returning = null, durableStorage = null) {
   const document = { elements: new Map(), activeElement: null };
+  const downloads = [], blobs = new Map();
   let now = 2000;
   class Element {
     constructor(tag) {
@@ -62,6 +129,11 @@ function fixture(records = [], intercept = null, search = "", returning = null) 
     getAttribute(name) { return this.attributes.get(name); }
     addEventListener(name, handler) { this.listeners[name] = handler; }
     focus() { if (!this.disabled) document.activeElement = this; }
+    click() {
+      if (this.tagName === "A") downloads.push({name: this.download, href: this.href, blob: blobs.get(this.href)});
+      this.listeners.click?.({target: this});
+    }
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this); }
     querySelectorAll(selector) {
       const selectors = selector.split(",").map(part => part.trim());
       const all = this.children.flatMap(child => [child, ...child.querySelectorAll("*")]);
@@ -82,19 +154,27 @@ function fixture(records = [], intercept = null, search = "", returning = null) 
   const root = add("vendor-onboarding", "section");
   root.dataset.apiBase = "/api/v1/vendor-onboarding";
   root.dataset.workspaceContext = "f".repeat(64);
-  const storage = new Map(returning ? [["lightwork:connection-task:v1", JSON.stringify(returning)]] : []);
+  const storage = durableStorage || new Map();
+  if (returning) storage.set("lightwork:connection-task:v1", JSON.stringify(returning));
   const sessionStorage = {getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
+  const localStorage = {getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)};
   const ids = ["message", "case-title", "case-reference", "status", "scope", "evidence", "assessment",
-    "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status"];
+    "corrections", "operation", "operation-record", "outcome", "renewal-status", "history", "cases", "cancellation-status", "page-status",
+    "acceptance-evidence-check", "export-status", "export-manifest"];
   ids.forEach(id => add(`vo-${id}`, "div", root));
+  const caseFilter = add("vo-case-filter", "select", root); caseFilter.value = "all";
+  add("vo-page-previous", "button", root); add("vo-page-next", "button", root);
   const intake = add("vo-intake", "form", root);
-  ["vendor", "document", "project", "freshness", "renewal"].forEach(id => add(`vo-${id}`, "input", intake));
+  ["vendor", "document", "project", "freshness", "due", "renewal"].forEach(id => add(`vo-${id}`, "input", intake));
   add("vo-purpose", "textarea", intake);
   add("vo-create", "button", intake);
   ["rationale", "acceptance-reason", "cancellation-reason"].forEach(id => add(`vo-${id}`, "textarea", root));
   add("vo-cancellation-confirm", "input", root);
+  add("vo-export-confirm", "input", root);
+  add("vo-case-project", "input", root); add("vo-case-purpose", "textarea", root);
+  add("vo-case-freshness", "input", root); add("vo-case-due", "input", root);
   ["refresh", "collect", "assess", "renew", "check-renewal", "review-approve", "review-reject",
-    "prepare", "approve", "execute", "reconcile", "accept", "reject", "cancel"].forEach(id => add(`vo-${id}`, "button", root));
+    "prepare", "approve", "execute", "reconcile", "accept", "reject", "cancel", "save-draft", "export-preview", "export-download"].forEach(id => add(`vo-${id}`, "button", root));
   const calls = [];
   const byId = id => document.getElementById(`vo-${id}`);
   const fetch = async (url, options) => {
@@ -109,9 +189,16 @@ function fixture(records = [], intercept = null, search = "", returning = null) 
     const selected = records.find(row => url.endsWith(`/cases/${encodeURIComponent(row.id)}`));
     return response(selected || { detail: "Not found" }, selected ? 200 : 404);
   };
+  const urlApi = {createObjectURL(blob) { const ref = `blob:fixture-${blobs.size + 1}`; blobs.set(ref, blob); return ref; }, revokeObjectURL() {}};
+  const location = {search, pathname: "/vendor-onboarding", hash: ""};
+  const navigations = [];
+  const history = {replaceState(_state, _title, target) {
+    navigations.push(target);
+    location.search = new URL(target, "https://lightwork.test").search;
+  }};
   vm.runInNewContext(fs.readFileSync(
     path.resolve(__dirname, "../../maverick_dashboard/static/lightwork-vendor-onboarding.js"), "utf8",
-  ), { document, fetch, window: {location: {search}, sessionStorage}, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
+  ), { document, fetch, Blob, window: {location, history, localStorage, sessionStorage, URL:urlApi}, URL, URLSearchParams, performance: { now: () => now }, setTimeout, clearTimeout, requestAnimationFrame: handler => setTimeout(handler, 0) });
   async function settle() {
     for (let turn = 0; turn < 20; turn += 1) {
       await new Promise(resolve => setImmediate(resolve));
@@ -120,11 +207,13 @@ function fixture(records = [], intercept = null, search = "", returning = null) 
     throw new Error("UI did not settle");
   }
   return {
-    root, byId, calls, document, settle, storage,
+    root, byId, calls, document, settle, storage, downloads, location, navigations,
     advanceTime(milliseconds) { now += milliseconds; },
     caseButton(id) { return byId("cases").children.find(button => button.dataset.caseId === id); },
     async load(id) { this.caseButton(id).listeners.click(); await settle(); },
     async click(id) { byId(id).listeners.click(); await settle(); },
+    async submit() { byId("intake").listeners.submit({preventDefault() {}}); await settle(); },
+    async filter(value) { byId("case-filter").value = value; byId("case-filter").listeners.change(); await settle(); },
   };
 }
 
@@ -134,15 +223,299 @@ test("initial and refreshed lists describe reads accurately and expose selection
   assert.match(ui.byId("message").textContent, /^Requests loaded/);
   assert.equal(ui.byId("rationale").disabled, true);
   assert.equal(ui.byId("acceptance-reason").disabled, true);
+  assert.match(ui.caseButton("one").textContent, /Owner user:procurement/);
+  assert.match(ui.caseButton("one").textContent, /Last progress/);
   await ui.load("one");
   assert.match(ui.byId("message").textContent, /^Request loaded/);
   assert.equal(ui.caseButton("one").getAttribute("aria-current"), "true");
   assert.equal(ui.caseButton("two").getAttribute("aria-current"), "false");
+  assert.equal(ui.location.search, "?case=one");
+  assert.equal(ui.navigations.at(-1), "/vendor-onboarding?case=one");
+  assert.equal(ui.byId("case-reference").children.at(-1).tagName, "A");
+  assert.equal(ui.byId("case-reference").children.at(-1).href, "/vendor-onboarding?case=one");
   ui.byId("rationale").value = "Current review draft";
   await ui.click("refresh");
   assert.match(ui.byId("message").textContent, /^Requests refreshed/);
   assert.equal(ui.byId("rationale").value, "Current review draft");
   assert.equal(ui.calls.every(call => call.method === "GET"), true);
+});
+
+test("prepared action shows exact authority effects assumptions and full payload", async () => {
+  const prepared = record("reviewed", {
+    stage: "action_prepared",
+    operation: {
+      state: "prepared",
+      approval_card: approvalCard(),
+      payload: {project: "VEND", summary: "Review Northstar",
+        description: "Use the exact reviewed evidence and scope."},
+    },
+  });
+  const ui = fixture([prepared]);
+  await ui.settle();
+  await ui.load("reviewed");
+  const text = ui.byId("operation").textContent;
+  assert.match(text, /RECOMMENDATION ONLY/);
+  assert.match(text, /prediction does not grant authority/);
+  assert.match(text, /Actor: user:reviewer/);
+  assert.match(text, /Workspace: tenant-a/);
+  assert.match(text, /Role: operator/);
+  assert.match(text, /IRREVERSIBLE OR EXTERNALLY PERSISTENT KNOWN EFFECTS/);
+  assert.match(text, /Jira automation may notify project members/);
+  assert.match(text, /FULL REVIEWED JIRA CONTENT/);
+  assert.match(text, /Use the exact reviewed evidence and scope/);
+  assert.equal(ui.byId("approve").disabled, false);
+});
+
+test("an incomplete approval card cannot select or enable a prepared operation", async () => {
+  const broken = record("broken-card", {
+    stage: "action_prepared",
+    operation: {
+      state: "prepared",
+      approval_card: {...approvalCard(), consequences: {known_effects: []}},
+      payload: {project: "VEND", summary: "Review Northstar", description: "Reviewed"},
+    },
+  });
+  const ui = fixture([broken]);
+  await ui.settle();
+  await ui.load("broken-card");
+  assert.match(ui.byId("message").textContent, /prepare and review a fresh operation/i);
+  assert.equal(ui.byId("approve").disabled, true);
+  assert.equal(ui.byId("operation").textContent, "");
+  assert.equal(ui.caseButton("broken-card").getAttribute("aria-current"), "false");
+});
+
+test("approval submits the exact card binding displayed to the reviewer", async () => {
+  const prepared = record("reviewed", {
+    stage: "action_prepared",
+    operation: {
+      state: "prepared",
+      approval_card: approvalCard(),
+      payload: {project: "VEND", summary: "Review Northstar", description: "Reviewed"},
+    },
+  });
+  let submitted;
+  const ui = fixture([prepared], call => {
+    if (!call.url.endsWith("/approve-action")) return undefined;
+    submitted = call.body;
+    return response({...prepared, revision: 2, stage: "action_approved",
+      operation: {...prepared.operation, state: "approved"}});
+  });
+  await ui.settle();
+  await ui.load("reviewed");
+  await ui.click("approve");
+  assert.deepEqual(submitted, {
+    expected_revision: 1,
+    confirm: true,
+    approval_binding_sha256: "1".repeat(64),
+  });
+});
+
+test("a server authority denial stays visible and never retries approval", async () => {
+  const prepared = record("reviewed", {
+    stage: "action_prepared",
+    operation: {
+      state: "prepared",
+      approval_card: approvalCard(),
+      payload: {project: "VEND", summary: "Review Northstar", description: "Reviewed"},
+    },
+  });
+  const ui = fixture([prepared], call => call.url.endsWith("/approve-action")
+    ? response({detail: {code: "permission_denied",
+      message: "Your role cannot approve this operation.",
+      next_action: "Ask a workspace administrator to review your access."}}, 403)
+    : undefined);
+  await ui.settle();
+  await ui.load("reviewed");
+  await ui.click("approve");
+
+  assert.equal(ui.calls.filter(call => call.url.endsWith("/approve-action")).length, 1);
+  assert.match(ui.byId("message").textContent, /role cannot approve/i);
+  assert.match(ui.byId("message").textContent, /workspace administrator/i);
+  assert.equal(ui.byId("approve").disabled, false);
+});
+
+test("bounded queue controls navigate three pages and reset the cursor for a stable filter", async () => {
+  const rows = [record("one"), record("two"), record("three"), record("four"), record("five")];
+  const ui = fixture(rows, call => {
+    const url = new URL(call.url, "https://lightwork.test");
+    if (call.method !== "GET" || !url.pathname.endsWith("/cases")) return undefined;
+    if (url.searchParams.get("view") === "unresolved") return response({
+      schema: "lightwork.vendor-onboarding.case-page.v1", view: "unresolved",
+      cases: [rows[3]], has_more: false, next_cursor: null,
+    });
+    const cursor = url.searchParams.get("cursor") || "";
+    const pages = {
+      "": {cases: rows.slice(0, 2), has_more: true, next_cursor: "cursor-one"},
+      "cursor-one": {cases: rows.slice(2, 4), has_more: true, next_cursor: "cursor-two"},
+      "cursor-two": {cases: rows.slice(4), has_more: false, next_cursor: null},
+    };
+    return response({schema: "lightwork.vendor-onboarding.case-page.v1", view: "all", ...pages[cursor]});
+  });
+  await ui.settle();
+  assert.deepEqual(ui.byId("cases").children.map(item => item.dataset.caseId), ["one", "two"]);
+  assert.equal(ui.byId("page-previous").disabled, true);
+  assert.equal(ui.byId("page-next").disabled, false);
+  await ui.click("page-next");
+  assert.deepEqual(ui.byId("cases").children.map(item => item.dataset.caseId), ["three", "four"]);
+  assert.match(ui.byId("page-status").textContent, /Page 2/);
+  await ui.click("page-next");
+  assert.deepEqual(ui.byId("cases").children.map(item => item.dataset.caseId), ["five"]);
+  assert.equal(ui.byId("page-next").disabled, true);
+  await ui.click("page-previous");
+  assert.deepEqual(ui.byId("cases").children.map(item => item.dataset.caseId), ["three", "four"]);
+  await ui.filter("unresolved");
+  assert.deepEqual(ui.byId("cases").children.map(item => item.dataset.caseId), ["four"]);
+  assert.match(ui.calls.at(-1).url, /view=unresolved/);
+  assert.doesNotMatch(ui.calls.at(-1).url, /cursor=/);
+  assert.equal(ui.byId("page-previous").disabled, true);
+});
+
+test("malformed pagination metadata fails closed without enabling navigation", async () => {
+  const ui = fixture([], call => call.url.endsWith("/cases") ? response({
+    schema: "lightwork.vendor-onboarding.case-page.v1", view: "all", cases: [],
+    has_more: true, next_cursor: "private cursor with spaces",
+  }) : undefined);
+  await ui.settle();
+  assert.match(ui.byId("message").textContent, /pagination is unavailable/i);
+  assert.equal(ui.byId("page-next").disabled, true);
+  assert.equal(ui.byId("page-previous").disabled, true);
+});
+
+test("a lost intake response reuses one retained submission key before opening the stable case", async () => {
+  const rows = [];
+  let submissions = 0;
+  const stable = record("stable", {stage: "intake", evidence: null, assessment: null});
+  const ui = fixture(rows, call => {
+    if (call.method !== "POST" || !call.url.endsWith("/cases")) return undefined;
+    submissions += 1;
+    if (submissions === 1) throw new Error("simulated response loss");
+    rows.push(stable);
+    return response(stable, 201);
+  });
+  await ui.settle();
+  ui.byId("vendor").value = "Stable intake";
+  ui.byId("document").value = "document-stable";
+  ui.byId("project").value = "VEND";
+  ui.byId("purpose").value = "Recover this request";
+  ui.byId("freshness").value = "365";
+  await ui.submit();
+  assert.match(ui.byId("message").textContent, /response loss/);
+  const first = ui.calls.filter(call => call.method === "POST").at(-1).body;
+  assert.match(first.submission_key, /^[A-Za-z0-9][A-Za-z0-9_.:-]{15,127}$/);
+  assert.ok(ui.storage.has(`lightwork:vendor-intake:v1:${"f".repeat(64)}`));
+  assert.equal(JSON.parse(ui.storage.get(`lightwork:vendor-intake:v1:${"f".repeat(64)}`)).fingerprint, undefined);
+  await ui.submit();
+  const second = ui.calls.filter(call => call.method === "POST").at(-1).body;
+  assert.equal(second.submission_key, first.submission_key);
+  assert.equal(ui.byId("case-title").textContent, "Vendor stable");
+  assert.match(ui.byId("case-reference").textContent, /stable/);
+  assert.equal(ui.storage.has(`lightwork:vendor-intake:v1:${"f".repeat(64)}`), false);
+});
+
+test("a lost intake response reuses its durable key after an app restart", async () => {
+  const storage = new Map();
+  const first = fixture([], call => {
+    if (call.method === "POST" && call.url.endsWith("/cases"))
+      throw new Error("simulated app shutdown after dispatch");
+    return undefined;
+  }, "", null, storage);
+  await first.settle();
+  first.byId("vendor").value = "Restart-safe intake";
+  first.byId("project").value = "VEND";
+  first.byId("purpose").value = "Preserve one request across restart";
+  first.byId("freshness").value = "365";
+  await first.submit();
+  const original = first.calls.filter(call => call.method === "POST").at(-1).body;
+
+  const stable = record("restart-safe", {stage: "intake", evidence: null, assessment: null});
+  const second = fixture([], call => {
+    if (call.method === "POST" && call.url.endsWith("/cases")) return response(stable, 201);
+    return undefined;
+  }, "", null, storage);
+  await second.settle();
+  second.byId("vendor").value = "Restart-safe intake";
+  second.byId("project").value = "VEND";
+  second.byId("purpose").value = "Preserve one request across restart";
+  second.byId("freshness").value = "365";
+  await second.submit();
+  const replay = second.calls.filter(call => call.method === "POST").at(-1).body;
+  assert.equal(replay.submission_key, original.submission_key);
+  assert.equal(second.location.search, "?case=restart-safe");
+  assert.equal(storage.has(`lightwork:vendor-intake:v1:${"f".repeat(64)}`), false);
+});
+
+test("a stale edit loads and displays the bounded current record without retrying the mutation", async () => {
+  const rows = [record("one")];
+  const current = record("one", {revision: 2, stage: "pending_review"});
+  let mutations = 0;
+  const ui = fixture(rows, call => {
+    if (!call.url.endsWith("/review")) return undefined;
+    mutations += 1; rows[0] = current;
+    return response({detail: {
+      schema: "lightwork.error.v1", code: "revision_conflict",
+      message: "Vendor onboarding case revision changed", retryable: false,
+      next_action: "Review the current case.", current: {
+        schema: "lightwork.vendor-onboarding.conflict-current.v1",
+        id: "one", revision: 2, stage: "pending_review", updated_at: 2000,
+        vendor_name: "Vendor one", work_item: {
+          lifecycle: "Awaiting approval", next_action: "review_assessment",
+          technical_effect: "not_verified", business_outcome: "pending",
+        },
+      },
+    }}, 409);
+  });
+  await ui.settle(); await ui.load("one");
+  ui.byId("rationale").value = "Different tab change";
+  await ui.click("review-approve");
+  assert.equal(mutations, 1);
+  assert.match(ui.byId("message").textContent, /Current version 2.*now open/);
+  assert.match(ui.byId("status").textContent, /Version: 2/);
+  assert.equal(ui.byId("rationale").value, "");
+});
+
+test("request details are editable in app and carry the selected revision", async () => {
+  let submitted;
+  const current = record("one", {stage: "intake", evidence: null, assessment: null});
+  const updated = record("one", {
+    revision: 2, stage: "intake", evidence: null, assessment: null,
+    project: "RISK", purpose: "Review a changed use", freshness_days: 180,
+    due_at: 1805184000,
+  });
+  const ui = fixture([current], call => {
+    if (!call.url.endsWith("/draft")) return undefined;
+    submitted = call.body;
+    return response(updated);
+  });
+  await ui.settle(); await ui.load("one");
+  ui.byId("case-project").value = "RISK";
+  ui.byId("case-purpose").value = "Review a changed use";
+  ui.byId("case-freshness").value = "180";
+  ui.byId("case-due").value = "2027-03-06";
+  await ui.click("save-draft");
+  assert.equal(submitted.expected_revision, 1);
+  assert.deepEqual(submitted, {
+    expected_revision: 1,
+    project: "RISK",
+    purpose: "Review a changed use",
+    freshness_days: 180,
+    due_at: Date.parse("2027-03-06T12:00:00Z") / 1000,
+  });
+  assert.match(ui.byId("status").textContent, /Version: 2/);
+  assert.equal(ui.byId("case-purpose").value, "Review a changed use");
+});
+
+test("a malformed current-record conflict is rejected without replacing the selected version", async () => {
+  const rows = [record("one")];
+  const ui = fixture(rows, call => call.url.endsWith("/review") ? response({detail: {
+    schema: "lightwork.error.v1", code: "revision_conflict", message: "Changed",
+    current: {schema: "lightwork.vendor-onboarding.conflict-current.v1", id: "one", revision: 2},
+  }}, 409) : undefined);
+  await ui.settle(); await ui.load("one");
+  ui.byId("rationale").value = "Attempted edit";
+  await ui.click("review-approve");
+  assert.match(ui.byId("message").textContent, /conflict response was incomplete/i);
+  assert.match(ui.byId("status").textContent, /Version: 1/);
+  assert.equal(ui.calls.filter(call => call.method === "POST").length, 1);
 });
 
 test("a linked vendor request reads the exact authorized case without mutating it", async () => {
@@ -202,7 +575,8 @@ test("the selected case explains the promised outcome and support boundary", asy
 });
 
 test("cancellation requires an explicit local-only confirmation and preserves uncertain delivery", async () => {
-  const rows = [record("one", {stage: "reconciliation_required", operation: {state: "reconciliation_required"}})];
+  const rows = [record("one", {stage: "reconciliation_required",
+    operation: {state: "reconciliation_required"}, reconciliation:reconciliationSummary()})];
   let submitted;
   const ui = fixture(rows, call => {
     if (!call.url.endsWith("/cancel")) return undefined;
@@ -360,6 +734,146 @@ test("refresh preserves acceptance text only for the same case version", async (
   assert.equal(ui.calls.some(call => call.method === "POST"), false);
 });
 
+test("acceptance evidence invalidation opens the named changed source without reusing the decision", async () => {
+  const rows = [record("one", {stage:"execution_completed",operation:{state:"verified"}})];
+  const current = record("one", {revision:2,stage:"acceptance_reevaluation_required",operation:{state:"verified"},
+    acceptance_evidence_check:{schema:"lightwork.vendor-onboarding.acceptance-evidence-check.v1",
+      status:"reevaluation_required",checked_at:1800000000,reviewed_evidence_sha256:"c".repeat(64),
+      reviewed_assessment_id:"AIV-reviewed",documents:[{reference:"EVR-"+"1".repeat(32),source:"gdrive",
+        document_id:"security-paper",reviewed_version:"v1",current_version:"v2",status:"changed"}]}});
+  let attempts = 0;
+  const ui = fixture(rows, call => {
+    if (!call.url.endsWith("/accept")) return undefined;
+    attempts += 1; rows[0] = current;
+    return response({detail:{schema:"lightwork.error.v1",code:"evidence_reevaluation_required",
+      message:"Reviewed evidence changed.",retryable:false,next_action:"Start reevaluation.",current:{
+        schema:"lightwork.vendor-onboarding.conflict-current.v1",id:"one",revision:2,
+        stage:"acceptance_reevaluation_required",updated_at:1800000000,vendor_name:"Vendor one",
+        work_item:{lifecycle:"Awaiting approval",next_action:"start_reevaluation_request",technical_effect:"verified",business_outcome:"pending"}}}},409);
+  });
+  await ui.settle(); await ui.load("one");
+  ui.byId("acceptance-reason").value = "Accept prior review";
+  await ui.click("accept");
+  assert.equal(attempts,1);
+  assert.match(ui.byId("message").textContent,/verified ticket remains.*prior review cannot be reused/i);
+  assert.match(ui.byId("acceptance-evidence-check").textContent,/security-paper: changed.*v1.*v2/i);
+  assert.equal(ui.byId("accept").disabled,true);
+  assert.equal(ui.byId("reject").disabled,false);
+  assert.equal(ui.byId("acceptance-reason").disabled,false);
+  assert.equal(ui.byId("renew").disabled,false);
+  assert.equal(ui.byId("acceptance-reason").value,"");
+});
+
+test("approval evidence invalidation names the source and offers only reevaluation", async () => {
+  const prepared = record("one", {stage:"action_pending_approval",operation:{state:"prepared",
+    approval_card:approvalCard(),payload:{project:"VEND",summary:"Review Northstar",description:"Reviewed"}}});
+  const rows = [prepared];
+  const current = record("one", {revision:2,stage:"acceptance_reevaluation_required",
+    work_item:{...prepared.work_item,lifecycle:"Awaiting approval",next_action:"start_reevaluation_request",
+      technical_effect:"not_verified"},
+    acceptance_evidence_check:{schema:"lightwork.vendor-onboarding.acceptance-evidence-check.v1",
+      status:"reevaluation_required",checked_at:1800000000,reviewed_evidence_sha256:"c".repeat(64),
+      reviewed_assessment_id:"AIV-reviewed",documents:[{reference:"EVR-"+"1".repeat(32),source:"gdrive",
+        document_id:"security-paper",reviewed_version:"v1",current_version:"v2",status:"changed"}]}});
+  const ui = fixture(rows, call => {
+    if (!call.url.endsWith("/approve-action")) return undefined;
+    rows[0] = current;
+    return response({detail:{schema:"lightwork.error.v1",code:"evidence_reevaluation_required",
+      message:"Reviewed evidence changed.",retryable:false,next_action:"Start reevaluation.",current:{
+        schema:"lightwork.vendor-onboarding.conflict-current.v1",id:"one",revision:2,
+        stage:"acceptance_reevaluation_required",updated_at:1800000000,vendor_name:"Vendor one",
+        work_item:{lifecycle:"Awaiting approval",next_action:"start_reevaluation_request",
+          technical_effect:"not_verified",business_outcome:"pending"}}}},409);
+  });
+  await ui.settle(); await ui.load("one"); await ui.click("approve");
+  assert.match(ui.byId("message").textContent,/stale prepared action was invalidated.*prior review cannot be reused/i);
+  assert.match(ui.byId("acceptance-evidence-check").textContent,/security-paper: changed.*v1.*v2/i);
+  for (const id of ["collect","assess","review-approve","review-reject","prepare","approve","execute"])
+    assert.equal(ui.byId(id).disabled,true,id);
+  assert.equal(ui.byId("renew").disabled,false);
+});
+
+test("reviewed evidence export previews its manifest and downloads the exact confirmed binding", async () => {
+  const row = record("one", {review_history:[{decision:"approved"}]});
+  const bundle = evidenceExport("one",1);
+  const ui = fixture([row], call => {
+    if (call.url.endsWith("/evidence-export-preview")) return response(bundle);
+    if (call.url.endsWith("/evidence-export")) return response(bundle);
+    return undefined;
+  });
+  await ui.settle(); await ui.load("one");
+  assert.equal(ui.byId("export-preview").disabled,false);
+  assert.equal(ui.byId("export-download").disabled,true);
+  await ui.click("export-preview");
+  assert.match(ui.byId("export-status").textContent,/1 reviewed claim.*1 evidence source included.*0 withheld/i);
+  assert.match(ui.byId("export-manifest").textContent,/EVR-1{32}.*Included connected document.*v1/i);
+  assert.equal(ui.byId("export-confirm").disabled,false);
+  ui.byId("export-confirm").checked = true; ui.byId("export-confirm").listeners.change();
+  assert.equal(ui.byId("export-download").disabled,false);
+  await ui.click("export-download");
+  const request = ui.calls.find(call => call.url.endsWith("/evidence-export"));
+  assert.deepEqual(request.body,{expected_revision:1,expected_export_sha256:"b".repeat(64),confirm:true});
+  assert.equal(ui.downloads.length,1);
+  assert.equal(ui.downloads[0].name,"lightwork-evidence-one.json");
+  assert.equal(ui.downloads[0].blob.type,"application/json");
+  assert.deepEqual(JSON.parse(await ui.downloads[0].blob.text()),bundle);
+  assert.match(ui.byId("export-status").textContent,/downloaded.*Preview again/i);
+  assert.equal(ui.byId("export-download").disabled,true);
+});
+
+test("a withheld export source is rendered only as an opaque dependency", async () => {
+  const reference = "EVR-" + "2".repeat(32);
+  const bundle = evidenceExport("one",1,{
+    claims:[{claim_id:"training",answer:"unknown",note:"Source access is unavailable",source_basis:"document",
+      evidence_refs:[],withheld_evidence_refs:[reference],citations:[],review_justification:"Human review retained the source-access limitation"}],
+    manifest:{schema:"lightwork.vendor-onboarding.evidence-export-manifest.v1",included:[],
+      withheld:[{reference,dependency_type:"external_evidence",disposition:"withheld",reason:"current_source_access_unavailable"}],
+      included_count:0,withheld_count:1,complete:false},
+  });
+  const ui = fixture([record("one",{review_history:[{}]})], call =>
+    call.url.endsWith("/evidence-export-preview") ? response(bundle) : undefined);
+  await ui.settle(); await ui.load("one"); await ui.click("export-preview");
+  assert.match(ui.byId("export-status").textContent,/0 evidence sources included.*1 withheld/i);
+  assert.match(ui.byId("export-manifest").textContent,/EVR-2{32}.*Withheld external evidence.*access unavailable/i);
+  assert.doesNotMatch(ui.byId("export-manifest").textContent,/private-source|credential|secret/i);
+  assert.equal(ui.byId("export-confirm").disabled,false);
+});
+
+test("cross-case or malformed export responses fail closed and never create a download", async () => {
+  for (const bundle of [
+    evidenceExport("other",1),
+    evidenceExport("one",1,{manifest:{schema:"lightwork.vendor-onboarding.evidence-export-manifest.v1",
+      included:[],withheld:[{reference:"private-source-id",dependency_type:"external_evidence",disposition:"withheld",reason:"current_source_access_unavailable"}],
+      included_count:0,withheld_count:1,complete:false}}),
+  ]) {
+    const ui = fixture([record("one",{review_history:[{}]})], call =>
+      call.url.endsWith("/evidence-export-preview") ? response(bundle) : undefined);
+    await ui.settle(); await ui.load("one"); await ui.click("export-preview");
+    assert.match(ui.byId("message").textContent,/export response was incomplete/i);
+    assert.equal(ui.byId("export-download").disabled,true);
+    assert.equal(ui.downloads.length,0);
+  }
+});
+
+test("lost export permission clears the reviewed manifest and blocks download replay", async () => {
+  const bundle = evidenceExport("one",1);
+  let denied = false;
+  const ui = fixture([record("one",{review_history:[{}]})], call => {
+    if (call.url.endsWith("/evidence-export-preview")) return response(bundle);
+    if (call.url.endsWith("/evidence-export") && denied) return response({detail:{schema:"lightwork.error.v1",
+      code:"permission_denied",message:"Evidence export access is unavailable.",retryable:false,next_action:"Review access."}},403);
+    return undefined;
+  });
+  await ui.settle(); await ui.load("one"); await ui.click("export-preview");
+  ui.byId("export-confirm").checked=true;ui.byId("export-confirm").listeners.change();denied=true;
+  await ui.click("export-download");
+  assert.match(ui.byId("message").textContent,/access is unavailable/i);
+  assert.equal(ui.byId("export-manifest").textContent,"");
+  assert.equal(ui.byId("export-preview").disabled,true);
+  assert.equal(ui.byId("export-download").disabled,true);
+  assert.equal(ui.downloads.length,0);
+});
+
 test("a pending refresh protects draft controls and prevents duplicate refresh or approval", async () => {
   const pending = deferred();
   let refreshing = false;
@@ -422,7 +936,8 @@ test("stages gate human review, execution, reconciliation and acceptance separat
   const ui = fixture([
     record("review"),
     record("approved", { operation: { state: "approved" } }),
-    record("uncertain", { operation: { state: "reconciliation_required" } }),
+    record("uncertain", { operation: { state: "reconciliation_required" },
+      reconciliation:reconciliationSummary() }),
     record("verified", { operation: { state: "verified" } }),
     record("accepted", { operation: { state: "verified" }, outcome: { accepted: true } }),
   ]);
@@ -443,6 +958,59 @@ test("stages gate human review, execution, reconciliation and acceptance separat
   await ui.load("accepted");
   assert.equal(ui.byId("acceptance-reason").disabled, true);
   assert.equal(ui.byId("renew").disabled, false);
+});
+
+test("reconciliation explains ambiguity, observations, ownership and the separate-action boundary", async () => {
+  const ui = fixture([record("uncertain", {
+    operation: { state: "reconciliation_required", payload: {project:"VEND",summary:"Reviewed task",description:"Reviewed content"} },
+    reconciliation: reconciliationSummary({
+      uncertainty: {state:"unresolved",reason:"multiple_matching_effects_observed",
+        explanation:"At least three possible Jira tasks matched, so no result was selected."},
+      safe_next_check: {kind:"review_ambiguity",mode:"read_only",label:"Review the possible Jira results"},
+      known_observations: [
+        {kind:"execution_attempt",state:"recorded",count:1,observed_at:1799999900},
+        {kind:"provider_receipt",state:"not_recorded"},
+        {kind:"authoritative_readback",state:"multiple_matches",match_count_lower_bound:3,observed_at:1800000000},
+      ],
+    }),
+  })]);
+  await ui.settle(); await ui.load("uncertain");
+  const text = ui.byId("operation").textContent;
+  assert.match(text,/UNCERTAIN PROVIDER RESULT/);
+  assert.match(text,/at least 3 matches/);
+  assert.match(text,/read-only check and cannot create another Jira task/);
+  assert.match(text,/Responsible operator: user:reviewer/);
+  assert.match(text,/separate reviewed action/);
+  assert.equal(ui.byId("reconcile").disabled,false);
+  for (const id of ["prepare","approve","execute","accept","reject"])
+    assert.equal(ui.byId(id).disabled,true,id);
+});
+
+test("lost Jira access disables status lookup and directs the operator to Connections", async () => {
+  const detail = reconciliationSummary({
+    uncertainty:{state:"unresolved",reason:"current_connection_access_unavailable",
+      explanation:"Current Jira access is unavailable; no provider request was made."},
+    safe_next_check:{kind:"restore_access",mode:"read_only",
+      label:"Restore the original Jira connection access, then check status",href:"/connections"},
+  });
+  const ui = fixture([record("access-lost", {stage:"reconciliation_required",
+    operation:{state:"reconciliation_required"},reconciliation:detail})]);
+  await ui.settle(); await ui.load("access-lost");
+  assert.equal(ui.byId("reconcile").disabled,true);
+  assert.match(ui.byId("operation").textContent,/Open Connections to restore access/);
+  assert.equal(ui.calls.filter(call=>call.method === "POST").length,0);
+});
+
+test("malformed uncertain-action fields fail closed before enabling a status request", async () => {
+  const detail = reconciliationSummary();
+  detail.known_observations[2].provider_body = "PRIVATE_PROVIDER_BODY";
+  const ui = fixture([record("malformed-uncertainty", {stage:"reconciliation_required",
+    operation:{state:"reconciliation_required"},reconciliation:detail})]);
+  await ui.settle(); await ui.load("malformed-uncertainty");
+  assert.match(ui.byId("message").textContent,/uncertain action status was incomplete/i);
+  assert.doesNotMatch(ui.byId("operation").textContent,/PRIVATE_PROVIDER_BODY/);
+  assert.equal(ui.byId("reconcile").disabled,true);
+  assert.equal(ui.calls.filter(call=>call.method === "POST").length,0);
 });
 
 test("a pending request disables edits and prevents a duplicate action", async () => {

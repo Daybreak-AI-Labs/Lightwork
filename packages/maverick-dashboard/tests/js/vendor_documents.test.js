@@ -11,6 +11,7 @@ const response = (body, status=200) => ({ok:status >= 200 && status < 300, statu
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function record(id="one", extra={}) {
   return {id, vendor_name:`Synthetic ${id}`, revision:1, document_id:"", document_ids:[], uploads:[],
+    owner:"user:procurement", updated_at:1800000000,
     stage:"intake", evidence:null, assessment:null, operation:null, outcome:null, metrics:{}, ...extra};
 }
 async function fixture(records, intercept=()=>undefined) {

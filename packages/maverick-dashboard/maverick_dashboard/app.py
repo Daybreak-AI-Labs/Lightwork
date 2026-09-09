@@ -99,6 +99,7 @@ from .health_routes import (
     readiness_response as _readiness_response,
 )
 from .oidc_login import router as oidc_login_router
+from .outcome_accounting_api import router as outcome_accounting_router
 from .outcome_pilot_costs_api import router as outcome_pilot_costs_router
 from .outcome_pilots_api import router as outcome_pilots_router
 from .project_reviews_api import router as project_reviews_router
@@ -129,7 +130,7 @@ class _CallbackAccessLogFilter(logging.Filter):
             # Suffix matching also covers an application mounted under a prefix.
             # Login can carry a nested callback query in its return_to parameter.
             if separator and unquote(path).rstrip("/").endswith(
-                ("/connections", "/auth/login", "/auth/callback")
+                ("/connections", "/auth/login", "/auth/callback", "/flow/approve")
             ):
                 record.args = (*args[:2], f"{path}?[redacted]", *args[3:])
         return True
@@ -845,6 +846,9 @@ from .ai_governance_loop_scheduler import (  # noqa: E402
 from .assessment_evidence_autopopulation_composition import (  # noqa: E402
     install_assessment_evidence_autopopulation_composition,
 )
+from .candidate_promotion_composition import (  # noqa: E402
+    install_candidate_promotion_composition,
+)
 from .consent_application_scanner_composition import (  # noqa: E402
     attach_consent_application_scanner_composition,
 )
@@ -951,6 +955,7 @@ attach_ai_governance_loop_scheduler(app)
 install_ai_entity_tasks_composition(app)
 install_ai_evidence_analysis_composition(app)
 install_assessment_evidence_autopopulation_composition(app)
+install_candidate_promotion_composition(app)
 install_governance_agents_composition(app)
 attach_administration_document_access_composition(app)
 attach_governed_document_vault_composition(app)
@@ -990,6 +995,7 @@ app.include_router(api_router)
 app.include_router(draft_router)
 app.include_router(record_search_router)
 app.include_router(action_center_router)
+app.include_router(outcome_accounting_router)
 app.include_router(outcome_pilots_router)
 app.include_router(outcome_pilot_costs_router)
 app.include_router(project_reviews_router)
@@ -1108,6 +1114,15 @@ app.include_router(task_file_recovery_router)
 from .connection_setup_api import router as connection_setup_router  # noqa: E402
 
 app.include_router(connection_setup_router)
+from .knowledge_access_api import page_router as knowledge_access_page_router  # noqa: E402
+from .knowledge_access_api import router as knowledge_access_router  # noqa: E402
+from .research_api import page_router as research_page_router  # noqa: E402
+from .research_api import router as research_router  # noqa: E402
+
+app.include_router(research_router)
+app.include_router(research_page_router)
+app.include_router(knowledge_access_router)
+app.include_router(knowledge_access_page_router)
 app.include_router(create_vendor_onboarding_page_router(templates))
 from .agent_control_plane_api import router as agent_control_plane_router  # noqa: E402
 from .cortex_api import router as cortex_router  # noqa: E402
@@ -2195,6 +2210,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "site_url": "Enter a valid workspace site address.",
             "state": "Start a new authorization from Connections.",
             "code": "Start a new authorization from Connections.",
+            "return_profile": "Choose the supported account return mode.",
+            "desktop_return": "Review the provider's registered desktop return address.",
         }
         errors = []
         for error in exc.errors()[:32]:
@@ -2344,6 +2361,13 @@ async def security_headers(request: Request, call_next):
         csp = _PLAN_TREE_CSP
     else:
         csp = _DEFAULT_CSP
+    if path == "/connections" and str(request.base_url).rstrip("/") == "http://127.0.0.1:8765":
+        from maverick.connection_oauth import desktop_return_enabled
+
+        if desktop_return_enabled():
+            # Only IPC to this desktop's scoped native account-return commands.
+            # Rust separately pins the main window and exact Connections URL.
+            csp = csp.replace("connect-src 'self';", "connect-src 'self' ipc: http://ipc.localhost;")
     response.headers.setdefault("Content-Security-Policy", csp)
     return response
 
@@ -5422,7 +5446,56 @@ async def simulate_page(request: Request) -> HTMLResponse:
             "action": action,
             "target": target,
             "result": result,
+            "research_component": "tabular",
+            "research_result": None,
+            "research_error": None,
         },
+    )
+
+
+@app.post("/simulate/research", response_class=HTMLResponse)
+async def simulate_research_page(
+    request: Request,
+    component: str = Form("tabular", max_length=32),
+) -> HTMLResponse:
+    """Run and render the actual isolated F09 synthetic research study."""
+    from maverick.research_simulator import ResearchSimulationError
+
+    from .control_plane import run_isolated_research_simulation
+    from .simulation_authority import authenticated_human_identity
+
+    status_code = 200
+    research_result = None
+    research_error = None
+    try:
+        identity = authenticated_human_identity(request)
+        research_result = await run_in_threadpool(
+            run_isolated_research_simulation,
+            identity,
+            component_name=component,
+        )
+    except HTTPException as exc:
+        status_code = exc.status_code
+        research_error = str(exc.detail)
+    except ValueError as exc:
+        status_code = 400
+        research_error = str(exc)
+    except ResearchSimulationError:
+        status_code = 503
+        research_error = "The isolated research simulator is unavailable."
+    return templates.TemplateResponse(
+        request,
+        "simulate.html",
+        {
+            "surface": "",
+            "action": "",
+            "target": "",
+            "result": None,
+            "research_component": component,
+            "research_result": research_result,
+            "research_error": research_error,
+        },
+        status_code=status_code,
     )
 
 
@@ -5697,6 +5770,11 @@ async def oversight_page(request: Request) -> HTMLResponse:
     /audit, /fleets) remain the deep dives; this is the at-a-glance roll-up.
     Fail-soft: an unreadable audit log yields empty panels, never a 500.
     """
+    # This page contains the deployment-wide approval queue and mutating
+    # decision controls. Authorize before reading either approval details or
+    # the audit/world-model stores.
+    require_permission(request, "operate")
+
     from collections import Counter, deque
 
     from maverick.audit import default_audit_log
@@ -5782,7 +5860,7 @@ async def oversight_page(request: Request) -> HTMLResponse:
         approvals = list(w.pending_approvals())
     except Exception:
         approvals = []
-    sources = {a.id: _approval_source(a.provenance) for a in approvals}
+    approval_context = _approval_queue_context(approvals)
     try:
         active = len(w.list_goals(status="active", owner=owner_filter))
     except Exception:
@@ -5800,7 +5878,7 @@ async def oversight_page(request: Request) -> HTMLResponse:
             "until": until,
             "halted": halted,
             "approvals": approvals,
-            "sources": sources,
+            **approval_context,
             "pending": len(approvals),
             "active": active,
             "n": n,
@@ -6809,7 +6887,76 @@ def _approval_source(provenance: str | None) -> str | None:
         # An approver must be able to see that at a glance, not read it as
         # an ordinary task approval.
         return "self-refinement · changes the agent's instructions"
+    if provenance == "assessment":
+        return "assessment · human review"
     return None
+
+
+def _approval_queue_context(approvals: list) -> dict:
+    """Build the exact-operation review context shared by approval surfaces."""
+
+    from maverick.approval_cards import ApprovalCardError, decode_approval_detail
+    from maverick.safety.secret_detector import redact
+
+    def safe(value: object, *, fallback: str = "") -> str:
+        try:
+            text, _matches = redact(" ".join(str(value or "").split()))
+            return text[:2000]
+        except Exception:
+            return fallback
+
+    sources = {approval.id: _approval_source(approval.provenance) for approval in approvals}
+    cards = {}
+    card_statuses = {}
+    approval_details = {}
+    approval_actions = {}
+    approval_scopes = {}
+    assessment_ids = {}
+    for approval in approvals:
+        approval_actions[approval.id] = safe(
+            approval.action, fallback="reviewed operation",
+        )
+        approval_scopes[approval.id] = safe(
+            approval.scope, fallback="reviewed target",
+        )
+        # Assessment UI enhancement is selected from explicit, app-owned
+        # provenance. Free-form detail, target labels, and model output must not
+        # be able to opt another approval into a DOM rewrite by containing an
+        # ``assessment:...`` substring.
+        if approval.provenance == "assessment":
+            assessment_match = re.search(
+                r"\[assessment:([A-Za-z0-9._-]{1,128})\]\s*$",
+                str(approval.detail or ""),
+            )
+            if assessment_match:
+                assessment_ids[approval.id] = assessment_match.group(1)
+        try:
+            card = decode_approval_detail(approval.detail)
+        except ApprovalCardError:
+            card = None
+            card_statuses[approval.id] = "invalid"
+            approval_details[approval.id] = (
+                "Structured approval details failed their integrity check."
+            )
+        else:
+            cards[approval.id] = card
+            approval_details[approval.id] = (
+                card["summary"] if card is not None else safe(approval.detail)
+            )
+            card_statuses[approval.id] = (
+                "expired"
+                if card is not None and time.time() >= card["expires_at"]
+                else ("current" if card is not None else "legacy")
+            )
+    return {
+        "sources": sources,
+        "cards": cards,
+        "card_statuses": card_statuses,
+        "approval_details": approval_details,
+        "approval_actions": approval_actions,
+        "approval_scopes": approval_scopes,
+        "assessment_ids": assessment_ids,
+    }
 
 
 @app.get("/approvals", response_class=HTMLResponse)
@@ -6828,12 +6975,14 @@ async def approvals_page(request: Request) -> HTMLResponse:
     so a view-only caller must not read it via the HTML page either.
     """
     require_permission(request, "operate")
-    approvals = _world().pending_approvals()
-    sources = {a.id: _approval_source(a.provenance) for a in approvals}
+    approvals = list(_world().pending_approvals())
     return templates.TemplateResponse(
         request,
         "approvals.html",
-        {"approvals": approvals, "sources": sources},
+        {
+            "approvals": approvals,
+            **_approval_queue_context(approvals),
+        },
     )
 
 
@@ -8237,29 +8386,93 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
 
 
 def _flow_approve_page(
-    title: str, message: str, *, status: int = 200, form_token: str = ""
+    title: str,
+    message: str,
+    *,
+    status: int = 200,
+    form_token: str = "",
+    approval_card: dict | None = None,
 ) -> HTMLResponse:
     """A minimal self-contained confirmation/result page for the signed approval
     link. When ``form_token`` is set it renders a confirm button that POSTs back
     (so a link-prefetcher that merely GETs the URL never actuates the decision)."""
     from html import escape
 
+    try:
+        from maverick.safety.secret_detector import redact
+
+        title, _title_matches = redact(str(title))
+        message, _message_matches = redact(str(message))
+    except Exception:
+        title = "Approval"
+        message = "Approval details are unavailable. Open the app and review again."
+
+    review = ""
+    if approval_card is not None:
+        from maverick.approval_cards import (
+            ApprovalCardError,
+            require_current_approval_card,
+        )
+
+        try:
+            card = require_current_approval_card(approval_card)
+        except ApprovalCardError:
+            form_token = ""
+            review = (
+                '<section aria-label="Approval details" class="review invalid">'
+                "Approval details failed their integrity or expiry check. "
+                "Open the app and request a fresh review.</section>"
+            )
+        else:
+            consequences = card["consequences"]
+            effects = "".join(
+                f"<li>{escape(str(item))}</li>"
+                for item in consequences["known_effects"]
+            )
+            assumptions = "".join(
+                f"<li>{escape(str(item))}</li>"
+                for item in consequences["unresolved_assumptions"]
+            ) or "<li>None recorded.</li>"
+            parameters = "".join(
+                f"<li>{escape(str(item))}</li>"
+                for item in card["parameters"]["summary"]
+            )
+            review = (
+                '<section aria-label="Approval details" class="review">'
+                '<strong>Recommendation only — prediction does not grant authority.</strong>'
+                f"<h3>{escape(card['summary'])}</h3>"
+                f"<p><b>Target:</b> {escape(card['target']['label'])}<br>"
+                f"<b>Actor:</b> {escape(card['authority']['actor'])}<br>"
+                f"<b>Workspace:</b> {escape(card['authority']['workspace'])}<br>"
+                f"<b>Role:</b> {escape(card['authority']['role'])}<br>"
+                f"<b>Expires:</b> {escape(str(card['expires_at']))}</p>"
+                f"<h4>Exact inputs</h4><ul>{parameters}</ul>"
+                f"<p><b>Before:</b> {escape(card['preview']['before'])}<br>"
+                f"<b>After:</b> {escape(card['preview']['after'])}</p>"
+                f"<h4>Known effects</h4><ul>{effects}</ul>"
+                f"<h4>Unresolved assumptions</h4><ul>{assumptions}</ul>"
+                f"<p><b>Irreversible or uncertain:</b> "
+                f"{'yes' if consequences['irreversible'] else 'no'}</p>"
+                "</section>"
+            )
     form = ""
     if form_token:
         form = (
             f'<form method="post" action="/flow/approve">'
             f'<input type="hidden" name="token" value="{escape(form_token)}">'
             f'<button type="submit" style="font-size:16px;padding:10px 22px;'
-            f'border-radius:8px;border:1px solid #888;cursor:pointer;">Confirm</button>'
+            f'border-radius:8px;border:1px solid #888;cursor:pointer;">'
+            f"Confirm exact operation</button>"
             f"</form>"
         )
     html = (
-        f"<!doctype html><meta charset=utf-8><meta name=viewport "
+        f"<!doctype html><meta charset=utf-8><meta name=referrer content=no-referrer>"
+        f"<meta name=viewport "
         f'content="width=device-width,initial-scale=1">'
         f"<title>{escape(title)}</title>"
         f'<div style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;'
-        f'padding:0 20px;text-align:center;">'
-        f"<h2>{escape(title)}</h2><p>{escape(message)}</p>{form}</div>"
+        f'padding:0 20px;">'
+        f"<h2>{escape(title)}</h2><p>{escape(message)}</p>{review}{form}</div>"
     )
     return HTMLResponse(html, status_code=status)
 
@@ -8272,7 +8485,7 @@ def _load_paused_approval_run(token: str):
 
     claim = verify_token(token)
     if not claim:
-        return None, "This approval link is invalid or has expired.", ""
+        return None, "This approval link is invalid or has expired.", "", ""
     tenant = str(claim.get("tenant") or "")
     tenant_token = None
     if tenant:
@@ -8281,7 +8494,7 @@ def _load_paused_approval_run(token: str):
 
             assert_tenant_active(tenant)
         except Exception:
-            return None, "That tenant is not active.", tenant
+            return None, "That tenant is not active.", tenant, ""
         from maverick.paths import set_tenant
 
         tenant_token = set_tenant(tenant)
@@ -8293,25 +8506,55 @@ def _load_paused_approval_run(token: str):
 
             reset_tenant(tenant_token)
     if run is None:
-        return None, "That flow run no longer exists.", tenant
+        return None, "That flow run no longer exists.", tenant, ""
     if run.status != "paused_approval":
-        return None, f"This run is no longer awaiting approval (status: {run.status}).", tenant
+        return None, f"This run is no longer awaiting approval (status: {run.status}).", tenant, ""
     if (
         str(run.cursor or "") != claim.get("cursor")
         or str(run.prompt or "") != claim.get("prompt")
         or float(run.updated or 0.0) != float(claim.get("updated", -1.0))
     ):
-        return None, "This approval link is for an older approval step.", tenant
+        return None, "This approval link is for an older approval step.", tenant, ""
     if str((run.human or {}).get("assignee") or "") != claim.get("assignee", "") or str(
         run.owner or ""
     ) != claim.get("owner", ""):
-        return None, "This approval link is for a different approver scope.", tenant
-    return run, claim["decision"], tenant
+        return None, "This approval link is for a different approver scope.", tenant, ""
+    from maverick_dashboard import automation_queue as aq
+
+    binding = str(claim.get("binding_sha256") or "")
+    try:
+        if tenant:
+            from maverick.paths import tenant_scope
+
+            with tenant_scope(tenant=tenant):
+                current_binding = aq.flow_approval_binding(run)
+        else:
+            current_binding = aq.flow_approval_binding(run)
+    except Exception:
+        return None, "Current approval authority is unavailable.", tenant, ""
+    if not binding or not hmac.compare_digest(binding, current_binding):
+        return None, "This approval link is for an older operation or authority.", tenant, ""
+    from maverick.approval_cards import ApprovalCardError, require_current_approval_card
+
+    try:
+        require_current_approval_card((run.human or {}).get("approval_card"))
+    except ApprovalCardError:
+        return None, "This approval has expired. Open the app for a fresh review.", tenant, ""
+    return run, claim["decision"], tenant, binding
 
 
-def _approval_link_actor(request: Request, run) -> str:
+def _approval_link_actor(
+    request: Request, run, *, tenant: str = "",
+) -> tuple[str, object]:
     """Return a provable authorized actor for a signed link, or fail closed."""
-    require_permission(request, "operate")
+    from .approval_authority import require_approval_authority
+
+    authority = require_approval_authority(
+        request,
+        action="flow.approval-link.decide",
+        resource=str(run.run_id),
+        tenant=tenant or None,
+    )
     principal = str(caller_principal(request) or "").strip()
     if not principal:
         raise HTTPException(
@@ -8327,7 +8570,7 @@ def _approval_link_actor(request: Request, run) -> str:
         raise HTTPException(status_code=403, detail="this approval is assigned to someone else")
     if not assignee and run.owner and principal != run.owner:
         raise HTTPException(status_code=403, detail="this approval belongs to another user")
-    return principal
+    return principal, authority
 
 
 @app.get("/flow/approve", response_class=HTMLResponse)
@@ -8340,11 +8583,11 @@ async def flow_approve_confirm(request: Request, token: str = "") -> HTMLRespons
 
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
-    run, decision, _tenant = _load_paused_approval_run(token)
+    run, decision, _tenant, _binding = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
     try:
-        _approval_link_actor(request, run)
+        _approval_link_actor(request, run, tenant=_tenant)
     except HTTPException as exc:
         return _flow_approve_page(
             "Approval unavailable",
@@ -8356,8 +8599,9 @@ async def flow_approve_confirm(request: Request, token: str = "") -> HTMLRespons
     return _flow_approve_page(
         f"Confirm: {verb} this flow?",
         f"“{name}” is paused: {run.prompt or 'awaiting your decision'}. "
-        f"Click Confirm to {verb} and resume it.",
+        f"Review the exact operation, then click Confirm to {verb} and resume it.",
         form_token=token,
+        approval_card=(run.human or {}).get("approval_card"),
     )
 
 
@@ -8370,11 +8614,13 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
 
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
-    run, decision, tenant = _load_paused_approval_run(token)
+    run, decision, tenant, approval_binding = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
     try:
-        decided_by = _approval_link_actor(request, run)
+        decided_by, decision_authority = _approval_link_actor(
+            request, run, tenant=tenant,
+        )
     except HTTPException as exc:
         return _flow_approve_page(
             "Approval unavailable",
@@ -8393,6 +8639,8 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
             run.owner,
             tenant=tenant,
             decided_by=decided_by,
+            approval_binding_sha256=approval_binding,
+            decision_authority=decision_authority,
         )
     except flow_store.FlowSnapshotError:
         return _flow_approve_page(
@@ -9520,6 +9768,7 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-vendor-setup.js")
 @app.get("/static/lightwork-task-file-recovery.js")
 @app.get("/static/lightwork-connection-setup.js")
+@app.get("/static/lightwork-native-account-return.js")
 @app.get("/static/lightwork-template-library.js")
 @app.get("/static/lightwork-guided-actions.js")
 @app.get("/static/lightwork-ai-business-intake.js")
@@ -9533,6 +9782,8 @@ async def shell_copilot_js() -> FileResponse:
 @app.get("/static/lightwork-workspace-recovery.js")
 @app.get("/static/lightwork-workspace-recovery.css")
 @app.get("/static/lightwork-action-center.js")
+@app.get("/static/lightwork-outcome-accounting.js")
+@app.get("/static/lightwork-outcome-value.js")
 @app.get("/static/lightwork-outcome-pilots.js")
 @app.get("/static/lightwork-outcome-pilot-costs.js")
 @app.get("/static/lightwork-project-reviews.js")

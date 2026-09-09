@@ -47,6 +47,12 @@ package-lock.json
 htmlcov/
 coverage.xml
 *.cover
+/packages/maverick-dashboard/tests/browser/.app*/
+/.browser-runtime*/
+/.browser-results*/
+**/.browser-runtime*/
+**/.browser-results*/
+/liblightwork_*_probe.rmeta
 
 # Type checkers
 .mypy_cache/
@@ -70,6 +76,7 @@ out/
 # Rust
 target/
 Cargo.lock
+!apps/desktop-oauth-return/Cargo.lock
 !apps/desktop/src-tauri/Cargo.lock
 !apps/installer-desktop/src-tauri/Cargo.lock
 !rust/Cargo.lock

@@ -5,9 +5,12 @@ keys, certify external effects, or validate every application invariant.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -82,16 +85,36 @@ def _constant(value):
     raise ValueError("non-finite JSON constant")
 
 
-def _read(path, relative, namespace):
+def _read(path, relative, namespace, *, tenant, workspace, decryptor):
     try:
         with path.open("rb") as stream:
             raw = stream.read(_MAX_RECORD_BYTES + 1)
         if len(raw) > _MAX_RECORD_BYTES:
             _fail(relative, "record exceeds the 16 MiB validation bound")
-        if raw.lstrip().startswith((b"MVKAR", b'"MVKAR', b"MVKTEN", b'"MVKTEN')):
-            _fail(relative, "encrypted record requires separately reviewed key-custody and decryption validation")
+        stripped = raw.lstrip()
+        if stripped.startswith((b'"MVKAR', b'"MVKTEN')) and decryptor is None:
+            _fail(
+                relative,
+                "encrypted record requires separately reviewed key-custody and decryption validation",
+            )
+        if stripped.startswith((b"MVKAR", b"MVKTEN")):
+            if decryptor is None:
+                _fail(relative, "encrypted record requires separately reviewed key-custody and decryption validation")
+            raw = decryptor(stripped, tenant, workspace)
         record = json.loads(raw.decode("utf-8"), object_pairs_hook=_object, parse_constant=_constant)
-    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
+        if isinstance(record, str) and record.startswith("MVKAR1:"):
+            if decryptor is None:
+                _fail(relative, "encrypted record requires separately reviewed key-custody and decryption validation")
+            try:
+                blob = base64.b64decode(record[len("MVKAR1:"):], validate=True)
+            except (ValueError, TypeError, binascii.Error) as exc:
+                raise ValueError("invalid encrypted text record") from exc
+            record = json.loads(
+                decryptor(blob, tenant, workspace).decode("utf-8"),
+                object_pairs_hook=_object,
+                parse_constant=_constant,
+            )
+    except Exception as exc:
         if isinstance(exc, RestoreValidationError):
             raise
         _fail(relative, "record is unreadable or is not unambiguous JSON")
@@ -141,7 +164,13 @@ def _case_references(case, records, path, tenant):
             _fail(path, "renewal_of scope binding does not match vendor_onboarding/" + prior["id"])
 
 
-def validate_staged_restore(stage: Path, *, tenant: str | None, whole_home: bool = False) -> dict:
+def validate_staged_restore(
+    stage: Path,
+    *,
+    tenant: str | None,
+    whole_home: bool = False,
+    decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
+) -> dict:
     """Validate complete archived local stores without a live-store fallback."""
     count = total_bytes = case_count = 0
     for workspace, workspace_tenant in _roots(stage, None if whole_home else tenant, whole_home):
@@ -152,7 +181,14 @@ def validate_staged_restore(stage: Path, *, tenant: str | None, whole_home: bool
                 relative = path.relative_to(stage).as_posix()
                 if not path.is_file():
                     _fail(relative, "record is not a regular file")
-                record, size = _read(path, relative, namespace)
+                record, size = _read(
+                    path,
+                    relative,
+                    namespace,
+                    tenant=workspace_tenant,
+                    workspace=workspace,
+                    decryptor=decryptor,
+                )
                 count += 1
                 total_bytes += size
                 if count > _MAX_RECORDS or total_bytes > _MAX_TOTAL_BYTES:

@@ -51,6 +51,17 @@ def customer(tmp_path, monkeypatch):
     monkeypatch.setattr(oauth, "_jira_sites", lambda *a: [{
         "id": CLOUD, "url": SITE, "scopes": oauth.PROFILES["jira-cloud"]["scopes"],
     }])
+    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token: {
+        "provider": provider,
+        "subject": "fixture-account",
+        "display_name": "Fixture Account",
+        "email": "fixture@example.test",
+        **(
+            {"email_verified": True, "hosted_domain": "example.test"}
+            if provider == "google"
+            else {"account_status": "active"}
+        ),
+    })
     from maverick.tools import _ssrf
     monkeypatch.setattr(_ssrf, "safe_client", lambda *a, **k: pytest.fail("Unexpected provider request"))
     from maverick_dashboard.app import app
@@ -202,7 +213,13 @@ def _approve_vendor(client, credential):
     row = _step(client, row, "assess")
     row = _step(client, row, "review", decision="approved", rationale="Restricted local fixture accepted")
     row = _step(client, row, "prepare-action")
-    row = _step(client, row, "approve-action", confirm=True)
+    row = _step(
+        client,
+        row,
+        "approve-action",
+        confirm=True,
+        approval_binding_sha256=row["operation"]["approval_card"]["binding_sha256"],
+    )
     assert row["operation"]["state"] == "approved"
     assert row["operation"]["preconditions"]["ticket_credential_version"] == credential["revision"]
     return row

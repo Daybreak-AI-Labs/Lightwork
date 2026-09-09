@@ -394,6 +394,11 @@ risk_limited = true              # require >=8 held-out
 #   eval_corpus = "/path.json"   {model|domain: [{goal, expected}]} — enables
 #                                the auto-built live A/B on scheduled runs
 #   eval_budget_dollars = 5.0    spend cap per auto-evaluated cycle (fail-closed)
+# Environment: MAVERICK_SELF_HARNESS_EVALUATOR_IMAGE selects a reviewed local
+# Linux image (never pulled; default request `python:3.12-slim`).
+# MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY=1 requests confirmatory
+# custody and currently fails closed on local/Windows deployments because the
+# controller account also administers the ledger and Docker daemon.
 auto_run = true                  # run the fleet cycle as part of `maverick dream`
 #   promote_as_canary = true     stage every promotion on probation
 #   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
@@ -504,6 +509,15 @@ enable = true              # one governed recall/deposit surface over knowledge
                            #   source's own toggle still applies. Operator
                            #   commands: `maverick cortex status|recall|deposit`.
                            #   Env: MAVERICK_CORTEX.
+
+[knowledge_access]         # current-rights Knowledge page and API (default on)
+enable = true              # exact registry versions only; every display/cache/
+                           #   export rechecks purpose, requested action, source
+                           #   checksum, approval, freshness, consent, lineage,
+                           #   and current named-user authority. Explicit false
+                           #   disables the page and API. Env override:
+                           #   MAVERICK_KNOWLEDGE_ACCESS.
+
 [commerce]                 # Commerce suite tools (com_shop_* / com_merch_* packs)
 enable = false             # explicit opt-in; env: MAVERICK_COMMERCE
 backend = "demo"           # in-memory reference backend; a real storefront/

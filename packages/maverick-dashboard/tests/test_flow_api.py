@@ -3,6 +3,8 @@ the automation queue, owner-scoped runs, and self-rewrite proposals. Flow engine
 gated (off by default)."""
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -48,6 +50,87 @@ def _publish(client, flow_id: str) -> dict:
     return response.json()
 
 
+def _attach_test_approval_card(run_id: str) -> str:
+    """Modernize a hand-built paused-run fixture and return its review binding."""
+    from maverick.approval_cards import build_approval_card, digest
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    run = store.load_run(run_id)
+    assert run is not None and run.status == "paused_approval"
+    flow = store.load_flow_snapshot(run.definition_digest)
+    paused = flow.node(run.cursor)
+    assert paused is not None and paused.kind == "approval"
+    next_node = flow.node(paused.next) if paused.next else None
+    continuation = (
+        next_node.to_dict()
+        if next_node is not None
+        else {"kind": "complete", "id": "end"}
+    )
+    human = dict(run.human or {})
+    human.setdefault("choices", [])
+    human.setdefault("assignee", "")
+    human.setdefault("form", [])
+    human["approval_card"] = build_approval_card(
+        action="flow.resume",
+        summary=run.prompt or f"Resume {run.flow_id}",
+        target_label=f"continue flow {run.flow_id}",
+        target={
+            "flow_id": run.flow_id,
+            "pause_node": paused.id,
+            "continuation": continuation,
+        },
+        parameters={"data": run.data or {}, "continuation": continuation},
+        parameter_summary=[f"Continue after {run.cursor or 'the current pause'}"],
+        actor=run.owner or "local:dashboard",
+        workspace="local",
+        role="flow-execution-owner",
+        authority_versions={
+            "definition_digest": run.definition_digest,
+            "release_digest": run.release_digest,
+            "release_id": run.release_id,
+            "execution_principal_sha256": digest(
+                run.execution_user_id or run.owner or "local:operator"
+            ),
+            "allowed_suites_sha256": digest(run.allowed_suites),
+        },
+        input_versions={
+            "run_data_sha256": digest(run.data or {}),
+            "definition_revision": run.definition_revision,
+        },
+        credential_versions={"resolution": "worker-dispatch"},
+        budget={"currency": "USD", "maximum": "configured runtime limit"},
+        expires_at=(
+            float(run.resume_at) if run.resume_at is not None else time.time() + 300
+        ),
+        known_effects=["Runs the reviewed immutable continuation once."],
+        unresolved_assumptions=["Current connector authority remains valid."],
+        before="The run remains paused.",
+        after="The reviewed continuation may execute once.",
+        irreversible=True,
+    )
+    run.human = human
+    store.save_run(run)
+    return aq.flow_approval_binding(store.load_run(run_id))
+
+
+def _approval_resume_body(client, run_id: str, decision: str, **extra) -> dict:
+    current = client.get(f"/api/v1/flows/runs/{run_id}")
+    assert current.status_code == 200, current.text
+    inputs = dict(extra.get("inputs") or {})
+    if inputs:
+        preview = client.post(
+            f"/api/v1/flows/runs/{run_id}/approval-preview",
+            json={"inputs": inputs},
+        )
+        assert preview.status_code == 200, preview.text
+        binding = preview.json().get("approval_binding_sha256")
+    else:
+        binding = current.json().get("approval_binding_sha256")
+    assert isinstance(binding, str) and len(binding) == 64
+    return {"decision": decision, "approval_binding_sha256": binding, **extra}
+
+
 def _store_published_pin(flow_id: str = "demo") -> dict:
     from maverick.flow import store
     from maverick.flow.ir import Flow, FlowNode
@@ -66,6 +149,35 @@ def _store_published_pin(flow_id: str = "demo") -> dict:
     return {
         "definition_digest": release["definition_digest"],
         "release_id": release["release_id"],
+        "definition_version": release["definition_version"],
+        "definition_revision": release["definition_revision"],
+        "subflow_digests": dict(release.get("subflow_digests") or {}),
+    }
+
+
+def _store_published_approval_pin(flow_id: str = "approval-expiry") -> dict:
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+
+    saved = store.save_flow(Flow(
+        id=flow_id,
+        name="Expiring approval",
+        start="approve",
+        nodes={
+            "approve": FlowNode(
+                id="approve", kind="approval", prompt="approve?", expires_after=1,
+            ),
+        },
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    return {
+        "definition_digest": release["definition_digest"],
+        "release_id": release["release_id"],
+        "release_digest": release["release_digest"],
         "definition_version": release["definition_version"],
         "definition_revision": release["definition_revision"],
         "subflow_digests": dict(release.get("subflow_digests") or {}),
@@ -304,6 +416,7 @@ def test_unpublish_refuses_paused_live_resume(monkeypatch, tmp_path):
         definition_revision=release["definition_revision"],
         subflow_digests=release["subflow_digests"],
     ))
+    approval_binding = _attach_test_approval_card("paused-live")
     assert store.unpublish_flow(
         "demo",
         expected_version=published.version,
@@ -311,7 +424,11 @@ def test_unpublish_refuses_paused_live_resume(monkeypatch, tmp_path):
     ) is True
 
     response = client.post(
-        "/api/v1/flows/runs/paused-live/resume", json={"decision": "approved"},
+        "/api/v1/flows/runs/paused-live/resume",
+        json={
+            "decision": "approved",
+            "approval_binding_sha256": approval_binding,
+        },
     )
     assert response.status_code == 409
     assert "no longer active" in response.json()["detail"]
@@ -691,11 +808,17 @@ def test_queued_live_resume_revalidates_release_at_delivery(
         definition_revision=release["definition_revision"],
         subflow_digests=release["subflow_digests"],
     ))
+    approval_binding = (
+        _attach_test_approval_card("paused-boundary")
+        if status == "paused_approval"
+        else ""
+    )
     aq.enqueue_flow_resume(
         saved.id,
         "paused-boundary",
         decision="approved" if status == "paused_approval" else "",
         decided_by="system:test" if status == "paused_approval" else "",
+        approval_binding_sha256=approval_binding,
     )
     job = next(
         j for j in aq._pending(aq.FLOW_RESUME_KIND)
@@ -929,7 +1052,7 @@ def test_identical_republish_creates_a_new_activation_and_refuses_old_work(
         id="activation-aba",
         name="Activation ABA",
         start="a",
-        nodes={"a": FlowNode(id="a", kind="agent", brief="same content")},
+        nodes={"a": FlowNode(id="a", kind="approval", prompt="same content")},
     ))
     v1 = store.publish_flow(
         saved.id,
@@ -953,11 +1076,13 @@ def test_identical_republish_creates_a_new_activation_and_refuses_old_work(
         definition_revision=v1["definition_revision"],
         subflow_digests=v1["subflow_digests"],
     ))
+    approval_binding = _attach_test_approval_card("old-paused")
     aq.enqueue_flow_resume(
         saved.id,
         "old-paused",
         decision="approved",
         decided_by="system:test",
+        approval_binding_sha256=approval_binding,
     )
 
     assert store.unpublish_flow(
@@ -1195,11 +1320,289 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     assert run["status"] == "paused_approval" and run["cursor"] == "b"
     assert run["data"]["r"] == "ran:assess X-9"     # agent output threaded through
     # resume approved -> drains to completion, action fires
-    c.post(f"/api/v1/flows/runs/{run_id}/resume", json={"decision": "approved"})
+    c.post(
+        f"/api/v1/flows/runs/{run_id}/resume",
+        json=_approval_resume_body(c, run_id, "approved"),
+    )
     _drain(aq)
     done = c.get(f"/api/v1/flows/runs/{run_id}").json()
     assert done["status"] == "completed"
     assert done["decided_by"] == "local:dashboard"
+
+
+def test_restored_resume_rechecks_credential_revision_before_live_executors(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("SYNTHETIC_API_KEY", "credential-generation-one")
+    from maverick.flow import execution, store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(
+        execution,
+        "default_agent_runner",
+        lambda world, **kwargs: lambda brief, data: ("reviewed", 1.0),
+    )
+    monkeypatch.setattr(
+        execution,
+        "default_action_runner",
+        lambda world, sandbox=None, **kwargs: lambda tool, params, data: ("ok", 1.0),
+    )
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    run_id = client.post("/api/v1/flows/demo/run", json={"data": {}}).json()["run_id"]
+    _drain(aq)
+    reviewed = client.get(f"/api/v1/flows/runs/{run_id}").json()
+    old_binding = reviewed["approval_binding_sha256"]
+    queued = client.post(
+        f"/api/v1/flows/runs/{run_id}/resume",
+        json={
+            "decision": "approved",
+            "approval_binding_sha256": old_binding,
+        },
+    )
+    assert queued.status_code == 200, queued.text
+    job = next(
+        item for item in aq._pending(aq.FLOW_RESUME_KIND)
+        if item.payload.get("run_id") == run_id
+    )
+    monkeypatch.setenv("SYNTHETIC_API_KEY", "credential-generation-two")
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("stale approval built live executors"),
+    )
+
+    aq._handle_flow_resume(job)
+
+    refused = store.load_run(run_id)
+    assert refused.status == "paused_approval"
+    assert "Review the current operation again" in refused.error
+    refreshed = client.get(f"/api/v1/flows/runs/{run_id}").json()
+    assert refreshed["approval_card_status"] == "current"
+    assert refreshed["approval_binding_sha256"] != old_binding
+    assert refreshed["approval_authority"]["credential_inventory_sha256"] != (
+        reviewed["approval_authority"]["credential_inventory_sha256"]
+    )
+
+
+@pytest.mark.parametrize("tamper", ["inputs", "durable_data", "missing_binding"])
+def test_direct_worker_refuses_unreviewed_or_changed_resume_payload(
+    monkeypatch, tmp_path, tamper,
+):
+    _isolate(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
+    from maverick.flow import execution, store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(
+        execution,
+        "default_agent_runner",
+        lambda world, **kwargs: lambda brief, data: ("reviewed", 1.0),
+    )
+    monkeypatch.setattr(
+        execution,
+        "default_action_runner",
+        lambda world, sandbox=None, **kwargs: lambda tool, params, data: ("ok", 1.0),
+    )
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    run_id = client.post(
+        "/api/v1/flows/demo/run", json={"data": {"reviewed": "v1"}},
+    ).json()["run_id"]
+    _drain(aq)
+    body = _approval_resume_body(
+        client, run_id, "approved", inputs={"review_note": "approved-value"},
+    )
+    response = client.post(f"/api/v1/flows/runs/{run_id}/resume", json=body)
+    assert response.status_code == 200, response.text
+    queued = next(
+        item for item in aq._pending(aq.FLOW_RESUME_KIND)
+        if item.payload.get("run_id") == run_id
+    )
+    payload = dict(queued.payload)
+    if tamper == "inputs":
+        payload["inputs"] = {"review_note": "changed-after-approval"}
+    elif tamper == "durable_data":
+        run = store.load_run(run_id)
+        run.data["reviewed"] = "changed-after-approval"
+        store.save_run(run)
+    else:
+        payload.pop("approval_binding_sha256", None)
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("unreviewed resume built live executors"),
+    )
+
+    aq._handle_flow_resume(SimpleNamespace(payload=payload))
+
+    refused = store.load_run(run_id)
+    assert refused.status == "paused_approval"
+    assert "Review the current operation again" in refused.error
+
+
+def test_resume_api_rejects_form_values_changed_after_exact_preview(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution, store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(
+        execution,
+        "default_agent_runner",
+        lambda world, **kwargs: lambda brief, data: ("reviewed", 1.0),
+    )
+    monkeypatch.setattr(
+        execution,
+        "default_action_runner",
+        lambda world, sandbox=None, **kwargs: lambda tool, params, data: ("ok", 0.0),
+    )
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    run_id = client.post(
+        "/api/v1/flows/demo/run", json={"data": {"reviewed": "v1"}},
+    ).json()["run_id"]
+    _drain(aq)
+    preview = client.post(
+        f"/api/v1/flows/runs/{run_id}/approval-preview",
+        json={"inputs": {"review_note": "approved value"}},
+    )
+    assert preview.status_code == 200, preview.text
+
+    response = client.post(
+        f"/api/v1/flows/runs/{run_id}/resume",
+        json={
+            "decision": "approved",
+            "inputs": {"review_note": "substituted value"},
+            "approval_binding_sha256": preview.json()["approval_binding_sha256"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert aq._pending(aq.FLOW_RESUME_KIND) == []
+    assert store.load_run(run_id).status == "paused_approval"
+
+
+@pytest.mark.parametrize("tamper", ["before_due", "missing_expiry_binding"])
+def test_direct_worker_cannot_forge_approval_expiry(
+    monkeypatch, tmp_path, tamper,
+):
+    _isolate(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
+    from maverick.flow import execution, store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(
+        execution,
+        "default_agent_runner",
+        lambda world, **kwargs: lambda brief, data: ("reviewed", 1.0),
+    )
+    monkeypatch.setattr(
+        execution,
+        "default_action_runner",
+        lambda world, sandbox=None, **kwargs: lambda tool, params, data: ("ok", 0.0),
+    )
+    flow = {
+        **_FLOW,
+        "id": "expiring-approval",
+        "nodes": [
+            dict(node, expires_after=3600)
+            if node["id"] == "b" else dict(node)
+            for node in _FLOW["nodes"]
+        ],
+    }
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    _publish(client, flow["id"])
+    run_id = client.post(
+        f"/api/v1/flows/{flow['id']}/run", json={"data": {}},
+    ).json()["run_id"]
+    _drain(aq)
+    run = store.load_run(run_id)
+    assert run.status == "paused_approval" and run.resume_at is not None
+    scheduled = next(
+        job for job in aq._pending(aq.FLOW_RESUME_KIND)
+        if job.payload.get("run_id") == run_id and job.payload.get("expired")
+    )
+    forged = dict(scheduled.payload)
+    if tamper == "missing_expiry_binding":
+        forged.pop("approval_expiry_binding_sha256", None)
+        monkeypatch.setattr(aq.time, "time", lambda: float(run.resume_at) + 1.0)
+    else:
+        monkeypatch.setattr(aq.time, "time", lambda: float(run.resume_at) - 1.0)
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("forged expiry built live executors"),
+    )
+
+    aq._handle_flow_resume(SimpleNamespace(payload=forged))
+
+    refused = store.load_run(run_id)
+    assert refused.status == "paused_approval"
+    assert "Review the current operation again" in refused.error
+
+
+def test_view_only_flow_approval_is_audited_and_remains_paused(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import audit
+    from maverick.flow import execution, store
+    from maverick_dashboard import api as api_module
+    from maverick_dashboard import auth
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(
+        execution,
+        "default_agent_runner",
+        lambda world, **kwargs: lambda brief, data: ("reviewed", 1.0),
+    )
+    monkeypatch.setattr(
+        execution,
+        "default_action_runner",
+        lambda world, sandbox=None, **kwargs: lambda tool, params, data: ("ok", 1.0),
+    )
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    run_id = client.post("/api/v1/flows/demo/run", json={"data": {}}).json()["run_id"]
+    _drain(aq)
+    recorded = []
+    monkeypatch.setattr(auth, "has_permission", lambda _request, _permission: False)
+    monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:viewer")
+    monkeypatch.setattr(api_module, "goal_owner_filter", lambda _request: None)
+    monkeypatch.setattr(
+        audit,
+        "audit_event",
+        lambda kind, **payload: recorded.append((kind, payload)) or True,
+    )
+
+    response = client.post(
+        f"/api/v1/flows/runs/{run_id}/resume",
+        json={"decision": "approved", "approval_binding_sha256": "a" * 64},
+    )
+
+    assert response.status_code == 403
+    assert store.load_run(run_id).status == "paused_approval"
+    assert aq._pending(aq.FLOW_RESUME_KIND) == []
+    assert len(recorded) == 1
+    assert recorded[0][0] == audit.EventKind.CAPABILITY_DENIED
+    assert recorded[0][1]["principal"] == "user:viewer"
+    assert len(recorded[0][1]["resource_sha256"]) == 64
+    assert run_id not in str(recorded[0][1])
 
 
 def test_approval_resume_never_defaults_an_empty_body_to_approved(
@@ -1235,7 +1638,6 @@ def test_approval_resume_never_defaults_an_empty_body_to_approved(
         definition_revision=release["definition_revision"],
         subflow_digests=release["subflow_digests"],
     ))
-
     response = _client().post(
         "/api/v1/flows/runs/explicit-decision-run/resume", json={},
     )
@@ -1282,10 +1684,11 @@ def test_approval_resume_refuses_an_authenticated_wrong_assignee(
         definition_revision=release["definition_revision"],
         subflow_digests=release["subflow_digests"],
     ))
+    binding = _attach_test_approval_card("assigned-approval-run")
 
     response = _client().post(
         "/api/v1/flows/runs/assigned-approval-run/resume",
-        json={"decision": "approved"},
+        json={"decision": "approved", "approval_binding_sha256": binding},
     )
 
     assert response.status_code == 403
@@ -1835,14 +2238,18 @@ def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tm
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    pin = _store_published_pin()
-    store.save_run(store.FlowRun(run_id="ap1", flow_id="demo",
-                                 status="paused_approval", resume_at=1.0,
-                                 **pin))                                      # expired
-    store.save_run(store.FlowRun(run_id="ap2", flow_id="demo",
-                                 status="paused_approval", resume_at=9e18,
-                                 **pin))                                       # still open
-    store.save_run(store.FlowRun(run_id="ev1", flow_id="demo",
+    pin = _store_published_approval_pin()
+    store.save_run(store.FlowRun(
+        run_id="ap1", flow_id="approval-expiry", status="paused_approval",
+        cursor="approve", prompt="approve?", resume_at=1.0, **pin,
+    ))                                                                        # expired
+    _attach_test_approval_card("ap1")
+    store.save_run(store.FlowRun(
+        run_id="ap2", flow_id="approval-expiry", status="paused_approval",
+        cursor="approve", prompt="approve?", resume_at=9e18, **pin,
+    ))                                                                        # still open
+    _attach_test_approval_card("ap2")
+    store.save_run(store.FlowRun(run_id="ev1", flow_id="approval-expiry",
                                  status="paused_event", resume_at=1.0,
                                  **pin))                                       # event-only
     aq._handle_flow_sweep(None)
@@ -1876,6 +2283,7 @@ def test_sweep_visits_named_tenants_and_preserves_resume_namespace(
     token = set_tenant("acme")
     try:
         private_pin = _store_published_pin()
+        private_approval_pin = _store_published_approval_pin()
         store.save_run(store.FlowRun(
             run_id="private-delay",
             flow_id="demo",
@@ -1885,11 +2293,14 @@ def test_sweep_visits_named_tenants_and_preserves_resume_namespace(
         ))
         store.save_run(store.FlowRun(
             run_id="private-approval",
-            flow_id="demo",
+            flow_id="approval-expiry",
             status="paused_approval",
+            cursor="approve",
+            prompt="approve?",
             resume_at=1.0,
-            **private_pin,
+            **private_approval_pin,
         ))
+        _attach_test_approval_card("private-approval")
     finally:
         reset_tenant(token)
 
@@ -1976,7 +2387,10 @@ def test_choice_approval_verdict_flows_through_resume(monkeypatch, tmp_path):
     _publish(c, "fch")
     run_id = c.post("/api/v1/flows/fch/run", json={"data": {}}).json()["run_id"]
     _drain(aq)
-    r = c.post(f"/api/v1/flows/runs/{run_id}/resume", json={"decision": "ship"})
+    r = c.post(
+        f"/api/v1/flows/runs/{run_id}/resume",
+        json=_approval_resume_body(c, run_id, "ship"),
+    )
     assert r.status_code == 200, r.text
     _drain(aq)
     done = c.get(f"/api/v1/flows/runs/{run_id}").json()

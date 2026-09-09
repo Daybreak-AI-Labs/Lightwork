@@ -31,9 +31,9 @@ def test_customer_destination_labels(monkeypatch, tmp_path):
         for group in ui_visibility.nav_groups("admin") for link in group["links"]
     }
     assert {path: links[path] for path in (
-        "/goals", "/connections", "/cortex", "/deliverables", "/settings"
+        "/goals", "/connections", "/knowledge-access", "/deliverables", "/settings"
     )} == {
-        "/goals": "Tasks", "/connections": "Connections", "/cortex": "Knowledge",
+        "/goals": "Tasks", "/connections": "Connections", "/knowledge-access": "Knowledge",
         "/deliverables": "Results", "/settings": "Settings",
     }
 

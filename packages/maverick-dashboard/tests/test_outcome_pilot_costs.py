@@ -13,6 +13,7 @@ from maverick import ai_cost_roi as billing
 from maverick import audit, config
 from maverick.paths import tenant_scope
 from maverick.privacy_ops import RecordConflict
+from maverick_dashboard import outcome_accounting_bridge as accounting_bridge
 from maverick_dashboard import outcome_pilot_costs as costs
 from maverick_dashboard import outcome_pilot_costs_api as api
 from maverick_dashboard import outcome_pilots as pilots
@@ -69,6 +70,10 @@ def planned():
         "criteria": "Reviewed result", "operation_id": "synthetic-cost-plan",
         "cases": [{"kind": "goal", "reference": str(i), "label": "Case " + str(i)} for i in range(1, 5)]},
         context="alice", actor="user:alice", resolve=resolve)
+    manifest = accounting_bridge.admit_pilot(record, resolve=resolve)
+    record = pilots.complete_admission(
+        record["id"], manifest, context="alice", actor="user:alice", resolve=resolve,
+    )
     return record, records, resolve
 
 
@@ -123,8 +128,16 @@ def test_operator_human_and_rework_costs_stay_distinct_from_provider_allocations
 def full_costs(planned, amount="40"):
     record, records, resolve = planned
     ingest(amount=amount)
-    for row in records.values():
-        row.update(finished=True, unstarted=False)
+    admissions = {
+        row["case_id"]: row["admitted_at"]
+        for row in record["admission_manifest"]["entries"]
+    }
+    for case_id, row in records.items():
+        row.update(
+            finished=True,
+            unstarted=False,
+            first_started_at=admissions[case_id] + 1,
+        )
     records["1"]["accepted"] = True
     saved = save(record, resolve, body(record, shares=[{"case_id": str(i), "basis_points": 2500,
         "source_version": "a" * 64} for i in range(1, 5)]))
@@ -161,8 +174,16 @@ def test_per_accepted_cost_requires_review_and_includes_all_rejected_case_costs(
 def test_missing_case_cost_never_becomes_zero_or_complete_coverage(planned):
     record, records, resolve = planned
     ingest()
-    for row in records.values():
-        row.update(finished=True)
+    admissions = {
+        row["case_id"]: row["admitted_at"]
+        for row in record["admission_manifest"]["entries"]
+    }
+    for case_id, row in records.items():
+        row.update(
+            finished=True,
+            unstarted=False,
+            first_started_at=admissions[case_id] + 1,
+        )
     records["1"]["accepted"] = True
     saved = save(record, resolve)
     coverage = costs.report(saved, resolve=resolve)["coverage"]
@@ -170,6 +191,19 @@ def test_missing_case_cost_never_becomes_zero_or_complete_coverage(planned):
     assert coverage["provider_cost_per_accepted_outcome"] is None
     with pytest.raises(ValueError, match="Every planned case"):
         confirm_costs(saved, resolve)
+
+
+def test_pre_admission_start_cannot_be_confirmed_as_complete_cost_coverage(planned):
+    record, records, resolve = full_costs(planned)
+    admitted_at = record["admission_manifest"]["entries"][0]["admitted_at"]
+    records["1"]["first_started_at"] = admitted_at
+
+    coverage = costs.report(record, resolve=resolve)["coverage"]
+
+    assert coverage["status"] == "incomplete"
+    assert coverage["can_confirm"] is False
+    assert "1" in coverage["missing_or_ineligible_cases"]
+    assert coverage["provider_cost_per_accepted_outcome"] is None
 
 
 def test_explicit_admitted_zero_cost_is_distinct_from_missing_cost(planned):
@@ -246,6 +280,26 @@ def test_new_correction_invalidates_then_requires_review_of_entire_line(planned)
     assert result["current_totals_by_currency"] == {"USD": "8.000000001"}
     assert len(result["allocations"][0]["history"]) == 1
     assert result["allocations"][0]["source"]["correction_count"] == 1
+
+
+def test_negative_net_provider_credit_is_not_reported_as_delivery_cost(planned):
+    record, _, resolve = planned
+    ingest(amount="1")
+    saved = save(record, resolve)
+    ingest("credit-over-balance", "-2", corrects="original")
+
+    result = costs.report(saved, resolve=resolve)
+    assert result["status"] == "partial"
+    assert result["current_totals_by_currency"] == {}
+    assert result["unsupported_credit_count"] == 1
+    assert result["allocations"][0]["status"] == "unsupported_credit"
+
+    with pytest.raises(ValueError, match="Provider credits cannot be allocated"):
+        save(
+            saved,
+            resolve,
+            body(saved, operation_id="review-negative-provider-credit"),
+        )
 
 
 def test_receipt_revision_and_source_changes_invalidate_allocations(planned):

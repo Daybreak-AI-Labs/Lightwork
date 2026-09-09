@@ -87,6 +87,20 @@ function Read-AcceptanceInventory([string]$Inventory) {
             if ($parsed.Major -gt 255 -or $parsed.Minor -gt 255 -or $parsed.Build -ge 65535) {throw 'The inventory version cannot support its next-patch MSI fixture.'}
         }
         if (-not $metadata.acceptance_fixture -and $metadata.version -cne $metadata.cohort_version) {throw 'A customer inventory cannot relabel the release cohort.'}
+        $recovery=@{
+            runtime='maverick-recovery.exe'
+            native_shell='maverick-recovery-desktop.exe'
+            signed_installer='Lightwork-recovery.msi'
+            start_menu='Repair Lightwork'
+        }
+        if (-not $metadata.installed_recovery -or @($metadata.installed_recovery.PSObject.Properties).Count -ne $recovery.Count) {
+            throw 'The inventory must declare the complete installed recovery set.'
+        }
+        foreach ($name in $recovery.Keys) {
+            if ($metadata.installed_recovery.$name -cne $recovery[$name]) {
+                throw 'The inventory contains an unexpected installed recovery artifact.'
+            }
+        }
         # Same runtime/inventory bounds as release_acceptance.py validate_bundle.
         if ($metadata.runtime.sha256 -isnot [string] -or $metadata.runtime.sha256 -cnotmatch '^[a-f0-9]{64}$' -or
             ($metadata.runtime.bytes -isnot [int] -and $metadata.runtime.bytes -isnot [long]) -or $metadata.runtime.bytes -lt 1 -or $metadata.runtime.bytes -gt 1GB) {throw 'The runtime inventory requires its exact bounded executable size and SHA-256.'}

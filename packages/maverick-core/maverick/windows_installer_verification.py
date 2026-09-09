@@ -29,6 +29,8 @@ foreach ($name in @('ProductVersion', 'ProductCode', 'UpgradeCode')) {
     $properties[$name] = $record.StringData(1)
     $view.Close()
 }
+$summary = $database.SummaryInformation(0)
+$properties['PackageCode'] = $summary.Property(9)
 $properties['PublisherThumbprint'] = $signature.SignerCertificate.Thumbprint
 $properties | ConvertTo-Json -Compress
 """
@@ -134,10 +136,16 @@ def inspect_signed_msi(path: Path, *, version: str, scratch: Path) -> dict:
                             capture_output=True, text=True, timeout=120,
                             creationflags=subprocess.CREATE_NO_WINDOW, check=False, env=environment)
     try:
-        properties = json.loads(result.stdout) if result.returncode == 0 else {}
+        properties = (
+            json.loads(result.stdout)
+            if result.returncode == 0 and len(result.stdout) <= 16384
+            else {}
+        )
+        guid = r"\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}"
         if (properties.get("ProductVersion") != version
                 or str(properties.get("UpgradeCode", "")).strip("{}").upper() != UPGRADE_CODE
-                or not re.fullmatch(r"\{[0-9A-Fa-f-]{36}\}", properties.get("ProductCode", ""))
+                or not re.fullmatch(guid, properties.get("ProductCode", ""))
+                or not re.fullmatch(guid, properties.get("PackageCode", ""))
                 or not re.fullmatch(r"[0-9A-Fa-f]{40}", properties.get("PublisherThumbprint", ""))):
             raise ValueError("unmatched package")
     except (ValueError, TypeError, AttributeError) as exc:

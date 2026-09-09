@@ -13,6 +13,9 @@ async function json(response){expect(response.ok(),await response.text()).toBeTr
 
 test('Help reviews the actual redacted support report before downloading its exact bytes',async({page},info)=>{
   await page.setViewportSize({width:320,height:800});await page.goto('/help');
+  await expect(page.locator('.support-scope')).toContainText('absolute Python executable and Lightwork data-root paths');
+  await expect(page.locator('.support-scope')).toContainText('Job identifiers, job types and raw error messages are excluded');
+  await expect(page.locator('.support-scope')).toContainText('encrypted preview on this installation for up to ten minutes');
   await expect(page.locator('#support-status')).toHaveText('No report has been collected.');
   const response=page.waitForResponse(r=>r.url().endsWith('/api/v1/support/preview'));
   await page.getByRole('button',{name:'Prepare support report',exact:true}).click();
@@ -23,6 +26,8 @@ test('Help reviews the actual redacted support report before downloading its exa
   expect(JSON.parse(await page.locator('#support-preview').textContent())).toEqual(report.bundle);
   const sizes=await page.locator('#support-center').evaluate(node=>({width:document.documentElement.clientWidth,right:node.getBoundingClientRect().right,scroll:node.scrollWidth,inner:node.clientWidth}));
   expect(sizes.right).toBeLessThanOrEqual(sizes.width+1);expect(sizes.scroll).toBeLessThanOrEqual(sizes.inner+1);
+  const links=await page.locator('.support-followups').boundingBox(),fab=await page.locator('#mv-copilot-fab').boundingBox();
+  expect(links&&fab&&!(links.x+links.width>fab.x&&links.x<fab.x+fab.width&&links.y+links.height>fab.y&&links.y<fab.y+fab.height)).toBeTruthy();
   await page.screenshot({path:info.outputPath('help-320.png'),fullPage:true});
   await page.locator('#support-confirm').check();
   const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Download reviewed report',exact:true}).click();

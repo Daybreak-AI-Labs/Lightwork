@@ -195,9 +195,9 @@ def create_cortex_page_router(templates: Jinja2Templates) -> APIRouter:
 
     @router.get(PAGE_PATH, response_class=HTMLResponse, include_in_schema=False)
     async def console(request: Request) -> HTMLResponse:
-        # The registry floor: every role may see what the brain holds and ask
-        # it questions (each read is audited). The audit tail is a separate
-        # grant, exactly like /audit and /api/v1/audit/tail.
+        # This compatibility console can return the same governed document
+        # projection as Knowledge, so it must share that surface's operate
+        # floor. The audit tail remains a separate grant.
         require_permission(request, "view")
         if any(key not in {"theme", "density", "font", "lang"} for key in request.query_params):
             raise HTTPException(status_code=404, detail="cortex unavailable")

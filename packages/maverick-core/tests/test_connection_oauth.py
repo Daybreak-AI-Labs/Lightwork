@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -12,6 +13,7 @@ from maverick.paths import tenant_scope
 
 OWNER = "user:owner"
 _TOKEN_POST = oauth._post_token
+_IDENTITY_GET = oauth._provider_identity
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +27,12 @@ def isolated(tmp_path, monkeypatch):
     config.config_path().write_text("[connections]\nenable=true\n[oauth]\nvault=true\n")
     monkeypatch.setattr(oauth, "_post_token", lambda *a, **k: pytest.fail("Unexpected provider token request"))
     monkeypatch.setattr(oauth, "_jira_sites", lambda *a, **k: pytest.fail("Unexpected provider site request"))
+    monkeypatch.setattr(oauth, "_provider_identity", lambda provider, token: {
+        "provider": provider, "subject": "fixture-account", "display_name": "Fixture Account",
+        "email": "fixture@example.test",
+        **({"email_verified": True, "hosted_domain": "example.test"} if provider == "google"
+           else {"account_status": "active"}),
+    })
     with tenant_scope(tenant="tenant-a"):
         yield
     config.reset_config_cache()
@@ -56,12 +64,20 @@ def test_real_state_pkce_and_sealed_named_connection(monkeypatch):
     query = parse_qs(urlsplit(begin["authorize_url"]).query)
     assert query["state"] == [begin["state"]]
     assert query["code_challenge_method"] == ["S256"]
-    assert query["scope"] == oauth.PROFILES["google-drive"]["scopes"]
+    assert query["scope"] == [" ".join(oauth.PROFILES["google-drive"]["scopes"])]
     assert query["access_type"] == ["offline"] and query["prompt"] == ["consent"]
     assert "verifier" not in begin
     saved = exchange(begin, monkeypatch)
     assert saved["owner"] == OWNER and saved["connector"] == "gdrive"
     assert saved["has_token"] and saved["oauth"]["renewal_state"] == "ready"
+    assert saved["oauth"]["identity"] == {
+        "provider": "google", "subject": "fixture-account",
+        "display_name": "Fixture Account", "email": "fixture@example.test",
+        "email_verified": True, "hosted_domain": "example.test",
+    }
+    assert saved["oauth"]["requested_scopes"] == sorted(oauth.PROFILES["google-drive"]["scopes"])
+    assert saved["oauth"]["granted_scopes"] == sorted(oauth.PROFILES["google-drive"]["scopes"])
+    assert saved["oauth"]["scope_status"] == "token_response"
     for value in (str(applications), str(saved), oauth._path().read_bytes().decode(errors="replace"), connections._path().read_bytes().decode(errors="replace")):
         assert "synthetic-client-secret" not in value
         assert "synthetic-refresh-token" not in value
@@ -140,6 +156,26 @@ def test_lost_rotating_refresh_reply_is_not_replayed(monkeypatch):
     assert connections.get_connection("evidence")["oauth"]["refresh_state"] == "pending"
 
 
+def test_refresh_cannot_replace_the_connected_provider_account(monkeypatch):
+    app()
+    saved = exchange(start(), monkeypatch)
+    expire()
+    monkeypatch.setattr(oauth, "_post_token", lambda *a: {
+        "access_token": "different-account-access", "refresh_token": "rotated-refresh",
+        "expires_in": 3600, "scope": " ".join(oauth.PROFILES["google-drive"]["scopes"]),
+    })
+    monkeypatch.setattr(oauth, "_provider_identity", lambda *a: {
+        "provider": "google", "subject": "different-account", "display_name": "Other Account",
+        "email": "other@example.test", "email_verified": True, "hosted_domain": "example.test",
+    })
+    with pytest.raises(PermissionError, match="could not be confirmed"):
+        oauth.renew(connections.get_connection("evidence"), actor=OWNER)
+    stored = connections.get_connection("evidence")
+    assert stored["token"] != "different-account-access"
+    assert stored["revision"] == saved["revision"]
+    assert stored["oauth"]["refresh_state"] == "pending"
+
+
 def test_gcs_named_reference_is_consumed_by_actual_discovery_resolver(monkeypatch):
     from maverick.privacy_discovery_credentials import resolve_connection
     app()
@@ -164,6 +200,8 @@ def test_jira_authorization_selects_actual_site_and_pins_cloud_api(monkeypatch):
         resolved = connections.resolve("jira")
     assert resolved[0] == "https://api.atlassian.com/ex/jira/" + cloud
     assert saved["oauth"]["site_url"] == "https://customer.atlassian.net"
+    assert saved["oauth"]["workspace"]["provider_id"] == cloud
+    assert saved["oauth"]["identity"]["provider"] == "atlassian"
 
 
 def test_mismatched_jira_site_and_missing_refresh_token_do_not_save(monkeypatch):
@@ -235,6 +273,75 @@ def test_unsupported_token_type_and_control_character_code_are_rejected():
     begin = start()
     with pytest.raises(ValueError, match="response was invalid"):
         oauth.finish(OWNER, state=begin["state"], code="synthetic\r\ninjection", context="fixture-context", redirect_uri="https://lightwork.example/connections")
+
+
+def test_provider_scope_aliases_are_normalized_and_missing_access_is_rejected():
+    requested = oauth.PROFILES["google-drive"]["scopes"]
+    response = {"access_token": "synthetic", "refresh_token": "synthetic-refresh",
+                "expires_in": 3600,
+                "scope": "openid profile email https://www.googleapis.com/auth/drive.readonly"}
+    _, _, _, granted, status = oauth._tokens(response, requested, provider="google")
+    assert granted == sorted(requested)
+    assert status == "token_response"
+    response["scope"] = "openid profile email"
+    with pytest.raises(ValueError, match="did not grant"):
+        oauth._tokens(response, requested, provider="google")
+
+
+def test_desktop_broker_profile_scope_contract_matches_backend_profiles():
+    contract = (
+        Path(__file__).resolve().parents[3]
+        / "apps" / "desktop-oauth-return" / "oauth-profile-scopes.tsv"
+    )
+    actual = {
+        tuple(line.split("\t"))
+        for line in contract.read_text(encoding="utf-8").splitlines()
+        if line
+    }
+    expected = {
+        (profile, value["provider"], " ".join(value["scopes"]))
+        for profile, value in oauth.PROFILES.items()
+    }
+    assert actual == expected
+
+
+@pytest.mark.parametrize("provider,field", [("google", "sub"), ("atlassian", "account_id")])
+def test_provider_identity_uses_fixed_endpoint_and_stable_subject(monkeypatch, provider, field):
+    calls = []
+    def read(url, token, *, label):
+        calls.append((url, token, label))
+        return {field:"stable-account", "name":"Named Account", "email":"named@example.test",
+                "email_verified":True, "hd":"example.test", "account_status":"active"}
+    monkeypatch.setattr(oauth, "_bearer_json", read)
+    identity = _IDENTITY_GET(provider, "private-access")
+    assert identity["subject"] == "stable-account"
+    assert identity["display_name"] == "Named Account"
+    expected = "https://openidconnect.googleapis.com/v1/userinfo" if provider == "google" else "https://api.atlassian.com/me"
+    assert calls == [(expected, "private-access", "Provider account identity")]
+
+
+def test_identity_failure_consumes_consent_without_saving_connection(monkeypatch):
+    app()
+    begin = start()
+    monkeypatch.setattr(oauth, "_post_token", lambda *a: {
+        "access_token": "synthetic-access", "refresh_token": "synthetic-refresh",
+        "expires_in": 3600, "scope": " ".join(oauth.PROFILES["google-drive"]["scopes"]),
+    })
+    monkeypatch.setattr(
+        oauth, "_provider_identity",
+        lambda *a: (_ for _ in ()).throw(ValueError("synthetic identity failure")),
+    )
+    with pytest.raises(ValueError, match="identity failure"):
+        oauth.finish(
+            OWNER, state=begin["state"], code="synthetic-code",
+            context="fixture-context", redirect_uri="https://lightwork.example/connections",
+        )
+    assert connections.get_connection("evidence") is None
+    with pytest.raises(PermissionError):
+        oauth.finish(
+            OWNER, state=begin["state"], code="synthetic-code",
+            context="fixture-context", redirect_uri="https://lightwork.example/connections",
+        )
 
 
 def test_actual_vendor_jira_refresh_retains_approval_generation_and_app_rotation_blocks_write(monkeypatch):

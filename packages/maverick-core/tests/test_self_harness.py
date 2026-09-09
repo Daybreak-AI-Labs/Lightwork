@@ -1423,9 +1423,14 @@ def test_holdout_evaluator_epoch_binds_full_evaluator_identity(monkeypatch, tmp_
 
     def capture(_self, query, _policy):
         captured.append(query)
-        return SimpleNamespace(critical_z_two_sided=1.96)
+        return SimpleNamespace(
+            critical_z_two_sided=1.96,
+            declared_cost=query.declared_cost,
+        )
 
     monkeypatch.setattr(HoldoutQueryLedger, "authorize", capture)
+    monkeypatch.setattr(
+        HoldoutQueryLedger, "finalize_evaluation", lambda *args, **kwargs: None)
     combinations = [
         ("verifier-v1", "paraphraser-v1"),
         ("verifier-v2", "paraphraser-v1"),
@@ -1439,8 +1444,10 @@ def test_holdout_evaluator_epoch_binds_full_evaluator_identity(monkeypatch, tmp_
         )
         authorize("confirmation", "sig", ["sealed"])
 
-    expected = fingerprint_manifest({
-        "schema": "maverick-self-harness-evaluator-v3",
+    from maverick.self_harness_holdout import AlphaBudget
+
+    expected = "eval-" + fingerprint_manifest({
+        "schema": "maverick-self-harness-evaluator-v4",
         "candidate_model": "M",
         "verifier_model": "verifier-v1",
         "runner_protocol": "llm-runner-v1",
@@ -1454,6 +1461,19 @@ def test_holdout_evaluator_epoch_binds_full_evaluator_identity(monkeypatch, tmp_
         "metamorphic_protocol": "llm-paraphraser-v1",
         "metamorphic_model": "paraphraser-v1",
         "deployed_system_sha256": fingerprint_manifest("deployed prompt"),
+        "container_image_request": "python:3.12-slim",
+        "contained_candidate_sha256": fingerprint_manifest(
+            runner._SELF_HARNESS_EVALUATOR_SOURCE),
+        "cost_policy": AlphaBudget(
+            family_alpha=0.05,
+            query_alpha=0.01,
+            max_queries=5,
+            max_provider_calls=50_000,
+            max_input_tokens=10**9,
+            max_output_tokens=10**9,
+            max_compute_millis=3_600_000,
+            max_dollars="5.0",
+        ).to_dict(),
     })
     assert captured[0].evaluator_epoch == expected
     assert len({query.evaluator_epoch for query in captured}) == 3
@@ -1481,9 +1501,14 @@ def test_holdout_family_hash_matches_effective_evaluation_view(
 
     def capture(_self, query, _policy):
         captured.append(query)
-        return SimpleNamespace(critical_z_two_sided=1.96)
+        return SimpleNamespace(
+            critical_z_two_sided=1.96,
+            declared_cost=query.declared_cost,
+        )
 
     monkeypatch.setattr(HoldoutQueryLedger, "authorize", capture)
+    monkeypatch.setattr(
+        HoldoutQueryLedger, "finalize_evaluation", lambda *args, **kwargs: None)
     base = {"M": [{"goal": "sealed", "expected": "ok"}]}
     inert_metadata = {
         "M": [{"goal": "sealed", "expected": "ok", "comment": "ignored"}],
@@ -1537,6 +1562,8 @@ def test_holdout_family_hash_matches_effective_evaluation_view(
 def test_overlapping_holdout_views_share_one_ledger_study_budget(tmp_path):
     from maverick import self_improvement_runner as runner
     from maverick.self_harness_holdout import (
+        EvaluationCost,
+        FinalSetRetired,
         HoldoutBudgetExhausted,
         HoldoutQueryLedger,
     )
@@ -1559,8 +1586,16 @@ def test_overlapping_holdout_views_share_one_ledger_study_budget(tmp_path):
             "M": [{"goal": goal, "expected": "ok"} for goal in goals],
         },
     )
+    # This unit test targets study/final-set identity. Docker completion is
+    # covered by the opt-in F08 isolation acceptance test.
+    authorize._finish_pending = lambda: True
+    authorize._declared_cost = lambda: EvaluationCost(provider_calls=10_000)
 
     authorize("confirmation", "sig-a", goals[:9])
+    # A changed purpose or revised candidate cannot make the same physical final
+    # set fresh while query allowance remains.
+    with pytest.raises(FinalSetRetired):
+        authorize("metamorphic", "sig-revised", goals[:9])
     authorize("confirmation", "sig-b", goals[1:])
     with pytest.raises(HoldoutBudgetExhausted):
         authorize("confirmation", "sig-c", goals[:9])
@@ -3384,6 +3419,28 @@ def test_cycle_forwards_judge_samples_to_auto_evaluator(monkeypatch, tmp_path, s
     monkeypatch.setattr(runner, "_auto_evaluator", _spy)
     runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
     assert seen == {"model_id": "M", "judge_samples": 4}
+
+
+def test_cycle_binds_all_nested_provider_calls_to_exact_work_item(monkeypatch):
+    from maverick import provider_cost_cap
+    from maverick import self_improvement_runner as runner
+
+    monkeypatch.setattr(sh, "enabled", lambda: False)
+    seen = []
+
+    def run_pass(*_args, **_kwargs):
+        seen.append(provider_cost_cap._current_work_item())
+        return sh.SelfHarnessReport(model_id="M")
+
+    monkeypatch.setattr(runner, "run_self_harness_pass", run_pass)
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=[], model_id="M", retire=False,
+        work_item_id="outcome-work:self-harness-42",
+    )
+
+    assert report.model_id == "M" and retired == 0
+    assert seen == ["outcome-work:self-harness-42"]
+    assert provider_cost_cap._current_work_item() is None
 
 
 def test_pass_stages_canary_from_config(monkeypatch, store):

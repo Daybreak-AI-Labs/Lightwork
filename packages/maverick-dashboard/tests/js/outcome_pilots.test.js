@@ -8,6 +8,7 @@ const template = fs.readFileSync(path.resolve(__dirname,'../../maverick_dashboar
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function report() {
   return {context:'alice',id:'OPL-test',title:'<script>bad</script>',customer:'Example',workflow:'Review',criteria:'Good evidence',revision:2,
+    admission:{status:'complete',expected_count:4,admitted_count:4,manifest_sha256:'b'.repeat(64),completion_sha256:'c'.repeat(64)},
     groups:{all:{accepted:0,planned:4,paired:0,unavailable:0,reported_minutes_difference:null,reported_cost_difference:null}},limitations:['Operator reported.'],
     cases:[{id:'1',label:'A case',allocation:'holdout',status:'unmeasured',measurement:null,
       source:{href:'/chat/goal/1',version:'a'.repeat(64),accepted:false,runtime_cost_usd:null}}]};
@@ -39,6 +40,7 @@ test('record picker, missing coverage, source titles and unknown values render h
   assert.match(ui.d.getElementById('op-report').textContent,/<script>bad<\/script>/);
   assert.equal(ui.d.querySelector('#op-report input[name="baseline_minutes"]').value,'');
   assert.match(ui.d.getElementById('op-report').textContent,/provider invoice unverified/);
+  assert.match(ui.d.getElementById('op-report').textContent,/complete for all 4 planned cases/);
   ui.dom.window.close();
 });
 test('lost save keeps measurements and exact retry identity without automatic retry',async()=>{
@@ -91,6 +93,24 @@ test('protected plan sends an explicit learning mode and attributed prior-exposu
   assert.equal(body.cases.length,4);ui.dom.window.close();
 });
 
+test('duplicate-pilot conflict keeps the complete plan and exact retry reference',async()=>{
+  const conflict=()=>({ok:false,status:409,json:async()=>({detail:'One or more selected work items already belongs to an active or frozen pilot in this tenant. No allocation model is configured.'})});
+  const ui=await setup([conflict]);
+  const form=ui.d.getElementById('op-plan');
+  form.elements.title.value='Competing customer pilot';form.elements.customer.value='Private customer';
+  form.elements.workflow.value='Review evidence';form.elements.criteria.value='Every citation is current';
+  [...ui.d.querySelectorAll('#op-planned-cases select')].forEach((select,index)=>{select.value='goal:'+(index+1);});
+  form.dispatchEvent(new ui.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  assert.equal(form.elements.title.value,'Competing customer pilot');
+  assert.equal(form.elements.customer.value,'Private customer');
+  assert.equal(ui.d.querySelectorAll('#op-planned-cases select').length,4);
+  assert.ok([...ui.d.querySelectorAll('#op-planned-cases select')].every(select=>select.value));
+  assert.match(form.dataset.operation,/^[a-f0-9-]{16,100}$/);
+  assert.match(ui.d.getElementById('op-status').textContent,/No allocation model is configured/);
+  assert.match(ui.d.getElementById('op-status').textContent,/inputs are still here/);
+  assert.equal(form.elements.title.disabled,false);ui.dom.window.close();
+});
+
 test('independent review binds exact evidence and needs a separate confirmation',async()=>{
   const packet={...report(),learning_policy:{prior_exposure_statement:'Local inputs checked; external training unknown.',automatic_local_exclusion_enforced:true,evidence_version:'c'.repeat(64)}};
   const ui=await setup([packet,{context:'alice',id:'OPL-test',revision:3}]);
@@ -107,4 +127,45 @@ test('HTML access loss during independent review clears private report, prepared
   ui.d.getElementById('op-prior-exposure').value='Private trial notes';ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
   assert.equal(ui.d.getElementById('op-report').textContent,'');assert.equal(ui.d.getElementById('op-prior-exposure').value,'');assert.equal(ui.d.getElementById('op-selected').options.length,0);
   assert.equal(ui.d.getElementById('op-review-load').disabled,true);ui.dom.window.close();
+});
+
+test('structured account-context conflict still clears private pilot inputs',async()=>{
+  const changed=()=>({ok:false,status:409,json:async()=>({detail:{code:'pilot_context_changed',message:'The account or workspace changed. Reload the pilot page.'}})});
+  const ui=await setup([changed]);
+  ui.d.getElementById('op-prior-exposure').value='Private trial notes';
+  ui.d.getElementById('op-review-reference').value='OPL-test';ui.d.getElementById('op-review-load').click();await tick();
+  assert.equal(ui.d.getElementById('op-prior-exposure').value,'');
+  assert.equal(ui.d.getElementById('op-review-reference').value,'');
+  assert.equal(ui.d.getElementById('op-review-load').disabled,true);
+  assert.match(ui.d.getElementById('op-status').textContent,/account or workspace changed/);ui.dom.window.close();
+});
+
+test('pilot picker can load a later context-filtered page',async()=>{
+  const dom = new JSDOM(template,{url:'https://lightwork.test',runScripts:'outside-only'});
+  const w=dom.window,d=w.document,calls=[];
+  w.fetch=async(url,options)=>{
+    calls.push({url,options});
+    if (url === '/api/v1/outcome-pilots/sources') return {ok:true,json:async()=>({
+      context:'alice',items:[],coverage:[],
+    })};
+    if (url.includes('cursor=OPL-page-one.json')) return {ok:true,json:async()=>({
+      context:'alice',partial:false,page:{has_more:false,next_cursor:null},
+      items:[{id:'OPL-page-two',title:'Reachable older pilot',cases:4}],
+    })};
+    if (url.startsWith('/api/v1/outcome-pilots?')) return {ok:true,json:async()=>({
+      context:'alice',partial:true,page:{has_more:true,next_cursor:'OPL-page-one.json'},
+      items:[{id:'OPL-page-one',title:'First pilot',cases:4}],
+    })};
+    throw new Error('Unexpected URL: '+url);
+  };
+  w.eval(script);await tick();await tick();
+  const more=d.getElementById('op-load-more');
+  assert.equal(more.hidden,false);
+  more.click();await tick();await tick();
+  assert.deepEqual([...d.getElementById('op-selected').options].map(option=>option.value),[
+    '', 'OPL-page-one', 'OPL-page-two',
+  ]);
+  assert.equal(more.hidden,true);
+  assert.ok(calls.some(call=>call.url.includes('cursor=OPL-page-one.json')));
+  dom.window.close();
 });

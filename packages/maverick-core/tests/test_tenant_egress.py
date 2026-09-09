@@ -102,6 +102,7 @@ def test_browser_navigate_uses_tenant_egress(monkeypatch):
             return True
 
     monkeypatch.setattr(browser_mod, "_get_session", lambda: _FakeSession())
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     out = browser_mod._run_browser_action(
         {"action": "navigate", "url": "https://blocked.test/data"},
     )

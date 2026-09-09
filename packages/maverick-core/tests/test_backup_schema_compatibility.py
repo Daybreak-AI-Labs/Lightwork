@@ -66,10 +66,10 @@ def test_unknown_or_malformed_archive_schema_requires_actionable_migration(tmp_p
 
 
 @pytest.mark.parametrize("operation", ["validate", "restore", "force_restore"])
-@pytest.mark.parametrize("declared", [None, 34, 35])
+@pytest.mark.parametrize("declared", [None, 35, 36])
 def test_future_payload_never_reaches_live_transaction_even_with_old_or_missing_metadata(tmp_path, monkeypatch, operation, declared):
-    assert world_model.SCHEMA_VERSION == 34  # This fixture targets the declared release boundary.
-    archive = _versioned_archive(tmp_path, [35], declared=declared)
+    assert world_model.SCHEMA_VERSION == 35  # This fixture targets the declared release boundary.
+    archive = _versioned_archive(tmp_path, [36], declared=declared)
     live = file_lock.ensure_private_directory(tmp_path / "live")
     sentinel = live / "keep.txt"
     file_lock.atomic_write_text(sentinel, "newer live data")
@@ -91,9 +91,9 @@ def test_future_payload_never_reaches_live_transaction_even_with_old_or_missing_
     assert not (live / backup._RESTORE_TX_ROOT).exists()
 
 
-@pytest.mark.parametrize("versions", [[0], [-1], ["34"], [34.5], [None], [33, 34], [34, 34]])
+@pytest.mark.parametrize("versions", [[0], [-1], ["35"], [35.5], [None], [34, 35], [35, 35]])
 def test_malformed_payload_schema_is_actionable_before_restore(tmp_path, versions):
-    archive = _versioned_archive(tmp_path, versions, declared=34)
+    archive = _versioned_archive(tmp_path, versions, declared=35)
     live = tmp_path / "live"
     with backup.recovery_scope(live, "acme", KEY), pytest.raises(backup.BackupError, match="schema.*reviewed"):
         backup.restore_backup(archive, replace_existing=True, force=True)
@@ -101,29 +101,29 @@ def test_malformed_payload_schema_is_actionable_before_restore(tmp_path, version
 
 
 def test_schema_version_view_cannot_masquerade_as_supported_metadata(tmp_path):
-    archive = _versioned_archive(tmp_path, [], declared=34, version_view=True)
+    archive = _versioned_archive(tmp_path, [], declared=35, version_view=True)
     with backup.recovery_scope(tmp_path / "live", "acme", KEY), pytest.raises(backup.BackupError, match="schema.*reviewed"):
         backup.validate_backup_application(archive)
 
 
-@pytest.mark.parametrize("declared", [True, "34", 34.0, 0, -1, {}, []])
+@pytest.mark.parametrize("declared", [True, "35", 35.0, 0, -1, {}, []])
 def test_malformed_signed_schema_metadata_is_not_a_compatibility_override(tmp_path, declared):
-    archive = _versioned_archive(tmp_path, [34], declared=declared)
+    archive = _versioned_archive(tmp_path, [35], declared=declared)
     with backup.recovery_scope(tmp_path / "live", "acme", KEY), pytest.raises(backup.BackupError, match="schema.*reviewed"):
         backup.restore_backup(archive, replace_existing=True, force=True)
 
 
 def test_whole_home_restore_checks_each_tenant_world_schema(tmp_path):
-    archive = _versioned_archive(tmp_path, [35], declared=None, relative="tenants/acme/world.db")
+    archive = _versioned_archive(tmp_path, [36], declared=None, relative="tenants/acme/world.db")
     live = tmp_path / "live"
     with backup.recovery_scope(live, "acme", KEY, whole_home=True), pytest.raises(backup.BackupError, match="newer than this binary.*upgrade"):
         backup.restore_backup(archive, replace_existing=True, force=True)
     assert not (live / "tenants/acme/world.db").exists()
 
 
-@pytest.mark.parametrize("declared", [None, 33])
+@pytest.mark.parametrize("declared", [None, 34])
 def test_signed_root_metadata_must_match_the_staged_database(tmp_path, declared):
-    archive = _versioned_archive(tmp_path, [34], declared=declared)
+    archive = _versioned_archive(tmp_path, [35], declared=declared)
     with backup.recovery_scope(tmp_path / "live", "acme", KEY), pytest.raises(backup.BackupError, match="schema.*match.*reviewed"):
         backup.restore_backup(archive, replace_existing=True, force=True)
 
@@ -138,7 +138,7 @@ def test_empty_version_table_remains_supported_legacy_restore(tmp_path):
         assert connection.execute("SELECT version FROM schema_version").fetchall() == []
 
 
-@pytest.mark.parametrize("actual", [33, 35])
+@pytest.mark.parametrize("actual", [34, 36])
 def test_explicit_unsigned_v1_still_checks_actual_schema_without_a_declaration(tmp_path, actual):
     archive = _versioned_archive(tmp_path, [actual], declared=None, schema=1, signed=False)
     live = tmp_path / "legacy-live"
@@ -175,7 +175,7 @@ def test_snapshot_schema_metadata_is_bound_to_the_copied_database(tmp_path, monk
 
 
 def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, monkeypatch):
-    assert world_model.SCHEMA_VERSION == 34
+    assert world_model.SCHEMA_VERSION == 35
     source = file_lock.ensure_private_directory(tmp_path / "source")
     # Reconstruct the v33 database using the released SQL ladder through v33.
     # This is a prior-schema fixture, not execution of a historical installer.
@@ -188,16 +188,17 @@ def test_prior_v33_record_survives_upgrade_restore_and_repeat_upgrade(tmp_path, 
         archive = backup.create_backup(tmp_path / "v33.tgz")
         assert backup.verify_backup(archive)["world_schema_version"] == 33
     with world_model.WorldModel(source / "world.db") as upgraded:
-        assert upgraded.schema_version == 34
+        assert upgraded.schema_version == 35
         assert upgraded.get_goal(goal_id).title == "Prior schema customer record"
         assert upgraded.conn.execute("SELECT name FROM sqlite_master WHERE name='provider_cap_receipts'").fetchone()
+        assert upgraded.conn.execute("SELECT name FROM sqlite_master WHERE name='provider_operation_attempts'").fetchone()
     live = tmp_path / "restored"
     with backup.recovery_scope(live, "acme", KEY):
         backup.restore_backup(archive, replace_existing=True)
     with closing(sqlite3.connect(live / "world.db")) as connection:
         assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 33
     with world_model.WorldModel(live / "world.db") as reopened:
-        assert reopened.schema_version == 34
+        assert reopened.schema_version == 35
         assert reopened.get_goal(goal_id).title == "Prior schema customer record"
         assert reopened.get_goal(goal_id).owner == "operator"
 
@@ -246,14 +247,14 @@ def test_custom_named_prior_world_restores_and_reopens(tmp_path, monkeypatch, re
     with backup.recovery_scope(live, "acme", KEY, whole_home=relative.startswith("tenants/")):
         backup.restore_backup(archive, replace_existing=True)
     with world_model.WorldModel(live / relative) as reopened:
-        assert reopened.schema_version == 34
+        assert reopened.schema_version == 35
         assert reopened.get_goal(goal_id).title == "Custom prior record"
         assert reopened.get_goal(goal_id).owner == "operator"
 
 
 @pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal"])
 def test_custom_sqlite_sidecars_cannot_hide_native_metadata(tmp_path, suffix):
-    archive = _versioned_archive(tmp_path, [34], declared=None, relative="tenant-world.data",
+    archive = _versioned_archive(tmp_path, [35], declared=None, relative="tenant-world.data",
                                  extra_files={"tenant-world.data" + suffix: b"uncheckpointed state"})
     with backup.recovery_scope(tmp_path / "live", "acme", KEY):
         with pytest.raises(backup.BackupError, match="checkpointed.*reviewed"):

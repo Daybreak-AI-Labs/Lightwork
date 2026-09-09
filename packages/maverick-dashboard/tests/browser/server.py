@@ -15,7 +15,6 @@ import tempfile
 import time
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 CONFIG = '''
 [features]
@@ -87,6 +86,7 @@ def environment(directory):
         "MAVERICK_TENANT":"browser-workspace", "MAVERICK_CLIENT_ID":"browser-client",
         "MAVERICK_PROFILE":"standard", "MAVERICK_ENTERPRISE":"0",
         "MAVERICK_ENCRYPT_AT_REST":"1", "MAVERICK_ENCRYPTION_KEY":secrets.token_hex(32),
+        "MAVERICK_DESKTOP_OAUTH_TICKET_KEY":secrets.token_hex(32),
         "MAVERICK_CONNECTIONS":"1",
         "MAVERICK_DASHBOARD_ADMINS":"user:browser-reviewer,user:browser-learning-reviewer"})
 
@@ -102,6 +102,11 @@ def fake_connection_authorization(module):
                 "expires_in":3600, "token_type":"Bearer"}
 
     module._post_token = local_connection_token
+    module._provider_identity = lambda provider, token: {
+        "provider": provider, "subject": "browser-fixture-account",
+        "display_name": "Browser Fixture Account", "email": "browser@example.test",
+        "email_verified": True, "hosted_domain": "example.test",
+    }
     return calls
 
 
@@ -121,6 +126,7 @@ def build_app(directory):
     )
     from maverick.file_lock import atomic_create_text, ensure_private_directory
     from maverick.governed_operations import ServiceContext
+    from maverick.oidc import VerifiedPrincipal
     from maverick.paths import tenant_scope
     from maverick.vendor_onboarding import VendorOnboardingService
     from maverick.vendor_onboarding_adapters import (
@@ -257,7 +263,12 @@ def build_app(directory):
         if subject not in {"browser-reviewer", "browser-colleague", "browser-learning-reviewer"}:
             from fastapi.responses import JSONResponse
             return JSONResponse({"detail":"Unknown synthetic browser principal"}, status_code=403)
-        request.state.principal = SimpleNamespace(principal="user:" + subject, sub=subject)
+        request.state.principal = VerifiedPrincipal(
+            sub=subject,
+            issuer="https://synthetic-browser-identity.example.test",
+            audience="lightwork-browser-fixture",
+            claims={"fixture": True},
+        )
         return await call_next(request)
 
     @dashboard.app.get("/__browser_fixture", include_in_schema=False)
@@ -281,6 +292,10 @@ def build_app(directory):
 
     from fixture_pilot_learning import install as install_pilot_learning_fixture
     install_pilot_learning_fixture(dashboard.app, world, tenant, principal)
+    from fixture_outcome_value import install as install_outcome_value_fixture
+    install_outcome_value_fixture(dashboard.app, world, tenant, principal)
+    from fixture_knowledge_access import install as install_knowledge_access_fixture
+    install_knowledge_access_fixture(dashboard.app, tenant, principal)
     from fixture_task_files import install as install_task_file_fixture
     install_task_file_fixture(dashboard.app, world, tenant, principal)
     return dashboard.app

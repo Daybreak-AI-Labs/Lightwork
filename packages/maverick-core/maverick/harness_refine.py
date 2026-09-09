@@ -63,6 +63,10 @@ _KEEP_SNAPSHOTS = 50
 #: let an aged-out approval authorize a second refinement.
 _MAX_CONSUMED_APPROVALS = 200
 _STORE_VERSION = 1
+_APPROVAL_ROLE = "harness_refinement_operator"
+_APPROVAL_AUTHORITY_VERSIONS = {
+    "request_schema": "lightwork.operation-approval.v1",
+}
 
 
 class RefineError(Exception):
@@ -266,20 +270,99 @@ def _key(target: str, name: str) -> str:
     return f"{target}:{name}"
 
 
+def _approval_actor(value: object, *, default: str = "local:operator") -> str:
+    """Resolve a current authenticated actor without trusting a CLI label."""
+    claimed = " ".join(str(value or "").split())
+    try:
+        from .connections import current_principal
+
+        authenticated = " ".join(str(current_principal() or "").split())
+    except Exception as exc:
+        raise RefineError(
+            "the current refinement actor is unavailable; refusing to apply"
+        ) from exc
+    if authenticated:
+        if claimed and claimed != authenticated:
+            raise RefineError(
+                "the claimed refinement actor does not match the authenticated actor"
+            )
+        return authenticated
+    try:
+        from maverick_dashboard.auth import auth_genuinely_off
+
+        if not auth_genuinely_off():
+            raise RefineError(
+                "an authenticated refinement actor is required"
+            )
+    except ImportError:
+        # Core-only local installations have no dashboard identity boundary.
+        pass
+    return claimed or default
+
+
+def _current_approval_authority(actor: str) -> dict:
+    """Resolve the authority that must still hold when a change is applied."""
+    try:
+        from .paths import current_tenant_id_strict
+
+        workspace = current_tenant_id_strict() or "local"
+    except Exception as exc:
+        raise RefineError(
+            "the current refinement authority is unavailable; refusing to apply"
+        ) from exc
+    return {
+        "actor": actor,
+        "workspace": workspace,
+        "role": _APPROVAL_ROLE,
+        "versions": dict(_APPROVAL_AUTHORITY_VERSIONS),
+    }
+
+
 # ---- propose --------------------------------------------------------------
 
-def _park_approval(target: str, name: str, digest: str, summary: str,
-                   proposed_by: str) -> int:
+def _park_approval(record: dict) -> int:
     """Park the human decision this refinement cannot make for itself."""
+    from .approval_cards import encode_operation_approval_detail
     from .safety.dual_control import required_approvals
     from .world_model import open_world
+
+    target = {"target": record["target"], "name": record["name"]}
+    parameters = {
+        "proposal_id": record["id"],
+        "change": record["change"],
+        "rationale": record["rationale"],
+    }
     return open_world().create_approval(
-        _action(target, name), risk="high",
-        detail=f"Apply a self-proposed change to the agent's own {target} "
-               f"{name!r}. Digest {digest[:16]}. Rationale: {summary}",
+        record["action"], risk="high",
+        detail=encode_operation_approval_detail(
+            action=record["action"],
+            summary=f"Apply harness refinement {record['name']}",
+            target_label=f"Harness {record['target']}: {record['name']}",
+            target=target,
+            parameters=parameters,
+            parameter_summary=[
+                f"Proposal: {record['id']}",
+                f"Change SHA-256: {record['digest']}",
+                f"Rationale: {record['rationale'][:400]}",
+            ],
+            actor=record["proposed_by"] or "local:operator",
+            role=_APPROVAL_ROLE,
+            authority_versions=_APPROVAL_AUTHORITY_VERSIONS,
+            input_versions={"proposal_sha256": record["digest"]},
+            known_effects=[
+                f"Updates the named {record['target']} refinement overlay."
+            ],
+            unresolved_assumptions=[
+                "The evaluator anchors will still pass at apply time."
+            ],
+            before="The proposed refinement is stored but has no effect.",
+            after="The exact reviewed refinement may be applied once.",
+            irreversible=False,
+            ttl_seconds=7 * 24 * 3600,
+        ),
         provenance=PROVENANCE,
         approvals_required=required_approvals("high"),
-        requested_by=proposed_by or "")
+        requested_by=record["proposed_by"] or "")
 
 
 def _discard(proposal_id: str) -> None:
@@ -322,6 +405,7 @@ def propose(observation: dict, *, goal_id: int | None = None,
     change = _screen("change", observation.get("change"))
     rationale = _screen("rationale", observation.get("rationale"))
 
+    proposed_actor = _approval_actor(proposed_by, default="local:operator")
     digest = _digest(target, name, change)
     proposal_id = uuid.uuid4().hex[:16]
     record: dict[str, Any] = {
@@ -329,7 +413,7 @@ def propose(observation: dict, *, goal_id: int | None = None,
         "name": name, "failure": failure, "change": change,
         "rationale": rationale, "digest": digest, "action": _action(target, name),
         "goal_id": int(goal_id) if goal_id is not None else None,
-        "proposed_by": str(proposed_by or "")[:200],
+        "proposed_by": proposed_actor[:200],
         "proposed_at": time.time(), "approval_id": None,
     }
     with _locked():
@@ -343,8 +427,7 @@ def propose(observation: dict, *, goal_id: int | None = None,
                 "proposals first — a full queue refuses rather than dropping "
                 "one an approver has not seen yet")
         if cfg["require_approval"]:
-            record["approval_id"] = _park_approval(
-                target, name, digest, rationale[:300], record["proposed_by"])
+            record["approval_id"] = _park_approval(record)
         store["proposals"][proposal_id] = record
         _save_store(store)
 
@@ -397,7 +480,8 @@ def _check_evaluator_anchors() -> None:
               "ground truth")
 
 
-def _consume_approval(store: dict, record: dict, approval_id: object) -> int:
+def _consume_approval(store: dict, record: dict, approval_id: object, *,
+                      applied_by: str) -> int:
     """Validate + spend one refinement approval; returns its id or raises.
 
     The approval must exist under our provenance, match this proposal's action
@@ -427,12 +511,52 @@ def _consume_approval(store: dict, record: dict, approval_id: object) -> int:
     spent = (f"approval #{aid} has already applied a refinement; approvals "
              "are one-shot — propose again to park a new one")
     consumed = list(store.get("consumed_approvals") or [])
-    # String-compare the ledger so a junk entry can never crash the check.
+    # Check the one-use ledger first so a spent approval retains its stable
+    # refusal even though applying it necessarily changed the live overlay.
     if any(str(u) == str(aid) for u in consumed):
         raise RefineError(spent)
     floor = int(store.get("approval_floor") or 0)
     if aid <= floor:
         raise RefineError(spent)
+    from .approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+        require_current_approval_card,
+    )
+    from .approval_cards import (
+        digest as approval_digest,
+    )
+
+    target = {"target": record.get("target"), "name": record.get("name")}
+    parameters = {
+        "proposal_id": record.get("id"),
+        "change": record.get("change"),
+        "rationale": record.get("rationale"),
+    }
+    current_authority = _current_approval_authority(applied_by)
+    requested_actor = " ".join(
+        str(getattr(approval, "requested_by", "") or "").split()
+    )
+    try:
+        card = decode_approval_detail(approval.detail)
+        if card is None:
+            raise ApprovalCardError("legacy approval detail is not exact-bound")
+        card = require_current_approval_card(card)
+        matches = (
+            card["action"] == action
+            and card["target"]["sha256"] == approval_digest(target)
+            and card["parameters"]["sha256"] == approval_digest(parameters)
+            and card["inputs"] == {"proposal_sha256": record.get("digest")}
+            and card["authority"] == current_authority
+            and requested_actor == applied_by
+        )
+    except (ApprovalCardError, KeyError, TypeError, ValueError):
+        matches = False
+    if not matches:
+        raise RefineError(
+            f"approval #{aid} no longer matches the current refinement; "
+            "propose and approve a new request"
+        )
     consumed.append(aid)
     keep = consumed[-_MAX_CONSUMED_APPROVALS:]
     for stale in consumed[:len(consumed) - len(keep)]:
@@ -526,16 +650,21 @@ def apply(proposal_id: str, *, applied_by: str = "",
         if cfg["require_approval"]:
             wanted = (approval_id if approval_id is not None
                       else record.get("approval_id"))
-            record["approval_id"] = _consume_approval(store, record, wanted)
+            applied_actor = _approval_actor(applied_by)
+            record["approval_id"] = _consume_approval(
+                store, record, wanted, applied_by=applied_actor,
+            )
             # Burn the approval before the effect, not after.
             _save_store(store)
+        else:
+            applied_actor = str(applied_by or "")[:200]
         snapshot = _take_snapshot()
         entry = {
             "target": record["target"], "name": record["name"],
             "change": record["change"], "rationale": record["rationale"],
             "failure": record["failure"], "digest": record["digest"],
             "proposal_id": record["id"], "applied_at": time.time(),
-            "applied_by": str(applied_by or "")[:200],
+            "applied_by": applied_actor,
         }
         try:
             _apply_change(entry)

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import threading
@@ -41,6 +42,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 from . import model_risk_schemas as schemas
 
@@ -735,17 +737,23 @@ async def external_memory_recall(
 
 @router.get("/approvals/{approval_id}")
 async def external_approval_status(
-    approval_id: int, agent_id: str = Depends(_require_agent),
+    approval_id: int,
+    binding_sha256: str = Query(default="", max_length=64),
+    agent_id: str = Depends(_require_agent),
 ) -> dict:
     """Poll a parked approval (the human decides in the dashboard queue)."""
     _rate_limit(agent_id, "approvals")
     from maverick import external_agents as xa
     try:
-        out = xa.approval_status(approval_id)
+        out = xa.approval_status(
+            agent_id,
+            approval_id,
+            expected_binding_sha256=binding_sha256,
+        )
+    except xa.ApprovalBindingMismatch as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    # The approval row itself is cross-checked to this provenance in core;
-    # any enrolled agent may poll only external_agents approvals.
     log.debug("external approval poll by %s: %s", agent_id, out["status"])
     return out
 
@@ -975,6 +983,66 @@ def _runtime_execution_context_sha256(payload: ExternalExecuteIn) -> str:
     ).encode("utf-8")).hexdigest()
 
 
+def _runtime_authority_fingerprint(
+    payload: ExternalExecuteIn,
+    result: object | None,
+) -> str:
+    """Commit to the full request and stable fields of one runtime decision."""
+
+    request = payload.model_dump(mode="json")
+    if result is None:
+        runtime: dict[str, object] = {"state": "disabled"}
+    else:
+        decision = getattr(result, "decision", None)
+        receipt = getattr(result, "receipt", None)
+        if not isinstance(decision, str) or not isinstance(receipt, dict):
+            raise ValueError("runtime authority result is malformed")
+        stable_receipt = dict(receipt)
+        # Re-evaluation necessarily has a new observation time. Every
+        # authority-bearing field (asset binding, policy digest, decision,
+        # categories, rules, controls, and input/output commitments) remains.
+        stable_receipt.pop("evaluated_at", None)
+        runtime = {
+            "state": "enabled",
+            "decision": decision,
+            "receipt": stable_receipt,
+        }
+    material = {"request": request, "runtime": runtime}
+    encoded = json.dumps(
+        material,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _runtime_revalidation_callback(
+    payload: ExternalExecuteIn,
+    initial_result: object | None,
+):
+    """Return a worker-safe callback that re-runs current runtime authority."""
+
+    frozen_payload = payload.model_dump_json()
+    expected = _runtime_authority_fingerprint(payload, initial_result)
+
+    def revalidate() -> bool:
+        # The core provider boundary runs in Starlette's AnyIO worker. Schedule
+        # the async authority resolver back on the request loop while the core
+        # retains its cross-process effect fence in the worker thread.
+        from anyio import from_thread
+
+        current_payload = ExternalExecuteIn.model_validate_json(frozen_payload)
+        current = from_thread.run(_external_execute_runtime_gate, current_payload)
+        if current is not None and getattr(current, "decision", None) != "allow":
+            return False
+        actual = _runtime_authority_fingerprint(current_payload, current)
+        return hmac.compare_digest(actual, expected)
+
+    return revalidate
+
+
 @router.post("/execute")
 async def external_execute(
     payload: ExternalExecuteIn, agent_id: str = Depends(_require_agent),
@@ -1010,7 +1078,15 @@ async def external_execute(
         request_body["_runtime_context_sha256"] = (
             _runtime_execution_context_sha256(payload)
         )
-    outcome = xa.execute(agent_id, request_body, shield=_shield())
+    outcome = await run_in_threadpool(
+        xa.execute,
+        agent_id,
+        request_body,
+        shield=_shield(),
+        runtime_revalidator=_runtime_revalidation_callback(
+            payload, runtime_result
+        ),
+    )
     if runtime_result is not None:
         outcome = {
             **outcome,
@@ -1071,11 +1147,15 @@ async def external_execution_commit(
         request_body["_runtime_context_sha256"] = (
             _runtime_execution_context_sha256(runtime_payload)
         )
-    outcome = xa.execute_commit(
+    outcome = await run_in_threadpool(
+        xa.execute_commit,
         agent_id,
         execution_id,
         request_body,
         shield=_shield(),
+        runtime_revalidator=_runtime_revalidation_callback(
+            runtime_payload, runtime_result
+        ),
     )
     if runtime_result is not None:
         outcome = {
@@ -1364,9 +1444,15 @@ _OPENAPI: dict = {
             "get": {
                 "operationId": "approvalStatus",
                 "summary": "Poll a parked high-risk action",
-                "parameters": [{"name": "approval_id", "in": "path",
-                                "required": True,
-                                "schema": {"type": "integer"}}],
+                "parameters": [
+                    {"name": "approval_id", "in": "path",
+                     "required": True, "schema": {"type": "integer"}},
+                    {"name": "binding_sha256", "in": "query",
+                     "required": False,
+                     "description": "Binding returned by /screen; a stale "
+                                    "binding is rejected.",
+                     "schema": {"type": "string", "maxLength": 64}},
+                ],
                 "responses": {"200": {"description": "Status", "content": {
                     "application/json": {"schema": {
                         "type": "object",
@@ -1374,6 +1460,13 @@ _OPENAPI: dict = {
                             "approval_id": {"type": "integer"},
                             "status": {"type": "string"},
                             "risk": {"type": "string"},
+                            "action": {"type": "string"},
+                            "approval_binding_sha256": {"type": "string"},
+                            "target_sha256": {"type": "string"},
+                            "parameters_sha256": {"type": "string"},
+                            "inputs": {"type": "object"},
+                            "credentials": {"type": "object"},
+                            "expires_at": {"type": "number"},
                         }}}}}},
             },
         },

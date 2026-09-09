@@ -1451,7 +1451,17 @@ class NormalizedIdentityChangeCoupler:
         state = deliveries.get(name) if isinstance(deliveries, Mapping) else None
         if not isinstance(state, Mapping):
             raise IdentityGovernanceStateError("change_coupling_delivery_state_invalid")
-        if state.get("status") == "delivered":
+        status = state.get("status")
+        if status in {
+            "bootstrap_reauthorization_required",
+            "bootstrap_reconciliation_required",
+        }:
+            raise IdentityGovernanceStateError(
+                "change_coupling_bootstrap_reauthorization_required"
+            )
+        if status not in {"pending", "delivering", "failed", "delivered"}:
+            raise IdentityGovernanceStateError("change_coupling_delivery_state_invalid")
+        if status == "delivered":
             return dict(record)
         attempts = state.get("attempts")
         if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 0:

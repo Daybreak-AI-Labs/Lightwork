@@ -98,10 +98,16 @@ def audit_authority_denial(
 
 def operation_binding(operation: dict) -> str:
     """Exact unredacted payload digest; credentials are references only."""
-    return digest({key: operation[key] for key in (
+    material = {key: operation[key] for key in (
         "id", "action", "context", "payload", "payload_sha256", "preconditions",
         "scope", "expires_at",
-    )})
+    )}
+    # Structured consequence/authority presentation is itself reviewed data.
+    # New operations bind it; legacy rows without a card retain their historical
+    # digest and are not silently rewritten during readback.
+    if "approval_card" in operation:
+        material["approval_card"] = operation["approval_card"]
+    return digest(material)
 
 
 def validate_approval(operation: dict, context: ServiceContext, now: float) -> None:

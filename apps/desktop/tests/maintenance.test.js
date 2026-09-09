@@ -11,9 +11,10 @@ function render(invoke) {
     "maintenance-authorization", "maintenance-incomplete", "maintenance-recovery-result", "rollback-install", "resume-maintenance",
     "maintenance-logs", "maintenance-log-point",
     "identity-transition-notice", "save-identity-transition",
-  ].map(id => [id, { textContent: "", value: "", hidden: false, disabled: false, handlers: {},
-    addEventListener(name, handler) { this.handlers[name] = handler; } }]));
-  const context = { document: { getElementById: id => elements[id] },
+  ].map(id => [id, { textContent: "", value: "", hidden: false, disabled: false, handlers: {}, children: [],
+    addEventListener(name, handler) { this.handlers[name] = handler; },
+    appendChild(child) { this.children.push(child); } }]));
+  const context = { document: { getElementById: id => elements[id], createElement: () => ({}) },
     window: { __TAURI__: { core: { invoke } }, location: { replace() {} } } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../ui/maintenance.js"), "utf8"), context);
   return elements;
@@ -101,4 +102,43 @@ test("repair cannot turn transition metadata into a trust-adopting installation"
   await settle();await elements["repair-install"].handlers.click();
   assert.equal(elements["install-update"].disabled,true);
   assert.equal(elements["update-review"].hidden,true);
+  assert.match(elements["maintenance-status"].textContent, /could not complete that step/);
+  assert.match(elements["maintenance-details"].textContent, /signing transition/);
+  assert.equal(elements["repair-install"].disabled,false);
+});
+
+test("completed and pending repair receipts use end-user repair language", async () => {
+  const elements = render(async () => ({
+    version: "1.0.0",
+    updates_configured: true,
+    recovery: {
+      recovery_points: [
+        { id: "done", old_version: "1.0.0", new_version: "1.0.0", status: "repaired", pending_finalization: false },
+        { id: "resume", old_version: "1.0.0", new_version: "1.0.0", status: "repair_recovered", pending_finalization: true },
+        { id: "upgrade-recovered", old_version: "1.0.0", new_version: "1.1.0", status: "upgrade_recovered", pending_finalization: false },
+      ],
+    },
+  }));
+  await settle();
+  assert.match(elements["maintenance-recovery-result"].textContent, /repaired 1\.0\.0/);
+  assert.match(elements["maintenance-recovery-result"].textContent, /returned to 1\.0\.0/);
+  assert.equal(elements["maintenance-incomplete"].children.length, 1);
+  assert.match(elements["maintenance-incomplete"].children[0].textContent, /awaiting finalization/);
+});
+
+test("unfinished maintenance offers recovery language instead of candidate replay", async () => {
+  const elements = render(async () => ({
+    version: "1.1.0",
+    updates_configured: true,
+    recovery: {
+      incomplete: true,
+      recovery_points: [
+        { id: "failed", old_version: "1.0.0", new_version: "1.1.0", status: "incomplete", pending_finalization: true },
+      ],
+    },
+  }));
+  await settle();
+  assert.equal(elements["resume-maintenance"].textContent, "Recover and restart");
+  assert.match(elements["maintenance-recovery-result"].textContent, /Recover the previously verified installation/);
+  assert.match(elements["maintenance-status"].textContent, /Recover it above/);
 });

@@ -61,10 +61,241 @@ def _intake(client):
 
 
 def _step(client, row, step, **extra):
+    if step == "approve-action":
+        extra.setdefault(
+            "approval_binding_sha256",
+            row["operation"]["approval_card"]["binding_sha256"],
+        )
     result = client.post(f"{BASE}/{row['id']}/{step}",
                          json={"expected_revision": row["revision"], **extra})
     assert result.status_code == 200, result.text
     return result.json()
+
+
+def test_pilot_claim_blocks_vendor_provider_reads_until_all_cases_are_admitted(web):
+    from maverick.paths import tenant_scope
+    from maverick_dashboard import outcome_accounting_bridge, outcome_pilots
+
+    client, service, ctx, tickets = web
+    rows = [
+        client.post(BASE, json={
+            "vendor_name": f"Pilot vendor {index}",
+            "document_id": "security-paper",
+            "project": "VEND",
+            "purpose": f"Pilot evidence case {index}",
+        }).json()
+        for index in range(1, 5)
+    ]
+    sources = {
+        row["id"]: {
+            "unstarted": True,
+            "input_version": f"vendor-input-{index}",
+            "first_started_at": None,
+        }
+        for index, row in enumerate(rows, start=1)
+    }
+    body = {
+        "title": "Vendor admission gate",
+        "customer": "Example team",
+        "workflow": "Collect vendor evidence",
+        "criteria": "Evidence is current and reviewable",
+        "operation_id": "vendor-start-gate-operation",
+        "cases": [
+            {"kind": "vendor", "reference": row["id"], "label": row["vendor_name"]}
+            for row in rows
+        ],
+    }
+    with tenant_scope(tenant=ctx.tenant):
+        pending = outcome_pilots.create(
+            body, context="vendor-context", actor=ctx.actor,
+            resolve=lambda _kind, reference: sources[reference],
+        )
+
+    path = f"{BASE}/{rows[0]['id']}/collect-evidence"
+    provider_reads = []
+    original_fetch = service.documents.fetch
+
+    def observed_fetch(*args, **kwargs):
+        provider_reads.append((args, kwargs))
+        return original_fetch(*args, **kwargs)
+
+    service.documents.fetch = observed_fetch
+    refused = client.post(path, json={"expected_revision": rows[0]["revision"]})
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert detail["code"] == "outcome_pilot_admission_incomplete"
+    assert detail["current"]["id"] == rows[0]["id"]
+    assert detail["current"]["stage"] == "intake"
+    current = service.get(ctx, rows[0]["id"])
+    assert current["stage"] == "intake"
+    assert current["evidence"] is None
+    assert current["metrics"]["document_reads"] == 0
+    assert provider_reads == []
+    assert tickets.creates == 0
+
+    with tenant_scope(tenant=ctx.tenant):
+        manifest = outcome_accounting_bridge.admit_pilot(
+            pending, resolve=lambda _kind, reference: sources[reference],
+        )
+        outcome_pilots.complete_admission(
+            pending["id"], manifest, context="vendor-context", actor=ctx.actor,
+            resolve=lambda _kind, reference: sources[reference],
+        )
+    collected = client.post(path, json={"expected_revision": rows[0]["revision"]})
+    assert collected.status_code == 200, collected.text
+    assert collected.json()["stage"] == "evidence_collected"
+    assert service.get(ctx, rows[0]["id"])["metrics"]["document_reads"] == 1
+    assert len(provider_reads) == 1
+
+
+def test_http_intake_replay_opens_one_stable_case_and_changed_payload_conflicts(web):
+    client, service, ctx, tickets = web
+    body = {
+        "submission_key": "browser-submit-key-0001",
+        "vendor_name": "Stable browser intake",
+        "document_id": "security-paper",
+        "project": "VEND",
+        "purpose": "Recover after a lost response",
+    }
+    first = client.post(BASE, json=body)
+    replay = client.post(BASE, json=body)
+    assert first.status_code == replay.status_code == 201
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["revision"] == first.json()["revision"]
+    assert len(service.list(ctx)) == 1
+
+    changed = client.post(BASE, json=dict(body, purpose="A different request"))
+    assert changed.status_code == 409
+    detail = changed.json()["detail"]
+    assert detail["code"] == "idempotency_conflict"
+    assert detail["current"] == {
+        "schema": "lightwork.vendor-onboarding.conflict-current.v1",
+        "id": first.json()["id"],
+        "revision": first.json()["revision"],
+        "stage": "intake",
+        "updated_at": first.json()["updated_at"],
+        "vendor_name": "Stable browser intake",
+        "work_item": {
+            "lifecycle": "Draft",
+            "next_action": "obtain_evidence",
+            "technical_effect": "not_verified",
+            "business_outcome": "pending",
+        },
+    }
+    assert "evidence" not in detail["current"]
+    assert len(service.list(ctx)) == 1 and tickets.creates == 0
+
+
+def test_http_two_tab_draft_edit_returns_current_case_without_silent_overwrite(web):
+    client, service, ctx, _ = web
+    created = client.post(BASE, json={
+        "submission_key": "two-tab-draft-key-0001",
+        "vendor_name": "Two tab vendor",
+        "document_id": "security-paper",
+        "project": "VEND",
+        "purpose": "Original intended use",
+        "freshness_days": 365,
+        "due_at": 1_900_000_000.0,
+    })
+    assert created.status_code == 201, created.text
+    row = created.json()
+    first = client.post(f"{BASE}/{row['id']}/draft", json={
+        "expected_revision": row["revision"],
+        "project": "RISK",
+        "purpose": "First tab intended use",
+        "freshness_days": 180,
+        "due_at": 1_910_000_000.0,
+    })
+    assert first.status_code == 200, first.text
+
+    stale = client.post(f"{BASE}/{row['id']}/draft", json={
+        "expected_revision": row["revision"],
+        "project": "OPS",
+        "purpose": "Second tab stale change",
+        "freshness_days": 90,
+        "due_at": 1_920_000_000.0,
+    })
+    assert stale.status_code == 409
+    detail = stale.json()["detail"]
+    assert detail["code"] == "revision_conflict"
+    assert detail["current"]["revision"] == first.json()["revision"]
+    retained = service.get(ctx, row["id"])
+    assert retained["project"] == "RISK"
+    assert retained["purpose"] == "First tab intended use"
+
+
+@pytest.mark.parametrize("submission_key", ["short", "contains space key", "x" * 129])
+def test_http_rejects_malformed_submission_keys_without_creating_a_case(web, submission_key):
+    client, service, ctx, tickets = web
+    result = client.post(BASE, json={
+        "submission_key": submission_key,
+        "vendor_name": "Rejected key vendor",
+        "document_id": "security-paper",
+        "project": "VEND",
+        "purpose": "Must not be admitted",
+    })
+    assert result.status_code == 422
+    assert service.list(ctx) == [] and tickets.creates == 0
+
+
+def test_http_queue_has_stable_three_page_navigation_and_unresolved_filter(web):
+    from maverick import vendor_onboarding
+    from maverick.paths import tenant_scope
+
+    client, _, ctx, tickets = web
+    created, unresolved = set(), set()
+    for index in range(7):
+        response = client.post(BASE, json={
+            "submission_key": f"api-page-submit-{index:04d}",
+            "vendor_name": f"API page vendor {index}",
+            "document_id": "security-paper",
+            "project": "VEND",
+            "purpose": f"Three page API case {index}",
+        })
+        assert response.status_code == 201, response.text
+        row = response.json()
+        created.add(row["id"])
+        if index % 2 == 0:
+            unresolved.add(row["id"])
+            with tenant_scope(tenant=ctx.tenant):
+                vendor_onboarding._CASES.update(
+                    row["id"],
+                    lambda value: value.update(
+                        stage="reconciliation_required",
+                        operation={"state": "reconciliation_required"},
+                    ),
+                    expected_revision=row["revision"],
+                    action="test_api_unresolved_queue_fixture",
+                    actor=ctx.actor,
+                )
+
+    def collect(view, limit):
+        cursor, seen, pages = "", [], 0
+        while True:
+            response = client.get(BASE, params={"limit": limit, "cursor": cursor, "view": view})
+            assert response.status_code == 200, response.text
+            page = response.json()
+            assert page["schema"] == "lightwork.vendor-onboarding.case-page.v1"
+            assert page["view"] == view and page["record_reads"] <= max(limit * 4, limit + 1)
+            seen.extend(row["id"] for row in page["cases"])
+            pages += 1
+            if not page["has_more"]:
+                assert page["next_cursor"] is None
+                break
+            assert page["next_cursor"] and page["next_cursor"] != cursor
+            cursor = page["next_cursor"]
+            assert pages < 20
+        assert len(seen) == len(set(seen))
+        return set(seen), pages
+
+    all_ids, all_pages = collect("all", 2)
+    unresolved_ids, unresolved_pages = collect("unresolved", 1)
+    assert all_ids == created and unresolved_ids == unresolved
+    assert all_pages >= 3 and unresolved_pages >= 3
+    malformed = client.get(BASE, params={"cursor": "not base64!"})
+    assert malformed.status_code == 409
+    assert malformed.json()["detail"]["code"] == "workflow_rejected"
+    assert tickets.creates == 0
 
 
 @pytest.mark.parametrize("lost_receipt", [False, True])
@@ -152,6 +383,12 @@ def test_http_case_exposes_pinned_work_item_contract(web):
     assert reopened.json()["work_item"] == row["work_item"]
     listed = client.get(BASE).json()["cases"]
     assert listed[0]["work_item"] == row["work_item"]
+    assert listed[0]["owner"] == row["owner"]
+    assert listed[0]["updated_at"] == row["updated_at"]
+    assert listed[0]["next_action"] == "obtain_evidence"
+    assert listed[0]["blocker"] is None
+    assert "evidence" not in listed[0] and "operation" not in listed[0]
+    assert "intake_idempotency" not in listed[0]
 
 
 def test_http_contract_and_revision_failures_have_stable_error_codes(web):
@@ -166,6 +403,14 @@ def test_http_contract_and_revision_failures_have_stable_error_codes(web):
     assert stale.json()["detail"]["code"] == "revision_conflict"
     assert stale.json()["detail"]["retryable"] is False
     assert "Reload" in stale.json()["detail"]["next_action"]
+    current = stale.json()["detail"]["current"]
+    assert current["id"] == changed["id"]
+    assert current["revision"] == changed["revision"]
+    assert current["stage"] == changed["stage"]
+    assert set(current) == {
+        "schema", "id", "revision", "stage", "updated_at", "vendor_name", "work_item",
+    }
+    assert "evidence" not in current and "operation" not in current
 
     with tenant_scope(tenant=ctx.tenant):
         vendor_onboarding._CASES.update(
@@ -266,6 +511,179 @@ def test_http_workflow_review_correction_external_confirmation_and_acceptance(we
     }).status_code == 409
 
 
+def test_http_acceptance_reports_changed_evidence_and_opens_reevaluation(web):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(client, row, "review", decision="approved", rationale="Reviewed current source")
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
+    row = _step(client, row, "execute", confirm=True)
+    source = service.documents.documents[(ctx.tenant, "security-paper")]
+    service.documents.documents[(ctx.tenant, "security-paper")] = replace(
+        source, version="v2", modified_at=NOW,
+    )
+
+    blocked = client.post(f"{BASE}/{row['id']}/accept", json={
+        "expected_revision": row["revision"],
+        "accepted": True,
+        "rationale": "Accept the prior review",
+    })
+    assert blocked.status_code == 409, blocked.text
+    detail = blocked.json()["detail"]
+    assert detail["code"] == "evidence_reevaluation_required"
+    assert detail["current"]["stage"] == "acceptance_reevaluation_required"
+    assert "evidence" not in detail["current"]
+    current = client.get(f"{BASE}/{row['id']}").json()
+    assert current["operation"]["state"] == "verified"
+    assert current["outcome"] is None
+    assert current["acceptance_evidence_check"]["documents"][0]["status"] == "changed"
+    assert current["acceptance_evidence_check"]["documents"][0]["document_id"] == "security-paper"
+    assert tickets.creates == 1
+    reevaluation = client.post(BASE, json={
+        "vendor_name": current["vendor_name"],
+        "document_id": "security-paper",
+        "project": current["project"],
+        "purpose": "Reevaluate changed evidence",
+        "renewal_of": current["id"],
+    })
+    assert reevaluation.status_code == 201, reevaluation.text
+    assert reevaluation.json()["review_history"] == []
+    assert tickets.creates == 1
+
+
+def test_http_action_approval_opens_changed_source_reevaluation_and_blocks_retry(web):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Reviewed the current source",
+    )
+    row = _step(client, row, "prepare-action")
+    source = service.documents.documents[(ctx.tenant, "security-paper")]
+    service.documents.documents[(ctx.tenant, "security-paper")] = replace(
+        source, version="v2", modified_at=NOW,
+    )
+
+    blocked = client.post(f"{BASE}/{row['id']}/approve-action", json={
+        "expected_revision": row["revision"],
+        "approval_binding_sha256": row["operation"]["approval_card"]["binding_sha256"],
+        "confirm": True,
+    })
+    assert blocked.status_code == 409, blocked.text
+    detail = blocked.json()["detail"]
+    assert detail["code"] == "evidence_reevaluation_required"
+    assert detail["current"]["stage"] == "acceptance_reevaluation_required"
+    assert detail["current"]["work_item"]["technical_effect"] == "not_verified"
+    assert "evidence" not in detail["current"]
+    current = client.get(f"{BASE}/{row['id']}").json()
+    assert current["operation"] is None
+    assert current["review_history"] == row["review_history"]
+    assert current["acceptance_evidence_check"]["documents"][0]["status"] == "changed"
+    assert current["acceptance_evidence_check"]["documents"][0]["document_id"] == "security-paper"
+    assert tickets.creates == 0
+
+    retry = client.post(f"{BASE}/{row['id']}/prepare-action", json={
+        "expected_revision": current["revision"],
+    })
+    assert retry.status_code == 409, retry.text
+    assert retry.json()["detail"]["code"] == "evidence_reevaluation_required"
+    assert retry.json()["detail"]["current"]["revision"] == current["revision"]
+
+    reevaluation = client.post(BASE, json={
+        "vendor_name": current["vendor_name"],
+        "document_id": "security-paper",
+        "project": current["project"],
+        "purpose": "Reevaluate changed evidence",
+        "renewal_of": current["id"],
+    })
+    assert reevaluation.status_code == 201, reevaluation.text
+    assert reevaluation.json()["renewal_of"] == current["id"]
+    assert reevaluation.json()["review_history"] == []
+    assert tickets.creates == 0
+
+
+def test_http_evidence_export_requires_reviewed_manifest_and_exact_confirmation(web):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(client, row, "review", decision="approved", rationale="Reviewed export claims")
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
+    row = _step(client, row, "execute", confirm=True)
+    row = _step(client, row, "accept", accepted=True, rationale="Accept reviewed export")
+
+    preview = client.post(f"{BASE}/{row['id']}/evidence-export-preview", json={
+        "expected_revision": row["revision"],
+    })
+    assert preview.status_code == 200, preview.text
+    assert preview.headers["cache-control"] == "no-store"
+    assert preview.headers["x-content-type-options"] == "nosniff"
+    bundle = preview.json()
+    assert bundle["case"]["id"] == row["id"]
+    assert {claim["claim_id"] for claim in bundle["claims"]} == set(row["assessment"]["answers"])
+    assert all(claim["evidence_refs"] or claim["review_justification"]
+               for claim in bundle["claims"])
+    assert client.post(f"{BASE}/{row['id']}/evidence-export", json={
+        "expected_revision": row["revision"],
+        "expected_export_sha256": bundle["binding_sha256"],
+    }).status_code == 422
+    downloaded = client.post(f"{BASE}/{row['id']}/evidence-export", json={
+        "expected_revision": row["revision"],
+        "expected_export_sha256": bundle["binding_sha256"],
+        "confirm": True,
+    })
+    assert downloaded.status_code == 200, downloaded.text
+    assert downloaded.json()["binding_sha256"] == bundle["binding_sha256"]
+    assert downloaded.headers["content-type"].startswith("application/json")
+    assert downloaded.headers["content-disposition"] == (
+        f'attachment; filename="lightwork-evidence-{row["id"]}.json"'
+    )
+    service.authorize = lambda candidate, capability, resource: (
+        candidate.binding() == ctx.binding() and capability != "evidence.export"
+    )
+    denied = client.post(f"{BASE}/{row['id']}/evidence-export-preview", json={
+        "expected_revision": row["revision"],
+    })
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "permission_denied"
+    assert tickets.creates == 1
+
+
+def test_http_active_markup_is_plain_text_and_unsupported_media_never_mutates_case(web):
+    client, service, ctx, tickets = web
+    row = client.post(BASE, json={
+        "vendor_name": "Synthetic markup source",
+        "document_ids": [],
+        "project": "VEND",
+        "purpose": "Verify inert preview rendering",
+    }).json()
+    active = b"<script>window.activeMarkupExecuted=true</script><img src=x onerror=alert(1)>"
+    common = {
+        "expected_revision": row["revision"],
+        "name": "active.txt",
+        "document_date": NOW - 100,
+        "content_base64": base64.b64encode(active).decode(),
+    }
+    unsupported = client.post(f"{BASE}/{row['id']}/upload-preview", json={
+        **common, "mime": "text/html",
+    })
+    assert unsupported.status_code == 409
+    assert "unsupported document format" in unsupported.json()["detail"]["message"]
+    assert service.get(ctx, row["id"])["revision"] == row["revision"]
+    assert service.get(ctx, row["id"])["uploads"] == []
+    preview = client.post(f"{BASE}/{row['id']}/upload-preview", json={
+        **common, "mime": "text/plain",
+    })
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["text"] == active.decode()
+    assert preview.json()["status"] == "available"
+    assert preview.json()["saved"] is False
+    assert service.get(ctx, row["id"])["uploads"] == []
+    assert tickets.creates == 0
+
+
 def test_http_rejects_forged_authority_unknown_steps_and_stale_versions(web):
     client, *_ = web
     row = _intake(client)
@@ -345,6 +763,88 @@ def test_http_requires_separate_explicit_approval_and_blocks_cross_origin(web):
     assert tickets.creates == 0
 
 
+def test_http_approval_requires_the_exact_reviewed_card_binding(web):
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Reviewed the exact current evidence",
+    )
+    row = _step(client, row, "prepare-action")
+    endpoint = f"{BASE}/{row['id']}/approve-action"
+
+    missing = client.post(endpoint, json={
+        "expected_revision": row["revision"],
+        "confirm": True,
+    })
+    assert missing.status_code == 422
+    assert service.get(ctx, row["id"]) == row
+
+    changed = client.post(endpoint, json={
+        "expected_revision": row["revision"],
+        "confirm": True,
+        "approval_binding_sha256": "0" * 64,
+    })
+    assert changed.status_code == 409
+    assert changed.json()["detail"]["code"] == "approval_binding_invalid"
+    assert service.get(ctx, row["id"]) == row
+    assert tickets.creates == 0
+
+    approved = _step(client, row, "approve-action", confirm=True)
+    assert approved["operation"]["state"] == "approved"
+
+
+def test_view_only_vendor_approval_is_audited_and_remains_unapproved(
+    web, monkeypatch,
+):
+    from maverick import audit
+    from maverick_dashboard import auth
+
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Reviewed the current evidence",
+    )
+    row = _step(client, row, "prepare-action")
+    recorded = []
+    monkeypatch.setattr(auth, "has_permission", lambda _request, _permission: False)
+    monkeypatch.setattr(auth, "caller_principal", lambda _request: "user:viewer")
+    monkeypatch.setattr(
+        audit,
+        "audit_event",
+        lambda kind, **payload: recorded.append((kind, payload)) or True,
+    )
+
+    denied = client.post(
+        f"{BASE}/{row['id']}/approve-action",
+        json={
+            "expected_revision": row["revision"],
+            "confirm": True,
+            "approval_binding_sha256": row["operation"]["approval_card"][
+                "binding_sha256"
+            ],
+        },
+    )
+
+    assert denied.status_code == 403
+    assert service.get(ctx, row["id"]) == row
+    assert tickets.creates == 0
+    assert len(recorded) == 1
+    kind, payload = recorded[0]
+    assert kind == audit.EventKind.CAPABILITY_DENIED
+    assert payload["principal"] == "user:viewer"
+    assert len(payload["resource_sha256"]) == 64
+    assert row["id"] not in str(payload)
+    assert row["vendor_name"] not in str(payload)
+
+
 def test_http_returns_reapproval_recovery_for_changed_budget_binding(web, monkeypatch):
     client, service, ctx, tickets = web
     row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
@@ -389,9 +889,90 @@ def test_http_returns_reapproval_recovery_for_changed_budget_binding(web, monkey
     assert tickets.creates == 0
 
 
+def test_http_role_loss_retires_approval_before_permission_denial_and_restore(
+    web,
+    monkeypatch,
+):
+    from maverick_dashboard import vendor_onboarding_api as api
+
+    client, service, ctx, tickets = web
+    row = _step(client, _step(client, _intake(client), "collect-evidence"), "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Approved for a bounded synthetic check",
+    )
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
+
+    permission = [True]
+    current_context = [ctx]
+
+    def require_current_permission(_request, _permission):
+        if not permission[0]:
+            raise HTTPException(403, "insufficient role for this action")
+
+    service.authorize = (
+        lambda candidate, _capability, _resource:
+        candidate.authorization_role != "read_only"
+    )
+    monkeypatch.setattr(api, "require_permission", require_current_permission)
+    monkeypatch.setattr(
+        app.state,
+        "vendor_onboarding_binding_factory",
+        lambda _request: WorkflowBinding(service, current_context[0]),
+    )
+
+    permission[0] = False
+    current_context[0] = replace(
+        ctx,
+        authorization_role="read_only",
+        authorization_policy="read-only-policy-v2",
+    )
+    denied = client.post(
+        f"{BASE}/{row['id']}/execute",
+        json={"expected_revision": row["revision"], "confirm": True},
+    )
+
+    assert denied.status_code == 409
+    assert denied.json()["detail"]["code"] == "approval_authority_changed"
+    # The execute-only binding marker must not weaken any later route.
+    assert client.get(f"{BASE}/{row['id']}").status_code == 403
+    current = service.get(ctx, row["id"])
+    assert current["stage"] == "review_approved"
+    assert current["operation"] is None
+    assert current["operation_history"][-1]["invalidated_reason"] == (
+        "approval_authority_changed"
+    )
+    assert tickets.creates == 0
+
+    permission[0] = True
+    current_context[0] = ctx
+    restored = client.post(
+        f"{BASE}/{row['id']}/execute",
+        json={"expected_revision": current["revision"], "confirm": True},
+    )
+    assert restored.status_code == 409
+    assert restored.json()["detail"]["code"] == "workflow_rejected"
+    assert tickets.creates == 0
+
+
 def test_http_cross_tenant_worker_and_export_return_no_foreign_content(web, monkeypatch):
     client, service, ctx, tickets = web
     row = _intake(client)
+    row = _step(client, row, "collect-evidence")
+    row = _step(client, row, "assess")
+    row = _step(
+        client,
+        row,
+        "review",
+        decision="approved",
+        rationale="Reviewed synthetic evidence",
+    )
+    row = _step(client, row, "prepare-action")
+    row = _step(client, row, "approve-action", confirm=True)
     service.authorize = lambda _context, _capability, _resource: True
     other = replace(ctx, tenant="synthetic-b", workspace_authority="workspace-b")
     monkeypatch.setattr(
@@ -402,11 +983,29 @@ def test_http_cross_tenant_worker_and_export_return_no_foreign_content(web, monk
 
     listing = client.get(BASE)
     assert listing.status_code == 200
-    assert listing.json() == {"cases": []}
+    assert listing.json()["cases"] == []
+    assert listing.json()["has_more"] is False
+    assert row["id"] not in listing.text
     exported = client.get(f"{BASE}/{row['id']}")
     assert exported.status_code == 404
     assert row["vendor_name"] not in exported.text
     assert row["purpose"] not in exported.text
+    for path, body in (
+        ("execute", {"expected_revision": row["revision"], "confirm": True}),
+        ("evidence-export-preview", {"expected_revision": row["revision"]}),
+        (
+            "evidence-export",
+            {
+                "expected_revision": row["revision"],
+                "confirm": True,
+                "expected_export_sha256": "0" * 64,
+            },
+        ),
+    ):
+        response = client.post(f"{BASE}/{row['id']}/{path}", json=body)
+        assert response.status_code == 404
+        assert row["vendor_name"] not in response.text
+        assert row["purpose"] not in response.text
     assert tickets.creates == 0
 
 
@@ -492,7 +1091,12 @@ def stock_workspace(web, monkeypatch):
     row = service.assess(current, row["id"], row["revision"])
     row = service.review(current, row["id"], row["revision"], "approved", "Reviewed synthetic evidence")
     row = service.prepare_action(current, row["id"], row["revision"])
-    row = service.approve_action(current, row["id"], row["revision"])
+    row = service.approve_action(
+        current,
+        row["id"],
+        row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
     return service, current, row, tickets, request
 
 
@@ -606,9 +1210,12 @@ def test_precondition_provider_errors_are_not_disclosed_in_reapproval_response(w
         raise ValueError("Authorization: synthetic-private-provider-value")
 
     monkeypatch.setattr(service.documents, "head", unavailable)
-    response = client.post(f"{BASE}/{row['id']}/{step}", json={
-        "expected_revision": row["revision"], "confirm": True,
-    })
+    body = {"expected_revision": row["revision"], "confirm": True}
+    if step == "approve-action":
+        body["approval_binding_sha256"] = row["operation"]["approval_card"][
+            "binding_sha256"
+        ]
+    response = client.post(f"{BASE}/{row['id']}/{step}", json=body)
     assert response.status_code == 409, response.text
     assert "synthetic-private-provider-value" not in response.text
     assert response.json()["detail"]["code"] == "approval_preconditions_changed"
@@ -731,7 +1338,10 @@ def test_vendor_page_has_one_main_landmark_and_labelled_decision_fields(web):
     assert len(ids) == len(set(ids)), "Duplicate IDs break labels and request controls"
     label_targets = {attrs.get("for") for tag, attrs in markup.elements if tag == "label"}
     for field in ("vo-rationale", "vo-acceptance-reason", "vo-vendor", "vo-document",
-                  "vo-project", "vo-purpose", "vo-freshness", "vo-renewal", "vo-cancellation-reason"):
+                  "vo-project", "vo-purpose", "vo-freshness", "vo-due", "vo-renewal",
+                  "vo-case-project", "vo-case-purpose", "vo-case-freshness", "vo-case-due",
+                  "vo-cancellation-reason", "vo-case-filter"):
         assert field in label_targets
+    assert {"vo-page-previous", "vo-page-next", "vo-page-status"}.issubset(ids)
     message = next(attrs for _, attrs in markup.elements if attrs.get("id") == "vo-message")
     assert message["aria-live"] == "polite"

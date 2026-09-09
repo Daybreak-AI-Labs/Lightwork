@@ -7,10 +7,96 @@
   const coverage = document.getElementById("ac-coverage"), previous = document.getElementById("ac-previous");
   const next = document.getElementById("ac-next"), page = document.getElementById("ac-page");
   let model = null, offset = 0, busy = false, generation = 0, expired = false;
-  const labels = {approval:"Approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews"};
+  const labels = {approval:"Approvals",signoff:"Sign-offs",assessment:"Assessments",project_review:"Project reviews",vendor_reconciliation:"Uncertain external actions"};
   function node(tag, text, className) {
     const el = document.createElement(tag); if (text !== undefined) el.textContent = text;
     if (className) el.className = className; return el;
+  }
+  function words(value) { return String(value || "unknown").replaceAll("_", " "); }
+  const reconciliationReasons = new Set([
+    "current_connection_access_unavailable", "no_matching_effect_observed",
+    "multiple_matching_effects_observed", "matching_effect_content_mismatch",
+    "authoritative_readback_unavailable", "receipt_recorded_readback_unverified",
+    "attempt_result_unrecorded",
+  ]);
+  const readbackStates = new Set([
+    "not_completed", "access_unavailable", "no_match", "multiple_matches",
+    "readback_mismatch", "readback_unavailable", "exact_match_verified",
+  ]);
+  function exactObject(value, keys) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const actual = Object.keys(value);
+    return actual.length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
+  }
+  const nonblank = (value, limit=2000) => typeof value === "string" && value.length > 0 &&
+    value.length <= limit && value.trim() === value;
+  const timestamp = (value, optional=false) => optional && value === null ||
+    typeof value === "number" && Number.isFinite(value) && value > 0;
+  function validObservation(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    if (value.kind === "execution_attempt") return exactObject(value,["kind","state","count","observed_at"]) &&
+      value.state === "recorded" && Number.isInteger(value.count) && value.count >= 1 && timestamp(value.observed_at);
+    if (value.kind === "provider_receipt") return exactObject(value,["kind","state"]) &&
+      ["recorded","not_recorded"].includes(value.state);
+    if (value.kind !== "authoritative_readback") return false;
+    const allowed = new Set(["kind","state","observed_at","match_count","match_count_lower_bound"]);
+    if (!Object.keys(value).every(key=>allowed.has(key)) ||
+        !["kind","state","observed_at"].every(key=>Object.prototype.hasOwnProperty.call(value,key)) ||
+        !readbackStates.has(value.state) || !timestamp(value.observed_at,true)) return false;
+    const exact = value.match_count, lower = value.match_count_lower_bound;
+    if (exact !== undefined && (!Number.isInteger(exact) || exact < 0)) return false;
+    if (lower !== undefined && (!Number.isInteger(lower) || lower < 2)) return false;
+    if (exact !== undefined && lower !== undefined) return false;
+    if (value.state === "no_match" && exact !== 0) return false;
+    if (value.state === "multiple_matches" &&
+        !((Number.isInteger(exact) && exact >= 2) || (Number.isInteger(lower) && lower >= 2))) return false;
+    if (value.state === "not_completed" && (value.observed_at !== null || exact !== undefined || lower !== undefined)) return false;
+    if (value.state !== "not_completed" && value.observed_at === null) return false;
+    return !["exact_match_verified","readback_mismatch"].includes(value.state) || exact === 1;
+  }
+  function reconciliationDetails(item) {
+    const detail = item.reconciliation;
+    if (!exactObject(detail,["schema","attempted_action","known_observations","uncertainty",
+      "safe_next_check","responsible_operator","resolution"]) ||
+        detail.schema !== "lightwork.vendor-onboarding.reconciliation-summary.v1") return null;
+    const attempted = detail.attempted_action, observations = detail.known_observations;
+    if (!exactObject(attempted,["operation_id","action","attempt_count","started_at","target"]) ||
+        !/^VOP-[a-f0-9]{32}$/.test(attempted.operation_id) || attempted.action !== "jira.create" ||
+        !Number.isInteger(attempted.attempt_count) || attempted.attempt_count < 1 ||
+        !timestamp(attempted.started_at) || !exactObject(attempted.target,["provider","project"]) ||
+        attempted.target.provider !== "jira" || !/^[A-Z][A-Z0-9_]{1,31}$/.test(attempted.target.project) ||
+        !Array.isArray(observations) || observations.length !== 3 || !observations.every(validObservation)) return null;
+    const byKind = new Map(observations.map(value=>[value.kind,value]));
+    if (byKind.size !== 3 || !["execution_attempt","provider_receipt","authoritative_readback"].every(kind=>byKind.has(kind)) ||
+        byKind.get("execution_attempt").count !== attempted.attempt_count ||
+        byKind.get("execution_attempt").observed_at !== attempted.started_at) return null;
+    const uncertainty = detail.uncertainty, next = detail.safe_next_check;
+    if (!exactObject(uncertainty,["state","reason","explanation"]) || uncertainty.state !== "unresolved" ||
+        !reconciliationReasons.has(uncertainty.reason) || !nonblank(uncertainty.explanation) ||
+        !next || !["check_status","review_ambiguity","restore_access"].includes(next.kind) ||
+        !exactObject(next,next.kind === "restore_access" ? ["kind","label","mode","href"] : ["kind","label","mode"]) ||
+        !nonblank(next.label,500) || next.mode !== "read_only" ||
+        (next.kind === "restore_access" && next.href !== "/connections")) return null;
+    const expected = {
+      current_connection_access_unavailable:["restore_access",null],
+      no_matching_effect_observed:["check_status","no_match"],
+      multiple_matching_effects_observed:["review_ambiguity","multiple_matches"],
+      matching_effect_content_mismatch:["review_ambiguity","readback_mismatch"],
+      authoritative_readback_unavailable:["check_status","readback_unavailable"],
+      receipt_recorded_readback_unverified:["check_status","not_completed"],
+      attempt_result_unrecorded:["check_status","not_completed"],
+    }[uncertainty.reason];
+    const receipt = byKind.get("provider_receipt"), readback = byKind.get("authoritative_readback");
+    if (next.kind !== expected[0] || expected[1] !== null && readback.state !== expected[1] ||
+        uncertainty.reason === "receipt_recorded_readback_unverified" && receipt.state !== "recorded" ||
+        uncertainty.reason === "attempt_result_unrecorded" && receipt.state !== "not_recorded") return null;
+    if (!exactObject(detail.responsible_operator,["principal","business_owner"]) ||
+        !nonblank(detail.responsible_operator.principal,256) || !nonblank(detail.responsible_operator.business_owner,256) ||
+        !exactObject(detail.resolution,["automatic_compensation_supported","unreviewed_replacement_allowed","requires_separate_review","explanation"]) ||
+        detail.resolution.automatic_compensation_supported !== false ||
+        detail.resolution.unreviewed_replacement_allowed !== false ||
+        detail.resolution.requires_separate_review !== true || !nonblank(detail.resolution.explanation)) return null;
+    return detail;
   }
   function pending(value) {
     busy = value; root.setAttribute("aria-busy", String(value));
@@ -44,6 +130,32 @@
       article.append(node("h2", item.title));
       article.append(node("p", `${labels[item.kind]} · ${item.assignment === "mine" ? "Assigned to you" : "Available to review"} · ${item.read ? "Read" : "Unread"}`));
       article.append(node("p", item.reason, "muted"));
+      const reconciliation = reconciliationDetails(item);
+      if (item.kind === "vendor_reconciliation" && !reconciliation)
+        throw new Error("Uncertain action details were incomplete. Refresh or open vendor onboarding directly.");
+      if (reconciliation) {
+        const details = node("section", undefined, "panel");
+        details.append(node("h3", "What Lightwork knows"));
+        const attempted = reconciliation.attempted_action;
+        details.append(node("p", `Attempted action: ${words(attempted.action)} · ${Number(attempted.attempt_count) || 0} recorded attempt${Number(attempted.attempt_count) === 1 ? "" : "s"} · Jira project ${attempted.target?.project || "unavailable"}.`));
+        const observations = node("ul");
+        reconciliation.known_observations.forEach(observation => {
+          const count = Number.isInteger(observation.match_count) ? ` · ${observation.match_count} match${observation.match_count === 1 ? "" : "es"}` :
+            Number.isInteger(observation.match_count_lower_bound) ? ` · at least ${observation.match_count_lower_bound} matches` : "";
+          observations.append(node("li", `${words(observation.kind)}: ${words(observation.state)}${count}`));
+        });
+        details.append(observations);
+        details.append(node("p", `Uncertainty: ${reconciliation.uncertainty.explanation}`));
+        details.append(node("p", `Safe next step: ${reconciliation.safe_next_check.label}. This check is read-only and cannot create another Jira task.`));
+        if (reconciliation.safe_next_check.kind === "restore_access") {
+          const access = node("a", "Resolve connection access", "btn");
+          access.href = reconciliation.safe_next_check.href; details.append(access);
+        }
+        const operator = reconciliation.responsible_operator.principal || reconciliation.responsible_operator.business_owner || "an authorized operator";
+        details.append(node("p", `Responsible operator: ${operator}.`));
+        details.append(node("p", reconciliation.resolution.explanation, "muted"));
+        article.append(details);
+      }
       if (item.due_at) article.append(node("p", `${item.overdue ? "Overdue" : "Due"}: ${new Date(item.due_at * 1000).toLocaleString()}`, item.overdue ? "badge warn" : "muted"));
       if (item.snoozed) article.append(node("p", `Snoozed until ${new Date(item.snoozed_until * 1000).toLocaleString()}`, "muted"));
       const actions = node("div"); actions.style.cssText = "display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;";

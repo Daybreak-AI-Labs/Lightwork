@@ -15,23 +15,29 @@ One JSON object per line:
 
 - `id` — stable identifier for the datum (immutable once released).
 - `label` — the correct verdict (e.g. accept = `true`, reject = `false`).
-- `prompt` — optional context shown to the evaluator; excluded from the checksum
-  (editing the artifact text does not move the decision boundary; flipping a
-  label or dropping an item does).
+- `prompt` — optional context shown to the evaluator. Because it changes what the
+  evaluator sees, it is included in the released checksum with `id` and `label`.
 
 ## The anchor is the guardrail
 
 A weak, mutable, or poisoned anchor turns provable learning into laundered
 drift (arXiv 2606.26294). Released anchors are therefore **immutable**, pinned
 by checksum in `../evaluator_anchors.lock.json` exactly as released world-model
-migrations are. After adding or extending an anchor, regenerate the lock so the
-change is reviewed:
+migrations are. After adding a separately versioned anchor, regenerate the lock
+so the addition is reviewed:
 
 ```
 python -m maverick.evaluator_evolution --regen   # rewrite the lock
 python -m maverick.evaluator_evolution --ci       # CI gate: fail on any drift
 ```
 
-This directory is intentionally empty of data by default — anchors are
-deployment-specific ground truth. The empty baseline lock keeps the CI gate
-green until you commit your first anchor.
+Missing locks, malformed or empty anchor files, unregistered roles, and edits to
+any released evaluator-visible field fail closed before anchor scoring.
+
+The repository ships `self_harness_protocol_v1.ndjson`, a balanced synthetic
+regression anchor for the F08 evaluator-boundary protocol. It makes the lock and
+CI path non-vacuous and reproducible in every checkout. It is not customer,
+provider, regulator, or independently administered ground truth, and passing it
+does not qualify a production evaluator. Deployment-specific final anchors must
+be separately versioned, independently curated, added without changing a
+released role, and reviewed together with the regenerated lock.

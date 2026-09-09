@@ -103,6 +103,35 @@ class TestRecordSession:
         assert "Transfers" in text
 
 
+class TestLessons:
+    def test_semantic_lessons_require_a_governed_reader(self, monkeypatch):
+        from maverick import knowledge_admin
+
+        monkeypatch.setattr(
+            knowledge_admin,
+            "open_knowledge_base",
+            lambda **_kwargs: pytest.fail("raw knowledge store must not be opened"),
+        )
+        assert assessment_memory.lessons("Acme CRM") == []
+
+    def test_governed_reader_is_bounded_and_malformed_results_fail_closed(self):
+        seen = []
+
+        def governed(query, limit):
+            seen.append((query, limit))
+            return ["  current approved lesson  "]
+
+        assert assessment_memory.lessons("Acme CRM", k=2, reader=governed) == [
+            "current approved lesson"
+        ]
+        assert seen == [("Acme CRM", 2)]
+        assert assessment_memory.lessons(
+            "Acme CRM",
+            k=1,
+            reader=lambda *_: ["one", "two"],
+        ) == []
+
+
 class TestConfig:
     def test_defaults(self):
         cfg = get_assessments()

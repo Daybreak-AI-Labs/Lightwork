@@ -90,6 +90,7 @@ def send_response(access_log, raw_target):
     "/%63onnections?error_description={secret}&arbitrary={secret}",
     "/auth/login?return_to=%2Fconnections%3Fcode%3D{secret}%26state%3D{secret}",
     "/auth/callback?code={secret}&state={secret}",
+    "/flow/approve?token={secret}",
 ])
 def test_real_uvicorn_response_redacts_callback_before_formatters(access_log, target):
     output, record, scope = send_response(access_log, target.format(secret=CANARY))

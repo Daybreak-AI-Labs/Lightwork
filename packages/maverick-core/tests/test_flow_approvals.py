@@ -18,7 +18,21 @@ def test_mint_verify_roundtrip():
     claim = approvals.verify_token(tok)
     assert claim == {"run_id": "run-1", "decision": "approved",
                      "cursor": "a", "prompt": "ok?", "updated": 123.0,
-                     "tenant": "", "assignee": "", "owner": ""}
+                     "tenant": "", "assignee": "", "owner": "",
+                     "binding_sha256": ""}
+
+
+def test_token_roundtrip_binds_exact_reviewed_operation():
+    binding = "a" * 64
+    token = approvals.mint_token(
+        "run-bound", "approved", cursor="gate", prompt="ship?",
+        updated=12.0, binding_sha256=binding,
+    )
+    assert approvals.verify_token(token)["binding_sha256"] == binding
+    assert approvals.mint_token(
+        "run-bound", "approved", cursor="gate", prompt="ship?",
+        updated=12.0, binding_sha256="not-a-digest",
+    ) is None
 
 
 def test_reject_token_carries_its_decision():

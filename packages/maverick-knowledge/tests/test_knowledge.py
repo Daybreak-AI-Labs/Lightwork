@@ -2,6 +2,7 @@
 per-domain ingest/search pipeline with shield-scanned ingestion."""
 from __future__ import annotations
 
+import hashlib
 import sys
 import types
 from types import SimpleNamespace
@@ -120,6 +121,7 @@ class TestBuildStore:
         store.add("hr", [("doc", "secret", [1.0, 0.0], {})])
         store.search("hr", [1.0, 0.0])
         store.count("hr")
+        store.read_where("hr", "doc_sha256", "a" * 64, limit=8)
         store.delete_collection("hr")
 
         create_table = next(sql for sql, _ in calls if sql.startswith("CREATE TABLE"))
@@ -144,6 +146,17 @@ class TestBuildStore:
         )
         assert "WHERE namespace = %s AND collection = %s" in count_sql
         assert count_params[0] == insert_params[0][0]
+
+        exact_sql, exact_params = next(
+            (sql, params)
+            for sql, params in calls
+            if sql.startswith("SELECT id, text, meta")
+        )
+        assert "WHERE namespace = %s AND collection = %s" in exact_sql
+        assert "meta ->> %s = %s" in exact_sql
+        assert exact_params == (
+            insert_params[0][0], "hr", "doc_sha256", "a" * 64, 9,
+        )
 
         delete_sql, delete_params = next(
             (sql, params) for sql, params in calls if sql.startswith("DELETE")
@@ -422,6 +435,98 @@ class TestSqliteStore:
 
 
 class TestKnowledgeBase:
+    def test_exact_document_reconstructs_overlap_and_duplicate_retry_is_idempotent(self):
+        text = "  alpha beta gamma delta epsilon zeta eta theta  "
+        store = SqliteVectorStore(":memory:")
+        kb = KnowledgeBase(
+            store=store,
+            embedder=DeterministicEmbedder(dim=64),
+            chunk_size=18,
+            chunk_overlap=4,
+        )
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+        count = kb.ingest_text("finance", text, source="quarterly.txt")
+        before = store.read_where("finance", "doc_sha256", digest, limit=100)
+        exact = kb.exact_document("finance", digest)
+        assert exact["text"] == text
+        assert exact["document_length"] == len(text)
+        assert exact["chunk_count"] == count
+
+        assert kb.ingest_text("finance", text, source="quarterly.txt") == count
+        after = store.read_where("finance", "doc_sha256", digest, limit=100)
+        assert [(row.chunk_id, row.text, row.meta) for row in after] == [
+            (row.chunk_id, row.text, row.meta) for row in before
+        ]
+
+    def test_retry_repairs_an_interrupted_deterministic_chunk_set(self):
+        text = "alpha beta gamma delta epsilon zeta eta theta"
+        store = SqliteVectorStore(":memory:")
+        kb = KnowledgeBase(
+            store=store,
+            embedder=DeterministicEmbedder(dim=64),
+            chunk_size=18,
+            chunk_overlap=4,
+        )
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        expected = kb.ingest_text("finance", text, source="quarterly.txt")
+        row = store._db.execute(
+            "SELECT id FROM chunks WHERE collection=? ORDER BY id LIMIT 1",
+            ("finance",),
+        ).fetchone()
+        store._db.execute(
+            "DELETE FROM chunks WHERE collection=? AND id=?",
+            ("finance", row[0]),
+        )
+        store._db.commit()
+
+        with pytest.raises(RuntimeError, match="ordering commitment is incomplete"):
+            kb.exact_document("finance", digest)
+        assert kb.ingest_text("finance", text, source="quarterly.txt") == expected
+        assert kb.exact_document("finance", digest)["text"] == text
+
+    def test_retry_rejects_conflicting_provenance_on_interrupted_document(self):
+        text = "alpha beta gamma delta epsilon zeta eta theta"
+        store = SqliteVectorStore(":memory:")
+        kb = KnowledgeBase(
+            store=store,
+            embedder=DeterministicEmbedder(dim=64),
+            chunk_size=18,
+            chunk_overlap=4,
+        )
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        kb.ingest_text(
+            "finance",
+            text,
+            source="alice.txt",
+            subject="subject:alice",
+            ingested_by="user:alice",
+        )
+        row = store._db.execute(
+            "SELECT id FROM chunks WHERE collection=? ORDER BY id LIMIT 1",
+            ("finance",),
+        ).fetchone()
+        store._db.execute(
+            "DELETE FROM chunks WHERE collection=? AND id=?",
+            ("finance", row[0]),
+        )
+        store._db.commit()
+
+        with pytest.raises(RuntimeError, match="bound to different provenance"):
+            kb.ingest_text(
+                "finance",
+                text,
+                source="bob.txt",
+                subject="subject:bob",
+                ingested_by="user:bob",
+            )
+
+        surviving = store.read_where("finance", "doc_sha256", digest, limit=100)
+        assert surviving
+        assert {row.meta["source"] for row in surviving} == {"alice.txt"}
+        assert {row.meta["subject"] for row in surviving} == {"subject:alice"}
+        assert {row.meta["ingested_by"] for row in surviving} == {"user:alice"}
+
     def test_ingest_and_search_per_domain(self):
         kb = KnowledgeBase(embedder=DeterministicEmbedder(dim=128))
         kb.ingest_text("finance", "Q3 revenue grew twelve percent year over year.",

@@ -12,7 +12,9 @@ import pytest
 from click.testing import CliRunner
 
 
-@pytest.mark.parametrize("status", ["upgraded", "rolled_back", "incomplete"])
+@pytest.mark.parametrize(
+    "status", ["upgraded", "rolled_back", "repaired", "repair_recovered", "incomplete"],
+)
 @pytest.mark.parametrize("open_result", [True, False])
 def test_result_window_resets_frozen_environment_without_changing_parent(
     tmp_path, monkeypatch, status, open_result,
@@ -67,3 +69,78 @@ def test_result_window_resets_frozen_environment_without_changing_parent(
         assert kwargs["env"] is not environment
         assert all(kwargs[name] == subprocess.DEVNULL for name in ("stdin", "stdout", "stderr"))
         assert kwargs["creationflags"] == 0x08000000
+
+
+def test_native_repair_authorization_protocol_has_a_fixed_actor_and_confirmation(
+    monkeypatch,
+):
+    cli = importlib.import_module("maverick.cli")
+    recovery = importlib.import_module("maverick.installation_recovery")
+    calls = []
+
+    def authorize_repair(**kwargs):
+        calls.append(kwargs)
+        return {"id": "a" * 32, "operation": "repair"}
+
+    monkeypatch.setattr(recovery, "authorize_repair", authorize_repair)
+    result = CliRunner().invoke(
+        cli.installation_maintenance_cmd,
+        ["authorize-repair"],
+        input=json.dumps({"confirm": True}),
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"id": "a" * 32, "operation": "repair"}
+    assert calls == [{
+        "actor": "native-desktop-repair",
+        "confirm_all_workspaces": True,
+    }]
+
+
+def test_native_repair_capability_and_authorization_forward_the_exact_signed_identity(
+    monkeypatch,
+):
+    cli = importlib.import_module("maverick.cli")
+    recovery = importlib.import_module("maverick.installation_recovery")
+    identity = {
+        "runtime_sha256": "a" * 64,
+        "installer_sha256": "b" * 64,
+        "public_key": "installed-public-key",
+        "version": "1.2.3",
+    }
+    capability_calls = []
+    authorization_calls = []
+    monkeypatch.setattr(
+        recovery,
+        "repair_capability",
+        lambda **kwargs: capability_calls.append(kwargs) or {"compatible": True},
+    )
+    monkeypatch.setattr(
+        recovery,
+        "authorize_repair",
+        lambda **kwargs: authorization_calls.append(kwargs) or {"operation": "repair"},
+    )
+
+    result = CliRunner().invoke(
+        cli.installation_maintenance_cmd,
+        ["repair-capability"],
+        input=json.dumps(identity),
+    )
+    assert result.exit_code == 0, result.output
+    assert capability_calls == [{
+        "expected_runtime_sha256": "a" * 64,
+        "expected_installer_sha256": "b" * 64,
+        "expected_public_key": "installed-public-key",
+        "expected_version": "1.2.3",
+    }]
+
+    result = CliRunner().invoke(
+        cli.installation_maintenance_cmd,
+        ["authorize-repair"],
+        input=json.dumps({"confirm": True, **identity}),
+    )
+    assert result.exit_code == 0, result.output
+    assert authorization_calls == [{
+        "actor": "native-desktop-repair",
+        "confirm_all_workspaces": True,
+        **capability_calls[0],
+    }]

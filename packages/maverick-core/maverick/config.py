@@ -2875,6 +2875,52 @@ def data_use_governance_enabled(cfg: dict | None = None) -> bool:
     return isinstance(section, dict) and section.get("enable") is True
 
 
+def knowledge_access_enabled(cfg: dict | None = None) -> bool:
+    """Whether the governed in-app organizational-memory surface is enabled.
+
+    Existing installations keep the feature available when the section is
+    absent.  An explicit false disables it, and malformed or unreadable active
+    configuration fails closed. ``MAVERICK_KNOWLEDGE_ACCESS`` has the same
+    deployment override semantics as other product feature gates.
+    """
+
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            return False
+        override = env_flag("MAVERICK_KNOWLEDGE_ACCESS")
+        if override is not None:
+            return override
+        if "knowledge_access" not in loaded:
+            return True
+        section = loaded.get("knowledge_access")
+    except Exception:  # pragma: no cover - authority reads fail closed
+        return False
+    return isinstance(section, dict) and section.get("enable", True) is True
+
+
+def candidate_promotion_enabled(cfg: dict | None = None) -> bool:
+    """Whether guarded research-candidate promotion is enabled.
+
+    Promotion can change production state, so the capability is opt-in and
+    malformed or unreadable active configuration fails closed. The deployment
+    override follows the same environment-first convention as other feature
+    gates.
+    """
+
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            return False
+        override = env_flag("MAVERICK_CANDIDATE_PROMOTION")
+        if override is not None:
+            return override
+        section = loaded.get("candidate_promotion", {})
+    except Exception:  # pragma: no cover - authority reads fail closed
+        return False
+    return isinstance(section, dict) and section.get("enable") is True
+
+
 def get_flows() -> dict:
     """Return the ``[flows]`` section (the flow engine).
 

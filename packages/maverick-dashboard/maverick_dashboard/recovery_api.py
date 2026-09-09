@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -58,6 +60,19 @@ class KeyIn(ConfirmIn):
 
 class EncryptionKeysIn(ConfirmIn):
     confirm_shared_keys: bool = Field(strict=True)
+
+
+class BootstrapIn(ConfirmIn):
+    source_offline: bool = Field(strict=True)
+
+
+class ReconciliationIn(ConfirmIn):
+    disposition: Literal[
+        "retire_and_create_new_request",
+        "external_effect_absent",
+        "external_effect_recorded",
+    ]
+    evidence_reference: str | None = Field(default=None, max_length=512)
 
 
 class RestoreIn(ConfirmIn):
@@ -183,6 +198,41 @@ async def download_encryption_keys(request: Request, body: EncryptionKeysIn):
         "Content-Disposition": 'attachment; filename="Lightwork-local-encryption-keys.zip"', "Cache-Control": "private, no-store"})
 
 
+@router.post("/api/v1/recovery/bootstrap/prepare")
+async def prepare_bootstrap(request: Request, body: BootstrapIn):
+    actor = _admit(request, mutation=True)
+    _confirm(body)
+    if body.source_offline is not True:
+        raise HTTPException(400, "Confirm that the source installation is offline.")
+    result = await _call(
+        recovery.prepare_bootstrap,
+        isolated=isolated(request.app),
+        actor=actor,
+        source_offline=body.source_offline,
+    )
+    return Response(
+        json.dumps(result),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/api/v1/recovery/bootstrap/resume")
+async def resume_bootstrap(request: Request, body: ConfirmIn):
+    actor = _admit(request, mutation=True)
+    _confirm(body)
+    result = await _call(
+        recovery.resume_bootstrap_restore,
+        isolated=isolated(request.app),
+        actor=actor,
+    )
+    return Response(
+        json.dumps(result),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.post("/api/v1/recovery/snapshots", status_code=201)
 async def create_snapshot(request: Request, body: ConfirmIn):
     _admit(request, mutation=True)
@@ -306,6 +356,92 @@ async def download_retained_key_test(request: Request, identifier: str, body: Re
     return Response(payload, media_type="application/json", headers={
         "Content-Disposition": 'attachment; filename="Lightwork-retained-key-test-' + identifier + '.json"',
         "Cache-Control": "private, no-store"})
+
+
+@router.post("/api/v1/recovery/snapshots/{identifier}/retained-keys/install")
+async def install_retained_keys(request: Request, identifier: str):
+    actor = _admit(request, mutation=True)
+    if request.headers.get("X-Lightwork-Confirm-Key-Install") != "true":
+        raise HTTPException(
+            400,
+            "Explicitly confirm installing this separately tested key copy into the empty installation.",
+        )
+    if request.headers.get("Content-Type", "").split(";")[0] != "application/octet-stream":
+        raise HTTPException(415, "Select the separately retained Lightwork encryption-key ZIP.")
+    expected = request.headers.get("X-Lightwork-Snapshot-SHA256", "")
+    report_id = request.headers.get("X-Lightwork-Custody-Report", "")
+    if (not re.fullmatch(r"[0-9a-f]{64}", expected)
+            or not re.fullmatch(r"[0-9a-f]{32}", report_id)):
+        raise HTTPException(400, "Load the exact saved custody report before installing retained keys.")
+    upload = bytearray()
+    async for chunk in request.stream():
+        if len(upload) + len(chunk) > recovery.MAX_CUSTODY_UPLOAD_BYTES:
+            raise HTTPException(413, "The retained-key ZIP exceeds the 4 MiB upload limit.")
+        upload.extend(chunk)
+    if not upload:
+        raise HTTPException(400, "Select the separately retained encryption-key ZIP.")
+    result = await _call(
+        recovery.install_retained_keys,
+        identifier,
+        bytes(upload),
+        expected_sha256=expected,
+        report_id=report_id,
+        isolated=isolated(request.app),
+        actor=actor,
+    )
+    return Response(
+        json.dumps(result),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.get("/api/v1/recovery/reconciliation")
+async def reconciliation_status(request: Request):
+    actor = _admit(request)
+    result = await _call(recovery.reconciliation_status, actor=actor)
+    return Response(
+        json.dumps(result),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/api/v1/recovery/reconciliation/items/{item_id}")
+async def resolve_reconciliation(
+    request: Request, item_id: str, body: ReconciliationIn
+):
+    actor = _admit(request, mutation=True)
+    _confirm(body)
+    result = await _call(
+        recovery.resolve_reconciliation,
+        item_id,
+        body.disposition,
+        evidence_reference=body.evidence_reference,
+        isolated=isolated(request.app),
+        actor=actor,
+    )
+    return Response(
+        json.dumps(result),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/api/v1/recovery/reconciliation/complete")
+async def complete_reconciliation(request: Request, body: ConfirmIn):
+    actor = _admit(request, mutation=True)
+    _confirm(body)
+    result = await _call(
+        recovery.complete_reconciliation,
+        isolated=isolated(request.app),
+        actor=actor,
+    )
+    return Response(
+        json.dumps(result),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.post("/api/v1/recovery/snapshots/{identifier}/retire")

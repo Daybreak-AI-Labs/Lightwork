@@ -1,13 +1,20 @@
 const {defineConfig}=require('@playwright/test');
-const os=require('node:os'),path=require('node:path');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 // On Windows use a workspace-owned temporary root. Some managed user TEMP
 // directories prevent Chromium cache cleanup even after the browser exits.
 if(process.platform==='win32'){
   const temporary=process.env.LIGHTWORK_BROWSER_TEMP||path.resolve(__dirname,'../../../..','.browser-runtime');
-  require('node:fs').mkdirSync(temporary,{recursive:true});
+  fs.mkdirSync(temporary,{recursive:true});
   process.env.TEMP=temporary;process.env.TMP=temporary;
 }
-const port=Number(process.env.LIGHTWORK_BROWSER_PORT||8769);
+// The desktop OAuth return profile deliberately accepts the installed dashboard
+// origin only. Keep the default browser gate on that real origin; callers that
+// override the port are running the non-native browser journeys only.
+const port=Number(process.env.LIGHTWORK_BROWSER_PORT||8765);
+const repositoryRoot=path.resolve(__dirname,'../../../..');
+const workspacePython=path.join(repositoryRoot,'.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
+const pythonExecutable=process.env.LIGHTWORK_BROWSER_PYTHON||(fs.existsSync(workspacePython)?workspacePython:(process.platform==='win32'?'python':'python3'));
+const pythonCommand=JSON.stringify(pythonExecutable);
 // Capture this test-only opt-in before the server clears LIGHTWORK_* variables.
 const showVendorSetup=process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP==='1'?' --show-vendor-setup':'';
 module.exports=defineConfig({
@@ -16,5 +23,5 @@ module.exports=defineConfig({
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],
   use:{baseURL:`http://127.0.0.1:${port}`,extraHTTPHeaders:{Origin:`http://127.0.0.1:${port}`},browserName:'chromium',headless:true,trace:'retain-on-failure',screenshot:'only-on-failure'},
-  webServer:{command:`python server.py --port ${port}${showVendorSetup}`,url:`http://127.0.0.1:${port}/livez`,reuseExistingServer:false,timeout:120000},
+  webServer:{command:`${pythonCommand} server.py --port ${port}${showVendorSetup}`,url:`http://127.0.0.1:${port}/livez`,reuseExistingServer:false,timeout:120000},
 });

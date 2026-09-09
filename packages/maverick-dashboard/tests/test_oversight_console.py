@@ -119,6 +119,58 @@ def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
     assert "Art 14" in text
 
 
+def test_pending_exact_operation_renders_current_and_actionable_inline(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    import re
+    import time
+
+    from maverick.approval_cards import build_approval_card, encode_approval_detail
+    from maverick.world_model import WorldModel
+
+    card = build_approval_card(
+        action="browser.click",
+        summary="Approve the reviewed customer change",
+        target_label="Customer settings save button",
+        target={"page": "https://customer.test/settings", "selector": "#save"},
+        parameters={"selector": "#save"},
+        parameter_summary=["Activate the Save button once"],
+        actor="local:dashboard",
+        workspace="default",
+        role="operator",
+        authority_versions={"role_revision": "role-v1"},
+        input_versions={"page_revision": "page-v1"},
+        credential_versions={"browser_session_sha256": "a" * 64},
+        budget={"currency": "USD", "maximum": 0.25},
+        expires_at=time.time() + 300,
+        known_effects=["The reviewed customer setting will be saved."],
+        unresolved_assumptions=[],
+        irreversible=False,
+        before="The setting is disabled.",
+        after="The setting is enabled.",
+    )
+    world = WorldModel(tmp_path / "world.db")
+    approval_id = world.create_approval(
+        "browser.click",
+        risk="high",
+        scope="#save",
+        detail=encode_approval_detail(card),
+    )
+
+    text = _client().get("/oversight").text
+    row = re.search(
+        rf'<tr data-id="{approval_id}".*?</tr>', text, flags=re.DOTALL,
+    )
+
+    assert row is not None
+    assert "Approve the reviewed customer change" in row.group(0)
+    assert "Customer settings save button" in row.group(0)
+    assert f'data-binding="{card["binding_sha256"]}"' in row.group(0)
+    assert 'data-action="approve" disabled' not in row.group(0)
+    assert "older request has no exact-operation review" not in row.group(0)
+
+
 def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.world_model import WorldModel
@@ -165,6 +217,28 @@ def _enable_oidc_principal_map(monkeypatch):
 
 def _as(user: str) -> dict:
     return {"Authorization": f"Bearer {user}"}
+
+
+def test_viewer_cannot_read_or_operate_the_global_approval_queue(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _enable_oidc_principal_map(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+
+    from maverick.world_model import WorldModel
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:viewer", "viewer")
+    WorldModel(tmp_path / "world.db").create_approval(
+        "tenant-secret-operation",
+        risk="high",
+        detail="Sensitive cross-owner target and parameters",
+    )
+
+    response = _client().get("/oversight", headers=_as("viewer"))
+
+    assert response.status_code == 403
+    assert "tenant-secret-operation" not in response.text
+    assert "Sensitive cross-owner target and parameters" not in response.text
 
 
 def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):

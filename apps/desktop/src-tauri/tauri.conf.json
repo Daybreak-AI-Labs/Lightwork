@@ -29,8 +29,8 @@
     "active": true,
     "targets": ["dmg", "app", "msi", "nsis", "deb", "appimage"],
     "icon": ["icons/icon.png", "../../installer-desktop/src-tauri/icons/icon.ico"],
-    "category": "DeveloperTool",
-    "shortDescription": "Lightwork dashboard desktop shell",
-    "longDescription": "Native window for the local Lightwork dashboard: launches `maverick dashboard` if it is not already running and embeds http://127.0.0.1:8765."
+    "category": "Business",
+    "shortDescription": "Governed AI operations in one desktop app",
+    "longDescription": "Run governed workflows, review evidence and approvals, manage connections, and recover work from the Lightwork desktop app."
   }
 }

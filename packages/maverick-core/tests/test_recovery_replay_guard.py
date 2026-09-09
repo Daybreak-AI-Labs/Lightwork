@@ -248,7 +248,12 @@ def test_vendor_operation_cannot_regain_approval_through_restore(workspace, ambi
     row = service.assess(ctx, row["id"], row["revision"])
     row = service.review(ctx, row["id"], row["revision"], "approved", "Restricted synthetic pilot")
     row = service.prepare_action(ctx, row["id"], row["revision"])
-    row = service.approve_action(ctx, row["id"], row["revision"])
+    row = service.approve_action(
+        ctx,
+        row["id"],
+        row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
     snapshot = workspace_recovery.create()
     executed = service.execute(ctx, row["id"])
     expected = "reconciliation_required" if ambiguous else "verified"

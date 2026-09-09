@@ -24,6 +24,10 @@ def _query(digest: str, query_id: str, *, cycle: str = "cycle-1",
     return HoldoutQuery(
         holdout_sha256=digest, query_id=query_id, cycle_id=cycle,
         signature=signature, evaluator_epoch=epoch, view_sha256=view,
+        final_set_sha256=fingerprint_manifest({
+            "holdout_sha256": digest, "query_id": query_id,
+        }),
+        protocol_sha256=fingerprint_manifest({"protocol": "holdout-test-v1"}),
     )
 
 

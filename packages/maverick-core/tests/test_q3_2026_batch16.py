@@ -130,6 +130,7 @@ def test_navigate_checkpoints_session(monkeypatch):
     monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
     fake = _FakeSession()
     monkeypatch.setattr(browser_mod, "_get_session", lambda: fake)
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     out = browser_mod._run_browser_action({"action": "navigate", "url": "https://example.com"})
     assert out.startswith("navigated to https://example.com")
     assert fake.save_calls == 1
@@ -139,6 +140,7 @@ def test_save_session_action(monkeypatch):
     monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
     fake = _FakeSession()
     monkeypatch.setattr(browser_mod, "_get_session", lambda: fake)
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     out = browser_mod._run_browser_action({"action": "save_session"})
     assert out == "session saved"
     assert fake.save_calls == 1
@@ -152,6 +154,7 @@ def test_save_session_reports_when_not_saved(monkeypatch):
             return False
 
     monkeypatch.setattr(browser_mod, "_get_session", lambda: _NoSaveSession())
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     out = browser_mod._run_browser_action({"action": "save_session"})
     assert "not saved" in out.lower()
 
@@ -170,6 +173,7 @@ def test_navigate_denies_disallowed_redirect_final_host(monkeypatch):
     fake = _FakeSession()
     fake.page.goto_url = "https://evil.com/private"
     monkeypatch.setattr(browser_mod, "_get_session", lambda: fake)
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     closed = []
     monkeypatch.setattr(browser_mod, "close_browser", lambda: closed.append(True))
 

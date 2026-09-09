@@ -143,6 +143,46 @@ def test_write_with_confirm_executes(monkeypatch):
     assert req.call_args.args[0] == "POST"
 
 
+def test_existing_record_update_requires_and_sends_if_match(monkeypatch):
+    _set(monkeypatch)
+    req = MagicMock(return_value=_resp(200, {"ok": True}))
+    _fake_httpx(monkeypatch, request=req)
+    tool = _tool()
+
+    missing = tool.fn({
+        "op": "patch", "path": "/things/7", "body": {"name": "new"},
+        "confirm": True,
+    })
+    assert "requires if_match" in missing
+    req.assert_not_called()
+
+    out = tool.fn({
+        "op": "patch", "path": "/things/7", "body": {"name": "new"},
+        "if_match": '"revision-7"', "confirm": True,
+    })
+    assert "ok" in out
+    assert req.call_args.kwargs["headers"]["If-Match"] == '"revision-7"'
+    assert tool.input_schema["x-lightwork-conditional-revision"] == {
+        "field": "if_match",
+        "header": "If-Match",
+        "operations": ["put", "patch", "delete"],
+    }
+
+
+def test_existing_record_update_rejects_wildcard_if_match(monkeypatch):
+    _set(monkeypatch)
+    req = MagicMock(return_value=_resp(200, {"ok": True}))
+    _fake_httpx(monkeypatch, request=req)
+
+    out = _tool().fn({
+        "op": "patch", "path": "/things/7", "body": {"name": "new"},
+        "if_match": "*", "confirm": True,
+    })
+
+    assert "single ETag/revision value" in out
+    req.assert_not_called()
+
+
 def test_bearer_auth_header(monkeypatch):
     _set(monkeypatch)
     req = MagicMock(return_value=_resp(200, {}))

@@ -49,7 +49,11 @@ _PATH_KEYS = {
 _REMOTE_ID_RE = re.compile(r"[A-Za-z0-9_.:-]{4,128}\Z")
 _MAX_ERROR = 500
 _MAX_BATCH = 200
-_HELD_STATUSES = frozenset({"dispatching", "dispatch_unconfirmed"})
+_HELD_STATUSES = frozenset({
+    "dispatching",
+    "dispatch_unconfirmed",
+    "bootstrap_reauthorization_required",
+})
 _HELD_REASON = (
     "Delivery is in progress or its outcome is unconfirmed; review the outbound "
     "record and external system before any retry."

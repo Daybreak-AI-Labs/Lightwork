@@ -2,8 +2,10 @@
 
 `ResearchContainerRunner` in `research.py` is a trusted-controller primitive for
 bounded Python candidates in a local Linux Docker engine. It is intentionally
-not registered in the ordinary sandbox factory, dashboard, installer or public
-research submission route. It adds no user-operable capability yet.
+not registered in the ordinary agent sandbox factory and cannot be selected or
+invoked by candidate code. `ResearchJobs` composes it behind the authenticated
+Research lab queue. The dashboard and advanced installer expose that governed
+controller workflow, not this primitive directly.
 
 The caller supplies a bounded mapping of relative file names to immutable bytes,
 an entrypoint within that mapping, a reviewed image already present locally, and
@@ -60,20 +62,28 @@ and retained temporary snapshot. The caller must resolve that uncertainty before
 claiming completion. Do not blindly resubmit the same candidate or delete the
 snapshot while a container may still be using it.
 
-## Integration still required
+## Integration boundary and remaining qualification
 
-This primitive is not completion of F03-A3 or the research platform. It does not
-authenticate a researcher, materialize a repository under that principal's
-authority, authorize a submission, derive attenuated capabilities, integrate an
-app job queue, persist an observation, or decide scientific/evaluator success.
+`ResearchJobs` now authenticates a named researcher, persists a tenant-scoped
+governed submission, requires a separately authorized named administrator to
+review the exact source, and records safe execution provenance before the
+controller-owned oracle publishes `AuthenticatedTestEvidence`. The administrator
+profile is configured globally through the app or the advanced installer; tenant
+overlays cannot replace its image or evaluators. Candidate stdout/JUnit and
+candidate-provided counts still have no evidence authority.
 
-It deliberately does not implement `exec_authenticated_tests` and does not mark
-itself ready for authenticated scoring. A separate trusted oracle/controller
-must evaluate candidate behavior outside the candidate process, bind its results
-to nonce/subject/arm/policy, and integrate with the existing evidence contract.
-Parsing candidate stdout/JUnit or signing candidate-provided counts is not that
-implementation. Any later user-facing integration needs the corresponding
-configuration and installer steps and independent acceptance through that path.
+The user-facing integration accepts a bounded set of browser-selected UTF-8
+files. It does not clone or materialize an arbitrary repository, install
+dependencies, mount external or hidden datasets, inject candidate secrets, run
+an arbitrary trusted evaluator command, or qualify a scientific claim. The
+exact-output oracle covers deterministic acceptance only.
+
+The governed-record seam can select the admitted local or shared Postgres
+backend. No shared-Postgres end-to-end research run or multi-replica worker has
+been qualified. Dispatch currently occurs through the dashboard service's
+bounded worker thread rather than a separately deployed least-privilege research
+worker. Automated orphan cleanup, retention release, and abandoned-running-job
+reconciliation also remain separate work.
 
 `/scratch` is not claimed to be the only writable filesystem location: Docker
 provides private IPC shared memory and special runtime mounts. The positive test

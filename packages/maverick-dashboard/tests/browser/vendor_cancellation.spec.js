@@ -85,6 +85,17 @@ test('desktop cancellation preserves the ticket from an in-app delivery and perm
   await expect(page.locator('#vo-prepare')).toBeEnabled();
   await page.locator('#vo-prepare').click();
   await expect(page.locator('#vo-approve')).toBeEnabled();
+  await expect(page.locator('#vo-operation')).toContainText('RECOMMENDATION ONLY');
+  await expect(page.locator('#vo-operation')).toContainText('prediction does not grant authority');
+  await expect(page.locator('#vo-operation')).toContainText('Actor:');
+  await expect(page.locator('#vo-operation')).toContainText('Workspace: browser-workspace');
+  await expect(page.locator('#vo-operation')).toContainText('Target: Jira project VEND');
+  await expect(page.locator('#vo-operation')).toContainText('Exact input digest:');
+  await expect(page.locator('#vo-operation')).toContainText('Credential versions:');
+  await expect(page.locator('#vo-operation')).toContainText('Budget:');
+  await expect(page.locator('#vo-operation')).toContainText('KNOWN EFFECTS');
+  await expect(page.locator('#vo-operation')).toContainText('UNRESOLVED ASSUMPTIONS');
+  await expect(page.locator('#vo-operation')).toContainText('FULL REVIEWED JIRA CONTENT');
   await page.locator('#vo-approve').click();
   await expect(page.locator('#vo-execute')).toBeEnabled();
   await page.locator('#vo-execute').click();
@@ -122,9 +133,7 @@ test('failed cancellation preserves the reason and stale state requires a refres
   await expect(page.locator('#vo-cancellation-confirm')).toBeChecked();
   await ok(await request.post(API + '/' + row.id + '/collect-evidence', {data: {expected_revision: row.revision}}));
   await page.locator('#vo-cancel').click();
-  await expect(page.locator('#vo-message')).toContainText('Refresh requests, review the current ticket result');
-  await expect(page.locator('#vo-cancellation-reason')).toHaveValue(reason);
-  await page.locator('#vo-refresh').click();
+  await expect(page.locator('#vo-message')).toContainText('Current version 2');
   await expect(page.locator('#vo-cancellation-reason')).toHaveValue('');
   await expect(page.locator('#vo-cancellation-confirm')).not.toBeChecked();
   await confirm(page, 'Reviewed the refreshed request; cancel local work');

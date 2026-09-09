@@ -44,6 +44,12 @@ def inventory(tmp_path):
         "packages": [{"distribution": name} for name in ("maverick-agent", "maverick-shield", "maverick-channels",
             "maverick-evolve", "maverick-dashboard", "maverick-mcp-server", "maverick-knowledge", "maverick-installer")],
         "runtime": {"sha256": "a" * 64, "bytes": 1234},
+        "installed_recovery": {
+            "runtime": "maverick-recovery.exe",
+            "native_shell": "maverick-recovery-desktop.exe",
+            "signed_installer": "Lightwork-recovery.msi",
+            "start_menu": "Repair Lightwork",
+        },
     }
     path = tmp_path / "runtime-inventory.json"
     path.write_text(json.dumps(value), encoding="utf-8")
@@ -182,7 +188,7 @@ if (-not $message.Contains('EXPECTED_PATH')) {throw ('No resolved input diagnost
     assert observed["created"] == [str(tmp_path / "failure.json")]
 
 
-@pytest.mark.parametrize("damage", ["bad_json", "missing_package", "duplicate_package", "runtime_hash", "runtime_size_bool", "publisher_claim", "fixture_string", "cohort_relabel"])
+@pytest.mark.parametrize("damage", ["bad_json", "missing_package", "duplicate_package", "runtime_hash", "runtime_size_bool", "publisher_claim", "fixture_string", "cohort_relabel", "recovery_set"])
 def test_inventory_contract_is_checked_before_any_package_or_process(tmp_path, inventory, damage):
     value = json.loads(inventory.read_text())
     if damage == "missing_package":
@@ -199,6 +205,8 @@ def test_inventory_contract_is_checked_before_any_package_or_process(tmp_path, i
         value["acceptance_fixture"] = "false"
     elif damage == "cohort_relabel":
         value["version"] = "0.1.8"
+    elif damage == "recovery_set":
+        value["installed_recovery"]["runtime"] = "developer-python.exe"
     inventory.write_text("{invalid" if damage == "bad_json" else json.dumps(value))
     result = probe(tmp_path, r"""
 . (Join-Path $env:PREFLIGHT_SOURCE 'msi-acceptance-preflight.ps1')

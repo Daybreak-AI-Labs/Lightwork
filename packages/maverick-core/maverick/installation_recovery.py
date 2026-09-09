@@ -1,4 +1,4 @@
-"""Reviewed Windows upgrade/rollback transactions over a whole local home.
+"""Reviewed Windows upgrade, repair, and rollback transactions over a whole local home.
 
 The authenticated recovery server grants one bounded operation. A separate
 retained runtime acquires the control-plane lock after that server exits;
@@ -29,7 +29,14 @@ from . import (
     release_identity_transition,
     workspace_recovery,
 )
-from .windows_installer_verification import inspect_signed_msi, verify_minisign
+from .windows_installer_verification import (
+    MAX_INSTALLER_BYTES,
+    UPGRADE_CODE,
+    InstallerVerificationError,
+    inspect_signed_msi,
+    installer_path,
+    verify_minisign,
+)
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _TOKEN = re.compile(r"^([0-9a-f]{32}):([0-9a-f]{64})$")
@@ -37,10 +44,44 @@ _VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 MAX_EXPANDED_BYTES = 8 * 1024**3
 MAX_TICKETS = 20
 MAX_RETIREMENT_HISTORY = 100
+MAINTENANCE_PROTOCOL = 2
+
+_REGISTERED_INSTALLER = r"""param([Parameter(Mandatory=$true)][string]$Version)
+$ErrorActionPreference = 'Stop'
+$engine = New-Object -ComObject WindowsInstaller.Installer
+$upgrade = '{""" + UPGRADE_CODE + r"""}'
+$matches = @()
+foreach ($product in @($engine.RelatedProducts($upgrade))) {
+    try {
+        if ($engine.ProductInfo($product, 'VersionString') -cne $Version) { continue }
+        $matches += [pscustomobject]@{
+            ProductCode = $product
+            PackageCode = $engine.ProductInfo($product, 'PackageCode')
+            InstallLocation = $engine.ProductInfo($product, 'InstallLocation')
+        }
+    } catch { throw }
+}
+if ($matches.Count -ne 1) { throw 'The installed Lightwork product identity is ambiguous or unavailable.' }
+$matches[0] | ConvertTo-Json -Compress
+"""
 
 
 class MaintenanceError(RuntimeError):
     """Maintenance has not established the authority or consistency it needs."""
+
+
+_TERMINAL_BY_OPERATION = {
+    "upgrade": frozenset({"upgraded", "upgrade_recovered"}),
+    "repair": frozenset({"repaired", "repair_recovered"}),
+    "rollback": frozenset({"rolled_back"}),
+}
+
+
+def _operation(record: dict) -> str:
+    operation = record.get("operation")
+    if not isinstance(operation, str) or operation not in _TERMINAL_BY_OPERATION:
+        raise MaintenanceError("The reviewed installation operation is unsupported.")
+    return operation
 
 
 def _home() -> Path:
@@ -167,14 +208,26 @@ def blockers() -> list[str]:
     return list(dict.fromkeys(reasons))
 
 
-def _runtime() -> Path:
+def _executing_runtime() -> Path:
     if os.name != "nt" or not getattr(sys, "frozen", False):
         raise MaintenanceError("Installation recovery requires the packaged Windows application.")
     return Path(sys.executable).absolute()
 
 
-def _native_channel(runtime: Path, *, expected_version: str | None = None) -> dict:
-    native = runtime.parent / "maverick-desktop.exe"
+def _runtime() -> Path:
+    executable = _executing_runtime()
+    if executable.name.casefold() == "maverick-recovery.exe":
+        return executable.with_name("maverick.exe")
+    return executable
+
+
+def _native_channel(
+    runtime: Path,
+    *,
+    expected_version: str | None = None,
+    native_path: Path | None = None,
+) -> dict:
+    native = native_path or runtime.parent / "maverick-desktop.exe"
     digest = backup._sha256(native)
     result = subprocess.run([str(native), "--maintenance-channel"], capture_output=True, text=True,
                             encoding="utf-8", timeout=30, check=False,
@@ -189,6 +242,249 @@ def _native_channel(runtime: Path, *, expected_version: str | None = None) -> di
     except (TypeError, ValueError) as exc:
         raise MaintenanceError("The installed native application's release identity could not be established.") from exc
     return {"native_sha256": digest, "public_key": public_key}
+
+
+def _registered_product_identity(version: str, scratch: Path, installed_runtime: Path) -> dict:
+    """Read the registered package identity without using Windows' private cache as source."""
+    if os.name != "nt" or not _VERSION.fullmatch(str(version)):
+        raise MaintenanceError("Repair requires one registered packaged Windows release.")
+    file_lock.ensure_private_directory(scratch)
+    script = scratch / "inspect-registered-installer.ps1"
+    if script.exists():
+        if file_lock.atomic_read_text(script) != _REGISTERED_INSTALLER:
+            raise MaintenanceError("The registered-installer inspection helper changed.")
+    else:
+        file_lock.atomic_create_text(script, _REGISTERED_INSTALLER)
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    powershell = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    environment = {
+        name: value for name, value in os.environ.items()
+        if name.lower() != "psmodulepath"
+    }
+    environment["PSModulePath"] = str(powershell.parent / "Modules")
+    result = subprocess.run(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", installer_path(script), "-Version", version],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        check=False,
+        env=environment,
+    )
+    try:
+        value = json.loads(result.stdout) if result.returncode == 0 and len(result.stdout) <= 16384 else {}
+        if not isinstance(value, dict):
+            raise ValueError("invalid registered product response")
+        product_code = value.get("ProductCode")
+        package_code = value.get("PackageCode")
+        install_location = Path(value.get("InstallLocation", ""))
+        guid = r"\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}"
+        expected_location = installed_runtime.parent.absolute()
+        if (not re.fullmatch(guid, product_code or "")
+                or not re.fullmatch(guid, package_code or "")
+                or not install_location.is_absolute() or install_location.is_symlink()
+                or install_location.absolute() != expected_location):
+            raise ValueError("invalid registered product")
+    except (OSError, TypeError, ValueError) as exc:
+        raise MaintenanceError(
+            "The registered Lightwork package identity or installation directory is unavailable. Repair was refused before changing the installation."
+        ) from exc
+    return {
+        "product_code": product_code.upper(),
+        "package_code": package_code.upper(),
+        "install_directory": str(install_location.absolute()),
+    }
+
+
+def _verify_repair_registration(directory: Path, record: dict) -> None:
+    registered = _registered_product_identity(
+        record["old_version"], directory, Path(record["installed_runtime"]),
+    )
+    expected = record["old"]
+    if any(registered[name] != expected[name] for name in (
+        "product_code", "package_code", "install_directory",
+    )):
+        raise MaintenanceError(
+            "The installed Windows product, package or location differs from the reviewed repair. Recovery remains blocked."
+        )
+
+
+def _repair_anchor(
+    runtime: Path,
+    scratch: Path,
+    registered: dict,
+    *,
+    expected_runtime_sha256: str | None = None,
+    expected_installer_sha256: str | None = None,
+    expected_public_key: str | None = None,
+    expected_version: str | None = None,
+    allow_verified_candidate_installer: bool = False,
+    executing_pair_only: bool = False,
+) -> dict:
+    """Bind one surviving runtime pair to the signed installed-release identity."""
+    directory = runtime.parent
+    recovery_runtime = directory / "maverick-recovery.exe"
+    recovery_native = directory / "maverick-recovery-desktop.exe"
+    recovery_installer = directory / "Lightwork-recovery.msi"
+    expected_binding = (
+        expected_runtime_sha256,
+        expected_installer_sha256,
+        expected_public_key,
+    )
+    reviewed_release = expected_version is not None
+    if any(value is not None for value in expected_binding) and (
+        not all(isinstance(value, str) for value in expected_binding)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_runtime_sha256 or "")
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_installer_sha256 or "")
+        or not expected_public_key
+        or len(expected_public_key) > 4096
+    ):
+        raise MaintenanceError("The signed repair release identity is incomplete.")
+    if reviewed_release and (
+        not all(isinstance(value, str) for value in expected_binding)
+        or not _VERSION.fullmatch(expected_version or "")
+        or expected_version != workspace_recovery.version()
+    ):
+        raise MaintenanceError("The signed repair release identity is incomplete.")
+    installer_sha256 = expected_installer_sha256
+    properties = None
+    try:
+        if recovery_installer.is_symlink() or not recovery_installer.is_file():
+            raise MaintenanceError("The retained install-time package is unavailable.")
+        if recovery_installer.stat().st_size > MAX_INSTALLER_BYTES:
+            raise MaintenanceError(
+                "The retained install-time package exceeds its supported size limit."
+            )
+        observed_installer_sha256 = backup._sha256(recovery_installer)
+        if expected_installer_sha256 is not None and not hmac.compare_digest(
+            observed_installer_sha256, expected_installer_sha256,
+        ):
+            raise MaintenanceError("The retained install-time package identity changed.")
+        properties = inspect_signed_msi(
+            recovery_installer,
+            version=workspace_recovery.version(),
+            scratch=scratch,
+        )
+        if (
+            backup._sha256(recovery_installer) != observed_installer_sha256
+            or properties["ProductCode"].upper() != registered["product_code"]
+            or properties["PackageCode"].upper() != registered["package_code"]
+        ):
+            raise MaintenanceError(
+                "The installed recovery source does not match the registered Windows package."
+            )
+        installer_sha256 = observed_installer_sha256
+    except (OSError, KeyError, TypeError, backup.BackupError,
+            InstallerVerificationError, MaintenanceError) as exc:
+        if not (reviewed_release and allow_verified_candidate_installer):
+            raise MaintenanceError(
+                "The retained install-time recovery source is unavailable. Use the signed customer installer to restore Lightwork."
+            ) from exc
+        properties = None
+    if executing_pair_only:
+        if not reviewed_release:
+            raise MaintenanceError("An exact signed repair release is required for this capability check.")
+        executing = _executing_runtime()
+        if executing == recovery_runtime:
+            candidates = ((recovery_runtime, recovery_native),)
+        elif executing == runtime:
+            candidates = ((runtime, directory / "maverick-desktop.exe"),)
+        else:
+            raise MaintenanceError(
+                "The maintenance request did not come from an installed application runtime."
+            )
+    elif reviewed_release:
+        candidates = (
+            (recovery_runtime, recovery_native),
+            (runtime, directory / "maverick-desktop.exe"),
+        )
+    else:
+        # Direct callers without a signature-verified release review retain the
+        # original strict contract: only the separate recovery pair may anchor.
+        candidates = ((recovery_runtime, recovery_native),)
+    selected = None
+    for candidate_runtime, candidate_native in candidates:
+        try:
+            if any(path.is_symlink() or not path.is_file()
+                   or path.stat().st_size > MAX_INSTALLER_BYTES
+                   for path in (candidate_runtime, candidate_native)):
+                continue
+            runtime_sha256 = backup._sha256(candidate_runtime)
+            native = _native_channel(
+                runtime,
+                expected_version=workspace_recovery.version(),
+                native_path=candidate_native,
+            )
+            if (expected_runtime_sha256 is not None
+                    and not hmac.compare_digest(runtime_sha256, expected_runtime_sha256)):
+                continue
+            if (expected_public_key is not None
+                    and not hmac.compare_digest(native["public_key"], expected_public_key)):
+                continue
+            selected = (candidate_runtime, candidate_native, runtime_sha256, native)
+            break
+        except (OSError, MaintenanceError):
+            continue
+    if selected is None:
+        raise MaintenanceError(
+            "Neither installed application copy matches the signed current release. Use the signed customer installer to restore Lightwork."
+        )
+    selected_runtime, selected_native, runtime_sha256, native = selected
+    return {
+        "runtime": selected_runtime,
+        "runtime_sha256": runtime_sha256,
+        "native": selected_native,
+        "native_sha256": native["native_sha256"],
+        "public_key": native["public_key"],
+        "installer": recovery_installer,
+        "installer_sha256": installer_sha256,
+        "publisher_thumbprint": (
+            properties["PublisherThumbprint"].upper() if properties is not None else None
+        ),
+        "retained_installer_available": properties is not None,
+    }
+
+
+def repair_capability(
+    *,
+    expected_runtime_sha256: str | None,
+    expected_installer_sha256: str | None,
+    expected_public_key: str | None,
+    expected_version: str | None,
+) -> dict:
+    """Read-only proof that this exact packaged runtime can prepare a repair."""
+    runtime = _runtime()
+    with backup._temporary_directory(prefix="lightwork-repair-capability-") as scratch:
+        registered = _registered_product_identity(
+            workspace_recovery.version(), scratch, runtime,
+        )
+        anchor = _repair_anchor(
+            runtime,
+            scratch,
+            registered,
+            expected_runtime_sha256=expected_runtime_sha256,
+            expected_installer_sha256=expected_installer_sha256,
+            expected_public_key=expected_public_key,
+            expected_version=expected_version,
+            allow_verified_candidate_installer=True,
+            executing_pair_only=True,
+        )
+    return {
+        "schema": "lightwork.installation-repair-capability.v1",
+        "compatible": True,
+        "version": expected_version,
+        "runtime_sha256": anchor["runtime_sha256"],
+        "installer_sha256": anchor["installer_sha256"],
+        "public_key": anchor["public_key"],
+        "runtime_role": (
+            "recovery" if anchor["runtime"].name.casefold() == "maverick-recovery.exe"
+            else "primary"
+        ),
+        "product_code": registered["product_code"],
+        "package_code": registered["package_code"],
+        "retained_installer_available": anchor["retained_installer_available"],
+    }
 
 
 def _admit_local() -> None:
@@ -280,6 +576,105 @@ def authorize(*, actor: str, isolated: bool, confirm_all_workspaces: bool,
                 "scope": "all local workspaces and shared administration files"}
 
 
+def authorize_repair(
+    *,
+    actor: str,
+    confirm_all_workspaces: bool,
+    expected_runtime_sha256: str | None = None,
+    expected_installer_sha256: str | None = None,
+    expected_public_key: str | None = None,
+    expected_version: str | None = None,
+) -> dict:
+    """Authorize one local, same-release repair from the bundled native UI."""
+    if confirm_all_workspaces is not True or not actor:
+        raise MaintenanceError(
+            "Review and explicitly confirm protecting all local workspaces before repair."
+        )
+    runtime = _runtime()
+    with _locked():
+        assert_normal_start_allowed()
+        _admit_local()
+        if _usable_point_count() >= MAX_TICKETS:
+            raise MaintenanceError(
+                "The installation recovery store is full. Review and retire obsolete recovery points before repair."
+            )
+        identifier = secrets.token_hex(16)
+        directory = file_lock.ensure_private_directory(_directory(identifier))
+        try:
+            old_version = workspace_recovery.version()
+            registered = _registered_product_identity(old_version, directory, runtime)
+            anchor = _repair_anchor(
+                runtime,
+                directory,
+                registered,
+                expected_runtime_sha256=expected_runtime_sha256,
+                expected_installer_sha256=expected_installer_sha256,
+                expected_public_key=expected_public_key,
+                expected_version=expected_version,
+                allow_verified_candidate_installer=(expected_version is not None),
+                executing_pair_only=(expected_version is not None),
+            )
+            old = {
+                "version": old_version,
+                "runtime_sha256": anchor["runtime_sha256"],
+                "installer_sha256": anchor["installer_sha256"],
+                "publisher_thumbprint": anchor["publisher_thumbprint"],
+                **registered,
+            }
+            record = {
+                "schema": 1,
+                "target": _target(),
+                "id": identifier,
+                "status": "authorized",
+                "operation": "repair",
+                "actor": actor,
+                "old_version": old_version,
+                "old_runtime_sha256": anchor["runtime_sha256"],
+                "installed_runtime": str(runtime),
+                "recovery_runtime": str(anchor["runtime"]),
+                "recovery_runtime_sha256": anchor["runtime_sha256"],
+                "recovery_native": str(anchor["native"]),
+                "recovery_native_sha256": anchor["native_sha256"],
+                "recovery_installer": str(anchor["installer"]),
+                "recovery_installer_sha256": anchor["installer_sha256"],
+                "retained_installer_available_at_authorization": anchor[
+                    "retained_installer_available"
+                ],
+                "reviewed_repair_release": expected_version is not None,
+                "created_at": time.time(),
+                "old": old,
+                "native_sha256": anchor["native_sha256"],
+                "public_key": anchor["public_key"],
+            }
+            nonce = secrets.token_hex(32)
+            record.update(
+                grant_hash=hashlib.sha256(nonce.encode()).hexdigest(),
+                expires_at=time.time() + 900,
+            )
+            _write(directory / "record.json", record)
+        except BaseException:
+            for name in ("inspect-registered-installer.ps1", "inspect-installer.ps1"):
+                path = directory / name
+                if path.exists() and path.is_file() and not path.is_symlink():
+                    path.unlink()
+            try:
+                directory.rmdir()
+            except OSError:
+                # Preserve unexpected files for diagnosis without masking the
+                # original authorization failure.
+                pass
+            raise
+        return {
+            "id": identifier,
+            "authorization": identifier + ":" + nonce,
+            "directory": str(directory),
+            "old_version": old_version,
+            "expires_at": record["expires_at"],
+            "operation": "repair",
+            "scope": "application files, all local workspaces and shared administration files",
+        }
+
+
 def _grant(token: str) -> tuple[Path, dict]:
     match = _TOKEN.fullmatch(token) if isinstance(token, str) else None
     if match is None:
@@ -309,8 +704,13 @@ def _installer(directory: Path, metadata: dict, label: str) -> dict:
     path = directory / (label + ".msi")
     digest = verify_minisign(path, metadata.get("public_key", ""), release.get("signature", ""))
     properties = inspect_signed_msi(path, version=release["version"], scratch=directory)
-    return {**release, "sha256": digest, "product_code": properties["ProductCode"],
-            "publisher_thumbprint": properties["PublisherThumbprint"]}
+    return {
+        **release,
+        "sha256": digest,
+        "product_code": properties["ProductCode"].upper(),
+        "package_code": str(properties.get("PackageCode", "")).upper(),
+        "publisher_thumbprint": properties["PublisherThumbprint"].upper(),
+    }
 
 
 def _snapshot(directory: Path, name: str, runtime_sha256: str) -> dict:
@@ -323,14 +723,224 @@ def _snapshot(directory: Path, name: str, runtime_sha256: str) -> dict:
     return {"name": destination.name, "sha256": backup._sha256(destination), "files": len(manifest["files"])}
 
 
+def _retained_identity(info: os.stat_result) -> tuple[int, int, int]:
+    return info.st_dev, info.st_ino, info.st_nlink
+
+
+def _copy_retained_source(source: Path, destination: Path, expected_sha256: str) -> None:
+    """Copy one immutable recovery source without reading a large MSI into RAM."""
+    if destination.exists():
+        raise MaintenanceError("The retained repair source already exists unexpectedly.")
+    source = backup._filesystem_path(source)
+    destination = backup._filesystem_path(destination)
+    fd = -1
+    try:
+        before = source.lstat()
+        if (backup._is_alias(source, before) or not stat.S_ISREG(before.st_mode)
+                or before.st_nlink != 1 or before.st_size > MAX_INSTALLER_BYTES):
+            raise MaintenanceError("The installed recovery source is not one supported regular file.")
+        fd = os.open(str(source), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        opened = os.fstat(fd)
+        after_open = source.lstat()
+        # Windows path stat infers executable bits from a .exe suffix while
+        # fstat does not. Bind the actual file identity and type, not those
+        # synthetic permission bits.
+        if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                or backup._is_alias(source, after_open)
+                or _retained_identity(before) != _retained_identity(opened)
+                or _retained_identity(opened) != _retained_identity(after_open)):
+            raise MaintenanceError("The installed recovery source changed while it was opened.")
+        with os.fdopen(fd, "rb") as reader:
+            fd = -1
+            digest, _ = backup._stream_to_new_private(
+                reader, destination, expected_size=opened.st_size,
+            )
+        final = source.lstat()
+        if (_retained_identity(after_open) != _retained_identity(final)
+                or final.st_size != opened.st_size
+                or getattr(final, "st_mtime_ns", None) != getattr(after_open, "st_mtime_ns", None)):
+            raise MaintenanceError("The installed recovery source changed during retention.")
+    except MaintenanceError:
+        destination.unlink(missing_ok=True)
+        raise
+    except (OSError, backup.BackupError) as exc:
+        destination.unlink(missing_ok=True)
+        raise MaintenanceError("The installed recovery source could not be retained safely.") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if not hmac.compare_digest(digest, expected_sha256):
+        destination.unlink(missing_ok=True)
+        raise MaintenanceError("The installed recovery source changed during retention.")
+
+
+def _replace_from_retained(source: Path, target: Path, expected_sha256: str) -> None:
+    """Atomically restore an exact retained application file into its fixed path."""
+    if not re.fullmatch(r"[0-9a-f]{64}", str(expected_sha256)):
+        raise MaintenanceError("The retained application identity is incomplete.")
+    staging = target.with_name("." + target.name + "-" + secrets.token_hex(8) + ".repair")
+    try:
+        _copy_retained_source(source, staging, expected_sha256)
+        file_lock._replace_with_retry(staging, target)
+        if target.is_symlink() or not target.is_file() or not hmac.compare_digest(
+                backup._sha256(target), expected_sha256):
+            raise MaintenanceError("A recovered application file did not match its retained identity.")
+    except (OSError, backup.BackupError) as exc:
+        raise MaintenanceError("A retained application file could not be restored safely.") from exc
+    finally:
+        staging.unlink(missing_ok=True)
+
+
+def _verify_repair_source(directory: Path, record: dict) -> Path:
+    source = directory / "repair-source.msi"
+    expected = record.get("recovery_installer_sha256")
+    if (source.is_symlink() or not source.is_file()
+            or not re.fullmatch(r"[0-9a-f]{64}", str(expected))
+            or not hmac.compare_digest(backup._sha256(source), expected)):
+        raise MaintenanceError("The retained install-time repair package changed or is unavailable.")
+    properties = inspect_signed_msi(
+        source, version=record["old_version"], scratch=directory,
+    )
+    old = record["old"]
+    if (backup._sha256(source) != expected
+            or properties["ProductCode"].upper() != old["product_code"]
+            or properties["PackageCode"].upper() != old["package_code"]
+            or properties["PublisherThumbprint"].upper() != old["publisher_thumbprint"]):
+        raise MaintenanceError("The retained install-time repair package no longer matches the reviewed installation.")
+    return source
+
+
+def _restore_repair_files(directory: Path, record: dict) -> None:
+    """Recover the complete single-file runtime/native shell set without MSI replay."""
+    installed_runtime = Path(record["installed_runtime"])
+    install_directory = installed_runtime.parent.absolute()
+    if install_directory != Path(record["old"]["install_directory"]).absolute():
+        raise MaintenanceError("The reviewed repair installation directory changed.")
+    source_installer = _verify_repair_source(directory, record)
+    sources = (
+        (directory / "maverick.exe", installed_runtime, record["old_runtime_sha256"]),
+        (directory / "maverick-desktop.exe", install_directory / "maverick-desktop.exe", record["native_sha256"]),
+        (directory / "maverick.exe", install_directory / "maverick-recovery.exe", record["recovery_runtime_sha256"]),
+        (directory / "maverick-desktop.exe", install_directory / "maverick-recovery-desktop.exe", record["recovery_native_sha256"]),
+        (source_installer, install_directory / "Lightwork-recovery.msi", record["recovery_installer_sha256"]),
+    )
+    # Authenticate every source before the first installed byte changes.
+    for source, _, expected in sources:
+        if (source.is_symlink() or not source.is_file()
+                or not hmac.compare_digest(backup._sha256(source), expected)):
+            raise MaintenanceError("A retained application file changed before recovery.")
+    for source, target, expected in sources:
+        if target.parent.absolute() != install_directory:
+            raise MaintenanceError("A recovered application target is outside the reviewed installation.")
+        _replace_from_retained(source, target, expected)
+
+
+def _prepare_repair(directory: Path, record: dict) -> None:
+    if record["status"] != "authorized":
+        raise MaintenanceError("The reviewed repair authorization is no longer available.")
+    installed_runtime = Path(record["installed_runtime"])
+    _verify_repair_registration(directory, record)
+    anchor = _repair_anchor(
+        installed_runtime,
+        directory,
+        record["old"],
+        expected_runtime_sha256=record["old_runtime_sha256"],
+        expected_installer_sha256=record["recovery_installer_sha256"],
+        expected_public_key=record["public_key"],
+        expected_version=(record["old_version"] if record.get("reviewed_repair_release") else None),
+        allow_verified_candidate_installer=bool(record.get("reviewed_repair_release")),
+        executing_pair_only=bool(record.get("reviewed_repair_release")),
+    )
+    if (str(anchor["runtime"]) != record.get("recovery_runtime")
+            or str(anchor["native"]) != record.get("recovery_native")
+            or str(anchor["installer"]) != record.get("recovery_installer")
+            or anchor["runtime_sha256"] != record.get("recovery_runtime_sha256")
+            or anchor["runtime_sha256"] != record.get("old_runtime_sha256")
+            or anchor["native_sha256"] != record.get("recovery_native_sha256")
+            or anchor["native_sha256"] != record.get("native_sha256")
+            or anchor["installer_sha256"] != record.get("recovery_installer_sha256")
+            or anchor["installer_sha256"] != record["old"].get("installer_sha256")
+            or anchor["publisher_thumbprint"] is not None
+            and record["old"].get("publisher_thumbprint") is not None
+            and anchor["publisher_thumbprint"] != record["old"]["publisher_thumbprint"]
+            or not hmac.compare_digest(anchor["public_key"], record.get("public_key", ""))
+    ):
+        raise MaintenanceError("The installed recovery copy changed after repair authorization.")
+    metadata_path = directory / "downloads.json"
+    if metadata_path.stat().st_size > 64 * 1024:
+        raise MaintenanceError("The repair installer metadata exceeds its limit.")
+    metadata = json.loads(file_lock.atomic_read_text(metadata_path))
+    if not hmac.compare_digest(str(metadata.get("public_key", "")), record["public_key"]):
+        raise MaintenanceError("The repair verification key differs from the installed native application.")
+    if metadata.get("identity_transition") is not None:
+        raise MaintenanceError("Repair cannot change the application's signing identity.")
+    new = _installer(directory, metadata, "new")
+    installer_sha256 = str(new.get("installer_sha256", ""))
+    if (new["version"] != record["old_version"]
+            or new.get("runtime_sha256") != record["old_runtime_sha256"]
+            or not re.fullmatch(r"[0-9a-f]{64}", installer_sha256)
+            or not hmac.compare_digest(new["sha256"], installer_sha256)
+            or not hmac.compare_digest(new["sha256"], record["old"]["installer_sha256"])
+            or new["product_code"] != record["old"]["product_code"]
+            or new["package_code"] != record["old"]["package_code"]
+            or record["old"].get("publisher_thumbprint") is not None
+            and new["publisher_thumbprint"] != record["old"]["publisher_thumbprint"]):
+        raise MaintenanceError(
+            "The repair package does not match the installed application build, product, package and publisher."
+        )
+    file_lock.atomic_write_bytes(directory / "maverick.exe", anchor["runtime"].read_bytes())
+    file_lock.atomic_write_bytes(directory / "maverick-desktop.exe", anchor["native"].read_bytes())
+    repair_source = directory / "repair-source.msi"
+    if repair_source.exists():
+        if (repair_source.is_symlink() or not repair_source.is_file()
+                or not hmac.compare_digest(
+                    backup._sha256(repair_source), record["recovery_installer_sha256"],
+                )):
+            raise MaintenanceError("The retained repair source already exists with another identity.")
+    else:
+        # The updater and this runtime independently verified the exact current
+        # MSI. Retain it before creating the startup block, so recovery does not
+        # depend on the installed copy surviving a failed repair.
+        _copy_retained_source(
+            directory / "new.msi",
+            repair_source,
+            record["recovery_installer_sha256"],
+        )
+    if (backup._sha256(directory / "maverick.exe") != record["old_runtime_sha256"]
+            or backup._sha256(directory / "maverick-desktop.exe") != record["native_sha256"]
+            or backup._sha256(directory / "repair-source.msi") != record["recovery_installer_sha256"]):
+        raise MaintenanceError("The retained repair helpers changed during copy.")
+    damage = []
+    for path, expected in (
+        (installed_runtime, record["old_runtime_sha256"]),
+        (installed_runtime.parent / "maverick-desktop.exe", record["native_sha256"]),
+        (installed_runtime.parent / "maverick-recovery.exe", record["old_runtime_sha256"]),
+        (installed_runtime.parent / "maverick-recovery-desktop.exe", record["native_sha256"]),
+    ):
+        try:
+            if path.is_symlink() or not path.is_file() or backup._sha256(path) != expected:
+                damage.append(path.name)
+        except OSError:
+            damage.append(path.name)
+    record["old"]["publisher_thumbprint"] = new["publisher_thumbprint"]
+    record.update(
+        new=new,
+        new_runtime_sha256=record["old_runtime_sha256"],
+        damaged_core_files=sorted(set(damage)),
+        retained_installer_available_at_prepare=anchor["retained_installer_available"],
+        before=_snapshot(directory, "before", record["old_runtime_sha256"]),
+    )
+
+
 def prepare(token: str) -> dict:
     """Called by the native shell only after stopping its owned recovery server."""
     with _locked(), _quiesced():
         directory, record = _grant(token)
         assert_normal_start_allowed()
         _admit_local()
-        current = backup._sha256(_runtime())
-        if record["operation"] == "upgrade":
+        operation = _operation(record)
+        if operation == "upgrade":
+            current = backup._sha256(_runtime())
             if record["status"] != "authorized" or current != record["old_runtime_sha256"]:
                 raise MaintenanceError("The reviewed source application changed.")
             metadata_path = directory / "downloads.json"
@@ -364,7 +974,10 @@ def prepare(token: str) -> dict:
                           before=_snapshot(directory, "before", current))
             if record.get("identity_transition") is not None:
                 record["transition_admitted_at"] = time.time()
-        else:
+        elif operation == "repair":
+            _prepare_repair(directory, record)
+        elif operation == "rollback":
+            current = backup._sha256(_runtime())
             if record["status"] != "upgraded" or current != record["new_runtime_sha256"]:
                 raise MaintenanceError("The installed application no longer matches this completed upgrade.")
             _verify_runtime(record, "new")
@@ -377,6 +990,8 @@ def prepare(token: str) -> dict:
                 # installer. Reverting real spend would reopen exhausted caps.
                 backup.assert_accounting_unchanged(archive)
             record["safety"] = _snapshot(directory, "safety-" + secrets.token_hex(8), current)
+        else:
+            raise MaintenanceError("The reviewed installation operation is unsupported.")
         record.update(status="prepared", prepared_at=time.time())
         _write(directory / "record.json", record)
         _write(_store() / "active.json", {"schema": 1, "target": _target(), "id": record["id"]})
@@ -391,6 +1006,8 @@ def _msiexec(directory: Path, action: str, name: str) -> None:
                  "/L*v", installer_path(directory / (action.strip("/") + "-" + name + ".log"))]
     if action == "/i":
         arguments.append("INSTALLDIR=" + installer_path(Path(record["installed_runtime"]).parent))
+        if record.get("operation") == "repair":
+            arguments.extend(("REINSTALL=ALL", "REINSTALLMODE=vamus"))
     result = subprocess.run(arguments,
                             check=False, timeout=1800, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode not in ((0, 3010, 1605) if action == "/x" else (0, 3010)):
@@ -401,6 +1018,52 @@ def _verify_runtime(record: dict, label: str) -> None:
     path = Path(record["installed_runtime"])
     if not path.is_file() or backup._sha256(path) != record[label + "_runtime_sha256"]:
         raise MaintenanceError("The installed application does not match the verified release. Workspace restoration has not been marked complete.")
+    if record.get("operation") == "repair":
+        recovery_runtime = path.parent / "maverick-recovery.exe"
+        main_native = path.parent / "maverick-desktop.exe"
+        recovery_native = path.parent / "maverick-recovery-desktop.exe"
+        expected = (
+            (recovery_runtime, record["recovery_runtime_sha256"]),
+            (main_native, record["native_sha256"]),
+            (recovery_native, record["recovery_native_sha256"]),
+        )
+        if any(item.is_symlink() or not item.is_file() or backup._sha256(item) != digest
+               for item, digest in expected):
+            raise MaintenanceError(
+                "The installed application or its recovery copy does not match the verified release. Recovery remains blocked."
+            )
+        native = _native_channel(
+            path,
+            expected_version=record[label]["version"],
+            native_path=recovery_native,
+        )
+        if (native.get("public_key") != record["public_key"]
+                or native.get("native_sha256") != record["recovery_native_sha256"]):
+            raise MaintenanceError(
+                "The installed recovery signing identity changed. Recovery remains blocked."
+            )
+        ticket = _directory(record["id"])
+        _verify_repair_registration(ticket, record)
+        anchor = _repair_anchor(
+            path,
+            ticket,
+            record["old"],
+            expected_runtime_sha256=record["old_runtime_sha256"],
+            expected_installer_sha256=record["recovery_installer_sha256"],
+            expected_public_key=record["public_key"],
+            expected_version=record["old_version"],
+        )
+        if (
+            anchor["runtime_sha256"] != record["recovery_runtime_sha256"]
+            or anchor["native_sha256"] != record["recovery_native_sha256"]
+            or anchor["installer_sha256"] != record["recovery_installer_sha256"]
+            or anchor["public_key"] != record["public_key"]
+            or anchor["publisher_thumbprint"] != record["old"]["publisher_thumbprint"]
+        ):
+            raise MaintenanceError(
+                "The installed recovery source changed. Recovery remains blocked."
+            )
+        return
     if record.get("identity_transition") is not None:
         side = record["identity_transition"]["policy"]["from" if label == "old" else "to"]
         native = _native_channel(path, expected_version=side["version"])
@@ -414,7 +1077,18 @@ def _verify_runtime(record: dict, label: str) -> None:
 
 
 def _verify_completed_state(directory: Path, record: dict, outcome: str) -> None:
-    _verify_runtime(record, "old" if outcome == "rolled_back" else "new")
+    labels = {
+        "upgraded": "new",
+        "upgrade_recovered": "old",
+        "rolled_back": "old",
+        "repaired": "new",
+        "repair_recovered": "old",
+    }
+    try:
+        label = labels[outcome]
+    except (KeyError, TypeError) as exc:
+        raise MaintenanceError("The installation completion outcome is unsupported.") from exc
+    _verify_runtime(record, label)
     with _scope():
         archive = directory / "before.tgz"
         if backup._sha256(archive) != record["before"]["sha256"]:
@@ -435,6 +1109,38 @@ def _verify_completed_state(directory: Path, record: dict, outcome: str) -> None
             backup._verify_restored(stage, expected)
 
 
+def _verified_before_archive(directory: Path, record: dict, operation: str) -> Path:
+    archive = directory / "before.tgz"
+    if backup._sha256(archive) != record["before"]["sha256"]:
+        raise MaintenanceError(f"The pre-{operation} snapshot changed.")
+    manifest = backup.verify_backup(archive)
+    binding = manifest.get("recovery", {})
+    if (binding.get("target") != _target()
+            or binding.get("runtime_sha256") != record["old_runtime_sha256"]):
+        raise MaintenanceError(
+            f"The pre-{operation} snapshot does not match this application and data home."
+        )
+    backup.assert_accounting_unchanged(archive)
+    return archive
+
+
+def _recover_failed_upgrade(directory: Path, record: dict) -> None:
+    with _scope():
+        archive = _verified_before_archive(directory, record, "upgrade")
+        _msiexec(directory, "/x", "new")
+        _msiexec(directory, "/i", "old")
+        _verify_runtime(record, "old")
+        backup.restore_backup(archive, replace_existing=True)
+
+
+def _recover_failed_repair(directory: Path, record: dict) -> None:
+    with _scope():
+        archive = _verified_before_archive(directory, record, "repair")
+        _restore_repair_files(directory, record)
+        _verify_runtime(record, "old")
+        backup.restore_backup(archive, replace_existing=True)
+
+
 def execute(token: str) -> dict:
     """Run from the retained old binary after the native shell exits.
 
@@ -446,28 +1152,58 @@ def execute(token: str) -> dict:
         active = _read(_store() / "active.json")
         if active.get("id") != record["id"]:
             raise MaintenanceError("Another reviewed operation owns installation recovery. Its startup block has been preserved.")
+        operation = _operation(record)
         if record["status"] != "prepared" or backup._sha256(_runtime()) != record["old_runtime_sha256"]:
             raise MaintenanceError("Only the reviewed retained application can complete this maintenance operation.")
+        finalization = record.get("finalization")
+        if finalization is not None and finalization not in _TERMINAL_BY_OPERATION[operation]:
+            raise MaintenanceError("The installation completion receipt does not match its reviewed operation.")
         _admit_local()
         record.update(status="applying", grant_hash="", started_at=time.time())
         _write(directory / "record.json", record)
         try:
-            metadata = {"public_key": record["public_key"], "old": record["old"], "new": record["new"]}
-            installers = {}
-            for label in ("old", "new"):
-                verified = _installer(directory, metadata, label)
-                if verified["sha256"] != record[label]["sha256"]:
-                    raise MaintenanceError("A retained installer changed after review.")
-                installers[label] = verified
-            _check_transition_installers(record, installers["old"], installers["new"])
-            if record.get("finalization") in {"upgraded", "rolled_back"}:
+            if operation == "repair":
+                _verify_repair_registration(directory, record)
+                metadata = {"public_key": record["public_key"], "new": record["new"]}
+                verified = _installer(directory, metadata, "new")
+                if any(verified.get(name) != record["new"].get(name) for name in (
+                    "sha256", "runtime_sha256", "installer_sha256", "product_code",
+                    "package_code", "publisher_thumbprint",
+                )):
+                    raise MaintenanceError("The retained repair installer changed after review.")
+            else:
+                metadata = {"public_key": record["public_key"], "old": record["old"], "new": record["new"]}
+                installers = {}
+                for label in ("old", "new"):
+                    verified = _installer(directory, metadata, label)
+                    if verified["sha256"] != record[label]["sha256"]:
+                        raise MaintenanceError("A retained installer changed after review.")
+                    installers[label] = verified
+                _check_transition_installers(record, installers["old"], installers["new"])
+            if record.get("finalization") in {
+                "upgraded", "upgrade_recovered", "rolled_back", "repaired", "repair_recovered",
+            }:
                 outcome = record["finalization"]
                 _verify_completed_state(directory, record, outcome)
-            elif record["operation"] == "upgrade":
-                _msiexec(directory, "/i", "new")
-                _verify_runtime(record, "new")
-                outcome = "upgraded"
-            else:
+            elif operation == "upgrade":
+                if record.get("upgrade_resume") == "restore_retained_release":
+                    _recover_failed_upgrade(directory, record)
+                    outcome = "upgrade_recovered"
+                    _verify_completed_state(directory, record, outcome)
+                else:
+                    _msiexec(directory, "/i", "new")
+                    _verify_runtime(record, "new")
+                    outcome = "upgraded"
+            elif operation == "repair":
+                if record.get("repair_resume") == "restore_retained_sources":
+                    _recover_failed_repair(directory, record)
+                    outcome = "repair_recovered"
+                else:
+                    _msiexec(directory, "/i", "new")
+                    _verify_runtime(record, "new")
+                    outcome = "repaired"
+                _verify_completed_state(directory, record, outcome)
+            elif operation == "rollback":
                 with _scope():
                     archive = directory / "before.tgz"
                     if backup._sha256(archive) != record["before"]["sha256"]:
@@ -486,15 +1222,22 @@ def execute(token: str) -> dict:
                     _verify_runtime(record, "old")
                     backup.restore_backup(archive, replace_existing=True)
                 outcome = "rolled_back"
+            else:
+                raise MaintenanceError("The reviewed installation operation is unsupported.")
             record.update(status=outcome, completed_at=time.time())
             _write(directory / "record.json", record)
-            (_store() / "active.json").unlink()
-            return {"id": record["id"], "status": outcome}
         except Exception as exc:
             record.update(status="incomplete", failed_at=time.time())
             record["error"] = str(exc)[:2000]
             _write(directory / "record.json", record)
             raise
+        try:
+            (_store() / "active.json").unlink()
+        except OSError as exc:
+            raise MaintenanceError(
+                "Installation completed, but its startup block could not be cleared. Resume this operation in Install & updates."
+            ) from exc
+        return {"id": record["id"], "status": outcome}
 
 
 def logs(identifier: str) -> dict:
@@ -526,6 +1269,10 @@ def assert_normal_start_allowed() -> None:
     marker = _home() / "backups" / "installation-recovery" / "active.json"
     if marker.exists():
         raise MaintenanceError("Installation recovery is unfinished. Open Install & updates in Lightwork Desktop to finish recovery before starting workspace work.")
+    try:
+        workspace_recovery.assert_bootstrap_start_allowed()
+    except workspace_recovery.RecoveryError as exc:
+        raise MaintenanceError(str(exc)) from exc
 
 
 def resume(identifier: str) -> str:
@@ -537,16 +1284,39 @@ def resume(identifier: str) -> str:
     with _locked():
         directory = _directory(identifier)
         record = _read(directory / "record.json")
-        active = _read(_store() / "active.json")
-        if active.get("id") != identifier or record.get("status") not in {"prepared", "applying", "incomplete", "upgraded", "rolled_back"}:
+        operation = _operation(record)
+        original_status = record.get("status")
+        marker = _store() / "active.json"
+        active = _read(marker) if marker.exists() else None
+        if ((active is not None and active.get("id") != identifier)
+                or active is None and original_status != "prepared"
+                or original_status not in {
+            "prepared", "applying", "incomplete", "upgraded", "rolled_back",
+            "repaired", "repair_recovered",
+        }):
             raise MaintenanceError("This installation has no unfinished reviewed operation to resume.")
-        if record.get("status") in {"upgraded", "rolled_back"}:
+        if original_status in {"upgraded", "rolled_back", "repaired", "repair_recovered"}:
+            if original_status not in _TERMINAL_BY_OPERATION[operation]:
+                raise MaintenanceError(
+                    "The installation completion receipt does not match its reviewed operation."
+                )
             # A crash between the signed completion receipt and marker removal
             # is recoverable only after rechecking exact binary and local state.
-            record["finalization"] = record["status"]
+            record["finalization"] = original_status
+        elif operation == "repair" and original_status in {"applying", "incomplete"}:
+            # Do not replay a candidate that already failed its exact installed
+            # identity check. Recover the application from the separately
+            # retained install-time sources, then restore the exact data snapshot.
+            record["repair_resume"] = "restore_retained_sources"
+        elif operation == "upgrade" and original_status in {"applying", "incomplete"}:
+            # A failed candidate may be deterministically bad. The exact old MSI
+            # and pre-upgrade state were authenticated before the first attempt.
+            record["upgrade_resume"] = "restore_retained_release"
         nonce = secrets.token_hex(32)
         record.update(status="prepared", grant_hash=hashlib.sha256(nonce.encode()).hexdigest(), expires_at=time.time() + 900)
         _write(directory / "record.json", record)
+        if active is None:
+            _write(marker, {"schema": 1, "target": _target(), "id": identifier})
         return identifier + ":" + nonce
 
 
@@ -587,7 +1357,9 @@ def _installed_identity() -> tuple[Path, str] | None:
 def _retirement_blocker(record: dict, active_id: str | None, installed: tuple[Path, str] | None) -> str | None:
     if active_id is not None or record.get("status") in {"prepared", "applying", "incomplete"}:
         return "An installation operation is unfinished. Finish it before retiring recovery points."
-    if record.get("status") in {"authorized", "rolled_back", "retired"}:
+    if record.get("status") in {
+        "authorized", "upgrade_recovered", "rolled_back", "repaired", "repair_recovered", "retired",
+    }:
         return None
     if record.get("status") == "upgraded":
         try:
@@ -685,7 +1457,9 @@ def status() -> dict:
         with _locked():
             active_id = _read(store / "active.json").get("id") if (store / "active.json").exists() else None
             saved = _records()
-            installed = _installed_identity() if any(record.get("status") == "upgraded" for _, record in saved) else None
+            installed = _installed_identity() if any(
+                record.get("status") == "upgraded" for _, record in saved
+            ) else None
             for _, record in saved:
                 row = {key: record.get(key) for key in ("id", "status", "old_version", "created_at", "completed_at")}
                 if record.get("status") == "retired" and not record.get("cleanup_pending"):
@@ -699,7 +1473,8 @@ def status() -> dict:
                                       "cleanup_pending": record.get("cleanup_pending", False)})
     records.sort(key=lambda row: (not row["pending_finalization"], -row["created_at"]))
     history.sort(key=lambda row: row["retired_at"], reverse=True)
-    return {"recovery_points": records, "retirement_history": history[:MAX_RETIREMENT_HISTORY],
+    return {"maintenance_protocol": MAINTENANCE_PROTOCOL,
+            "recovery_points": records, "retirement_history": history[:MAX_RETIREMENT_HISTORY],
             "retirement_history_limit": MAX_RETIREMENT_HISTORY, "point_limit": MAX_TICKETS,
             "incomplete": (store / "active.json").exists(),
             "coverage": "All local workspaces and shared administration. External stores and services are excluded."}

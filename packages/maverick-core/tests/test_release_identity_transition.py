@@ -252,8 +252,8 @@ def test_interrupted_admitted_bridge_can_resume_after_admission_expiry_and_featu
     monkeypatch.setattr(config, "signing_identity_transition_enabled", lambda: False)
     monkeypatch.setattr(maintenance, "_msiexec", installer)
     token = maintenance.resume(grant["id"])
-    assert maintenance.execute(token)["status"] == "upgraded"
-    assert fixture["native"].read_bytes() == b"new-native"
+    assert maintenance.execute(token)["status"] == "upgrade_recovered"
+    assert fixture["native"].read_bytes() == b"old-native"
 
 
 @pytest.mark.parametrize("fault", ["msi-tamper", "publisher-revoked", "native-key-mismatch"])

@@ -38,7 +38,7 @@ import hashlib
 import logging
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -162,23 +162,10 @@ def _tokens(text: str) -> set[str]:
 # ---------------------------------------------------------------- sources
 
 def _recall_knowledge(query: str, k: int, tenant: str | None) -> list[Hit]:
-    from . import knowledge_admin
-    kb = knowledge_admin.open_knowledge_base(tenant=tenant)
-    if kb is None:
-        raise RuntimeError("knowledge base unavailable or disabled ([knowledge] enable)")
-    try:
-        hits: list[Hit] = []
-        for collection in kb.collections():
-            for h in kb.search(collection, query, k):
-                hits.append(Hit("knowledge", collection, h.text,
-                                h.source or "unknown", float(h.score),
-                                {"collection": collection}))
-        hits.sort(key=lambda h: h.score, reverse=True)
-        return hits[:k]
-    finally:
-        close = getattr(kb, "close", None)
-        if callable(close):
-            close()
+    del query, k, tenant
+    raise RuntimeError(
+        "governed knowledge access is required; use the authenticated Lightwork app"
+    )
 
 
 def _recall_skills(query: str, k: int) -> list[Hit]:
@@ -270,9 +257,13 @@ def recall(
     world: Any = None,
     shield: Any = None,
     goal_id: int | None = None,
+    knowledge_reader: Callable[[str, int], tuple[list[Hit], str | None]] | None = None,
 ) -> Result:
     """Recall from every requested source under one envelope, audited once.
 
+    ``knowledge_reader`` lets a trusted service compose a stricter current-
+    rights document boundary while retaining Cortex's single result and audit
+    envelope. It must return bounded ``knowledge`` hits and an optional denial.
     ``model_id`` switches the lessons source from a lexical search over the
     learned lines to the exact guidance block the agent loop would inject for
     that model (scoped by ``domain``/``role``). ``world`` lets a caller reuse
@@ -298,7 +289,22 @@ def recall(
         for s in wanted:
             try:
                 if s == "knowledge":
-                    hits = _recall_knowledge(query, k, res.tenant)
+                    if knowledge_reader is None:
+                        hits = _recall_knowledge(query, k, res.tenant)
+                    else:
+                        resolved = knowledge_reader(query, k)
+                        if not isinstance(resolved, tuple) or len(resolved) != 2:
+                            raise RuntimeError("governed knowledge reader returned malformed material")
+                        hits, why = resolved
+                        if (
+                            not isinstance(hits, list)
+                            or len(hits) > k
+                            or any(type(hit) is not Hit or hit.source != "knowledge" for hit in hits)
+                            or (why is not None and not isinstance(why, str))
+                        ):
+                            raise RuntimeError("governed knowledge reader crossed its result boundary")
+                        if why:
+                            res.denied[s] = why
                 elif s == "skills":
                     hits = _recall_skills(query, k)
                 elif s == "lessons":

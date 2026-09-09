@@ -32,6 +32,8 @@ import uuid as _uuid
 from typing import Any
 from urllib.parse import urlparse
 
+from ._provider_accounting import BestEffortTransportError, metered_transport_call
+
 log = logging.getLogger(__name__)
 
 
@@ -81,6 +83,7 @@ class WeaviateStore:
 
         url = url or os.environ.get("MAVERICK_WEAVIATE_URL")
         api_key = api_key or os.environ.get("MAVERICK_WEAVIATE_API_KEY")
+        self._remote = bool(url)
         # Server-side embedding module (see module docstring). Default to
         # text2vec-transformers; "none" means the caller supplies vectors.
         self._vectorizer = (
@@ -204,23 +207,37 @@ class WeaviateStore:
             raise ValueError(
                 f"metadatas length {len(metadatas)} != documents length {len(documents)}")
         tenant_id = _active_tenant()
-        coll = self._client.collections.get(self._collection)
-        with coll.batch.dynamic() as batch:
-            for i, doc in enumerate(documents):
-                props = {"document": doc}
-                if metadatas:
-                    props.update(metadatas[i] or {})
-                # Stamp the tenant so query()/count() can filter by it. The
-                # tenant-namespaced UUID alone only protects delete-by-id;
-                # near_text semantic search ignores the id namespace, so
-                # without this property one tenant's query would return
-                # another tenant's documents.
-                if tenant_id is not None:
-                    props["_tenant"] = tenant_id
-                batch.add_object(
-                    properties=props,
-                    uuid=_uuid_for(_stored_id(ids[i], tenant_id)),
+        def dispatch() -> None:
+            coll = self._client.collections.get(self._collection)
+            batch_api = coll.batch
+            with batch_api.dynamic() as batch:
+                for i, doc in enumerate(documents):
+                    props = {"document": doc}
+                    if metadatas:
+                        props.update(metadatas[i] or {})
+                    # Stamp the tenant so query()/count() can filter by it. The
+                    # tenant-namespaced UUID alone only protects delete-by-id;
+                    # near_text semantic search ignores the id namespace, so
+                    # without this property one tenant's query would return
+                    # another tenant's documents.
+                    if tenant_id is not None:
+                        props["_tenant"] = tenant_id
+                    batch.add_object(
+                        properties=props,
+                        uuid=_uuid_for(_stored_id(ids[i], tenant_id)),
+                    )
+            failed_objects = getattr(batch_api, "failed_objects", None)
+            if isinstance(failed_objects, (list, tuple)) and failed_objects:
+                raise RuntimeError(
+                    f"weaviate batch reported {len(failed_objects)} failed objects"
                 )
+
+        metered_transport_call(
+            "weaviate",
+            dispatch,
+            hosted=self._remote,
+            category="storage",
+        )
 
     @staticmethod
     def _tenant_filter(tenant_id: str | None):
@@ -233,12 +250,18 @@ class WeaviateStore:
     def query(self, text: str, *, top_k: int = 5) -> list[dict]:
         if not text:
             return []
-        coll = self._client.collections.get(self._collection)
         near_kwargs: dict = {"query": text, "limit": max(1, min(top_k, 100))}
         tfilter = self._tenant_filter(_active_tenant())
         if tfilter is not None:
             near_kwargs["filters"] = tfilter
-        res = coll.query.near_text(**near_kwargs)
+        res = metered_transport_call(
+            "weaviate",
+            lambda: self._client.collections.get(self._collection).query.near_text(
+                **near_kwargs
+            ),
+            hosted=self._remote,
+            category="retrieval",
+        )
         out: list[dict] = []
         for obj in getattr(res, "objects", []) or []:
             props = dict(getattr(obj, "properties", {}) or {})
@@ -260,45 +283,105 @@ class WeaviateStore:
         if not ids:
             return
         tenant_id = _active_tenant()
-        coll = self._client.collections.get(self._collection)
-        for doc_id in ids:
-            try:
-                coll.data.delete_by_id(_uuid_for(_stored_id(doc_id, tenant_id)))
-            except Exception as e:  # pragma: no cover -- backend-specific
-                log.debug("weaviate: delete %s failed: %s", doc_id, e)
+
+        def dispatch() -> None:
+            coll = self._client.collections.get(self._collection)
+            first_error: Exception | None = None
+            for doc_id in ids:
+                try:
+                    coll.data.delete_by_id(_uuid_for(_stored_id(doc_id, tenant_id)))
+                except Exception as exc:  # continue the legacy best-effort sweep
+                    first_error = first_error or exc
+            if first_error is not None:
+                raise BestEffortTransportError("weaviate delete failed") from first_error
+
+        try:
+            metered_transport_call(
+                "weaviate",
+                dispatch,
+                hosted=self._remote,
+                category="update",
+            )
+        except BestEffortTransportError as exc:
+            log.debug("weaviate: delete failed: %s", exc.__cause__)
 
     def count(self) -> int:
+        def dispatch():
+            try:
+                coll = self._client.collections.get(self._collection)
+                # Scope the count to the active tenant (matches pgvector) so one
+                # tenant can't read another's document count through the aggregate.
+                tfilter = self._tenant_filter(_active_tenant())
+                if tfilter is not None:
+                    return coll.aggregate.over_all(total_count=True, filters=tfilter)
+                return coll.aggregate.over_all(total_count=True)
+            except Exception as exc:
+                raise BestEffortTransportError("weaviate count failed") from exc
+
         try:
-            coll = self._client.collections.get(self._collection)
-            # Scope the count to the active tenant (matches pgvector) so one
-            # tenant can't read another's document count through the aggregate.
-            tfilter = self._tenant_filter(_active_tenant())
-            if tfilter is not None:
-                res = coll.aggregate.over_all(total_count=True, filters=tfilter)
-            else:
-                res = coll.aggregate.over_all(total_count=True)
+            res = metered_transport_call(
+                "weaviate",
+                dispatch,
+                hosted=self._remote,
+                category="retrieval",
+            )
             return int(getattr(res, "total_count", 0) or 0)
-        except Exception:
+        except BestEffortTransportError:
             return 0
 
     def reset(self) -> None:
         tenant_id = _active_tenant()
         if tenant_id is None:
             # Single-tenant: drop and recreate the whole collection (fast).
+            def dispatch() -> None:
+                delete_error: Exception | None = None
+                try:
+                    self._client.collections.delete(self._collection)
+                except Exception as exc:
+                    delete_error = exc
+                # Preserve the existing fail-loud behaviour if recreation fails.
+                self._ensure_collection()
+                if delete_error is not None:
+                    raise BestEffortTransportError(
+                        "weaviate collection reset failed"
+                    ) from delete_error
+
             try:
-                self._client.collections.delete(self._collection)
-            except Exception:
-                pass
-            self._ensure_collection()
+                metered_transport_call(
+                    "weaviate",
+                    dispatch,
+                    hosted=self._remote,
+                    category="update",
+                )
+            except BestEffortTransportError as exc:
+                log.debug("weaviate: collection reset failed: %s", exc.__cause__)
             return
         # Multi-tenant: delete ONLY this tenant's objects. Dropping the shared
         # collection here would wipe EVERY other tenant's vectors too -- the same
         # isolation add()/query()/delete()/count() already enforce via _tenant.
+        def dispatch_tenant_reset() -> None:
+            try:
+                coll = self._client.collections.get(self._collection)
+                result = coll.data.delete_many(where=self._tenant_filter(tenant_id))
+                failed = getattr(result, "failed", 0)
+                if isinstance(failed, int) and not isinstance(failed, bool) and failed:
+                    raise RuntimeError(
+                        f"weaviate tenant reset reported {failed} failed deletions"
+                    )
+            except Exception as exc:
+                raise BestEffortTransportError(
+                    "weaviate tenant reset failed"
+                ) from exc
+
         try:
-            coll = self._client.collections.get(self._collection)
-            coll.data.delete_many(where=self._tenant_filter(tenant_id))
-        except Exception as e:  # pragma: no cover -- backend-specific
-            log.debug("weaviate: tenant-scoped reset failed: %s", e)
+            metered_transport_call(
+                "weaviate",
+                dispatch_tenant_reset,
+                hosted=self._remote,
+                category="update",
+            )
+        except BestEffortTransportError as exc:
+            log.debug("weaviate: tenant-scoped reset failed: %s", exc.__cause__)
 
 
 __all__ = ["WeaviateStore"]

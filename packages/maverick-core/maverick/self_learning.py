@@ -667,7 +667,10 @@ def acquire_mcp_server(name: str, *, need: str = "") -> Any:
     from .mcp_client import MCPServerSpec
     from .mcp_registry import is_indirect_stdio_command
     from .paths import current_tenant_id
-    from .safety.consent import ConsentDenied, require_consent
+    from .safety.consent import (
+        consume_operation_consent,
+        require_operation_consent,
+    )
 
     check_learning_halt("self_learning", "mcp_acquisition_start")
     if not _NAME_RE.match(name):
@@ -705,6 +708,19 @@ def acquire_mcp_server(name: str, *, need: str = "") -> Any:
     tenant = current_tenant_id() or "shared"
     spec_digest = _canonical_mcp_spec_digest(spec)
     consent_scope = _mcp_consent_scope(tenant, name, spec_digest)
+    target_path = tenant_config_path() or config_path()
+
+    def current_target() -> dict[str, Any]:
+        current_entry = _catalog.resolve(name, "mcp")
+        if current_entry is None:
+            raise ValueError("catalog MCP entry disappeared during approval")
+        return {
+            "tenant": current_tenant_id() or "shared",
+            "name": name,
+            "config_path": str(tenant_config_path() or config_path()),
+            "catalog_source": current_entry.source,
+            "catalog_sha256": current_entry.sha256,
+        }
 
     # Operator gate BEFORE any persistence/launch. The detail surfaces the
     # exact pinned command + digest so the approver sees what will run. The
@@ -715,17 +731,58 @@ def acquire_mcp_server(name: str, *, need: str = "") -> Any:
         f"{command} {' '.join(args)} (executable_sha256={pin}; "
         f"spec_sha256={spec_digest})"
     )
-    decision = require_consent(
-        "add-mcp-server", risk="high", scope=consent_scope, detail=detail,
+    permit = require_operation_consent(
+        "add-mcp-server",
+        risk="high",
+        scope=consent_scope,
+        detail=detail,
         provenance=(
             f"self-learning:{tenant}:mcp:{name}:spec-sha256={spec_digest}"
         ),
-        raise_on_deny=True, allow_auto_approve=False,
+        target=current_target(),
+        parameters={"server": spec.to_dict(), "need": need or name},
+        parameter_summary=[
+            "Persist the exact catalog-pinned MCP server specification for this tenant."
+        ],
+        known_effects=[
+            "Adds the reviewed MCP server to the active tenant configuration."
+        ],
+        unresolved_assumptions=[
+            "The pinned executable is launched only later through the normal MCP start checks."
+        ],
+        before="The tenant configuration does not contain this MCP server entry.",
+        after="The tenant configuration contains this reviewed MCP server entry.",
+        irreversible=False,
+        target_provider=current_target,
+        parameters_provider=lambda: {
+            "server": spec.to_dict(),
+            "need": need or name,
+        },
+        input_versions_provider=lambda: {
+            "spec_sha256": _canonical_mcp_spec_digest(spec),
+            "catalog_entry_sha256": hashlib.sha256(
+                json.dumps(
+                    {
+                        "source": (_catalog.resolve(name, "mcp") or entry).source,
+                        "sha256": (_catalog.resolve(name, "mcp") or entry).sha256,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+        },
+        credential_versions_provider=lambda: {
+            "executable_sha256": spec.pin_sha256,
+            "server_spec_sha256": _canonical_mcp_spec_digest(spec),
+        },
+        budget_provider=lambda: {
+            "config_bytes": len(
+                json.dumps(spec.to_dict(), sort_keys=True).encode("utf-8")
+            )
+        },
+        allow_auto_approve=False,
+        consult_ledger=False,
     )
-    if not getattr(decision, "granted", False):
-        raise ConsentDenied("add-mcp-server")
-    if (current_tenant_id() or "shared") != tenant:
-        raise ValueError("active tenant changed during MCP acquisition consent")
 
     def tenant_authority_check() -> None:
         if (current_tenant_id() or "shared") != tenant:
@@ -735,14 +792,13 @@ def acquire_mcp_server(name: str, *, need: str = "") -> Any:
     # overlay. Use it rather than granting a tenant-scoped approval that mutates
     # deployment-global config authority. Shared/single-tenant mode retains the
     # historical global config target.
-    target_path = tenant_config_path() or config_path()
-
-    return add_mcp_server(
-        name, command, args=args, pin_sha256=pin,
-        need=need or name,
-        path=target_path,
-        authority_check=tenant_authority_check,
-    )
+    with consume_operation_consent(permit):
+        return add_mcp_server(
+            name, command, args=args, pin_sha256=pin,
+            need=need or name,
+            path=target_path,
+            authority_check=tenant_authority_check,
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1496,9 +1552,9 @@ def write_generated_tool(
     """
     from .paths import current_tenant_id
     from .safety.consent import (
-        ConsentDenied,
+        consume_operation_consent,
         grant_persistent,
-        require_consent,
+        require_operation_consent,
     )
 
     check_learning_halt("self_learning", "generated_tool_start")
@@ -1525,11 +1581,37 @@ def write_generated_tool(
     scope = _generated_consent_scope(tenant, name, digest)
     target = generated_tools_dir() / f"{name}.py"
     existed_before_consent = target.exists()
+
+    def current_target() -> dict[str, Any]:
+        current_path = generated_tools_dir() / f"{name}.py"
+        return {
+            "tenant": current_tenant_id() or "shared",
+            "name": name,
+            "path": str(current_path),
+            "already_exists": current_path.exists(),
+        }
+
+    def sandbox_credentials() -> dict[str, str]:
+        from .approval_cards import digest as approval_digest
+
+        backend = type(sandbox)
+        return {
+            "kind": "generated-tool-sandbox",
+            "generation_sha256": approval_digest({
+                "backend": f"{backend.__module__}.{backend.__qualname__}",
+                "workdir": str(getattr(sandbox, "workdir", "")),
+                "host_visible_fs": getattr(sandbox, "host_visible_fs", None),
+                "generated_tool_safe": getattr(
+                    sandbox, "generated_tool_safe", None,
+                ),
+            }),
+        }
+
     if not require_approval:
         log.warning(
             "require_approval=False no longer bypasses generated-tool consent"
         )
-    decision = require_consent(
+    permit = require_operation_consent(
         "register-generated-tool",
         risk="high",
         scope=scope,
@@ -1539,52 +1621,86 @@ def write_generated_tool(
             "call execute in an isolated, network-denied sandbox."
         ),
         provenance=f"self-learning:{tenant}:{name}:sha256={digest}",
-        raise_on_deny=True,
+        target=current_target(),
+        parameters={"name": name, "source": source, "need": need or name},
+        parameter_summary=[
+            f"Validate and persist the exact {len(source.encode('utf-8'))}-byte source committed by SHA-256."
+        ],
+        known_effects=[
+            "Executes the reviewed source in a network-denied shape probe and persists it for this tenant."
+        ],
+        unresolved_assumptions=[
+            "Static checks cannot prove every semantic behavior of generated code."
+        ],
+        before="The source has not executed and no generated-tool file or grant exists.",
+        after="The reviewed source is persisted with a tenant/name/digest runtime grant.",
+        irreversible=False,
+        target_provider=current_target,
+        parameters_provider=lambda: {
+            "name": name,
+            "source": source,
+            "need": need or name,
+        },
+        input_versions_provider=lambda: {
+            "source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            "static_policy": "generated-tool-ast-v1",
+        },
+        credential_versions_provider=sandbox_credentials,
+        budget_provider=lambda: {
+            "source_bytes": len(source.encode("utf-8")),
+            "probe_timeout_seconds": _IMPORT_CHECK_TIMEOUT,
+        },
+        allow_auto_approve=False,
+        consult_ledger=False,
     )
-    if not getattr(decision, "granted", False):
-        raise ConsentDenied("register-generated-tool")
 
-    # Consent must happen before any execution, including the sandbox probe.
-    metadata = _validate_import_isolated(
-        source, expected_name=name, sandbox=sandbox,
-    )
+    # Spend the permit before the first execution of generated bytes and retain
+    # the authority fence through persistence of both source and runtime grant.
+    with consume_operation_consent(permit):
+        metadata = _validate_import_isolated(
+            source, expected_name=name, sandbox=sandbox,
+        )
 
-    tools_dir = generated_tools_dir()
-    ensure_private_directory(tools_dir)
-    target = tools_dir / f"{name}.py"
-    with cross_process_lock(target):
-        if target.exists():
-            raise ValueError(
-                f"generated tool {name!r} already exists; refusing to overwrite it"
-            )
-        if existed_before_consent:
-            raise ValueError(
-                f"generated tool {name!r} changed during approval; "
-                "retry to obtain a fresh digest-bound decision"
-            )
-        check_learning_halt("self_learning", "generated_tool_persistence")
-        atomic_write_text(target, source, mode=0o600)
-        try:
-            # A later process must be able to distinguish these approved bytes
-            # from an AST-safe file swapped in after registration.
-            check_learning_halt("self_learning", "generated_tool_consent_persistence")
-            grant_persistent("register-generated-tool", scope=scope)
-            if not _generated_consent_granted(
-                tenant=tenant, name=name, digest=digest,
-            ):
-                raise ValueError("could not persist generated-tool digest consent")
-        except Exception:
-            target.unlink(missing_ok=True)
-            raise
-    tool = _generated_tool_proxy(
-        source=source,
-        metadata=metadata,
-        sandbox=sandbox,
-        tenant=tenant,
-        digest=digest,
-    )
-    _record_committed(need or name, "tool", name, source=str(target))
-    return tool
+        tools_dir = generated_tools_dir()
+        ensure_private_directory(tools_dir)
+        target = tools_dir / f"{name}.py"
+        with cross_process_lock(target):
+            if target.exists():
+                raise ValueError(
+                    f"generated tool {name!r} already exists; refusing to overwrite it"
+                )
+            if existed_before_consent:
+                raise ValueError(
+                    f"generated tool {name!r} changed during approval; "
+                    "retry to obtain a fresh digest-bound decision"
+                )
+            check_learning_halt("self_learning", "generated_tool_persistence")
+            atomic_write_text(target, source, mode=0o600)
+            try:
+                # A later process must distinguish these approved bytes from an
+                # AST-safe file swapped in after registration.
+                check_learning_halt(
+                    "self_learning", "generated_tool_consent_persistence",
+                )
+                grant_persistent("register-generated-tool", scope=scope)
+                if not _generated_consent_granted(
+                    tenant=tenant, name=name, digest=digest,
+                ):
+                    raise ValueError(
+                        "could not persist generated-tool digest consent"
+                    )
+            except Exception:
+                target.unlink(missing_ok=True)
+                raise
+        tool = _generated_tool_proxy(
+            source=source,
+            metadata=metadata,
+            sandbox=sandbox,
+            tenant=tenant,
+            digest=digest,
+        )
+        _record_committed(need or name, "tool", name, source=str(target))
+        return tool
 
 
 def _strip_fences(text: str) -> str:
