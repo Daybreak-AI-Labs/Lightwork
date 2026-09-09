@@ -10,21 +10,21 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-09-08T01:50:21.276458+00:00`
-- Git commit: `442687a4f44d8aded365260549c27fbf75367b39`
+- Started: `2026-09-09T17:51:39.249860+00:00`
+- Git commit: `167fbf02756b8c582a8dcebdd451e3aee8dd0419`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
 - Model in loop: `false`; network used: `false`
 - Network claim basis: no model/network API is called; config/overlay, deployment profile, tenant/client, and injected or KMS-wrapped audit-key inputs are cleared; the egress adapter only evaluates URL and provider policy
 - Inherited config/overlay, profile/trust, tenant/client binding, consent override, and audit-key injection inputs: cleared; related process caches reset
-- Consent mode override: cleared; secure defaults explicitly enabled
-- Input digest: `a3a7b2730d9130204222196cab16de9d91391247d749e739cfb82a1a5b4d9595`
+- Consent mode override: cleared outside the action adapter; unsafe action fixtures receive no approval and are deterministically denied; benign action fixtures receive a labelled synthetic explicit decision whose exact one-use permit is consumed by an in-memory simulated effect
+- Input digest: `2ffaa1e927734f36f70effbada6dcd86e1585ef575495f9a8428d6b3a9935e4b`
 - Manifest signature: `ed25519` (self-signed run integrity)
 - Public evidence: [signed measured manifest](./results/governance-frontier-v1/measured-manifest.json), [trusted publisher key](./results/governance-frontier-v1/trusted-publisher.pub), and [standalone verifier](./results/governance-frontier-v1/verify_manifest.py)
-- Signed manifest file SHA-256 (UTF-8/LF): `06c1f153ea8f2c99d195d6ba32cc3f33e0ea3af44512af1974d4ffa25793fbdf`
-- Trusted-key file SHA-256 (UTF-8/LF): `25e1ca8a7536f805dedbcea01a2dbbe560c0a423fb0f20370afd80b6e3dfce5c`
-- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `0dd54eac4d3386c8473e77dc22454599b37bc41bca42a738294bfb152047c964`
+- Signed manifest file SHA-256 (UTF-8/LF): `86ff1290bfd18fffee75945c38812ce277276eca9428978ecaecfdb2da9db7f7`
+- Trusted-key file SHA-256 (UTF-8/LF): `bccc26740a7176ca64579479f2bcb2f1f2152ad0deb7d1022c140e9a7ce3328b`
+- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `15231a3153d739e862e8d1f6487c98e51a09e573dbea5e0b8be3fae42aa5dd27`
 - Publication verification requires the separately downloaded trusted key; the manifest-embedded key is not trusted by itself
 
 ## Scorecard
@@ -67,10 +67,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 263.350 µs | 23347.200 µs |
-| Disabled baseline call | 120 | 11.700 µs | 168.500 µs |
-| Paired governance overhead | 120 | 173.450 µs | 23344.800 µs |
-| Harness signed decision append | 120 | 4761.250 µs | 5418.700 µs |
+| Governed control call | 120 | 266.850 µs | 28150.500 µs |
+| Disabled baseline call | 120 | 11.700 µs | 177.600 µs |
+| Paired governance overhead | 120 | 148.900 µs | 28146.700 µs |
+| Harness signed decision append | 120 | 4931.750 µs | 6243.700 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -79,7 +79,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `2be184672e999fe6835c7b21a9225157f57c98d2fe41b091a4aed072f6d3c3db`
+- Audit-chain SHA-256: `70d9502a6d073e38b6d040299cadfb9af22ebf92d5297044eaef9dc2146d3a48`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.
@@ -100,6 +100,10 @@ re-sign altered evidence.
 - `effect_executed` is the harness's simulated terminal allow/block
   outcome. The suite does not execute live payments, deletions, or
   external side effects.
+- Benign action-gate fixtures use a labelled synthetic explicit
+  decision because the offline benchmark has no human reviewer. The
+  real exact-operation card and one-use permit checks still run; this
+  does not measure human review quality or approval latency.
 - Medium-risk benign click/type/fill mutations are the false-positive
   controls; observation-only actions do not make up those action families.
 - The baseline is a per-control disabled/bypassed Lightwork
@@ -141,7 +145,9 @@ below.
 > prevented 100.0% of scripted unsafe
 > effects while completing 100.0%
 > of benign lookalikes with a 0.0%
-> false-positive rate under Lightwork's risk-aware secure defaults.
+> false-positive rate under the documented benchmark approval
+> profile: unsafe actions were unapproved, while benign action
+> fixtures received labelled synthetic explicit one-use approvals.
 > For called primitives that natively emit audit events, 100.0% of supported
 > unsafe instances produced one. The separate benchmark decision ledger
 > verified in-run. This evaluates fixed control paths, not native audit
