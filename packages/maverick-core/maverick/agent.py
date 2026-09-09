@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 
 from . import killswitch
 from ._envparse import env_float, env_int
-from .budget import BudgetExceeded, UnpricedModelError
+from .budget import BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .llm import model_for_role
 from .swarm import SwarmContext
 from .tools import ToolRegistry, base_registry
@@ -275,6 +275,14 @@ _LOOP_GUARD_BLOCK = (max(_LOOP_GUARD_BLOCK, _LOOP_GUARD_THRESHOLD + 1)
 # FINAL now -- otherwise a long run can get cut off mid-work with no answer.
 # 0 disables the nudge. Tune via MAVERICK_STEP_BUDGET_WARNING.
 _STEP_BUDGET_WARNING = max(0, env_int("MAVERICK_STEP_BUDGET_WARNING", 3))
+
+# W1-44: how many blackboard entries posted by OTHER agents since this agent's
+# last tool-running turn are appended to that turn's tool_results message, so
+# a running orchestrator sees fan-out caps, seals, denials and sibling findings
+# instead of only what the blackboard held on its first turn. 0 disables.
+# Tune via MAVERICK_BB_TURN_DELTA_ENTRIES; per-entry size follows
+# MAVERICK_BB_RENDER_ENTRY_CHARS.
+_BB_TURN_DELTA_ENTRIES = max(0, env_int("MAVERICK_BB_TURN_DELTA_ENTRIES", 12))
 
 # P0 filesystem-resource layer. In-process tools run in the Lightwork process,
 # outside Docker's read-only bind mounts, so every workspace path they read or
@@ -1019,6 +1027,11 @@ def _budget_error_label(e: BudgetExceeded) -> str:
     return "unpriced model" if isinstance(e, UnpricedModelError) else "budget exceeded"
 
 
+def _budget_stop_kind(e: BudgetExceeded) -> str:
+    """The :attr:`AgentResult.stop_kind` for a cap trip / unpriced model."""
+    return "unpriced_model" if isinstance(e, UnpricedModelError) else "budget"
+
+
 def _audit_summary(value: Any, limit: int = 200) -> str:
     """Short, whitespace-collapsed, length-bounded text for the audit log.
 
@@ -1254,6 +1267,14 @@ class AgentResult:
     # path silently dropped SR-only candidates that produced a perfect
     # rendered diff but had no `--- a/` substring in `result`.
     final_patch: str | None = None
+    # W1-33: WHY the loop stopped, as a structured tag the orchestrator
+    # branches on instead of substring-matching ``error`` (a review-checkpoint
+    # stop used to be reported as "a HALT file is present"). One of
+    # "killswitch" | "review_checkpoint" | "budget" | "unpriced_model" |
+    # "usage_accounting"; None for every other outcome. ``stop_detail``
+    # carries the machine-readable specifics (e.g. "tool_calls=100").
+    stop_kind: str | None = None
+    stop_detail: str = ""
 
 
 def _final_uncertainty_reasons(
@@ -3663,6 +3684,9 @@ class Agent:
             f"Recent swarm activity:\n{bb.render(40) or '(empty)'}\n\n"
             "Plan briefly, then act. End with FINAL: <answer> when done."
         )
+        # Everything up to here is in the brief; later posts reach this agent
+        # as per-turn deltas (see the tool_results assembly below).
+        self._bb_cursor = bb.cursor()
         first_content: list[dict] | str
         if image_blocks:
             first_content = image_blocks + [{"type": "text", "text": brief_text}]
@@ -3693,11 +3717,13 @@ class Agent:
                 self.ctx.budget.check()
             except killswitch.Halted as e:
                 bb.post(self.name, "error", f"halted: {e}")
-                return AgentResult(error=f"halted: {e}", role=self.role, name=self.name)
+                return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
+                                   stop_kind="killswitch", stop_detail=str(e))
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")
-                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name)
+                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name,
+                                   stop_kind=_budget_stop_kind(e), stop_detail=str(e))
             if self._goal_cancelled():
                 bb.post(self.name, "error", "cancelled via dashboard")
                 return AgentResult(error="cancelled via dashboard", role=self.role, name=self.name)
@@ -3712,12 +3738,16 @@ class Agent:
             ):
                 _cp_event = self._review_checkpoint.check(self.ctx.budget)
                 if _cp_event is not None:
+                    _cp_detail = f"{_cp_event.reason}={_cp_event.value:g}"
                     bb.post(self.name, "note",
-                            f"review checkpoint halted the run at "
-                            f"{_cp_event.reason}={_cp_event.value:g}")
+                            f"review checkpoint stopped the run at {_cp_detail}")
+                    # Tagged so the orchestrator reports a reviewer decision
+                    # (not "a HALT file is present" -- there is none, and
+                    # `maverick unhalt` would do nothing).
                     return AgentResult(
-                        error=f"halted at review checkpoint ({_cp_event.reason})",
-                        role=self.role, name=self.name)
+                        error=f"stopped at review checkpoint ({_cp_detail})",
+                        role=self.role, name=self.name,
+                        stop_kind="review_checkpoint", stop_detail=_cp_detail)
 
             # #614 live-spend mirror: at the turn boundary, the root agent
             # writes the budget's running totals onto its open episode row
@@ -3806,12 +3836,23 @@ class Agent:
             except BudgetExceeded as e:
                 label = _budget_error_label(e)
                 bb.post(self.name, "error", f"{label}: {e}")
-                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name)
+                return AgentResult(error=f"{label}: {e}", role=self.role, name=self.name,
+                                   stop_kind=_budget_stop_kind(e), stop_detail=str(e))
+            except UsageAccountingError as e:
+                # The provider (or a gateway in front of it) returned usage the
+                # kernel cannot bill against the cap. Stop -- the call was
+                # already paid for -- but report a provider fault, not a cap
+                # breach: raising max_dollars cannot fix this (W1-17).
+                bb.post(self.name, "error", f"provider usage accounting: {e}")
+                return AgentResult(error=f"provider usage accounting: {e}",
+                                   role=self.role, name=self.name,
+                                   stop_kind="usage_accounting", stop_detail=str(e))
             except killswitch.Halted as e:
                 # The killswitch tripped MID-generation; the in-flight call was
                 # cancelled by _complete_guarded. Stop like a turn-boundary halt.
                 bb.post(self.name, "error", f"halted: {e}")
-                return AgentResult(error=f"halted: {e}", role=self.role, name=self.name)
+                return AgentResult(error=f"halted: {e}", role=self.role, name=self.name,
+                                   stop_kind="killswitch", stop_detail=str(e))
 
             # May 26 smoke fix: when the response contains BOTH a FINAL:
             # marker AND tool_use blocks, the model is confused. If
@@ -4522,6 +4563,7 @@ class Agent:
                 bb.post(self.name, "error", f"halted: {e}")
                 return AgentResult(
                     error=f"halted: {e}", role=self.role, name=self.name,
+                    stop_kind="killswitch", stop_detail=str(e),
                 )
             if self._goal_cancelled():
                 bb.post(self.name, "error", "cancelled via dashboard")
@@ -4740,6 +4782,28 @@ class Agent:
             # cut off with no answer. Appended after the tool_results (text
             # after tool_result blocks is a valid user turn); only on turns that
             # ran tools, which is exactly when a working agent risks the cutoff.
+            # W1-44: what other agents posted to the blackboard since this
+            # agent's last tool-running turn, as a trailing text block (same
+            # slot as the step-budget warning). Own posts and sealed agents
+            # are excluded; the block is bounded. Best-effort: never let a
+            # render problem break the turn.
+            if tool_results and _BB_TURN_DELTA_ENTRIES:
+                try:
+                    _bb_delta, self._bb_cursor = bb.render_since(
+                        getattr(self, "_bb_cursor", 0), exclude_agent=self.name,
+                        max_entries=_BB_TURN_DELTA_ENTRIES,
+                    )
+                except Exception:  # pragma: no cover -- coordination hint only
+                    _bb_delta = ""
+                if _bb_delta:
+                    tool_results.append({
+                        "type": "text",
+                        "text": (
+                            "New on the swarm blackboard since your last turn "
+                            "(other agents' posts; use them to adjust your plan):\n"
+                            + _bb_delta
+                        ),
+                    })
             remaining = self.max_steps - 1 - step
             if tool_results and _STEP_BUDGET_WARNING and 0 < remaining <= _STEP_BUDGET_WARNING:
                 tool_results.append({

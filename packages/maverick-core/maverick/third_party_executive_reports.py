@@ -772,6 +772,33 @@ def _metric_label(metric_id: str) -> str:
     return metric_id.replace("_", " ").title()
 
 
+# Body text starts here on every page (below the 72pt brand band) and never
+# runs past the floor: the footer sits at y=34, so the floor keeps one clear
+# line between the last body baseline and the footer text.
+_PDF_FIRST_BASELINE = 690
+_PDF_BODY_FLOOR = 60
+
+
+def _pdf_line_style(
+    kind: str,
+    accent: tuple[float, float, float],
+    text_color: tuple[float, float, float],
+) -> tuple[str, int, tuple[float, float, float], int]:
+    """``(font, size, color, baseline step)`` for one rendered line kind."""
+
+    if kind == "title":
+        return "F2", 20, (1.0, 1.0, 1.0), 31
+    if kind == "subtitle":
+        return "F1", 12, (1.0, 1.0, 1.0), 28
+    if kind == "heading":
+        return "F2", 13, accent, 25
+    if kind == "metric":
+        return "F2", 10, text_color, 18
+    if kind == "digest":
+        return "F1", 7, text_color, 15
+    return "F1", 9, text_color, 18
+
+
 def render_deterministic_pdf(
     *,
     report_id: str,
@@ -851,9 +878,23 @@ def render_deterministic_pdf(
         )
     )
 
-    per_page = 38
-    chunks = [lines[index : index + per_page] for index in range(0, len(lines), per_page)]
-    chunks = chunks or [[("body", "No report content is available.")]]
+    # Paginate by the vertical space the lines actually consume (W4-89): a
+    # fixed line count overflowed the page once a report carried every
+    # metric plus several sources, drawing body lines below the y=34 footer
+    # and off the paper edge -- silently clipping the source digests that
+    # are the report's evidence. A line starts a new page when its baseline
+    # would cross the body floor above the footer band.
+    chunks: list[list[tuple[str, str]]] = [[]]
+    y = _PDF_FIRST_BASELINE
+    for line in lines:
+        y_step = _pdf_line_style(line[0], accent, text_color)[3]
+        if chunks[-1] and y - y_step < _PDF_BODY_FLOOR:
+            chunks.append([])
+            y = _PDF_FIRST_BASELINE
+        chunks[-1].append(line)
+        y -= y_step
+    if not chunks[0]:
+        chunks = [[("body", "No report content is available.")]]
     page_streams: list[bytes] = []
     for page_index, chunk in enumerate(chunks, 1):
         operations = [
@@ -864,20 +905,9 @@ def render_deterministic_pdf(
             "0 714 612 6 re f",
             "Q",
         ]
-        y = 690
+        y = _PDF_FIRST_BASELINE
         for kind, value in chunk:
-            if kind == "title":
-                font, size, color, y_step = "F2", 20, (1.0, 1.0, 1.0), 31
-            elif kind == "subtitle":
-                font, size, color, y_step = "F1", 12, (1.0, 1.0, 1.0), 28
-            elif kind == "heading":
-                font, size, color, y_step = "F2", 13, accent, 25
-            elif kind == "metric":
-                font, size, color, y_step = "F2", 10, text_color, 18
-            elif kind == "digest":
-                font, size, color, y_step = "F1", 7, text_color, 15
-            else:
-                font, size, color, y_step = "F1", 9, text_color, 18
+            font, size, color, y_step = _pdf_line_style(kind, accent, text_color)
             operations.extend(
                 (
                     "BT",

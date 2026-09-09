@@ -387,3 +387,20 @@ def test_range_day_traversal_neutralized(monkeypatch, tmp_path):
     # back or used as a path component.
     assert "../../etc" not in r.text
     assert "../../passwd" not in r.text
+
+
+def test_active_now_panel_diff_renders_and_respects_focus(monkeypatch, tmp_path):
+    """W3-74: the live table used to be rebuilt via innerHTML every 5 s,
+    dropping keyboard focus from the 'why?' buttons and polling hidden tabs."""
+    _isolate(monkeypatch, tmp_path)
+    text = _client().get("/oversight").text
+    script = text[text.index('id="active-now"'):]
+    # Rows are keyed by goal id and updated in place; no wholesale rebuild.
+    assert "tr.dataset.goal" in script
+    assert "box.innerHTML = h" not in script
+    # Refresh is skipped while the tab is hidden or focus is inside the table.
+    assert "if (document.hidden) return;" in script
+    assert "box.contains(document.activeElement)" in script
+    # The refresh window is announced to assistive tech.
+    assert "setAttribute('aria-busy', 'true')" in script
+    assert "removeAttribute('aria-busy')" in script

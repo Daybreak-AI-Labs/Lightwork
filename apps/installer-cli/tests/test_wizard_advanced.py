@@ -1168,3 +1168,37 @@ def test_signing_identity_admission_is_an_explicit_installer_opt_in(tmp_path, mo
     assert features["workspace_recovery"] is True
     disabled = _write(tmp_path, monkeypatch, {"allow_signing_identity_transition": False})
     assert tomllib.loads(disabled).get("features", {}).get("signing_identity_transition", False) is False
+
+
+def test_dashboard_compress_decline_is_written_and_accept_is_the_default(tmp_path, monkeypatch):
+    # W3-77: response compression is default-on in the app, so only a
+    # deliberate "no" (a proxy already compresses) reaches config.toml.
+    off = _write(tmp_path, monkeypatch, {"dashboard_compress": False})
+    assert tomllib.loads(off)["dashboard"]["compress"] is False
+    on = _write(tmp_path, monkeypatch, {"dashboard_compress": True})
+    assert "compress" not in on
+
+
+def test_bedrock_auth_mode_is_written_and_iam_needs_no_key(tmp_path, monkeypatch):
+    # W1-10: the wizard asks how to authenticate to Bedrock and writes it; IAM
+    # signing carries no api_key line, a bearer token does.
+    from maverick_installer import wizard
+
+    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
+    for mode in ("iam", "api_key"):
+        wizard.write_config(
+            providers=["bedrock"], role_models={}, channels={},
+            safety={"profile": "balanced"},
+            budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
+            sandbox={"backend": "local", "workdir": "~/ws"},
+            keys={}, capabilities={}, advanced={},
+            provider_options={"bedrock": {"auth_mode": mode}},
+        )
+        parsed = tomllib.loads((tmp_path / "config.toml").read_text())
+        assert parsed["providers"]["bedrock"]["auth_mode"] == mode
+        assert ("api_key" in parsed["providers"]["bedrock"]) == (mode == "api_key")
+
+    monkeypatch.setattr(wizard, "_q_select", lambda *a, **k: "api_key - Bedrock bearer token in BEDROCK_API_KEY")
+    assert wizard.pick_bedrock_auth() == {"auth_mode": "api_key"}

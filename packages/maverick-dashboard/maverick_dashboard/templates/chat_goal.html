@@ -888,9 +888,22 @@
         if (!d.open || d.dataset.loaded) return;
         d.dataset.loaded = '1';
         const body = d.querySelector('.artifact__history-body');
+        body.textContent = 'Loading…';
+        body.classList.add('muted');
         const url = '/api/v1/goals/' + encodeURIComponent(d.dataset.goal) +
                     '/artifacts/history?title=' + encodeURIComponent(d.dataset.title);
-        fetch(url).then(function (r) { return r.json(); }).then(function (j) {
+        // W3-75: a non-2xx (auth lapsed, goal gone, server error) used to
+        // render as "No history." or leave "Loading…" forever, and the loaded
+        // flag meant re-opening never retried. Check the status, and on any
+        // failure show why and clear the flag so the next toggle retries.
+        fetch(url).then(function (r) {
+          if (!r.ok) {
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              throw new Error(j.detail || ('History unavailable (HTTP ' + r.status + ')'));
+            });
+          }
+          return r.json();
+        }).then(function (j) {
           body.textContent = '';
           body.classList.remove('muted');
           const versions = (j.versions || []).slice().reverse();  // newest first
@@ -922,7 +935,12 @@
             }
             body.appendChild(wrap);
           });
-        }).catch(function () { body.textContent = 'Failed to load history.'; });
+        }).catch(function (e) {
+          body.classList.add('muted');
+          body.textContent = 'Could not load history: ' + String(e && e.message || e) +
+                             '. Close and reopen to retry.';
+          delete d.dataset.loaded;
+        });
       });
     });
   </script>

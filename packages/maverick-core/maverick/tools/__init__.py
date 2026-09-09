@@ -303,13 +303,24 @@ class Tool:
     # ``to_anthropic()``: it must never alter the tool catalog the model
     # sees (that would bust the prompt cache).
     parallel_safe: bool = False
+    # W1-11: ask the provider to validate tool inputs against input_schema
+    # (Anthropic ``strict: true``; OpenAI function ``strict: true``) so a
+    # malformed-arguments retry is never needed. Off by default: strict mode
+    # constrains the schema (e.g. additionalProperties: false, every property
+    # required on OpenAI), so a tool opts in once its schema is ready. Only
+    # emitted when set, so the catalog the model sees -- and the prompt
+    # cache key -- is unchanged for every other tool.
+    strict: bool = False
 
     def to_anthropic(self) -> dict[str, Any]:
-        return {
+        spec: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
         }
+        if self.strict:
+            spec["strict"] = True
+        return spec
 
 
 class ToolRegistry:

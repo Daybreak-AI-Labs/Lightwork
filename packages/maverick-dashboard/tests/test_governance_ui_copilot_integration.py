@@ -67,6 +67,8 @@ class _AssetParser(HTMLParser):
         attributes = dict(attrs)
         candidate = attributes.get("href" if tag == "link" else "src")
         if candidate and candidate.startswith("/static/"):
+            # Shell assets carry a content-hash query (W3-77); count by path.
+            candidate = candidate.split("?")[0]
             self.assets.add(candidate)
             self.asset_counts[candidate] += 1
 

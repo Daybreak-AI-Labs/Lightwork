@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
+from maverick.budget import Budget, UsageAccountingError
 from maverick.providers.ollama_provider import OllamaClient
 from maverick.providers.openai_provider import OpenAIClient
 
@@ -38,7 +38,7 @@ class _Resp:
 def test_paid_provider_missing_usage_aborts():
     # USAGE_REQUIRED is True on the base/paid client -> fail closed.
     budget = Budget(max_dollars=10.0)
-    with pytest.raises(BudgetExceeded, match="missing token usage"):
+    with pytest.raises(UsageAccountingError, match="missing token usage"):
         OpenAIClient._from_response(_Resp(_Msg()), budget, model="gpt-4o",
                                     usage_required=True)
 

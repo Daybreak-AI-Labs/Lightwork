@@ -66,8 +66,8 @@ def test_drop_workbench_uses_shared_shell_and_fail_closed_controls(
     assert "California DROP requests" in response.text
     assert 'id="drop-operations" disabled' in response.text
     assert 'src="/static/lightwork-privacy-drop-management.js"' in response.text
-    assert 'src="/static/lightwork-copilot.js"' in response.text
-    assert 'href="/static/lightwork.css"' in response.text
+    assert 'src="/static/lightwork-copilot.js' in response.text
+    assert 'href="/static/lightwork.css' in response.text
     assert "/api/v1/privacy/drop" in response.text
     assert "No subject identity enters this page" in response.text
     for control_id in (

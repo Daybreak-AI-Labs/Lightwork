@@ -179,6 +179,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "theme",
         "density",
         "allow_extension",
+        "compress",
         "themes",
         "public_url",
         "default_suites",

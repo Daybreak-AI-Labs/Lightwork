@@ -255,6 +255,75 @@ def _mark_user_message(msg: dict) -> dict:
     return msg
 
 
+def _forced_tool_choice_unsupported(model_id: str) -> bool:
+    """Models on which ``tool_choice`` ``any``/``tool`` return a 400
+    (forced-tool-use-not-supported): Claude Fable 5.1 and Claude Mythos 5.1
+    per the tool-use docs. ``auto``/``none`` still work there; strict tool
+    use is the documented substitute for schema-valid inputs."""
+    return model_id.startswith("claude-fable-5-1") or model_id.startswith("claude-mythos-5-1")
+
+
+def _append_user_text(messages: list[dict], text: str) -> list[dict]:
+    """A copy of ``messages`` with ``text`` appended as a trailing text block
+    on the last user message (the volatile turn, never the cached prefix).
+    Leaves ``messages`` untouched when there is no user message to extend."""
+    for idx in range(len(messages) - 1, -1, -1):
+        if messages[idx].get("role") != "user":
+            continue
+        content = messages[idx].get("content")
+        if isinstance(content, str):
+            blocks: list = [{"type": "text", "text": content}] if content else []
+        elif isinstance(content, list):
+            blocks = list(content)
+        else:
+            return messages
+        blocks.append({"type": "text", "text": text})
+        out = list(messages)
+        out[idx] = {**messages[idx], "content": blocks}
+        return out
+    return messages
+
+
+def _apply_tool_choice(
+    kwargs: dict[str, Any],
+    tool_choice: dict | None,
+    model_id: str,
+) -> None:
+    """Translate a normalized ``tool_choice`` onto an Anthropic request (W1-11).
+
+    A forced choice (``any``/``tool``) is clamped to ``auto`` where the API
+    rejects it -- Fable/Mythos 5.1, or manual extended thinking
+    (``thinking.type == "enabled"``) -- and the intent is carried as an
+    instruction on the last user message instead, which the docs name as the
+    supported alternative. ``disable_parallel_tool_use`` survives the clamp.
+    """
+    from .base import normalize_tool_choice
+
+    choice = normalize_tool_choice(tool_choice)
+    if choice is None or not kwargs.get("tools"):
+        return
+    manual_thinking = (kwargs.get("thinking") or {}).get("type") == "enabled"
+    if choice["type"] in ("any", "tool") and (
+        _forced_tool_choice_unsupported(model_id) or manual_thinking
+    ):
+        wanted = choice.get("name")
+        instruction = (
+            f"Respond by calling the `{wanted}` tool." if wanted
+            else "Respond by calling one of the available tools."
+        )
+        log.info(
+            "tool_choice %s not supported for %s (%s); sending auto with an "
+            "instruction instead", choice["type"], model_id,
+            "manual thinking" if manual_thinking else "model",
+        )
+        kwargs["messages"] = _append_user_text(kwargs["messages"], instruction)
+        choice = {"type": "auto", **(
+            {"disable_parallel_tool_use": True}
+            if choice.get("disable_parallel_tool_use") else {}
+        )}
+    kwargs["tool_choice"] = choice
+
+
 def _add_messages_cache_breakpoint(messages: list[dict]) -> list[dict]:
     """Mark the most recent stable user/tool_result message(s) for caching.
 
@@ -341,6 +410,7 @@ class AnthropicClient:
         thinking_budget: int | None,
         model: str | None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
     ) -> dict[str, Any]:
         # Fast mode (W1-3): MODEL_OPUS_FAST is a catalog-only id, never sent
         # to the API. Substitute the real model NOW so every prefix check
@@ -501,6 +571,10 @@ class AnthropicClient:
                     oc["effort"] = model_effort
                 else:
                     kwargs["output_config"] = {"effort": model_effort}
+
+        # W1-11: forced / restricted tool selection, after thinking is settled
+        # (a manual-thinking request cannot force a tool).
+        _apply_tool_choice(kwargs, tool_choice, model_id)
 
         if want_fast:
             # `speed` is a top-level request field the API only validates on
@@ -670,9 +744,11 @@ class AnthropicClient:
         model: str | None = None,
         on_delta: Callable[[str], None] | None = None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
     ) -> LLMResponse:
         kwargs = self._build_request(
-            system, messages, tools, max_tokens, thinking_budget, model, effort)
+            system, messages, tools, max_tokens, thinking_budget, model, effort,
+            tool_choice=tool_choice)
         # Fast mode (W1-3) is beta-endpoint-only: `speed` is only a validated
         # field on client.beta.messages.*. Bill against the CALLER's model id
         # ("claude-opus-4-8-fast", the correctly-priced rate-card SKU), not
@@ -708,9 +784,11 @@ class AnthropicClient:
         thinking_budget: int | None = None,
         model: str | None = None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
     ) -> LLMResponse:
         kwargs = self._build_request(
-            system, messages, tools, max_tokens, thinking_budget, model, effort)
+            system, messages, tools, max_tokens, thinking_budget, model, effort,
+            tool_choice=tool_choice)
         is_fast = kwargs.get("speed") == "fast"
         endpoint = self.aclient.beta.messages if is_fast else self.aclient.messages
         billing_model = model if is_fast else kwargs.get("model")

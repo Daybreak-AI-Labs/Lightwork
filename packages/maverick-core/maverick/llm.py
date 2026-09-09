@@ -725,6 +725,49 @@ def _record_provider_call(provider: str) -> None:
 _TRANSPORT_FAILURE_CLASSES = frozenset({"rate_limit", "timeout", "network", "server", "other"})
 
 
+_TOOL_CHOICE_SUPPORT: dict[tuple[type, str], bool] = {}
+
+
+def _add_tool_choice(
+    kwargs: dict[str, Any],
+    tool_choice: dict | None,
+    client: Any,
+    method: str,
+    tools: list[dict] | None,
+) -> None:
+    """W1-11: thread a caller's ``tool_choice`` to the provider client when it
+    accepts one. Validated up front (a bad value is the caller's bug, raised
+    before any spend); dropped with a debug line for a client whose
+    ``complete``/``complete_async`` has no such parameter (e.g. codex_cli), so
+    an optional hint never breaks a provider that cannot honour it."""
+    if not tool_choice:
+        return
+    from .providers.base import normalize_tool_choice
+
+    choice = normalize_tool_choice(tool_choice)
+    if not tools:
+        return
+    key = (type(client), method)
+    supported = _TOOL_CHOICE_SUPPORT.get(key)
+    if supported is None:
+        import inspect
+
+        try:
+            params = inspect.signature(getattr(client, method)).parameters
+            supported = "tool_choice" in params or any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+            )
+        except (TypeError, ValueError):
+            supported = False
+        _TOOL_CHOICE_SUPPORT[key] = supported
+    if supported:
+        kwargs["tool_choice"] = choice
+    else:
+        logging.getLogger(__name__).debug(
+            "tool_choice ignored: %s.%s does not accept it",
+            type(client).__name__, method)
+
+
 def _is_provider_transport_failure(exc: BaseException) -> bool:
     """True only for a genuine provider-transport failure (429/5xx/timeout/
     connection) -- never for a LOCAL guard (budget, model-not-allowed,
@@ -1237,6 +1280,17 @@ _AZURE_CLIENT_ENV_NAMES = (
     "AZURE_OPENAI_DEPLOYMENT",
     "AZURE_OPENAI_TOKEN_SCOPE",
 )
+# Everything the native Bedrock client reads (W1-10); part of the client
+# fingerprint so a region/auth/endpoint change rotates the cached client.
+_BEDROCK_CLIENT_ENV_NAMES = (
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_DEFAULT_REGION",
+    "AWS_REGION",
+    "BEDROCK_API_KEY",
+    "BEDROCK_AUTH_MODE",
+    "BEDROCK_ENDPOINT",
+    "BEDROCK_MODEL_ID",
+)
 _PROVIDER_SNAPSHOT_RETRIES = 3
 _CLIENT_CACHE_MAX = 32
 
@@ -1635,15 +1689,6 @@ class LLM:
                 if value:
                     base_url = value
                     break
-        # Bedrock derives its endpoint from region rather than a BASE_URL env.
-        # Resolve that derivation here so cache identity rotates with AWS_REGION.
-        if provider == "bedrock" and base_url is None:
-            region = environment.get("AWS_REGION", "").strip()
-            if region:
-                base_url = (
-                    f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
-                )
-
         default_headers = _canonical_headers(pcfg.get("default_headers"))
         raw_auth_mode = pcfg.get("auth_mode")
         auth_mode = None
@@ -1663,6 +1708,20 @@ class LLM:
             if auth_mode is not None:
                 azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
             provider_environment = tuple(sorted(azure_environment.items()))
+        elif provider == "bedrock":
+            # The native client derives its endpoint from the region and picks
+            # IAM vs bearer auth; ``[providers.bedrock] auth_mode`` / ``endpoint``
+            # win over the environment, all from the same snapshot.
+            bedrock_environment = {
+                name: environment.get(name, "")
+                for name in _BEDROCK_CLIENT_ENV_NAMES
+            }
+            if auth_mode is not None:
+                bedrock_environment["BEDROCK_AUTH_MODE"] = auth_mode
+            raw_endpoint = pcfg.get("endpoint")
+            if isinstance(raw_endpoint, str) and raw_endpoint.strip():
+                bedrock_environment["BEDROCK_ENDPOINT"] = raw_endpoint.strip().lower()
+            provider_environment = tuple(sorted(bedrock_environment.items()))
 
         fingerprint = _provider_config_fingerprint(
             api_key=key,
@@ -1700,9 +1759,10 @@ class LLM:
                 "base_url": config.base_url,
                 "default_headers": config.headers_dict(),
             }
-            if provider == "azure":
+            if provider in ("azure", "bedrock"):
                 # Azure's key-vs-Entra selection, static token, deployment, and
-                # API version must consume the same environment snapshot too.
+                # API version -- and Bedrock's region, auth mode and endpoint --
+                # must consume the same environment snapshot too.
                 factory_kwargs["environment"] = config.environment_dict()
             client = get_provider_client(provider, **factory_kwargs)
 
@@ -1734,6 +1794,7 @@ class LLM:
         model: str | None = None,
         on_delta=None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
         _no_failover: bool = False,
         _provider_sequence: _ProviderAttemptSequence | None = None,
     ) -> LLMResponse:
@@ -1761,7 +1822,8 @@ class LLM:
                     (m, (lambda m=m: self.complete(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, on_delta=on_delta, effort=effort, _no_failover=True,
+                        model=m, on_delta=on_delta, effort=effort,
+                        tool_choice=tool_choice, _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
@@ -1810,6 +1872,7 @@ class LLM:
             model_effort = effort_for_model(effort, model_id)
             if model_effort:
                 kwargs["effort"] = model_effort
+        _add_tool_choice(kwargs, tool_choice, client, "complete", tools)
         import time as _time
         try:
             from .chaos import maybe_fail
@@ -1921,6 +1984,7 @@ class LLM:
         thinking_budget: int | None = None,
         model: str | None = None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
         _no_failover: bool = False,
         _provider_sequence: _ProviderAttemptSequence | None = None,
     ) -> LLMResponse:
@@ -1944,7 +2008,8 @@ class LLM:
                     (m, (lambda m=m: self.complete_async(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, effort=effort, _no_failover=True,
+                        model=m, effort=effort, tool_choice=tool_choice,
+                        _no_failover=True,
                         _provider_sequence=_provider_sequence)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
@@ -2024,6 +2089,7 @@ class LLM:
                     model_effort = effort_for_model(effort, model_id)
                     if model_effort:
                         _ekw["effort"] = model_effort
+                _add_tool_choice(_ekw, tool_choice, client, "complete_async", tools)
 
                 async def _call():
                     # Each physical hedge has independent capacity and a receipt.

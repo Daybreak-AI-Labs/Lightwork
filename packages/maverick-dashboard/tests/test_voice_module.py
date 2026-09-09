@@ -21,7 +21,7 @@ def test_voice_module_served_with_ranking_and_humanizer():
 
 def test_base_loads_module_and_chat_fallback_uses_it():
     base = (_TPL / "templates" / "base.html").read_text(encoding="utf-8")
-    assert "/static/lightwork-voice.js" in base
+    assert "asset('lightwork-voice.js')" in base      # versioned /static/lightwork-voice.js link
     chat = (_TPL / "templates" / "chat_goal.html").read_text(encoding="utf-8")
     assert "window.lwVoice" in chat
     # The bare utterance survives only as the last-resort fallback branch.

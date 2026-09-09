@@ -697,6 +697,27 @@ def pick_providers() -> list[str]:
     return [p.split()[0] for p in picks]
 
 
+def pick_bedrock_auth() -> dict[str, Any]:
+    """How Lightwork authenticates to AWS Bedrock; written to
+    ``[providers.bedrock]`` (W1-10). IAM is the standard enterprise path
+    (instance/task role, profile, or env keys) and needs no bearer token."""
+    console.print(
+        "[dim]Bedrock can sign requests with your AWS IAM credentials -- an "
+        "instance or task role, an AWS profile, or AWS_ACCESS_KEY_ID/"
+        "AWS_SECRET_ACCESS_KEY (the standard enterprise path; needs the "
+        "bedrock extra: boto3) -- or send a Bedrock bearer token.[/dim]"
+    )
+    pick = _q_select(
+        "  How should Lightwork authenticate to Bedrock?",
+        [
+            "iam     - AWS IAM credentials / role (SigV4, recommended)",
+            "api_key - Bedrock bearer token in BEDROCK_API_KEY",
+        ],
+        default="iam     - AWS IAM credentials / role (SigV4, recommended)",
+    )
+    return {"auth_mode": pick.split()[0]}
+
+
 def pick_per_tenant_keys() -> bool:
     """Offer per-tenant BYOK provider keys (multi-tenant deployments only).
 
@@ -5049,6 +5070,13 @@ def pick_advanced() -> dict[str, Any]:
     # Department (job-function) scoping only bites once sign-in is on, so it is
     # offered right after — writes under [dashboard]. Returns {} when declined.
     advanced["department_access"] = pick_department_access(bool(advanced["oidc"].get("enabled")))
+    # Response compression is on by default ([dashboard] compress); the only
+    # reason to turn it off is a reverse proxy that already compresses.
+    advanced["dashboard_compress"] = _q_confirm(
+        "Compress dashboard responses (gzip)? Say no only if a proxy in front "
+        "of Lightwork already compresses.",
+        default=True,
+    )
     return advanced
 
 
@@ -5294,6 +5322,29 @@ def pick_sandbox() -> dict[str, Any]:
         ).split()[0]
         if lang != "python":
             cfg["language"] = lang
+    if backend == "kubernetes":
+        # The backend fails closed when allow_network=false and the namespace
+        # has no deny-all NetworkPolicy (a transient pod can't block its own
+        # egress), so a config written without asking ran nothing (platform
+        # audit W1-104). Ask, and hand over the exact manifest to apply.
+        namespace = _q_text("  Kubernetes namespace for sandbox pods", default="default").strip()
+        cfg["namespace"] = namespace or "default"
+        net = _q_select(
+            "  Pod networking (a transient pod cannot block its own egress):",
+            [
+                "deny  - No network: apply the deny-all NetworkPolicy shown next (recommended)",
+                "allow - Pods may use the cluster network (package installs, HTTP fetches)",
+            ],
+            default="deny  - No network: apply the deny-all NetworkPolicy shown next (recommended)",
+        )
+        cfg["allow_network"] = net.split()[0] == "allow"
+        if not cfg["allow_network"]:
+            console.print(
+                "\n  Apply this once to the namespace before the first run "
+                "(commands fail closed until it is present):\n"
+            )
+            console.print(kubernetes_deny_all_manifest(cfg["namespace"]), highlight=False)
+            console.print("\n  kubectl apply -f - <<'EOF' ... EOF   (paste the manifest above)\n")
     return cfg
 
 
@@ -5394,6 +5445,26 @@ def pick_knowledge_access() -> dict[str, bool]:
             default=True,
         )
     }
+
+
+def kubernetes_deny_all_manifest(namespace: str) -> str:
+    """The deny-all NetworkPolicy the kubernetes sandbox backend requires when
+    ``allow_network = false`` -- the kernel's own manifest when it is
+    importable, else an identical local copy (the wizard runs before core)."""
+    try:
+        from maverick.sandbox.kubernetes import _DENY_ALL_NETWORKPOLICY
+    except Exception:
+        _DENY_ALL_NETWORKPOLICY = (
+            "apiVersion: networking.k8s.io/v1\n"
+            "kind: NetworkPolicy\n"
+            "metadata:\n"
+            "  name: maverick-deny-all\n"
+            "  namespace: {ns}\n"
+            "spec:\n"
+            "  podSelector: {{}}\n"
+            "  policyTypes: [Ingress, Egress]"
+        )
+    return _DENY_ALL_NETWORKPOLICY.format(ns=namespace)
 
 
 # ---------- new wizard steps (council parity pass) ----------
@@ -6117,8 +6188,13 @@ def _cfg_governance(
     return ["[governance]", *values, ""]
 
 
-def _cfg_providers(providers: list[str], per_tenant_keys: bool = False) -> list[str]:
+def _cfg_providers(
+    providers: list[str],
+    per_tenant_keys: bool = False,
+    provider_options: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
     lines: list[str] = []
+    options = provider_options or {}
     if per_tenant_keys:
         # Bring-your-own-key: let an active tenant override the deployment-global
         # provider key with its own (resolved from the secret provider under a
@@ -6132,6 +6208,18 @@ def _cfg_providers(providers: list[str], per_tenant_keys: bool = False) -> list[
         info = catalog.PROVIDERS.get(prov, {})
         lines.append(f"[providers.{prov}]")
         env_name = info.get("env")
+        if prov == "bedrock":
+            # Native Bedrock: IAM signing needs no key; a bearer token does.
+            mode = str((options.get("bedrock") or {}).get("auth_mode") or "iam")
+            lines.append("# iam = sign with AWS credentials/role (needs the bedrock "
+                         "extra); api_key = Bedrock bearer in BEDROCK_API_KEY.")
+            _emit_kv(lines, "auth_mode", mode)
+            if mode == "api_key":
+                lines.append(f'api_key = "${{{env_name}}}"')
+            lines.append('# endpoint = "mantle"   # Opus 4.7+ (anthropic.claude-*); '
+                         '"legacy" for Opus 4.6 and earlier')
+            lines.append("")
+            continue
         if env_name:
             lines.append(f'api_key = "${{{env_name}}}"')
         if prov == "ollama":
@@ -7990,9 +8078,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             if val:
                 _emit_kv(lines, key, val)
     dept = advanced.get("department_access") or {}
+    compress_off = advanced.get("dashboard_compress") is False
     if isinstance(dept, dict) and (
         dept.get("default_suites") or dept.get("group_roles") or dept.get("group_suites")
-        or "local_owner_setup" in advanced
+        or "local_owner_setup" in advanced or compress_off
     ):
         # Department (job-function) scoping for signed-in users. default_suites
         # is deny-by-default for users with no explicit grant; the group tables
@@ -8001,6 +8090,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[dashboard]")
         if "local_owner_setup" in advanced:
             _emit_kv(lines, "local_owner_setup", advanced["local_owner_setup"] is True)
+        if compress_off:
+            # Default-on in the app; only a deliberate "no" is written.
+            lines.append("# Response compression off: a proxy in front already compresses.")
+            _emit_kv(lines, "compress", False)
         if dept.get("default_suites"):
             lines.append("# Departments a signed-in user may use until an admin grants more.")
             _emit_kv(lines, "default_suites", list(dept["default_suites"]))
@@ -8229,6 +8322,7 @@ def write_config(
     candidate_promotion: dict[str, Any] | None = None,
     knowledge_access: dict[str, Any] | None = None,
     advanced: dict[str, Any] | None = None,
+    provider_options: dict[str, dict[str, Any]] | None = None,
     mcp_servers: dict[str, dict[str, Any]] | None = None,
     mcp_registries: list[str] | None = None,
     template_registries: list[str] | None = None,
@@ -8355,7 +8449,9 @@ def write_config(
     ]
     lines += _cfg_deployment(deployment)
     lines += _cfg_governance(governance_profile, finance)
-    lines += _cfg_providers(providers, per_tenant_keys=per_tenant_keys)
+    lines += _cfg_providers(
+        providers, per_tenant_keys=per_tenant_keys, provider_options=provider_options,
+    )
     lines += _cfg_role_models(role_models)
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
@@ -9537,6 +9633,14 @@ def run(fast: bool = False, resume: bool = False) -> int:
     state["providers"] = providers
     _save_partial(state)
 
+    provider_options = state.get("provider_options")
+    if provider_options is None:
+        provider_options = {}
+        if "bedrock" in providers:
+            provider_options["bedrock"] = pick_bedrock_auth()
+        state["provider_options"] = provider_options
+        _save_partial(state)
+
     per_tenant_keys = state.get("per_tenant_keys")
     if per_tenant_keys is None:
         per_tenant_keys = pick_per_tenant_keys()
@@ -9678,6 +9782,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         candidate_promotion=candidate_promotion,
         knowledge_access=knowledge_access,
         advanced=advanced,
+        provider_options=provider_options,
         mcp_servers=mcp_servers,
         plugins=plugins,
         plugin_grant=plugin_grant,

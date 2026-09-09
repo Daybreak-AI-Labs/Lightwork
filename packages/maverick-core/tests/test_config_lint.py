@@ -31,6 +31,7 @@ def test_dashboard_keys_the_app_reads_are_known():
     findings = lint_config({"dashboard": {
         "token": "x", "theme": "dark", "density": "compact",
         "allow_extension": True, "themes": {"mine": {"bg": "#000"}},
+        "compress": False,
     }})
     assert findings == [], [f.message for f in findings]
 

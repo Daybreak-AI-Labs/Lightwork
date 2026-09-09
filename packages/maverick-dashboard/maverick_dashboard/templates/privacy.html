@@ -1081,9 +1081,23 @@
           if (!csv) { msg.textContent = 'Paste the CSV export first.'; return; }
           btn.disabled = true; msg.textContent = 'Importing…';
           post(url, { csv_text: csv }).then(function (d) {
-            msg.textContent = 'Imported ' + (d.imported || 0) +
-              (d.skipped ? ', skipped ' + d.skipped : '') + '. Reloading…';
-            setTimeout(function () { location.reload(); }, 900);
+            // Vendors report skipped rows structured ({row, name, reason});
+            // consents report a plain count. Summarise by reason so a
+            // truncated import never reads as a clean success.
+            var skipped = d.skipped, note = '';
+            if (Array.isArray(skipped)) {
+              if (skipped.length) {
+                var byReason = {};
+                skipped.forEach(function (s) { byReason[s.reason] = (byReason[s.reason] || 0) + 1; });
+                note = ', skipped ' + skipped.length + ' (' + Object.keys(byReason).map(function (k) {
+                  return byReason[k] + ' ' + k.replace(/_/g, ' ');
+                }).join(', ') + ')';
+              }
+            } else if (skipped) {
+              note = ', skipped ' + skipped;
+            }
+            msg.textContent = 'Imported ' + (d.imported || 0) + note + '. Reloading…';
+            setTimeout(function () { location.reload(); }, note ? 2500 : 900);
           }).catch(function (e) {
             btn.disabled = false; msg.textContent = String(e.message || e);
           });

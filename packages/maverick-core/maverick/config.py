@@ -905,6 +905,10 @@ def any_provider_configured() -> bool:
             continue
         if str(pcfg.get("api_key", "")).strip() or str(pcfg.get("base_url", "")).strip():
             return True
+        # Bedrock signing with AWS IAM credentials carries no key at all: the
+        # explicit auth_mode is the configuration (W1-10).
+        if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
+            return True
     return False
 
 

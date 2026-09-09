@@ -129,6 +129,18 @@ def _humanize_run_error(e: Exception) -> str:
             "  Restore or repair runtime-overrides.toml, then run "
             "`maverick doctor` before retrying."
         )
+    from ..budget import UsageAccountingError
+
+    if isinstance(e, UsageAccountingError):
+        # A gateway fault, not a cap breach (W1-17): say so, and don't send
+        # the user off to raise max_dollars.
+        return (
+            "The model provider returned invalid usage accounting, so Lightwork "
+            "stopped rather than run uncounted against your spending cap.\n"
+            f"  {msg}\n"
+            "  This is a provider/gateway fault, not a budget problem: fix or "
+            "route around the gateway, then retry."
+        )
     # Sandbox backends already raise an actionable RuntimeError, e.g.
     # "Docker not available. ... change [sandbox] backend to 'local'".
     if isinstance(e, RuntimeError) and (

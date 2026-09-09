@@ -9,14 +9,41 @@
                      sealed off (a sector seal) while the others keep running
                      and become immune.') %}
     {{ state('Current state',
-             domains | length ~ ' sealed domain agent' ~ ('' if domains | length == 1 else 's'),
-             badge='bulkheads up' if domains else 'none yet',
-             badge_class='ok' if domains else 'idle',
+             domain_page.catalog_total ~ ' sealed domain agent' ~ ('' if domain_page.catalog_total == 1 else 's'),
+             badge='bulkheads up' if domain_page.catalog_total else 'none yet',
+             badge_class='ok' if domain_page.catalog_total else 'idle',
              copy='Every agent runs inside its own compartment with an
                    explicit tool and knowledge envelope — a breach in one
                    domain never reaches another.') }}
   {% endcall %}
-  <div class="panel{% if not domains %} empty{% endif %}">
+  <div class="panel{% if not domain_page.catalog_total %} empty{% endif %}">
+    {% if domain_page.catalog_total %}
+      <form method="get" action="/compartments" aria-label="Search sealed domain agents"
+            style="display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; margin-bottom: var(--space-3);">
+        <label for="domain-query" style="display: grid; gap: var(--space-1);">
+          <span>Search agents</span>
+          <input class="input" id="domain-query" name="q" type="search"
+                 maxlength="128" value="{{ domain_page.query }}"
+                 placeholder="Name, persona or compartment" />
+        </label>
+        <label for="domain-per-page" style="display: grid; gap: var(--space-1);">
+          <span>Results per page</span>
+          <input class="input" id="domain-per-page" name="per_page" type="number"
+                 min="1" max="100" value="{{ domain_page.per_page }}" />
+        </label>
+        <button class="btn" type="submit">Search</button>
+        {% if domain_page.query %}<a class="btn btn--ghost" href="/compartments">Clear</a>{% endif %}
+      </form>
+      <p class="muted" role="status">
+        {% if domain_page.returned %}
+          Showing {{ domain_page.first }}–{{ domain_page.last }} of
+          {{ domain_page.filtered_total }} matching agents
+        {% else %}
+          Showing 0 of {{ domain_page.filtered_total }} matching agents
+        {% endif %}
+        ({{ domain_page.catalog_total }} sealed).
+      </p>
+    {% endif %}
     {% if domains %}
     <table>
       <thead><tr>
@@ -57,11 +84,27 @@
       {% endfor %}
       </tbody>
     </table>
+    {% elif domain_page.catalog_total %}
+      <p class="muted">No agents match this search.</p>
     {% else %}
       <div class="mv-empty">
         <p class="mv-empty__title">No domain agents yet</p>
         <p class="mv-empty__body">Compartments are created when your organization onboards a department — each one gets its own sealed agent. Create your first specialist in the <a href="/agents">Agent Factory</a>.</p>
       </div>
+    {% endif %}
+    {% if domain_page.page_count > 1 %}
+      <nav aria-label="Sealed domain agent pages"
+           style="display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-3);">
+        {% if domain_page.page > 1 %}
+          <a class="btn btn--ghost"
+             href="/compartments?q={{ domain_page.query | urlencode }}&amp;per_page={{ domain_page.per_page }}&amp;page={{ domain_page.page - 1 }}">Previous</a>
+        {% endif %}
+        <span class="muted">Page {{ domain_page.page }} of {{ domain_page.page_count }}</span>
+        {% if domain_page.page < domain_page.page_count %}
+          <a class="btn btn--ghost"
+             href="/compartments?q={{ domain_page.query | urlencode }}&amp;per_page={{ domain_page.per_page }}&amp;page={{ domain_page.page + 1 }}">Next</a>
+        {% endif %}
+      </nav>
     {% endif %}
   </div>
 {% endblock %}
