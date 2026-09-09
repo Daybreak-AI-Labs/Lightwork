@@ -216,7 +216,7 @@ def build_app(directory):
         project_id = world.create_project("Browser review project", owner=principal)
         review_goal = world.create_goal("Browser captured result", "Synthetic review task", owner=principal, project_id=project_id)
         world.set_goal_status(review_goal, "done", result="Synthetic captured deliverable. Evidence limitations remain explicit.")
-        for member in (principal, "user:browser-colleague"):
+        for member in (principal, "user:browser-colleague", "user:browser-outcome-owner"):
             rbac.set_tenant_role(tenant, member, "operator", actor=principal)
         with connections.bind_principal(principal):
             connections.set_connection("browser-discovery", connector="servicenow_cmdb", base_url="https://data.example.com", token="synthetic-local-test-token", owner=principal)
@@ -260,7 +260,7 @@ def build_app(directory):
     @dashboard.app.middleware("http")
     async def fixture_principal(request: Request, call_next):
         subject = request.headers.get("X-Browser-Principal", "browser-reviewer")
-        if subject not in {"browser-reviewer", "browser-colleague", "browser-learning-reviewer"}:
+        if subject not in {"browser-reviewer", "browser-colleague", "browser-learning-reviewer", "browser-outcome-owner"}:
             from fastapi.responses import JSONResponse
             return JSONResponse({"detail":"Unknown synthetic browser principal"}, status_code=403)
         request.state.principal = VerifiedPrincipal(

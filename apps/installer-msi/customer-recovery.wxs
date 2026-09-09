@@ -21,7 +21,9 @@
     <DirectoryRef Id="ApplicationProgramsFolder">
       <Component Id="LightworkRepairShortcut" Guid="33CB594E-5A4F-44CA-AE65-454F4E9D33D1" Win64="yes">
         <Shortcut Id="LightworkRepairShortcutEntry" Name="Repair Lightwork" Description="Repair Lightwork from its retained recovery application" Target="[INSTALLDIR]maverick-recovery-desktop.exe" Arguments="--maintenance-result" WorkingDirectory="INSTALLDIR" Icon="ProductIcon" />
-        <RegistryValue Root="HKLM" Key="Software\Daybreak AI Labs\Lightwork" Name="RepairShortcut" Type="integer" Value="1" KeyPath="yes" />
+        <!-- The Start Menu folder lives in the user profile, so ICE38/ICE57 require
+             an HKCU key path here, exactly like the package's own shortcut component. -->
+        <RegistryValue Root="HKCU" Key="Software\Daybreak AI Labs\Lightwork" Name="RepairShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
   </Fragment>

@@ -52,7 +52,9 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     document.addEventListener('DOMContentLoaded', () => {document.documentElement.style.zoom = String(value);});
   }, zoom);
   await page.goto('/start');
-  const destinations = [['Tasks', '/goals'], ['Connections', '/connections'], ['Knowledge', '/cortex'], ['Results', '/deliverables'], ['Settings', '/settings']];
+  // Knowledge is the governed knowledge-access page; the legacy Cortex console
+  // is an advanced tool that no longer appears in customer navigation.
+  const destinations = [['Tasks', '/goals'], ['Connections', '/connections'], ['Knowledge', '/knowledge-access'], ['Results', '/deliverables'], ['Settings', '/settings']];
   for (const [label, path] of destinations) {
     await expect(page.locator('#navfinder-dialog')).toHaveAttribute('data-navfinder-ready', 'true');
     await page.keyboard.press('Control+k');
@@ -74,6 +76,9 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     await expect.poll(() => page.evaluate(() => Number(getComputedStyle(document.documentElement).zoom))).toBe(zoom);
     await fits(page);
     await info.attach(`${label.toLowerCase()}-${zoom * 100}`, {body: await page.screenshot(), contentType: 'image/png'});
+    // Let the destination finish its own data requests before leaving it, so
+    // history navigation never aborts an in-flight fetch under load.
+    await page.waitForLoadState('networkidle');
     // Headless Chromium does not implement the browser chrome Alt+Left action.
     // This exercises actual history navigation separately from page keyboard UI.
     await page.goBack({waitUntil: 'domcontentloaded'});
@@ -90,7 +95,7 @@ test('restricted customer sees no admin or research destination and direct pages
     expect(response.status()).toBe(403);
     expect(await response.text()).not.toContain('Synthetic captured deliverable');
   }
-  for (const path of ['/goals', '/cortex', '/deliverables']) {
+  for (const path of ['/goals', '/knowledge-access', '/deliverables']) {
     const link = page.locator(`#sidebar a[href="${path}"]`);
     const toggle = link.locator('xpath=ancestor::div[contains(@class, "navgrp")]').locator('.navgrp__toggle');
     if (await toggle.getAttribute('aria-expanded') === 'false') {

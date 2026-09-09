@@ -45,15 +45,19 @@ def _create_groups(world, principal: str) -> list[list[dict]]:
 
 
 def install(app, world, tenant: str, principal: str) -> None:
-    groups: list[list[dict]] = []
-    finished = False
+    # Fixture state is kept per synthetic caller so a journey can seed sources
+    # for its own owner, isolated from the records other journeys admit for the
+    # shared reviewer during the same server session.
+    state: dict[str, dict] = {}
 
-    def require_owner(request: Request) -> None:
-        if caller_principal(request) != principal:
+    def fixture_owner(request: Request) -> tuple[str, dict]:
+        caller = caller_principal(request)
+        if caller != principal and not str(caller or "").startswith("user:browser-"):
             raise HTTPException(
                 403,
-                "Only the synthetic fixture owner can change outcome-value fixture state.",
+                "Only a synthetic browser principal can change outcome-value fixture state.",
             )
+        return caller, state.setdefault(caller, {"groups": [], "finished": False})
 
     def fixture_context(request: Request) -> str:
         with tenant_scope(tenant=tenant):
@@ -61,10 +65,11 @@ def install(app, world, tenant: str, principal: str) -> None:
 
     @app.post("/__browser_fixture/outcome-value/setup", include_in_schema=False)
     async def setup(request: Request):
-        require_owner(request)
+        owner, own = fixture_owner(request)
+        groups = own["groups"]
         if not groups:
             with tenant_scope(tenant=tenant):
-                groups.extend(_create_groups(world, principal))
+                groups.extend(_create_groups(world, owner))
         return {
             "synthetic": True,
             "provider_calls": 0,
@@ -74,8 +79,8 @@ def install(app, world, tenant: str, principal: str) -> None:
 
     @app.post("/__browser_fixture/outcome-value/finish", include_in_schema=False)
     async def finish(request: Request, body: dict):
-        nonlocal finished
-        require_owner(request)
+        owner, own = fixture_owner(request)
+        groups = own["groups"]
         identifiers = body.get("pilot_ids") if isinstance(body, dict) else None
         if (
             not groups
@@ -99,17 +104,17 @@ def install(app, world, tenant: str, principal: str) -> None:
                     ) from exc
                 expected = [row["reference"] for row in group]
                 actual = [case.get("reference") for case in pilot.get("cases", [])]
-                if pilot.get("actor") != principal or actual != expected:
+                if pilot.get("actor") != owner or actual != expected:
                     raise HTTPException(
                         409,
                         "A supplied pilot does not match this fixture's frozen cases.",
                     )
-            if not finished:
+            if not own["finished"]:
                 for group in groups:
                     for row in group:
                         identifier = int(row["reference"])
                         goal = world.get_goal(identifier)
-                        if goal is None or goal.owner != principal or goal.status != "pending":
+                        if goal is None or goal.owner != owner or goal.status != "pending":
                             raise HTTPException(409, "A fixture source changed before execution.")
                 for group in groups:
                     for row in group:
@@ -132,13 +137,13 @@ def install(app, world, tenant: str, principal: str) -> None:
                             world.record_signoff(
                                 identifier,
                                 "approved" if outcome == "accepted" else "rejected",
-                                decided_by=principal,
+                                decided_by=owner,
                                 note="Synthetic named-human decision for local browser acceptance.",
                             )
-                finished = True
+                own["finished"] = True
         return {
             "synthetic": True,
             "provider_calls": 0,
             "pilot_ids": identifiers,
-            "finished": finished,
+            "finished": own["finished"],
         }

@@ -2,7 +2,7 @@
 {% block title %}Knowledge access · Lightwork{% endblock %}
 {% block head_extra %}<link rel="stylesheet" href="/static/lightwork-knowledge-access.css">{% endblock %}
 {% block content %}
-<main class="ka-shell" id="knowledge-access"
+<section class="ka-shell" id="knowledge-access"
       data-context="{{ knowledge_context }}"
       data-tenant="{{ knowledge_tenant }}"
       data-actor="{{ knowledge_actor }}"
@@ -137,6 +137,6 @@
   </section>
 
   <noscript><p class="panel">JavaScript is required to revalidate and display governed knowledge sources.</p></noscript>
-</main>
+</section>
 {% endblock %}
 {% block scripts_extra %}<script src="/static/lightwork-knowledge-access.js" defer></script>{% endblock %}

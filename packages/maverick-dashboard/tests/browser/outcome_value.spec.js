@@ -151,6 +151,10 @@ async function cohort(page,pilotId,headers){
 
 test('real admitted pilot cohorts remain isolated and withhold ROI without human-time evidence',async({page,context,baseURL},info)=>{
   await localOnly(context,baseURL);
+  // Run as a dedicated synthetic owner: the portfolio, pilot pagination and
+  // accounting summary assert exact counts, and earlier journeys admit
+  // records for the shared reviewer during the same server session.
+  await context.setExtraHTTPHeaders({Origin:baseURL,'X-Browser-Principal':'browser-outcome-owner'});
   await paginateCohortPilotLists(context);
   const errors=[];
   const consoleErrors=[];
