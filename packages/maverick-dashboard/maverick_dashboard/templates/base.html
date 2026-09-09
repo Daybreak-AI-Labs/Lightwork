@@ -1,6 +1,9 @@
 {% from "_assets.html" import asset -%}
 <!doctype html>
-<html lang="{{ lang or 'en' }}" dir="{{ dir or 'ltr' }}">
+{#- <html lang> declares the language of the page BODY (English until the
+    templates are translated); the chrome strings that do follow the selected
+    language carry their own lang attribute below (W3-73, WCAG 3.1.1). -#}
+<html lang="{{ page_lang or 'en' }}" dir="{{ dir or 'ltr' }}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -27,7 +30,7 @@
   <link rel="apple-touch-icon" href="{{ asset('daybreak-logo.jpg') }}" />
 </head>
 <body class="theme-{{ theme or 'dark' }} font-{{ font or 'default' }} density-{{ density or 'comfortable' }}">
-  <a class="skip-link" href="#content">Skip to content</a>
+  <a class="skip-link" href="#content"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('chrome.skip_to_content') }}</a>
   <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
       <symbol id="i-chat" viewBox="0 0 16 16"><path d="M13 8.4A2.2 2.2 0 0 1 10.8 10.6H6.4L3 13V5.2A2.2 2.2 0 0 1 5.2 3h5.6A2.2 2.2 0 0 1 13 5.2z"/></symbol>
@@ -128,8 +131,8 @@
         <option value="compact" {% if density == 'compact' %}selected{% endif %}>Compact</option>
       </select>
           </label>
-          <label class="prefs__row"><span>{{ t('label.font') }}</span>
-      <select class="ctl" id="font-select" data-ui-preference="font" aria-label="{{ t('label.font') }}">
+          <label class="prefs__row"><span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('label.font') }}</span>
+      <select class="ctl" id="font-select" data-ui-preference="font" aria-label="{{ t('label.font') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
         <option value="">{{ t('label.font') }}</option>
         <option value="default" {% if font == 'default' %}selected{% endif %}>{{ t('font.default') }}</option>
         <option value="dyslexic" {% if font == 'dyslexic' %}selected{% endif %}>{{ t('font.dyslexic') }}</option>
@@ -138,7 +141,7 @@
         </div>
       </details>
       {% if show_logout %}
-      <a class="iconbtn" href="/auth/logout" aria-label="Sign out" title="Sign out">
+      <a class="iconbtn" href="/auth/logout" aria-label="{{ t('chrome.sign_out') }}" title="{{ t('chrome.sign_out') }}"{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>
         <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 14H3.5A1.5 1.5 0 0 1 2 12.5v-9A1.5 1.5 0 0 1 3.5 2H6"/><path d="M10.5 11 14 8l-3.5-3"/><path d="M14 8H6"/></svg>
       </a>
       {% endif %}
@@ -253,7 +256,7 @@
     {% block content %}{% endblock %}
   </main>
   <footer>
-    <span class="muted">Lightwork by Daybreak Labs · {{ t('footer.local') }} · proprietary software</span>
+    <span class="muted">Lightwork by Daybreak Labs · <span{% if lang and page_lang and lang != page_lang %} lang="{{ lang }}"{% endif %}>{{ t('footer.local') }}</span> · proprietary software</span>
   </footer>
 
   <!-- Reusable toast regions + confirm dialog (window.mvToast / window.mvConfirm).

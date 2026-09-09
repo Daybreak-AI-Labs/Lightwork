@@ -26,6 +26,21 @@ SEED_LANGS = ("ar",)
 # catalog for them lands.
 RTL_LANGS = frozenset({"ar", "he", "fa", "ur"})
 
+#: Languages the page BODY is actually rendered in. The templates' copy is
+#: English; only the handful of chrome strings routed through :func:`t` follow
+#: the selected language. ``<html lang>`` must describe the body (WCAG 3.1.1),
+#: so it uses :func:`content_lang`, and the translated chrome elements carry
+#: their own ``lang`` attribute. Add a language here once its templates exist.
+CONTENT_LANGS = frozenset({"en"})
+
+
+def content_lang(lang: str) -> str:
+    """The language to declare on ``<html>``: the selected language only when
+    the page body is translated into it, else English (the body's language).
+    Assistive tech picks voice and pronunciation rules from this attribute;
+    declaring ``de`` over an English page reads it with the wrong engine."""
+    return lang if lang in CONTENT_LANGS else DEFAULT_LANG
+
 
 def dir_for(lang: str) -> str:
     """Text direction for a language code: ``rtl`` or ``ltr``."""
@@ -55,6 +70,8 @@ MESSAGES: dict[str, dict[str, str]] = {
     "action.deny":    {"en": "Deny", "fr": "Refuser", "de": "Ablehnen", "ja": "却下する", "zh": "拒绝", "ar": "رفض"},
     "action.search":  {"en": "Search", "fr": "Rechercher", "de": "Suchen", "ja": "検索", "zh": "搜索", "ar": "بحث"},
     "footer.local":   {"en": "self-hosted", "fr": "auto-hébergé", "de": "selbst gehostet", "ja": "セルフホスト", "zh": "自托管"},
+    "chrome.skip_to_content": {"en": "Skip to content", "fr": "Aller au contenu", "de": "Zum Inhalt springen", "ja": "コンテンツへスキップ", "zh": "跳到内容", "ar": "تخطي إلى المحتوى"},
+    "chrome.sign_out": {"en": "Sign out", "fr": "Se déconnecter", "de": "Abmelden", "ja": "サインアウト", "zh": "退出登录", "ar": "تسجيل الخروج"},
     "font.default":   {"en": "Default", "fr": "Par défaut", "de": "Standard", "ja": "標準", "zh": "默认"},
     "font.dyslexic":  {"en": "Dyslexia-friendly", "fr": "Adaptée à la dyslexie", "de": "Legasthenie-freundlich", "ja": "ディスレクシア対応", "zh": "阅读障碍友好"},
 }
@@ -85,6 +102,6 @@ def t(key: str, lang: str = DEFAULT_LANG) -> str:
 
 
 __all__ = [
-    "LANGS", "DEFAULT_LANG", "SEED_LANGS", "RTL_LANGS", "MESSAGES",
-    "dir_for", "resolve_lang", "t",
+    "LANGS", "DEFAULT_LANG", "SEED_LANGS", "RTL_LANGS", "CONTENT_LANGS", "MESSAGES",
+    "content_lang", "dir_for", "resolve_lang", "t",
 ]

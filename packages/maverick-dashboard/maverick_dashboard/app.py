@@ -142,6 +142,7 @@ templates.env.filters["humanize"] = _idfmt.humanize
 templates.env.globals.setdefault("theme", "dark")
 templates.env.globals.setdefault("font", "default")
 templates.env.globals.setdefault("lang", "en")
+templates.env.globals.setdefault("page_lang", "en")
 templates.env.globals.setdefault("density", "comfortable")
 templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
@@ -308,7 +309,7 @@ def _resolve_font(request: Request) -> str:
 # body class + the theme switcher links, the `font` accessibility axis,
 # and the chrome-i18n helpers (`lang`, `t`).
 def _theme_context(request: Request) -> dict:
-    from .i18n import dir_for, resolve_lang
+    from .i18n import content_lang, dir_for, resolve_lang
     from .i18n import t as _t
 
     lang = resolve_lang(request)
@@ -319,7 +320,12 @@ def _theme_context(request: Request) -> dict:
         "density": resolve_density(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
+        # ``lang`` is the selected UI language (drives ``t()`` and ``dir``);
+        # ``page_lang`` is what the page body is actually written in and is
+        # what ``<html lang>`` declares (W3-73). They differ until the
+        # templates are translated.
         "lang": lang,
+        "page_lang": content_lang(lang),
         "dir": dir_for(lang),
         "t": lambda key: _t(key, lang),
     }
