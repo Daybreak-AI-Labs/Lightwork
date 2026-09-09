@@ -128,7 +128,7 @@ class TestDeliverablesPage:
         self._world(tmp_path, monkeypatch)
         r = client.get("/deliverables")
         assert r.status_code == 200
-        assert "Deliverables" in r.text
+        assert "Results · Lightwork" in r.text   # the page is labelled Results
         # finance_cash13w ships a contract, so its consumers show as filter chips
         assert "fpa_analyst" in r.text
         assert "13-week cash forecast" in r.text

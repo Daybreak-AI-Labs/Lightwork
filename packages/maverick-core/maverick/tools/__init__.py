@@ -1433,17 +1433,12 @@ def base_registry(
     )
     _apply_deferred_loading(reg)
 
-    # Route external connector WRITES through durable governed transactions.
-    # Standard mode is opt-in; enterprise mode is a mandatory fail-closed floor.
-    # Done last so it wraps the final tool objects.
-    try:
-        from ..governed_tools import apply_governed_connectors
-        apply_governed_connectors(reg, goal_id=goal_id)
-    except Exception:
-        from ..enterprise import enterprise_enabled
+    # Route every compatible external connector write through the durable,
+    # fresh-human governed transaction boundary. Done last so it wraps the
+    # final tool objects; assembly fails closed if the boundary cannot load.
+    from ..governed_tools import apply_governed_connectors
 
-        if enterprise_enabled():
-            raise
+    apply_governed_connectors(reg, goal_id=goal_id)
 
     return reg
 

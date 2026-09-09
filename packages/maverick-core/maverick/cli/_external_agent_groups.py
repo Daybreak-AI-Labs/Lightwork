@@ -137,8 +137,7 @@ def xa_mint_cmd(agent_id: str, surface: str, approval_id: int | None) -> None:
     with --approval-id once a decision-maker approves it."""
     from .. import external_agents as xa
     try:
-        token = xa.mint_token(agent_id, surface, minted_by="cli",
-                              mint_approval_id=approval_id)
+        token = xa.mint_token(agent_id, surface, mint_approval_id=approval_id)
     except xa.MintApprovalPending as e:
         click.echo(click.style(f"approval required — parked as approval "
                                f"#{e.approval_id}", fg="yellow"))

@@ -19,6 +19,16 @@ here.
 
 ## Agent kernel & orchestration
 
+- **Customer navigation** — Tasks (`/goals`), Connections (`/connections`),
+  Knowledge (`/knowledge-access`), Results (`/deliverables`), and Settings (`/settings`)
+  retain existing routes and data permissions. Navigation and direct page
+  requests deny unreadable role policy. Connections requires workspace admin;
+  Settings and technical Learning/Benchmarks/Performance pages require
+  installation admin. Their JSON snapshots and feature-switch inventory use the
+  same authority. Knowledge exposes only exact, currently eligible registry
+  versions, not all company data. Existing tenant-scoped customer assessment/benchmark-exchange
+  results retain their own permissions.
+
 - **Recursive multi-agent swarm** — orchestrator decomposes a goal and spawns
   specialist sub-agents (researcher / coder / writer / verifier / revisor /
   reflector), run in parallel (`orchestrator.py`, `agent.py`, `swarm.py`).
@@ -1509,6 +1519,17 @@ here.
   dashboard overlay. Savings = human cost − actual agent spend, plus ROI
   and hours given back. Read-only over the same episode ledger as Spend;
   zeros (never invented numbers) until goals have run.
+- **Outcome and delivered-cost evidence** (`outcome_accounting.py`,
+  `outcome_value_reporting.py`, dashboard `/outcome-pilots` +
+  `/api/v1/outcome-accounting`) — keeps every admitted pilot case in the
+  accepted, rejected, failed, cancelled, or unresolved denominator and exposes
+  its outcome, timestamps, provider attempts, review/setup/support/rework and
+  exception costs, allocation assumptions, corrections, and evidence basis in
+  the app and a bounded JSON export. Baseline cost and human-time evidence stay
+  visibly observed, estimated, or unknown; net savings and ROI are withheld
+  when the comparison is incomplete. Renewal and expansion evidence remains
+  separate from operating savings. Operator-recorded evidence is identified as
+  such until customer qualification supplies measured baseline and effort.
 - **2,031-agent specialist portfolio across 54 suites** — the original 8
 - **Autonomous Shoring** (`shoring.py`, dashboard `/shoring` +
   `/api/v1/shoring`; `[shoring] enable`, `MAVERICK_SHORING`) — the engagement
@@ -1617,13 +1638,31 @@ here.
   Shield-scanned, provenance-tagged (`vendor:agent_id`), tenant-isolated,
   every read audited. Successes/failures consolidate through the dream
   cycle; `maverick proof --fleet` breaks value out per vendor.
+- **Current-rights Knowledge** (`knowledge_access.py`,
+  `knowledge_content_projection.py`, dashboard `/knowledge-access`, default-on
+  `[knowledge_access] enable` / `MAVERICK_KNOWLEDGE_ACCESS`) — a named-user,
+  tenant-scoped search/detail/export and source-rights workflow over exact F07
+  dataset versions. Human display is a distinct `read` use: export or analysis
+  authority may imply that narrower read, while training-only authority never
+  does. Every direct read and cache hit re-resolves current purpose, requested
+  action, approval, checksum, license/usage constraints, freshness, consent,
+  and every parent with the same action. Exports carry a deterministic binding
+  of the user authorization and exact source evidence. Correction, exclusion,
+  and deletion requests preserve what reviewers saw, re-walk derivative state
+  on every response, and expose crash recovery for an interrupted approval.
+  Raw deletion is never described as erasing learned-weight influence. The
+  production projector currently supports exact approved evidence-graph nodes
+  and immutable fleet-memory inbox records; unsupported or mismatched stores
+  fail closed. See [Governed Knowledge](knowledge-access.md).
 - **Cortex — the company brain** (`cortex.py`, default-on `[cortex] enable`
   / `MAVERICK_CORTEX`; CLI `maverick cortex status|recall|deposit`; dashboard
-  page `/cortex`; audit kinds `cortex_recall` / `cortex_deposit`) — ONE
+  compatibility page `/cortex`; audit kinds `cortex_recall` / `cortex_deposit`) — ONE
   governed recall/deposit surface over the five memories the workforce
   already has: **knowledge** (the tenant's documents, with citations),
   **skills**, **self-harness lessons**, **the Operating Record** and
-  **fleet memory**. Each source keeps its own store, gates and semantics;
+  **fleet memory**. Dashboard document recall is composed through Current-rights
+  Knowledge and never falls back to the raw vector source; other Cortex clients
+  must use the governed Knowledge API for documents. Each source keeps its own store, gates and semantics;
   Cortex adds what none of them had together: one query, one provenance
   envelope (source, kind, text, citation, score), one audit row per read
   across all of them and per write — who asked, which sources answered with
@@ -2097,12 +2136,24 @@ here.
   data-key datalist) with a raw-text advanced mode for `and`/`or`.
 
 - **Renewable named accounts** (`connection_oauth`, gated on Connections and the
-  OAuth vault) — sealed per-owner app registration and reviewed provider consent
+  OAuth vault) — sealed workspace app registration managed by an installation
+  administrator, with reviewed account consent by workspace administrators
   in Connections for Google Drive, Google Cloud Storage discovery and Jira
   Cloud. Server-held PKCE/state binds the current workspace, account, app and
   connection versions; renewal preserves the reviewed generation, while a lost
   rotating-token response requires reconnecting. Vendor/discovery adapters consume
-  the actual named records. External provider registration/consent and live
+  the actual named records. Existing personal registrations stay private. A
+  same-browser connection detour retains the original vendor request; denial
+  and uncertain renewal expose reconnect/return actions without resending work.
+  The optional desktop return uses a signed, one-shot loopback broker to return
+  from the system browser to the initiating Lightwork window. Saved status shows
+  provider account identity, requested/provider-reported scopes, Lightwork owner
+  and the selected Jira workspace; renewal refuses a changed provider subject.
+  Customers use the installed provider registration and do not create provider
+  applications or handle client secrets during normal setup.
+  Authenticated disconnect requires the reviewed credential revision. Callback
+  access logs and connection validation errors redact sensitive inputs.
+  External provider registration/consent and live
   customer acceptance remain separate; see [account authorization](named-account-authorization.md).
 - **Named connections** (`maverick.connections`, gated on `[connections]`) —
   store a connector's base URL + API token under a name, sealed at rest with
@@ -2639,8 +2690,8 @@ deployment-global key byte-for-byte — a BYOK misconfiguration never takes an
 agent offline. BYOK only: no resale, metering, or markup lives here. Distinct
 from per-tenant `[kms]` BYOK (envelope-encryption key custody).
 
-**Public perf dashboard** (`GET /perf` + `GET /api/v1/perf` on the
-dashboard): one page/JSON face for the perf story — the perf-SLA checks
+**Installation performance diagnostics** (`GET /perf` + `GET /api/v1/perf` on
+the dashboard, installation-admin-only): one page/JSON face for the perf story — the perf-SLA checks
 measured live on the host (in a worker thread, against the published
 thresholds), recorded benchmark history with short-window regression
 verdicts, and the longitudinal era retrospective; sections with no recorded
@@ -4755,7 +4806,7 @@ tested without spawning py-spy.
   sparklines/bars; same-origin/token limits documented in the JS header and
   on the demo page; errors render as HTTP status, never fake data.
 - **Benchmark live dashboard** (`/benchmarks` + `GET /api/v1/benchmarks`):
-  per-suite trend sparklines + regression verdicts over the real
+  installation-admin-only per-suite trend sparklines + regression verdicts over the real
   `continuous_benchmark` history (`bench_track`), via the real
   `detect_regression`; honest empty state naming the record command. No
   fabricated competitor numbers — this page is *this deployment's* recorded
@@ -5188,6 +5239,15 @@ tested without spawning py-spy.
   prior-exposure statements, and request a different named administrator's
   evidence-bound review. This does not verify prior or provider exposure.
   See [workflow pilots](workflow-pilots.md).
+- **Outcome accounting contract** (`outcome_accounting`,
+  `outcome_accounting_api`): tenant-scoped admitted-work records retain source-
+  versioned observations, corrections, human decisions, cancelled/failed work,
+  failed-attempt costs, and explicitly unpriced amounts. The in-app projection
+  keeps technical verification, business acceptance, and cost completeness
+  separate. Portfolio responses use bounded cursor pages, reconcile every row
+  shown, and label when more admitted records remain. Detail responses include
+  the shared `lightwork.contract.outcome-record.v1` projection. This is an
+  application accounting record, not an independently authenticated invoice.
 - **Workflow readiness** (`workflow_readiness`): an in-app inventory labels
   available/bounded workflows, live validation requirements, previews,
   experimental features, prototypes and the Windows release candidate.

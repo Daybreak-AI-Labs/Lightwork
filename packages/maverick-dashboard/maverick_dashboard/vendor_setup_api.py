@@ -11,11 +11,13 @@ from maverick import config, connections
 from maverick import vendor_onboarding_setup as setup
 from maverick.governed_records import RecordConflict
 from maverick.paths import current_tenant_id_strict
+from maverick.vendor_onboarding import deployment_readiness
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import rbac, scim_groups, settings_store
 from .auth import caller_principal, require_global_permission, role_for_principal
 from .draft_api import context_for
+from .workflow_readiness import supplier_setup_readiness
 
 router = APIRouter(prefix="/api/v1/vendor-setup", tags=["vendor-setup"])
 
@@ -51,6 +53,7 @@ def _configuration():
     selected = [{key: value.get(key) for key in setup.REQUIRED_MODULES}
                 for value in (global_config, effective)]
     selected.append({"connections_override": connections.deployment_override()})
+    selected.append({"deployment": deployment_readiness()})
     return hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest(), global_config
 
 
@@ -71,12 +74,24 @@ def _authority(request, response, payload=None):
             raise HTTPException(422, "Review and confirm the setup change.")
         if not hmac.compare_digest(payload.context, context_for(request)) or not hmac.compare_digest(payload.configuration, fingerprint):
             raise HTTPException(409, "Account, workspace or settings changed. Reload and review setup.")
+        profile = deployment_readiness()
+        if not profile["supported"]:
+            raise HTTPException(409, profile["message"] + " " + profile["next_action"])
     return actor, fingerprint, loaded
 
 
 @router.get("")
 def overview(request: Request, response: Response):
     actor, fingerprint, loaded = _authority(request, response)
+    profile = deployment_readiness()
+    if not profile["supported"]:
+        # A diagnostic must not enter unsupported stores or acquire saga locks.
+        state = {"context": context_for(request), "configuration": fingerprint,
+            "revision": 0, "binding": {"resource_owner": "", "ticket_connection": "", "document_connection": ""},
+            "owner_locked": False, "owner_source": "unavailable", "eligible_owners": [],
+            "principal": actor, "connections_enabled": False, "modules_enabled": False,
+            "connections": [], "live_provider_verified": False, "deployment": profile}
+        return {**state, "readiness": supplier_setup_readiness(state)}
     try:
         record = setup.current()
         ownership = setup.owner_policy()
@@ -86,14 +101,15 @@ def overview(request: Request, response: Response):
         tenant = current_tenant_id_strict()
         eligible_owners = [] if ownership["owner_locked"] else sorted(
             principal for principal in rbac.list_tenant_roles(tenant) if _eligible_owner(tenant, principal))
-        return {"context": context_for(request), "configuration": fingerprint,
+        state = {"context": context_for(request), "configuration": fingerprint,
             "revision": (record or {}).get("revision", 0), "binding": binding,
             "owner_locked": ownership["owner_locked"], "owner_source": ownership["owner_source"],
             "eligible_owners": eligible_owners,
             "principal": actor, "connections_enabled": connections.enabled(),
             "modules_enabled": all((loaded.get(key) or {}).get("enable") is True for key in setup.REQUIRED_MODULES),
             "connections": [{key: row[key] for key in ("name", "connector", "base_url", "revision", "has_token")} for row in candidates if row["connector"] in {"jira", "gdrive"}],
-            "live_provider_verified": False}
+            "live_provider_verified": False, "deployment": profile}
+        return {**state, "readiness": supplier_setup_readiness(state)}
     except Exception as exc:
         raise HTTPException(503, "Vendor setup records are unavailable.") from exc
 

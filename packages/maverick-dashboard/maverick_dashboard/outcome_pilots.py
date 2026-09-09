@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import secrets
 import time
 from decimal import Decimal
@@ -16,7 +17,16 @@ from maverick.governed_records import GovernedRecordStore
 from maverick.privacy_ops import RecordConflict
 
 STORE = GovernedRecordStore("outcome_pilots", "OPL", "outcome_pilots")
+ADMISSION_INDEX = GovernedRecordStore(
+    "outcome_pilot_admission_index", "OPI", "outcome_pilot_admission_index",
+)
 LIMIT = 1000
+_ADMISSION_INDEX_ID = "OPI-active-work-items"
+_ADMISSION_INDEX_SCHEMA = "lightwork.outcome-pilot-admission-index.v1"
+_ADMISSION_MANIFEST_SCHEMA = "lightwork.outcome-pilot-admission-manifest.v1"
+_ACTIVE_STATES = frozenset({"preparing", "frozen"})
+_MAX_CASES = 100
+_MAX_INDEX_RETRIES = 32
 
 
 def digest(value):
@@ -33,12 +43,284 @@ def get(pilot_id, context):
     return _owned(STORE.get(pilot_id), context)
 
 
-def listing(context):
+def listing(context, *, cursor="", limit=100):
+    """Page through records after filtering by the exact account context."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise ValueError("Pilot page size must be between 1 and 200")
+    if not isinstance(cursor, str) or len(cursor) > 256:
+        raise ValueError("Pilot page cursor is invalid")
+    items = []
+    last_visible_cursor = cursor
+    has_more = False
+    for backend_cursor, record_id in STORE.iter_record_ids(
+        start_after=cursor,
+        limit=LIMIT + 1,
+    ):
+        # Every backend exposes a rotating scan. Stop before it wraps so a
+        # continuation never repeats an earlier page.
+        if cursor and backend_cursor <= cursor:
+            break
+        record = STORE.get(record_id)
+        if record is None or record.get("context") != context:
+            continue
+        if len(items) == limit:
+            has_more = True
+            break
+        items.append({
+            "id": record["id"],
+            "title": record["title"],
+            "revision": record["revision"],
+            "created_at": record["created_at"],
+            "cases": len(record["cases"]),
+        })
+        last_visible_cursor = backend_cursor
+    return {
+        "items": items,
+        "partial": has_more,
+        "page": {
+            "has_more": has_more,
+            "next_cursor": last_visible_cursor if has_more else None,
+        },
+    }
+
+
+def _work_item_key(case):
+    return digest({"kind": case["kind"], "reference": case["reference"]})
+
+
+def _manifest_entries(record):
+    contract = f"outcome-pilot:{record['id']}:{record['plan_version']}"
+    return [{
+        "case_id": case["id"],
+        "admission_id": f"{record['id']}:{case['id']}",
+        "work_item_id": f"{case['kind']}:{case['reference']}",
+        "acceptance_contract_ref": contract,
+        "input_version": case["input_version"],
+        "accounting_record_id": None,
+        "admitted_at": None,
+    } for case in record["cases"]]
+
+
+def admission_manifest(record):
+    """Build the complete expected-case manifest before any case is admitted."""
+    entries = _manifest_entries(record)
+    expected = [{key: entry[key] for key in (
+        "case_id", "admission_id", "work_item_id",
+        "acceptance_contract_ref", "input_version",
+    )} for entry in entries]
+    return {
+        "schema": _ADMISSION_MANIFEST_SCHEMA,
+        "status": "pending",
+        "pilot_id": record["id"],
+        "plan_version": record["plan_version"],
+        "expected_count": len(entries),
+        "admitted_count": 0,
+        "manifest_sha256": digest(expected),
+        "completion_sha256": None,
+        "entries": entries,
+    }
+
+
+def completed_admission_manifest(record, admissions):
+    """Bind every expected case to its durable accounting admission atomically."""
+    expected = admission_manifest(record)
+    if not isinstance(admissions, dict) or set(admissions) != {
+        entry["case_id"] for entry in expected["entries"]
+    }:
+        raise ValueError("Outcome accounting did not return every planned case admission.")
+    entries = []
+    for entry in expected["entries"]:
+        admitted = admissions[entry["case_id"]]
+        identifier = admitted.get("id") if isinstance(admitted, dict) else None
+        admitted_at = admitted.get("admitted_at") if isinstance(admitted, dict) else None
+        if (not isinstance(identifier, str) or not identifier or len(identifier) > 200
+                or isinstance(admitted_at, bool) or not isinstance(admitted_at, (int, float))
+                or not math.isfinite(admitted_at) or admitted_at < 0):
+            raise ValueError("Outcome accounting returned an invalid case admission.")
+        entries.append({**entry, "accounting_record_id": identifier,
+                        "admitted_at": admitted_at})
+    completion = [{"case_id": row["case_id"],
+                   "accounting_record_id": row["accounting_record_id"],
+                   "admitted_at": row["admitted_at"]} for row in entries]
+    return {**expected, "status": "complete", "admitted_count": len(entries),
+            "completion_sha256": digest([expected["manifest_sha256"], completion]),
+            "entries": entries}
+
+
+def validate_admission_manifest(record, *, require_complete=False):
+    """Validate stored manifest shape and its exact binding to the frozen plan."""
+    manifest = record.get("admission_manifest")
+    manifest_keys = {"schema", "status", "pilot_id", "plan_version",
+                     "expected_count", "admitted_count", "manifest_sha256",
+                     "completion_sha256", "entries"}
+    if not isinstance(manifest, dict) or set(manifest) != manifest_keys:
+        raise RecordConflict("This pilot has no durable admission manifest. Retry its original creation request before work starts.")
+    expected = admission_manifest(record)
+    for key in ("schema", "pilot_id", "plan_version", "expected_count", "manifest_sha256"):
+        if manifest.get(key) != expected[key]:
+            raise RecordConflict("This pilot admission manifest does not match its frozen plan.")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list) or len(entries) != expected["expected_count"]:
+        raise RecordConflict("This pilot admission manifest is incomplete.")
+    immutable = ("case_id", "admission_id", "work_item_id",
+                 "acceptance_contract_ref", "input_version")
+    entry_keys = {*immutable, "accounting_record_id", "admitted_at"}
+    if any(any(row.get(key) != expected_row[key] for key in immutable)
+           for row, expected_row in zip(entries, expected["entries"], strict=True)
+           if isinstance(row, dict)) or any(not isinstance(row, dict)
+                                             or set(row) != entry_keys for row in entries):
+        raise RecordConflict("This pilot admission manifest does not match its frozen cases.")
+    status = manifest.get("status")
+    if status not in {"pending", "complete"}:
+        raise RecordConflict("This pilot admission manifest has an invalid state.")
+    if status == "pending":
+        if (manifest.get("admitted_count") != 0
+                or manifest.get("completion_sha256") is not None
+                or any(row.get("accounting_record_id") is not None
+                       or row.get("admitted_at") is not None for row in entries)):
+            raise RecordConflict("This pilot has a partially published admission manifest.")
+    else:
+        if manifest.get("admitted_count") != len(entries):
+            raise RecordConflict("This pilot admission manifest is incomplete.")
+        completion = []
+        for row in entries:
+            identifier, admitted_at = row.get("accounting_record_id"), row.get("admitted_at")
+            if (not isinstance(identifier, str) or not identifier or len(identifier) > 200
+                    or isinstance(admitted_at, bool) or not isinstance(admitted_at, (int, float))
+                    or not math.isfinite(admitted_at) or admitted_at < 0):
+                raise RecordConflict("This pilot admission manifest contains an invalid admission.")
+            completion.append({"case_id": row["case_id"],
+                               "accounting_record_id": identifier,
+                               "admitted_at": admitted_at})
+        if (len({row["accounting_record_id"] for row in completion}) != len(completion)
+                or manifest.get("completion_sha256")
+                != digest([manifest["manifest_sha256"], completion])):
+            raise RecordConflict("This pilot admission manifest failed its integrity check.")
+    if require_complete and status != "complete":
+        raise RecordConflict("Every frozen case must be admitted before this pilot can run or accept observations.")
+    return manifest
+
+
+def _sha256_text(value):
+    return (isinstance(value, str) and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value))
+
+
+def _valid_claim(value):
+    return (isinstance(value, dict)
+            and set(value) == {"pilot_id", "creation_request"}
+            and isinstance(value.get("pilot_id"), str)
+            and value["pilot_id"].startswith("OPL-")
+            and _sha256_text(value.get("creation_request")))
+
+
+def _existing_work_item_claims():
     rows = STORE.list(limit=LIMIT + 1)
-    visible = [r for r in rows[:LIMIT] if r.get("context") == context]
-    return {"items": [{"id": r["id"], "title": r["title"], "revision": r["revision"],
-                       "created_at": r["created_at"], "cases": len(r["cases"])} for r in visible],
-            "partial": len(rows) > LIMIT}
+    if len(rows) > LIMIT:
+        raise RecordConflict("Pilot admission could not prove complete active-work coverage.")
+    discovered = {}
+    for row in rows:
+        if row.get("state", "frozen") not in _ACTIVE_STATES:
+            continue
+        claim = {"pilot_id": row.get("id"),
+                 "creation_request": row.get("creation_request")}
+        if not _valid_claim(claim):
+            raise RecordConflict("Pilot admission could not verify an existing pilot identity.")
+        for case in row.get("cases", []):
+            try:
+                key = _work_item_key(case)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RecordConflict("Pilot admission could not verify an existing work-item claim.") from exc
+            claimed = discovered.setdefault(key, claim)
+            if claimed != claim:
+                raise RecordConflict("Existing pilot records contain conflicting active work-item claims.")
+    return discovered
+
+
+def _claim_work_items(identifier, cases, actor, creation_request):
+    """Atomically claim all exact work items within the current tenant."""
+    candidate = {"pilot_id": identifier, "creation_request": creation_request}
+    if not _sha256_text(creation_request):
+        raise RecordConflict("Pilot admission requires an exact creation identity.")
+    requested = {_work_item_key(case) for case in cases}
+    if len(requested) != len(cases):
+        raise ValueError("Each pilot case must use a different task or vendor case.")
+    discovered = _existing_work_item_claims()
+    for _ in range(_MAX_INDEX_RETRIES):
+        current = ADMISSION_INDEX.get(_ADMISSION_INDEX_ID)
+        claims = {} if current is None else current.get("claims")
+        if current is not None and (current.get("schema") != _ADMISSION_INDEX_SCHEMA
+                                    or not isinstance(claims, dict)
+                                    or len(claims) > LIMIT * _MAX_CASES
+                                    or any(not _sha256_text(key) or not _valid_claim(value)
+                                           for key, value in claims.items())):
+            raise RecordConflict("Pilot admission could not verify the tenant work-item index.")
+        claims = dict(claims or {})
+        for key, prior_claim in discovered.items():
+            claimed = claims.setdefault(key, prior_claim)
+            if claimed != prior_claim:
+                raise RecordConflict("Existing pilot records conflict with the tenant work-item index.")
+        if any(value["pilot_id"] == identifier and value != candidate
+               for value in claims.values()):
+            raise RecordConflict("This operation reference already belongs to another pilot.")
+        if any(claims.get(key) is not None and claims[key] != candidate
+               for key in requested):
+            raise RecordConflict("One or more selected work items already belongs to an active or frozen pilot in this tenant. No allocation model is configured.")
+        updated = {**claims, **dict.fromkeys(requested, candidate)}
+        if len(updated) > LIMIT * _MAX_CASES:
+            raise RecordConflict("The tenant pilot work-item admission index reached its safe limit.")
+        if current is not None and updated == claims:
+            return current
+        try:
+            if current is None:
+                return ADMISSION_INDEX.create({
+                    "id": _ADMISSION_INDEX_ID,
+                    "schema": _ADMISSION_INDEX_SCHEMA,
+                    "claims": updated,
+                }, action="claim_outcome_pilot_work", actor=actor)
+            saved = ADMISSION_INDEX.update(
+                _ADMISSION_INDEX_ID,
+                lambda value, claimed=updated: value.update(claims=claimed),
+                expected_revision=current["revision"],
+                action="claim_outcome_pilot_work",
+                actor=actor,
+            )
+            if saved is not None:
+                return saved
+        except RecordConflict:
+            continue
+    raise RecordConflict("Pilot admission changed repeatedly. Retry with the same operation reference.")
+
+
+def _ensure_manifest(record):
+    """Migrate an exact legacy creation retry to a fail-closed pending manifest."""
+    if record.get("admission_manifest") is not None:
+        validate_admission_manifest(record)
+        return record
+    pending = admission_manifest(record)
+    try:
+        saved = STORE.update(
+            record["id"], lambda current: current.update(admission_manifest=pending),
+            expected_revision=record["revision"], action="prepare_pilot_admission_manifest",
+            actor=record["actor"],
+        )
+    except RecordConflict:
+        saved = STORE.get(record["id"])
+    if saved is None:
+        raise RecordConflict("The pilot disappeared while its admission manifest was prepared.")
+    validate_admission_manifest(saved)
+    return saved
+
+
+def prepare_admission(pilot_id, *, context, resolve):
+    """Resume exact plan preparation so the app can finish an uncertain create."""
+    record = get(pilot_id, context)
+    _claim_work_items(
+        record["id"], record["cases"], record["actor"],
+        record.get("creation_request"),
+    )
+    record = _ensure_manifest(record)
+    return _finish_protected_plan(record, resolve) if record.get("state") == "preparing" else record
 
 
 def create(body, *, context, actor, resolve):
@@ -59,7 +341,7 @@ def create(body, *, context, actor, resolve):
         _owned(existing, context)
         if existing["creation_request"] != request:
             raise RecordConflict("This operation reference already belongs to another pilot.")
-        return _finish_protected_plan(existing, resolve) if existing.get("state") == "preparing" else existing
+        return prepare_admission(identifier, context=context, resolve=resolve)
     sources, cases = set(), []
     for index, case in enumerate(body["cases"]):
         key = (case["kind"], case["reference"])
@@ -81,12 +363,14 @@ def create(body, *, context, actor, resolve):
               "state": "preparing" if mode == "exclude_local_learning" else "frozen",
               "creation_request": request, "frozen_at": time.time(), "operations": {}}
     record["plan_version"] = digest({k: record[k] for k in ("title", "customer", "workflow", "criteria", "cases", "frozen_at", "learning_mode", "prior_exposure_statement")})
+    record["admission_manifest"] = admission_manifest(record)
     # Recheck after assembling the whole plan. This detects concurrent starts;
     # sources remain separate stores, so report eligibility also checks times.
     for case in cases:
         source = resolve(case["kind"], case["reference"])
         if not source["unstarted"] or source["input_version"] != case["input_version"]:
             raise RecordConflict("A case changed while the plan was being prepared.")
+    _claim_work_items(identifier, cases, actor, request)
     try:
         saved = STORE.create(record, action="prepare_outcome_pilot" if mode == "exclude_local_learning" else "freeze_outcome_pilot", actor=actor, max_records=LIMIT)
     except RecordConflict:
@@ -115,10 +399,60 @@ def _finish_protected_plan(record, resolve):
                         action="freeze_protected_outcome_pilot", actor=record["actor"])
 
 
+def complete_admission(pilot_id, manifest, *, context, actor, resolve):
+    """Publish one all-case admission manifest after verifying admission preceded work."""
+    record = get(pilot_id, context)
+    validate_admission_manifest(record)
+    candidate = {**record, "admission_manifest": copy.deepcopy(manifest)}
+    completed = validate_admission_manifest(candidate, require_complete=True)
+    if record["admission_manifest"].get("status") == "complete":
+        if record["admission_manifest"] != completed:
+            raise RecordConflict("This pilot already has a different completed admission manifest.")
+        return record
+    if record.get("state", "frozen") != "frozen":
+        raise RecordConflict("This pilot must finish freezing before its admissions can complete.")
+    admitted = {entry["case_id"]: entry for entry in completed["entries"]}
+    for case in record["cases"]:
+        source = resolve(case["kind"], case["reference"])
+        if source.get("input_version") != case["input_version"]:
+            raise RecordConflict("A case changed before every frozen admission completed.")
+        started_at = source.get("first_started_at")
+        if source.get("unstarted") is True and started_at is None:
+            continue
+        admitted_at = admitted[case["id"]]["admitted_at"]
+        if (isinstance(started_at, bool) or not isinstance(started_at, (int, float))
+                or not math.isfinite(started_at) or started_at <= admitted_at):
+            raise RecordConflict("Work started before its durable pilot admission could be verified. No observations can be accepted.")
+
+    def mutate(current):
+        _owned(current, context)
+        validate_admission_manifest(current)
+        if current["admission_manifest"]["status"] == "complete":
+            if current["admission_manifest"] != completed:
+                raise RecordConflict("This pilot already has a different completed admission manifest.")
+            return
+        current["admission_manifest"] = copy.deepcopy(completed)
+
+    try:
+        saved = STORE.update(
+            pilot_id, mutate, expected_revision=record["revision"],
+            action="complete_outcome_pilot_admission", actor=actor,
+        )
+    except RecordConflict:
+        current = get(pilot_id, context)
+        if current.get("admission_manifest") == completed:
+            return current
+        raise
+    if saved is None:
+        raise RecordConflict("The pilot disappeared before its admissions completed.")
+    return saved
+
+
 def observe(pilot_id, case_id, body, *, context, actor, resolve):
     record = get(pilot_id, context)
     if record.get("state", "frozen") != "frozen":
         raise RecordConflict("This plan has not finished freezing its learning policy. No observation was accepted.")
+    manifest = validate_admission_manifest(record, require_complete=True)
     request = digest([case_id, {k: v for k, v in body.items() if k != "expected_revision"}])
     prior = record["operations"].get(body["operation_id"])
     if prior is not None:
@@ -133,8 +467,23 @@ def observe(pilot_id, case_id, body, *, context, actor, resolve):
         raise RecordConflict("The source changed. Review its current result before recording an observation.")
     if source["input_version"] != case["input_version"]:
         raise RecordConflict("The task inputs changed after this plan was frozen. This case is not a valid pair.")
+    admission = next(row for row in manifest["entries"] if row["case_id"] == case_id)
+    started_at = source.get("first_started_at")
+    if not (source.get("unstarted") is True and started_at is None) and (
+        isinstance(started_at, bool)
+        or not isinstance(started_at, (int, float))
+        or not math.isfinite(started_at)
+        or started_at <= admission["admitted_at"]
+    ):
+        raise RecordConflict(
+            "Work started before its durable pilot admission could be verified."
+        )
     measurement = {k: v for k, v in body.items() if k not in {"expected_revision", "operation_id"}}
-    measurement.update(actor=actor, observed_at=time.time())
+    measurement.update(
+        actor=actor,
+        observed_at=time.time(),
+        source_operation_id=body["operation_id"],
+    )
 
     def mutate(current):
         _owned(current, context)
@@ -156,14 +505,27 @@ def observe(pilot_id, case_id, body, *, context, actor, resolve):
     return saved
 
 
-def _pair(case, source, frozen_at):
+def _pair(case, source, frozen_at, admitted_at=None):
     measurement = case["measurement"]
     if source.get("sample"):
         return "sample"
     if source["input_version"] != case["input_version"]:
         return "inputs_changed"
-    if source.get("first_started_at") is not None and source["first_started_at"] <= frozen_at:
+    started_at = source.get("first_started_at")
+    if started_at is not None and (
+        isinstance(started_at, bool)
+        or not isinstance(started_at, (int, float))
+        or not math.isfinite(started_at)
+    ):
+        return "invalid_start_time"
+    if started_at is not None and started_at <= frozen_at:
         return "started_before_plan"
+    if (
+        admitted_at is not None
+        and started_at is not None
+        and started_at <= admitted_at
+    ):
+        return "started_before_admission"
     if measurement is None:
         return "unmeasured"
     if measurement["source_version"] != source["version"]:
@@ -177,14 +539,42 @@ def _pair(case, source, frozen_at):
 
 
 def report(record, *, resolve):
+    admitted = False
+    admission = {"status": "invalid", "expected_count": len(record["cases"]),
+                 "admitted_count": 0, "manifest_sha256": None,
+                 "completion_sha256": None}
+    admitted_entries = {}
+    try:
+        manifest = validate_admission_manifest(record)
+        admitted = manifest["status"] == "complete"
+        if admitted:
+            admitted_entries = {
+                row["case_id"]: row["admitted_at"] for row in manifest["entries"]
+            }
+        admission = {key: manifest[key] for key in (
+            "status", "expected_count", "admitted_count", "manifest_sha256",
+            "completion_sha256",
+        )}
+    except RecordConflict:
+        pass
     rows = []
     for case in record["cases"]:
         row = {**case}
         try:
             source = resolve(case["kind"], case["reference"])
-            row.update(source=source, status=_pair(case, source, record["frozen_at"]))
+            row.update(
+                source=source,
+                status=_pair(
+                    case,
+                    source,
+                    record["frozen_at"],
+                    admitted_entries.get(case["id"]),
+                ),
+            )
             if record.get("state", "frozen") != "frozen":
                 row["status"] = "plan_not_frozen"
+            elif not admitted:
+                row["status"] = "admission_incomplete"
             if record.get("learning_mode") == "exclude_local_learning" and case["allocation"] == "holdout":
                 from maverick.pilot_learning import evidence
                 row["learning_exclusion"] = evidence(int(case["reference"]), pilot_id=record["id"],
@@ -236,6 +626,7 @@ def report(record, *, resolve):
             "workflow": record["workflow"], "criteria": record["criteria"], "revision": record["revision"],
             "plan_version": record["plan_version"], "frozen_at": record["frozen_at"], "cases": rows,
             "state": record.get("state", "frozen"),
+            "admission": admission,
             "groups": groups, "measurement_basis": "operator_reported",
             "learning_policy": learning,
             "provider_invoice_verified": False, "holdout_exposure_verified": False,
@@ -253,6 +644,7 @@ def independent_review(pilot_id, body, *, actor, resolve):
     record = STORE.get(pilot_id)
     if record is None:
         raise LookupError("Pilot unavailable.")
+    validate_admission_manifest(record, require_complete=True)
     if not actor.startswith("user:") or actor == record["actor"]:
         raise PermissionError("A different named administrator must perform the independent review.")
     # The API enforces global administrator access; resolve reauthorizes every

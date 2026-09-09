@@ -33,6 +33,38 @@ def _noop_agent(brief, data):
     return ("ok", 1.0)
 
 
+def _approval_binding(run, *, inputs=None):
+    from maverick.flow.approvals import paused_operation_binding
+
+    return paused_operation_binding(store.load_run(run.run_id), inputs=inputs)
+
+
+def _approval_attestation(
+    run, *, inputs=None, decision="approved", decided_by="system:direct",
+):
+    from maverick.flow.approvals import (
+        flow_decision_attestation_material,
+        paused_operation_binding,
+    )
+    from maverick_dashboard.approval_authority import issue_flow_decision_attestation
+
+    current = store.load_run(run.run_id)
+    binding = paused_operation_binding(current, inputs=inputs)
+    material = flow_decision_attestation_material(
+        current,
+        inputs=inputs,
+        operation_binding_sha256=binding,
+        authority_binding_sha256="",
+        decision=decision,
+        decided_by=decided_by,
+    )
+    return issue_flow_decision_attestation(
+        None,
+        material=material,
+        expires_at=float(current.human["approval_card"]["expires_at"]),
+    )
+
+
 def test_agent_runner_runtime_type_error_is_never_retried():
     calls = []
 
@@ -296,9 +328,11 @@ def test_concurrent_resume_executes_downstream_action_once(tmp_path, monkeypatch
                 agent_runner=_noop_agent,
                 action_runner=action,
                 resume_run_id=paused.run_id,
-                decision="approved",
-                decided_by="system:direct",
-            ).status
+                 decision="approved",
+                 decided_by="system:direct",
+                 approval_binding_sha256=_approval_binding(paused),
+                 approval_decision_attestation=_approval_attestation(paused),
+             ).status
         except execution.FlowNotResumable:
             return "not-resumable"
 
@@ -358,9 +392,189 @@ def test_core_resume_requires_explicit_actor_and_declared_assignee(
         resume_run_id=paused.run_id,
         decision="approved",
         decided_by="user:alice",
+        approval_binding_sha256=_approval_binding(paused),
+        approval_decision_attestation=_approval_attestation(
+            paused, decided_by="user:alice",
+        ),
     )
     assert completed.status == "completed"
     assert completed.decided_by == "user:alice"
+
+
+@pytest.mark.parametrize("tamper", ["missing_binding", "expired_card", "changed_role"])
+def test_direct_core_resume_revalidates_the_persisted_approval_before_effect(
+    tmp_path, monkeypatch, tamper,
+):
+    from copy import deepcopy
+
+    from maverick.approval_cards import ApprovalCardError, digest
+
+    _patch_home(tmp_path, monkeypatch)
+    flow = Flow(id="direct-approval-guard", name="guard", start="gate", nodes={
+        "gate": FlowNode(
+            id="gate", kind="approval", prompt="approve deletion?", next="delete",
+        ),
+        "delete": FlowNode(id="delete", kind=NODE_ACTION, tool="stripe"),
+    })
+    paused = execution.execute(
+        flow,
+        agent_runner=_noop_agent,
+        action_runner=lambda *args: ("unused", 1.0),
+    )
+    if tamper != "missing_binding":
+        current = store.load_run(paused.run_id)
+        card = deepcopy(current.human["approval_card"])
+        card.pop("binding_sha256")
+        if tamper == "expired_card":
+            card["expires_at"] = time.time() - 1
+        else:
+            card["authority"]["role"] = "revoked-role"
+        card["binding_sha256"] = digest(card)
+        current.human["approval_card"] = card
+        store.save_run(current)
+
+    calls: list[str] = []
+    binding = "" if tamper == "missing_binding" else _approval_binding(paused)
+    with pytest.raises(ApprovalCardError):
+        execution.execute(
+            flow,
+            agent_runner=_noop_agent,
+            action_runner=lambda tool, params, data: (
+                calls.append(tool) or "mutated", 1.0
+            ),
+            resume_run_id=paused.run_id,
+            decision="approved",
+            decided_by="system:direct",
+            approval_binding_sha256=binding,
+        )
+
+    assert calls == []
+    assert store.load_run(paused.run_id).status == "paused_approval"
+
+
+def test_direct_core_resume_cannot_manufacture_decision_from_public_binding(
+    tmp_path, monkeypatch,
+):
+    from maverick.approval_cards import ApprovalCardError
+
+    _patch_home(tmp_path, monkeypatch)
+    flow = Flow(id="direct-permit-guard", name="guard", start="gate", nodes={
+        "gate": FlowNode(id="gate", kind="approval", prompt="approve?", next="act"),
+        "act": FlowNode(id="act", kind=NODE_ACTION, tool="stripe"),
+    })
+    paused = execution.execute(
+        flow, agent_runner=_noop_agent,
+        action_runner=lambda *args: ("unused", 1.0),
+    )
+    calls: list[str] = []
+
+    with pytest.raises(ApprovalCardError, match="decision attestation"):
+        execution.execute(
+            flow,
+            agent_runner=_noop_agent,
+            action_runner=lambda tool, params, data: (
+                calls.append(tool) or "mutated", 1.0
+            ),
+            resume_run_id=paused.run_id,
+            decision="approved",
+            decided_by="system:direct",
+            approval_binding_sha256=_approval_binding(paused),
+        )
+
+    assert calls == []
+    assert store.load_run(paused.run_id).status == "paused_approval"
+
+
+def test_direct_core_resume_rechecks_credential_inventory_after_permit(
+    tmp_path, monkeypatch,
+):
+    from maverick.approval_cards import ApprovalCardError
+
+    _patch_home(tmp_path, monkeypatch)
+    monkeypatch.setenv("STRIPE_API_KEY", "credential-before")
+    flow = Flow(id="credential-rotation", name="guard", start="gate", nodes={
+        "gate": FlowNode(id="gate", kind="approval", prompt="approve?", next="act"),
+        "act": FlowNode(id="act", kind=NODE_ACTION, tool="stripe"),
+    })
+    paused = execution.execute(
+        flow, agent_runner=_noop_agent,
+        action_runner=lambda *args: ("unused", 1.0),
+    )
+    attestation = _approval_attestation(paused)
+    monkeypatch.setenv("STRIPE_API_KEY", "credential-after")
+    calls: list[str] = []
+
+    with pytest.raises(ApprovalCardError, match="durable operation"):
+        execution.execute(
+            flow,
+            agent_runner=_noop_agent,
+            action_runner=lambda tool, params, data: (
+                calls.append(tool) or "mutated", 1.0
+            ),
+            resume_run_id=paused.run_id,
+            decision="approved",
+            decided_by="system:direct",
+            approval_binding_sha256=_approval_binding(paused),
+            approval_decision_attestation=attestation,
+        )
+
+    assert calls == []
+    assert store.load_run(paused.run_id).status == "paused_approval"
+
+
+def test_approval_resume_revalidates_inside_effect_fence(tmp_path, monkeypatch):
+    import os
+
+    from maverick.flow import approvals
+    from maverick.flow.runner import FlowApprovalStale
+
+    _patch_home(tmp_path, monkeypatch)
+    monkeypatch.setenv("STRIPE_API_KEY", "credential-before")
+    flow = Flow(id="credential-toctou", name="guard", start="gate", nodes={
+        "gate": FlowNode(id="gate", kind="approval", prompt="approve?", next="act"),
+        "act": FlowNode(id="act", kind=NODE_ACTION, tool="stripe"),
+    })
+    paused = execution.execute(
+        flow,
+        agent_runner=_noop_agent,
+        action_runner=lambda *args: ("unused", 1.0),
+    )
+    binding = _approval_binding(paused)
+    attestation = _approval_attestation(paused)
+    real_require = approvals.require_current_paused_operation
+    observations: list[tuple[str, str]] = []
+    calls = 0
+
+    def rotate_after_validation(*args, **kwargs):
+        nonlocal calls
+        card = real_require(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            monkeypatch.setenv("STRIPE_API_KEY", "credential-after")
+        return card
+
+    monkeypatch.setattr(
+        approvals, "require_current_paused_operation", rotate_after_validation,
+    )
+
+    with pytest.raises(FlowApprovalStale, match="changed before execution"):
+        execution.execute(
+            flow,
+            agent_runner=_noop_agent,
+            action_runner=lambda tool, params, data: (
+                observations.append((tool, os.environ["STRIPE_API_KEY"])) or "mutated",
+                1.0,
+            ),
+            resume_run_id=paused.run_id,
+            decision="approved",
+            decided_by="system:direct",
+            approval_binding_sha256=binding,
+            approval_decision_attestation=attestation,
+        )
+
+    assert calls == 1
+    assert observations == []
+    assert store.load_run(paused.run_id).status == "paused_approval"
 
 
 def test_paused_run_uses_pinned_root_after_edit_and_delete(tmp_path, monkeypatch):
@@ -390,6 +604,8 @@ def test_paused_run_uses_pinned_root_after_edit_and_delete(tmp_path, monkeypatch
         resume_run_id=paused.run_id,
         decision="approved",
         decided_by="system:direct",
+        approval_binding_sha256=_approval_binding(paused),
+        approval_decision_attestation=_approval_attestation(paused),
     )
 
     assert resumed.status == "completed"
@@ -426,6 +642,8 @@ def test_paused_run_uses_pinned_subflow_after_child_edit_and_delete(tmp_path, mo
         resume_run_id=paused.run_id,
         decision="approved",
         decided_by="system:direct",
+        approval_binding_sha256=_approval_binding(paused),
+        approval_decision_attestation=_approval_attestation(paused),
     )
 
     assert resumed.status == "completed"
@@ -627,6 +845,8 @@ def test_high_risk_lost_ack_is_quarantined_without_a_grounded_failure(tmp_path, 
         resume_run_id=paused.run_id,
         decision="approved",
         decided_by="system:direct",
+        approval_binding_sha256=_approval_binding(paused),
+        approval_decision_attestation=_approval_attestation(paused),
     )
     assert run.status == STATUS_INDETERMINATE
     assert run.cursor == "charge"
@@ -660,6 +880,8 @@ def test_high_risk_pre_effect_refusal_is_failed_not_indeterminate(
         resume_run_id=paused.run_id,
         decision="approved",
         decided_by="system:direct",
+        approval_binding_sha256=_approval_binding(paused),
+        approval_decision_attestation=_approval_attestation(paused),
     )
 
     assert run.status == "failed"

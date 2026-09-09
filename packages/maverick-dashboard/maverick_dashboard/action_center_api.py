@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import re
 import time
 from typing import Literal
 
@@ -22,6 +23,7 @@ from .auth import (
 from .draft_api import context_for
 
 router = APIRouter(prefix="/api/v1/action-center", tags=["action-center"])
+_QUEUE_CURSOR = re.compile(r"[A-Za-z0-9_-]{1,768}\Z")
 
 
 class PreferenceIn(BaseModel):
@@ -37,6 +39,58 @@ def require_enabled(request):
     require_permission(request, "operate")
     if config.config_source_errors(include_tenant=True) or config.get_features().get("action_center") is not True:
         raise HTTPException(status_code=403, detail="Action Center is disabled in Settings or configuration is unavailable.")
+
+
+def _vendor_reconciliation_rows(request) -> dict:
+    """Read a bounded local queue through the current request-bound authority."""
+    from .vendor_onboarding_api import _binding
+
+    binding = _binding(request)
+    rows, cursor, complete = [], "", False
+    seen = set()
+    max_pages = max(1, (action_center.SOURCE_LIMIT + 99) // 100)
+    for _page in range(max_pages):
+        if len(rows) >= action_center.SOURCE_LIMIT:
+            break
+        requested_limit = min(100, action_center.SOURCE_LIMIT - len(rows))
+        page = binding.service.list_page(
+            binding.context,
+            limit=requested_limit,
+            cursor=cursor,
+            view="unresolved",
+        )
+        expected_keys = {
+            "schema", "cases", "view", "limit", "has_more", "next_cursor",
+            "record_reads", "scan_complete", "order",
+        }
+        if (not isinstance(page, dict) or set(page) != expected_keys
+                or page.get("schema") != "lightwork.vendor-onboarding.case-page.v1"
+                or page.get("view") != "unresolved"
+                or page.get("limit") != requested_limit
+                or page.get("order") != "case_id_ascending"
+                or not isinstance(page.get("cases"), list)
+                or len(page["cases"]) > requested_limit
+                or type(page.get("record_reads")) is not int
+                or not 0 <= page["record_reads"] <= max(requested_limit * 4, requested_limit + 1)
+                or type(page.get("has_more")) is not bool
+                or type(page.get("scan_complete")) is not bool
+                or page["scan_complete"] is page["has_more"]):
+            raise ValueError("vendor reconciliation source is unavailable")
+        next_cursor = page["next_cursor"]
+        if (page["has_more"] and (
+                not isinstance(next_cursor, str) or not _QUEUE_CURSOR.fullmatch(next_cursor)
+        )
+                or not page["has_more"] and next_cursor is not None):
+            raise ValueError("vendor reconciliation source is unavailable")
+        rows.extend(page["cases"])
+        if not page["has_more"]:
+            complete = True
+            break
+        if next_cursor in seen:
+            raise ValueError("vendor reconciliation cursor did not advance")
+        seen.add(next_cursor)
+        cursor = next_cursor
+    return {"items": rows, "complete": complete}
 
 
 def _model(request):
@@ -67,8 +121,13 @@ def _model(request):
 
         def project_reviews():
             return _service(request).inbox()
+    vendor_reconciliations = None
+    if config.get_features().get("vendor_onboarding") is True:
+        def vendor_reconciliations():
+            return _vendor_reconciliation_rows(request)
     return action_center.collect(_world(), principal=principal, owner=goal_owner_filter(request),
-        specs=specs, assessments=list_saved, assessment_allowed=allowed, project_reviews=project_reviews)
+        specs=specs, assessments=list_saved, assessment_allowed=allowed,
+        project_reviews=project_reviews, vendor_reconciliations=vendor_reconciliations)
 
 
 async def _snapshot(request):
@@ -87,7 +146,10 @@ async def _snapshot(request):
 
 @router.get("")
 async def inbox(request: Request, response: Response,
-                kind: Literal["all", "approval", "signoff", "assessment", "project_review"] = "all",
+                kind: Literal[
+                    "all", "approval", "signoff", "assessment", "project_review",
+                    "vendor_reconciliation",
+                ] = "all",
                 view: Literal["active", "unread", "snoozed", "overdue", "all"] = "active",
                 assignment: Literal["all", "mine", "available"] = "all",
                 offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200)):

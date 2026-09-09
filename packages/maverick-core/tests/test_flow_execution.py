@@ -12,6 +12,51 @@ def _patch_home(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
 
 
+def _approval_binding(run, *, inputs=None):
+    from maverick.flow import store
+    from maverick.flow.approvals import paused_operation_binding
+
+    return paused_operation_binding(store.load_run(run.run_id), inputs=inputs)
+
+
+def _approval_attestation(
+    run, *, inputs=None, decision="approved", decided_by="system:direct",
+):
+    from maverick.flow import store
+    from maverick.flow.approvals import (
+        flow_decision_attestation_material,
+        paused_operation_binding,
+    )
+    from maverick_dashboard.approval_authority import issue_flow_decision_attestation
+
+    current = store.load_run(run.run_id)
+    binding = paused_operation_binding(current, inputs=inputs)
+    material = flow_decision_attestation_material(
+        current,
+        inputs=inputs,
+        operation_binding_sha256=binding,
+        authority_binding_sha256="",
+        decision=decision,
+        decided_by=decided_by,
+    )
+    return issue_flow_decision_attestation(
+        None,
+        material=material,
+        expires_at=float(current.human["approval_card"]["expires_at"]),
+    )
+
+
+def test_flow_exception_text_redacts_signed_approval_token():
+    token = "eyJ" + "A" * 32 + "." + "b" * 64
+
+    visible = execution._safe_failure(
+        RuntimeError(f"resume provider reflected {token}"),
+    )
+
+    assert token not in visible
+    assert "REDACTED:lightwork_flow_approval_token" in visible
+
+
 # ---- lowering ---------------------------------------------------------------
 
 class TestLowering:
@@ -171,8 +216,12 @@ class TestExecution:
         assert paused.status == "paused_approval" and paused.nodes["a"]["outcome"] == 1.0
         resumed = execution.execute(f, agent_runner=lambda b, d: ("x", 1.0),
                                     action_runner=lambda *a: ("", None),
-                                    resume_run_id=paused.run_id, decision="approved",
-                                    decided_by="system:direct")
+                                     resume_run_id=paused.run_id, decision="approved",
+                                     decided_by="system:direct",
+                                     approval_binding_sha256=_approval_binding(paused),
+                                     approval_decision_attestation=(
+                                         _approval_attestation(paused)
+                                     ))
         # the pre-pause node's trace is preserved alongside the post-resume nodes
         assert resumed.nodes["a"]["outcome"] == 1.0 and resumed.nodes["c"]["outcome"] == 1.0
 
@@ -187,8 +236,12 @@ class TestExecution:
                                    data={"n": 1})
         assert paused.status == "paused_approval" and paused.cursor == "a"
         resumed = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None),
-                                    resume_run_id=paused.run_id, decision="approved",
-                                    decided_by="system:direct")
+                                     resume_run_id=paused.run_id, decision="approved",
+                                     decided_by="system:direct",
+                                     approval_binding_sha256=_approval_binding(paused),
+                                     approval_decision_attestation=(
+                                         _approval_attestation(paused)
+                                     ))
         assert resumed.status == "completed" and resumed.data["done"] == "ran"
         assert resumed.run_id == paused.run_id          # same run, resumed in place
 
@@ -209,7 +262,13 @@ class TestExecution:
         resumed = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None),
                                     resume_run_id=paused.run_id, decision="approved",
                                     decided_by="system:direct",
-                                    inputs={"corrected": "the fixed value"})
+                                     approval_binding_sha256=_approval_binding(
+                                         paused, inputs={"corrected": "the fixed value"},
+                                     ),
+                                     approval_decision_attestation=_approval_attestation(
+                                         paused, inputs={"corrected": "the fixed value"},
+                                     ),
+                                     inputs={"corrected": "the fixed value"})
         assert got["brief"] == "use the fixed value"        # human input threaded in
         assert resumed.data["corrected"] == "the fixed value"
 
@@ -235,7 +294,15 @@ class TestExecution:
             f, agent_runner=ag, action_runner=lambda *a: ("", None),
             resume_run_id=paused.run_id, decision="approved",
             decided_by="system:direct",
-            inputs={"amount": "999999.00", "note": "reviewed"})
+             approval_binding_sha256=_approval_binding(
+                 paused,
+                 inputs={"amount": "999999.00", "note": "reviewed"},
+             ),
+             approval_decision_attestation=_approval_attestation(
+                 paused,
+                 inputs={"amount": "999999.00", "note": "reviewed"},
+             ),
+             inputs={"amount": "999999.00", "note": "reviewed"})
         assert got["brief"] == "pay 100.00 because reviewed"
         assert resumed.data["amount"] == "100.00"
         assert resumed.data["note"] == "reviewed"
@@ -295,8 +362,12 @@ class TestExecution:
                                    action_runner=lambda *a: ("", None))
         rej = execution.execute(f, agent_runner=lambda *a: ("", None),
                                 action_runner=lambda *a: ("", None),
-                                resume_run_id=paused.run_id, decision="rejected",
-                                decided_by="system:direct")
+                                 resume_run_id=paused.run_id, decision="rejected",
+                                 decided_by="system:direct",
+                                 approval_binding_sha256=_approval_binding(paused),
+                                 approval_decision_attestation=_approval_attestation(
+                                     paused, decision="rejected",
+                                 ))
         assert rej.status == "rejected" and "done" not in rej.data
 
 

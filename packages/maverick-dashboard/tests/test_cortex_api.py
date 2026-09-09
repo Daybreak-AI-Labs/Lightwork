@@ -58,7 +58,7 @@ def recalled(monkeypatch):
         wanted = tuple(kw.get("sources") or cortex.SOURCES)
         res = cortex.Result(query=query, tenant="acme", sources=wanted,
                             per_source=dict.fromkeys(wanted, 0))
-        for hit in (
+        fixture_hits = (
             _hit("knowledge", "finance", "Accruals over $25k need controller sign-off.",
                  "finance/close-policy.md", 0.91, collection="finance"),
             _hit("knowledge", "finance", "Vendor onboarding needs a W-9.",
@@ -67,8 +67,18 @@ def recalled(monkeypatch):
                  triggers=["close"], verified=True),
             _hit("record", "approval", "Release $6,000 vendor payment",
                  "record · approval · j.alvarez · 2026-01-01 00:00", 1.0, goal_id=7),
-        ):
-            if hit.source in wanted:
+        )
+        for source in wanted:
+            if source == "knowledge" and callable(kw.get("knowledge_reader")):
+                hits, denied = kw["knowledge_reader"](query, kw["k"])
+                res.hits.extend(hits)
+                res.per_source[source] = len(hits)
+                if denied:
+                    res.denied[source] = denied
+                continue
+            for hit in fixture_hits:
+                if hit.source != source:
+                    continue
                 res.hits.append(hit)
                 res.per_source[hit.source] += 1
         if "fleet" in wanted:
@@ -104,21 +114,24 @@ def test_status_reports_every_source_and_the_posture():
     assert body["isolation"]["pooled_across_tenants"] is False
 
 
-def test_recall_passes_the_result_through_with_per_source_counts(recalled):
+def test_recall_never_falls_back_to_raw_legacy_knowledge(recalled):
     r = client.post(f"{BASE}/recall", json={"query": "close accrual", "k": 3})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["schema"] == cortex_api.RECALL_SCHEMA
     assert body["query"] == "close accrual" and body["tenant"] == "acme"
     assert body["sources"] == list(cortex.SOURCES)
-    assert body["per_source"] == {"knowledge": 2, "skills": 1, "lessons": 0, "record": 1, "fleet": 0}
-    assert [h["source"] for h in body["hits"]] == ["knowledge", "knowledge", "skills", "record"]
-    first = body["hits"][0]
-    assert first == {"source": "knowledge", "kind": "finance",
-                     "text": "Accruals over $25k need controller sign-off.",
-                     "citation": "finance/close-policy.md", "score": 0.91,
-                     "meta": {"collection": "finance"}}
-    assert body["denied"] == {"fleet": "fleet memory answers enrolled external agents"}
+    assert body["per_source"] == {
+        "knowledge": 0, "skills": 1, "lessons": 0, "record": 1, "fleet": 0,
+    }
+    assert [h["source"] for h in body["hits"]] == ["skills", "record"]
+    assert body["denied"] == {
+        "fleet": "fleet memory answers enrolled external agents",
+        "knowledge": (
+            "Current source access could not be revalidated. "
+            "Open Knowledge and request fresh access or evidence."
+        ),
+    }
     assert body["audited"] is True and body["took_ms"] == 7
     query, kw = recalled[0]
     assert query == "close accrual" and kw["k"] == 3 and kw["domain"] is None
@@ -134,11 +147,64 @@ def test_recall_narrows_sources_and_domain_and_dedupes(recalled):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["sources"] == ["record", "knowledge"]
-    assert body["per_source"] == {"record": 1, "knowledge": 2}
-    assert body["denied"] == {}
+    assert body["per_source"] == {"record": 1, "knowledge": 0}
+    assert body["denied"] == {
+        "knowledge": (
+            "Current source access could not be revalidated. "
+            "Open Knowledge and request fresh access or evidence."
+        ),
+    }
     _query, kw = recalled[0]
     assert tuple(kw["sources"]) == ("record", "knowledge") and kw["domain"] == "finance"
     assert kw["k"] == cortex_api.DEFAULT_K
+
+
+def test_recall_uses_governed_exact_knowledge_and_discards_legacy_hits(
+    recalled,
+    monkeypatch,
+):
+    from maverick_dashboard import knowledge_access_api
+
+    class Governed:
+        def search(self, tenant, actor, *, query, purpose, limit):
+            assert (tenant, actor, query, purpose, limit) == (
+                "acme", "user:jo", "close", "product_research", 5,
+            )
+            return {
+                "items": [{
+                    "reference": {
+                        "kind": "dataset", "asset_id": "close-policy", "version": "v7",
+                        "manifest_sha256": "1" * 64,
+                        "schema": "lightwork.research-registry-ref.v1",
+                    },
+                    "title": "Current close policy",
+                    "summary": "Controller approval is required.",
+                    "claim_state": "verified",
+                    "source": {
+                        "provenance_kind": "source",
+                        "source_ref": "catalog:evidence-graph/node-7",
+                    },
+                    "eligibility": {
+                        "fresh_until": 4_102_444_800.0,
+                        "actor_authorization_sha256": "2" * 64,
+                    },
+                }],
+            }
+
+    monkeypatch.setattr(cortex_api, "caller_principal", lambda request: "user:jo")
+    monkeypatch.setattr(cortex_api, "current_tenant_id_strict", lambda: "acme")
+    monkeypatch.setattr(knowledge_access_api, "_service", lambda request: Governed())
+
+    response = client.post(f"{BASE}/recall", json={"query": "close"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["per_source"]["knowledge"] == 1
+    knowledge = [hit for hit in body["hits"] if hit["source"] == "knowledge"]
+    assert len(knowledge) == 1
+    assert knowledge[0]["text"] == "Controller approval is required."
+    assert knowledge[0]["citation"] == "catalog:evidence-graph/node-7"
+    assert knowledge[0]["meta"]["registry_reference"]["manifest_sha256"] == "1" * 64
+    assert tuple(recalled[0][1]["sources"]) == cortex.SOURCES
 
 
 def test_recall_names_the_authenticated_principal(recalled, monkeypatch):

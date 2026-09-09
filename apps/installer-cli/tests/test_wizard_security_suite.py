@@ -192,7 +192,6 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
             "a" * 64,
             "virustotal, abuseipdb",
             "120",
-            "procurement",
         ]
     )
     monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: next(text_answers))
@@ -1075,6 +1074,102 @@ def _write_vendor_onboarding_config(tmp_path, monkeypatch, security_suite, **kwa
     return tomllib.loads((tmp_path / "config.toml").read_text(encoding="utf-8"))
 
 
+def test_vendor_first_run_defers_owner_to_current_workspace_in_app(tmp_path, monkeypatch):
+    import io
+
+    from maverick import config, vendor_onboarding_setup
+    from maverick.paths import tenant_scope
+    from maverick.vendor_onboarding_config import VendorOnboardingSettings
+    from maverick_installer import wizard
+    from rich.console import Console
+
+    output = io.StringIO()
+    monkeypatch.setattr(wizard, "console", Console(file=output, width=140, no_color=True))
+    monkeypatch.setattr(wizard, "_q_confirm", lambda prompt, **kwargs:
+        prompt.startswith("Enable AI vendor onboarding") or prompt.startswith("  Allow reviewed local"))
+
+    def no_identity_prompt(prompt, **kwargs):
+        pytest.fail("Fresh vendor setup must not request unchecked identity: " + prompt)
+
+    monkeypatch.setattr(wizard, "_q_text", no_identity_prompt)
+    selected = wizard.pick_security_suite()
+    assert selected["vendor_onboarding"] is True
+    assert selected["vendor_onboarding_owner"] == ""
+    assert "active workspace member" in output.getvalue()
+    assert "in the app" in output.getvalue()
+    parsed = _write_vendor_onboarding_config(tmp_path, monkeypatch, selected)
+    assert parsed["vendor_onboarding"]["resource_owner"] == ""
+    assert parsed["vendor_onboarding"]["reviewed_uploads"] is True
+    for key in vendor_onboarding_setup.REQUIRED_MODULES:
+        assert parsed[key]["enable"] is True
+    # Enablement is not an invented complete binding; runtime still requires
+    # ownership until the existing in-app setup chooses a current member.
+    with pytest.raises(ValueError, match="resource_owner.*required"):
+        VendorOnboardingSettings.from_config(parsed)
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    config.reset_config_cache()
+    try:
+        with tenant_scope(tenant="wizard-first-run"):
+            assert vendor_onboarding_setup.owner_policy() == {
+                "resource_owner": "", "owner_locked": False, "owner_source": "initial",
+            }
+    finally:
+        config.reset_config_cache()
+
+
+@pytest.mark.parametrize("owner", ["", "procurement", "user:existing@example.test"])
+def test_vendor_resume_preserves_saved_owner_decision(tmp_path, monkeypatch, owner):
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(wizard, "PARTIAL_STATE_PATH", tmp_path / "wizard-partial.json")
+    # Other completed steps are carried unchanged through the real resume loop.
+    keys = (
+        "safety",
+        "signed_skills",
+        "budget",
+        "sandbox",
+        "research_execution",
+        "candidate_promotion",
+        "knowledge_access",
+        "capabilities",
+        "self_learning",
+        "ekko",
+        "automation_import",
+        "event_triggers",
+        "flows",
+        "knowledge",
+        "oauth",
+        "governed_connectors",
+        "durable",
+        "workspace",
+        "finance",
+        "value",
+        "assessments",
+        "advanced",
+    )
+    saved = dict.fromkeys(keys, {"enable": False})
+    saved["security_suite"] = {
+        "vendor_onboarding": True, "vendor_onboarding_owner": owner,
+        "vendor_reviewed_uploads": False,
+    }
+    wizard._save_partial(saved)
+    resumed = wizard._load_partial()
+    assert resumed == saved
+
+    def no_reenrollment():
+        pytest.fail("Resume must preserve the saved vendor choice")
+
+    monkeypatch.setattr(wizard, "pick_security_suite", no_reenrollment)
+    selected = wizard._run_simple_picks(resumed, lambda: None)
+    assert selected["security_suite"] == saved["security_suite"]
+    assert wizard._load_partial()["security_suite"] == saved["security_suite"]
+    parsed = _write_vendor_onboarding_config(tmp_path, monkeypatch, selected["security_suite"])
+    assert parsed["vendor_onboarding"]["resource_owner"] == owner
+    assert parsed["vendor_onboarding"]["reviewed_uploads"] is False
+
+
 @pytest.mark.parametrize("advanced", [None, {"connections": False, "vendor_management": False}])
 def test_vendor_onboarding_opt_in_writes_all_runtime_dependencies(tmp_path, monkeypatch, advanced):
     from maverick import (
@@ -1101,6 +1196,8 @@ def test_vendor_onboarding_opt_in_writes_all_runtime_dependencies(tmp_path, monk
     assert settings.document_connection == "gdrive"
     assert settings.ticket_connection == "jira"
     assert settings.document_connection != settings.ticket_connection
+    assert settings.safe_read_attempts == 3
+    assert settings.safe_read_backoff_seconds == 0.25
     for dependency in (
         "vendor_management", "connections", "evidence_graph", "model_risk_assurance", "ai_vendor_risk",
     ):

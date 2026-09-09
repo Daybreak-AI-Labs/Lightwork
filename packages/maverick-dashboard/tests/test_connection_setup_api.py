@@ -23,6 +23,10 @@ def client(tmp_path, monkeypatch):
     rbac.set_role("user:owner", "admin")
     rbac.set_role("user:other", "operator")
     monkeypatch.setattr(connection_oauth, "_post_token", lambda *a: pytest.fail("Unexpected provider request"))
+    monkeypatch.setattr(connection_oauth, "_provider_identity", lambda provider, token: {
+        "provider": provider, "subject": "fixture-account", "display_name": "Fixture Account",
+        "email": "fixture@example.test", "email_verified": True, "hosted_domain": "example.test",
+    })
     application = FastAPI()
     @application.middleware("http")
     async def identity(request: Request, call_next):

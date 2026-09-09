@@ -103,6 +103,7 @@ def test_inspection_child_uses_windows_modules_when_parent_module_is_incompatibl
             "(Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe');"
             "if($signature.Status -ne 'Valid'){throw 'The Windows binary signature is not valid.'};"
             "@{ProductVersion='0.1.7';ProductCode='{12345678-1234-1234-1234-123456789ABC}';"
+            "PackageCode='{ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB}';"
             "UpgradeCode='{AB5BC260-7EC9-4B70-AF78-28F4067BC530}';"
             "PublisherThumbprint=$signature.SignerCertificate.Thumbprint}|ConvertTo-Json -Compress"
         )

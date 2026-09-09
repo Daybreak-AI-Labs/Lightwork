@@ -28,7 +28,10 @@ tests); the handlers/arming are unit-tested directly.
 from __future__ import annotations
 
 import contextlib
+import hmac
 import logging
+import math
+import os
 import threading
 import time
 
@@ -812,6 +815,176 @@ def _flow_execution_authorized(run) -> bool:
         return False
 
 
+def _flow_approval_authority(run) -> dict:
+    """Current role, workspace, credential and budget authority for a pause."""
+    from maverick.approval_cards import digest
+    from maverick.flow import store
+    from maverick.paths import current_tenant_id_strict
+    from maverick.tenant.registry import assert_tenant_active
+
+    from maverick_dashboard.auth import role_for_principal, stored_automation_identity
+    from maverick_dashboard.rbac import permissions_for
+
+    tenant = current_tenant_id_strict() or ""
+    try:
+        if tenant:
+            assert_tenant_active(tenant)
+        owner, user_id, suites = stored_automation_identity(str(run.owner or ""))
+    except Exception as exc:
+        raise store.FlowSnapshotError(
+            "flow approval identity authority is unavailable"
+        ) from exc
+    role = role_for_principal(owner or None)
+    if owner and not role:
+        raise store.FlowSnapshotError("flow approval role authority is unavailable")
+    permissions = sorted(permissions_for(role)) if role else ["local_operator"]
+    try:
+        from maverick.connections import list_connections
+
+        connections = sorted([
+            {
+                "name": row.get("name"),
+                "connector": row.get("connector"),
+                "revision": row.get("revision"),
+                "owner": row.get("owner"),
+                "access": row.get("access"),
+            }
+            for row in list_connections()
+            if not row.get("owner") or row.get("owner") == owner
+        ], key=lambda row: (str(row["name"]), str(row["revision"])))
+        environment_credentials = [
+            {
+                "name_sha256": digest(name),
+                "value_sha256": digest(value),
+            }
+            for name, value in sorted(os.environ.items())
+            if value and any(
+                marker in name.upper()
+                for marker in ("_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+            )
+        ]
+    except Exception as exc:
+        raise store.FlowSnapshotError(
+            "flow credential authority is unavailable"
+        ) from exc
+    budget_material = {
+        "configured": config.get_budget_overrides(),
+        "environment_dollar_cap": os.environ.get("MAVERICK_BUDGET_DOLLARS"),
+    }
+    try:
+        from maverick.runtime_overrides import budget_override
+
+        budget_material["dashboard_dollar_cap"] = budget_override()
+    except Exception as exc:
+        raise store.FlowSnapshotError("flow budget authority is unavailable") from exc
+    workspace_generation = None
+    if owner:
+        try:
+            from maverick_dashboard.workspace_tenants import get_selection_binding
+
+            workspace_generation = get_selection_binding(owner)
+            selected_tenant = workspace_generation[0]
+            if selected_tenant is not None and selected_tenant != tenant:
+                raise store.FlowSnapshotError(
+                    "flow workspace no longer matches the approval tenant"
+                )
+        except Exception as exc:
+            if isinstance(exc, store.FlowSnapshotError):
+                raise
+            raise store.FlowSnapshotError(
+                "flow workspace authority is unavailable"
+            ) from exc
+    return {
+        "schema": "lightwork.flow-approval-authority.v1",
+        "tenant": tenant,
+        "owner": owner,
+        "user_id": user_id or "",
+        "role": role or "local_operator",
+        "role_permissions_sha256": digest(permissions),
+        "suite_grant_sha256": digest(None if suites is None else sorted(suites)),
+        "workspace_selection_sha256": digest(workspace_generation),
+        "credential_inventory_sha256": digest({
+            "named_connections": connections,
+            "environment_credentials": environment_credentials,
+        }),
+        "budget_authority_sha256": digest(budget_material),
+    }
+
+
+def flow_approval_binding(run, *, inputs: dict | None = None) -> str:
+    """Bind an approval verdict to the exact pause and current authority."""
+    from maverick.flow.approvals import paused_operation_binding
+
+    return paused_operation_binding(
+        run, inputs=inputs, authority=_flow_approval_authority(run),
+    )
+
+
+def current_flow_approval_card(run, *, allow_expired: bool = False) -> dict:
+    """Validate that the displayed card still describes the durable pause."""
+    from maverick.approval_cards import (
+        ApprovalCardError,
+        digest,
+        require_current_approval_card,
+        validate_approval_card,
+    )
+    from maverick.flow import store
+    from maverick.flow.redact import cap, redact
+
+    try:
+        raw_card = (run.human or {}).get("approval_card")
+        card = (
+            validate_approval_card(raw_card)
+            if allow_expired
+            else require_current_approval_card(raw_card)
+        )
+        flow = store.load_flow_snapshot(str(run.definition_digest or ""))
+        paused = flow.node(run.cursor) if run.cursor else None
+        if paused is None or paused.kind != "approval":
+            raise ApprovalCardError("approval pause target is unavailable")
+        next_node = flow.node(paused.next) if paused.next else None
+        continuation = (
+            next_node.to_dict()
+            if next_node is not None
+            else {"kind": "complete", "id": "end"}
+        )
+        persisted_data = redact(cap(run.data or {}))
+        expected_target = digest({
+            "flow_id": flow.id,
+            "pause_node": paused.id,
+            "continuation": continuation,
+        })
+        expected_parameters = digest({
+            "data": persisted_data,
+            "continuation": continuation,
+        })
+        versions = card["authority"]["versions"]
+        checks = (
+            card["action"] == "flow.resume",
+            hmac.compare_digest(card["target"]["sha256"], expected_target),
+            hmac.compare_digest(
+                card["parameters"]["sha256"], expected_parameters,
+            ),
+            card["inputs"].get("run_data_sha256") == digest(persisted_data),
+            versions.get("definition_digest") == run.definition_digest,
+            versions.get("release_digest") == run.release_digest,
+            versions.get("release_id") == run.release_id,
+            (
+                run.resume_at is None
+                or float(card["expires_at"]) == float(run.resume_at)
+            ),
+        )
+        if not all(checks):
+            raise ApprovalCardError(
+                "approval card no longer describes the durable operation"
+            )
+        return card
+    except (ApprovalCardError, AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise store.FlowSnapshotError(
+            "flow approval card is stale or invalid"
+        ) from exc
+
+
 def _flow_runners(run):
     from maverick.flow import execution
     from maverick.sandbox import build_sandbox
@@ -864,6 +1037,8 @@ def enqueue_flow_resume(
     expired: bool = False,
     from_failure: bool = False,
     run_at: float | None = None,
+    approval_binding_sha256: str = "",
+    decision_authority: object | None = None,
 ) -> None:
     """Reserve a resume only while its immutable live release remains active.
 
@@ -892,8 +1067,57 @@ def enqueue_flow_resume(
             raise store.FlowSnapshotError("flow run owner does not match")
         if run.status == "paused_approval" and not expired:
             _validate_approval_actor(run, decision=decision, decided_by=decided_by)
+            try:
+                card = current_flow_approval_card(run)
+            except store.FlowSnapshotError as exc:
+                raise store.FlowSnapshotError(
+                    "flow approval expired; request a fresh review"
+                ) from exc
+            reviewed_binding = flow_approval_binding(
+                run, inputs=dict(inputs or {}),
+            )
+            if not approval_binding_sha256 or not hmac.compare_digest(
+                reviewed_binding, str(approval_binding_sha256)
+            ):
+                raise store.FlowSnapshotError(
+                    "flow approval changed; review the current operation"
+                )
+            current_binding = reviewed_binding
             payload["decision"] = str(decision)
             payload["decided_by"] = str(decided_by)
+            payload["approval_binding_sha256"] = current_binding
+            from maverick.flow.approvals import (
+                flow_decision_attestation_material,
+                paused_operation_binding,
+            )
+
+            from .approval_authority import issue_flow_decision_attestation
+
+            core_binding = paused_operation_binding(
+                run, inputs=dict(inputs or {}),
+            )
+            material = flow_decision_attestation_material(
+                run,
+                inputs=dict(inputs or {}),
+                operation_binding_sha256=core_binding,
+                authority_binding_sha256=current_binding,
+                decision=str(decision),
+                decided_by=str(decided_by),
+            )
+            payload["approval_decision_attestation"] = (
+                issue_flow_decision_attestation(
+                    decision_authority,
+                    material=material,
+                    expires_at=float(card["expires_at"]),
+                )
+            )
+        elif run.status == "paused_approval" and expired:
+            if run.resume_at is None or not math.isfinite(float(run.resume_at)):
+                raise store.FlowSnapshotError(
+                    "flow approval has no valid expiry reservation"
+                )
+            current_flow_approval_card(run, allow_expired=True)
+            payload["approval_expiry_binding_sha256"] = flow_approval_binding(run)
         if not run.definition_digest:
             raise store.FlowSnapshotError(
                 "flow run has no immutable definition to resume"
@@ -941,6 +1165,45 @@ def _validate_approval_actor(run, *, decision: str, decided_by: str) -> None:
         raise store.FlowSnapshotError("the approver is not the declared assignee")
 
 
+def _require_current_flow_approval(run, payload: dict) -> None:
+    """Revalidate a queued verdict against this exact pause and authority."""
+    from maverick.flow import store
+
+    expected = str(payload.get("approval_binding_sha256") or "")
+    current = flow_approval_binding(
+        run, inputs=dict(payload.get("inputs") or {}),
+    )
+    if not expected or not hmac.compare_digest(expected, current):
+        raise store.FlowSnapshotError(
+            "approval operation or authority changed"
+        )
+    current_flow_approval_card(run)
+    _validate_approval_actor(
+        run,
+        decision=str(payload.get("decision") or ""),
+        decided_by=str(payload.get("decided_by") or ""),
+    )
+
+
+def _require_current_flow_expiry(run, payload: dict) -> None:
+    """Accept only the bound scheduler reservation after the exact expiry time."""
+    from maverick.flow import store
+
+    try:
+        due_at = float(run.resume_at)
+    except (TypeError, ValueError) as exc:
+        raise store.FlowSnapshotError("approval expiry is unavailable") from exc
+    if not math.isfinite(due_at) or time.time() < due_at:
+        raise store.FlowSnapshotError("approval expiry is not due")
+    if payload.get("decision") or payload.get("decided_by") or payload.get("inputs"):
+        raise store.FlowSnapshotError("approval expiry payload is invalid")
+    expected = str(payload.get("approval_expiry_binding_sha256") or "")
+    current = flow_approval_binding(run)
+    if not expected or not hmac.compare_digest(expected, current):
+        raise store.FlowSnapshotError("approval expiry reservation changed")
+    current_flow_approval_card(run, allow_expired=True)
+
+
 def _approval_body(name: str, run) -> str:
     """The approval notification text, with clickable approve/reject links when a
     public URL + webhook secret are configured (else just the prompt)."""
@@ -948,10 +1211,18 @@ def _approval_body(name: str, run) -> str:
     base = _public_base_url()
     if base:
         from maverick.flow.approvals import approval_links
-        links = approval_links(base, run.run_id, cursor=run.cursor,
-                               prompt=run.prompt, updated=run.updated,
-                               assignee=str((run.human or {}).get("assignee") or ""),
-                               owner=run.owner)
+
+        binding = flow_approval_binding(run)
+        links = approval_links(
+            base,
+            run.run_id,
+            cursor=run.cursor,
+            prompt=run.prompt,
+            updated=run.updated,
+            assignee=str((run.human or {}).get("assignee") or ""),
+            owner=run.owner,
+            binding_sha256=binding,
+        )
         if links:
             return (f"“{name}” needs your approval: {ask}\n"
                     f"✅ Approve: {links['approve']}\n"
@@ -1265,7 +1536,7 @@ def _handle_flow_run(job=None) -> None:
         raise
 
 
-def _handle_flow_resume(job=None) -> None:
+def _handle_flow_resume(job=None) -> None:  # noqa: C901
     """Resume a paused flow run with a human decision (durable one-shot). A stale
     resume (the run already advanced, e.g. a duplicate delay-sweep enqueue) is a
     clean no-op, not an error."""
@@ -1276,7 +1547,7 @@ def _handle_flow_resume(job=None) -> None:
         return
     from maverick.flow import execution
     try:
-        def _resume() -> None:
+        def _resume() -> None:  # noqa: C901
             from maverick.flow import store
             prior = store.load_run(run_id)
             if prior is None:
@@ -1303,17 +1574,21 @@ def _handle_flow_resume(job=None) -> None:
             )
             if prior.status not in PAUSED_STATUSES and not retryable_failure:
                 return
-            if prior.status == "paused_approval" and not payload.get("expired"):
+            if prior.status == "paused_approval":
                 try:
-                    _validate_approval_actor(
-                        prior,
-                        decision=str(payload.get("decision") or ""),
-                        decided_by=str(payload.get("decided_by") or ""),
-                    )
+                    if payload.get("expired"):
+                        _require_current_flow_expiry(prior, payload)
+                    else:
+                        _require_current_flow_approval(prior, payload)
                 except store.FlowSnapshotError:
                     # An untrusted/corrupt queue delivery never consumes or
                     # destroys the legitimate paused approval.
                     log.warning("refused unattributable approval resume for %s", run_id)
+                    prior.error = (
+                        "Approval changed or expired before execution. "
+                        "Review the current operation again."
+                    )
+                    store.save_run(prior)
                     return
             if not prior.definition_digest:
                 _mark_flow_run_failed(
@@ -1354,6 +1629,36 @@ def _handle_flow_resume(job=None) -> None:
                     execution.sandbox_runners()
                     if dry_run else _flow_runners(prior)
                 )
+                # Building an executor does not dispatch it.  Re-read every
+                # mutable authority source at the last local boundary before
+                # execute can claim the pause and reach a provider or tool.
+                if prior.status == "paused_approval":
+                    try:
+                        if payload.get("expired"):
+                            _require_current_flow_expiry(prior, payload)
+                        else:
+                            _require_current_flow_approval(prior, payload)
+                    except store.FlowSnapshotError:
+                        prior.error = (
+                            "Approval changed before execution. "
+                            "Review the current operation again."
+                        )
+                        store.save_run(prior)
+                        return
+                from maverick.flow.approvals import paused_operation_binding
+
+                core_approval_binding = ""
+                core_expiry_binding = ""
+                if prior.status == "paused_approval":
+                    submitted_inputs = dict(payload.get("inputs") or {})
+                    core_binding = paused_operation_binding(
+                        prior,
+                        inputs=submitted_inputs,
+                    )
+                    if payload.get("expired"):
+                        core_expiry_binding = core_binding
+                    else:
+                        core_approval_binding = core_binding
                 run = execution.execute(
                     flow,
                     agent_runner=agent_runner,
@@ -1363,6 +1668,14 @@ def _handle_flow_resume(job=None) -> None:
                     decision=str(payload.get("decision") or ""),
                     decided_by=str(payload.get("decided_by") or ""),
                     expired=bool(payload.get("expired")),
+                    approval_binding_sha256=core_approval_binding,
+                    approval_expiry_binding_sha256=core_expiry_binding,
+                    approval_authority_binding_sha256=str(
+                        payload.get("approval_binding_sha256") or ""
+                    ),
+                    approval_decision_attestation=payload.get(
+                        "approval_decision_attestation"
+                    ),
                     from_failure=bool(payload.get("from_failure")),
                     inputs=dict(payload.get("inputs") or {}),
                     record_outcomes=not dry_run,
@@ -1408,11 +1721,9 @@ def _handle_flow_sweep(_job=None) -> None:
                     continue
             elif run.status == runner.STATUS_PAUSED_APPROVAL:
                 # An approval whose node set an expiry resolves once it lapses.
-                # The OUT-OF-BAND `expired` flag (not a decision string, so no
-                # resume caller can forge it through the verdict channel) lets
-                # the runner route to the node's `on_expire` escalation lane if
-                # set; without one it fails closed (rejected) -- never a silent
-                # approval.
+                # The bound, due-time-checked expiry reservation lets the runner
+                # route to the node's `on_expire` escalation lane if set; without
+                # one it fails closed (rejected), never a silent approval.
                 try:
                     enqueue_flow_resume(
                         run.flow_id,

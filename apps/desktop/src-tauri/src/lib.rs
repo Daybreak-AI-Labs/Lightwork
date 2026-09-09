@@ -12,6 +12,7 @@
 //! Customer builds carry the full frozen release runtime beside this binary.
 //! Engineering builds retain the installed-CLI lookup for local development.
 
+mod native_oauth;
 mod updates;
 
 use lightwork_desktop_runtime::{Dashboard, DASHBOARD_URL};
@@ -158,16 +159,31 @@ pub fn run() {
         );
         return;
     }
+    // Generate a per-shell key in memory. Pass it directly to the dashboard
+    // child instead of placing it in this process's environment, where an OS
+    // opener or unrelated child could inherit it.
+    let (oauth_broker, dashboard_ticket_key) =
+        lightwork_desktop_oauth_return::Broker::for_dashboard_process()
+            .expect("secure desktop account-return authority");
+    std::env::remove_var(lightwork_desktop_oauth_return::TICKET_KEY_ENV);
     #[cfg(feature = "customer-runtime")]
-    let dashboard = Dashboard::with_binary(
+    let dashboard = Dashboard::with_binary_and_environment(
         std::env::current_exe()
             .expect("installed executable path")
             .parent()
             .expect("installed executable directory")
             .join("maverick.exe"),
+        lightwork_desktop_oauth_return::TICKET_KEY_ENV,
+        dashboard_ticket_key,
     );
     #[cfg(not(feature = "customer-runtime"))]
-    let dashboard = Dashboard::default();
+    let dashboard = Dashboard::with_environment(
+        lightwork_desktop_oauth_return::TICKET_KEY_ENV,
+        dashboard_ticket_key,
+    );
+    // The secret exists only in broker memory and the dashboard-child process tree.
+    // A different listener already occupying the dashboard port cannot mint a
+    // native OAuth ticket accepted by this broker.
     let maintenance_result = std::env::args().any(|argument| argument == "--maintenance-result");
     if !maintenance_result {
         let _ = dashboard.start();
@@ -179,11 +195,16 @@ pub fn run() {
     builder
         .manage(dashboard)
         .manage(updates::Maintenance::default())
+        .manage(oauth_broker)
         .invoke_handler(tauri::generate_handler![
             retry_dashboard,
             dashboard_diagnostics,
             startup_support_report,
             switch_recovery_mode,
+            native_oauth::prepare_oauth_return,
+            native_oauth::launch_oauth_return,
+            native_oauth::consume_oauth_return,
+            native_oauth::cancel_oauth_return,
             updates::maintenance_status,
             updates::check_desktop_update,
             updates::install_desktop_update,
@@ -191,6 +212,15 @@ pub fn run() {
             updates::resume_desktop_maintenance,
             updates::desktop_maintenance_logs
         ])
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                webview
+                    .state::<lightwork_desktop_oauth_return::Broker>()
+                    .stop();
+            }
+        })
         .setup(move |app| {
             if maintenance_result {
                 if let Some(window) = app.get_webview_window("main") {
@@ -264,6 +294,7 @@ pub fn run() {
         .expect("error while building the Lightwork desktop shell")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                app.state::<lightwork_desktop_oauth_return::Broker>().stop();
                 // Kill only the dashboard *we* started; an externally started
                 // one was never put into the Sidecar state.
                 app.state::<Dashboard>().stop_owned();

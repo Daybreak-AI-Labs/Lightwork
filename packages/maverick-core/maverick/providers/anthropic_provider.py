@@ -839,7 +839,9 @@ class AnthropicClient:
             }
             if tools:
                 kwargs["tools"] = _cached_tools(tools)
-            resp = self.client.messages.create(**kwargs)
+            from ..retry import sync_physical_attempt
+
+            resp = sync_physical_attempt(lambda: self.client.messages.create(**kwargs))
             if budget is not None:
                 self._parse_response(resp, budget, model=kwargs.get("model"))
             return True

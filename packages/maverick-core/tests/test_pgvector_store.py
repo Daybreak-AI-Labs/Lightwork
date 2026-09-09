@@ -10,6 +10,22 @@ import sys
 import types
 
 import pytest
+from maverick import provider_cost_cap as cap
+from maverick.paths import tenant_scope
+
+
+@pytest.fixture
+def provider_ledger(tmp_path, monkeypatch):
+    path = tmp_path / "provider-spend.json"
+    monkeypatch.setattr(cap, "caps_from_config", dict)
+    monkeypatch.setattr(cap, "_shared_world", lambda: None)
+    monkeypatch.setattr(cap, "_ledger_path", lambda: path)
+    monkeypatch.setattr(
+        cap,
+        "period_key",
+        lambda now=None, period=None: "2026-09-08",
+    )
+    return path
 
 
 class _FakeCursor:
@@ -27,6 +43,8 @@ class _FakeCursor:
     def execute(self, sql, params=None):
         self._conn.executed.append((sql, params))
         low = sql.lower()
+        if self._conn.error is not None and self._conn.error_match in low:
+            raise self._conn.error
         if "count(*)" in low:
             self._one = (self._conn.count_value,)
         elif low.lstrip().startswith("select"):
@@ -45,6 +63,8 @@ class _FakeConn:
         self.count_value = 0
         self.query_rows: list = []
         self.closed = False
+        self.error: BaseException | None = None
+        self.error_match = ""
 
     def cursor(self):
         return _FakeCursor(self)
@@ -138,6 +158,26 @@ def test_pgvector_dim_mismatch_raises(monkeypatch):
     store = PgVectorStore(dsn="postgresql://x", embedder=ragged)
     with pytest.raises(ValueError, match="embedding dim"):
         store.add(["a", "b"])
+
+
+def test_pgvector_invalid_embedding_count_does_not_meter_transport(
+    monkeypatch,
+    provider_ledger,
+):
+    _install_fake_psycopg(monkeypatch)
+    from maverick.vector_store.pgvector_store import PgVectorStore
+
+    store = PgVectorStore(
+        dsn="postgresql://example.test/db",
+        embedder=lambda texts: [],  # noqa: ARG005
+    )
+    with tenant_scope(tenant="knowledge-tenant"), cap.work_item_scope(
+        "research:PGVECTOR-INVALID"
+    ):
+        with pytest.raises(ValueError, match="embedding count"):
+            store.add(["doc"])
+
+    assert not provider_ledger.exists()
 
 
 def test_pgvector_query_uses_cosine_and_collection_tenant(monkeypatch):
@@ -252,3 +292,93 @@ def test_semantic_recall_recognizes_pgvector(monkeypatch):
     monkeypatch.setenv("MAVERICK_VECTOR_STORE", "pgvector")
     from maverick import semantic_recall
     assert semantic_recall.backend_name() == "pgvector"
+
+
+def test_pgvector_operations_publish_unknown_cost_receipts(
+    monkeypatch,
+    provider_ledger,
+):
+    conn = _install_fake_psycopg(monkeypatch)
+    conn.count_value = 1
+    from maverick.vector_store.pgvector_store import PgVectorStore
+
+    store = PgVectorStore(
+        dsn="postgresql://user:secret@example.test/db",  # pragma: allowlist secret
+        collection="research",
+        embedder=_embedder(),
+    )
+    work_item = "research:PGVECTOR-1"
+    with tenant_scope(tenant="knowledge-tenant"), cap.work_item_scope(work_item):
+        store.add([])
+        assert store.query("") == []
+        store.delete([])
+        store.add(["doc"], ids=["doc-1"])
+        assert store.query("query") == []
+        store.delete(["doc-1"])
+        assert store.count() == 1
+        store.reset()
+        receipts = cap.reservation_catalogue_for_work_item(
+            work_item,
+            path=provider_ledger,
+        ).receipts
+
+    assert len(receipts) == 5
+    assert [row.operation["category"] for row in receipts].count("storage") == 1
+    assert [row.operation["category"] for row in receipts].count("retrieval") == 2
+    assert [row.operation["category"] for row in receipts].count("update") == 2
+    assert all(row.provider == "pgvector" for row in receipts)
+    assert all(row.state == "unknown" and row.actual is None for row in receipts)
+    assert all(row.operation["attempt_state"] == "succeeded" for row in receipts)
+    assert all(
+        row.operation["service"] == "vector-store:pgvector" for row in receipts
+    )
+    assert all("secret" not in row.operation["service"] for row in receipts)
+
+
+def test_pgvector_transport_failure_is_retained_and_reraised(
+    monkeypatch,
+    provider_ledger,
+):
+    original = OSError("synthetic postgres outage")
+    conn = _install_fake_psycopg(monkeypatch)
+    from maverick.vector_store.pgvector_store import PgVectorStore
+
+    store = PgVectorStore(
+        dsn="postgresql://example.test/db",
+        embedder=_embedder(),
+    )
+    conn.error = original
+    conn.error_match = "embedding <=>"
+    work_item = "research:PGVECTOR-FAIL"
+    with tenant_scope(tenant="knowledge-tenant"), cap.work_item_scope(work_item):
+        with pytest.raises(OSError) as captured:
+            store.query("query")
+        receipt = cap.reservation_catalogue_for_work_item(
+            work_item,
+            path=provider_ledger,
+        ).receipts[0]
+
+    assert captured.value is original
+    assert receipt.state == "unknown"
+    assert receipt.operation["category"] == "retrieval"
+    assert receipt.operation["attempt_state"] == "failed"
+
+
+def test_pgvector_unknown_price_cap_blocks_before_database_dispatch(
+    monkeypatch,
+    provider_ledger,
+):
+    conn = _install_fake_psycopg(monkeypatch)
+    from maverick.vector_store.pgvector_store import PgVectorStore
+
+    store = PgVectorStore(dsn="postgresql://example.test/db")
+    before = len(conn.executed)
+    monkeypatch.setattr(cap, "caps_from_config", lambda: {"pgvector": 10.0})
+    with tenant_scope(tenant="knowledge-tenant"), cap.work_item_scope(
+        "research:PGVECTOR-CAPPED"
+    ):
+        with pytest.raises(cap.ProviderAccountingUnavailable):
+            store.count()
+
+    assert len(conn.executed) == before
+    assert not provider_ledger.exists()

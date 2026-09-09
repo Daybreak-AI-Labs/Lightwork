@@ -11,6 +11,8 @@ v0.2 cost-correctness fix:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import os
@@ -58,10 +60,20 @@ class UnpricedModelError(BudgetExceeded):
     """
 
 
+@dataclass(frozen=True, slots=True)
+class TokenCharge:
+    """The cost and price evidence attributable to one token-meter update."""
+
+    dollars: float
+    pricing_evidence: dict[str, object]
+
+
 # Fallback price (Sonnet 4.6 list, no cache discount) in $/Mtok.
 # Used only by the explicit estimate-only fallback for an unknown model.
 _FALLBACK_PRICE_IN = 3.0
 _FALLBACK_PRICE_OUT = 15.0
+_TOKEN_OPERATION = re.compile(r"[0-9a-f]{64}\Z")
+_MAX_TOKEN_OPERATIONS = 5000
 
 # Model ids already warned about (estimate-priced); warn once each, not per call.
 _UNPRICED_WARNED: set[str] = set()
@@ -149,6 +161,81 @@ def _coerce_count(v: object) -> int:
     if n < 0:
         raise UsageAccountingError(f"invalid token usage count: negative value {n}")
     return n
+
+
+def _nonnegative_finite(value: object, label: str) -> float:
+    """Return a finite, non-negative accounting value or stop the run.
+
+    ``nan`` is especially dangerous here: every comparison with it is false,
+    so accepting it can permanently disable a dollar cap.  Booleans are
+    rejected even though Python otherwise treats them as integers.
+    """
+
+    if isinstance(value, bool):
+        raise BudgetExceeded(f"invalid {label}: {value!r}")
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise BudgetExceeded(f"invalid {label}: {value!r}") from exc
+    if not math.isfinite(normalized) or normalized < 0:
+        raise BudgetExceeded(f"invalid {label}: {value!r}")
+    return normalized
+
+
+def _nonnegative_integer(value: object, label: str) -> int:
+    """Validate a stored counter without rounding or string coercion."""
+
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise BudgetExceeded(f"invalid {label}: {value!r}")
+    return value
+
+
+def _token_operation_id(value: object | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _TOKEN_OPERATION.fullmatch(value):
+        raise BudgetExceeded("invalid token metering operation id")
+    return value
+
+
+def _token_request_digest(value: dict[str, object]) -> str:
+    try:
+        encoded = json.dumps(
+            value, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise BudgetExceeded("invalid token metering request") from exc
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _validate_token_operations(value: object) -> dict[str, dict[str, object]]:
+    if not isinstance(value, dict) or len(value) > _MAX_TOKEN_OPERATIONS:
+        raise BudgetExceeded("invalid token metering operation state")
+    for operation, row in value.items():
+        if not isinstance(operation, str) or not _TOKEN_OPERATION.fullmatch(operation):
+            raise BudgetExceeded("invalid token metering operation state")
+        if not isinstance(row, dict) or set(row) != {
+            "request", "dollars", "pricing_evidence", "failure",
+        }:
+            raise BudgetExceeded("invalid token metering operation state")
+        if not isinstance(row["request"], str) or not _TOKEN_OPERATION.fullmatch(row["request"]):
+            raise BudgetExceeded("invalid token metering operation state")
+        _nonnegative_finite(row["dollars"], "stored token charge")
+        evidence = row["pricing_evidence"]
+        if not isinstance(evidence, dict):
+            raise BudgetExceeded("invalid token metering operation state")
+        try:
+            encoded = json.dumps(evidence, sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise BudgetExceeded("invalid token metering operation state") from exc
+        if len(encoded.encode("utf-8")) > 64 * 1024:
+            raise BudgetExceeded("invalid token metering operation state")
+        failure = row["failure"]
+        if failure is not None and (
+            not isinstance(failure, str) or not failure or len(failure) > 2000
+        ):
+            raise BudgetExceeded("invalid token metering operation state")
+    return value
 
 # Anthropic cache multipliers (over the list input price).
 # Two TTLs: 5m default (1.25x write surcharge) and 1h (2.0x write surcharge).
@@ -536,7 +623,8 @@ class Budget:
         cache_read_mult: float | None = None,
         cache_write_5m_tok: int = 0,
         cache_write_1h_tok: int = 0,
-    ) -> None:
+        operation_id: str | None = None,
+    ) -> TokenCharge:
         """Add usage from one LLM call.
 
         ``in_tok`` is the number of input tokens billed at full rate
@@ -579,13 +667,18 @@ class Budget:
         cache_write_tok = _coerce_count(cache_write_tok)
         cache_write_5m_tok = _coerce_count(cache_write_5m_tok)
         cache_write_1h_tok = _coerce_count(cache_write_1h_tok)
+        operation = _token_operation_id(operation_id)
+        if model is not None and (
+            not isinstance(model, str) or not model or len(model) > 512
+        ):
+            raise BudgetExceeded("invalid model identifier")
+        if cache_write_ttl is not None and (
+            not isinstance(cache_write_ttl, str) or len(cache_write_ttl) > 64
+        ):
+            raise BudgetExceeded("invalid cache write TTL")
         split_cache_write = bool(cache_write_5m_tok or cache_write_1h_tok)
         if split_cache_write:
             cache_write_tok = cache_write_5m_tok + cache_write_1h_tok
-        # Resolve before mutating counters. A missing/unverified billing rate
-        # must leave the Budget untouched, not record tokens and then raise.
-        quote = _lookup_price_quote(model)
-        in_rate, out_rate = quote.rates
         # Wave 12 (council F12b): make the accumulator atomic so a
         # future parallel best-of-N (or multi-agent swarm where two
         # agents share a Budget) can't lose updates. `+=` on float is
@@ -595,35 +688,99 @@ class Budget:
         # the OTHER thread has already invalidated. check() does no I/O
         # and elapsed() is reentrant-safe, so holding the lock through
         # it is fine.
+        # Compute one attributable charge before updating the shared total.
+        # Returning it avoids deriving a call's cost from before/after snapshots
+        # that can include another thread's direct Budget update.
+        read_mult = _nonnegative_finite(
+            _CACHE_READ_MULT if cache_read_mult is None else cache_read_mult,
+            "cache read multiplier",
+        )
+        request = _token_request_digest({
+            "in_tok": in_tok,
+            "out_tok": out_tok,
+            "model": model,
+            "cache_read_tok": cache_read_tok,
+            "cache_write_tok": cache_write_tok,
+            "cache_write_ttl": cache_write_ttl,
+            "cache_read_mult": read_mult,
+            "cache_write_5m_tok": cache_write_5m_tok,
+            "cache_write_1h_tok": cache_write_1h_tok,
+        })
+
         with self._lock:
+            self._validate_integrity()
+            if operation is not None and operation in self._token_operations:
+                prior = self._token_operations[operation]
+                if prior["request"] != request:
+                    raise BudgetExceeded(
+                        "token metering operation belongs to different usage"
+                    )
+                replayed = TokenCharge(
+                    _nonnegative_finite(prior["dollars"], "stored token charge"),
+                    dict(prior["pricing_evidence"]),
+                )
+                if prior["failure"] is not None:
+                    failure = BudgetExceeded(str(prior["failure"]))
+                    failure.pricing_evidence = dict(replayed.pricing_evidence)
+                    failure.token_charge = replayed
+                    raise failure
+                return replayed
+            if operation is not None and len(self._token_operations) >= _MAX_TOKEN_OPERATIONS:
+                raise BudgetExceeded("token metering operation capacity reached")
+            # Resolve inside the operation lock. Two concurrent exact retries
+            # must not both miss the receipt and mutate the same counters.
+            quote = _lookup_price_quote(model)
+            in_rate, out_rate = quote.rates
+            pricing_evidence = quote.metadata()
+            call_dollars = (in_tok / 1_000_000) * in_rate
+            call_dollars += (cache_read_tok / 1_000_000) * in_rate * read_mult
+            if split_cache_write:
+                call_dollars += (
+                    (cache_write_5m_tok / 1_000_000) * in_rate
+                    * _CACHE_WRITE_MULT_5M
+                )
+                call_dollars += (
+                    (cache_write_1h_tok / 1_000_000) * in_rate
+                    * _CACHE_WRITE_MULT_1H
+                )
+            else:
+                write_mult = _cache_write_mult_from_ttl(cache_write_ttl)
+                call_dollars += (
+                    (cache_write_tok / 1_000_000) * in_rate * write_mult
+                )
+            call_dollars += (out_tok / 1_000_000) * out_rate
+            call_dollars = _nonnegative_finite(call_dollars, "token charge")
+            charge = TokenCharge(call_dollars, dict(pricing_evidence))
             self.input_tokens += in_tok
             self.cache_read_tokens += cache_read_tok
             self.cache_write_tokens += cache_write_tok
             self.output_tokens += out_tok
 
-            self.pricing_evidence[quote.model_id] = quote.metadata()
-            # Provider-aware cache-read discount: Anthropic 0.1x (default),
-            # OpenAI/o-series/gpt-5 auto-cache ~0.5x (caller passes it).
-            read_mult = _CACHE_READ_MULT if cache_read_mult is None else float(cache_read_mult)
-            self.dollars += (in_tok / 1_000_000) * in_rate
-            self.dollars += (cache_read_tok / 1_000_000) * in_rate * read_mult
-            if split_cache_write:
-                # Bill each TTL tier at its own multiplier instead of forcing
-                # the whole write to one rate (see the W1-6 docstring note).
-                self.dollars += (
-                    (cache_write_5m_tok / 1_000_000) * in_rate * _CACHE_WRITE_MULT_5M
-                )
-                self.dollars += (
-                    (cache_write_1h_tok / 1_000_000) * in_rate * _CACHE_WRITE_MULT_1H
-                )
-            else:
-                write_mult = _cache_write_mult_from_ttl(cache_write_ttl)
-                self.dollars += (cache_write_tok / 1_000_000) * in_rate * write_mult
-            self.dollars += (out_tok / 1_000_000) * out_rate
-            self.check()
+            self.pricing_evidence[quote.model_id] = dict(pricing_evidence)
+            self.dollars += call_dollars
+            failure = None
+            try:
+                self.check()
+            except BudgetExceeded as exc:
+                # A caller that durably records the already-incurred overrun
+                # still needs the exact price evidence used by this mutation.
+                exc.pricing_evidence = dict(pricing_evidence)
+                exc.token_charge = charge
+                failure = exc
+            if operation is not None:
+                self._token_operations[operation] = {
+                    "request": request,
+                    "dollars": call_dollars,
+                    "pricing_evidence": dict(pricing_evidence),
+                    "failure": None if failure is None else str(failure),
+                }
+            if failure is not None:
+                raise failure
+        return charge
 
     def record_tool_call(self) -> None:
         with self._lock:
+            self._validate_integrity()
             self.tool_calls += 1
             self.check()
 
@@ -637,7 +794,9 @@ class Budget:
         lock (lost updates under concurrency) and ``check()`` (so the
         parent silently busted its cap across attempts).
         """
+        other._validate_integrity()
         with self._lock:
+            self._validate_integrity()
             self.input_tokens += other.input_tokens
             self.output_tokens += other.output_tokens
             self.cache_read_tokens += other.cache_read_tokens
@@ -674,6 +833,9 @@ class Budget:
         # other's pending spend instead of all passing the same check and
         # then collectively overshooting the cap.
         self._reserved = 0.0
+        # Operation receipts make a durable/pickled Budget idempotent across an
+        # outcome-ledger append failure and exact retry.
+        self._token_operations: dict[str, dict[str, object]] = {}
         # A non-finite cap (nan/inf) silently disables enforcement: every
         # `self.dollars > nan` comparison in check() is False, so the cap
         # never trips. TOML 1.0 has native nan/inf and `--max-dollars inf`
@@ -698,22 +860,49 @@ class Budget:
         non-picklable transient fields so a Budget can survive being
         sent to a multiprocessing worker (and the monotonic clock is
         per-process — reset on unpickle to avoid bogus elapsed math)."""
-        state = self.__dict__.copy()
-        state.pop("_lock", None)
-        # Preserve consumed wall time across process boundaries.
-        # Monotonic baselines are process-local, so serialize elapsed
-        # duration and reconstruct a compatible baseline on restore.
-        state["_elapsed_at_pickle"] = self.elapsed()
-        state.pop("_started_monotonic", None)
+        with self._lock:
+            self._validate_integrity()
+            state = self.__dict__.copy()
+            state.pop("_lock", None)
+            # Preserve consumed wall time across process boundaries.
+            # Monotonic baselines are process-local, so serialize elapsed
+            # duration and reconstruct a compatible baseline on restore.
+            state["_elapsed_at_pickle"] = self.elapsed()
+            state.pop("_started_monotonic", None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self.__dict__.setdefault("_token_operations", {})
         self._lock = threading.Lock()
-        elapsed = float(self.__dict__.pop("_elapsed_at_pickle", 0.0) or 0.0)
-        self._started_monotonic = time.monotonic() - max(0.0, elapsed)
+        elapsed = _nonnegative_finite(
+            self.__dict__.pop("_elapsed_at_pickle", 0.0) or 0.0,
+            "serialized elapsed time",
+        )
+        self._started_monotonic = time.monotonic() - elapsed
+        self._validate_integrity()
+
+    def _validate_integrity(self) -> None:
+        """Fail closed when live or restored accounting state is malformed."""
+
+        for field_name in (
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "tool_calls",
+            "max_input_tokens",
+            "max_output_tokens",
+            "max_tool_calls",
+        ):
+            _nonnegative_integer(getattr(self, field_name), field_name.replace("_", " "))
+        for field_name in ("dollars", "max_dollars", "max_wall_seconds"):
+            _nonnegative_finite(getattr(self, field_name), field_name.replace("_", " "))
+        _nonnegative_finite(getattr(self, "_reserved", 0.0), "reserved dollars")
+        _validate_token_operations(getattr(self, "_token_operations", {}))
 
     def check(self) -> None:
+        self._validate_integrity()
         if self.input_tokens > self.max_input_tokens:
             raise BudgetExceeded(f"input tokens {self.input_tokens} > {self.max_input_tokens}")
         if self.output_tokens > self.max_output_tokens:
@@ -722,7 +911,7 @@ class Budget:
             raise BudgetExceeded(f"${self.dollars:.2f} > ${self.max_dollars:.2f}")
         if self.tool_calls > self.max_tool_calls:
             raise BudgetExceeded(f"tool calls {self.tool_calls} > {self.max_tool_calls}")
-        elapsed = self.elapsed()
+        elapsed = _nonnegative_finite(self.elapsed(), "elapsed wall time")
         if elapsed >= self.max_wall_seconds:
             raise BudgetExceeded(
                 f"wall time {elapsed:.0f}s >= {self.max_wall_seconds:.0f}s"
@@ -739,14 +928,16 @@ class Budget:
         researchers on 200k-token contexts). Gating each dispatch on its
         projected cost bounds the overshoot to roughly the in-flight set.
         """
-        if est_cost <= 0:
+        est = _nonnegative_finite(est_cost, "projected call cost")
+        if est == 0:
             return
         with self._lock:
-            projected = self.dollars + getattr(self, "_reserved", 0.0) + est_cost
+            self._validate_integrity()
+            projected = self.dollars + getattr(self, "_reserved", 0.0) + est
             if projected > self.max_dollars:
                 raise BudgetExceeded(
                     f"projected ${projected:.2f} > ${self.max_dollars:.2f} "
-                    f"(spent ${self.dollars:.2f} + est ${est_cost:.2f} for this call)"
+                    f"(spent ${self.dollars:.2f} + est ${est:.2f} for this call)"
                 )
 
     def reserve(self, est_cost: float) -> float:
@@ -758,10 +949,11 @@ class Budget:
         $6+ with a wide parallel fan-out). Pair every successful reserve() with
         a release() in a ``finally``.
         """
-        est = est_cost if (est_cost and est_cost > 0) else 0.0
+        est = _nonnegative_finite(est_cost, "projected call cost")
         if est == 0.0:
             return 0.0
         with self._lock:
+            self._validate_integrity()
             held = getattr(self, "_reserved", 0.0)
             projected = self.dollars + held + est
             if projected > self.max_dollars:
@@ -775,10 +967,12 @@ class Budget:
 
     def release(self, held: float) -> None:
         """Release a hold taken by reserve(). Safe to call with 0.0."""
-        if not held or held <= 0:
+        amount = _nonnegative_finite(held, "released reservation")
+        if amount == 0:
             return
         with self._lock:
-            self._reserved = max(0.0, getattr(self, "_reserved", 0.0) - held)
+            self._validate_integrity()
+            self._reserved = max(0.0, getattr(self, "_reserved", 0.0) - amount)
 
     def cache_hit_rate(self) -> float:
         """Fraction of prompt-input tokens served from cache this run, across

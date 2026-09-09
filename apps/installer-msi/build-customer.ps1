@@ -27,7 +27,9 @@ $cli = Join-Path $repoRoot 'apps/installer-desktop/node_modules/@tauri-apps/cli/
 if (-not (Test-Path -LiteralPath $cli)) { throw 'Install the locked installer-desktop build dependencies before building.' }
 Push-Location (Join-Path $repoRoot 'apps/desktop')
 try {
-    & node $cli build --target x86_64-pc-windows-msvc --config $config --bundles msi --features customer-runtime -- --locked
+    # --verbose surfaces the WiX candle/light output; without it a linker or
+    # ICE validation failure only reports "failed to run light.exe".
+    & node $cli build --verbose --target x86_64-pc-windows-msvc --config $config --bundles msi --features customer-runtime -- --locked
     if ($LASTEXITCODE -ne 0) { throw 'Customer desktop packaging failed.' }
 } finally { Pop-Location }
 Write-Host 'Built the complete customer candidate. Publisher signing and Windows acceptance must pass before distribution.'

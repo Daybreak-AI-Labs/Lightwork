@@ -20,11 +20,38 @@ from __future__ import annotations
 import logging
 import os
 import re
+import uuid
 from typing import Any
 
+from ..provider_cost_cap import (
+    ProviderAccountingUnavailable,
+    ProviderCapExceeded,
+    metered_provider_call,
+)
 from . import Tool
 
 log = logging.getLogger(__name__)
+
+
+class _SearchMeter:
+    """One logical search operation spanning sequential backend failover."""
+
+    def __init__(self, operation_id: str | None = None):
+        self.operation_id = operation_id or f"web-search:{uuid.uuid4().hex}"
+        self.attempt_no = 0
+
+    def dispatch(self, provider: str, callback):
+        self.attempt_no += 1
+        category = "search" if self.attempt_no == 1 else "retry"
+        return metered_provider_call(
+            provider,
+            callback,
+            operation_id=self.operation_id,
+            category=category,
+            parent_category="search",
+            attempt_no=self.attempt_no,
+            service=provider,
+        )
 
 
 _SEARCH_INPUT_SCHEMA: dict[str, Any] = {
@@ -67,7 +94,9 @@ def _format_results(results: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def _try_tavily(query: str, num: int) -> list[dict] | None:
+def _try_tavily(
+    query: str, num: int, *, meter: _SearchMeter | None = None,
+) -> list[dict] | None:
     key = os.environ.get("TAVILY_API_KEY")
     if not key:
         return None
@@ -76,18 +105,23 @@ def _try_tavily(query: str, num: int) -> list[dict] | None:
     except ImportError:
         return None
     try:
-        resp = httpx.post(
-            "https://api.tavily.com/search",
-            json={
-                "api_key": key,
-                "query": query,
-                "max_results": num,
-                "include_answer": False,
-            },
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        def request():
+            resp = httpx.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": key,
+                    "query": query,
+                    "max_results": num,
+                    "include_answer": False,
+                },
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        data = (meter or _SearchMeter()).dispatch("tavily", request)
+    except (ProviderAccountingUnavailable, ProviderCapExceeded):
+        raise
     except Exception as e:
         log.warning("tavily search failed: %s", e)
         return None
@@ -101,7 +135,9 @@ def _try_tavily(query: str, num: int) -> list[dict] | None:
     return out
 
 
-def _try_brave(query: str, num: int) -> list[dict] | None:
+def _try_brave(
+    query: str, num: int, *, meter: _SearchMeter | None = None,
+) -> list[dict] | None:
     key = os.environ.get("BRAVE_API_KEY")
     if not key:
         return None
@@ -110,14 +146,19 @@ def _try_brave(query: str, num: int) -> list[dict] | None:
     except ImportError:
         return None
     try:
-        resp = httpx.get(
-            "https://api.search.brave.com/res/v1/web/search",
-            params={"q": query, "count": min(num, 20)},
-            headers={"X-Subscription-Token": key, "Accept": "application/json"},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        def request():
+            resp = httpx.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": min(num, 20)},
+                headers={"X-Subscription-Token": key, "Accept": "application/json"},
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        data = (meter or _SearchMeter()).dispatch("brave", request)
+    except (ProviderAccountingUnavailable, ProviderCapExceeded):
+        raise
     except Exception as e:
         log.warning("brave search failed: %s", e)
         return None
@@ -131,7 +172,9 @@ def _try_brave(query: str, num: int) -> list[dict] | None:
     return out
 
 
-def _try_serpapi(query: str, num: int) -> list[dict] | None:
+def _try_serpapi(
+    query: str, num: int, *, meter: _SearchMeter | None = None,
+) -> list[dict] | None:
     key = os.environ.get("SERPAPI_API_KEY")
     if not key:
         return None
@@ -140,13 +183,18 @@ def _try_serpapi(query: str, num: int) -> list[dict] | None:
     except ImportError:
         return None
     try:
-        resp = httpx.get(
-            "https://serpapi.com/search.json",
-            params={"q": query, "num": num, "api_key": key, "engine": "google"},
-            timeout=20.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        def request():
+            resp = httpx.get(
+                "https://serpapi.com/search.json",
+                params={"q": query, "num": num, "api_key": key, "engine": "google"},
+                timeout=20.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        data = (meter or _SearchMeter()).dispatch("serpapi", request)
+    except (ProviderAccountingUnavailable, ProviderCapExceeded):
+        raise
     except Exception as e:
         # Redact the key: httpx errors embed the full request URL, which
         # carries api_key in the query string for serpapi.
@@ -201,22 +249,29 @@ def _parse_ddg_results(html: str, num: int) -> list[dict]:
     return out
 
 
-def _try_duckduckgo(query: str, num: int) -> list[dict] | None:
+def _try_duckduckgo(
+    query: str, num: int, *, meter: _SearchMeter | None = None,
+) -> list[dict] | None:
     """Last-resort: DuckDuckGo HTML scrape via the official lite endpoint."""
     try:
         import httpx
     except ImportError:
         return None
     try:
-        resp = httpx.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers={"User-Agent": "Mozilla/5.0 (compatible; Lightwork/1.0)"},
-            timeout=15.0,
-            follow_redirects=True,
-        )
-        resp.raise_for_status()
-        html = resp.text
+        def request():
+            resp = httpx.get(
+                "https://html.duckduckgo.com/html/",
+                params={"q": query},
+                headers={"User-Agent": "Mozilla/5.0 (compatible; Lightwork/1.0)"},
+                timeout=15.0,
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            return resp.text
+
+        html = (meter or _SearchMeter()).dispatch("duckduckgo", request)
+    except (ProviderAccountingUnavailable, ProviderCapExceeded):
+        raise
     except Exception as e:
         log.warning("duckduckgo search failed: %s", e)
         return None
@@ -281,9 +336,12 @@ def _run_search(args: dict[str, Any]) -> str:
             )
 
     last_err: str | None = None
+    meter = _SearchMeter()
     for name, fn in backends:
         try:
-            results = fn(full_query, num)
+            results = fn(full_query, num, meter=meter)
+        except (ProviderAccountingUnavailable, ProviderCapExceeded):
+            raise
         except Exception as e:
             last_err = f"{name}: {type(e).__name__}: {e}"
             log.warning("backend %s raised: %s", name, e)

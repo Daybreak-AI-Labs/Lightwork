@@ -5,13 +5,25 @@
 <section id="support-center" data-context="{{ support_context }}" data-draft-recovery="off">
   <h1>Help and diagnostics</h1>
   <p>Prepare a redacted report of this installation's versions, readiness checks and recent failures. Review it here, then download the same report to share with your support contact.</p>
-  <p>Reports may contain workspace labels and error descriptions. Passwords and recognized credentials are removed. Nothing is sent automatically.</p>
+  <section class="support-scope" aria-labelledby="support-scope-title">
+    <h2 id="support-scope-title">What the report will include</h2>
+    <ul>
+      <li>Installed Lightwork component versions, Python/runtime version, operating-system platform and machine type.</li>
+      <li>The absolute Python executable and Lightwork data-root paths, plus whether the data root exists and is a directory.</li>
+      <li>License customer, tier, status, enabled suites and expiry; the current client/workspace binding identity.</li>
+      <li>Whether a provider is configured, the names of providers Lightwork recognizes, and readiness of workspace identity, safety controls and trusted agents.</li>
+      <li>Counts of recent failures grouped into fixed categories. Job identifiers, job types and raw error messages are excluded.</li>
+      <li>Configuration shape: hashed configuration-key names, boolean and numeric settings, and collection sizes. Configuration text values are replaced with presence markers.</li>
+      <li>A random support reference and the time the report was prepared.</li>
+    </ul>
+    <p>Document text, prompts, URLs, customer document filenames, passwords, tokens, credential payloads and raw job errors are excluded. Preparing the report stores an encrypted preview on this installation for up to ten minutes. Nothing is sent automatically.</p>
+  </section>
   {% if can_prepare_support %}
   <button type="button" class="btn btn--primary" id="support-prepare">Prepare support report</button>
   <p id="support-status" role="status" aria-live="polite">No report has been collected.</p>
   <section id="support-result" hidden>
     <h2>Report summary</h2><p id="support-reference"></p><ul id="support-readiness"></ul>
-    <p><a href="/settings">Review settings</a> · <a href="/workspace/recovery">Open workspace recovery</a></p>
+    <p class="support-followups"><a href="/settings">Review settings</a><span aria-hidden="true">·</span><a href="/workspace/recovery">Open workspace recovery</a></p>
     <details><summary>Review the redacted report</summary><pre id="support-preview"></pre></details>
     <p><label><input type="checkbox" id="support-confirm"> I reviewed the report and want to download it.</label></p>
     <button type="button" class="btn btn--primary" id="support-download" disabled>Download reviewed report</button>

@@ -15,6 +15,8 @@ get a masked hint only (see ``state()``).
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import threading
@@ -44,12 +46,22 @@ class ProviderConfigurationUnavailable(RuntimeError):
     """Provider authority could not be inspected or restored safely."""
 
 
+class ResearchSettingsConflict(RuntimeError):
+    """The administrator reviewed an older research execution profile."""
+
+
+class ResearchSettingsUnavailable(RuntimeError):
+    """A higher-precedence operator source owns the research profile."""
+
+
 def _locked(*, strict: bool = False):
     from contextlib import ExitStack
 
+    from maverick.authority_effects import authority_effect_fence
     from maverick.file_lock import cross_process_lock
     stack = ExitStack()
     try:
+        stack.enter_context(authority_effect_fence())
         stack.enter_context(_SETTINGS_LOCK)
         stack.enter_context(
             cross_process_lock(config.dashboard_overrides_path(), strict=strict)
@@ -140,7 +152,7 @@ FEATURE_INFO = {
     "project_reviews": "Share selected, fixed task results with assigned workspace reviewers. Review does not execute or sign off the live task.",
     "outcome_measurement": "Plan a paired workflow pilot, record observed baseline and review effort, and compare current accepted outcomes. Unmeasured costs and unreviewed work remain explicit.",
     "guided_onboarding": "Offer a guided path to a reviewed deliverable, privacy assessment, or accepted vendor case. Task creation alone never establishes success.",
-    "action_center": "Collect approvals, deliverable sign-offs, and assessment reviews in one personal list, with private read and snooze preferences. Overdue items remain visible.",
+    "action_center": "Collect approvals, deliverable sign-offs, assessment reviews, and uncertain external actions in one personal list, with private read and snooze preferences. Overdue items remain visible.",
     "draft_recovery": "Keep encrypted recovery copies of unfinished editor work, private to each account and workspace. Credentials and attachments are excluded; restoring never runs or publishes work.",
     "record_search": "Find accessible vendors, evidence, assessments, decisions, tasks, and reports by name or reference. Searches use current metadata and disclose unavailable or partial sources.",
     "workspace_recovery": "Let global administrators export signed local workspace snapshots, verify and test them, and restore only in isolated local recovery mode. External stores and shared administration are excluded.",
@@ -462,6 +474,7 @@ def _dump(data: dict) -> str:
                     "capabilities", "features", "flows", "self_modify", "ekko",
                     "security_ops", "threat_hunt", "env_hunt",
                     "security_suite_control", "oauth", "workspace",
+                    "research_execution",
                     *_LEARNING_SECTIONS, *_MODULE_TOP_SECTIONS,
                     *SWITCHABLE_SECTIONS)):
         tbl = data.get(section) or {}
@@ -852,6 +865,82 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
         data = _load_overlay_for_update()
         data.setdefault(section, {})[name] = bool(enabled)
         _write(data)
+
+
+def _research_settings_sha256(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def research_execution_state() -> dict:
+    """Return a non-secret, exact-revision view of the global research profile."""
+    config.reset_config_cache()
+    config.load_global_config()
+    if config.config_source_errors(include_tenant=False):
+        return {"settings_sha256": "", "configuration": {},
+                "writable": False, "source": "unavailable"}
+    base = config._load_config_file(config.config_path())
+    overlay = load_overlay()
+    # This security-sensitive table is a complete installation-owned profile.
+    # Nested deep merge would make deleting a base-config evaluator impossible;
+    # an explicit dashboard table therefore replaces the base table wholesale.
+    raw = (overlay["research_execution"] if "research_execution" in overlay
+           else base.get("research_execution", {}))
+    source = "dashboard" if "research_execution" in overlay else "base"
+    writable = True
+    operator_overlay = os.environ.get(config.CONFIG_OVERLAY_ENV)
+    if operator_overlay:
+        operator = config._load_config_file(Path(operator_overlay).expanduser())
+        if "research_execution" in operator:
+            raw = operator["research_execution"]
+            source = "operator_overlay"
+            writable = False
+    if not isinstance(raw, dict):
+        raw = {"invalid": True}
+    return {"settings_sha256": _research_settings_sha256(raw), "configuration": raw,
+            "writable": writable, "source": source}
+
+
+def set_research_execution(value: dict, *, expected_settings_sha256: str) -> dict:
+    """Persist one validated global research profile in the dashboard overlay."""
+    from dataclasses import asdict
+
+    from maverick.research_jobs import ResearchProfile
+
+    if (type(expected_settings_sha256) is not str or len(expected_settings_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in expected_settings_sha256)):
+        raise ValueError("invalid research settings revision")
+    if not isinstance(value, dict):
+        raise ValueError("invalid research execution settings")
+    if value.get("enable") is True:
+        profile = ResearchProfile.from_config(value)
+        clean = {"enable": True, "image_id": profile.image_id,
+                 "queue_seconds": profile.queue_seconds,
+                 "evaluators": {item.id: {"version": item.version,
+                                             "stdout_sha256": item.stdout_sha256}
+                                for item in profile.evaluators},
+                 "limits": asdict(profile.limits)}
+    elif value == {"enable": False}:
+        clean = {"enable": False}
+    else:
+        raise ValueError("disabled research settings may contain only enable=false")
+    with _locked(strict=True):
+        config.reset_config_cache()
+        data = _load_overlay_for_update()
+        operator_overlay = os.environ.get(config.CONFIG_OVERLAY_ENV)
+        if operator_overlay and "research_execution" in config._load_config_file(
+                Path(operator_overlay).expanduser()):
+            raise ResearchSettingsUnavailable(
+                "Research execution is owned by the operator config overlay")
+        current = (data["research_execution"] if "research_execution" in data
+                   else config._load_config_file(config.config_path()).get(
+                       "research_execution", {}))
+        if not hmac.compare_digest(expected_settings_sha256, _research_settings_sha256(current)):
+            raise ResearchSettingsConflict("Research execution settings changed; reload before saving")
+        data["research_execution"] = clean
+        _write(data)
+        config.reset_config_cache()
+    return research_execution_state()
 
 
 # Platform systems whose [section] enable flag an admin may switch from
@@ -1592,6 +1681,8 @@ __all__ = [
     "clear_provider", "ProviderRotationConflict",
     "ProviderConfigurationUnavailable",
     "SecuritySuiteConfigUnavailable", "SecuritySuiteRevisionConflict",
+    "ResearchSettingsConflict", "ResearchSettingsUnavailable",
+    "research_execution_state", "set_research_execution",
     "security_suite_revision",
     "set_dgm", "set_ekko", "set_security_suite",
     "set_toggle", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",

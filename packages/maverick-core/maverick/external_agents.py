@@ -33,11 +33,13 @@ further actions rather than silently accumulating spend.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
 import secrets
 import time
+from collections.abc import Callable
 from typing import Any
 
 log = logging.getLogger("maverick.external_agents")
@@ -104,8 +106,24 @@ class ExternalAgentsError(Exception):
     """Operator-facing failure (bad input, unknown agent, plane disabled)."""
 
 
+def _safe_exception_text(exc: BaseException, *, fallback: str) -> str:
+    """Bound and redact exception text before persistence or user display."""
+
+    try:
+        from .safety.secret_detector import redact
+
+        text, _matches = redact(str(exc))
+        return (text.strip() or fallback)[:200]
+    except Exception:
+        return fallback
+
+
 class ExternalAgentsDependencyError(ExternalAgentsError):
     """The enrollment sidecar exists but cannot be used as an authority."""
+
+
+class ApprovalBindingMismatch(ExternalAgentsError):
+    """A caller's remembered approval binding is no longer authoritative."""
 
 
 class MintApprovalPending(ExternalAgentsError):
@@ -225,8 +243,18 @@ def _save_sidecar(entries: dict[str, dict]) -> None:
 
 
 def _sidecar_locked():
+    from contextlib import ExitStack
+
+    from .authority_effects import authority_effect_fence
     from .file_lock import cross_process_lock
-    return cross_process_lock(registry_path())
+
+    stack = ExitStack()
+    # The enrollment/containment/budget/execution sidecar is authority.  Keep
+    # its mutation order aligned with the trust registry and provider paths:
+    # global authority fence first, then the store-specific lock.
+    stack.enter_context(authority_effect_fence())
+    stack.enter_context(cross_process_lock(registry_path()))
+    return stack
 
 
 def _month_key(now: float | None = None) -> str:
@@ -363,7 +391,9 @@ def enroll(
     try:
         agent = put_agent(entry)
     except AgentTrustError as e:
-        raise ExternalAgentsError(str(e)) from e
+        raise ExternalAgentsError(
+            _safe_exception_text(e, fallback="external-agent enrollment failed")
+        ) from e
     fleet = "disabled"
     try:
         from . import fleet_memory
@@ -420,8 +450,14 @@ def unenroll(agent_id: str) -> bool:
     return removed
 
 
-def mint_token(agent_id: str, surface: str, *, minted_by: str = "",
-               mint_approval_id: int | None = None) -> str:
+def mint_token(
+    agent_id: str,
+    surface: str,
+    *,
+    minted_by: str = "",
+    mint_approval_id: int | None = None,
+    mint_authority: object | None = None,
+) -> str:
     """Mint (or rotate) the bearer credential for one surface.
 
     Returns the token value — the ONLY time it is ever shown; the registry
@@ -439,30 +475,46 @@ def mint_token(agent_id: str, surface: str, *, minted_by: str = "",
         raise ExternalAgentsError(
             f"unknown surface {surface!r}; expected one of "
             f"{', '.join(TOKEN_SURFACES)}")
-    agent = lookup(agent_id)
-    if agent is None:
-        raise ExternalAgentsError(f"agent {agent_id!r} is not enrolled")
-    approved_id: int | None = None
-    if _mint_approval_required():
-        if mint_approval_id is None:
-            approval_id = _park_mint_approval(agent_id, surface, minted_by)
-            raise MintApprovalPending(
-                f"credential mint for {agent_id!r} ({surface}) requires "
-                f"approval: parked as approval #{approval_id} — have a "
-                "decision-maker approve it in the dashboard queue, then "
-                "re-run the mint with that approval id", approval_id)
-        approved_id = _consume_mint_approval(agent_id, surface,
-                                             mint_approval_id)
-    token = f"lw-{surface}-{secrets.token_urlsafe(32)}"
-    entry = _entry_from_agent(agent)
-    # At rest the registry holds only the hash — a leaked overlay backup
-    # must never authenticate. The raw value exists in this return alone.
-    from .agent_trust import hash_token
-    entry[f"{surface}_token"] = hash_token(token)
-    try:
-        put_agent(entry)
-    except AgentTrustError as e:
-        raise ExternalAgentsError(str(e)) from e
+    from .authority_effects import authority_effect_fence
+
+    # Resolve, approve, and replace the same trust generation under the shared
+    # effect fence.  Without this outer scope, a concurrent attenuation or
+    # credential rotation could land between the approval check and put_agent,
+    # then be silently overwritten from the stale snapshot read above.
+    with authority_effect_fence():
+        agent = lookup(agent_id)
+        if agent is None:
+            raise ExternalAgentsError(f"agent {agent_id!r} is not enrolled")
+        authority = _current_mint_authority(
+            agent_id,
+            surface,
+            minted_by=minted_by,
+            opaque_authority=mint_authority,
+        )
+        approved_id: int | None = None
+        if _mint_approval_required():
+            if mint_approval_id is None:
+                approval_id = _park_mint_approval(agent_id, surface, authority)
+                raise MintApprovalPending(
+                    f"credential mint for {agent_id!r} ({surface}) requires "
+                    f"approval: parked as approval #{approval_id} — have a "
+                    "decision-maker approve it in the dashboard queue, then "
+                    "re-run the mint with that approval id", approval_id)
+            approved_id = _consume_mint_approval(
+                agent_id, surface, mint_approval_id, authority=authority,
+            )
+        token = f"lw-{surface}-{secrets.token_urlsafe(32)}"
+        entry = _entry_from_agent(agent)
+        # At rest the registry holds only the hash — a leaked overlay backup
+        # must never authenticate. The raw value exists in this return alone.
+        from .agent_trust import hash_token
+        entry[f"{surface}_token"] = hash_token(token)
+        try:
+            put_agent(entry)
+        except AgentTrustError as e:
+            raise ExternalAgentsError(
+                _safe_exception_text(e, fallback="external-agent credential update failed")
+            ) from e
     from .audit import EventKind, audit_event
     extra = {"mint_approval_id": approved_id} if approved_id else {}
     audit_event(EventKind.EXTERNAL_CREDENTIAL_MINTED, agent="external_agents",
@@ -476,8 +528,11 @@ def _mint_approval_required() -> bool:
     try:
         from .config import get_external_agents
         return bool(get_external_agents()["mint_approval"])
-    except Exception:
-        return False
+    except Exception as exc:
+        raise ExternalAgentsError(
+            "credential mint approval policy is unavailable; refusing to "
+            "mint (fail closed)"
+        ) from exc
 
 
 def _mint_action(agent_id: str, surface: str) -> str:
@@ -486,22 +541,193 @@ def _mint_action(agent_id: str, surface: str) -> str:
     return f"mint-credential:{agent_id}:{surface}"
 
 
-def _park_mint_approval(agent_id: str, surface: str, minted_by: str) -> int:
+_MINT_ROLE = "external_agent_credential_admin"
+_MINT_AUTHORITY_VERSIONS = {
+    "request_schema": "lightwork.operation-approval.v1",
+}
+_MINT_BUDGET = {
+    "state": "not_applicable",
+    "operation": "credential_rotation",
+}
+_EXECUTION_ROLE = "external_agent_operator"
+_EXECUTION_AUTHORITY_VERSIONS = {
+    "request_schema": "lightwork.operation-approval.v1",
+}
+_EXECUTION_BUDGET = {"state": "governed_again_at_execution"}
+
+
+def _current_workspace() -> str:
+    try:
+        from .paths import current_tenant_id_strict
+
+        return current_tenant_id_strict() or "local"
+    except Exception as exc:
+        raise ExternalAgentsError(
+            "external-agent workspace authority is unavailable"
+        ) from exc
+
+
+def _current_execution_authority(agent_id: str) -> dict[str, object]:
+    """Resolve the exact principal/workspace/role bound to an execution."""
+
+    return {
+        "actor": f"agent:{agent_id}",
+        "workspace": _current_workspace(),
+        "role": _EXECUTION_ROLE,
+        "versions": dict(_EXECUTION_AUTHORITY_VERSIONS),
+    }
+
+
+def _current_mint_authority(
+    agent_id: str,
+    surface: str,
+    *,
+    minted_by: str,
+    opaque_authority: object | None,
+) -> dict[str, object]:
+    """Resolve current mint authority at the credential-effect boundary."""
+
+    workspace = _current_workspace()
+    actor = " ".join(str(minted_by or "local:operator").split())
+    if opaque_authority is None:
+        try:
+            from maverick_dashboard.auth import auth_genuinely_off
+
+            if not auth_genuinely_off():
+                raise ExternalAgentsError(
+                    "an authenticated credential mint authority is required"
+                )
+        except ImportError:
+            # Core-only local installations have no dashboard identity boundary.
+            pass
+    if opaque_authority is not None:
+        expected_resource = f"{agent_id}:{surface}"
+        if (
+            getattr(opaque_authority, "action", None)
+            != "external_agents.credential_mint"
+            or getattr(opaque_authority, "resource", None) != expected_resource
+            or getattr(opaque_authority, "tenant", None) != workspace
+        ):
+            raise ExternalAgentsError(
+                "authenticated credential mint authority does not match this request"
+            )
+        actor = " ".join(str(getattr(opaque_authority, "principal", "")).split())
+        if not actor:
+            raise ExternalAgentsError(
+                "authenticated credential mint authority has no actor"
+            )
+    return {
+        "actor": actor,
+        "workspace": workspace,
+        "role": _MINT_ROLE,
+        "versions": dict(_MINT_AUTHORITY_VERSIONS),
+        "budget": dict(_MINT_BUDGET),
+    }
+
+
+def _agent_credential_versions(agent_id: str) -> dict[str, str]:
+    """Commit approval cards to the current external-agent trust record."""
+    from .agent_trust import lookup
+    from .approval_cards import digest
+
+    agent = lookup(agent_id)
+    if agent is None:
+        raise ExternalAgentsError(f"agent {agent_id!r} is not enrolled")
+    return {"agent_trust_sha256": digest(_entry_from_agent(agent))}
+
+
+def _approval_card_matches(
+    detail: str | None,
+    *,
+    action: str,
+    target: dict,
+    parameters: dict,
+    input_versions: dict,
+    credential_versions: dict,
+    authority: dict | None = None,
+    budget: dict | None = None,
+) -> bool:
+    """Validate one current structured card against the operation in hand."""
+    from .approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+        digest,
+        require_current_approval_card,
+    )
+
+    try:
+        card = decode_approval_detail(detail)
+        if card is None:
+            return False
+        card = require_current_approval_card(card)
+        return (
+            card["action"] == action
+            and secrets.compare_digest(card["target"]["sha256"], digest(target))
+            and secrets.compare_digest(
+                card["parameters"]["sha256"], digest(parameters)
+            )
+            and card["inputs"] == input_versions
+            and card["credentials"] == credential_versions
+            and (authority is None or card["authority"] == authority)
+            and (budget is None or card["budget"] == budget)
+        )
+    except (ApprovalCardError, KeyError, TypeError, ValueError):
+        return False
+
+
+def _park_mint_approval(agent_id: str, surface: str, authority: dict) -> int:
     """Park the step-up approval for one credential mint; returns its id."""
+    from .approval_cards import encode_operation_approval_detail
     from .safety.dual_control import required_approvals
     from .world_model import open_world
+
+    action = _mint_action(agent_id, surface)
+    target = {"agent_id": agent_id, "surface": surface}
+    parameters = {"operation": "mint_or_rotate"}
+    credential_versions = _agent_credential_versions(agent_id)
     return open_world().create_approval(
-        _mint_action(agent_id, surface), risk="high",
-        detail=f"Mint (or rotate) the {surface} bearer credential for "
-               f"external agent {agent_id!r}. The token is shown once to the "
-               "requester; the previous bearer stops working immediately.",
+        action, risk="high",
+        detail=encode_operation_approval_detail(
+            action=action,
+            summary=f"Mint or rotate the {surface} bearer for {agent_id}",
+            target_label=f"External agent {agent_id} ({surface})",
+            target=target,
+            parameters=parameters,
+            parameter_summary=[
+                f"Credential surface: {surface}",
+                "The prior bearer will stop working immediately.",
+            ],
+            actor=str(authority["actor"]),
+            role=str(authority["role"]),
+            authority_versions=dict(authority["versions"]),
+            credential_versions=credential_versions,
+            budget=dict(authority["budget"]),
+            known_effects=[
+                "Issues one new bearer and replaces the current bearer for this surface.",
+                "Returns the new bearer to the requester exactly once.",
+            ],
+            unresolved_assumptions=[
+                "The requester will transfer and store the new bearer securely."
+            ],
+            before="The current credential state remains authoritative.",
+            after="A newly generated bearer becomes authoritative for this surface.",
+            # Rotating a bearer invalidates the prior secret immediately. A
+            # later rotation can restore access, but cannot make that old
+            # bearer valid again.
+            irreversible=True,
+        ),
         provenance="external_agents",
         approvals_required=required_approvals("high"),
-        requested_by=minted_by or "")
+        requested_by=str(authority["actor"]))
 
 
-def _consume_mint_approval(agent_id: str, surface: str,
-                           mint_approval_id: int) -> int:
+def _consume_mint_approval(
+    agent_id: str,
+    surface: str,
+    mint_approval_id: int,
+    *,
+    authority: dict,
+) -> int:
     """Validate + spend one mint approval; returns its id, raises on refusal.
 
     The approval must exist under our provenance, match this agent + surface's
@@ -516,6 +742,7 @@ def _consume_mint_approval(agent_id: str, surface: str,
         raise ExternalAgentsError(
             f"mint_approval_id {mint_approval_id!r} is not an approval "
             "id") from e
+    from .approval_cards import digest as approval_digest
     from .world_model import open_world
     approval = open_world().get_approval(approval_id)
     if approval is None or approval.provenance != "external_agents":
@@ -530,6 +757,32 @@ def _consume_mint_approval(agent_id: str, surface: str,
         raise ExternalAgentsError(
             f"approval #{approval_id} is {approval.status}; minting needs "
             "an approved decision")
+    if approval.requested_by != authority["actor"]:
+        raise ExternalAgentsError(
+            f"approval #{approval_id} was requested by a different actor; "
+            "park and approve a new credential mint"
+        )
+    target = {"agent_id": agent_id, "surface": surface}
+    parameters = {"operation": "mint_or_rotate"}
+    card_matches = _approval_card_matches(
+        approval.detail,
+        action=action,
+        target=target,
+        parameters=parameters,
+        input_versions={
+            "request_sha256": approval_digest(
+                {"target": target, "parameters": parameters}
+            )
+        },
+        credential_versions=_agent_credential_versions(agent_id),
+        authority={
+            "actor": authority["actor"],
+            "workspace": authority["workspace"],
+            "role": authority["role"],
+            "versions": authority["versions"],
+        },
+        budget=dict(authority["budget"]),
+    )
     with _sidecar_locked():
         sidecar = _load_sidecar()
         meta = sidecar.setdefault(agent_id, {})
@@ -548,6 +801,11 @@ def _consume_mint_approval(agent_id: str, surface: str,
         floor = int(meta.get("mint_approval_floor") or 0)
         if approval_id <= floor:
             raise ExternalAgentsError(spent)
+        if not card_matches:
+            raise ExternalAgentsError(
+                f"approval #{approval_id} no longer matches the current "
+                "credential mint; park and approve a new request"
+            )
         used.append(approval_id)
         keep = used[-_MAX_USED_MINT_APPROVALS:]
         for stale in used[:len(used) - len(keep)]:
@@ -971,11 +1229,45 @@ def screen(
         return deny
     floor = _approval_floor()
     if req_risk and risk_rank(req_risk) >= risk_rank(floor):
+        from .approval_cards import (
+            decode_approval_detail,
+            encode_operation_approval_detail,
+        )
         from .world_model import open_world
+        action = f"external:{agent_id}:{tool}"
+        target = {"agent_id": agent_id, "tool": tool}
+        parameters = {"detail": str(detail or ""), "risk": req_risk}
+        approval_detail = encode_operation_approval_detail(
+            action=action,
+            summary=f"Review external agent action {tool}",
+            target_label=f"External agent {agent_id}: {tool}",
+            target=target,
+            parameters=parameters,
+            parameter_summary=[
+                f"Resolved risk: {req_risk}",
+                f"Request detail digest is bound to agent {agent_id}.",
+            ],
+            actor=f"agent:{agent_id}",
+            role="external_agent_operator",
+            credential_versions=_agent_credential_versions(agent_id),
+            known_effects=[
+                "Records a human decision for this exact screened action."
+            ],
+            unresolved_assumptions=[
+                "This screening approval does not execute the external action."
+            ],
+            before="The screened external action remains blocked.",
+            after="The approval decision is available to the requesting agent.",
+            irreversible=False,
+        )
+        approval_card = decode_approval_detail(approval_detail)
+        if approval_card is None:  # pragma: no cover - encoder contract
+            raise ExternalAgentsError("screen approval binding was not encoded")
         approval_id = open_world().create_approval(
-            f"external:{agent_id}:{tool}", risk=req_risk,
+            action, risk=req_risk,
             scope=meta.get("department") or None,
-            detail=str(detail or "")[:2000], provenance="external_agents",
+            detail=approval_detail,
+            provenance="external_agents",
             requested_by=f"agent:{agent_id}")
         _notify_approval(approval_id, agent_id, tool, req_risk,
                          meta.get("department") or "")
@@ -985,6 +1277,7 @@ def screen(
             "awaiting a human decision")
         out["requires_approval"] = True
         out["approval_id"] = approval_id
+        out["approval_binding_sha256"] = approval_card["binding_sha256"]
         return out
     return _screen_verdict(agent_id, tool, True, "allow", "within ceilings")
 
@@ -1235,15 +1528,74 @@ def reset_budget(agent_id: str, *, reset_by: str = "") -> bool:
     return True
 
 
-def approval_status(approval_id: int) -> dict:
+def approval_status(
+    agent_id: str,
+    approval_id: int,
+    *,
+    expected_binding_sha256: str = "",
+) -> dict:
     """Poll endpoint for a parked ``screen`` approval: the external agent
     holds its action until the human decides in the dashboard queue."""
+    from .approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+        digest,
+        require_current_approval_card,
+    )
     from .world_model import open_world
+
     approval = open_world().get_approval(int(approval_id))
-    if approval is None or approval.provenance != "external_agents":
+    requester = f"agent:{agent_id}"
+    if (
+        approval is None
+        or approval.provenance != "external_agents"
+        or approval.requested_by != requester
+        or not str(approval.action).startswith(f"external:{agent_id}:")
+    ):
         raise ExternalAgentsError(f"unknown approval {approval_id!r}")
-    return {"approval_id": approval.id, "status": approval.status,
-            "risk": approval.risk}
+    tool = str(approval.action).split(":", 2)[2]
+    try:
+        card = decode_approval_detail(approval.detail)
+        if card is None:
+            raise ApprovalCardError("legacy approval detail")
+        card = require_current_approval_card(card)
+        expected_authority = {
+            "actor": requester,
+            "workspace": _current_workspace(),
+            "role": "external_agent_operator",
+            "versions": {"request_schema": "lightwork.operation-approval.v1"},
+        }
+        if (
+            card["action"] != approval.action
+            or card["target"]["sha256"]
+            != digest({"agent_id": agent_id, "tool": tool})
+            or card["authority"] != expected_authority
+            or card["credentials"] != _agent_credential_versions(agent_id)
+            or card["budget"] != {"state": "governed_again_at_execution"}
+        ):
+            raise ApprovalCardError("approval authority changed")
+    except (ApprovalCardError, KeyError, TypeError, ValueError) as exc:
+        raise ApprovalBindingMismatch(
+            "approval binding is stale; submit the screened action again"
+        ) from exc
+    binding = str(card["binding_sha256"])
+    remembered = str(expected_binding_sha256 or "").strip().lower()
+    if remembered and not secrets.compare_digest(remembered, binding):
+        raise ApprovalBindingMismatch(
+            "approval binding changed; submit the screened action again"
+        )
+    return {
+        "approval_id": approval.id,
+        "status": approval.status,
+        "risk": approval.risk,
+        "action": approval.action,
+        "approval_binding_sha256": binding,
+        "target_sha256": card["target"]["sha256"],
+        "parameters_sha256": card["parameters"]["sha256"],
+        "inputs": card["inputs"],
+        "credentials": card["credentials"],
+        "expires_at": card["expires_at"],
+    }
 
 
 # -- governed execution (the enforcement tier above screening) ----------------
@@ -1431,8 +1783,168 @@ def _screen_execute_request(agent_id: str, request: dict, *,
     return None, parsed
 
 
-def execute(agent_id: str, request: dict, *,
-            shield: Any | None = None) -> dict:
+def _execution_request_snapshot(parsed: dict, *, goal_id: int | None) -> dict:
+    """Detach provider inputs from a caller-owned, potentially mutable dict."""
+
+    snapshot = {
+        "connector": parsed["connector"],
+        "op": parsed["op"],
+        "path": parsed["path"],
+        "body": copy.deepcopy(parsed["body"]),
+        "detail": parsed["detail"],
+        "goal_id": goal_id,
+    }
+    if parsed["runtime_context_sha256"]:
+        snapshot["_runtime_context_sha256"] = parsed["runtime_context_sha256"]
+    return snapshot
+
+
+def _goal_execution_verdict(
+    agent_id: str,
+    tool: str,
+    goal_id: int | None,
+) -> dict | None:
+    """Require a still-live, same-owner Operating Record when one is bound."""
+
+    if goal_id is None:
+        return None
+    try:
+        from .world_model import open_world
+
+        goal = open_world().get_goal(int(goal_id))
+    except Exception:
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "goal_unavailable",
+            "the bound Operating Record could not be revalidated; no effect occurred",
+        )
+    if (
+        goal is None
+        or goal.owner != f"agent:{agent_id}"
+        or goal.status not in ("active", "pending")
+    ):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "bad_goal",
+            "goal is not a live run owned by this agent",
+        )
+    return None
+
+
+def _revalidate_execution_admission(
+    agent_id: str,
+    request: dict,
+    *,
+    connector: str,
+    op: str,
+    path: str,
+    digest: str,
+    goal_id: int | None,
+    shield: Any | None,
+    correlation: str,
+) -> tuple[dict | None, str]:
+    """Resolve all mutable admission inputs at the provider boundary."""
+
+    deny, parsed = _screen_execute_request(agent_id, request, shield=shield)
+    if deny is not None:
+        return deny, ""
+    live_body = parsed["body"] if isinstance(parsed["body"], dict) else None
+    live_digest = _request_digest(
+        parsed["connector"],
+        parsed["op"],
+        parsed["path"],
+        live_body,
+        runtime_context_sha256=parsed["runtime_context_sha256"],
+    )
+    if (
+        parsed["preview"]
+        or parsed["connector"] != connector
+        or parsed["op"] != op
+        or parsed["path"] != path
+        or not secrets.compare_digest(live_digest, digest)
+    ):
+        return (
+            _screen_verdict(
+                agent_id,
+                parsed["tool"],
+                False,
+                "request_changed",
+                "the request changed before the provider boundary; no effect occurred",
+            ),
+            "",
+        )
+    risk = "low" if op == "get" else "high"
+    deny, _meta, _decision, resolved_risk = _screen_admission(
+        agent_id,
+        parsed["tool"],
+        risk=risk,
+        detail="",
+        shield=shield,
+        correlation=correlation,
+    )
+    if deny is not None:
+        return deny, resolved_risk
+    goal_verdict = _goal_execution_verdict(agent_id, parsed["tool"], goal_id)
+    return goal_verdict, resolved_risk
+
+
+def _runtime_revalidation_verdict(
+    agent_id: str,
+    tool: str,
+    *,
+    runtime_context_sha256: str,
+    runtime_revalidator: Callable[[], bool] | None,
+) -> dict | None:
+    """Require a server-owned current runtime decision when that plane binds."""
+
+    if runtime_revalidator is None:
+        if not runtime_context_sha256:
+            return None
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "runtime_authority_unavailable",
+            "runtime policy context cannot be trusted without server revalidation; "
+            "no effect occurred",
+        )
+    try:
+        current = runtime_revalidator()
+    except Exception:
+        log.warning(
+            "external_agents: runtime authority revalidation failed",
+            exc_info=True,
+        )
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "runtime_authority_unavailable",
+            "current runtime policy authority is unavailable; no effect occurred",
+        )
+    if current is not True:
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "runtime_authority_changed",
+            "runtime policy, asset, or revision changed before the provider "
+            "boundary; no effect occurred",
+        )
+    return None
+
+
+def execute(
+    agent_id: str,
+    request: dict,
+    *,
+    shield: Any | None = None,
+    runtime_revalidator: Callable[[], bool] | None = None,
+) -> dict:
     """Perform one outbound action ON THE AGENT'S BEHALF through a governed
     connector — the enforcement tier above :func:`screen`.
 
@@ -1480,15 +1992,20 @@ def execute(agent_id: str, request: dict, *,
         except (TypeError, ValueError):
             return _screen_verdict(agent_id, tool, False, "bad_goal",
                                    "goal_id must be an integer")
-        from .world_model import open_world
-        goal = open_world().get_goal(gid)
-        if (goal is None or goal.owner != f"agent:{agent_id}"
-                or goal.status not in ("active", "pending")):
-            return _screen_verdict(
-                agent_id, tool, False, "bad_goal",
-                "goal is not a live run owned by this agent")
-    from .governed_rest import GOVERNED_REST_FACTORIES
-    conn = GOVERNED_REST_FACTORIES[connector]()
+        goal_verdict = _goal_execution_verdict(agent_id, tool, gid)
+        if goal_verdict is not None:
+            return goal_verdict
+    try:
+        execution_request = _execution_request_snapshot(parsed, goal_id=gid)
+    except (TypeError, ValueError, RecursionError):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "bad_body",
+            "request body could not be frozen for exact execution",
+        )
+    body = execution_request["body"]
     digest = _request_digest(connector, op, path,
                              body if isinstance(body, dict) else None,
                              runtime_context_sha256=runtime_context_sha256)
@@ -1496,6 +2013,9 @@ def execute(agent_id: str, request: dict, *,
         if op == "get":
             return _screen_verdict(agent_id, tool, False, "bad_op",
                                    "preview applies to writes only")
+        from .governed_rest import GOVERNED_REST_FACTORIES
+
+        conn = GOVERNED_REST_FACTORIES[connector]()
         out = _screen_verdict(
             agent_id, tool, True, "preview",
             "described without performing (no side effect)")
@@ -1506,15 +2026,54 @@ def execute(agent_id: str, request: dict, *,
     from .safety.tool_risk import risk_rank
     floor = _approval_floor()
     if req_risk and risk_rank(req_risk) >= risk_rank(floor):
+        from .governed_rest import GOVERNED_REST_FACTORIES
+
+        conn = GOVERNED_REST_FACTORIES[connector]()
         return _park_execution(agent_id, conn, meta, tool=tool,
                                connector=connector, op=op, path=path,
                                body=body, detail=detail, digest=digest,
                                req_risk=req_risk, floor=floor, goal_id=gid,
                                idempotency_key=idempotency_key)
+
+    def _final_authority() -> dict | None:
+        boundary_verdict, current_risk = _revalidate_execution_admission(
+            agent_id,
+            execution_request,
+            connector=connector,
+            op=op,
+            path=path,
+            digest=digest,
+            goal_id=gid,
+            shield=shield,
+            correlation="execute_provider_boundary",
+        )
+        if boundary_verdict is not None:
+            return boundary_verdict
+        runtime_verdict = _runtime_revalidation_verdict(
+            agent_id,
+            tool,
+            runtime_context_sha256=runtime_context_sha256,
+            runtime_revalidator=runtime_revalidator,
+        )
+        if runtime_verdict is not None:
+            return runtime_verdict
+        if current_risk and risk_rank(current_risk) >= risk_rank(
+            _approval_floor()
+        ):
+            return _screen_verdict(
+                agent_id,
+                tool,
+                False,
+                "approval_policy_changed",
+                "current policy now requires approval; submit the request again",
+            )
+        return None
+
     return _perform_execution(agent_id, connector, op, path,
                               body if isinstance(body, dict) else None,
                               goal_id=gid, digest=digest, tool=tool,
-                              approved=False)
+                              approved=False,
+                              final_authority=_final_authority)
 
 
 def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
@@ -1616,12 +2175,47 @@ def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
         describe = (conn.preview_write({"op": op, "path": path,
                                         "body": body or {}})
                     if op != "get" else f"would GET {connector}{path}")
+        from .approval_cards import encode_operation_approval_detail
         from .world_model import open_world
+        target = {
+            "agent_id": agent_id,
+            "connector": connector,
+            "operation": op,
+            "path": path,
+        }
+        parameters = {"request_sha256": digest, "goal_id": goal_id}
         approval_id = open_world().create_approval(
             approval_action, risk=req_risk,
             scope=meta.get("department") or None,
-            detail=(f"{describe}\nrequest sha256: {digest}\n"
-                    f"{detail or ''}")[:2000],
+            detail=encode_operation_approval_detail(
+                action=approval_action,
+                summary=f"Execute {op.upper()} through {connector}",
+                target_label=f"{connector} {op.upper()} {path}"[:500],
+                target=target,
+                parameters=parameters,
+                parameter_summary=[
+                    str(describe)[:500],
+                    f"Request SHA-256: {digest}",
+                ],
+                actor=f"agent:{agent_id}",
+                role=_EXECUTION_ROLE,
+                authority_versions=dict(_EXECUTION_AUTHORITY_VERSIONS),
+                input_versions={"request_sha256": digest},
+                credential_versions=_agent_credential_versions(agent_id),
+                budget=dict(_EXECUTION_BUDGET),
+                known_effects=[
+                    "Performs this exact connector request at most once after approval."
+                ],
+                unresolved_assumptions=[
+                    "The target system may trigger its own downstream automation."
+                ],
+                before="No connector write has been performed for this execution.",
+                after="The reviewed connector request may be committed once.",
+                # Any provider write can become irreversible once the target
+                # or downstream automation observes it.
+                irreversible=op != "get",
+                ttl_seconds=_EXECUTION_TTL_SECONDS,
+            ),
             provenance="external_agents", requested_by=f"agent:{agent_id}")
     except Exception:
         # Nothing was authorized and nothing will fire — hand the reserved
@@ -1741,8 +2335,293 @@ def execute_status(agent_id: str, execution_id: str) -> dict:
     return out
 
 
-def execute_commit(agent_id: str, execution_id: str, request: dict, *,
-                   shield: Any | None = None) -> dict:
+def _execution_approval_matches(
+    approval: object,
+    entry: dict,
+    *,
+    agent_id: str,
+    connector: str,
+    op: str,
+    path: str,
+    request_digest: str,
+) -> bool:
+    """Bind a queue decision to the live request and trust generation."""
+    try:
+        action = str(entry.get("approval_action") or "")
+        target = {
+            "agent_id": agent_id,
+            "connector": connector,
+            "operation": op,
+            "path": path,
+        }
+        parameters = {
+            "request_sha256": request_digest,
+            "goal_id": entry.get("goal_id"),
+        }
+        return (
+            getattr(approval, "action", None) == action
+            and getattr(approval, "provenance", None) == "external_agents"
+            and getattr(approval, "requested_by", None) == f"agent:{agent_id}"
+            and _approval_card_matches(
+                getattr(approval, "detail", None),
+                action=action,
+                target=target,
+                parameters=parameters,
+                input_versions={"request_sha256": request_digest},
+                credential_versions=_agent_credential_versions(agent_id),
+                authority=_current_execution_authority(agent_id),
+                budget=dict(_EXECUTION_BUDGET),
+            )
+        )
+    except ExternalAgentsError:
+        return False
+
+
+def _execution_approval_verdict(
+    approval: object,
+    entry: dict,
+    *,
+    approval_id: object,
+    execution_id: str,
+    agent_id: str,
+    connector: str,
+    op: str,
+    path: str,
+    tool: str,
+    request_digest: str,
+) -> dict | None:
+    """Return a refusal for a non-current queue decision, else ``None``."""
+    decision = getattr(approval, "status", None)
+    if decision == "denied":
+        _set_execution_status(agent_id, execution_id, "denied", expect="pending")
+        return _screen_verdict(
+            agent_id, tool, False, "approval_denied", "a human denied this action"
+        )
+    if decision != "approved":
+        out = _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "approval_pending",
+            "still awaiting a human decision",
+        )
+        out.update({
+            "requires_approval": True,
+            "approval_id": approval_id,
+            "execution_id": execution_id,
+        })
+        return out
+    if _execution_approval_matches(
+        approval,
+        entry,
+        agent_id=agent_id,
+        connector=connector,
+        op=op,
+        path=path,
+        request_digest=request_digest,
+    ):
+        return None
+    _set_execution_status(agent_id, execution_id, None, drop=True, expect="pending")
+    return _screen_verdict(
+        agent_id,
+        tool,
+        False,
+        "approval_mismatch",
+        "the approval no longer matches the current action, request, or "
+        "credential state; submit it again for a new approval",
+    )
+
+
+def _commit_request_context(
+    agent_id: str,
+    tool: str,
+    request: dict,
+    entry: dict,
+    *,
+    shield: Any | None,
+) -> tuple[dict | None, dict | None, int | None, bool, str]:
+    """Screen and detach the exact request replay for a parked execution."""
+
+    request_verdict, parsed = _screen_execute_request(
+        agent_id, request, shield=shield
+    )
+    if request_verdict is not None:
+        return request_verdict, None, None, False, ""
+    request_goal_id = request.get("goal_id")
+    if request_goal_id is not None:
+        try:
+            request_goal_id = int(request_goal_id)
+        except (TypeError, ValueError):
+            return (
+                _screen_verdict(
+                    agent_id,
+                    tool,
+                    False,
+                    "bad_goal",
+                    "goal_id must be an integer",
+                ),
+                None,
+                None,
+                False,
+                "",
+            )
+    parked_goal_id = entry.get("goal_id")
+    if parked_goal_id is not None:
+        try:
+            parked_goal_id = int(parked_goal_id)
+        except (TypeError, ValueError):
+            return (
+                _screen_verdict(
+                    agent_id,
+                    tool,
+                    False,
+                    "approval_mismatch",
+                    "the parked execution has an invalid Operating Record binding",
+                ),
+                None,
+                None,
+                False,
+                "",
+            )
+    try:
+        snapshot = _execution_request_snapshot(parsed, goal_id=parked_goal_id)
+    except (TypeError, ValueError, RecursionError):
+        return (
+            _screen_verdict(
+                agent_id,
+                tool,
+                False,
+                "bad_body",
+                "request body could not be frozen for exact execution",
+            ),
+            None,
+            parked_goal_id,
+            False,
+            "",
+        )
+    body = snapshot["body"] if isinstance(snapshot["body"], dict) else None
+    digest = _request_digest(
+        parsed["connector"],
+        parsed["op"],
+        parsed["path"],
+        body,
+        runtime_context_sha256=parsed["runtime_context_sha256"],
+    )
+    return (
+        None,
+        snapshot,
+        parked_goal_id,
+        request_goal_id == parked_goal_id,
+        digest,
+    )
+
+
+def _revalidate_claimed_execution(
+    agent_id: str,
+    execution_id: str,
+    request: dict,
+    *,
+    approval_id: object,
+    connector: str,
+    op: str,
+    path: str,
+    digest: str,
+    goal_id: int | None,
+    tool: str,
+    shield: Any | None,
+    runtime_context_sha256: str,
+    runtime_revalidator: Callable[[], bool] | None,
+) -> dict | None:
+    """Re-resolve a claimed approval and authority at the provider boundary."""
+
+    boundary_verdict, _current_risk = _revalidate_execution_admission(
+        agent_id,
+        request,
+        connector=connector,
+        op=op,
+        path=path,
+        digest=digest,
+        goal_id=goal_id,
+        shield=shield,
+        correlation="execute_commit_provider_boundary",
+    )
+    if boundary_verdict is not None:
+        return boundary_verdict
+    runtime_verdict = _runtime_revalidation_verdict(
+        agent_id,
+        tool,
+        runtime_context_sha256=runtime_context_sha256,
+        runtime_revalidator=runtime_revalidator,
+    )
+    if runtime_verdict is not None:
+        return runtime_verdict
+    try:
+        with _sidecar_locked():
+            current_entry = (
+                ((_load_sidecar(strict=True).get(agent_id) or {}).get(
+                    "executions"
+                ) or {}).get(str(execution_id))
+            )
+            if current_entry is not None:
+                current_entry = dict(current_entry)
+    except ExternalAgentsDependencyError:
+        current_entry = None
+    if (
+        current_entry is None
+        or current_entry.get("status") != "executing"
+        or current_entry.get("approval_id") != approval_id
+        or current_entry.get("connector") != connector
+        or current_entry.get("op") != op
+        or current_entry.get("path") != path
+        or current_entry.get("goal_id") != goal_id
+        or not secrets.compare_digest(
+            str(current_entry.get("digest") or ""), digest
+        )
+    ):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "execution_authority_changed",
+            "the claimed execution authority changed; no effect occurred",
+        )
+    try:
+        from .world_model import open_world
+
+        current_approval = open_world().get_approval(int(approval_id))
+    except Exception:
+        current_approval = None
+    if (
+        getattr(current_approval, "status", None) != "approved"
+        or not _execution_approval_matches(
+            current_approval,
+            current_entry,
+            agent_id=agent_id,
+            connector=connector,
+            op=op,
+            path=path,
+            request_digest=digest,
+        )
+    ):
+        return _screen_verdict(
+            agent_id,
+            tool,
+            False,
+            "approval_mismatch",
+            "the approval is no longer current for this exact authority; "
+            "no effect occurred",
+        )
+    return None
+
+
+def execute_commit(
+    agent_id: str,
+    execution_id: str,
+    request: dict,
+    *,
+    shield: Any | None = None,
+    runtime_revalidator: Callable[[], bool] | None = None,
+) -> dict:
     """Commit one approved execution — a digest-bound replay.
 
     The agent re-sends the IDENTICAL request; a sha256 mismatch voids the
@@ -1801,26 +2680,32 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
             # A concurrent commit claimed it between our snapshot and the
             # void — report the live state instead of acting on the stale one.
             return execute_commit(agent_id, execution_id, request,
-                                  shield=shield)
+                                  shield=shield,
+                                  runtime_revalidator=runtime_revalidator)
         return _screen_verdict(
             agent_id, tool, False, "execution_expired",
             "the parked execution expired before any effect; submit it "
             "again")
-    if body is not None and not isinstance(body, dict):
-        return _screen_verdict(agent_id, tool, False, "bad_body",
-                               "body must be a JSON object")
-    runtime_context_sha256 = request.get("_runtime_context_sha256")
-    if runtime_context_sha256 is not None and (
-        not isinstance(runtime_context_sha256, str)
-        or not re.fullmatch(r"[0-9a-f]{64}", runtime_context_sha256)
-    ):
+    (
+        request_verdict,
+        execution_request,
+        parked_goal_id,
+        goal_matches,
+        digest,
+    ) = _commit_request_context(
+        agent_id, tool, request, entry, shield=shield
+    )
+    if request_verdict is not None:
+        return request_verdict
+    if execution_request is None:  # pragma: no cover - helper contract
         return _screen_verdict(
             agent_id,
             tool,
             False,
-            "bad_runtime_context",
-            "runtime policy context binding is malformed",
+            "authority_unavailable",
+            "the exact request context is unavailable; no effect occurred",
         )
+    body = execution_request["body"]
     approval_id = entry.get("approval_id")
     if not approval_id:
         # The park never completed (approval creation failed after the slot
@@ -1832,10 +2717,10 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
             agent_id, tool, False, "park_incomplete",
             "the park never completed (no approval exists); submit the "
             "request again")
-    digest = _request_digest(connector, op, path,
-                             body if isinstance(body, dict) else None,
-                             runtime_context_sha256=runtime_context_sha256 or "")
-    if digest != entry.get("digest"):
+    if (
+        not secrets.compare_digest(digest, str(entry.get("digest") or ""))
+        or not goal_matches
+    ):
         # Void only while still pending: a stale snapshot must never delete
         # an entry a concurrent (correct) commit has claimed and is
         # executing. The mismatch is misbehavior either way — count it.
@@ -1852,18 +2737,20 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
             approval = open_world().get_approval(int(approval_id))
         except Exception:
             approval = None
-    decision = getattr(approval, "status", None)
-    if decision == "denied":
-        _set_execution_status(agent_id, str(execution_id), "denied",
-                              expect="pending")
-        return _screen_verdict(agent_id, tool, False, "approval_denied",
-                               "a human denied this action")
-    if decision != "approved":
-        out = _screen_verdict(agent_id, tool, False, "approval_pending",
-                              "still awaiting a human decision")
-        out.update({"requires_approval": True, "approval_id": approval_id,
-                    "execution_id": str(execution_id)})
-        return out
+    approval_verdict = _execution_approval_verdict(
+        approval,
+        entry,
+        approval_id=approval_id,
+        execution_id=str(execution_id),
+        agent_id=agent_id,
+        connector=connector,
+        op=op,
+        path=path,
+        tool=tool,
+        request_digest=digest,
+    )
+    if approval_verdict is not None:
+        return approval_verdict
     risk = "low" if op == "get" else "high"
     deny, _meta, _decision, _risk = _screen_admission(
         agent_id, tool, risk=risk, detail="", shield=shield,
@@ -1875,20 +2762,42 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
             agent_id, tool, False, "already_finished",
             "a concurrent commit claimed this execution first")
         return out
+
     verdict = _perform_execution(
         agent_id, connector, op, path,
         body if isinstance(body, dict) else None,
-        goal_id=entry.get("goal_id"), digest=digest, tool=tool,
-        approved=True)
+        goal_id=parked_goal_id, digest=digest, tool=tool,
+        approved=True,
+        final_authority=lambda: _revalidate_claimed_execution(
+            agent_id,
+            str(execution_id),
+            execution_request,
+            approval_id=approval_id,
+            connector=connector,
+            op=op,
+            path=path,
+            digest=digest,
+            goal_id=parked_goal_id,
+            tool=tool,
+            shield=shield,
+            runtime_context_sha256=str(
+                execution_request.get("_runtime_context_sha256") or ""
+            ),
+            runtime_revalidator=runtime_revalidator,
+        ))
     if verdict.get("rule") == "receipt_unavailable":
         # Nothing fired — hand the slot back so the agent can retry the
         # commit once the receipt store recovers.
         _set_execution_status(agent_id, str(execution_id), "pending",
                               expect="executing")
     else:
+        terminal_status = verdict.get("status")
+        if terminal_status is None and verdict.get("allowed") is False:
+            terminal_status = "denied"
         _set_execution_status(agent_id, str(execution_id),
-                              verdict.get("status") or "failed",
+                              terminal_status or "failed",
                               expect="executing")
+        verdict.setdefault("status", terminal_status or "failed")
     verdict["execution_id"] = str(execution_id)
     return verdict
 
@@ -1944,7 +2853,8 @@ def _set_execution_status(agent_id: str, execution_id: str,
 
 def _perform_execution(agent_id: str, connector: str, op: str, path: str,
                        body: dict | None, *, goal_id: int | None,
-                       digest: str, tool: str, approved: bool) -> dict:
+                       digest: str, tool: str, approved: bool,
+                       final_authority: Callable[[], dict | None]) -> dict:
     """The effect itself, receipted.
 
     PREPARE is fsynced tamper-evident BEFORE any network I/O (no receipt =
@@ -1956,7 +2866,6 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
     values; the response is secret-redacted and bounded before it returns
     to the caller."""
     from .governed_actions import record_tool_lineage
-    from .governed_rest import GOVERNED_REST_FACTORIES
     principal = f"agent:{agent_id}"
     fields = sorted(body) if isinstance(body, dict) and body else []
     receipt = {"path": path, "fields": fields, "request_sha256": digest}
@@ -1972,18 +2881,105 @@ def _perform_execution(agent_id: str, connector: str, op: str, path: str,
             agent_id, tool, False, "receipt_unavailable",
             "could not persist the PREPARE receipt; refusing to act "
             "(fail-closed)")
-    conn = GOVERNED_REST_FACTORIES[connector]()
+    effect_started = False
     try:
-        if op == "get":
-            raw = conn.read({"path": path})
-        else:
-            raw = conn.write({"op": op, "path": path, "body": body or {}})
+        from .authority_effects import authority_effect_fence
+        from .governed_rest import GOVERNED_REST_FACTORIES
+
+        with authority_effect_fence():
+            try:
+                boundary_verdict = final_authority()
+            except Exception:
+                log.warning(
+                    "external_agents: final execution authority check failed",
+                    exc_info=True,
+                )
+                boundary_verdict = _screen_verdict(
+                    agent_id,
+                    tool,
+                    False,
+                    "authority_unavailable",
+                    "current execution authority could not be revalidated; "
+                    "no effect occurred",
+                )
+            if boundary_verdict is not None:
+                try:
+                    record_tool_lineage(
+                        goal_id,
+                        tool,
+                        receipt,
+                        actor=principal,
+                        transaction_id=digest[:16],
+                        phase="abort",
+                        result=str(boundary_verdict.get("rule") or "denied")[:200],
+                        force=True,
+                    )
+                except Exception:  # pragma: no cover - no effect already assured
+                    log.warning(
+                        "external_agents: ABORT receipt failed", exc_info=True
+                    )
+                return boundary_verdict
+            try:
+                conn = GOVERNED_REST_FACTORIES[connector]()
+            except Exception:
+                log.warning(
+                    "external_agents: governed connector initialization failed",
+                    exc_info=True,
+                )
+                verdict = _screen_verdict(
+                    agent_id,
+                    tool,
+                    False,
+                    "connector_unavailable",
+                    "the governed connector could not be initialized; "
+                    "no effect occurred",
+                )
+                record_tool_lineage(
+                    goal_id,
+                    tool,
+                    receipt,
+                    actor=principal,
+                    transaction_id=digest[:16],
+                    phase="abort",
+                    result="connector_unavailable",
+                    force=True,
+                )
+                return verdict
+            effect_started = True
+            if op == "get":
+                raw = conn.read({"path": path})
+            else:
+                raw = conn.write({"op": op, "path": path, "body": body or {}})
     except Exception as e:
+        if not effect_started:
+            try:
+                record_tool_lineage(
+                    goal_id,
+                    tool,
+                    receipt,
+                    actor=principal,
+                    transaction_id=digest[:16],
+                    phase="abort",
+                    result="authority_unavailable",
+                    force=True,
+                )
+            except Exception:  # pragma: no cover - no effect already assured
+                log.warning("external_agents: ABORT receipt failed", exc_info=True)
+            return _screen_verdict(
+                agent_id,
+                tool,
+                False,
+                "authority_unavailable",
+                "the provider boundary could not acquire current authority; "
+                "no effect occurred",
+            )
         try:
             record_tool_lineage(
                 goal_id, tool, receipt, actor=principal,
                 transaction_id=digest[:16], phase="indeterminate",
-                result=str(e)[:200], force=True)
+                result=_safe_exception_text(
+                    e, fallback="external provider request failed",
+                ), force=True)
         except Exception:  # pragma: no cover -- receipt is best-effort here
             log.warning("external_agents: INDETERMINATE receipt failed",
                         exc_info=True)

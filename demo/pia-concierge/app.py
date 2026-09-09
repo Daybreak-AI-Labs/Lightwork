@@ -1687,7 +1687,7 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
                         f"Required controls: {controls_txt}. Uploads: {', '.join(case.uploads) or 'none'}. "
                         # The token the dashboard's review pop-out keys on.
                         f"[assessment:{getattr(case, 'assessment_id', '') or 'unsaved'}]"),
-                provenance="goal",
+                provenance="assessment",
                 requested_by=AGENT,
             )
         return result_dict, controls, approval_id

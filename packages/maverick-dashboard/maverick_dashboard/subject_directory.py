@@ -69,8 +69,11 @@ def _retired_path() -> Path:
 
 @contextmanager
 def _locked():
+    from maverick.authority_effects import authority_effect_fence
+
     ensure_private_directory(maverick_home())
     with ExitStack() as stack:
+        stack.enter_context(authority_effect_fence())
         stack.enter_context(_LOCK)
         stack.enter_context(cross_process_lock(_path()))
         yield

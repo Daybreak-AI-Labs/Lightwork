@@ -1,6 +1,8 @@
 """Tests for the agent control-plane dashboard pages (replay + agent trust)."""
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
@@ -243,6 +245,12 @@ def test_simulate_browser_pay_is_high(monkeypatch):
     from maverick_dashboard.control_plane import simulate_action
     res = simulate_action("browser", "click", "text=Pay now")
     assert res["risk"] == "high" and res["decision"]
+    assert res["result_class"] == "simulation"
+    assert res["evidence_class"] == "simulated"
+    assert res["live_effect"] is False
+    assert res["can_accept_business_outcome"] is False
+    assert res["authoritative_live_evidence_eligible"] is False
+    assert res["business_outcome_acceptance"] == "prohibited"
 
 
 def test_simulate_ask_mode_requires_approval(monkeypatch):
@@ -260,16 +268,105 @@ def test_simulate_readonly_not_gated(monkeypatch):
 
 def test_simulate_unknown_surface_errors():
     from maverick_dashboard.control_plane import simulate_action
-    assert "error" in simulate_action("rocket", "launch", "")
+    result = simulate_action("rocket", "launch", "")
+    assert "error" in result
+    assert result["evidence_class"] == "simulated"
+    assert result["can_accept_business_outcome"] is False
 
 
 def test_simulate_api_and_page():
     r = client.get("/api/v1/simulate",
                    params={"surface": "browser", "action": "click", "target": "text=Pay"})
     assert r.status_code == 200 and r.json()["risk"] == "high"
+    assert r.json()["live_effect"] is False
+    assert r.json()["business_outcome_acceptance"] == "prohibited"
     p = client.get("/simulate",
                    params={"surface": "browser", "action": "click", "target": "Pay now"})
     assert p.status_code == 200 and "Decision" in p.text
+    assert "Simulation only" in p.text
+    assert "No live action ran" in p.text
+    assert "cannot be accepted as a live business outcome" in p.text
+    assert "Not eligible for acceptance" in p.text
+
+
+def test_actual_research_simulation_requires_named_human_and_renders(monkeypatch):
+    from maverick.research_simulator import AuthenticatedHumanIdentityV1
+    from maverick_dashboard import simulation_authority
+
+    unauthenticated = client.post(
+        "/api/v1/simulate/research",
+        params={"component": "tabular"},
+    )
+    assert unauthenticated.status_code == 401
+    unauthenticated_page = client.post(
+        "/simulate/research",
+        data={"component": "tabular"},
+    )
+    assert unauthenticated_page.status_code == 401
+    assert "verified named-human session is required" in unauthenticated_page.text
+    assert "No simulated or live action was completed" in unauthenticated_page.text
+
+    identity = AuthenticatedHumanIdentityV1(
+        "user:dashboard-simulation-reviewer",
+        hashlib.sha256(b"verified-dashboard-test-session").hexdigest(),
+    )
+    monkeypatch.setattr(
+        simulation_authority,
+        "authenticated_human_identity",
+        lambda _request: identity,
+    )
+    response = client.post(
+        "/api/v1/simulate/research",
+        params={"component": "feature-prefix"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scenario_id"] == "dashboard-synthetic-research-v1"
+    assert payload["component_id"] == "feature-prefix-backoff-baseline-v1"
+    assert payload["success"] is True
+    assert payload["component_process_isolated"] is True
+    assert payload["oracle_passed"] is True
+    assert payload["authority_requires_approval"] is True
+    assert payload["approver_principal"] == identity.principal
+    assert payload["action_lineage_valid"] is True
+    assert payload["source_ref"].startswith("simulator:sim-")
+    assert payload["evidence_class"] == "simulated"
+    assert payload["authoritative_live_evidence_eligible"] is False
+    assert payload["business_outcome_acceptance"] == "prohibited"
+
+    page = client.post(
+        "/simulate/research",
+        data={"component": "tabular"},
+    )
+    assert page.status_code == 200
+    assert 'data-testid="research-simulation-boundary"' in page.text
+    assert "Research study completed" in page.text
+    assert "Built-in synthetic software world" in page.text
+    assert "Component process" in page.text and "Isolated" in page.text
+    assert "named-human approval required" in page.text
+    assert "Not eligible for acceptance" in page.text
+    assert "Approve and run synthetic study" in page.text
+    assert "accept business outcome" not in page.text.lower()
+
+
+def test_research_simulation_rejects_unregistered_component(monkeypatch):
+    from maverick.research_simulator import AuthenticatedHumanIdentityV1
+    from maverick_dashboard import simulation_authority
+
+    monkeypatch.setattr(
+        simulation_authority,
+        "authenticated_human_identity",
+        lambda _request: AuthenticatedHumanIdentityV1(
+            "user:dashboard-simulation-reviewer",
+            hashlib.sha256(b"verified-dashboard-test-session").hexdigest(),
+        ),
+    )
+    response = client.post(
+        "/api/v1/simulate/research",
+        params={"component": "caller-plugin"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "component must be tabular or feature-prefix"}
 
 
 # ---- compliance packet -----------------------------------------------------

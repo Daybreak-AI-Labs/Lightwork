@@ -105,7 +105,11 @@ def test_propose_stores_a_pending_proposal_and_parks_an_approval():
     assert parked.risk == "high"
     assert parked.status == "pending"
     assert parked.requested_by == "agent:sales"
-    assert proposal["digest"][:16] in (parked.detail or "")
+    from maverick.approval_cards import decode_approval_detail
+    card = decode_approval_detail(parked.detail)
+    assert card is not None
+    assert card["action"] == proposal["action"]
+    assert card["inputs"] == {"proposal_sha256": proposal["digest"]}
     assert "harness_refinement_proposed" in _audit_kinds()
     # Nothing is in force until somebody applies it.
     assert hr.refinements() == []
@@ -161,7 +165,9 @@ def test_apply_after_denial_refuses():
 
 def test_apply_after_approval_snapshots_and_emits_both_audit_kinds():
     _configure()
-    proposal = hr.propose(_observation(), goal_id=7)
+    proposal = hr.propose(
+        _observation(), goal_id=7, proposed_by="ops@corp.test",
+    )
     _approve(proposal["approval_id"])
     applied = hr.apply(proposal["id"], applied_by="ops@corp.test")
 
@@ -179,6 +185,60 @@ def test_apply_after_approval_snapshots_and_emits_both_audit_kinds():
     kinds = _audit_kinds()
     assert "harness_refinement_applied" in kinds
     assert "learning_update" in kinds
+
+
+def test_apply_refuses_actor_drift_without_spending_the_approval():
+    _configure()
+    proposal = hr.propose(_observation(), proposed_by="user:alice")
+    _approve(proposal["approval_id"])
+
+    with pytest.raises(hr.RefineError, match="current refinement"):
+        hr.apply(proposal["id"], applied_by="user:bob")
+
+    assert hr.refinements() == []
+    assert hr.list_proposals(status="pending")[0]["id"] == proposal["id"]
+    applied = hr.apply(proposal["id"], applied_by="user:alice")
+    assert applied["status"] == "applied"
+    assert applied["applied_by"] == "user:alice"
+
+
+def test_apply_rechecks_authenticated_actor_at_the_effect_boundary():
+    from maverick.connections import bind_principal
+
+    _configure()
+    with bind_principal("user:alice"):
+        proposal = hr.propose(_observation())
+    _approve(proposal["approval_id"])
+
+    with bind_principal("user:bob"):
+        with pytest.raises(hr.RefineError, match="authenticated actor"):
+            hr.apply(proposal["id"], applied_by="user:alice")
+    assert hr.refinements() == []
+
+    with bind_principal("user:alice"):
+        applied = hr.apply(proposal["id"])
+    assert applied["applied_by"] == "user:alice"
+
+
+def test_cli_apply_has_no_self_asserted_actor_override():
+    _configure()
+    proposal = hr.propose(_observation(), proposed_by="cli")
+    _approve(proposal["approval_id"])
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    refused = CliRunner().invoke(
+        main, ["refine", "apply", proposal["id"], "--by", "user:bob"],
+    )
+    assert refused.exit_code != 0
+    assert "No such option '--by'" in refused.output
+    assert hr.refinements() == []
+
+    applied = CliRunner().invoke(
+        main, ["refine", "apply", proposal["id"]],
+    )
+    assert applied.exit_code == 0, applied.output
+    assert hr.refinements()[0]["applied_by"] == "cli"
 
 
 def test_one_approval_cannot_apply_two_refinements():
@@ -203,6 +263,25 @@ def test_tampered_change_refuses_even_with_an_approval():
     with pytest.raises(hr.RefineError, match="digest"):
         hr.apply(proposal["id"])
     assert hr.refinements() == []
+
+
+def test_changed_refinement_digest_requires_a_new_approval():
+    _configure()
+    proposal = hr.propose(_observation())
+    _approve(proposal["approval_id"])
+    store = json.loads(hr.store_path().read_text(encoding="utf-8"))
+    record = store["proposals"][proposal["id"]]
+    record["change"] = "Require a different approval workflow."
+    record["digest"] = hr._digest(record["target"], record["name"], record["change"])
+    hr.store_path().write_text(json.dumps(store), encoding="utf-8")
+
+    with pytest.raises(hr.RefineError, match="current refinement"):
+        hr.apply(proposal["id"])
+    assert hr.refinements() == []
+
+    fresh = hr.propose(_observation(change=record["change"]))
+    _approve(fresh["approval_id"])
+    assert hr.apply(fresh["id"])["status"] == "applied"
 
 
 def test_require_approval_false_applies_directly_and_still_audits():

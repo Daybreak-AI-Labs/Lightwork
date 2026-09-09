@@ -664,6 +664,18 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
         " period_key TEXT NOT NULL, provider TEXT NOT NULL,"
         " receipts_json TEXT NOT NULL, PRIMARY KEY (period_key, provider))",
     ]),
+    (35, [
+        "CREATE TABLE IF NOT EXISTS provider_operation_attempts ("
+        " scope_sha256 TEXT NOT NULL, operation_id TEXT NOT NULL,"
+        " attempt_no BIGINT NOT NULL, category TEXT NOT NULL,"
+        " parent_category TEXT NOT NULL, service TEXT, provider TEXT NOT NULL,"
+        " period_key TEXT NOT NULL, request_id TEXT NOT NULL,"
+        " PRIMARY KEY (scope_sha256, operation_id, attempt_no),"
+        " UNIQUE (provider, period_key, request_id))",
+        "CREATE TABLE IF NOT EXISTS provider_operation_attempt_backfill ("
+        " singleton SMALLINT PRIMARY KEY CHECK(singleton = 1),"
+        " completed BOOLEAN NOT NULL CHECK(completed))",
+    ]),
 ]
 
 # Highest migration version = the reported schema version.
@@ -4747,6 +4759,252 @@ class PostgresWorldModel:
         if row[0] is None and row[1] is not None:
             raise RuntimeError("Provider accounting total is missing")
         return (float(row[0] or 0), json.loads(row[1]) if row[1] is not None else {})
+
+    @staticmethod
+    def _provider_cap_period_sql(period_kind: str) -> str:
+        if period_kind == "day":
+            return "to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD')"
+        if period_kind == "month":
+            return "to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM')"
+        raise ValueError("provider cap period kind is invalid")
+
+    def provider_cap_period(self, period_kind: str) -> str:
+        """Return the current UTC period from the shared database clock."""
+        with self._tx() as cur:
+            cur.execute(f"SELECT {self._provider_cap_period_sql(period_kind)}")
+            row = cur.fetchone()
+        if row is None or not isinstance(row[0], str):
+            raise RuntimeError("Provider accounting clock is unavailable")
+        return row[0]
+
+    def mutate_current_provider_cap(self, period_kind: str, provider: str, operation):
+        """Mutate the current provider bucket using one database-clock transaction."""
+        period_sql = self._provider_cap_period_sql(period_kind)
+        with self._tx() as cur:
+            cur.execute(f"SELECT {period_sql}")
+            period = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO provider_spend(period_key, provider, dollars) VALUES(%s, %s, 0) "
+                "ON CONFLICT(period_key, provider) DO NOTHING", (period, provider),
+            )
+            cur.execute(
+                "SELECT dollars FROM provider_spend WHERE period_key = %s AND provider = %s FOR UPDATE",
+                (period, provider),
+            )
+            total = float(cur.fetchone()[0])
+            cur.execute(
+                "SELECT receipts_json FROM provider_cap_receipts WHERE period_key = %s AND provider = %s",
+                (period, provider),
+            )
+            state = cur.fetchone()
+            total, receipts, result = operation(
+                period, total, json.loads(state[0]) if state else {},
+            )
+            cur.execute(
+                "UPDATE provider_spend SET dollars = %s WHERE period_key = %s AND provider = %s",
+                (total, period, provider),
+            )
+            cur.execute(
+                "INSERT INTO provider_cap_receipts(period_key, provider, receipts_json) VALUES(%s, %s, %s) "
+                "ON CONFLICT(period_key, provider) DO UPDATE SET receipts_json = EXCLUDED.receipts_json",
+                (period, provider, json.dumps(receipts, allow_nan=False)),
+            )
+            return period, result
+
+    @staticmethod
+    def _backfill_provider_operation_attempts(cur) -> None:
+        """Index legacy JSON receipts once under a transactional winner row."""
+        cur.execute(
+            "INSERT INTO provider_operation_attempt_backfill(singleton, completed) "
+            "VALUES(1, TRUE) ON CONFLICT (singleton) DO NOTHING RETURNING singleton"
+        )
+        if cur.fetchone() is None:
+            # ON CONFLICT waits for the winning transaction. Its marker and
+            # backfill commit together, so no partial state is observable here.
+            return
+        cur.execute(
+            "INSERT INTO provider_operation_attempts("
+            "scope_sha256, operation_id, attempt_no, category, parent_category, "
+            "service, provider, period_key, request_id) "
+            "SELECT COALESCE(j.receipt->>'operation_scope_sha256', "
+            "j.receipt->>'work_item_sha256', "
+            "'c544f4564db872e0ffb51fa1bb81b3d7089460a7a9a79ad21cd3952e77f0efec'), "  # pragma: allowlist secret
+            "j.receipt->'operation'->>'operation_id', "
+            "(j.receipt->'operation'->>'attempt_no')::BIGINT, "
+            "j.receipt->'operation'->>'category', "
+            "j.receipt->'operation'->>'parent_category', "
+            "j.receipt->'operation'->>'service', "
+            "p.provider, p.period_key, j.request_id "
+            "FROM provider_cap_receipts AS p "
+            "CROSS JOIN LATERAL jsonb_each(p.receipts_json::jsonb) "
+            "AS j(request_id, receipt) "
+            "WHERE jsonb_typeof(j.receipt->'operation') = 'object' "
+            "AND NOT EXISTS (SELECT 1 FROM provider_operation_attempts AS a "
+            "WHERE a.provider = p.provider AND a.period_key = p.period_key "
+            "AND a.request_id = j.request_id)"
+        )
+
+    def reserve_current_provider_cap(
+        self,
+        period_kind: str,
+        provider: str,
+        operation,
+        attempt: dict[str, object],
+    ):
+        """Claim a global operation attempt in the reservation transaction."""
+        period_sql = self._provider_cap_period_sql(period_kind)
+        with self._tx() as cur:
+            cur.execute(f"SELECT {period_sql}")
+            period = cur.fetchone()[0]
+            self._backfill_provider_operation_attempts(cur)
+            cur.execute(
+                "INSERT INTO provider_operation_attempts("
+                "scope_sha256, operation_id, attempt_no, category, parent_category, "
+                "service, provider, period_key, request_id) "
+                "VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (scope_sha256, operation_id, attempt_no) DO NOTHING "
+                "RETURNING request_id",
+                (
+                    attempt["scope_sha256"],
+                    attempt["operation_id"],
+                    attempt["attempt_no"],
+                    attempt["category"],
+                    attempt["parent_category"],
+                    attempt["service"],
+                    provider,
+                    period,
+                    attempt["request_id"],
+                ),
+            )
+            admitted = cur.fetchone()
+            if admitted is None:
+                cur.execute(
+                    "SELECT category, parent_category, service, provider, period_key, request_id "
+                    "FROM provider_operation_attempts "
+                    "WHERE scope_sha256 = %s AND operation_id = %s AND attempt_no = %s",
+                    (
+                        attempt["scope_sha256"],
+                        attempt["operation_id"],
+                        attempt["attempt_no"],
+                    ),
+                )
+                existing = cur.fetchone()
+                if existing is None:
+                    raise RuntimeError("provider operation attempt claim disappeared")
+                return period, False, {
+                    "category": existing[0],
+                    "parent_category": existing[1],
+                    "service": existing[2],
+                    "provider": existing[3],
+                    "period": existing[4],
+                    "request_id": existing[5],
+                }
+            cur.execute(
+                "INSERT INTO provider_spend(period_key, provider, dollars) VALUES(%s, %s, 0) "
+                "ON CONFLICT(period_key, provider) DO NOTHING",
+                (period, provider),
+            )
+            cur.execute(
+                "SELECT dollars FROM provider_spend WHERE period_key = %s AND provider = %s FOR UPDATE",
+                (period, provider),
+            )
+            total = float(cur.fetchone()[0])
+            cur.execute(
+                "SELECT receipts_json FROM provider_cap_receipts WHERE period_key = %s AND provider = %s",
+                (period, provider),
+            )
+            state = cur.fetchone()
+            total, receipts, result = operation(
+                period,
+                total,
+                json.loads(state[0]) if state else {},
+            )
+            cur.execute(
+                "UPDATE provider_spend SET dollars = %s WHERE period_key = %s AND provider = %s",
+                (total, period, provider),
+            )
+            cur.execute(
+                "INSERT INTO provider_cap_receipts(period_key, provider, receipts_json) VALUES(%s, %s, %s) "
+                "ON CONFLICT(period_key, provider) DO UPDATE SET receipts_json = EXCLUDED.receipts_json",
+                (period, provider, json.dumps(receipts, allow_nan=False)),
+            )
+            return period, True, result
+
+    def read_current_provider_cap(self, period_kind: str, provider: str):
+        """Read the database-clock period and its bucket in one statement."""
+        period_sql = self._provider_cap_period_sql(period_kind)
+        with self._tx() as cur:
+            cur.execute(
+                f"SELECT {period_sql}, "
+                f"(SELECT dollars FROM provider_spend WHERE period_key = {period_sql} AND provider = %s), "
+                f"(SELECT receipts_json FROM provider_cap_receipts WHERE period_key = {period_sql} AND provider = %s)",
+                (provider, provider),
+            )
+            row = cur.fetchone()
+        if row is None or not isinstance(row[0], str):
+            raise RuntimeError("Provider accounting clock is unavailable")
+        if row[1] is None and row[2] is not None:
+            raise RuntimeError("Provider accounting total is missing")
+        return row[0], float(row[1] or 0), json.loads(row[2]) if row[2] is not None else {}
+
+    def snapshot_provider_cap_reservations(
+        self,
+        work_item_sha256: str,
+        *,
+        limit: int,
+    ) -> list[tuple[str, str, float | None, str]]:
+        """Return complete matching buckets from one point-in-time SQL snapshot."""
+        if (
+            not isinstance(work_item_sha256, str)
+            or len(work_item_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in work_item_sha256)
+            or isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 2001
+        ):
+            raise ValueError("provider reservation snapshot request is invalid")
+        sql = (
+            "SELECT r.period_key, r.provider, s.dollars, r.receipts_json "
+            "FROM provider_cap_receipts AS r "
+            "LEFT JOIN provider_spend AS s "
+            "ON s.period_key = r.period_key AND s.provider = r.provider "
+            "WHERE EXISTS (SELECT 1 FROM jsonb_each(r.receipts_json::jsonb) "
+            "AS entry(request_id, receipt) "
+            "WHERE entry.receipt ->> 'work_item_sha256' = %s) "
+            "ORDER BY r.period_key, r.provider LIMIT %s"
+        )
+        with self._tx() as cur:
+            cur.execute(sql, (work_item_sha256, limit))
+            return [tuple(row) for row in cur.fetchall()]
+
+    def find_provider_cap_reservations(
+        self,
+        work_item_sha256: str,
+        *,
+        limit: int,
+        after: tuple[str, str, str] | None = None,
+    ) -> list[tuple[str, str, str]]:
+        """Return bounded reservation keys for one opaque tenant/work hash."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 201:
+            raise ValueError("provider reservation discovery limit is invalid")
+        sql = (
+            "SELECT p.period_key, p.provider, entry.request_id "
+            "FROM provider_cap_receipts AS p "
+            "CROSS JOIN LATERAL jsonb_each(p.receipts_json::jsonb) "
+            "AS entry(request_id, receipt) "
+            "WHERE entry.receipt ->> 'work_item_sha256' = %s"
+        )
+        params: list[object] = [work_item_sha256]
+        if after is not None:
+            sql += (
+                " AND (p.period_key, p.provider, entry.request_id) > (%s, %s, %s)"
+            )
+            params.extend(after)
+        sql += " ORDER BY p.period_key, p.provider, entry.request_id LIMIT %s"
+        params.append(limit)
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return [tuple(row) for row in cur.fetchall()]
 
     # ----- pruning -----
 

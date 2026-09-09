@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+{% block title %}Research lab · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .research-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:var(--space-3); }
+  .research-stack { display:grid;gap:var(--space-3);align-content:start;min-width:0; }
+  .research-form { display:grid;gap:var(--space-3); }
+  .research-form label { display:flex;flex-direction:column;gap:var(--space-1);min-width:0; }
+  .research-form .check { flex-direction:row;align-items:flex-start; }
+  .research-form .check input { width:auto;flex:none;margin-block-start:.3em; }
+  .research-form .input { box-sizing:border-box;width:100%;max-width:100%; }
+  .research-actions { display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center; }
+  .research-list { display:grid;gap:var(--space-2);padding:0;list-style:none; }
+  .research-item { border:1px solid var(--border);border-radius:var(--radius);padding:var(--space-3);overflow-wrap:anywhere; }
+  .research-item p { margin:.35rem 0; }
+  .research-evaluator { display:grid;grid-template-columns:1fr 1fr 2fr auto;gap:var(--space-2);align-items:end;margin-block:var(--space-2); }
+  .research-source { white-space:pre-wrap;overflow:auto;max-height:24rem;padding:var(--space-2);background:var(--surface-2);border-radius:var(--radius); }
+  .research-workspace { margin-block:var(--space-4); }
+  .research-workspace .panel { min-width:0; }
+  .research-workspace select[multiple] { min-height:8rem; }
+  .research-workspace code { overflow-wrap:anywhere; }
+  .research-badge { display:inline-block;padding:.15rem .5rem;border:1px solid var(--border);border-radius:999px;font-size:.85rem; }
+  .research-badge[data-state="approved"] { border-color:var(--success, #27864a); }
+  .research-badge[data-state="revoked"], .research-badge[data-state="failed"] { border-color:var(--danger, #b42318); }
+  .research-lineage { padding-inline-start:1.25rem; }
+  .research-costs { margin-block:var(--space-2); }
+  .research-advanced { border-block-start:1px solid var(--border);padding-block-start:var(--space-2); }
+  @media (max-width:720px) { .research-evaluator { grid-template-columns:1fr; } }
+</style>
+<div id="research-lab" data-context="{{ research_context }}">
+  <h1>Research lab</h1>
+  <p>Submit a bounded source experiment, keep it separate from the trusted application, and have an installation administrator review the exact source before it runs.</p>
+  <p id="research-status" role="status" aria-live="polite">Loading the current research workspace…</p>
+
+  <section class="panel" aria-labelledby="research-readiness-title">
+    <h2 id="research-readiness-title">Execution readiness</h2>
+    <p id="research-readiness">Checking the installation-owned container profile…</p>
+    <p class="muted">A successful local result is evidence for this exact source and evaluator. It is not live-provider, customer, or production-containment qualification.</p>
+    <button type="button" class="btn" id="research-refresh">Refresh research jobs</button>
+  </section>
+
+  <section class="research-workspace" aria-labelledby="governed-research-title">
+    <h2 id="governed-research-title">Governed datasets, models, and runs</h2>
+    <p>Register immutable versions, review their rights and lineage, then bind a run to the exact approved versions. Registry records contain commitments and safe source references; dataset rows and model weights stay outside this page.</p>
+    <p id="research-governed-status" role="status" aria-live="polite">Loading governed research records…</p>
+    <div class="research-actions">
+      <button type="button" class="btn" id="research-governed-refresh">Refresh governed records</button>
+      <span id="research-materialization-state" class="muted"></span>
+    </div>
+    <p id="research-registry-authority-state" class="muted"></p>
+
+    <div class="research-grid">
+      <div class="research-stack">
+        <details class="panel" open>
+        <summary><strong>Register a dataset version</strong></summary>
+        <form id="research-dataset-form" class="research-form">
+          <div class="research-grid">
+            <label>Dataset ID<input class="input" name="dataset_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Version<input class="input" name="version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+          </div>
+          <label>Safe source reference<input class="input" name="source_ref" maxlength="2048" placeholder="artifact:dataset/version or an installed catalog source" required></label>
+          <label>Content SHA-256<input class="input" name="content_sha256" pattern="[a-f0-9]{64}" maxlength="64" aria-describedby="research-content-sha-help"></label>
+          <p class="muted" id="research-content-sha-help">Installation administrators may leave this blank for an exact installed evidence-graph node, fleet-memory record, position-stamped knowledge document, or owner-bound Ekko candidate set. Lightwork reads the selected record and binds its canonical checksum. Other source types require a supplied SHA-256.</p>
+          <div class="research-grid">
+            <label>License ID<input class="input" name="license_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>License evidence SHA-256<input class="input" name="license_evidence_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+          </div>
+          <label>Allowed purposes, comma separated<input class="input" name="allowed_purposes" placeholder="product_research" required></label>
+          <label>Usage constraints, one per line<textarea class="input" name="usage_constraints" rows="3" maxlength="8192" placeholder="local_only" required></textarea></label>
+          <div class="research-grid">
+            <label>Permitted action<select class="input" name="data_use_action" required><option value="analyze">Analyze</option><option value="train">Train</option><option value="read">Read</option><option value="export">Export</option></select></label>
+            <label>Provenance<select class="input" name="provenance_kind" required><option value="source">Source dataset</option><option value="derived">Derived dataset</option><option value="synthetic">Synthetic fixture</option></select></label>
+          </div>
+          <div class="research-grid">
+            <label>Authorized data-use decision<select class="input" name="data_use_decision_choice"><option value="">Choose an authorized allow decision or enter one below</option></select></label>
+            <label>Data-use decision ID<input class="input" name="data_use_decision_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Decision SHA-256<input class="input" name="data_use_decision_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+          </div>
+          <p class="muted">Authorized “allow” decision records appear here. Approval and every run recheck their current authority. <a href="/data-use">Create or review data-use authority in the app</a>.</p>
+          <details class="research-advanced">
+            <summary>Consent and derivative lineage</summary>
+            <label>Parent dataset versions<select class="input" name="parent_datasets" multiple></select></label>
+            <div class="research-grid">
+              <label>Consent record ID<input class="input" name="consent_record_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Consent evidence SHA-256<input class="input" name="consent_evidence_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
+            </div>
+          </details>
+          <div id="research-synthetic-fields" class="research-advanced" hidden>
+            <p><strong>Synthetic fixture provenance</strong> — this label is preserved in every run and export.</p>
+            <div class="research-grid">
+              <label>Generator ID<input class="input" name="synthetic_generator_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Generator version<input class="input" name="synthetic_generator_version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Generator artifact SHA-256<input class="input" name="synthetic_generator_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
+              <label>Generator config SHA-256<input class="input" name="synthetic_config_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
+              <label>Seed<input class="input" name="synthetic_seed" type="number" min="0" max="9007199254740991" step="1"></label>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" name="confirm" required>I reviewed the exact source, checksum, license, permitted use, and provenance.</label>
+          <button type="submit" class="btn btn--primary">Register immutable dataset version</button>
+        </form>
+        </details>
+
+        <details class="panel">
+        <summary><strong>Register a model version</strong></summary>
+        <form id="research-model-form" class="research-form">
+          <div class="research-grid">
+            <label>Model ID<input class="input" name="model_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Version<input class="input" name="version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+          </div>
+          <label>Safe source reference<input class="input" name="source_ref" maxlength="2048" placeholder="artifact:model/version or safe HTTPS URL" required></label>
+          <label>Artifact SHA-256<input class="input" name="artifact_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+          <div class="research-grid">
+            <label>License ID<input class="input" name="license_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>License evidence SHA-256<input class="input" name="license_evidence_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+          </div>
+          <label>Allowed purposes, comma separated<input class="input" name="allowed_purposes" placeholder="product_research" required></label>
+          <label>Usage constraints, one per line<textarea class="input" name="usage_constraints" rows="3" maxlength="8192" placeholder="local_only" required></textarea></label>
+          <label>Provider model identity<input class="input" name="provider_model_identity" maxlength="256" required></label>
+          <div class="research-grid">
+            <label>Immutable provider revision<input class="input" name="immutable_provider_revision" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" placeholder="Leave blank only when the provider cannot pin a revision"></label>
+            <label>Provenance<select class="input" name="provenance_kind"><option value="external">External model</option><option value="trained">Lightwork training result</option></select></label>
+          </div>
+          <details class="research-advanced">
+            <summary>Unpinnable provider observation window</summary>
+            <div class="research-grid">
+              <label>Observed from, Unix seconds<input class="input" name="observed_from" type="number" min="0" step="0.001"></label>
+              <label>Observed until, Unix seconds<input class="input" name="observed_until" type="number" min="0" step="0.001"></label>
+            </div>
+            <label>Reproducibility limitation<textarea class="input" name="reproducibility_limitation" rows="2" maxlength="512"></textarea></label>
+          </details>
+          <details class="research-advanced">
+            <summary>Dataset and model lineage</summary>
+            <label>Dataset versions<select class="input" name="dataset_lineage" multiple></select></label>
+            <label>Dataset lineage purpose<input class="input" name="dataset_lineage_purpose" pattern="[a-z][a-z0-9_.-]{0,63}" maxlength="64"></label>
+            <label>Base model versions<select class="input" name="model_lineage" multiple></select></label>
+          </details>
+          <div id="research-training-receipt-fields" class="research-advanced" hidden>
+            <p>A trained model is admitted only when the server verifies its signed receipt against current trust roots.</p>
+            <div class="research-grid">
+              <label>Training receipt ID<input class="input" name="training_receipt_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128"></label>
+              <label>Receipt payload SHA-256<input class="input" name="training_receipt_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
+              <label>Training dataset boundary SHA-256<input class="input" name="training_dataset_sha256" pattern="[a-f0-9]{64}" maxlength="64"></label>
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" name="confirm" required>I reviewed the model identity, version limits, rights, and lineage.</label>
+          <button type="submit" class="btn btn--primary">Register immutable model version</button>
+        </form>
+        </details>
+      </div>
+
+      <div class="research-stack">
+        <details class="panel" open>
+          <summary><strong>Plan and submit a governed run</strong></summary>
+          <form id="research-run-form" class="research-form">
+          <div class="research-grid">
+            <label>Run ID<input class="input" name="run_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Run version<input class="input" name="run_version" value="v1" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Experiment ID<input class="input" name="experiment_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+            <label>Experiment version<input class="input" name="experiment_version" value="v1" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+          </div>
+          <div class="research-grid">
+            <label>Purpose<input class="input" name="purpose" pattern="[a-z][a-z0-9_.-]{0,63}" maxlength="64" placeholder="product_research" required></label>
+            <label>Action<select class="input" name="action"><option value="analyze">Analyze</option><option value="train">Train</option></select></label>
+          </div>
+          <label>Approved dataset versions<select class="input" name="dataset_refs" multiple required></select></label>
+          <label>Approved model version, optional<select class="input" name="model_ref"><option value="">No model</option></select></label>
+          <details class="research-advanced" open>
+            <summary>Immutable code and environment</summary>
+            <label>Code commit digest<input class="input" name="code_revision" pattern="(?:[a-f0-9]{40}|[a-f0-9]{64}|sha256:[a-f0-9]{64})" required></label>
+            <label>Code artifact SHA-256<input class="input" name="code_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+            <div class="research-grid">
+              <label>Environment ID<input class="input" name="environment_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+              <label>Environment version<input class="input" name="environment_version" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+              <label>Environment SHA-256<input class="input" name="environment_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+              <label>Seed<input class="input" name="seed" type="number" min="0" max="9007199254740991" step="1" required></label>
+            </div>
+          </details>
+          <details class="research-advanced" open>
+            <summary>Resource and evaluation caps</summary>
+            <div class="research-grid">
+              <label>Wall seconds<input class="input" name="max_wall_seconds" type="number" min="0" max="31536000" value="300" required></label>
+              <label>Provider calls<input class="input" name="max_provider_calls" type="number" min="0" max="10000000" value="0" required></label>
+              <label>Storage bytes<input class="input" name="max_storage_bytes" type="number" min="0" max="1125899906842624" value="104857600" required></label>
+              <label>Maximum cost<input class="input" name="max_cost" pattern="(?:0|[1-9][0-9]*)(?:\.[0-9]+)?" value="0" required></label>
+              <label>Currency<input class="input" name="currency" pattern="[A-Z]{3,8}" maxlength="8" value="USD" required></label>
+            </div>
+            <label>Metric protocol SHA-256<input class="input" name="metric_protocol_sha256" pattern="[a-f0-9]{64}" maxlength="64" required></label>
+          </details>
+          <label class="check"><input type="checkbox" name="confirm" required>I reviewed the exact versions, purpose, seed, metrics, and resource caps. Submit this plan to the governed queue.</label>
+          <button type="submit" class="btn btn--primary">Plan and queue run</button>
+          </form>
+        </details>
+      </div>
+    </div>
+
+    <div class="research-grid">
+      <section class="panel" aria-labelledby="research-assets-title">
+        <h3 id="research-assets-title">Registry versions</h3>
+        <ul id="research-registry-items" class="research-list"><li>Loading…</li></ul>
+        <div id="research-impact" aria-live="polite"></div>
+      </section>
+      <section class="panel" aria-labelledby="research-runs-title">
+        <h3 id="research-runs-title">Governed runs and exact cost</h3>
+        <ul id="research-governed-runs" class="research-list"><li>Loading…</li></ul>
+      </section>
+    </div>
+  </section>
+
+  <section class="panel" id="research-promotions" aria-labelledby="research-promotions-title">
+    <h2 id="research-promotions-title">Candidate promotion and rollback</h2>
+    <p>Review completed research separately from deployment. A successful study cannot promote itself: an authorized person must approve the exact candidate, and Lightwork rechecks the study, data rights, artifacts, policy, and current roles before every deployment step.</p>
+    <p id="research-promotions-status" role="status" aria-live="polite">Loading candidate promotions…</p>
+    <div class="research-actions">
+      <button type="button" class="btn" id="research-promotions-refresh">Refresh candidates</button>
+      <span id="research-promotions-readiness" class="muted"></span>
+    </div>
+    <details class="research-advanced" id="research-promotion-proposal" hidden>
+      <summary><strong>Propose a completed research result</strong></summary>
+      <p>Select a completed run and a reviewed deployment preset. Lightwork loads the canonical evaluator study and all immutable evidence from trusted server records.</p>
+      <form id="research-promotion-form" class="research-form">
+        <div class="research-grid">
+          <label>Candidate name<input class="input" name="candidate_id" pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,127}" maxlength="128" required></label>
+          <label>Completed run<select class="input" name="run_id" required><option value="">Choose a completed run</option></select></label>
+          <label>Reviewed target preset<select class="input" name="target_preset" required><option value="">Choose a deployment target</option></select></label>
+        </div>
+        <p class="muted">Lightwork reads the canonical study, evaluator report, artifact commitments, compatibility, and resource envelope from trusted server records. Negative and inconclusive studies remain visible but cannot enter deployment review.</p>
+        <button type="submit" class="btn btn--primary">Create independent review request</button>
+      </form>
+    </details>
+    <ul id="research-promotions-list" class="research-list"><li>Loading…</li></ul>
+  </section>
+
+  <details class="panel" id="research-settings" hidden>
+    <summary>Administrator setup</summary>
+    <p>Use an immutable image already present on this machine. Evaluators compare the exact output hash; candidate code cannot change the expected result.</p>
+    <p id="research-settings-readiness" class="muted"></p>
+    <form id="research-settings-form" class="research-form">
+      <label class="check"><input type="checkbox" name="enable">Enable bounded research execution</label>
+      <label>Immutable local image ID<input class="input" name="image_id" maxlength="71" pattern="sha256:[a-f0-9]{64}" placeholder="sha256:…" autocomplete="off" required></label>
+      <label>Queued review lifetime in seconds<input class="input" name="queue_seconds" type="number" min="30" max="86400" value="3600" required></label>
+      <div>
+        <div class="research-actions"><strong>Exact-output evaluators</strong><button type="button" class="btn" id="research-add-evaluator">Add evaluator</button></div>
+        <div id="research-evaluators"></div>
+      </div>
+      <details>
+        <summary>Container limits</summary>
+        <div class="research-grid">
+          <label>Run time, seconds<input class="input" name="timeout_seconds" type="number" min="0.1" max="300" step="0.1" value="10" required></label>
+          <label>Output bytes<input class="input" name="output_bytes" type="number" min="1024" max="1048576" value="65536" required></label>
+          <label>Memory bytes<input class="input" name="memory_bytes" type="number" min="33554432" max="1073741824" value="134217728" required></label>
+          <label>Scratch bytes<input class="input" name="scratch_bytes" type="number" min="1048576" max="268435456" value="16777216" required></label>
+          <label>Process limit<input class="input" name="pids" type="number" min="8" max="256" value="32" required></label>
+          <label>CPU limit<input class="input" name="cpus" type="number" min="0.1" max="2" step="0.1" value="0.5" required></label>
+        </div>
+      </details>
+      <label class="check"><input type="checkbox" name="confirm">I reviewed this installation-wide execution profile and understand that changing it invalidates queued reviews.</label>
+      <button type="submit" class="btn btn--primary" id="research-settings-save">Save research setup</button>
+    </form>
+  </details>
+
+  <div class="research-grid">
+    <section class="panel" aria-labelledby="research-submit-title">
+      <h2 id="research-submit-title">Submit source for review</h2>
+      <form id="research-submit" class="research-form">
+        <label>Source files<input class="input" name="files" type="file" multiple required></label>
+        <p id="research-files" class="muted">Choose up to 64 UTF-8 files, 256 KiB total.</p>
+        <label>Python entrypoint<select class="input" name="entrypoint" required><option value="">Choose source files first</option></select></label>
+        <label>Evaluator<select class="input" name="evaluator_id" required><option value="">No evaluator is available</option></select></label>
+        <label class="check"><input type="checkbox" name="confirm">Submit this exact source to the administrator review queue.</label>
+        <button type="submit" class="btn btn--primary" id="research-submit-button">Submit for review</button>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="research-jobs-title">
+      <h2 id="research-jobs-title">Your experiments</h2>
+      <ul id="research-jobs" class="research-list"><li>Loading…</li></ul>
+    </section>
+  </div>
+
+  <section class="panel" id="research-review-panel" aria-labelledby="research-review-title" hidden>
+    <h2 id="research-review-title">Administrator review queue</h2>
+    <p>Open a submission to inspect every source file. Dispatch is bound to this source, profile, workspace, account, and current administrator authority.</p>
+    <div class="research-actions">
+      <label for="research-review-choice">Queued submission</label>
+      <select class="input" id="research-review-choice"><option value="">Choose a submission</option></select>
+      <button type="button" class="btn" id="research-open-review">Open exact source</button>
+    </div>
+    <div id="research-review-detail"></div>
+    <label class="check"><input type="checkbox" id="research-dispatch-confirm">I reviewed the exact source and current execution profile.</label>
+    <div class="research-actions">
+      <button type="button" class="btn btn--primary" id="research-dispatch" disabled>Run reviewed source</button>
+      <button type="button" class="btn" id="research-admin-cancel" disabled>Cancel submission</button>
+    </div>
+  </section>
+</div>
+<script src="/static/lightwork-research.js" defer></script>
+<script src="/static/lightwork-research-workspace.js" defer></script>
+<script src="/static/lightwork-candidate-promotions.js" defer></script>
+{% endblock %}

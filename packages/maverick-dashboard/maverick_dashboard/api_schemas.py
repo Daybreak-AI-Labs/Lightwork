@@ -510,6 +510,12 @@ class FlowRunIn(BaseModel):
     idempotency_key: str = Field(default="", max_length=200)
 
 
+class FlowApprovalPreviewIn(BaseModel):
+    """Candidate approval form values to bind before the final decision."""
+
+    inputs: dict = Field(default_factory=dict)
+
+
 class FlowResumeIn(BaseModel):
     """Resume a paused flow run: the human verdict on the approval node, plus any
     free-form inputs to merge into the run data (so an approval can also collect
@@ -521,6 +527,11 @@ class FlowResumeIn(BaseModel):
     # reject it explicitly.  Never turn a missing request field into consent.
     decision: str = Field(default="", max_length=40)
     inputs: dict = Field(default_factory=dict)
+    # The current operation binding returned with a paused approval run.  The
+    # API refuses to substitute a newer target/authority snapshot at click time.
+    approval_binding_sha256: str = Field(
+        default="", pattern=r"^([0-9a-f]{64})?$",
+    )
 
 
 class FlowDraftIn(BaseModel):

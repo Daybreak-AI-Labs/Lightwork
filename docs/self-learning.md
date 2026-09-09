@@ -218,6 +218,42 @@ artifact. Accepted changes use the shared configured improvement margin and a
 durable PREPARE → exact-digest CAS apply → COMMIT transaction; evidence lineage
 is embedded in the hash-chained promotion receipt.
 
+## Sealed self-harness evaluation boundary
+
+Risk-limited self-harness final queries use a two-phase ledger protocol. Before
+any final case is scored, one SQLite `BEGIN IMMEDIATE` transaction reserves the
+query, alpha, final-set identity, and declared provider-call, input-token,
+output-token, dollar, and compute envelope. The receipt is finalized only after
+scoring. A promotion gate first requires that finalization to complete through
+`ResearchContainerCandidate`, which invokes `ResearchContainerRunner`; a later
+query likewise completes the prior scored query before it can reserve another.
+Container or accounting failure keeps the candidate from promotion.
+Token and dollar retirement values come from the shared cycle `Budget`; compute
+uses elapsed wall time plus container runtime. Because the provider adapter does
+not expose a durable request counter, the provider-call axis is charged at the
+deterministic scorer-protocol upper bound and labeled by the declared/actual
+receipt fields rather than silently releasing possibly consumed capacity.
+
+Submitted Python evaluator candidates run as Linux uid/gid 65532 with a
+read-only root, one read-only candidate snapshot, bounded private scratch,
+network mode `none`, all capabilities dropped, no-new-privileges, and a fixed
+credential-free environment. The runner never falls back to host execution and
+never pulls an image. Set `MAVERICK_SELF_HARNESS_EVALUATOR_IMAGE` to a reviewed
+image already present in the local Linux Docker engine; the default request is
+`python:3.12-slim`, and the resolved immutable image ID is bound into execution
+evidence. Opt-in hostile-code acceptance uses
+`LIGHTWORK_RUN_RESEARCH_CONTAINER_TESTS=1` and
+`LIGHTWORK_RESEARCH_TEST_IMAGE=<local-image>`.
+
+This is a local development custody boundary. On Windows, a verified regular
+ledger path and Docker Desktop containment do not prove restrictive ACLs or an
+independent evaluator identity: the controller account can still administer the
+ledger, evaluator process, and Docker daemon. Set
+`MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY=1` for confirmatory use; the
+local implementation deliberately fails closed because no separately operated
+custodian is installed. Production qualification therefore requires an
+external final-set/evaluator custodian and its own operational evidence.
+
 ## Evaluator co-evolution
 
 The verifier-calibration interlock (above) keeps learning honest by **freezing**

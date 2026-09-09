@@ -965,8 +965,8 @@
 
 /* --- Page hero (shared; the Ekko treatment generalized) ------------------ */
 .hero {
-  position: relative; overflow: hidden; display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(17rem, .65fr);
+  position: relative; overflow: hidden; display: grid; container-type: inline-size;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
   gap: var(--space-5); align-items: end;
   padding: clamp(1.4rem, 4vw, 2.8rem);
   border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -992,7 +992,7 @@
 .hero-statebox__label { color: var(--muted); font-size: var(--text-xs);
   text-transform: uppercase; letter-spacing: .08em; }
 .hero-statebox__row { display: flex; align-items: center; justify-content: space-between;
-  gap: var(--space-3); margin: var(--space-2) 0; }
+  flex-wrap: wrap; gap: var(--space-3); margin: var(--space-2) 0; }
 .hero-statebox__copy { color: var(--muted); font-size: var(--text-sm);
   min-height: 2.5em; margin: 0; }
 @media (max-width: 920px) {
@@ -1393,7 +1393,8 @@ footer, .footer { font-family: var(--font-mono); font-size: 11.5px; letter-spaci
   font-family: var(--font-serif); font-weight: 200; letter-spacing: -.035em; line-height: 1.0;
 }
 .page-title { font-size: clamp(2rem, 4.2vw, 3rem); }
-.hero-title { font-size: clamp(2.2rem, 5vw, 3.8rem); }
+.hero-title { font-size: clamp(2.2rem, 5vw, 3.8rem);
+  font-size: clamp(2rem, 12cqi, 3.8rem); overflow-wrap: anywhere; }
 .page-title b, .page-title strong, .hero-title b, .hero-title strong { font-weight: 600; }
 h2 { font-family: var(--font-serif); font-weight: 600; letter-spacing: .1em; color: var(--brand); }
 /* display-sized h2s (not eyebrows) keep the sans face and their own colour */
@@ -1413,7 +1414,7 @@ th, .stat .label, .hero-statebox__label { font-family: var(--font-mono); letter-
   background-size: 26px 26px;
   -webkit-mask-image: radial-gradient(ellipse 70% 80% at 80% 20%, #000 0%, transparent 70%);
   mask-image: radial-gradient(ellipse 70% 80% at 80% 20%, #000 0%, transparent 70%); }
-.hero > * { position: relative; z-index: 1; }
+.hero > * { position: relative; z-index: 1; min-width: 0; }
 .hero::before { height: 2px; background: var(--grad); }
 .hero-statebox { background: var(--bg); }
 .panel, .stat, .card, .mv-empty { border-radius: var(--radius-lg); box-shadow: none; }

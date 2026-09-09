@@ -1,6 +1,8 @@
 """Support exports are reviewed, redacted, and bound to current authority."""
 import hashlib
 import json
+import os
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -91,3 +93,26 @@ def test_preview_expiry_and_encryption_refuse_unreviewed_download(support, monke
     path.write_text("{}")
     assert client.post("/api/v1/support/download", json=body).status_code == 409
     assert not audits
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-path regression")
+def test_preview_download_supports_long_windows_profile_paths(support, monkeypatch):
+    client, identity, audits = support
+    base = Path(os.environ["MAVERICK_HOME"])
+    long_home = base.joinpath(*(("profile-" + "x" * 55,) * 4))
+    monkeypatch.setenv("MAVERICK_HOME", str(long_home))
+
+    preview = client.post("/api/v1/support/preview", json={})
+    assert preview.status_code == 200, preview.text
+    data = preview.json()
+    logical = support_api._directory(identity["context"]) / (data["preview_id"] + ".preview")
+    assert len(str(logical.resolve())) > 260
+    body = {
+        "preview_id": data["preview_id"],
+        "sha256": data["sha256"],
+        "confirm": True,
+    }
+    downloaded = client.post("/api/v1/support/download", json=body)
+    assert downloaded.status_code == 200, downloaded.text
+    assert hashlib.sha256(downloaded.content).hexdigest() == data["sha256"]
+    assert len(audits) == 1

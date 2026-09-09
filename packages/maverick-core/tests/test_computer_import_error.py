@@ -17,6 +17,11 @@ def test_non_screenshot_action_returns_error_string_when_dep_absent(monkeypatch)
         raise ImportError("pyautogui not installed. Run: pip install 'maverick-agent[computer-use]'")
 
     monkeypatch.setattr(computer, "_ensure_pyautogui", _boom)
+    # This test isolates the optional-dependency contract. Exact-operation
+    # approval is covered separately by test_action_gate.py.
+    monkeypatch.setattr(
+        computer, "gate_computer_action", lambda *_args, **_kwargs: None,
+    )
     for action in ("left_click", "mouse_move", "type", "key", "scroll"):
         res = _run_computer_action({"action": action, "coordinate": [10, 10], "text": "x"})
         assert isinstance(res, str), (action, type(res))

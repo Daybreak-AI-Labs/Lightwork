@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Deliverables · Lightwork{% endblock %}
+{% block title %}Results · Lightwork{% endblock %}
 {% block content %}
   {% from "_hero.html" import hero, state %}
-  {% call hero('Your AI workforce', 'Deliverables',
+  {% call hero('Your AI workforce', 'Results',
                subtitle='Work, organized by who it\'s for',
                lede='The work your AI teams produce, organized by deliverable
                      and by who it\'s for — your forecasts, reports, and items
@@ -75,7 +75,7 @@
   {% endif %}
 
   {% if items %}
-    <div class="section-head"><h2>Deliverables</h2></div>
+    <div class="section-head"><h2>Results</h2></div>
     <div class="card-grid">
       {% for it in items %}
         <div class="card">

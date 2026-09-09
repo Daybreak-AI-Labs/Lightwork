@@ -58,7 +58,7 @@ import math
 import os
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -166,9 +166,9 @@ class AnchorItem:
     """One held-out ground-truth datum: ``label`` is the correct verdict.
 
     For a paper reviewer the label is the human accept/reject; for a grader, a
-    pass/fail at the reference grade. ``prompt`` is optional context (the artifact
-    the evaluator judges) and never affects the checksum-relevant identity, which
-    is ``(id, label)`` -- the part that must stay immutable once released.
+    pass/fail at the reference grade. ``prompt`` is evaluator input, so it is part
+    of the checksum-relevant identity together with ``id`` and ``label``. Editing
+    any of those fields changes the released measurement and must fail integrity.
     """
 
     id: str
@@ -182,21 +182,18 @@ class Anchor:
 
     role: str
     items: tuple[AnchorItem, ...]
+    _source_valid: bool = field(default=True, repr=False, compare=False)
 
     def __len__(self) -> int:
         return len(self.items)
 
     def checksum(self) -> str:
-        """Stable sha256 over ``role`` and each item's ``(id, label)``.
-
-        ``prompt`` is deliberately excluded: editing the artifact text shown to
-        an evaluator does not change the ground-truth decision boundary, but
-        flipping a label or dropping an item does -- that is what must be pinned.
-        """
+        """Stable SHA-256 over every evaluator-visible released anchor field."""
         payload = {
+            "schema": "maverick-evaluator-anchor-v2",
             "role": self.role,
             "items": sorted(
-                ([it.id, bool(it.label)] for it in self.items),
+                ([it.id, bool(it.label), it.prompt] for it in self.items),
                 key=lambda r: r[0],
             ),
         }
@@ -212,6 +209,7 @@ def load_anchor(path: Path | str, role: str) -> Anchor:
     """
     p = Path(path)
     items: list[AnchorItem] = []
+    source_valid = True
     if p.exists():
         try:
             with open(p, encoding="utf-8") as fh:
@@ -222,17 +220,24 @@ def load_anchor(path: Path | str, role: str) -> Anchor:
                     try:
                         d = json.loads(raw)
                         if not isinstance(d, dict) or "id" not in d or "label" not in d:
+                            source_valid = False
+                            continue
+                        item_id = d["id"]
+                        label = d["label"]
+                        prompt = d.get("prompt", "")
+                        if (not isinstance(item_id, str) or not item_id.strip()
+                                or not isinstance(label, bool)
+                                or not isinstance(prompt, str)):
+                            source_valid = False
                             continue
                         items.append(AnchorItem(
-                            id=str(d["id"]),
-                            label=bool(d["label"]),
-                            prompt=str(d.get("prompt", "")),
-                        ))
+                            id=item_id, label=label, prompt=prompt))
                     except (json.JSONDecodeError, TypeError, ValueError):
+                        source_valid = False
                         continue
         except OSError:
-            return Anchor(role=role, items=())
-    return Anchor(role=role, items=tuple(items))
+            return Anchor(role=role, items=(), _source_valid=False)
+    return Anchor(role=role, items=tuple(items), _source_valid=source_valid)
 
 
 def score_on_anchor(
@@ -296,6 +301,49 @@ def anchor_fingerprint(anchors: Mapping[str, Anchor]) -> dict:
     }
 
 
+def _anchor_well_formed(anchor: object) -> bool:
+    if not isinstance(anchor, Anchor):
+        return False
+    if (not isinstance(anchor.role, str) or not anchor.role.strip()
+            or len(anchor.role) > 128 or not anchor.items
+            or anchor._source_valid is not True):
+        return False
+    ids: set[str] = set()
+    for item in anchor.items:
+        if (not isinstance(item, AnchorItem)
+                or not isinstance(item.id, str) or not item.id.strip()
+                or len(item.id) > 512 or item.id in ids
+                or not isinstance(item.label, bool)
+                or not isinstance(item.prompt, str)
+                or len(item.prompt) > 1_000_000):
+            return False
+        ids.add(item.id)
+    return True
+
+
+def _lock_maps(lock: object) -> tuple[dict[str, str], dict[str, int]] | None:
+    if not isinstance(lock, dict):
+        return None
+    checksums = lock.get("checksums")
+    sizes = lock.get("sizes")
+    if not isinstance(checksums, dict) or not isinstance(sizes, dict):
+        return None
+    if set(checksums) != set(sizes):
+        return None
+    normalized_checksums: dict[str, str] = {}
+    normalized_sizes: dict[str, int] = {}
+    for role, checksum in checksums.items():
+        size = sizes.get(role)
+        if (not isinstance(role, str) or not role.strip() or len(role) > 128
+                or not isinstance(checksum, str) or len(checksum) != 64
+                or any(ch not in "0123456789abcdef" for ch in checksum)
+                or isinstance(size, bool) or not isinstance(size, int) or size < 0):
+            return None
+        normalized_checksums[role] = checksum
+        normalized_sizes[role] = size
+    return normalized_checksums, normalized_sizes
+
+
 def load_lock() -> dict | None:
     try:
         return json.loads(anchor_lock_path().read_text(encoding="utf-8"))
@@ -306,6 +354,11 @@ def load_lock() -> dict | None:
 def write_lock(anchors: Mapping[str, Anchor] | None = None) -> Path:
     """Re-bake the committed lock from the current anchors (the ``--regen`` path)."""
     anchors = discover_anchors() if anchors is None else anchors
+    if any(
+        role != getattr(anchor, "role", None) or not _anchor_well_formed(anchor)
+        for role, anchor in anchors.items()
+    ):
+        raise ValueError("cannot lock an invalid evaluator anchor")
     payload = anchor_fingerprint(anchors)
     payload["_comment"] = (
         "Committed fingerprint of the evaluator ground-truth anchors. Generated "
@@ -330,20 +383,33 @@ def lock_problems(
     silently disappear.
     """
     anchors = discover_anchors() if anchors is None else anchors
+    malformed = [
+        role for role, anchor in anchors.items()
+        if role != getattr(anchor, "role", None) or not _anchor_well_formed(anchor)
+    ]
+    if malformed:
+        return [
+            "invalid evaluator anchor(s): " + ", ".join(sorted(map(str, malformed)))
+        ]
     if not anchors and not lock:
         return []  # nothing committed to govern (a clean default deployment)
     fp = anchor_fingerprint(anchors)
     if not lock:
         return ["no evaluator_anchors.lock.json -- run `--regen` to create the baseline"]
-    locked = lock.get("checksums", {})
+    maps = _lock_maps(lock)
+    if maps is None:
+        return ["evaluator_anchors.lock.json has an invalid schema"]
+    locked, locked_sizes = maps
     current = fp["checksums"]
     problems: list[str] = []
     pending_regen = False
     for role, cksum in current.items():
         if role in locked:
-            if locked[role] != cksum:
+            if locked[role] != cksum or locked_sizes[role] != fp["sizes"][role]:
                 problems.append(
-                    f"anchor {role!r} checksum changed ({locked[role]} -> {cksum}) "
+                    f"anchor {role!r} checksum changed or size changed "
+                    f"({locked[role]}/{locked_sizes[role]} -> "
+                    f"{cksum}/{fp['sizes'][role]}) "
                     "-- a released anchor was edited; anchors are immutable once "
                     "released (add a new anchor or version instead)")
         else:
@@ -363,19 +429,21 @@ def lock_problems(
 def verify_anchor_integrity(anchor: Anchor, lock: dict | None = None) -> bool:
     """Runtime guard: does this anchor match its locked checksum?
 
-    Used inside the promotion path. Anchor locking is separately provisioned, so
-    a deployment with no lock fails *open*. But once a role IS locked, a checksum
-    mismatch fails *closed*: we will not promote an evaluator against a
-    tampered or weakened anchor.
+    Used inside the promotion path. Evaluation against an unregistered role or a
+    missing/malformed lock fails closed: an unlocked anchor is development input,
+    not a released measurement. Checksum and size must both match before scoring.
     """
     if lock is None:
         lock = load_lock()
-    if not lock:
-        return True
-    locked = lock.get("checksums", {})
-    if anchor.role not in locked:
-        return True  # this role was never locked -> not governed
-    return locked[anchor.role] == anchor.checksum()
+    maps = _lock_maps(lock)
+    if maps is None or not _anchor_well_formed(anchor):
+        return False
+    checksums, sizes = maps
+    return (
+        anchor.role in checksums
+        and checksums[anchor.role] == anchor.checksum()
+        and sizes[anchor.role] == len(anchor)
+    )
 
 
 def validate(anchor_dir: Path | None = None) -> list[str]:
@@ -534,7 +602,7 @@ def consider_promotion(
     )
     if not enabled():
         return _replace(base, reason="evaluator evolution disabled")
-    if not verify_anchor_integrity(anchor, lock):
+    if anchor.role != slot.role or not verify_anchor_integrity(anchor, lock):
         _audit("evaluator_anchor_integrity_failed", role=slot.role)
         return _replace(base, reason="anchor integrity check failed")
 
@@ -598,24 +666,42 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     p.add_argument("--regen", action="store_true",
                    help="rewrite evaluator_anchors.lock.json from the current anchors")
     p.add_argument("--force", action="store_true",
-                   help="with --regen, also re-lock anchor(s) whose checksum changed "
-                        "since the committed lock (DANGEROUS: only for an intentional, "
-                        "reviewed edit to a released anchor -- never for routine regen)")
+                   help="deprecated compatibility flag; released anchors still "
+                        "cannot be re-locked after a checksum change")
     args = p.parse_args(argv)
 
     if args.regen:
-        changed = [prob for prob in lock_problems(load_lock())
-                   if "checksum changed" in prob]
-        if changed and not args.force:
+        current_problems = lock_problems(load_lock())
+        changed = [
+            prob for prob in current_problems if "checksum changed" in prob
+        ]
+        hard_failures = [
+            prob for prob in current_problems
+            if ("gone from the anchor dir" in prob
+                or "invalid evaluator anchor" in prob
+                or "invalid schema" in prob)
+        ]
+        if hard_failures:
+            print("evaluator-anchor governance: refusing to --regen")
+            for prob in hard_failures:
+                print(f"  - {prob}")
+            print("  repair the release lock/anchor set or add a separately "
+                  "versioned anchor; regeneration cannot erase released history.")
+            return 1
+        if changed:
             print("evaluator-anchor governance: refusing to --regen")
             for prob in changed:
                 print(f"  - {prob}")
             print("  a released anchor was edited on disk; regenerating the lock "
                   "now would silently launder that edit. Add a new anchor/version "
-                  "instead, or re-run with --force if this edit was an intentional, "
-                  "reviewed change to the released anchor.")
+                  "instead; released IDs cannot be re-locked, including with "
+                  "--force.")
             return 1
-        path = write_lock()
+        try:
+            path = write_lock()
+        except ValueError as exc:
+            print(f"evaluator-anchor governance: refusing to --regen: {exc}")
+            return 1
         print(f"wrote {path}")
         return 0
 

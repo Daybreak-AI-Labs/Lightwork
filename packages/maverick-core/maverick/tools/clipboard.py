@@ -135,41 +135,112 @@ def _write_clipboard(text: str) -> bool:
     return False
 
 
-def _consent_ok(op: str) -> bool:
-    """Gate clipboard read/write through the consent/approvals path.
+def _clipboard_target() -> dict[str, object]:
+    """Return the live host-surface binding checked again before access."""
+
+    return {
+        "surface": "host-desktop-clipboard",
+        "disabled": os.environ.get("MAVERICK_CLIPBOARD_DISABLE") == "1",
+    }
+
+
+def _operation_permit(op: str, text: str | None = None):
+    """Gate clipboard read/write through an exact one-use approval card.
 
     The clipboard routinely holds passwords / 2FA codes / tokens, so a
     prompt-injected agent could silently exfiltrate (read) or plant
-    (write) content. Both ops therefore go through ``require_consent``.
-    Under the default 'auto-approve' mode this is a no-op (granted +
-    logged), so behavior is unchanged out of the box; an operator who
-    sets MAVERICK_CONSENT_MODE to ask / dashboard / auto-deny gets every
-    clipboard access gated. A denial returns False so the caller can
-    surface a clear error instead of crashing.
+    (write) content. Both ops therefore require a fresh human decision;
+    silent auto-approval and standing grants are ineligible. A denial
+    returns a clear tool error instead of crashing.
 
     This tool stays on the host path -- the desktop clipboard can't be
     sandboxed (see the module docstring) -- so the consent gate is its
     safety boundary, not sandbox.exec.
     """
-    from ..safety import ConsentDenied, require_consent
-    try:
-        require_consent(
-            "clipboard", risk="high", scope=op, detail=f"clipboard {op}",
-            raise_on_deny=True,
-        )
-        return True
-    except ConsentDenied:
-        return False
+    from ..safety import require_operation_consent
+
+    parameters = {"operation": op}
+    if op == "write":
+        parameters["text"] = text
+    effects = (
+        ["Reads the current host clipboard and returns its contents to the run."]
+        if op == "read"
+        else ["Replaces the current host clipboard with the exact committed text."]
+    )
+    before = (
+        "The run has not read the current host clipboard."
+        if op == "read"
+        else "The host clipboard has not been changed by this operation."
+    )
+    after = (
+        "The clipboard contents are available to the current run."
+        if op == "read"
+        else "The host clipboard contains the reviewed text."
+    )
+    return require_operation_consent(
+        f"clipboard.{op}",
+        risk="high",
+        scope=f"host clipboard / {op}",
+        detail=f"{op.title()} the host clipboard once.",
+        provenance="clipboard",
+        target=_clipboard_target(),
+        parameters=parameters,
+        parameter_summary=[
+            (
+                "Read the clipboard value present at the effect boundary."
+                if op == "read"
+                else f"Write the exact {len(text or '')}-character value committed by SHA-256."
+            )
+        ],
+        known_effects=effects,
+        unresolved_assumptions=[
+            "The clipboard may contain sensitive data owned by another application."
+        ],
+        before=before,
+        after=after,
+        irreversible=op == "write",
+        target_provider=_clipboard_target,
+        parameters_provider=lambda: dict(parameters),
+        credential_versions_provider=lambda: {
+            "state": "not_applicable",
+            "surface": "host-desktop-clipboard",
+        },
+        budget_provider=lambda: {"backend_timeout_seconds": 5},
+        allow_auto_approve=False,
+        consult_ledger=False,
+    )
 
 
 def _run(args: dict[str, Any]) -> str:
     if os.environ.get("MAVERICK_CLIPBOARD_DISABLE") == "1":
         return "ERROR: clipboard tool disabled by MAVERICK_CLIPBOARD_DISABLE=1"
     op = args.get("op")
-    if op in ("read", "write") and not _consent_ok(op):
-        return "ERROR: clipboard access denied (consent)"
+    if op == "write" and not isinstance(args.get("text", ""), str):
+        return "ERROR: write text must be a string"
+    if op not in ("read", "write"):
+        return f"ERROR: unknown op {op!r}"
+    text = args.get("text", "") if op == "write" else None
+    from ..approval_cards import ApprovalCardError
+    from ..safety import ConsentDenied, consume_operation_consent
+
+    try:
+        permit = _operation_permit(op, text)
+    except ConsentDenied:
+        return "ERROR: clipboard access was not approved; no clipboard action was sent"
+    except ApprovalCardError:
+        return (
+            "ERROR: the clipboard target or approval authority changed; "
+            "review it again"
+        )
     if op == "read":
-        val = _read_clipboard()
+        try:
+            with consume_operation_consent(permit):
+                val = _read_clipboard()
+        except ApprovalCardError:
+            return (
+                "ERROR: the clipboard target or approval authority changed; "
+                "review it again"
+            )
         if val is None:
             return (
                 "ERROR: no clipboard backend available. Install one of: "
@@ -177,16 +248,21 @@ def _run(args: dict[str, Any]) -> str:
             )
         return val
     if op == "write":
-        text = args.get("text", "")
-        if not isinstance(text, str):
-            return "ERROR: write text must be a string"
-        if _write_clipboard(text):
+        try:
+            with consume_operation_consent(permit):
+                wrote = _write_clipboard(text)
+        except ApprovalCardError:
+            return (
+                "ERROR: the clipboard target or approval authority changed; "
+                "review it again"
+            )
+        if wrote:
             return f"wrote {len(text)} chars to clipboard"
         return (
             "ERROR: no clipboard backend available. Install one of: "
             "pyperclip (pip), xclip / xsel (X11), wl-clipboard (Wayland)."
         )
-    return f"ERROR: unknown op {op!r}"
+    raise AssertionError("validated clipboard operation was not handled")
 
 
 def clipboard() -> Tool:

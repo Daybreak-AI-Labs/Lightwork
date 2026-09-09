@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import time
 from collections.abc import Callable
 
@@ -11,6 +13,22 @@ from maverick.privacy_ops import RecordConflict
 
 _PREFERENCES = GovernedRecordStore("action_center_preferences", "ACP", "attention_preferences")
 SOURCE_LIMIT = 2000
+_VENDOR_CASE_ID = re.compile(r"VON-[A-Za-z0-9_-]{1,59}\Z")
+_VENDOR_OPERATION_ID = re.compile(r"VOP-[a-f0-9]{32}\Z")
+_VENDOR_PROJECT = re.compile(r"[A-Z][A-Z0-9_]{1,31}\Z")
+_RECONCILIATION_REASONS = frozenset({
+    "current_connection_access_unavailable",
+    "no_matching_effect_observed",
+    "multiple_matching_effects_observed",
+    "matching_effect_content_mismatch",
+    "authoritative_readback_unavailable",
+    "receipt_recorded_readback_unverified",
+    "attempt_result_unrecorded",
+})
+_READBACK_STATES = frozenset({
+    "not_completed", "access_unavailable", "no_match", "multiple_matches",
+    "readback_mismatch", "readback_unavailable", "exact_match_verified",
+})
 
 
 def _digest(value) -> str:
@@ -26,9 +44,253 @@ def _item(kind, key, title, *, href, owner="", due_at=None, updated_at=0, versio
     return value
 
 
+def _projection_error():
+    raise ValueError("invalid reconciliation projection")
+
+
+def _closed(value, keys):
+    if not isinstance(value, dict) or set(value) != set(keys):
+        _projection_error()
+    return value
+
+
+def _bounded_text(value, *, limit=2000):
+    if (not isinstance(value, str) or not value or value.strip() != value
+            or len(value) > limit):
+        _projection_error()
+    return value
+
+
+def _timestamp(value, *, optional=False):
+    if optional and value is None:
+        return None
+    if (isinstance(value, bool) or not isinstance(value, int | float)
+            or not math.isfinite(float(value)) or float(value) <= 0):
+        _projection_error()
+    return float(value)
+
+
+def _project_observation(value):
+    if not isinstance(value, dict):
+        _projection_error()
+    kind = value.get("kind")
+    if kind == "execution_attempt":
+        _closed(value, {"kind", "state", "count", "observed_at"})
+        if value.get("state") != "recorded" or type(value.get("count")) is not int \
+                or value["count"] < 1:
+            _projection_error()
+        return {"kind": kind, "state": "recorded", "count": value["count"],
+                "observed_at": _timestamp(value.get("observed_at"))}
+    if kind == "provider_receipt":
+        _closed(value, {"kind", "state"})
+        if value.get("state") not in {"recorded", "not_recorded"}:
+            _projection_error()
+        return {"kind": kind, "state": value["state"]}
+    if kind != "authoritative_readback":
+        _projection_error()
+    allowed = {"kind", "state", "observed_at", "match_count", "match_count_lower_bound"}
+    if not set(value).issubset(allowed) or not {"kind", "state", "observed_at"}.issubset(value):
+        _projection_error()
+    state = value.get("state")
+    if state not in _READBACK_STATES:
+        _projection_error()
+    exact, lower = value.get("match_count"), value.get("match_count_lower_bound")
+    if exact is not None and (type(exact) is not int or exact < 0):
+        _projection_error()
+    if lower is not None and (type(lower) is not int or lower < 2):
+        _projection_error()
+    if exact is not None and lower is not None:
+        _projection_error()
+    if state == "no_match" and exact != 0:
+        _projection_error()
+    if state == "multiple_matches" and not (
+        type(exact) is int and exact >= 2 or type(lower) is int and lower >= 2
+    ):
+        _projection_error()
+    if state == "not_completed" and (exact is not None or lower is not None):
+        _projection_error()
+    observed_at = _timestamp(value.get("observed_at"), optional=True)
+    if (state == "not_completed") != (observed_at is None):
+        _projection_error()
+    if state in {"exact_match_verified", "readback_mismatch"} and exact != 1:
+        _projection_error()
+    projected = {"kind": kind, "state": state, "observed_at": observed_at}
+    if exact is not None:
+        projected["match_count"] = exact
+    if lower is not None:
+        projected["match_count_lower_bound"] = lower
+    return projected
+
+
+def _project_reconciliation(value):
+    _closed(value, {
+        "schema", "attempted_action", "known_observations", "uncertainty",
+        "safe_next_check", "responsible_operator", "resolution",
+    })
+    if value.get("schema") != "lightwork.vendor-onboarding.reconciliation-summary.v1":
+        _projection_error()
+    attempted = _closed(value.get("attempted_action"), {
+        "operation_id", "action", "attempt_count", "started_at", "target",
+    })
+    target = _closed(attempted.get("target"), {"provider", "project"})
+    if (not isinstance(attempted.get("operation_id"), str)
+            or not _VENDOR_OPERATION_ID.fullmatch(attempted["operation_id"])
+            or attempted.get("action") != "jira.create"
+            or type(attempted.get("attempt_count")) is not int
+            or attempted["attempt_count"] < 1
+            or target.get("provider") != "jira"
+            or not isinstance(target.get("project"), str)
+            or not _VENDOR_PROJECT.fullmatch(target["project"])):
+        _projection_error()
+    attempted = {
+        "operation_id": attempted["operation_id"], "action": "jira.create",
+        "attempt_count": attempted["attempt_count"],
+        "started_at": _timestamp(attempted.get("started_at")),
+        "target": {"provider": "jira", "project": target["project"]},
+    }
+    observations = value.get("known_observations")
+    if not isinstance(observations, list) or len(observations) != 3:
+        _projection_error()
+    observations = [_project_observation(item) for item in observations]
+    if {item["kind"] for item in observations} != {
+        "execution_attempt", "provider_receipt", "authoritative_readback",
+    }:
+        _projection_error()
+    observed = {item["kind"]: item for item in observations}
+    if (observed["execution_attempt"]["count"] != attempted["attempt_count"]
+            or observed["execution_attempt"]["observed_at"] != attempted["started_at"]):
+        _projection_error()
+    uncertainty = _closed(value.get("uncertainty"), {"state", "reason", "explanation"})
+    if (uncertainty.get("state") != "unresolved"
+            or uncertainty.get("reason") not in _RECONCILIATION_REASONS):
+        _projection_error()
+    uncertainty = {"state": "unresolved", "reason": uncertainty["reason"],
+                   "explanation": _bounded_text(uncertainty.get("explanation"))}
+    next_check = value.get("safe_next_check")
+    if not isinstance(next_check, dict):
+        _projection_error()
+    kind = next_check.get("kind")
+    expected_keys = {"kind", "label", "mode", "href"} if kind == "restore_access" else {
+        "kind", "label", "mode",
+    }
+    _closed(next_check, expected_keys)
+    if kind not in {"check_status", "review_ambiguity", "restore_access"} \
+            or next_check.get("mode") != "read_only":
+        _projection_error()
+    next_check = {"kind": kind, "label": _bounded_text(next_check.get("label"), limit=500),
+                  "mode": "read_only"}
+    if kind == "restore_access":
+        if value["safe_next_check"].get("href") != "/connections":
+            _projection_error()
+        next_check["href"] = "/connections"
+    reason = uncertainty["reason"]
+    readback_state = observed["authoritative_readback"]["state"]
+    receipt_state = observed["provider_receipt"]["state"]
+    expected = {
+        "current_connection_access_unavailable": ("restore_access", None),
+        "no_matching_effect_observed": ("check_status", "no_match"),
+        "multiple_matching_effects_observed": ("review_ambiguity", "multiple_matches"),
+        "matching_effect_content_mismatch": ("review_ambiguity", "readback_mismatch"),
+        "authoritative_readback_unavailable": ("check_status", "readback_unavailable"),
+        "receipt_recorded_readback_unverified": ("check_status", "not_completed"),
+        "attempt_result_unrecorded": ("check_status", "not_completed"),
+    }[reason]
+    if kind != expected[0] or (expected[1] is not None and readback_state != expected[1]):
+        _projection_error()
+    if reason == "receipt_recorded_readback_unverified" and receipt_state != "recorded":
+        _projection_error()
+    if reason == "attempt_result_unrecorded" and receipt_state != "not_recorded":
+        _projection_error()
+    responsible = _closed(value.get("responsible_operator"), {"principal", "business_owner"})
+    responsible = {
+        "principal": _bounded_text(responsible.get("principal"), limit=256),
+        "business_owner": _bounded_text(responsible.get("business_owner"), limit=256),
+    }
+    resolution = _closed(value.get("resolution"), {
+        "automatic_compensation_supported", "unreviewed_replacement_allowed",
+        "requires_separate_review", "explanation",
+    })
+    if (resolution.get("automatic_compensation_supported") is not False
+            or resolution.get("unreviewed_replacement_allowed") is not False
+            or resolution.get("requires_separate_review") is not True):
+        _projection_error()
+    resolution = {
+        "automatic_compensation_supported": False,
+        "unreviewed_replacement_allowed": False,
+        "requires_separate_review": True,
+        "explanation": _bounded_text(resolution.get("explanation")),
+    }
+    return {
+        "schema": "lightwork.vendor-onboarding.reconciliation-summary.v1",
+        "attempted_action": attempted, "known_observations": observations,
+        "uncertainty": uncertainty, "safe_next_check": next_check,
+        "responsible_operator": responsible, "resolution": resolution,
+    }
+
+
+def _vendor_reconciliation_item(case: dict) -> dict:
+    if not isinstance(case, dict):
+        _projection_error()
+    case_id = case.get("id")
+    vendor_name = case.get("vendor_name")
+    revision = case.get("revision")
+    owner = case.get("owner")
+    if (not isinstance(case_id, str) or not _VENDOR_CASE_ID.fullmatch(case_id)
+            or type(revision) is not int or revision < 1
+            or case.get("schema") != "lightwork.vendor-onboarding.v1"
+            or case.get("stage") not in {"executing", "reconciliation_required"}):
+        _projection_error()
+    vendor_name = _bounded_text(vendor_name, limit=256)
+    owner = _bounded_text(owner, limit=256)
+    updated_at = _timestamp(case.get("updated_at"))
+    due_at = _timestamp(case.get("due_at"), optional=True)
+    reconciliation = _project_reconciliation(case.get("reconciliation"))
+    if reconciliation["responsible_operator"]["business_owner"] != owner:
+        _projection_error()
+    item = _item(
+        "vendor_reconciliation",
+        case_id,
+        f"Resolve uncertain Jira task for {vendor_name}",
+        href=f"/third-party/vendor-onboarding?case={case_id}",
+        owner=reconciliation["responsible_operator"]["principal"],
+        due_at=due_at,
+        updated_at=updated_at,
+        version=[revision, reconciliation],
+        reason=reconciliation["uncertainty"]["explanation"],
+    )
+    item["reconciliation"] = reconciliation
+    return item
+
+
+def _collect_vendor_reconciliations(source: Callable[[], dict]) -> tuple[list[dict], str]:
+    result = source()
+    if (not isinstance(result, dict) or not isinstance(result.get("items"), list)
+            or type(result.get("complete")) is not bool):
+        raise ValueError("invalid reconciliation source")
+    if len(result["items"]) > SOURCE_LIMIT:
+        raise ValueError("unbounded reconciliation source")
+    return (
+        [_vendor_reconciliation_item(case) for case in result["items"]],
+        "current" if result["complete"] else "partial",
+    )
+
+
+def _vendor_reconciliation_source(
+    source: Callable[[], dict] | None,
+) -> tuple[list[dict], list[dict]]:
+    if source is None:
+        return [], []
+    try:
+        items, status = _collect_vendor_reconciliations(source)
+        return items, [{"kind": "vendor_reconciliation", "status": status}]
+    except Exception:
+        return [], [{"kind": "vendor_reconciliation", "status": "unavailable"}]
+
+
 def collect(world, *, principal: str | None, owner: str | None, specs: list[dict],
             assessments: Callable[[], list[dict]], assessment_allowed: Callable[[dict], bool],
             project_reviews: Callable[[], list[dict]] | None = None,
+            vendor_reconciliations: Callable[[], dict] | None = None,
             now: float | None = None) -> dict:
     """Project only authorized content; report failed or bounded sources honestly."""
     now = time.time() if now is None else now
@@ -100,6 +362,11 @@ def collect(world, *, principal: str | None, owner: str | None, specs: list[dict
             coverage.append({"kind": "project_review", "status": "current"})
         except Exception:
             coverage.append({"kind": "project_review", "status": "unavailable"})
+    reconciliations, reconciliation_coverage = _vendor_reconciliation_source(
+        vendor_reconciliations,
+    )
+    items.extend(reconciliations)
+    coverage.extend(reconciliation_coverage)
     for row in items:
         row["overdue"] = bool(row["due_at"] and row["due_at"] <= now)
         row["assignment"] = "mine" if principal and row["owner"] == principal else "available"

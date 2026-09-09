@@ -7,11 +7,11 @@
 //! `SecretMatch` (incl. its preview) and does the string splicing, so behaviour
 //! can never drift from the pure-Python redactor. Patterns are compiled once.
 //!
-//! Engine: `fancy-regex`. None of these patterns use look-around, so each
-//! compiles to the linear `regex` backend — but routing every detector through
-//! one backtracking engine keeps semantics identical to Python's `re` and lets
-//! us share the fail-safe error path (any engine error => caller falls back to
-//! pure Python, i.e. err toward over-redaction).
+//! Engine: `fancy-regex`. Most patterns compile to its linear `regex` backend;
+//! the Lightwork capability-token boundaries use fixed look-around. Routing
+//! every detector through one engine keeps semantics identical to Python's
+//! `re` and lets us share the fail-safe error path (any engine error => caller
+//! falls back to pure Python, i.e. err toward over-redaction).
 
 use crate::{byte_spans_to_char, compile_pattern};
 use fancy_regex::Regex;
@@ -63,6 +63,16 @@ static DEFS: &[(&str, &str, bool)] = &[
     ),
     ("stripe_live_key", r"\bsk_live_[0-9a-zA-Z]{24,}\b", false),
     ("stripe_test_key", r"\bsk_test_[0-9a-zA-Z]{24,}\b", false),
+    (
+        "lightwork_agent_token",
+        r"(?<![A-Za-z0-9_-])lw-(?:rest|mcp)-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])",
+        false,
+    ),
+    (
+        "lightwork_flow_approval_token",
+        r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{16,}\.[0-9a-fA-F]{64}(?![0-9a-fA-F])",
+        false,
+    ),
     (
         "jwt",
         r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",

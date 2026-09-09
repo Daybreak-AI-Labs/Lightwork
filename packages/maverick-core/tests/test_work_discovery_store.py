@@ -166,6 +166,38 @@ def test_store_is_owner_device_tenant_scoped_even_with_a_shared_database(store):
     assert other_tenant.get_enrollment() is None
     assert other_tenant.list_events() == []
 
+    own_projection = store.governed_candidate_projection()
+    other_tenant.enroll(policy)
+    other_projection = other_tenant.governed_candidate_projection()
+    assert own_projection["owner_sha256"] != other_projection["owner_sha256"]
+    assert own_projection["device_sha256"] != other_projection["device_sha256"]
+    assert (
+        own_projection["lineage"]["event_sha256"]
+        != other_projection["lineage"]["event_sha256"]
+    )
+
+
+def test_governed_candidate_projection_requires_live_exact_consent(store):
+    policy = _policy()
+    enrollment = store.enroll(policy)
+
+    projection = store.governed_candidate_projection()
+
+    assert projection["schema"] == "lightwork.ekko-knowledge-projection.v1"
+    assert projection["consent"] == {
+        "policy_sha256": policy.fingerprint(),
+        "enrolled_at": enrollment.enrolled_at,
+        "valid_until": enrollment.expires_at,
+    }
+    assert projection["lineage"]["event_count"] == 0
+    assert len(projection["lineage"]["event_sha256"]) == 64
+    assert projection["candidates"] == []
+    assert "alice" not in str(projection)
+
+    store.revoke_enrollment()
+    with pytest.raises(EnrollmentRequired, match="not enrolled"):
+        store.governed_candidate_projection()
+
 
 def test_same_tenant_ciphertext_transplant_across_owner_scope_is_rejected(store):
     policy = _policy()

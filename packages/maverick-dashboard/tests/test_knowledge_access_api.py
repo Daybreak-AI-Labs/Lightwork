@@ -1,0 +1,480 @@
+"""APP10 authenticated knowledge UI/API boundaries."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+import secrets
+
+import pytest
+from fastapi.testclient import TestClient
+from maverick import config, governed_records, world_model
+from maverick.knowledge_access import (
+    KnowledgeAccessService,
+    KnowledgeActorAuthority,
+    KnowledgeDocument,
+)
+from maverick.research_registry import (
+    DataUseAuthority,
+    RegistryReviewAuthority,
+    ResearchRegistry,
+    ResearchRegistryDenied,
+)
+
+BASE = "/api/v1/knowledge-access"
+ORIGIN = "http://127.0.0.1:8765"
+OWNER = "user:knowledge-owner@example.test"
+PURPOSE = "product_research"
+FUTURE = 4_102_444_800.0
+
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+@pytest.fixture
+def customer(tmp_path, monkeypatch):
+    for key in tuple(os.environ):
+        if key.startswith(("MAVERICK_", "LIGHTWORK_")) or key.endswith("_API_KEY"):
+            monkeypatch.delenv(key, raising=False)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(home / "config.toml"))
+    monkeypatch.setenv("MAVERICK_SECURE_DEFAULT", "0")
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "local")
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
+    monkeypatch.setenv("MAVERICK_VOICE_AUTO_FETCH", "0")
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    config.reset_config_cache()
+    governed_records._reset_process_authority_pin_for_testing()
+
+    rights: dict[tuple[str, str], dict] = {}
+
+    def data_use(tenant, decision_id, decision_sha256):
+        asset_id = decision_id.removeprefix("decision-")
+        state = rights.get((tenant, asset_id))
+        if state is None or not state["allowed"]:
+            raise ResearchRegistryDenied("fixture rights revoked")
+        if decision_sha256 != _sha(f"{tenant}:{decision_id}"):
+            raise ResearchRegistryDenied("fixture decision changed")
+        return DataUseAuthority(
+            tenant=tenant,
+            decision_id=decision_id,
+            decision_sha256=decision_sha256,
+            asset_id=asset_id,
+            action=state["action"],
+            purpose_codes=(PURPOSE,),
+            expires_at=state["expires_at"],
+            authority_sha256=_sha(f"authority:{tenant}:{asset_id}"),
+        )
+
+    registry = ResearchRegistry(
+        data_use_resolver=data_use,
+        review_authority_resolver=lambda tenant, actor: RegistryReviewAuthority(
+            tenant,
+            actor,
+            _sha(f"review:{tenant}:{actor}"),
+        ),
+    )
+
+    def content(tenant, reference, admission):
+        label = reference.asset_id.replace("-", " ").replace("_", " ")
+        return KnowledgeDocument(
+            tenant=tenant,
+            reference=reference,
+            content_sha256=admission.content_sha256,
+            title=f"<script>{tenant} {label}</script>",
+            summary=f"Private {tenant} derived summary for {reference.asset_id}.",
+            claim_state="verified",
+            observed_at=1_700_000_000.0,
+            verified_at=1_700_000_100.0,
+        )
+
+    service = KnowledgeAccessService(
+        registry=registry,
+        content_resolver=content,
+        actor_authority_resolver=lambda tenant, actor, action, purpose: (
+            KnowledgeActorAuthority(
+                tenant=tenant,
+                principal=actor,
+                action=action,
+                purpose=purpose,
+                authorization_sha256=_sha(
+                    f"actor:{tenant}:{actor}:{action}:{purpose}"
+                ),
+            )
+        ),
+    )
+
+    from maverick_dashboard.app import app
+
+    app.state.knowledge_access_service = service
+    with TestClient(
+        app,
+        base_url=ORIGIN,
+        client=("127.0.0.1", 53220),
+        headers={"Origin": ORIGIN},
+        follow_redirects=False,
+    ) as client:
+        enrolled = client.post(
+            "/auth/local-owner",
+            data={
+                "email": OWNER.removeprefix("user:"),
+                "password": "Disposable owner " + secrets.token_hex(16),  # pragma: allowlist secret
+                "confirm": "yes",
+            },
+        )
+        assert enrolled.status_code == 303, enrolled.text
+        for tenant in ("knowledge-a", "knowledge-b"):
+            assert client.post(
+                "/api/v1/admin/tenants",
+                json={"id": tenant, "display_name": tenant, "plan": "free"},
+            ).status_code == 201
+            assert client.put(
+                f"/api/v1/admin/tenants/{tenant}/roles/{OWNER}",
+                json={"role": "admin"},
+            ).status_code == 204
+        _select(client, "knowledge-a")
+        yield client, service, registry, rights
+    delattr(app.state, "knowledge_access_service")
+    governed_records._reset_process_authority_pin_for_testing()
+    config.reset_config_cache()
+
+
+def _select(client, tenant):
+    response = client.put("/api/v1/workspace/active-tenant", json={"tenant_id": tenant})
+    assert response.status_code == 200, response.text
+    client.headers["X-Lightwork-Expected-Tenant"] = tenant
+
+
+def _context(client) -> str:
+    response = client.get(BASE + "/requests")
+    assert response.status_code == 200, response.text
+    return response.json()["context"]
+
+
+def _dataset(registry, rights, tenant, asset_id, *, parent_datasets=()):
+    rights[(tenant, asset_id)] = {
+        "allowed": True,
+        "action": "export",
+        "expires_at": FUTURE,
+    }
+    reference = registry.register_dataset(
+        tenant,
+        "user:source-owner",
+        dataset_id=asset_id,
+        version="v1",
+        source_ref=f"catalog:{tenant}/{asset_id}/v1",
+        content_sha256=_sha(f"content:{tenant}:{asset_id}"),
+        license_id="customer-authorized",
+        license_evidence_sha256=_sha(f"license:{tenant}:{asset_id}"),
+        allowed_purposes=(PURPOSE,),
+        usage_constraints=("tenant_only", "separate_training_permission_required"),
+        data_use_action="export",
+        data_use_decision_id=f"decision-{asset_id}",
+        data_use_decision_sha256=_sha(f"{tenant}:decision-{asset_id}"),
+        parent_datasets=parent_datasets,
+    )
+    return registry.approve(
+        tenant,
+        "user:independent-reviewer",
+        reference,
+        expected_revision=1,
+    )
+
+
+def _ref(reference):
+    from dataclasses import asdict
+
+    return asdict(reference)
+
+
+def test_page_assets_navigation_and_customer_language(customer):
+    client, _service, _registry, _rights = customer
+    page = client.get("/knowledge-access")
+    assert page.status_code == 200, page.text
+    assert "Find knowledge you can use now" in page.text
+    assert "does not grant permission to train" in page.text
+    assert "does not erase its influence from learned weights" in page.text
+    assert 'data-tenant="knowledge-a"' in page.text
+    assert f'data-actor="{OWNER}"' in page.text
+    assert re.search(r"style-src 'self' 'nonce-[A-Za-z0-9_-]+'", page.headers["content-security-policy"])
+    assert client.get("/static/lightwork-knowledge-access.js").status_code == 200
+    assert client.get("/static/lightwork-knowledge-access.css").status_code == 200
+    assert client.get("/knowledge-access?unexpected=1").status_code == 404
+
+    from maverick_dashboard import ui_visibility
+
+    entry = ui_visibility.page_for("/knowledge-access")
+    assert entry and entry["floor"] == "operate"
+    assert "/knowledge-access" in {
+        link["href"]
+        for group in ui_visibility.nav_groups("operator")
+        for link in group["links"]
+    }
+
+
+def test_revoke_after_cache_blocks_search_detail_and_export(customer):
+    client, _service, registry, rights = customer
+    source = _dataset(registry, rights, "knowledge-a", "cached-policy")
+    context = _context(client)
+    search = {
+        "context": context,
+        "query": "cached policy",
+        "purpose": PURPOSE,
+        "limit": 20,
+    }
+    first = client.post(BASE + "/search", json=search)
+    assert first.status_code == 200, first.text
+    assert first.json()["count"] == 1
+    assert "Private knowledge-a derived summary" in first.text
+    assert first.json()["items"][0]["eligibility"]["requested_action"] == "read"
+    assert first.json()["items"][0]["eligibility"]["actor"] == OWNER
+    assert first.json()["tenant"] == "knowledge-a"
+    assert first.json()["actor"] == OWNER
+    assert first.json()["actor_authorization_sha256"] == first.json()["items"][0][
+        "eligibility"
+    ]["actor_authorization_sha256"]
+
+    rights[("knowledge-a", "cached-policy")]["allowed"] = False
+    withheld = client.post(BASE + "/search", json=search)
+    assert withheld.status_code == 200, withheld.text
+    assert withheld.json()["items"] == []
+    assert withheld.json()["omitted_ineligible"] == 1
+    assert "cached-policy" not in str(withheld.json()["items"])
+    for path, body in (
+        ("/detail", {"context": context, "reference": _ref(source), "purpose": PURPOSE}),
+        (
+            "/export",
+            {"context": context, "references": [_ref(source)], "purpose": PURPOSE},
+        ),
+    ):
+        response = client.post(BASE + path, json=body)
+        assert response.status_code == 409, response.text
+        assert "cached-policy" not in response.text
+        assert "Private knowledge-a" not in response.text
+        assert "no-store" in response.headers["cache-control"]
+
+
+def test_same_labels_do_not_cross_tenant_search_export_or_cache(customer):
+    client, _service, registry, rights = customer
+    source_a = _dataset(registry, rights, "knowledge-a", "same-label")
+    source_b = _dataset(registry, rights, "knowledge-b", "same-label")
+    context_a = _context(client)
+    result_a = client.post(
+        BASE + "/search",
+        json={"context": context_a, "query": "same-label", "purpose": PURPOSE, "limit": 20},
+    )
+    assert result_a.status_code == 200
+    assert "Private knowledge-a" in result_a.text
+    assert "knowledge-b" not in result_a.text
+
+    _select(client, "knowledge-b")
+    context_b = _context(client)
+    foreign = client.post(
+        BASE + "/detail",
+        json={"context": context_b, "reference": _ref(source_a), "purpose": PURPOSE},
+    )
+    assert foreign.status_code == 409
+    assert "knowledge-a" not in foreign.text
+    result_b = client.post(
+        BASE + "/search",
+        json={"context": context_b, "query": "same-label", "purpose": PURPOSE, "limit": 20},
+    )
+    assert "Private knowledge-b" in result_b.text
+    assert "knowledge-a" not in result_b.text
+    exported = client.post(
+        BASE + "/export",
+        json={"context": context_b, "references": [_ref(source_b)], "purpose": PURPOSE},
+    )
+    assert exported.status_code == 200
+    assert "Private knowledge-b" in exported.text
+    assert "knowledge-a" not in exported.text
+    body = exported.json()
+    assert body["items"][0]["eligibility"]["requested_action"] == "export"
+    assert body["actor"] == OWNER
+    assert body["authority_evidence"]["actor"] == OWNER
+    assert body["authority_evidence"]["sources"][0]["reference"] == _ref(source_b)
+    assert body["qualification"]["external_store_and_customer_qualification"] == (
+        "qualification_pending"
+    )
+
+
+def test_correction_request_and_approved_deletion_show_lineage_honestly(customer):
+    client, service, registry, rights = customer
+    source = _dataset(registry, rights, "knowledge-a", "customer-source")
+    derived = _dataset(
+        registry,
+        rights,
+        "knowledge-a",
+        "derived-source",
+        parent_datasets=(source,),
+    )
+    model = registry.register_model(
+        "knowledge-a",
+        "user:model-owner",
+        model_id="candidate-model",
+        version="v1",
+        source_ref="artifact:knowledge-a/candidate-model/v1",
+        artifact_sha256=_sha("candidate weights"),
+        license_id="internal-model-license",
+        license_evidence_sha256=_sha("model license"),
+        allowed_purposes=(PURPOSE,),
+        usage_constraints=("tenant_only",),
+        provider_model_identity="candidate-model-v1",
+        immutable_provider_revision=_sha("provider revision"),
+        dataset_lineage=(derived,),
+        dataset_lineage_purpose=PURPOSE,
+    )
+    registry.approve("knowledge-a", "user:model-reviewer", model, expected_revision=1)
+    context = _context(client)
+    submitted = client.post(
+        BASE + "/requests",
+        json={
+            "context": context,
+            "confirm": True,
+            "reference": _ref(source),
+            "request_type": "deletion",
+            "reason": "Customer approved deletion request.",
+            "request_key": "customer-deletion-1",
+            "proposed_correction": None,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request = submitted.json()
+    assert {item["required_action"] for item in request["derivatives"]} == {
+        "invalidate_dataset",
+        "retire_or_retrain_model",
+    }
+    assert "does not erase its influence from learned weights" in request["weight_influence_notice"]
+
+    decided = client.post(
+        BASE + "/requests/" + request["id"] + "/decision",
+        json={
+            "context": context,
+            "confirm": True,
+            "expected_revision": request["revision"],
+            "decision": "approve",
+            "evidence_sha256": _sha("review rationale"),
+        },
+    )
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "approved"
+    assert decided.json()["raw_record_status"] == "external_source_deletion_unverified"
+    assert any(
+        row["workflow_state"] == "retire_or_retrain_model_required"
+        for row in decided.json()["derivatives"]
+    )
+    assert service.search(
+        "knowledge-a",
+        OWNER,
+        query="customer",
+        purpose=PURPOSE,
+    )["items"] == []
+
+
+def test_context_confirmation_and_malformed_inputs_fail_closed(customer):
+    client, _service, registry, rights = customer
+    source = _dataset(registry, rights, "knowledge-a", "input-source")
+    context = _context(client)
+    wrong = client.post(
+        BASE + "/detail",
+        json={"context": "f" * 64, "reference": _ref(source), "purpose": PURPOSE},
+    )
+    assert wrong.status_code == 409
+    assert "input-source" not in wrong.text
+    unconfirmed = client.post(
+        BASE + "/requests",
+        json={
+            "context": context,
+            "confirm": False,
+            "reference": _ref(source),
+            "request_type": "exclusion",
+            "reason": "Review needed.",
+            "request_key": "request-unconfirmed",
+        },
+    )
+    assert unconfirmed.status_code == 422
+    malformed = client.post(
+        BASE + "/search",
+        json={"context": context, "query": "x", "purpose": "../tenant-b", "limit": 500},
+    )
+    assert malformed.status_code == 422
+    assert malformed.headers["cache-control"] == "private, no-store"
+
+
+def test_retention_hold_and_release_are_available_through_authenticated_api(customer):
+    client, _service, registry, rights = customer
+    source = _dataset(registry, rights, "knowledge-a", "api-held-source")
+    context = _context(client)
+    submitted = client.post(
+        BASE + "/requests",
+        json={
+            "context": context,
+            "confirm": True,
+            "reference": _ref(source),
+            "request_type": "deletion",
+            "reason": "Deletion follows the preservation review.",
+            "request_key": "api-held-deletion",
+            "proposed_correction": None,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    request = submitted.json()
+    held = client.post(
+        BASE + f"/requests/{request['id']}/retention-hold",
+        json={
+            "context": context,
+            "confirm": True,
+            "expected_revision": request["revision"],
+            "hold_id": "matter-2026-8",
+            "basis": "Preserve while the legal matter remains open.",
+            "expires_at": FUTURE,
+            "evidence_sha256": _sha("api hold evidence"),
+        },
+    )
+    assert held.status_code == 200, held.text
+    assert held.json()["retention_hold"]["effective_status"] == "active"
+    released = client.post(
+        BASE + f"/requests/{request['id']}/retention-hold/release",
+        json={
+            "context": context,
+            "confirm": True,
+            "expected_revision": held.json()["revision"],
+            "reason": "The legal matter closed.",
+            "evidence_sha256": _sha("api release evidence"),
+        },
+    )
+    assert released.status_code == 200, released.text
+    assert released.json()["retention_hold"]["effective_status"] == "released"
+    assert released.json()["retention_hold"]["release_reason"] == (
+        "The legal matter closed."
+    )
+
+
+def test_feature_gate_and_request_byte_boundary_fail_closed(customer, monkeypatch):
+    client, _service, registry, rights = customer
+    source = _dataset(registry, rights, "knowledge-a", "bounded-source")
+    context = _context(client)
+
+    oversized = client.post(
+        BASE + "/detail",
+        headers={"Content-Length": str(128 * 1024 + 1)},
+        json={"context": context, "reference": _ref(source), "purpose": PURPOSE},
+    )
+    assert oversized.status_code == 413
+    assert oversized.headers["cache-control"] == "private, no-store"
+    assert "bounded-source" not in oversized.text
+
+    monkeypatch.setenv("MAVERICK_KNOWLEDGE_ACCESS", "0")
+    assert client.get("/knowledge-access").status_code == 404
+    disabled = client.post(
+        BASE + "/detail",
+        json={"context": context, "reference": _ref(source), "purpose": PURPOSE},
+    )
+    assert disabled.status_code == 404
+    assert "bounded-source" not in disabled.text

@@ -6,6 +6,7 @@ remains an operator decision and does not establish invoice authenticity.
 from __future__ import annotations
 
 import copy
+import math
 import time
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from functools import lru_cache
@@ -84,6 +85,11 @@ def allocate(pilot_id, body, *, context, actor, resolve, service=None):
     source = sources(service).get(body["observation_id"])
     if source is None or source["version"] != body["billing_version"]:
         raise RecordConflict("The billing source or its corrections changed. Review the current admitted cost.")
+    if Decimal(source["net_cost"]) < 0:
+        raise ValueError(
+            "Provider credits cannot be allocated as positive delivery cost. Record or "
+            "review a nonnegative provider cost source instead."
+        )
     cases = {case["id"]: case for case in record["cases"]}
     shares = body["shares"]
     if len({share["case_id"] for share in shares}) != len(shares):
@@ -127,13 +133,25 @@ def allocate(pilot_id, body, *, context, actor, resolve, service=None):
 
 
 def _coverage(record, rows, totals, per_case, current_sources, resolve):
+    manifest = pilots.validate_admission_manifest(record, require_complete=True)
+    admissions = {
+        row["case_id"]: row["admitted_at"] for row in manifest["entries"]
+    }
     case_states, accessible = [], True
     for case in record["cases"]:
         try:
             source = resolve(case["kind"], case["reference"])
-            valid = (source["input_version"] == case["input_version"] and not source.get("sample")
-                     and source["finished"] is True and (source.get("first_started_at") is None
-                     or source["first_started_at"] > record["frozen_at"]))
+            started_at = source.get("first_started_at")
+            valid = (
+                source["input_version"] == case["input_version"]
+                and not source.get("sample")
+                and source["finished"] is True
+                and source.get("unstarted") is not True
+                and not isinstance(started_at, bool)
+                and isinstance(started_at, (int, float))
+                and math.isfinite(started_at)
+                and started_at > admissions[case["id"]]
+            )
             case_states.append({"id": case["id"], "version": source["version"], "eligible": valid,
                                 "accepted": valid and source.get("accepted") is True})
         except Exception:
@@ -217,7 +235,14 @@ def report(record, *, resolve, service=None):
             raise ValueError("Saved provider allocation evidence failed its version check.")
         source = allocation["source"]
         current = current_sources.get(source["id"])
-        state = "current" if current and current["version"] == source["version"] else "billing_changed"
+        current_credit = (
+            current is not None and Decimal(current["net_cost"]) < 0
+        )
+        state = (
+            "unsupported_credit" if current_credit else
+            "current" if current and current["version"] == source["version"] else
+            "billing_changed"
+        )
         unavailable = False
         for entry, share in [(item, share) for item in versions for share in item["shares"]]:
             case = cases.get(share["case_id"])
@@ -244,15 +269,17 @@ def report(record, *, resolve, service=None):
                     bucket[code] = bucket.get(code, Decimal(0)) + value
             row["unallocated_cost"] = _money(amount * (10000 - sum(s["basis_points"] for s in allocation["shares"])) / 10000)
         rows.append(row)
+    unsupported_credits = sum(row["status"] == "unsupported_credit" for row in rows)
     return {"status": "partial" if any(row["status"] != "current" for row in rows) else "current",
             "evidence_class": "admitted_provider_cost_with_operator_allocation",
             "provider_invoice_verified": False, "allocations": rows,
+            "unsupported_credit_count": unsupported_credits,
             "current_totals_by_currency": {code: _money(value) for code, value in sorted(totals.items())},
             "current_case_totals": {case: {code: _money(value) for code, value in sorted(bucket.items())}
                                     for case, bucket in per_case.items()},
             "coverage": _coverage(record, rows, totals, per_case, current_sources, resolve),
             "limits": ["Provider amounts come from completed billing admissions; invoice authenticity is not independently verified.",
                        "Case attribution is a reviewed operator allocation. Changed billing corrections or case versions invalidate the allocation.",
-                       "Currencies are separate. Unallocated and unavailable costs are not treated as zero or included in totals.",
+                       "Currencies are separate. Unallocated, unavailable, and negative credit sources are not treated as zero or included in delivery-cost totals.",
                        "Reported total workflow costs and human/rework costs remain separate; these amounts are never added to reported totals automatically.",
                        "Duplicate allocation is prevented within this pilot. Reuse across different pilots is not a consolidated enterprise cost ledger."]}

@@ -153,13 +153,11 @@ def refine_list_cmd(status: str) -> None:
 @click.argument("proposal_id")
 @click.option("--approval-id", type=int, default=None,
               help="The approved approval authorizing this apply.")
-@click.option("--by", "applied_by", default="cli")
-def refine_apply_cmd(proposal_id: str, approval_id: int | None,
-                     applied_by: str) -> None:
+def refine_apply_cmd(proposal_id: str, approval_id: int | None) -> None:
     """Apply an approved proposal (snapshots first, so revert is real)."""
     from .. import harness_refine
     try:
-        out = harness_refine.apply(proposal_id, applied_by=applied_by,
+        out = harness_refine.apply(proposal_id, applied_by="cli",
                                    approval_id=approval_id)
     except harness_refine.RefineError as e:
         raise click.ClickException(str(e)) from e

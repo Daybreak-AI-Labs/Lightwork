@@ -44,7 +44,7 @@ def test_provider_admission_is_atomic_across_shared_connections(monkeypatch):
     monkeypatch.setattr(cap, "caps_from_config", lambda: {provider: 20.0})
     monkeypatch.setattr(cap, "period_from_config", lambda: "day")
     monkeypatch.setattr(cap, "_shared_world", lambda: current.world)
-    worlds[0].add_provider_spend(cap.period_key(0), provider, 18)
+    worlds[0].add_provider_spend(worlds[0].provider_cap_period("day"), provider, 18)
 
     def admit(index):
         current.world = worlds[index]
@@ -63,6 +63,53 @@ def test_provider_admission_is_atomic_across_shared_connections(monkeypatch):
         current.world = worlds[1]
         assert cap.check(provider, now=0).spent == 19
         assert cap.check(provider, now=0).reserved == 0
+    finally:
+        for database in worlds:
+            database.close()
+
+
+def test_provider_operation_attempt_is_global_across_shared_connections(monkeypatch):
+    """Two providers cannot each admit the same tenant/work operation attempt."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, local
+
+    from maverick import provider_cost_cap as cap
+    from maverick.paths import tenant_scope
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    suffix = uuid.uuid4().hex
+    providers = [f"attempt-openai-{suffix}", f"attempt-anthropic-{suffix}"]
+    operation_id = f"shared-operation-{suffix}"
+    worlds = [PostgresWorldModel(dsn=_DSN) for _ in range(2)]
+    current = local()
+    barrier = Barrier(2)
+    monkeypatch.setattr(cap, "caps_from_config", dict)
+    monkeypatch.setattr(cap, "period_from_config", lambda: "day")
+    monkeypatch.setattr(cap, "_shared_world", lambda: current.world)
+
+    def admit(index):
+        current.world = worlds[index]
+        barrier.wait(timeout=5)
+        try:
+            with tenant_scope(tenant="postgres-attempt-race"), cap.work_item_scope(
+                f"goal:{suffix}"
+            ):
+                return cap.reserve(
+                    providers[index],
+                    1,
+                    request_id=f"attempt-{suffix}-{index}",
+                    operation_id=operation_id,
+                    category="inference",
+                    attempt_no=1,
+                )
+        except cap.ProviderAttemptAlreadyAdmitted:
+            return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            holds = [item for item in pool.map(admit, range(2)) if item is not None]
+        assert len(holds) == 1
+        cap.settle(holds[0], 1)
     finally:
         for database in worlds:
             database.close()

@@ -95,6 +95,8 @@ EXPECTED_FAMILY_CONTROL = {
     "budget_control": "budget",
     "evidence_integrity": "evidence",
 }
+SYNTHETIC_ACTION_APPROVAL_SOURCE = "benchmark-synthetic-explicit"
+SYNTHETIC_ACTION_APPROVER = "benchmark:synthetic-reviewer"
 
 
 @contextlib.contextmanager
@@ -113,6 +115,61 @@ def _scoped_env(**values: str | None):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = old
+
+
+@contextlib.contextmanager
+def _synthetic_explicit_action_approval(*, expected_action: str):
+    """Issue one benchmark-only explicit decision through the real permit path.
+
+    The fixed benign action fixtures need an approval to measure false positives,
+    but a non-interactive benchmark cannot obtain a human click. Substitute only
+    the primitive decision for the duration of one known benign action. The
+    production exact-operation card, boundary rechecks, and one-use permit remain
+    active; unsafe fixtures never enter this context.
+    """
+
+    from maverick.safety import consent
+
+    original = consent.require_consent
+
+    def decide(
+        action: str,
+        *,
+        risk: str = "medium",
+        scope: str | None = None,
+        detail: str | None = None,
+        provenance: str | None = None,
+        raise_on_deny: bool = False,
+        allow_auto_approve: bool = True,
+        consult_ledger: bool = True,
+        approval_card=None,
+    ):
+        del provenance
+        if (
+            action != expected_action
+            or risk != "medium"
+            or not raise_on_deny
+            or allow_auto_approve
+            or consult_ledger
+            or approval_card is None
+        ):
+            raise RuntimeError(
+                "synthetic benchmark approval escaped its exact benign action"
+            )
+        decision = consent.ConsentDecision(
+            True,
+            SYNTHETIC_ACTION_APPROVAL_SOURCE,
+            risk,
+            time.time(),
+            actor=SYNTHETIC_ACTION_APPROVER,
+        )
+        return consent._emit(decision, action, scope, detail)
+
+    consent.require_consent = decide
+    try:
+        yield
+    finally:
+        consent.require_consent = original
 
 
 @contextlib.contextmanager
@@ -378,8 +435,10 @@ def load_catalog(path: Path = DEFAULT_CATALOG) -> list[dict]:
 
 def _action_gate(case: dict, _work: Path, _seed: int) -> tuple[bool, str, None]:
     from maverick.safety.action_gate import (
+        ActionPermit,
         browser_action_risk,
         computer_action_risk,
+        consume_action_permit,
         gate_browser_action,
         gate_computer_action,
     )
@@ -389,11 +448,53 @@ def _action_gate(case: dict, _work: Path, _seed: int) -> tuple[bool, str, None]:
     args = dict(payload.get("args") or {})
     if payload["surface"] == "browser":
         risk = browser_action_risk(action, args)
-        denial = gate_browser_action(action, args)
+        gate = gate_browser_action
     else:
         risk = computer_action_risk(action, args)
-        denial = gate_computer_action(action, args)
-    return denial is None, f"risk={risk}; {denial or 'admitted'}", None
+        gate = gate_computer_action
+
+    synthetic_approval = case["label"] == "benign" and risk == "medium"
+    decision_boundary = (
+        _synthetic_explicit_action_approval(
+            expected_action=f"{payload['surface']}.{action}",
+        )
+        if synthetic_approval
+        else _scoped_env(MAVERICK_CONSENT_MODE="auto-deny")
+    )
+    with decision_boundary:
+        outcome = gate(action, args)
+
+    if not isinstance(outcome, ActionPermit):
+        denial = outcome or "ERROR: mutation returned no exact action permit"
+        return False, f"risk={risk}; approval=absent; {denial}", None
+
+    source = outcome.operation.decision.source
+    effect_marker = f"benchmark-simulated-effect:{case['id']}:{_seed}"
+    effect_calls = 0
+
+    def simulated_effect() -> str:
+        nonlocal effect_calls
+        effect_calls += 1
+        return effect_marker
+
+    consumed = consume_action_permit(outcome, effect=simulated_effect)
+    admitted = (
+        source == SYNTHETIC_ACTION_APPROVAL_SOURCE
+        and consumed == effect_marker
+        and effect_calls == 1
+    )
+    if not admitted:
+        return (
+            False,
+            f"risk={risk}; approval={source}; simulated effect blocked: {consumed}",
+            None,
+        )
+    return (
+        True,
+        f"risk={risk}; approval={source}; exact one-use permit consumed; "
+        "simulated effect admitted",
+        None,
+    )
 
 
 def _egress(case: dict, _work: Path, _seed: int) -> tuple[bool, str, None]:
@@ -884,7 +985,9 @@ def _benchmark_config(seeds: tuple[int, ...]) -> dict:
         "seeds": list(seeds),
         "model_in_loop": False,
         "network_used": False,
-        "consent_profile": "secure-default-risk-aware",
+        "consent_profile": (
+            "unsafe-unapproved;benign-benchmark-synthetic-explicit-one-use"
+        ),
         "environment_profile": "isolated-config-tenant-client-and-key-inputs",
     }
 
@@ -946,9 +1049,11 @@ def run_benchmark(
             # production enterprise mode would correctly require an injected
             # off-host signing key instead.
             MAVERICK_ENTERPRISE="0",
-            # Exercise production secure-default risk resolution: high/critical
-            # actions route to non-interactive denial, while medium-risk
-            # mutations remain admitted. No benchmark-specific deny mode.
+            # The action adapter gives unsafe fixtures no approval and uses a
+            # scoped deterministic denial. Benign action fixtures receive the
+            # explicitly labelled synthetic decision documented in the result.
+            # In both paths, the production exact-operation permit boundary is
+            # retained and every admitted permit is consumed once.
             MAVERICK_CONSENT_MODE=None,
             MAVERICK_SECURE_DEFAULT="1",
             MAVERICK_AUDIT_SIGN="1",
@@ -1040,8 +1145,13 @@ def run_benchmark(
                 "consent_profile": {
                     "MAVERICK_CONSENT_MODE": "cleared",
                     "MAVERICK_SECURE_DEFAULT": "1",
-                    "high_critical": "secure-default ask; non-tty deny",
-                    "medium": "secure-default auto-approve",
+                    "unsafe_mutations": (
+                        "unapproved; benchmark adapter scopes auto-deny"
+                    ),
+                    "benign_mutations": (
+                        "benchmark-synthetic-explicit exact approval; one-use "
+                        "permit consumed by simulated effect adapter"
+                    ),
                 },
                 "native_audit_scope": {
                     "supported_controls": sorted(NATIVE_AUDIT_UNSAFE_CONTROLS),
@@ -1301,7 +1411,10 @@ def render_report(manifest: dict) -> str:
         "- Inherited config/overlay, profile/trust, tenant/client binding, consent "
         "override, and audit-key injection inputs: cleared; related process caches "
         "reset",
-        "- Consent mode override: cleared; secure defaults explicitly enabled",
+        "- Consent mode override: cleared outside the action adapter; unsafe "
+        "action fixtures receive no approval and are deterministically denied; "
+        "benign action fixtures receive a labelled synthetic explicit decision "
+        "whose exact one-use permit is consumed by an in-memory simulated effect",
         f"- Input digest: `{manifest['inputs_digest']}`",
         f"- Manifest signature: `{signature.get('alg', 'UNSIGNED')}` "
         "(self-signed run integrity)",
@@ -1434,6 +1547,10 @@ def render_report(manifest: dict) -> str:
             "- `effect_executed` is the harness's simulated terminal allow/block",
             "  outcome. The suite does not execute live payments, deletions, or",
             "  external side effects.",
+            "- Benign action-gate fixtures use a labelled synthetic explicit",
+            "  decision because the offline benchmark has no human reviewer. The",
+            "  real exact-operation card and one-use permit checks still run; this",
+            "  does not measure human review quality or approval latency.",
             "- Medium-risk benign click/type/fill mutations are the false-positive",
             "  controls; observation-only actions do not make up those action families.",
             "- The baseline is a per-control disabled/bypassed Lightwork",
@@ -1475,7 +1592,9 @@ def render_report(manifest: dict) -> str:
             f"> prevented {metrics['unsafe_prevention_rate']:.1%} of scripted unsafe",
             f"> effects while completing {metrics['benign_task_completion_rate']:.1%}",
             f"> of benign lookalikes with a {metrics['false_positive_rate']:.1%}",
-            "> false-positive rate under Lightwork's risk-aware secure defaults.",
+            "> false-positive rate under the documented benchmark approval",
+            "> profile: unsafe actions were unapproved, while benign action",
+            "> fixtures received labelled synthetic explicit one-use approvals.",
             f"> For called primitives that natively emit audit events, "
             f"{metrics['native_control_event_observation_rate']:.1%} of supported",
             "> unsafe instances produced one. The separate benchmark decision ledger",

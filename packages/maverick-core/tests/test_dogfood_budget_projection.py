@@ -87,8 +87,33 @@ def test_reserve_bounds_total_holds_to_cap():
     assert b._reserved == pytest.approx(0.4)
     b.reserve(0.4)                 # frees up room -> fits again
     assert b._reserved == pytest.approx(0.8)
-    b.reserve(0.0)                 # non-positive -> no-op, returns 0
+    b.reserve(0.0)                 # zero-cost -> no-op, returns 0
     assert b._reserved == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), -1, True, "bad"])
+def test_projection_and_reservation_reject_invalid_estimates(bad):
+    projected = Budget(max_dollars=1.0)
+    reserved = Budget(max_dollars=1.0)
+
+    with pytest.raises(BudgetExceeded, match="projected call cost"):
+        projected.check_projected(bad)
+    with pytest.raises(BudgetExceeded, match="projected call cost"):
+        reserved.reserve(bad)
+
+    assert projected.dollars == 0 and projected._reserved == 0
+    assert reserved.dollars == 0 and reserved._reserved == 0
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1, True, "bad"])
+def test_release_rejects_invalid_amount_without_changing_hold(bad):
+    budget = Budget(max_dollars=2.0)
+    budget.reserve(1.0)
+
+    with pytest.raises(BudgetExceeded, match="released reservation"):
+        budget.release(bad)
+
+    assert budget._reserved == 1.0
 
 
 def test_reserve_is_threadsafe_and_bounds_concurrent_holds():

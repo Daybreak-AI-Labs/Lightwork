@@ -249,14 +249,69 @@ def test_customer_config_bundles_offline_runtime_and_never_signs_with_build_secr
     assert bundle["windows"]["webviewInstallMode"]["type"] == "offlineInstaller"
     assert bundle["windows"]["allowDowngrades"] is False
     assert bundle["windows"]["wix"]["upgradeCode"] == stage.UPGRADE_CODE
-    assert "fragmentPaths" not in bundle["windows"]["wix"]
+    assert bundle["windows"]["wix"]["fragmentPaths"] == [
+        str(stage.RECOVERY_FRAGMENT.resolve())
+    ]
+    assert bundle["windows"]["wix"]["componentRefs"] == stage.RECOVERY_COMPONENTS
     assert bundle["createUpdaterArtifacts"] is False
+    assert len(bundle["externalBin"]) == 1
     assert Path(bundle["externalBin"][0] + "-" + stage.TARGET + ".exe").read_bytes() == runtime.read_bytes()
     assert config["plugins"]["updater"]["pubkey"] == public_key()
     inventory = json.loads(path.with_name("runtime-inventory.json").read_text(encoding="utf-8"))
     assert len(inventory["packages"]) == 8
     assert inventory["acceptance_fixture"] is False
     assert inventory["publisher_signature_verified"] is False
+    assert inventory["installed_recovery"] == {
+        "runtime": "maverick-recovery.exe",
+        "native_shell": "maverick-recovery-desktop.exe",
+        "signed_installer": "Lightwork-recovery.msi",
+        "start_menu": "Repair Lightwork",
+    }
+
+
+def test_customer_recovery_fragment_uses_exact_msi_files_and_fixed_app_shortcut():
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(stage.RECOVERY_FRAGMENT).getroot()
+    ns = {"w": "http://schemas.microsoft.com/wix/2006/wi"}
+    components = {
+        node.attrib["Id"]: node
+        for node in root.findall("w:Fragment/w:DirectoryRef/w:Component", ns)
+    }
+    assert set(components) == set(stage.RECOVERY_COMPONENTS)
+    copies = {
+        node.attrib["Id"]: node.attrib
+        for node in components["LightworkRecoveryCopies"].findall("w:CopyFile", ns)
+    }
+    assert copies["LightworkRecoveryRuntime"]["FileId"] == "Bin_maverick.exe"
+    assert copies["LightworkRecoveryRuntime"]["DestinationName"] == "maverick-recovery.exe"
+    assert copies["LightworkRecoveryDesktop"]["FileId"] == "Path"
+    assert copies["LightworkRecoveryDesktop"]["DestinationName"] == "maverick-recovery-desktop.exe"
+    # The package itself is retained by an explicit deferred copy, not a
+    # MoveFile row: the installer reads a MoveFile source property as a
+    # directory and OriginalDatabase is a file path.
+    assert "LightworkRecoveryInstaller" not in copies
+    actions = {
+        node.attrib["Id"]: node.attrib
+        for node in root.findall("w:Fragment/w:CustomAction", ns)
+    }
+    retain = actions["LightworkRetainInstaller"]
+    assert retain["Execute"] == "deferred" and retain["Impersonate"] == "no" and retain["Return"] == "check"
+    assert '"[OriginalDatabase]" "[INSTALLDIR]Lightwork-recovery.msi"' in retain["ExeCommand"]
+    assert actions["LightworkRetainInstallerRollback"]["Execute"] == "rollback"
+    scheduled = {
+        node.attrib["Action"]: node
+        for node in root.findall("w:Fragment/w:InstallExecuteSequence/w:Custom", ns)
+    }
+    assert set(scheduled) == {"LightworkRetainInstaller", "LightworkRetainInstallerRollback"}
+    assert scheduled["LightworkRetainInstallerRollback"].text == "NOT Installed"
+    # The in-app repair reinstalls the same version with REINSTALL=ALL from the
+    # verified package; the retained copy must follow that package as well.
+    assert scheduled["LightworkRetainInstaller"].text == "NOT Installed OR REINSTALL"
+    shortcut = components["LightworkRepairShortcut"].find("w:Shortcut", ns)
+    assert shortcut.attrib["Name"] == "Repair Lightwork"
+    assert shortcut.attrib["Target"] == "[INSTALLDIR]maverick-recovery-desktop.exe"
+    assert shortcut.attrib["Arguments"] == "--maintenance-result"
 
 
 def test_fault_injection_cannot_enter_a_customer_release(tmp_path, monkeypatch):
@@ -283,7 +338,11 @@ def test_acceptance_failure_fragment_is_referenced_so_linker_cannot_drop_it(tmp_
                        fixture_version="0.1.8", fault_fragment=MODULE.with_name("acceptance-failure.wxs"))
     config = json.loads(path.read_text(encoding="utf-8"))
     import xml.etree.ElementTree as ET
-    fragment = ET.parse(config["bundle"]["windows"]["wix"]["fragmentPaths"][0]).getroot()
+    fault_path = next(
+        item for item in config["bundle"]["windows"]["wix"]["fragmentPaths"]
+        if Path(item).name == "acceptance-failure.wxs"
+    )
+    fragment = ET.parse(fault_path).getroot()
     ns = {"w": "http://schemas.microsoft.com/wix/2006/wi"}
     feature = fragment.find("w:Fragment/w:Feature", ns)
     assert feature.attrib["Id"] in config["bundle"]["windows"]["wix"]["featureRefs"]

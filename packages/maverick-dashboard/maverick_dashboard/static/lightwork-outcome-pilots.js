@@ -5,28 +5,33 @@
   const context = root.dataset.context;
   const $ = id => document.getElementById(id);
   const status = $('op-status'), chosen = $('op-selected'), report = $('op-report');
+  const loadMore = $('op-load-more');
   let sources = [], current = null, busy = false, serial = 0, lostAuthority = false;
+  let pilotCursor = '';
   const node = (tag, text) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; return e; };
   const operation = () => crypto.randomUUID();
   const sourceKey = source => source.kind + ':' + source.reference;
   function clearAuthority() {
-    lostAuthority = true; current = null; sources = []; report.replaceChildren(); $('op-independent-report').replaceChildren();
+    lostAuthority = true; current = null; sources = []; pilotCursor = ''; report.replaceChildren(); $('op-independent-report').replaceChildren();
     if ($('op-prepared')) $('op-prepared').replaceChildren();
     root.querySelectorAll('textarea,input').forEach(input => { input.value = ''; });
     root.querySelectorAll('select').forEach(select => select.replaceChildren()); controls(true);
+    if (loadMore) loadMore.hidden = true;
   }
   async function request(path, method, body) {
     const r = await fetch('/api/v1/outcome-pilots' + path, {method: method || 'GET', cache:'no-store',
       headers: {'Content-Type':'application/json', 'X-Lightwork-Pilot-Context':context},
       ...(body ? {body: JSON.stringify(body)} : {})});
-    if ([401,403,409].includes(r.status)) {
+    if ([401,403].includes(r.status)) {
       clearAuthority();
     }
     let data;
     try { data = await r.json(); } catch (_) { throw new Error('Pilot information could not be read. Reload this page before continuing.'); }
     if (!r.ok) {
       const detail = Array.isArray(data.detail) ? data.detail.map(e => e.loc.slice(1).join(' → ') + ': ' + e.msg).join('; ') : data.detail;
-      const error = new Error(typeof detail === 'string' ? detail : 'The request could not be completed.'); error.status = r.status; throw error;
+      if (r.status === 409 && detail && detail.code === 'pilot_context_changed') clearAuthority();
+      const message = typeof detail === 'string' ? detail : detail && typeof detail.message === 'string' ? detail.message : 'The request could not be completed.';
+      const error = new Error(message); error.status = r.status; throw error;
     }
     if (data.context !== context) { clearAuthority(); const error = new Error('The account or workspace changed. Reload this page.'); error.status = 409; throw error; }
     return data;
@@ -70,10 +75,42 @@
     ['human_cost','Reported human preparation and review cost, excluding rework','text'], ['rework_cost','Reported rework cost','text'],
     ['currency','Currency, such as USD','text'], ['evidence','Observation and cost evidence references','textarea'], ['note','Method, timing, and limitations','textarea']
   ];
+  const costCoverageFamilies = [
+    ['provider_usage', 'Provider usage'], ['failed_attempts', 'Failed attempts'],
+    ['setup', 'Setup'], ['review', 'Human review'],
+    ['exception', 'Exception handling'], ['rework', 'Rework'],
+    ['support', 'Support'], ['allocation', 'Shared allocation'],
+  ];
+  function coverageFields(form, measurement) {
+    const fieldset = node('fieldset'), legend = node('legend', 'Delivered-cost coverage');
+    const help = node('p', 'For every family, choose Included in total, Confirmed zero, or Unknown, then cite the evidence or assumption. Unknown keeps ROI unavailable.');
+    const grid = node('div'); grid.className = 'op-grid';
+    fieldset.append(legend, help, grid);
+    const current = measurement && measurement.cost_coverage;
+    costCoverageFamilies.forEach(([family, label]) => {
+      const wrapper = node('div'); wrapper.dataset.coverageFamily = family;
+      const statusLabel = node('label', label), select = node('select');
+      select.className = 'input'; select.name = 'coverage_' + family + '_status';
+      [['unknown','Unknown'],['included','Included in total'],['zero','Confirmed zero']]
+        .forEach(([value, text]) => select.append(new Option(text, value)));
+      select.value = current && current[family] ? current[family].status : 'unknown';
+      statusLabel.append(select);
+      const noteLabel = node('label', 'Evidence or assumption'), note = node('textarea');
+      note.className = 'input'; note.name = 'coverage_' + family + '_note';
+      note.maxLength = 1000; note.rows = 2; note.required = true;
+      note.value = current && current[family]
+        ? current[family].note : 'No cost evidence was established for this family.';
+      noteLabel.append(note); wrapper.append(statusLabel, noteLabel); grid.append(wrapper);
+    });
+    form.append(fieldset);
+  }
   function draw(data) {
     current = data; report.replaceChildren(); $('op-export').disabled = false;
     report.append(node('h2', data.title), node('p', data.customer + ' · ' + data.workflow), node('p', 'Frozen criteria: ' + data.criteria));
     report.append(node('p', 'Pilot reference: ' + data.id + ' · ' + (data.state || 'frozen')));
+    if (data.admission) report.append(node('p', data.admission.status === 'complete' && data.admission.admitted_count === data.admission.expected_count ?
+      'Outcome accounting admission: complete for all ' + data.admission.expected_count + ' planned cases.' :
+      'Outcome accounting admission is incomplete. This pilot cannot run or accept observations yet.'));
     if (data.learning_policy) {
       const learning = data.learning_policy;
       report.append(node('h3', 'Local learning policy'), node('p', learning.automatic_local_exclusion_enforced ? 'Automatic local learning exclusion is recorded for every evaluation task.' : 'Automatic local learning exclusion is not established for all evaluation tasks.'));
@@ -102,7 +139,8 @@
       if (c.learning_exclusion) details.append(node('p', c.learning_exclusion.enforced ? 'Local learning exclusion receipt: ' + c.learning_exclusion.policy_id : 'Local learning exclusion receipt is unavailable or no longer matches these task inputs.'));
       details.append(node('p', 'Human and rework cost details are operator reports. They are already part of your reported total; provider allocations are shown separately and are not added automatically.'));
       const form = node('form'), grid = node('div'); grid.className = 'op-grid';
-      measurements.forEach(([key,label,type]) => field(grid,key,label,(c.measurement || {})[key],type)); form.append(grid);
+      measurements.forEach(([key,label,type]) => field(grid,key,label,(c.measurement || {})[key],type));
+      form.append(grid); coverageFields(form, c.measurement || null);
       const criteria = node('label','Did this case meet the frozen criteria?'), select = node('select'); select.name = 'criteria_met'; select.className = 'input';
       [['','Not measured'],['true','Yes'],['false','No']].forEach(([v,t]) => select.append(new Option(t,v)));
       select.value = c.measurement && c.measurement.criteria_met !== null ? String(c.measurement.criteria_met) : ''; criteria.append(select); form.append(criteria);
@@ -112,6 +150,10 @@
         event.preventDefault(); if (!form.reportValidity()) return;
         const fd = new FormData(form), body = {expected_revision:data.revision, operation_id:form.dataset.operation || operation(), source_version:c.source.version};
         measurements.forEach(([key,,type]) => { const v = String(fd.get(key) || '').trim(); body[key] = v === '' ? null : type ? v : Number(v); });
+        body.cost_coverage = Object.fromEntries(costCoverageFamilies.map(([family]) => [family, {
+          status: String(fd.get('coverage_' + family + '_status') || 'unknown'),
+          note: String(fd.get('coverage_' + family + '_note') || '').trim(),
+        }]));
         body.criteria_met = fd.get('criteria_met') === '' ? null : fd.get('criteria_met') === 'true';
         form.dataset.operation = body.operation_id;
         mutation(async () => { await request('/' + data.id + '/cases/' + c.id, 'PUT', body); feedback.textContent = 'Observation saved.'; delete form.dataset.operation; await load(data.id); });
@@ -128,10 +170,28 @@
     try { const data = await request('/' + id); if (ticket === serial) draw(data); }
     catch (e) { if (ticket === serial) { current = null; report.replaceChildren(); $('op-export').disabled = true; status.textContent = e.message; } throw e; }
   }
-  async function refreshList(selected) {
-    const data = await request(''); chosen.replaceChildren(new Option('Choose a pilot', ''));
-    data.items.forEach(r => chosen.append(new Option(r.title + ' · ' + r.cases + ' cases',r.id)));
-    chosen.value = selected || ''; if (data.partial) status.textContent = 'Pilot coverage is partial; the scan limit was reached.';
+  async function refreshList(selected, cursor) {
+    const continuation = cursor || '';
+    const data = await request('?limit=100' + (continuation ? '&cursor=' + encodeURIComponent(continuation) : ''));
+    if (!continuation) chosen.replaceChildren(new Option('Choose a pilot', ''));
+    const existing = new Set([...chosen.options].map(option => option.value));
+    data.items.forEach(r => {
+      if (!existing.has(r.id)) chosen.append(new Option(r.title + ' · ' + r.cases + ' cases',r.id));
+    });
+    const page = data.page && typeof data.page === 'object' ? data.page : {};
+    const hasMore = page.has_more === true;
+    pilotCursor = hasMore && typeof page.next_cursor === 'string' ? page.next_cursor : '';
+    if (loadMore) loadMore.hidden = !pilotCursor;
+    if (selected && [...chosen.options].some(option => option.value === selected)) chosen.value = selected;
+    if (hasMore) status.textContent = 'More pilots are available. Load the next page to reach older cohorts.';
+    return {found: !selected || chosen.value === selected, hasMore};
+  }
+  async function refreshThroughSelected(selected) {
+    let page = await refreshList(selected);
+    for (let count = 0; selected && !page.found && page.hasMore && count < 10; count++) {
+      page = await refreshList(selected, pilotCursor);
+    }
+    return page;
   }
   $('op-plan').addEventListener('submit', event => {
     event.preventDefault(); const form = event.currentTarget; if (!form.reportValidity()) return;
@@ -142,7 +202,7 @@
     if (mode === 'exclude_local_learning' && (prior.length < 20 || cases.some(c => c.kind !== 'goal'))) { status.textContent = 'Protected pilots need task cases and a prior-exposure statement of at least20 characters.'; return; }
     const body = {title:fd.get('title'),customer:fd.get('customer'),workflow:fd.get('workflow'),criteria:fd.get('criteria'),cases, learning_mode:mode, prior_exposure_statement:prior,
       operation_id:form.dataset.operation || operation()}; form.dataset.operation = body.operation_id;
-    mutation(async () => { const saved = await request('', 'POST', body); await refreshList(saved.id); await load(saved.id); form.reset(); delete form.dataset.operation; $('op-plan-details').open = false; });
+    mutation(async () => { const saved = await request('', 'POST', body); await refreshThroughSelected(saved.id); await load(saved.id); form.reset(); delete form.dataset.operation; $('op-plan-details').open = false; });
   });
   $('op-plan').addEventListener('input', () => { delete $('op-plan').dataset.operation; });
   $('op-learning-mode').addEventListener('change', () => { $('op-prior-exposure').required = $('op-learning-mode').value === 'exclude_local_learning'; });
@@ -171,6 +231,20 @@
     });
   });
   $('op-add-case').addEventListener('click', addCase);
+  if (loadMore) loadMore.addEventListener('click', async () => {
+    if (busy || lostAuthority || !pilotCursor) return;
+    busy = true; controls(true); status.textContent = 'Loading more pilots…';
+    try {
+      const page = await refreshList(chosen.value, pilotCursor);
+      status.textContent = page.hasMore
+        ? 'Another pilot page loaded. More older cohorts are available.'
+        : 'All pilots for this account and workspace are available.';
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      busy = false; controls(false);
+    }
+  });
   chosen.addEventListener('change', () => { if (!busy) load(chosen.value).catch(() => {}); });
   $('op-refresh').addEventListener('click', () => load(chosen.value).catch(() => {}));
   $('op-export').addEventListener('click', () => {

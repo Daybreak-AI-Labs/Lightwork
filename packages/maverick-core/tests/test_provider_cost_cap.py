@@ -241,6 +241,22 @@ def test_caps_from_config_defaults_empty():
     assert pcc.period_from_config() == "day"
 
 
+def test_caps_from_config_rejects_nonfinite_ceiling(monkeypatch):
+    monkeypatch.setattr(
+        pcc,
+        "_budget_cfg",
+        lambda: {
+            "provider_caps": {
+                "openai": float("inf"),
+                "anthropic": float("nan"),
+                "safe": 12.5,
+            },
+        },
+    )
+
+    assert pcc.caps_from_config() == {"safe": 12.5}
+
+
 def test_caps_from_config_drops_bogus_entries(monkeypatch, tmp_path):
     cfg = tmp_path / "config.toml"
     cfg.write_text(

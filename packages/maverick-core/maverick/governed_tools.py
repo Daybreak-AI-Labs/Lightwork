@@ -2,16 +2,15 @@
 
 The enterprise REST connectors expose a service as a ``confirm=true``-gated tool
 -- but the AGENT can set ``confirm`` itself, so a consequential write to a system
-of record has no human in the loop. Standard deployments opt in with
-``[governed_connectors] enable``; enterprise mode enforces the boundary for
-every compatible connector. Writes are simulated, human-gated, and surrounded
+of record has no human in the loop. The live registry therefore enforces the
+boundary for every compatible connector. Writes are simulated, human-gated, and surrounded
 by durable PREPARE/COMMIT receipts. The agent cannot self-approve. Reads pass
 through unchanged.
 
 The governed ``apply`` reuses the ORIGINAL tool's write path (the same env auth +
 SSRF-safe request), so wrapping never changes *where* a write goes -- only that
-it must clear the approval gate first. Standard mode remains inert when the
-feature is disabled; enterprise mode is deliberately fail closed.
+it must clear the approval gate and any required remote revision precondition
+first.
 
 Connectors whose tool exposes an ``op`` plus ``confirm`` schema are wrapped,
 including the ``make_rest_tool`` family and bespoke Salesforce/ServiceNow
@@ -26,7 +25,10 @@ import json
 import logging
 import os
 import uuid
+from urllib.parse import urlsplit, urlunsplit
 
+from .approval_cards import ApprovalCardError, digest
+from .safety.consent import ConsentDenied
 from .tools import Tool
 
 log = logging.getLogger(__name__)
@@ -36,6 +38,20 @@ _WRITE_OPS = (
     "record_create", "record_update", "record_delete",
     "create", "update",
 )
+
+_REVISION_EXEMPT_OPS = frozenset({
+    "call_create", "capture", "comment", "create", "create_event",
+    "dispatch", "dns_create", "event", "insert", "invoke",
+    "lpush", "meeting_create", "mr_comment", "page_append", "page_create",
+    "post", "publish", "record_create", "refund_create", "reply",
+    "run", "send", "send_event", "send_mail", "sms", "sms_send",
+    "submit_event", "submit_metric", "subscribe", "task_create", "track",
+    "trigger",
+})
+
+
+class _RevisionPreconditionError(ValueError):
+    """A remote mutation has no enforceable compare-and-set boundary."""
 
 # Bespoke external-system tools do not all use the REST factory's
 # ``op`` + ``confirm`` schema. Their mutating operations still cross the same
@@ -281,6 +297,94 @@ def _resource_label(tool_name: str, args: dict) -> str:
     return str(args.get("op") or "write")
 
 
+def _safe_resource_label(value: str) -> str:
+    """Return readable target context without query/userinfo capabilities."""
+
+    text = str(value or "").strip()
+    try:
+        parts = urlsplit(text)
+        if parts.scheme or parts.netloc:
+            host = parts.hostname or ""
+            if parts.port is not None:
+                host = f"{host}:{parts.port}"
+            text = urlunsplit((parts.scheme, host, parts.path, "", ""))
+        else:
+            text = text.split("?", 1)[0].split("#", 1)[0]
+    except ValueError:
+        text = "[invalid connector target]"
+    try:
+        from .safety.secret_detector import redact
+
+        text, _matches = redact(" ".join(text.split()))
+    except Exception:
+        return "[connector target unavailable]"
+    return (text or "[connector target]")[:500]
+
+
+def _safe_connector_result(value: object) -> str:
+    """Redact a connector result before receipts or model-visible return."""
+
+    raw = str(value)
+    try:
+        from .safety.secret_detector import redact
+
+        raw, _matches = redact(raw)
+    except Exception:
+        return f"[connector result withheld; sha256={digest(raw)}]"
+    return raw
+
+
+def _connector_revision_contract(tool: Tool, args: dict) -> dict[str, object]:
+    """Resolve an enforceable remote compare-and-set contract for a write."""
+
+    op = str(args.get("op") or "").strip().lower()
+    schema = tool.input_schema if isinstance(tool.input_schema, dict) else {}
+    declared = schema.get("x-lightwork-conditional-revision")
+    if isinstance(declared, dict):
+        field = str(declared.get("field") or "").strip()
+        header = str(declared.get("header") or "").strip()
+        operations = {
+            str(item).strip().lower()
+            for item in declared.get("operations", [])
+        }
+        if op in operations:
+            value = args.get(field)
+            if (
+                not field
+                or not header
+                or not isinstance(value, str)
+                or not value.strip()
+                or value.strip() == "*"
+                or len(value) > 512
+                or "\r" in value
+                or "\n" in value
+            ):
+                raise _RevisionPreconditionError(
+                    "the current remote ETag/revision is required"
+                )
+            return {
+                "schema": "lightwork.connector-conditional-revision.v1",
+                "field": field,
+                "header": header,
+                "value_sha256": digest(value.strip()),
+            }
+
+    existing_state_mutation = (
+        _is_graphql_op_tool(tool)
+        or tool.name in _SQL_CONNECTORS
+        or op not in _REVISION_EXEMPT_OPS
+    )
+    if existing_state_mutation:
+        raise _RevisionPreconditionError(
+            "this connector does not declare an atomic revision/ETag contract"
+        )
+    return {
+        "schema": "lightwork.connector-conditional-revision.v1",
+        "state": "not_applicable",
+        "reason": "reviewed create, append, or one-shot effect",
+    }
+
+
 def _approval_detail(
     effect: str,
     args: dict,
@@ -310,6 +414,68 @@ def _approval_detail(
         f"{effect}; transaction_id={transaction_id}; "
         f"request_sha256={request_digest}; request={request}"
     )
+
+
+def _connector_credential_versions(tool: Tool) -> dict[str, str]:
+    """Commit to live connector credential authority without retaining secrets.
+
+    Connectors resolve credentials at their request boundary.  The generic
+    wrapper cannot safely read a token, but it can bind every process
+    credential generation and every sealed connection revision.  Any rotation
+    therefore invalidates a waiting permit before the connector is called.
+    """
+
+    from .approval_cards import digest
+
+    environment = [
+        [name, hashlib.sha256(value.encode("utf-8")).hexdigest()]
+        for name, value in sorted(os.environ.items())
+    ]
+    from .connections import list_connections
+
+    connections = [
+        {
+            "name": row.get("name"),
+            "connector": row.get("connector"),
+            "revision": row.get("revision"),
+            "owner": row.get("owner"),
+            "access": row.get("access"),
+            "allowed_principals": row.get("allowed_principals"),
+        }
+        for row in list_connections()
+    ]
+    implementation = {
+        "module": getattr(tool.fn, "__module__", ""),
+        "qualname": getattr(tool.fn, "__qualname__", type(tool.fn).__qualname__),
+        "bytecode_sha256": hashlib.sha256(
+            getattr(getattr(tool.fn, "__code__", None), "co_code", b"")
+        ).hexdigest(),
+    }
+    return {
+        "schema": "lightwork.connector-credential-authority.v1",
+        "process_environment_sha256": digest(environment),
+        "saved_connections_sha256": digest(connections),
+        "implementation_sha256": digest(implementation),
+    }
+
+
+def _connector_target(
+    tool: Tool,
+    path: str,
+    revision_contract: dict[str, object],
+) -> dict[str, object]:
+    """Live connector/operation target re-read at permit consumption."""
+
+    return {
+        "tool": tool.name,
+        "resource": path,
+        "conditional_revision": copy.deepcopy(revision_contract),
+        "input_schema": tool.input_schema,
+        "implementation": {
+            "module": getattr(tool.fn, "__module__", ""),
+            "qualname": getattr(tool.fn, "__qualname__", type(tool.fn).__qualname__),
+        },
+    }
 
 
 def wrap_connector_tool(
@@ -364,8 +530,8 @@ def wrap_connector_tool(
         op = str(args.get("op", "")).strip().lower()
         if not _is_governed_write(tool, args):
             return tool.fn(args)
-        approver = _approver()
-        path = _resource_label(tool.name, args)
+        resource = _resource_label(tool.name, args)
+        path = _safe_resource_label(resource)
         ga = GovernedActions()
         action = f"{tool.name}.write"
         ga.register(ActionSpec(
@@ -378,13 +544,15 @@ def wrap_connector_tool(
         ))
         params = {"op": op, "path": path}
         try:
-            preview = ga.simulate(action, params)
-            if preview.requires_approval and not approver and not strict:
+            try:
+                revision_contract = _connector_revision_contract(tool, args)
+            except _RevisionPreconditionError as exc:
                 return (
-                    f"REFUSED (governed): {preview.effect}. A governed write needs an "
-                    "approver of record; the agent cannot self-approve. Set "
-                    "[governed_connectors] approver or MAVERICK_GOVERNED_APPROVER."
+                    "REFUSED (governed): a fresh read and atomic remote "
+                    f"revision precondition are required for target {path!r} "
+                    f"({exc}); no external write was attempted."
                 )
+            preview = ga.simulate(action, params)
 
             # Freeze the exact request before approval so a caller retaining a
             # reference to the input dict cannot race a different payload into
@@ -398,45 +566,76 @@ def wrap_connector_tool(
             request_digest = hashlib.sha256(request_bytes).hexdigest()
             transaction_id = uuid.uuid4().hex
 
-            # Standard mode retains the legacy operator-of-record gate and the
-            # consent primitive's compatibility default. Enterprise requires a
-            # fresh explicit human decision: neither silent auto-approval nor a
-            # persistent ledger grant can authorize this external effect.
-            from .safety.consent import require_consent
+            # Every connector mutation requires a fresh explicit human decision:
+            # neither silent auto approval nor a persistent ledger grant can
+            # authorize this external effect.
+            from .safety.consent import (
+                consume_operation_consent,
+                require_operation_consent,
+            )
 
-            decision = require_consent(
-                action,
-                risk="high",
-                scope=(
-                    f"{path}#sha256={request_digest}"
-                    if strict else path
-                ),
-                detail=_approval_detail(
+            approval_scope = f"{path}#sha256={request_digest}"
+            approval_detail = _approval_detail(
                     preview.effect,
                     receipt_args,
                     transaction_id=transaction_id,
                     request_digest=request_digest,
-                ),
-                provenance="governed-connector",
-                allow_auto_approve=not strict,
-                consult_ledger=not strict,
-            )
-            if not decision.granted:
-                return (
-                    f"REFUSED (governed): {preview.effect}. "
-                    "A human approval was not granted."
                 )
+            permit = require_operation_consent(
+                action,
+                risk="high",
+                scope=approval_scope,
+                detail=approval_detail,
+                provenance="governed-connector",
+                target=_connector_target(tool, resource, revision_contract),
+                parameters={
+                    "request": receipt_args,
+                    "transaction_id": transaction_id,
+                },
+                parameter_summary=[
+                    "Send the exact request committed by SHA-256 under the displayed transaction id.",
+                    (
+                        "Remote revision precondition: "
+                        f"{revision_contract.get('header', revision_contract.get('reason'))}."
+                    ),
+                ],
+                known_effects=[preview.effect],
+                unresolved_assumptions=[
+                    "The remote service may apply additional automation after accepting the request."
+                ],
+                before="No PREPARE receipt or remote write exists for this transaction.",
+                after="The remote system may contain the reviewed change and Lightwork records its outcome.",
+                irreversible=True,
+                target_provider=lambda: _connector_target(
+                    tool, resource, revision_contract,
+                ),
+                parameters_provider=lambda: {
+                    "request": copy.deepcopy(receipt_args),
+                    "transaction_id": transaction_id,
+                },
+                input_versions_provider=lambda: {
+                    "request_sha256": request_digest,
+                },
+                credential_versions_provider=lambda: (
+                    _connector_credential_versions(tool)
+                ),
+                budget_provider=lambda: {
+                    "transaction_id": transaction_id,
+                    "external_effect_cost": "unmeasured",
+                },
+                allow_auto_approve=False,
+                consult_ledger=False,
+            )
+            decision = permit.decision
 
             decision_actor = str(getattr(decision, "actor", "") or "").strip()
-            if strict and decision.source == "dashboard" and not decision_actor:
+            if decision.source == "dashboard" and not decision_actor:
                 return (
                     "REFUSED (governed): the dashboard decision did not carry "
-                    "an authenticated approver identity; no write was attempted."
+                    "an authenticated approver identity for target "
+                    f"{path!r}; no write was attempted."
                 )
-            approval_identity = (
-                (decision_actor or decision.source)
-                if strict else (approver or decision_actor or decision.source)
-            )
+            approval_identity = decision_actor or decision.source
             try:
                 prepared = _receipt(
                     action=f"{action}.prepare",
@@ -452,35 +651,39 @@ def wrap_connector_tool(
             if not prepared:
                 return (
                     "REFUSED (governed): the durable PREPARE receipt could not "
-                    "be persisted; no external write was attempted."
+                    f"be persisted for target {path!r}; no external write was "
+                    "attempted."
                 )
 
-            try:
-                result = tool.fn(receipt_args)
-            except Exception as exc:  # noqa: BLE001 -- preserve failure receipt
-                # Exception messages from HTTP/database libraries routinely
-                # embed credentialed URLs, headers, and DSNs. Receipts and the
-                # model-visible result get only a bounded type marker; the
-                # transaction id is sufficient for privileged reconciliation.
-                detail = type(exc).__name__[:120]
+            # Spend and revalidate after PREPARE, immediately before the
+            # connector crosses its remote effect boundary.
+            with consume_operation_consent(permit):
                 try:
-                    _receipt(
-                        action=f"{action}.indeterminate",
-                        args=receipt_args,
-                        effect=preview.effect,
-                        result=detail,
-                        approver=approval_identity,
-                        transaction_id=transaction_id,
-                        phase="INDETERMINATE",
-                        strict_write=False,
+                    result = tool.fn(receipt_args)
+                except Exception as exc:  # noqa: BLE001 -- preserve failure receipt
+                    # Exception messages from HTTP/database libraries routinely
+                    # embed credentialed URLs, headers, and DSNs. Receipts and the
+                    # model-visible result get only a bounded type marker; the
+                    # transaction id is sufficient for privileged reconciliation.
+                    detail = type(exc).__name__[:120]
+                    try:
+                        _receipt(
+                            action=f"{action}.indeterminate",
+                            args=receipt_args,
+                            effect=preview.effect,
+                            result=detail,
+                            approver=approval_identity,
+                            transaction_id=transaction_id,
+                            phase="INDETERMINATE",
+                            strict_write=False,
+                        )
+                    except Exception:  # receipt is best-effort after ambiguity
+                        pass
+                    return (
+                        "INDETERMINATE (governed): the connector raised after its "
+                        "external-effect boundary; reconcile before retrying. "
+                        f"transaction_id={transaction_id}; failure_type={detail}"
                     )
-                except Exception:  # receipt is best-effort after ambiguity
-                    pass
-                return (
-                    "INDETERMINATE (governed): the connector raised after its "
-                    "external-effect boundary; reconcile before retrying. "
-                    f"transaction_id={transaction_id}; failure_type={detail}"
-                )
 
             # A string error from a connector is also ambiguous: several
             # connector implementations catch network exceptions internally,
@@ -490,13 +693,13 @@ def wrap_connector_tool(
 
             result_state = classify_tool_result(result)
             if result_state is not ToolResultState.SUCCEEDED:
-                safe_result = result_state.value
+                result_marker = result_state.value
                 try:
                     _receipt(
                         action=f"{action}.indeterminate",
                         args=receipt_args,
                         effect=preview.effect,
-                        result=safe_result,
+                        result=result_marker,
                         approver=approval_identity,
                         transaction_id=transaction_id,
                         phase="INDETERMINATE",
@@ -508,15 +711,16 @@ def wrap_connector_tool(
                     "INDETERMINATE (governed): the connector did not prove a "
                     "committed or definitively aborted write; reconcile before "
                     f"retrying. transaction_id={transaction_id}; "
-                    f"result_state={safe_result}"
+                    f"result_state={result_marker}"
                 )
 
+            safe_result = _safe_connector_result(result)
             try:
                 committed = _receipt(
                     action=f"{action}.commit",
                     args=receipt_args,
                     effect=preview.effect,
-                    result=str(result),
+                    result=safe_result,
                     approver=approval_identity,
                     transaction_id=transaction_id,
                     phase="COMMIT",
@@ -530,7 +734,25 @@ def wrap_connector_tool(
                     "succeeded, but its COMMIT receipt could not be persisted. "
                     f"transaction_id={transaction_id}; do not retry automatically."
                 )
-            return str(result)
+            return safe_result
+        except ConsentDenied:
+            return (
+                f"REFUSED (governed): approval was denied for target {path!r}; "
+                "no external write was attempted."
+            )
+        except ApprovalCardError as exc:
+            lowered = str(exc).lower()
+            if "expired" in lowered:
+                reason = "approval expired"
+            elif "actor is unavailable" in lowered:
+                reason = "the current signed-in actor is unavailable"
+            else:
+                reason = "the operation or its authority changed"
+            return (
+                f"REFUSED (governed): {reason} for target {path!r}; review the "
+                "current target and request again. No external write was "
+                "attempted."
+            )
         except ActionError:
             return "ERROR (governed): action policy rejected the request"
         except Exception as exc:  # noqa: BLE001 -- policy errors refuse writes
@@ -539,6 +761,9 @@ def wrap_connector_tool(
                 f"operator review (failure_type={type(exc).__name__[:120]})"
             )
 
+    # Preserve connector provenance used by registry inventory and credential
+    # scoping checks while the closure still supplies the governed boundary.
+    _fn.__module__ = getattr(tool.fn, "__module__", _fn.__module__)
     note = " [governed: writes simulated, human-gated, and transaction-receipted]"
     return Tool(
         name=tool.name,
@@ -550,30 +775,16 @@ def wrap_connector_tool(
 
 
 def governance_enabled() -> bool:
-    """Whether the live tool path governs connector writes.
+    """The live connector mutation boundary is always active."""
 
-    Enterprise is a mandatory floor. Standard deployments remain opt-in via
-    config or ``MAVERICK_GOVERNED_CONNECTORS``.
-    """
-    if _enterprise_mode():
-        return True
-    try:
-        from .config import env_flag, get_governed_connectors
-        ov = env_flag("MAVERICK_GOVERNED_CONNECTORS")
-        if ov is not None:
-            return ov
-        return bool(get_governed_connectors().get("enable", False))
-    except Exception:  # pragma: no cover
-        return False
+    return True
 
 
 def apply_governed_connectors(reg, *, goal_id: int | None = None) -> list[str]:
     """Replace external write tools with governed wrappers.
 
-    In standard mode an explicit connector list scopes the opt-in; an empty
-    list means all compatible tools. Enterprise always wraps every compatible
-    tool and rejects explicitly named missing/incompatible tools rather than
-    silently leaving an expected security boundary open.
+    Every compatible connector is wrapped. Configuration may name connectors
+    for inventory checks, but cannot remove the mutation boundary.
     """
     if not governance_enabled():
         return []
@@ -582,9 +793,7 @@ def apply_governed_connectors(reg, *, goal_id: int | None = None) -> list[str]:
         from .config import get_governed_connectors
         names = get_governed_connectors().get("connectors", [])
     except Exception as exc:  # pragma: no cover
-        if enterprise:
-            raise RuntimeError("cannot load governed connector policy") from exc
-        return []
+        raise RuntimeError("cannot load governed connector policy") from exc
 
     configured = [str(name).strip() for name in names if str(name).strip()]
     available = {tool.name: tool for tool in reg.all()}
@@ -599,13 +808,10 @@ def apply_governed_connectors(reg, *, goal_id: int | None = None) -> list[str]:
                 f"incompatible tools: {', '.join(sorted(invalid))}"
             )
 
-    if enterprise or not configured:
-        candidates = [
-            name for name, tool in available.items()
-            if _is_governable_op_tool(tool)
-        ]
-    else:
-        candidates = configured
+    candidates = [
+        name for name, tool in available.items()
+        if _is_governable_op_tool(tool)
+    ]
 
     wrapped: list[str] = []
     for name in candidates:

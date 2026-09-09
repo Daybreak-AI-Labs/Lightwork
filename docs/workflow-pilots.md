@@ -6,6 +6,17 @@ Enable **Outcome measurement** in Settings or the installer wizard, then open
 their current account/workspace context. Every source is reauthorized when
 the pilot is read or an observation is recorded.
 
+The page also reads a bounded tenant-scoped outcome-accounting page. It
+summarizes admitted work shown in that page, including failed, cancelled and
+unresolved records, known cost by currency, failed-attempt cost and the count of
+records with unknown amounts. It explicitly labels when more cursor pages
+exist, and Previous/Next controls let the operator inspect them in the app.
+A successful transport response does not verify a technical outcome,
+and technical verification does not create customer acceptance. Corrections
+and expired evidence invalidate the current projection without deleting the
+earlier observation or human verdict. Record detail responses project the
+shared versioned outcome contract for other platform consumers.
+
 ## In-app path
 
 1. Name the customer/team, workflow and acceptance criteria. Choose at least

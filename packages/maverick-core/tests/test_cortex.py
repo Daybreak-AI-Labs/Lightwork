@@ -117,7 +117,34 @@ def sources(monkeypatch):
 
 
 def test_recall_fans_out_under_one_envelope_and_audits_once(sources, events):
-    res = cortex.recall("close accrual", world=object(), k=3)
+    def governed(_query, _limit):
+        return [
+            cortex.Hit(
+                "knowledge",
+                "finance",
+                "Close accrual guidance.",
+                "catalog:finance/close/v1",
+                0.9,
+            ),
+            cortex.Hit(
+                "knowledge",
+                "finance",
+                "Vendor onboarding needs a W-9.",
+                "catalog:finance/vendors/v1",
+                0.62,
+            ),
+            cortex.Hit(
+                "knowledge",
+                "policies",
+                "Retention: 7 years.",
+                "catalog:policies/retention/v1",
+                0.4,
+            ),
+        ], None
+
+    res = cortex.recall(
+        "close accrual", world=object(), k=3, knowledge_reader=governed,
+    )
     assert res.per_source["knowledge"] == 3       # two finance chunks + one policy chunk
     assert res.per_source["skills"] == 1
     assert res.per_source["lessons"] == 0         # no learned line mentions close/accrual
@@ -130,7 +157,76 @@ def test_recall_fans_out_under_one_envelope_and_audits_once(sources, events):
     assert payload["per_source"]["knowledge"] == 3
     assert payload["caller"] == "system"
     assert "query" not in payload and payload["query_sha"]   # digest, never the raw text
-    assert sources["kb"].closed
+    assert sources["kb"].closed is False
+
+
+def test_recall_refuses_raw_knowledge_without_governed_reader(sources, events):
+    result = cortex.recall(
+        "close accrual",
+        sources=("knowledge",),
+        world=object(),
+        k=3,
+    )
+
+    assert result.hits == []
+    assert result.per_source == {"knowledge": 0}
+    assert "governed knowledge access is required" in result.denied["knowledge"]
+    assert sources["kb"].closed is False
+    assert len([row for row in events if row[0] == audit.EventKind.CORTEX_RECALL]) == 1
+
+
+def test_governed_knowledge_reader_replaces_raw_adapter_and_keeps_one_audit(
+    sources,
+    events,
+):
+    calls = []
+
+    def governed(query, limit):
+        calls.append((query, limit))
+        return [
+            cortex.Hit(
+                "knowledge",
+                "source",
+                "Current approved summary.",
+                "catalog:evidence-graph/node-7",
+                1.0,
+                {"registry_reference": {"manifest_sha256": "1" * 64}},
+            )
+        ], None
+
+    result = cortex.recall(
+        "close accrual",
+        sources=("knowledge", "skills"),
+        world=object(),
+        k=2,
+        knowledge_reader=governed,
+    )
+
+    assert calls == [("close accrual", 2)]
+    assert result.per_source == {"knowledge": 1, "skills": 1}
+    assert result.hits[0].text == "Current approved summary."
+    assert sources["kb"].closed is False
+    recall_events = [row for row in events if row[0] == audit.EventKind.CORTEX_RECALL]
+    assert len(recall_events) == 1
+    assert recall_events[0][1]["sources"] == ["knowledge", "skills"]
+    assert recall_events[0][1]["per_source"] == result.per_source
+
+
+def test_malformed_governed_reader_fails_closed_without_raw_fallback(sources, events):
+    result = cortex.recall(
+        "close",
+        sources=("knowledge",),
+        world=object(),
+        knowledge_reader=lambda _query, _limit: ([cortex.Hit(
+            "record", "approval", "wrong source", "record:7"
+        )], None),
+    )
+
+    assert result.hits == []
+    assert result.per_source == {"knowledge": 0}
+    assert "crossed its result boundary" in result.denied["knowledge"]
+    assert sources["kb"].closed is False
+    assert len([row for row in events if row[0] == audit.EventKind.CORTEX_RECALL]) == 1
 
 
 def test_lessons_are_matched_lexically_when_no_model_is_given(sources, events):
@@ -230,7 +326,20 @@ def test_external_deposit_only_reaches_fleet_memory(sources, events):
 
 
 def test_context_renders_citations_for_a_prompt(sources, events):
-    res = cortex.recall("close accrual", world=object(), k=2)
+    res = cortex.recall(
+        "close accrual",
+        world=object(),
+        k=2,
+        knowledge_reader=lambda _query, _limit: ([
+            cortex.Hit(
+                "knowledge",
+                "finance",
+                "Close accrual guidance.",
+                "finance/close-policy.md",
+                0.9,
+            )
+        ], None),
+    )
     ctx = res.context(max_chars=2000)
     assert "[knowledge · finance/close-policy.md]" in ctx
     assert "[skills · month-end-close]" in ctx

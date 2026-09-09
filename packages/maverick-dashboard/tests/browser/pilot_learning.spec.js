@@ -29,6 +29,7 @@ test('protected pilot enforces child exclusion and independently reviews exact l
   const created=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/v1/outcome-pilots');
   await plan.getByRole('button',{name:'Save and freeze plan'}).click();const creation=await created;expect(creation.status()).toBe(200);
   const pilot=await creation.json();await expect(page.locator('#op-report')).toContainText('Automatic local learning exclusion is recorded');
+  await expect(page.locator('#op-report')).toContainText('complete for all 4 planned cases');
   const report=await downloadedReport(page);expect(report.state).toBe('frozen');
   expect(report.learning_policy.automatic_local_exclusion_enforced).toBe(true);
   expect(report.cases.filter(c=>c.allocation==='holdout')).toHaveLength(2);
@@ -72,8 +73,10 @@ test('protected pilot enforces child exclusion and independently reviews exact l
     expect((await request.post('/__browser_fixture/pilot-learning/'+pilot.id+'/change')).status()).toBe(200);
     const refused=second.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===reviewPath);
     await stale.getByRole('button',{name:'Record independent review'}).click();expect((await refused).status()).toBe(409);
-    await expect(second.locator('#op-independent-report')).toBeEmpty();await expect(second.locator('#op-review-reference')).toHaveValue('');
-    await expect(second.locator('#op-review-load')).toBeDisabled();
+    await expect(second.locator('#op-status')).toContainText('plan, source or exclusion evidence changed');
+    await expect(second.locator('#op-review-reference')).toHaveValue(pilot.id);
+    await expect(stale.locator('textarea')).toHaveValue('This review must refuse after the original source input changes.');
+    await expect(second.locator('#op-review-load')).toBeEnabled();
     await page.locator('#op-refresh').click();await expect(page.locator('#op-report')).toContainText('evidence changed; review again');
     const changed=await downloadedReport(page);expect(changed.learning_policy.automatic_local_exclusion_enforced).toBe(false);
     expect(changed.learning_policy.independent_review.current).toBe(false);expect(changed.holdout_exposure_verified).toBe(false);

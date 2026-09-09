@@ -183,9 +183,22 @@ _SCHEMA: dict[str, Any] = {
         "path": {"type": "string", "description": "API path beginning with /..."},
         "params": {"type": "object", "description": "query params (get)."},
         "body": {"type": "object", "description": "JSON body (write ops)."},
+        "if_match": {
+            "type": "string",
+            "maxLength": 512,
+            "description": (
+                "Current remote ETag/revision for PUT, PATCH, or DELETE. "
+                "Sent as If-Match and required to prevent stale writes."
+            ),
+        },
         "confirm": {"type": "boolean", "description": "required for write ops."},
     },
     "required": ["op", "path"],
+    "x-lightwork-conditional-revision": {
+        "field": "if_match",
+        "header": "If-Match",
+        "operations": ["put", "patch", "delete"],
+    },
 }
 
 _READ_SCHEMA: dict[str, Any] = {
@@ -223,6 +236,20 @@ def _rest_validate(
     if read_only and not read_path_allowed(path):
         allowed = ", ".join(read_prefixes) or "(none)"
         return f"ERROR: {name} read path is not allowed. Allowed prefixes: {allowed}"
+    if op in {"put", "patch", "delete"}:
+        if_match = args.get("if_match")
+        if not isinstance(if_match, str) or not if_match.strip():
+            return (
+                f"ERROR: {op.upper()} requires if_match with the current remote "
+                "ETag/revision; refresh the record and review again"
+            )
+        if (
+            if_match.strip() == "*"
+            or len(if_match) > 512
+            or "\r" in if_match
+            or "\n" in if_match
+        ):
+            return "ERROR: if_match must be a single ETag/revision value"
     try:
         import httpx  # noqa: F401
     except ImportError:
@@ -272,7 +299,11 @@ def _rest_execute(
         from ._ssrf import BlockedHost, safe_client
         try:
             with safe_client(url, timeout=30.0) as client:
-                r = client.request(op.upper(), url, headers=headers(tok),
+                request_headers = headers(tok)
+                if_match = args.get("if_match")
+                if isinstance(if_match, str) and if_match.strip():
+                    request_headers["If-Match"] = if_match.strip()
+                r = client.request(op.upper(), url, headers=request_headers,
                                    params=params or None, json=body)
         except BlockedHost:
             return "ERROR: blocked host (SSRF guard)"

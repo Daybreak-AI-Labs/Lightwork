@@ -165,7 +165,8 @@ def cortex_recall_cmd(ctx, query: str, sources: tuple[str, ...], domain: str | N
                       as_context: bool) -> None:
     """Recall QUERY from every source under one envelope; audited once.
 
-    Hits are grouped by source, each with its citation. A source that is off
+    Hits are grouped by source, each with its citation. Governed knowledge
+    retrieval requires the authenticated Lightwork app. A source that is off
     or broken is listed under ``denied`` with its reason; the others still
     answer. The whole surface being off is an error, not an empty result.
     """

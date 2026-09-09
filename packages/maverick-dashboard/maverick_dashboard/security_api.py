@@ -1670,15 +1670,12 @@ def _verified_audit_chain(
     )
 
 
-def _approval_detail(kind: str, payload: dict) -> str:
-    return json.dumps(
-        {"kind": kind, **payload},
-        sort_keys=True,
-        separators=(",", ":"),
+def _queue_platform_containment(proposal) -> int:
+    from maverick.approval_cards import (
+        digest,
+        encode_operation_approval_detail,
     )
 
-
-def _queue_platform_containment(proposal) -> int:
     from ._shared import _world
 
     payload = {
@@ -1688,11 +1685,36 @@ def _queue_platform_containment(proposal) -> int:
         "reason": proposal.reason,
         "evidence_ids": [item.event_id for item in proposal.evidence],
     }
+    detail = encode_operation_approval_detail(
+        action="security.platform_containment",
+        summary=f"Review platform containment proposal {proposal.action}",
+        target_label=f"Platform scope: {proposal.scope}"[:500],
+        target={"proposal_id": proposal.proposal_id, "scope": proposal.scope},
+        parameters=payload,
+        parameter_summary=[
+            f"Containment action: {proposal.action}",
+            f"Proposal SHA-256: {digest(payload)}",
+            f"Cited evidence events: {len(proposal.evidence)}",
+        ],
+        actor="system:platform_hunt",
+        role="security_operator",
+        input_versions={"proposal_sha256": digest(payload)},
+        known_effects=[
+            "Records a human decision for the exact cited containment proposal."
+        ],
+        unresolved_assumptions=[
+            "The platform hunter has no containment executor in this workflow."
+        ],
+        before="The containment proposal remains inert and pending review.",
+        after="The reviewed containment proposal has a recorded decision.",
+        irreversible=False,
+        ttl_seconds=24 * 3600,
+    )
     return int(_world().create_approval(
         "security.platform_containment",
         risk="high",
         scope=proposal.scope,
-        detail=_approval_detail("platform_containment_v1", payload),
+        detail=detail,
         provenance="security.platform_hunt.v1",
         requested_by="system:platform_hunt",
     ))
@@ -2253,19 +2275,132 @@ def _response_payload(proposal) -> dict:
     }
 
 
-def _queue_environment_response(proposal) -> int:
+def _environment_response_executor_binding(executor: object) -> dict[str, str]:
+    """Return a secret-free stable binding for one mutating adapter."""
+    from types import CodeType
+
+    from maverick.approval_cards import ApprovalCardError, digest
+
+    def stable_constant(value):
+        if isinstance(value, CodeType):
+            return stable_code(value)
+        if value is None or type(value) in (bool, int, str, bytes):
+            return value.hex() if isinstance(value, bytes) else value
+        if isinstance(value, float):
+            return {"float": repr(value)}
+        if isinstance(value, tuple):
+            return [stable_constant(item) for item in value]
+        return {"type": f"{type(value).__module__}.{type(value).__qualname__}"}
+
+    def stable_code(value: CodeType) -> dict:
+        return {
+            "bytecode": value.co_code.hex(),
+            "constants": [stable_constant(item) for item in value.co_consts],
+            "names": list(value.co_names),
+            "argcount": value.co_argcount,
+            "kwonlyargcount": value.co_kwonlyargcount,
+        }
+
+    name = str(getattr(executor, "name", "")).strip().lower()
+    execute_method = getattr(type(executor), "execute", None)
+    code = getattr(execute_method, "__code__", None)
+    implementation = {
+        "type": f"{type(executor).__module__}.{type(executor).__qualname__}",
+        "execute_code_sha256": digest(
+            stable_code(code) if code is not None else {"state": "no_python_code"}
+        ),
+    }
+    revision = str(
+        getattr(executor, "approval_revision", None)
+        or getattr(executor, "revision", None)
+        or getattr(executor, "version", None)
+        or "unversioned"
+    ).strip()
+    declared_digest = getattr(executor, "approval_credential_sha256", None)
+    if callable(declared_digest):
+        declared_digest = declared_digest()
+    if declared_digest is None:
+        credential_sha256 = digest({"state": "not_declared"})
+    else:
+        credential_sha256 = str(declared_digest).strip().lower()
+        if (
+            len(credential_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in credential_sha256)
+        ):
+            raise ApprovalCardError(
+                "response executor credential binding must be a SHA-256 digest"
+            )
+    return {
+        "executor": name,
+        "implementation_sha256": digest(implementation),
+        "revision": revision,
+        "credential_sha256": credential_sha256,
+    }
+
+
+def _queue_environment_response(proposal, *, response_executor=None) -> int:
     from ._shared import _world
 
     if not proposal.executor:
         raise ValueError("an executor-bound response is required before approval")
+    if response_executor is None:
+        response_executor = environment_response_registry().get(proposal.executor)
+    executor_binding = _environment_response_executor_binding(response_executor)
     return int(_world().create_approval(
         "security.environment_response",
         risk="critical",
         scope=proposal.target,
-        detail=_approval_detail("environment_response_v1", _response_payload(proposal)),
+        detail=_environment_response_approval_detail(
+            proposal, executor_binding=executor_binding,
+        ),
         provenance="security.env_hunt.response.v1",
         requested_by="system:env_hunt",
     ))
+
+
+def _environment_response_approval_detail(
+    proposal,
+    *,
+    executor_binding: dict[str, str] | None = None,
+) -> str:
+    from maverick.approval_cards import encode_operation_approval_detail
+
+    payload = _response_payload(proposal)
+    if executor_binding is None:
+        executor = environment_response_registry().get(proposal.executor)
+        executor_binding = _environment_response_executor_binding(executor)
+    return encode_operation_approval_detail(
+        action="security.environment_response",
+        summary=f"Execute defensive response {proposal.action}",
+        target_label=f"{proposal.action}: {proposal.target}"[:500],
+        target={
+            "proposal_id": proposal.proposal_id,
+            "target": proposal.target,
+            "executor": proposal.executor,
+        },
+        parameters=payload,
+        parameter_summary=[
+            f"Defensive action: {proposal.action}",
+            f"Executor: {proposal.executor}",
+            f"Executor revision: {executor_binding['revision']}",
+            f"Proposal SHA-256: {proposal.digest}",
+        ],
+        actor="system:env_hunt",
+        role="security_response_operator",
+        input_versions={"proposal_sha256": proposal.digest},
+        credential_versions=executor_binding,
+        known_effects=[
+            "Invokes the named defensive executor once after all approval gates pass."
+        ],
+        unresolved_assumptions=[
+            "The target still denotes the same external environment resource.",
+            "The executor may observe changed external state at execution time.",
+        ],
+        before="The defensive response proposal is inert.",
+        after="The exact reviewed defensive response may execute once.",
+        irreversible=True,
+        ttl_seconds=24 * 3600,
+    )
 
 
 def _response_proposal_from_record(record: dict):
@@ -2336,6 +2471,7 @@ def _attach_response_proposal(
     *,
     actor: str,
     expected_revision: int | None = None,
+    response_executor=None,
 ) -> tuple[dict, int | None]:
     """Persist an inert exact proposal before optionally queueing its approval."""
     from maverick.env_hunt import RevisionConflict
@@ -2367,7 +2503,9 @@ def _attach_response_proposal(
     )
     approval_id = None
     if proposal.executor:
-        approval_id = _queue_environment_response(proposal)
+        approval_id = _queue_environment_response(
+            proposal, response_executor=response_executor,
+        )
         approvals = dict(updated.get("response_approval_ids") or {})
         approvals[proposal.proposal_id] = approval_id
         try:
@@ -2772,7 +2910,7 @@ async def propose_environment_response(
         )
     finding = _finding_record(finding_record)
     try:
-        environment_response_registry().get(body.executor)
+        response_executor = environment_response_registry().get(body.executor)
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     proposal = await run_in_threadpool(
@@ -2792,6 +2930,7 @@ async def propose_environment_response(
             proposal,
             actor=_actor(request),
             expected_revision=body.expected_revision,
+            response_executor=response_executor,
         )
     except env_hunt.RevisionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -2813,7 +2952,13 @@ async def propose_environment_response(
     }
 
 
-def _world_approval_matches(proposal, row, approval_id: int) -> bool:
+def _world_approval_matches(
+    proposal,
+    row,
+    approval_id: int,
+    *,
+    executor_binding: dict[str, str] | None = None,
+) -> bool:
     """Treat the queue as workflow state, never as cryptographic authority."""
     if (
         row is None
@@ -2825,10 +2970,39 @@ def _world_approval_matches(proposal, row, approval_id: int) -> bool:
         or row.requested_by != "system:env_hunt"
     ):
         return False
-    expected = _approval_detail(
-        "environment_response_v1", _response_payload(proposal),
+    from maverick.approval_cards import (
+        ApprovalCardError,
+        decode_approval_detail,
+        digest,
+        require_current_approval_card,
     )
-    return row.detail == expected
+
+    target = {
+        "proposal_id": proposal.proposal_id,
+        "target": proposal.target,
+        "executor": proposal.executor,
+    }
+    payload = _response_payload(proposal)
+    if executor_binding is None:
+        try:
+            executor = environment_response_registry().get(proposal.executor)
+            executor_binding = _environment_response_executor_binding(executor)
+        except (KeyError, TypeError, ValueError):
+            return False
+    try:
+        card = decode_approval_detail(row.detail)
+        if card is None:
+            return False
+        card = require_current_approval_card(card)
+        return (
+            card["action"] == "security.environment_response"
+            and card["target"]["sha256"] == digest(target)
+            and card["parameters"]["sha256"] == digest(payload)
+            and card["inputs"] == {"proposal_sha256": proposal.digest}
+            and card["credentials"] == executor_binding
+        )
+    except (ApprovalCardError, KeyError, TypeError, ValueError):
+        return False
 
 
 @router.post("/soc/responses/execute")
@@ -2836,6 +3010,8 @@ async def execute_environment_response(
     request: Request, body: schemas.EnvironmentExecuteIn,
 ) -> dict:
     require_global_permission(request, "admin")
+    execution_actor = _actor(request)
+    execution_tenant = _environment_tenant_binding()
     env_hunt = _environment_module()
     from maverick.shield_policy import shield_available
 
@@ -2887,11 +3063,6 @@ async def execute_environment_response(
     world_approval = await run_in_threadpool(_world().get_approval, body.approval_id)
     if world_approval is None:
         raise HTTPException(status_code=404, detail="no such governed approval")
-    if not _world_approval_matches(proposal, world_approval, body.approval_id):
-        raise HTTPException(
-            status_code=403,
-            detail="governed approval does not match the exact stored response",
-        )
     from maverick.approval_signing import trusted_approver_keys
 
     try:
@@ -2916,8 +3087,39 @@ async def execute_environment_response(
     )
     try:
         executor = environment_response_registry().get(body.executor)
+        executor_binding = _environment_response_executor_binding(executor)
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    # This is the last check before execute_response audits and durably claims
+    # the effect. The exact object resolved here is passed through, so a
+    # same-name registry replacement cannot ride an earlier approval.
+    if not _world_approval_matches(
+        proposal,
+        world_approval,
+        body.approval_id,
+        executor_binding=executor_binding,
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "governed approval does not match the exact stored response "
+                "or current executor binding"
+            ),
+        )
+    # Re-run the authenticated admin gate after every awaited dependency read
+    # and immediately before the durable claim/effect boundary. A revoked or
+    # substituted session, actor, or tenant cannot inherit the earlier check.
+    require_global_permission(request, "admin")
+    if (
+        _actor(request) != execution_actor
+        or _environment_tenant_binding() != execution_tenant
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="environment response execution authority changed",
+        )
     try:
         receipt = await run_in_threadpool(
             env_hunt.execute_response,
@@ -2927,7 +3129,7 @@ async def execute_environment_response(
             executor=executor,
             execution_ledger=store,
             execution_enabled=env_hunt.response_execution_enabled(),
-            actor=_actor(request),
+            actor=execution_actor,
         )
     except env_hunt.ResponseNotAuthorized as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

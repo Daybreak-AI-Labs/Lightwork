@@ -22,6 +22,8 @@ import logging
 import random
 import time
 from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TypeVar
 
 from .._envparse import env_float, env_int
@@ -29,6 +31,76 @@ from .._envparse import env_float, env_int
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+_PHYSICAL_ATTEMPT_OBSERVER: ContextVar[object | None] = ContextVar(
+    "maverick_physical_attempt_observer",
+    default=None,
+)
+
+
+@contextmanager
+def observe_physical_attempts(observer: object):
+    """Bind accounting callbacks to each provider request made by retry code.
+
+    The observer must expose ``before_attempt()`` and
+    ``after_attempt(ticket, response, error)``.  A context variable keeps
+    concurrent async tasks isolated while allowing provider adapters to remain
+    independent from the provider-cost ledger.
+    """
+
+    if not callable(getattr(observer, "before_attempt", None)) or not callable(
+        getattr(observer, "after_attempt", None)
+    ):
+        raise TypeError("physical attempt observer is invalid")
+    token = _PHYSICAL_ATTEMPT_OBSERVER.set(observer)
+    try:
+        yield observer
+    finally:
+        _PHYSICAL_ATTEMPT_OBSERVER.reset(token)
+
+
+def _before_physical_attempt() -> tuple[object | None, object | None]:
+    observer = _PHYSICAL_ATTEMPT_OBSERVER.get()
+    if observer is None:
+        return None, None
+    return observer, observer.before_attempt()
+
+
+def _after_physical_attempt(
+    observer: object | None,
+    ticket: object | None,
+    response: object | None,
+    error: BaseException | None,
+) -> None:
+    if observer is not None:
+        observer.after_attempt(ticket, response, error)
+
+
+def sync_physical_attempt(fn: Callable[[], T]) -> T:
+    """Run one physical call and notify the current accounting observer."""
+
+    observer, ticket = _before_physical_attempt()
+    try:
+        result = fn()
+    except BaseException as exc:
+        _after_physical_attempt(observer, ticket, None, exc)
+        raise
+    _after_physical_attempt(observer, ticket, result, None)
+    return result
+
+
+async def async_physical_attempt(fn: Callable[[], Awaitable[T]]) -> T:
+    """Async twin of :func:`sync_physical_attempt`."""
+
+    observer, ticket = _before_physical_attempt()
+    try:
+        result = await fn()
+    except BaseException as exc:
+        _after_physical_attempt(observer, ticket, None, exc)
+        raise
+    _after_physical_attempt(observer, ticket, result, None)
+    return result
 
 
 # Clamp to >=1: a 0/negative override would make sync_retry/async_retry do
@@ -182,9 +254,13 @@ def sync_retry(fn: Callable[[], T]) -> T:
     retryable = _retryable_exception_classes()
     last: Exception | None = None
     for attempt in range(MAX_ATTEMPTS):
+        observer, ticket = _before_physical_attempt()
         try:
-            return fn()
+            result = fn()
         except retryable as e:
+            # Finish accounting from inside this handler. If finalization fails,
+            # that failure escapes the retry loop and no further paid call runs.
+            _after_physical_attempt(observer, ticket, None, e)
             if not _is_retryable_status_error(e) or _is_terminal(e):
                 raise
             last = e
@@ -196,6 +272,12 @@ def sync_retry(fn: Callable[[], T]) -> T:
                 attempt + 1, MAX_ATTEMPTS, type(e).__name__, delay,
             )
             time.sleep(delay)
+        except BaseException as exc:
+            _after_physical_attempt(observer, ticket, None, exc)
+            raise
+        else:
+            _after_physical_attempt(observer, ticket, result, None)
+            return result
     assert last is not None
     raise last
 
@@ -205,9 +287,11 @@ async def async_retry(fn: Callable[[], Awaitable[T]]) -> T:
     retryable = _retryable_exception_classes()
     last: Exception | None = None
     for attempt in range(MAX_ATTEMPTS):
+        observer, ticket = _before_physical_attempt()
         try:
-            return await fn()
+            result = await fn()
         except retryable as e:
+            _after_physical_attempt(observer, ticket, None, e)
             if not _is_retryable_status_error(e) or _is_terminal(e):
                 raise
             last = e
@@ -219,5 +303,11 @@ async def async_retry(fn: Callable[[], Awaitable[T]]) -> T:
                 attempt + 1, MAX_ATTEMPTS, type(e).__name__, delay,
             )
             await asyncio.sleep(delay)
+        except BaseException as exc:
+            _after_physical_attempt(observer, ticket, None, exc)
+            raise
+        else:
+            _after_physical_attempt(observer, ticket, result, None)
+            return result
     assert last is not None
     raise last

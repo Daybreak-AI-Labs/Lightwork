@@ -14,6 +14,9 @@ import logging
 import math
 import os
 from typing import Protocol
+from urllib.parse import urlsplit
+
+from .provider_accounting import metered_call
 
 log = logging.getLogger(__name__)
 
@@ -65,17 +68,32 @@ class HostedEmbedder:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.dim = dim
+        hostname = (urlsplit(self.base_url).hostname or "hosted-embeddings").lower()
+        if "voyageai" in hostname:
+            self.provider = "voyage"
+        elif "openai" in hostname:
+            self.provider = "openai"
+        else:
+            self.provider = hostname[:192]
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx
 
-        r = httpx.post(
-            f"{self.base_url}/embeddings",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": self.model, "input": texts},
-            timeout=60,
+        def dispatch():
+            response = httpx.post(
+                f"{self.base_url}/embeddings",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={"model": self.model, "input": texts},
+                timeout=60,
+            )
+            response.raise_for_status()
+            return response
+
+        r = metered_call(
+            self.provider,
+            dispatch,
+            service=f"embeddings:{self.model}",
         )
-        r.raise_for_status()
         # OpenAI/Voyage-compatible responses are only guaranteed addressable by
         # each item's `index`, not positional order, so reorder before zipping
         # vectors back to their input chunks (a reordered batch would otherwise
@@ -113,18 +131,26 @@ class CohereEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         import httpx
 
-        r = httpx.post(
-            f"{self.base_url}/embed",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={
-                "model": self.model,
-                "texts": texts,
-                "input_type": self.input_type,
-                "embedding_types": ["float"],
-            },
-            timeout=60,
+        def dispatch():
+            response = httpx.post(
+                f"{self.base_url}/embed",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json={
+                    "model": self.model,
+                    "texts": texts,
+                    "input_type": self.input_type,
+                    "embedding_types": ["float"],
+                },
+                timeout=60,
+            )
+            response.raise_for_status()
+            return response
+
+        r = metered_call(
+            "cohere",
+            dispatch,
+            service=f"embeddings:{self.model}",
         )
-        r.raise_for_status()
         body = r.json()
         # v2 nests vectors under embeddings.float; v1 returned a flat list.
         embeddings = body.get("embeddings", body)

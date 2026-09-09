@@ -387,9 +387,13 @@ def _locked(*, strict: bool = False):
     fail closed instead of racing a control-plane cap change.
     """
     from contextlib import ExitStack
+
+    from ..authority_effects import authority_effect_fence
+
     ensure_private_directory(maverick_home())
     ensure_private_directory(_registry_path().parent)
     stack = ExitStack()
+    stack.enter_context(authority_effect_fence())
     stack.enter_context(_REGISTRY_LOCK)
     stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
     return stack

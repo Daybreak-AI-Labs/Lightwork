@@ -46,3 +46,19 @@ def test_secrets_still_redacts_complete_pem():
            "ABCDEFbody123456\n"
            "-----END PRIVATE KEY-----")
     assert "ABCDEFbody123456" not in scrub(pem)
+
+
+def test_secret_detector_redacts_lightwork_capability_tokens():
+    agent_token = "lw-rest-" + "A" * 43
+    flow_token = "eyJ" + "B" * 40 + "." + "c" * 64
+
+    redacted, matches = sd_redact(
+        f"selector=[value={agent_token}] callback={flow_token}"
+    )
+
+    assert agent_token not in redacted
+    assert flow_token not in redacted
+    assert {match.name for match in matches} >= {
+        "lightwork_agent_token",
+        "lightwork_flow_approval_token",
+    }

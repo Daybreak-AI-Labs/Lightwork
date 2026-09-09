@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 
 import maverick.budget as budget_mod
 import pytest
@@ -115,3 +116,92 @@ def test_cache_hit_rate_consolidates_across_providers():
     assert stats["billable_input_tokens"] == 200
     assert stats["hit_rate"] == 0.8
     assert "hit_rate" in b.summary()
+
+
+@pytest.mark.parametrize(
+    "bad_multiplier",
+    [float("nan"), float("inf"), float("-inf"), -0.1, True, "unpriced"],
+)
+def test_cache_read_multiplier_rejects_invalid_values_before_mutation(bad_multiplier):
+    budget = Budget(max_dollars=0.000_001)
+    before = budget.summary(), budget.dollars, budget.pricing_snapshot()
+
+    with pytest.raises(BudgetExceeded, match="cache read multiplier"):
+        budget.record_tokens(
+            0,
+            0,
+            cache_read_tok=1,
+            cache_read_mult=bad_multiplier,
+        )
+
+    assert (budget.summary(), budget.dollars, budget.pricing_snapshot()) == before
+    budget.dollars = budget.max_dollars
+    with pytest.raises(BudgetExceeded):
+        budget.reserve(0.000_001)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("dollars", float("nan")),
+        ("dollars", float("inf")),
+        ("_reserved", float("nan")),
+        ("input_tokens", -1),
+        ("output_tokens", 1.5),
+        ("tool_calls", True),
+    ],
+)
+def test_check_rejects_corrupted_accounting_state(field, bad_value):
+    budget = Budget()
+    setattr(budget, field, bad_value)
+
+    with pytest.raises(BudgetExceeded, match="invalid"):
+        budget.check()
+
+
+def test_restore_rejects_nonfinite_accounting_state():
+    original = Budget()
+    state = original.__getstate__()
+    state["dollars"] = float("nan")
+    restored = Budget.__new__(Budget)
+
+    with pytest.raises(BudgetExceeded, match="invalid dollars"):
+        restored.__setstate__(state)
+
+
+def test_token_operation_replays_once_after_budget_is_serialized():
+    budget = Budget(max_output_tokens=10, max_dollars=100)
+    operation = "a" * 64
+    first = budget.record_tokens(
+        0, 1, model="codex_cli:gpt-5.5", operation_id=operation,
+    )
+    restored = pickle.loads(pickle.dumps(budget))
+    replayed = restored.record_tokens(
+        0, 1, model="codex_cli:gpt-5.5", operation_id=operation,
+    )
+
+    assert replayed == first
+    assert restored.output_tokens == 1
+    assert restored.dollars == budget.dollars
+    with pytest.raises(BudgetExceeded, match="different usage"):
+        restored.record_tokens(
+            0, 2, model="codex_cli:gpt-5.5", operation_id=operation,
+        )
+    assert restored.output_tokens == 1
+
+
+def test_restore_rejects_corrupted_token_operation_state():
+    original = Budget()
+    state = original.__getstate__()
+    state["_token_operations"] = {
+        "b" * 64: {
+            "request": "c" * 64,
+            "dollars": float("nan"),
+            "pricing_evidence": {},
+            "failure": None,
+        },
+    }
+    restored = Budget.__new__(Budget)
+
+    with pytest.raises(BudgetExceeded, match="stored token charge"):
+        restored.__setstate__(state)

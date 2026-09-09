@@ -5,13 +5,14 @@ import hmac
 from functools import partial
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from maverick import config
+from maverick.outcome_accounting import COST_COVERAGE_FAMILIES
 from maverick.privacy_ops import RecordConflict
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
-from . import outcome_pilot_sources, outcome_pilots
+from . import outcome_accounting_bridge, outcome_pilot_sources, outcome_pilots
 from .auth import caller_principal, require_global_permission, require_permission
 from .draft_api import context_for
 
@@ -20,6 +21,11 @@ router = APIRouter(tags=["outcome-pilots"])
 
 class StrictIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True, allow_inf_nan=False)
+
+
+class CoverageDeclarationIn(StrictIn):
+    status: Literal["included", "zero", "unknown"]
+    note: str = Field(..., min_length=1, max_length=1000)
 
 
 class CaseIn(StrictIn):
@@ -67,11 +73,14 @@ class ObservationIn(StrictIn):
     evidence: str = Field(..., min_length=1, max_length=4000)
     note: str = Field(..., min_length=1, max_length=4000)
     criteria_met: bool | None = None
+    cost_coverage: dict[str, CoverageDeclarationIn] | None = None
 
     @model_validator(mode="after")
     def cost_currency(self):
         if any(value is not None for value in (self.baseline_cost, self.ai_total_cost, self.human_cost, self.rework_cost)) and self.currency is None:
             raise ValueError("Currency is required for a reported cost.")
+        if self.cost_coverage is not None and set(self.cost_coverage) != set(COST_COVERAGE_FAMILIES):
+            raise ValueError("Declare every required delivered-cost family exactly once.")
         return self
 
 
@@ -89,7 +98,10 @@ def _context(request, *, mutation=False):
     context = context_for(request)
     header = request.headers.get("X-Lightwork-Pilot-Context")
     if (mutation or header is not None) and not hmac.compare_digest(header or "", context):
-        raise HTTPException(409, "The account or workspace changed. Reload the pilot page.")
+        raise HTTPException(409, {
+            "code": "pilot_context_changed",
+            "message": "The account or workspace changed. Reload the pilot page.",
+        })
     return context
 
 
@@ -124,18 +136,35 @@ async def page(request: Request):
 
 
 @router.get("/api/v1/outcome-pilots")
-async def list_pilots(request: Request, response: Response):
+async def list_pilots(
+    request: Request,
+    response: Response,
+    limit: int = Query(100, ge=1, le=200),
+    cursor: str = Query("", max_length=256, pattern=r"^[A-Za-z0-9_.:-]*$"),
+):
     context = _context(request)
     response.headers["Cache-Control"] = "private, no-store"
-    return {**await _call(outcome_pilots.listing, context), "context": context}
+    return {
+        **await _call(outcome_pilots.listing, context, cursor=cursor, limit=limit),
+        "context": context,
+    }
 
 
 @router.post("/api/v1/outcome-pilots")
 async def create_pilot(request: Request, response: Response, body: PlanIn):
     context = _context(request, mutation=True)
+    actor = caller_principal(request) or "local:dashboard"
+    resolver = _resolver(request)
     response.headers["Cache-Control"] = "private, no-store"
     record = await _call(outcome_pilots.create, body.model_dump(), context=context,
-        actor=caller_principal(request) or "local:dashboard", resolve=_resolver(request))
+        actor=actor, resolve=resolver)
+    manifest = await _call(
+        outcome_accounting_bridge.admit_pilot, record, resolve=resolver,
+    )
+    record = await _call(
+        outcome_pilots.complete_admission, record["id"], manifest,
+        context=context, actor=actor, resolve=resolver,
+    )
     return {"id": record["id"], "revision": record["revision"], "context": context}
 
 
@@ -151,9 +180,31 @@ async def pilot_report(request: Request, response: Response, pilot_id: str):
     from .outcome_pilot_costs_api import report_for
 
     context = _context(request)
+    actor = caller_principal(request) or "local:dashboard"
+    resolver = _resolver(request)
     response.headers["Cache-Control"] = "private, no-store"
-    record = await _call(outcome_pilots.get, pilot_id, context)
-    return {**await _call(outcome_pilots.report, record, resolve=_resolver(request)),
+    record = await _call(
+        outcome_pilots.prepare_admission, pilot_id, context=context,
+        resolve=resolver,
+    )
+    manifest = await _call(
+        outcome_accounting_bridge.admit_pilot, record, resolve=resolver,
+    )
+    record = await _call(
+        outcome_pilots.complete_admission, record["id"], manifest,
+        context=context, actor=actor, resolve=resolver,
+    )
+    admissions = await _call(
+        outcome_accounting_bridge.require_complete_admission, record,
+    )
+    for accounting in admissions.values():
+        await _call(
+            outcome_accounting_bridge.reconcile_record,
+            request,
+            context,
+            accounting["id"],
+        )
+    return {**await _call(outcome_pilots.report, record, resolve=resolver),
             "provider_costs": await report_for(request, record), "context": context}
 
 
@@ -171,8 +222,17 @@ async def prepare_task(request: Request, response: Response, body: PreparedTaskI
 async def observation(request: Request, response: Response, pilot_id: str, case_id: str, body: ObservationIn):
     context = _context(request, mutation=True)
     response.headers["Cache-Control"] = "private, no-store"
+    current = await _call(outcome_pilots.get, pilot_id, context)
+    await _call(outcome_accounting_bridge.require_complete_admission, current)
     record = await _call(outcome_pilots.observe, pilot_id, case_id, body.model_dump(), context=context,
         actor=caller_principal(request) or "local:dashboard", resolve=_resolver(request))
+    case = next(item for item in record["cases"] if item["id"] == case_id)
+    source = await _call(outcome_pilot_sources.resolve, request, case["kind"], case["reference"])
+    await _call(
+        outcome_accounting_bridge.sync_case, record, case_id, source,
+        source_operation_id=body.operation_id,
+        actor=caller_principal(request) or "local:dashboard",
+    )
     return {"id": record["id"], "revision": record["revision"], "context": context}
 
 
@@ -184,6 +244,7 @@ async def independent_packet(request: Request, response: Response, pilot_id: str
     record = await _call(outcome_pilots.STORE.get, pilot_id)
     if record is None or not actor.startswith("user:") or actor == record["actor"]:
         raise HTTPException(403, "A different named global administrator must review this pilot.")
+    await _call(outcome_accounting_bridge.require_complete_admission, record)
     for case in record["cases"]:
         await _call(outcome_pilot_sources.resolve, request, case["kind"], case["reference"])
     response.headers["Cache-Control"] = "private, no-store"

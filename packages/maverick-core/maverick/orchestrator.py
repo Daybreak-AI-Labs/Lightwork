@@ -31,6 +31,18 @@ from .world_model import WorldModel
 log = logging.getLogger(__name__)
 
 
+def _safe_exception_text(exc: BaseException, *, fallback: str) -> str:
+    """Redact and bound exception text before logs, persistence, or display."""
+
+    try:
+        from .safety.secret_detector import redact
+
+        text, _matches = redact(str(exc))
+        return (text.strip() or fallback)[:1000]
+    except Exception:
+        return f"{fallback} ({type(exc).__name__})"
+
+
 @contextmanager
 def _enrich(label: str):
     """Wrap a gated brief-enrichment block: its failure is logged at debug and
@@ -39,7 +51,11 @@ def _enrich(label: str):
     try:
         yield
     except Exception as e:  # pragma: no cover -- enrichment never blocks a run
-        log.debug("%s skipped: %s", label, e)
+        log.debug(
+            "%s skipped: %s",
+            label,
+            _safe_exception_text(e, fallback="enrichment unavailable"),
+        )
 
 def _skill_distillation_frozen(*, config: dict | None = None) -> bool:
     """Whether calibration has frozen learning (the verifier drifted and no
@@ -137,7 +153,10 @@ def _build_shield() -> Any | None:
         log.warning("maverick-shield not installed; tool-call scans disabled")
         return None
     except Exception as e:  # pragma: no cover
-        log.error("Shield construction failed (fail-open): %s", e)
+        log.error(
+            "Shield construction failed (fail-open): %s",
+            _safe_exception_text(e, fallback="Shield unavailable"),
+        )
         return None
     # Agent compartments: wrap the single swarm-shared shield with a run-scoped
     # threat ledger so a block by any agent immunizes the rest of the swarm for
@@ -150,7 +169,10 @@ def _build_shield() -> Any | None:
         if compartments_enabled():
             return ImmunizingShield(base=shield)
     except Exception as e:  # pragma: no cover
-        log.error("Compartment wrap failed (fail-open): %s", e)
+        log.error(
+            "Compartment wrap failed (fail-open): %s",
+            _safe_exception_text(e, fallback="compartment unavailable"),
+        )
     return shield
 
 
@@ -188,7 +210,10 @@ def _build_knowledge() -> Any | None:
         from maverick_knowledge import KnowledgeBase, build_embedder, build_store
         return KnowledgeBase(store=build_store(kcfg), embedder=build_embedder(kcfg))
     except Exception as e:  # pragma: no cover -- knowledge is optional
-        log.warning("knowledge base unavailable (fail-open): %s", e)
+        log.warning(
+            "knowledge base unavailable (fail-open): %s",
+            _safe_exception_text(e, fallback="knowledge base unavailable"),
+        )
         return None
 
 
@@ -232,7 +257,7 @@ def _unpriced_model_message(exc: BaseException, goal_id: Any) -> str:
     return (
         "Stopped: this goal used a model with no verified price, so "
         "Lightwork refused to bill it rather than guess.\n"
-        f"Detail: {exc}\n"
+        f"Detail: {_safe_exception_text(exc, fallback='model price unavailable')}\n"
         "Fix: add a sourced price for this model to the rate card, or set "
         "[budget] strict_pricing = false to allow a warning-labelled "
         f"estimate, then resume: maverick resume {goal_id}"
@@ -284,7 +309,11 @@ def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
         from .webhooks import fire
         fire(event, payload)
     except Exception as e:  # pragma: no cover -- webhooks never block a run
-        log.debug("webhook %s skipped: %s", event, e)
+        log.debug(
+            "webhook %s skipped: %s",
+            event,
+            _safe_exception_text(e, fallback="webhook unavailable"),
+        )
 
 
 def _finished_webhook_payload(
@@ -1414,7 +1443,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         from . import quotas
         _quota_reason = quotas.over_quota(principal) if quotas.quotas_enforced() else None
     except Exception as exc:
-        _quota_reason = f"principal quota policy unavailable: {exc}"
+        _quota_reason = (
+            "principal quota policy unavailable: "
+            f"{_safe_exception_text(exc, fallback='quota lookup failed')}"
+        )
     if _quota_reason:
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_quota_reason}")
         log.warning("goal #%s refused: %s", goal_id, _quota_reason)
@@ -1433,7 +1465,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         assert_tenant_active(_tenant_id)
         _tenant_reason = tenant_over_quota(_tenant_id)
     except Exception as exc:
-        _tenant_reason = f"tenant policy unavailable or inactive: {exc}"
+        _tenant_reason = (
+            "tenant policy unavailable or inactive: "
+            f"{_safe_exception_text(exc, fallback='tenant lookup failed')}"
+        )
     if not _tenant_reason:
         # W2-83: budget_from_config clamps a run to $0 when the tenant's
         # allowance is exhausted by in-flight holds (or unreadable) and says
@@ -1638,8 +1673,11 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 domain_profile = _profile
                 root = agent_from_profile(_profile, ctx, brief, depth=0)
             except Exception as e:
+                safe_error = _safe_exception_text(
+                    e, fallback="domain agent construction failed",
+                )
                 msg = (
-                    f"domain {domain!r} agent build failed: {e}. "
+                    f"domain {domain!r} agent build failed: {safe_error}. "
                     "Refusing to run without the requested domain capability envelope."
                 )
                 log.error("%s", msg)
@@ -1665,21 +1703,26 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             # caught BEFORE the BudgetExceeded clause below (it's a
             # subclass) or it's reported as "raise your cap and resume",
             # advice that fails identically since spend was never the issue.
-            _lifecycle.end_episode(f"unpriced model: {e}", "failure")
+            safe_error = _safe_exception_text(e, fallback="model price unavailable")
+            _lifecycle.end_episode(f"unpriced model: {safe_error}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
-                _ft.record_failure("unpriced_model", goal_id=goal_id, detail=str(e))
+                _ft.record_failure(
+                    "unpriced_model", goal_id=goal_id, detail=safe_error,
+                )
             except Exception:  # pragma: no cover -- telemetry never blocks a run
                 pass
             _maybe_record_reflexion(
-                goal, failure_class="unpriced_model", failure_msg=str(e),
+                goal, failure_class="unpriced_model", failure_msg=safe_error,
                 blackboard=blackboard, shield=shield, channel=channel,
                 user_id=user_id, domain=domain,
             )
-            world.set_goal_status(goal_id, "blocked", result=f"unpriced model: {e}")
+            world.set_goal_status(
+                goal_id, "blocked", result=f"unpriced model: {safe_error}",
+            )
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked",
-                "result": f"unpriced model: {e}",
+                "result": f"unpriced model: {safe_error}",
             })
             return _unpriced_model_message(e, goal_id)
         except UsageAccountingError as e:
@@ -1704,21 +1747,24 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             })
             return _usage_accounting_message(str(e), goal_id)
         except BudgetExceeded as e:
-            _lifecycle.end_episode(f"budget: {e}", "failure")
+            safe_error = _safe_exception_text(e, fallback="budget limit reached")
+            _lifecycle.end_episode(f"budget: {safe_error}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
-                _ft.record_failure("budget", goal_id=goal_id, detail=str(e))
+                _ft.record_failure("budget", goal_id=goal_id, detail=safe_error)
             except Exception:  # pragma: no cover -- telemetry never blocks a run
                 pass
             _maybe_record_reflexion(
-                goal, failure_class="budget", failure_msg=str(e),
+                goal, failure_class="budget", failure_msg=safe_error,
                 blackboard=blackboard, shield=shield, channel=channel,
                 user_id=user_id, domain=domain,
             )
-            world.set_goal_status(goal_id, "blocked", result=f"budget exceeded: {e}")
+            world.set_goal_status(
+                goal_id, "blocked", result=f"budget exceeded: {safe_error}",
+            )
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked",
-                "result": f"budget exceeded: {e}",
+                "result": f"budget exceeded: {safe_error}",
             })
             # Sentence-style error so a non-engineer can read it.
             return _budget_exceeded_message(budget, goal_id)
@@ -1728,8 +1774,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             # forever -- a ghost in `status` and the dashboard. Mark it failed
             # and close the episode, then re-raise so the caller can present
             # the error (the CLI turns it into a one-line message).
+            safe_error = _safe_exception_text(e, fallback="internal run failure")
             try:
-                _lifecycle.end_episode(f"error: {e}", "failure")
+                _lifecycle.end_episode(f"error: {safe_error}", "failure")
             except Exception:  # pragma: no cover
                 pass
             try:  # default-on local failure telemetry; no-op when disabled
@@ -1738,7 +1785,9 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             except Exception:  # pragma: no cover -- telemetry never blocks a run
                 pass
             try:
-                world.set_goal_status(goal_id, "blocked", result=f"internal error: {e}")
+                world.set_goal_status(
+                    goal_id, "blocked", result=f"internal error: {safe_error}",
+                )
             except Exception:  # pragma: no cover
                 pass
             raise
@@ -2000,7 +2049,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                     raise
                 refusal = (
                     "AI evidence gateway withheld the generated output. "
-                    f"Operator action is required: {exc}"
+                    "Operator action is required: "
+                    f"{_safe_exception_text(exc, fallback='evidence review failed')}"
                 )
                 _lifecycle.end_episode(refusal, "failure")
                 world.set_goal_status(goal_id, "blocked", result=refusal)
@@ -2121,7 +2171,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             try:
                 world.append_turn(conversation_id, "assistant", summary, goal_id=goal_id)
             except Exception as e:  # pragma: no cover -- never block on history
-                log.warning("conversation turn write failed: %s", e)
+                log.warning(
+                    "conversation turn write failed: %s",
+                    _safe_exception_text(e, fallback="conversation write failed"),
+                )
 
         # Overlap the side effects with distillation when enabled (default on).
         # WorldModel uses check_same_thread=False + a write lock (built for the
@@ -2174,7 +2227,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             except BudgetExceeded:
                 skill_note = "\n\n[skill distill skipped: budget]"
             except Exception as e:
-                skill_note = f"\n\n[skill distill error: {e}]"
+                skill_note = (
+                    "\n\n[skill distill error: "
+                    f"{_safe_exception_text(e, fallback='distillation unavailable')}]"
+                )
         else:
             # Show the opt-in hint once per process, not on every run / chat
             # turn (it's a standing setting, not a per-goal event).
@@ -2340,6 +2396,25 @@ async def run_goal(
     allowed_suites: frozenset[str] | None = None,
 ) -> str:
     """Hold task execution authority until all finalization work has stopped."""
+    # A prepared outcome-pilot task is still a normal goal row and can be
+    # reached from the CLI, queue, API, or another internal dispatcher.  Keep
+    # the admission check at this common boundary, before sandbox setup,
+    # recovery markers, episodes, provider clients, or goal-state mutation.
+    # Work without an exact tenant-scoped pilot claim takes the fast no-op path.
+    goal = world.get_goal(goal_id)
+    if goal is not None:
+        from .outcome_pilot_start_gate import (
+            OutcomePilotAdmissionRequired,
+            require_work_item_admission,
+        )
+
+        try:
+            require_work_item_admission("goal", str(goal_id))
+        except OutcomePilotAdmissionRequired as exc:
+            return (
+                "BLOCKED: "
+                f"{_safe_exception_text(exc, fallback='pilot admission required')}"
+            )
     from .task_file_recovery import run_scope
     sandbox = sandbox or LocalBackend()
     with run_scope(world, goal_id, sandbox):
@@ -2438,7 +2513,10 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
                 len(scored), len(distinct),
             )
     except Exception as e:  # pragma: no cover -- donation must never break a run
-        log.warning("best-of-N candidate donation skipped: %s", e)
+        log.warning(
+            "best-of-N candidate donation skipped: %s",
+            _safe_exception_text(e, fallback="candidate donation failed"),
+        )
 
 
 # Host-git RCE hardening (fsmonitor/filter-hook guard + scrubbed env) now
@@ -2473,7 +2551,10 @@ def _reset_workdir_to_head(workdir) -> None:
         _subprocess.run(["git", "-C", str(wd), "clean", "-fd"],
                         capture_output=True, timeout=30, env=env)
     except Exception as e:  # pragma: no cover -- fail-open
-        log.debug("best-of-N workdir reset skipped: %s", e)
+        log.debug(
+            "best-of-N workdir reset skipped: %s",
+            _safe_exception_text(e, fallback="workdir reset failed"),
+        )
 
 
 def _strip_binary_diff_sections(diff: str) -> str:
@@ -2555,7 +2636,10 @@ def _capture_workdir_diff(workdir) -> str:
         diff = _strip_binary_diff_sections(diff)
         return diff if diff.strip() else ""
     except Exception as e:  # pragma: no cover -- fail-open
-        log.debug("best-of-N workdir diff capture skipped: %s", e)
+        log.debug(
+            "best-of-N workdir diff capture skipped: %s",
+            _safe_exception_text(e, fallback="workdir diff capture failed"),
+        )
         return ""
 
 
@@ -2708,10 +2792,13 @@ async def run_goal_best_of_n(
                 from . import killswitch as _ks
                 if isinstance(e, (BudgetExceeded, _ks.Halted)):
                     raise
-                log.warning("best-of-N attempt %d failed: %s", i, e)
+                safe_error = _safe_exception_text(
+                    e, fallback="best-of-N attempt failed",
+                )
+                log.warning("best-of-N attempt %d failed: %s", i, safe_error)
                 candidates.append(Candidate(
                     index=i, patch="", score=0.0,
-                    apply_check_passed=False, error=str(e),
+                    apply_check_passed=False, error=safe_error,
                 ))
                 # Roll ALL of the failed attempt's spend into the parent so
                 # the summary is honest; stop if the aggregate hit a cap.

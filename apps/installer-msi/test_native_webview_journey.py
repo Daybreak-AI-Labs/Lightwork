@@ -119,7 +119,7 @@ assert.deepEqual(inspect(),{ready:true,path:'other',form_rejected:false,rejectio
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("mode", ["accepted", "visible_refusal", "incomplete", "timeout", "missing-receipt", "wrong-version"])
+@pytest.mark.parametrize("mode", ["accepted", "visible_refusal", "incomplete", "timeout", "reconnect-fails", "missing-receipt", "wrong-version"])
 def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path, modules, monkeypatch, mode):
     module, _ = modules
     journey = module.Journey.__new__(module.Journey)
@@ -133,7 +133,7 @@ def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path,
     launched = False
 
     def windows(_path):
-        replaced = launched and mode in {"accepted", "missing-receipt", "wrong-version"}
+        replaced = launched and mode in {"accepted", "reconnect-fails", "missing-receipt", "wrong-version"}
         return [(123, 2 if replaced else 1)]
 
     def version(expected):
@@ -163,20 +163,21 @@ def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path,
                 raise RuntimeError("synthetic private driver error")
             return observed
 
-        def close(self):
-            actions.append("close")
-
         def screenshot(self, _path):
             actions.append("screenshot")
 
     journey.view = View()
     journey.assert_version = version
-    journey.attach = lambda: actions.append("attach")
+    def reconnect():
+        actions.append("restart-driver")
+        if mode == "reconnect-fails":
+            raise RuntimeError("synthetic stale driver session")
+    journey.restart_driver_after_relaunch = reconnect
     monkeypatch.setattr(module, "app_windows", windows)
     if mode == "accepted":
         journey.transition(rollback=True)
         assert journey.report["checks"] == ["signed-native-rollback"]
-        assert actions == ["close", "attach", "screenshot"]
+        assert actions == ["restart-driver", "screenshot"]
         assert versions == ["0.1.8", "0.1.7"]
     else:
         with pytest.raises(RuntimeError, match="bounded transition diagnostics") as error:
@@ -187,9 +188,59 @@ def test_native_transition_diagnostics_never_replace_acceptance_checks(tmp_path,
         diagnostic = journey.report["transition"]
         assert set(diagnostic) == {"stage", "page_state", "process_state_available", "installed_old_process",
                                    "installed_new_process", "retained_result_windows"}
-        expected = "completion_receipt" if mode == "missing-receipt" else "version_verification" if mode == "wrong-version" else "process_relaunch"
+        expected = ("completion_receipt" if mode == "missing-receipt" else
+                    "version_verification" if mode == "wrong-version" else
+                    "driver_reconnect" if mode == "reconnect-fails" else "process_relaunch")
         assert diagnostic["stage"] == expected
         assert diagnostic["installed_old_process"] == (expected == "process_relaunch")
+
+
+def test_relaunch_uses_fresh_driver_without_deleting_dead_browser_session(tmp_path, modules, monkeypatch):
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory = tmp_path
+    journey.env = {"FIXTURE": "bounded"}
+    journey.driver_path = tmp_path / "msedgedriver.exe"
+    journey.driver_port = 1000
+    journey.driver_log = (tmp_path / "driver.log").open("wb")
+    actions = []
+
+    class OldView:
+        session = "/session/stale"
+
+        def close(self):
+            raise AssertionError("A dead browser session must not receive DELETE")
+
+    class Driver:
+        def kill(self):
+            actions.append("kill-stale-driver")
+
+        def wait(self, *, timeout):
+            actions.append(("wait-stale-driver", timeout))
+
+    journey.view, journey.driver = OldView(), Driver()
+    monkeypatch.setattr(module, "available_port", lambda: 2000)
+
+    class NewView:
+        def __init__(self, port):
+            actions.append(("new-view", port))
+            self.session = ""
+
+    class NewDriver:
+        def __init__(self, command, **kwargs):
+            actions.append(("new-driver", command, kwargs["env"]))
+
+    monkeypatch.setattr(module, "WebView", NewView)
+    monkeypatch.setattr(module.subprocess, "Popen", NewDriver)
+    journey.attach = lambda: actions.append("attach-replacement")
+    journey.restart_driver_after_relaunch()
+
+    assert journey.driver_port == 2000
+    assert journey.view.session == ""
+    assert actions[:3] == ["kill-stale-driver", ("wait-stale-driver", 15), ("new-view", 2000)]
+    assert actions[-1] == "attach-replacement"
+    assert b"WebDriver restarted after native relaunch" in (tmp_path / "driver.log").read_bytes()
+    journey.driver_log.close()
 
 
 @pytest.mark.parametrize("mode", ["accepted", "refused", "timeout", "malformed"])
@@ -679,3 +730,99 @@ def test_normal_support_journey_reviews_exact_cohort_and_download(tmp_path, modu
         assert journey.report["support_inventory"]["package_count"] == 8
         assert journey.report["support_inventory"]["versions"] == report["versions"]
         assert journey.report["checks"] == ["normal-support-eight-package-inventory"]
+
+
+def test_recovery_set_repair_opens_install_and_updates_before_reading_the_version(tmp_path, modules, monkeypatch):
+    # The primary application opens on the dashboard. Its maintenance page,
+    # the only page with #installed-version, is reached through the real
+    # "Install & updates" menu, exactly as the signed upgrade journey does.
+    module, _ = modules
+    journey = module.Journey.__new__(module.Journey)
+    journey.directory, journey.state = tmp_path, tmp_path / "state"
+    journey.report = {"checks": []}
+    install = tmp_path / "install"
+    install.mkdir()
+    journey.install = install
+    journey.binary, journey.runtime = install / "maverick-desktop.exe", install / "maverick.exe"
+    journey.recovery_binary = install / "maverick-recovery-desktop.exe"
+    journey.recovery_runtime = install / "maverick-recovery.exe"
+    journey.recovery_installer = install / "Lightwork-recovery.msi"
+    journey.base = tmp_path / "base.msi"
+    native, runtime, package = b"synthetic native shell", b"synthetic runtime", b"synthetic base package"
+    for path, content in ((journey.binary, native), (journey.recovery_binary, native), (journey.runtime, runtime),
+                          (journey.recovery_runtime, runtime), (journey.base, package), (journey.recovery_installer, package)):
+        path.write_bytes(content)
+    journey.metadata = {"version": "0.1.7", "runtime": {"sha256": module.digest(journey.runtime)}}
+    marker = tmp_path / "marker.txt"
+    marker.write_text("before signed repair", encoding="utf-8")
+    actions = []
+    state = {"page": "dashboard", "repair_offered": False, "repaired": False}
+    journey.stop = lambda: actions.append("stop")
+    journey.start = lambda *arguments: (actions.append(("start", arguments)), state.update(page="dashboard"))
+    journey.restart_driver_after_relaunch = lambda: actions.append("restart-driver")
+
+    def open_menu(binary, label):
+        assert binary == journey.binary
+        actions.append(("menu", label))
+        if label == "Install & updates":
+            state["page"] = "maintenance"
+
+    monkeypatch.setattr(module, "menu", open_menu)
+    monkeypatch.setattr(module, "app_windows", lambda _path: [(2, 2)] if state["repaired"] else [(1, 1)])
+
+    class View:
+        session = "/session/synthetic"
+
+        def wait(self, condition, **_kwargs):
+            try:
+                value = condition()
+            except (OSError, RuntimeError, KeyError):
+                value = None
+            if not value:
+                raise RuntimeError("The expected native UI transition did not complete before its deadline.")
+            return value
+
+        def text(self, selector):
+            actions.append(("text", selector))
+            if state["page"] != "maintenance":
+                raise RuntimeError("WebView command element failed (404).")
+            if selector == "#installed-version":
+                return "0.1.7"
+            if selector == "#update-version":
+                return "Repair version 0.1.7" if state["repair_offered"] else ""
+            raise AssertionError(selector)
+
+        def property(self, selector, name):
+            assert (selector, name) == ("#install-update", "disabled")
+            return not state["repair_offered"]
+
+        def click(self, selector):
+            actions.append(("click", selector))
+            if selector == "#repair-install":
+                state["repair_offered"] = True
+            if selector == "#install-update":
+                # The real repair restores the retained recovery set and reopens
+                # the primary application on its maintenance result page.
+                journey.recovery_binary.write_bytes(native)
+                journey.recovery_runtime.write_bytes(runtime)
+                journey.recovery_installer.write_bytes(package)
+                state["repaired"] = True
+
+        def call(self, method, path, payload):
+            assert method == "POST" and path.endswith("/execute/sync")
+            return "completed" if state["repaired"] and payload["args"] == ["repaired 0.1.7"] else "pending"
+
+        def screenshot(self, path):
+            actions.append(("screenshot", path.name))
+
+    journey.view = View()
+    journey.repair_damaged_recovery_set(marker)
+
+    assert journey.report["checks"] == ["signed-native-recovery-set-repair"]
+    assert actions[:3] == ["stop", ("start", ()), ("menu", "Install & updates")]
+    assert actions.index(("menu", "Install & updates")) < actions.index(("text", "#installed-version"))
+    assert actions[-1] == ("screenshot", "signed-native-recovery-set-repair.png")
+    assert module.digest(journey.recovery_binary) == module.digest(journey.binary)
+    assert module.digest(journey.recovery_runtime) == module.digest(journey.runtime)
+    assert module.digest(journey.recovery_installer) == module.digest(journey.base)
+    assert marker.read_text(encoding="utf-8") == "before signed repair"
