@@ -34,6 +34,20 @@ class BudgetExceeded(Exception):
     pass
 
 
+class UsageAccountingError(RuntimeError):
+    """A provider reported malformed usage accounting -- a missing, non-finite
+    or negative token count -- for a call that was already paid for.
+
+    Fail closed: the spend cannot be billed against the cap, so the run stops.
+    Deliberately NOT a :class:`BudgetExceeded` subclass (platform audit W1-17):
+    reporting a broken gateway as "budget exceeded" sent operators to raise
+    ``max_dollars`` instead of fixing the gateway, hid the real cause from the
+    dashboard and CLI, and made provider failover treat it as a budget control
+    signal. It is still non-retryable (another model cannot repair a gateway's
+    accounting), and it counts as a provider failure for the circuit breaker.
+    """
+
+
 class UnpricedModelError(BudgetExceeded):
     """Raised when billing lacks a verified, provenance-carrying model rate.
 
@@ -119,8 +133,9 @@ def _coerce_count(v: object) -> int:
     Providers occasionally return ``None`` in ``usage`` on streaming refusals;
     that remains a zero count for backwards-compatible null-safety. Non-finite,
     unparseable, or negative counts are invalid accounting data. Raise
-    ``BudgetExceeded`` so the run stops instead of silently recording a paid
-    call as $0 and bypassing later budget checks.
+    :class:`UsageAccountingError` so the run stops instead of silently
+    recording a paid call as $0 and bypassing later budget checks -- and so
+    the stop is reported as a provider fault, not a cap breach.
     """
     if v is None:
         return 0
@@ -129,9 +144,9 @@ def _coerce_count(v: object) -> int:
             raise ValueError("non-finite")
         n = int(v or 0)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise BudgetExceeded(f"invalid token usage count: {v!r}") from exc
+        raise UsageAccountingError(f"invalid token usage count: {v!r}") from exc
     if n < 0:
-        raise BudgetExceeded(f"invalid token usage count: negative value {n}")
+        raise UsageAccountingError(f"invalid token usage count: negative value {n}")
     return n
 
 # Anthropic cache multipliers (over the list input price).

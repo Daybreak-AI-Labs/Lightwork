@@ -24,7 +24,7 @@ import os
 from collections.abc import Callable
 from typing import Any
 
-from ..budget import Budget, BudgetExceeded
+from ..budget import Budget, UsageAccountingError
 from ..llm import LLMResponse, ToolCall
 from ..retry import async_retry, sync_retry
 from ..secrets import scrub
@@ -65,21 +65,23 @@ def _strict_usage_count(v: object, field: str, *, missing_ok: bool = False) -> i
 
     OpenAI-compatible calls are paid before we see ``usage``. If the gateway
     reports malformed accounting data, do not silently record a zero-cost call:
-    fail closed so the agent stops instead of bypassing spend limits.
+    fail closed so the agent stops instead of bypassing spend limits. The
+    error is a :class:`UsageAccountingError` (a provider fault), never a
+    cap breach -- see platform audit W1-17.
     Optional cache fields may pass ``missing_ok=True`` to treat ``None`` as 0.
     """
     if v is None:
         if missing_ok:
             return 0
-        raise BudgetExceeded(f"invalid OpenAI usage.{field}: missing token count")
+        raise UsageAccountingError(f"invalid OpenAI usage.{field}: missing token count")
     try:
         if isinstance(v, float) and not math.isfinite(v):
             raise ValueError("non-finite")
         n = int(v or 0)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise BudgetExceeded(f"invalid OpenAI usage.{field}: {v!r}") from exc
+        raise UsageAccountingError(f"invalid OpenAI usage.{field}: {v!r}") from exc
     if n < 0:
-        raise BudgetExceeded(f"invalid OpenAI usage.{field}: negative token count {n}")
+        raise UsageAccountingError(f"invalid OpenAI usage.{field}: negative token count {n}")
     return n
 
 
@@ -441,7 +443,9 @@ class OpenAIClient:
         if budget is not None:
             usage = getattr(resp, "usage", None)
             if not usage and usage_required:
-                raise BudgetExceeded("OpenAI response missing token usage; cannot enforce budget")
+                raise UsageAccountingError(
+                    "OpenAI response missing token usage; cannot enforce budget"
+                )
             if not usage:
                 # Self-hosted server omitted usage (see USAGE_REQUIRED). Its ids
                 # price at $0, so there is nothing to enforce: the getattr chain

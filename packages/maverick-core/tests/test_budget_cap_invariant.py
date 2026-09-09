@@ -10,7 +10,7 @@ pairs: usage over a cap MUST raise, usage under it MUST NOT.
 from __future__ import annotations
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
+from maverick.budget import Budget, BudgetExceeded, UsageAccountingError
 
 
 def _budget(**caps) -> Budget:
@@ -64,9 +64,11 @@ def test_zero_wall_cap_trips_when_monotonic_clock_has_not_ticked(monkeypatch):
 
 
 def test_nonfinite_or_negative_usage_fails_closed():
+    # Malformed usage still stops the run, but as a provider accounting fault
+    # (W1-17), not as a cap breach.
     b = _budget()
     for bad in (float("inf"), float("nan"), -1):
-        with pytest.raises(BudgetExceeded):
+        with pytest.raises(UsageAccountingError):
             b.record_tokens(0, bad)
 
 
