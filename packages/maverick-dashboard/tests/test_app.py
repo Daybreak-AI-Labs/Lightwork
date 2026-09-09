@@ -134,11 +134,40 @@ def test_compartments_page_renders(tmp_path, monkeypatch):
     resp = client.get("/compartments")
     assert resp.status_code == 200
     assert "compartments" in resp.text.lower()
-    # the built-in finance pack shows up as a domain in the roster
-    assert "finance" in resp.text
     # a pack that declares an output contract surfaces its deliverable
     assert "Delivers:" in resp.text
-    assert "13-week cash forecast" in resp.text
+    # the built-in finance packs are findable through the search box
+    found = client.get("/compartments", params={"q": "finance"})
+    assert found.status_code == 200
+    assert "finance" in found.text
+    assert "matching agents" in found.text
+    # the deliverable of a specific pack is on its search result
+    cash = client.get("/compartments", params={"q": "finance_cash13w"})
+    assert "13-week cash forecast" in cash.text
+
+
+def test_compartments_page_is_searched_and_paginated(tmp_path, monkeypatch):
+    """W3-30: unscoped, the roster is 2,000+ packs and rendered every
+    capability envelope into one multi-megabyte page. It now renders one
+    bounded slice, like /tools."""
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    resp = client.get("/compartments", params={"per_page": 5})
+    assert resp.status_code == 200
+    assert len(resp.content) < 300_000, len(resp.content)
+    assert resp.text.count('<tr>') <= 6          # header row + 5 packs
+    assert "Showing 1–5 of" in resp.text
+    assert "Page 1 of" in resp.text and "Next" in resp.text
+    second = client.get("/compartments", params={"per_page": 5, "page": 2})
+    assert second.status_code == 200
+    assert "Showing 6–10 of" in second.text and "Previous" in second.text
+    # Beyond the last page is a clean 400, not an empty table.
+    assert client.get("/compartments", params={"per_page": 100, "page": 100_000}).status_code == 400
+    # A search narrows the slice and is reflected in the pager links.
+    found = client.get("/compartments", params={"q": "finance", "per_page": 5})
+    assert found.status_code == 200
+    assert "finance" in found.text
+    assert "q=finance" in found.text or "Page 1 of 1" in found.text
 
 
 def test_facts_page_renders(tmp_path, monkeypatch):

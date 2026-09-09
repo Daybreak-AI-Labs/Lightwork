@@ -5348,12 +5348,32 @@ async def simulate_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/compartments", response_class=HTMLResponse)
-async def compartments_page(request: Request) -> HTMLResponse:
+async def compartments_page(
+    request: Request,
+    q: str = Query(default="", max_length=128),
+    page: int = Query(default=1, ge=1, le=100_000),
+    per_page: int = Query(default=50, ge=1, le=100),
+) -> HTMLResponse:
     """The agent factory's roster: each domain pack and the bulkhead it runs in.
 
     Reads the discoverable domain packs (built-in + onboarded) so an operator
     can see which sealed agents exist and the capability envelope each runs
-    under -- the compartments a Rung-2 seal acts on."""
+    under -- the compartments a Rung-2 seal acts on. Searched and paginated
+    like /tools (W3-30): unscoped, the full roster is 2,000+ packs and rendered
+    every capability envelope into one multi-megabyte page."""
+    query = q.strip()
+    domain_page = {
+        "query": query,
+        "page": page,
+        "per_page": per_page,
+        "catalog_total": 0,
+        "filtered_total": 0,
+        "returned": 0,
+        "page_count": 1,
+        "first": 0,
+        "last": 0,
+    }
+    domains: list = []
     try:
         from maverick.domain import available_domains, suite_for
 
@@ -5362,14 +5382,46 @@ async def compartments_page(request: Request) -> HTMLResponse:
         # Job-function scoping: a scoped caller sees only their departments'
         # sealed agents and capability envelopes, matching /agents (this page
         # otherwise leaks every department's pack config).
-        domains = scope_to_suites(
+        catalog = scope_to_suites(
             request,
             sorted(available_domains().values(), key=lambda d: d.name),
             suite_of=lambda d: suite_for(d.name),
         )
+        folded = query.casefold()
+        filtered = [
+            d
+            for d in catalog
+            if not folded
+            or folded in d.name.casefold()
+            or folded in (getattr(d, "persona", "") or "").casefold()
+            or folded in (getattr(d, "compartment", "") or "").casefold()
+        ]
+        page_count = max(1, (len(filtered) + per_page - 1) // per_page)
+        if page > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail="compartment page exceeds the available search results",
+            )
+        start = (page - 1) * per_page
+        domains = filtered[start : start + per_page]
+        domain_page = {
+            "query": query,
+            "page": page,
+            "per_page": per_page,
+            "catalog_total": len(catalog),
+            "filtered_total": len(filtered),
+            "returned": len(domains),
+            "page_count": page_count,
+            "first": start + 1 if domains else 0,
+            "last": start + len(domains),
+        }
+    except HTTPException:
+        raise
     except Exception:  # never 500 the page if the factory layer is unavailable
         domains = []
-    return templates.TemplateResponse(request, "compartments.html", {"domains": domains})
+    return templates.TemplateResponse(
+        request, "compartments.html", {"domains": domains, "domain_page": domain_page},
+    )
 
 
 @app.get("/agents", response_class=HTMLResponse)
