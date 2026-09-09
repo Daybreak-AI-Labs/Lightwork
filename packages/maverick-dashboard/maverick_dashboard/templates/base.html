@@ -1,8 +1,8 @@
 {% from "_assets.html" import asset -%}
 <!doctype html>
-{#- <html lang> declares the language of the page BODY (English until the
-    templates are translated); the chrome strings that do follow the selected
-    language carry their own lang attribute below (W3-73, WCAG 3.1.1). -#}
+{#- The root lang attribute declares the language of the page BODY (English
+    until the templates are translated); the chrome strings that do follow the
+    selected language carry their own lang attribute below (W3-73, WCAG 3.1.1). -#}
 <html lang="{{ page_lang or 'en' }}" dir="{{ dir or 'ltr' }}">
 <head>
   <meta charset="utf-8" />

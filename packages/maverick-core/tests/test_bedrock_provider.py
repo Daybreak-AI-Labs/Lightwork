@@ -95,12 +95,12 @@ def test_iam_without_boto3_fails_with_the_extra_named(fake_sdk, monkeypatch):
 
 def test_bearer_token_selects_api_key_auth_without_boto3(fake_sdk, monkeypatch):
     _pretend_boto3(monkeypatch, False)
-    monkeypatch.setenv("BEDROCK_API_KEY", "  bearer-token \n")
+    monkeypatch.setenv("BEDROCK_API_KEY", "  bearer-token \n")  # pragma: allowlist secret
     from maverick.providers.bedrock_provider import BedrockClient
 
     c = BedrockClient()
     assert c.auth_mode == "api_key"
-    assert c.client.kw["api_key"] == "bearer-token"
+    assert c.client.kw["api_key"] == "bearer-token"  # pragma: allowlist secret
 
 
 def test_explicit_api_key_mode_without_a_token_fails_closed(fake_sdk, monkeypatch):
