@@ -199,7 +199,6 @@ def test_iam_config_counts_as_a_configured_provider(monkeypatch):
     assert config.any_provider_configured() is True
     monkeypatch.setattr(config, "load_config", lambda: {"providers": {"bedrock": {}}})
     assert config.any_provider_configured() is False
-    assert "AWS_BEARER_TOKEN_BEDROCK" in config.PROVIDER_KEY_ENV_MAP["bedrock"]
 
 
 def test_dispatcher_hands_bedrock_the_admitted_snapshot(fake_sdk, monkeypatch):

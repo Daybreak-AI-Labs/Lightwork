@@ -653,7 +653,7 @@ PROVIDER_KEY_ENV_MAP: dict[str, tuple[str, ...]] = {
     "tgi": ("TGI_API_KEY",),
     "vllm": ("VLLM_API_KEY",),
     "azure": ("AZURE_OPENAI_API_KEY",),
-    "bedrock": ("BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"),
+    "bedrock": ("BEDROCK_API_KEY",),
     "openai_compatible": ("OPENAI_COMPATIBLE_API_KEY",),
     # ChatGPT/Codex access token for the codex_cli provider. Consumed by
     # `codex login --with-access-token` (fed on STDIN, never argv/logs).
