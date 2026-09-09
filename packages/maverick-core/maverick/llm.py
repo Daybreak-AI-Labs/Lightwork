@@ -1032,6 +1032,17 @@ _AZURE_CLIENT_ENV_NAMES = (
     "AZURE_OPENAI_DEPLOYMENT",
     "AZURE_OPENAI_TOKEN_SCOPE",
 )
+# Everything the native Bedrock client reads (W1-10); part of the client
+# fingerprint so a region/auth/endpoint change rotates the cached client.
+_BEDROCK_CLIENT_ENV_NAMES = (
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "AWS_DEFAULT_REGION",
+    "AWS_REGION",
+    "BEDROCK_API_KEY",
+    "BEDROCK_AUTH_MODE",
+    "BEDROCK_ENDPOINT",
+    "BEDROCK_MODEL_ID",
+)
 _PROVIDER_SNAPSHOT_RETRIES = 3
 _CLIENT_CACHE_MAX = 32
 
@@ -1400,15 +1411,6 @@ class LLM:
                 if value:
                     base_url = value
                     break
-        # Bedrock derives its endpoint from region rather than a BASE_URL env.
-        # Resolve that derivation here so cache identity rotates with AWS_REGION.
-        if provider == "bedrock" and base_url is None:
-            region = environment.get("AWS_REGION", "").strip()
-            if region:
-                base_url = (
-                    f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
-                )
-
         default_headers = _canonical_headers(pcfg.get("default_headers"))
         raw_auth_mode = pcfg.get("auth_mode")
         auth_mode = None
@@ -1428,6 +1430,20 @@ class LLM:
             if auth_mode is not None:
                 azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
             provider_environment = tuple(sorted(azure_environment.items()))
+        elif provider == "bedrock":
+            # The native client derives its endpoint from the region and picks
+            # IAM vs bearer auth; ``[providers.bedrock] auth_mode`` / ``endpoint``
+            # win over the environment, all from the same snapshot.
+            bedrock_environment = {
+                name: environment.get(name, "")
+                for name in _BEDROCK_CLIENT_ENV_NAMES
+            }
+            if auth_mode is not None:
+                bedrock_environment["BEDROCK_AUTH_MODE"] = auth_mode
+            raw_endpoint = pcfg.get("endpoint")
+            if isinstance(raw_endpoint, str) and raw_endpoint.strip():
+                bedrock_environment["BEDROCK_ENDPOINT"] = raw_endpoint.strip().lower()
+            provider_environment = tuple(sorted(bedrock_environment.items()))
 
         fingerprint = _provider_config_fingerprint(
             api_key=key,
@@ -1465,9 +1481,10 @@ class LLM:
                 "base_url": config.base_url,
                 "default_headers": config.headers_dict(),
             }
-            if provider == "azure":
+            if provider in ("azure", "bedrock"):
                 # Azure's key-vs-Entra selection, static token, deployment, and
-                # API version must consume the same environment snapshot too.
+                # API version -- and Bedrock's region, auth mode and endpoint --
+                # must consume the same environment snapshot too.
                 factory_kwargs["environment"] = config.environment_dict()
             client = get_provider_client(provider, **factory_kwargs)
 

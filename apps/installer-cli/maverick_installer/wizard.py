@@ -692,6 +692,27 @@ def pick_providers() -> list[str]:
     return [p.split()[0] for p in picks]
 
 
+def pick_bedrock_auth() -> dict[str, Any]:
+    """How Lightwork authenticates to AWS Bedrock; written to
+    ``[providers.bedrock]`` (W1-10). IAM is the standard enterprise path
+    (instance/task role, profile, or env keys) and needs no bearer token."""
+    console.print(
+        "[dim]Bedrock can sign requests with your AWS IAM credentials -- an "
+        "instance or task role, an AWS profile, or AWS_ACCESS_KEY_ID/"
+        "AWS_SECRET_ACCESS_KEY (the standard enterprise path; needs the "
+        "bedrock extra: boto3) -- or send a Bedrock bearer token.[/dim]"
+    )
+    pick = _q_select(
+        "  How should Lightwork authenticate to Bedrock?",
+        [
+            "iam     - AWS IAM credentials / role (SigV4, recommended)",
+            "api_key - Bedrock bearer token in BEDROCK_API_KEY",
+        ],
+        default="iam     - AWS IAM credentials / role (SigV4, recommended)",
+    )
+    return {"auth_mode": pick.split()[0]}
+
+
 def pick_per_tenant_keys() -> bool:
     """Offer per-tenant BYOK provider keys (multi-tenant deployments only).
 
@@ -6018,8 +6039,13 @@ def _cfg_governance(
     return ["[governance]", *values, ""]
 
 
-def _cfg_providers(providers: list[str], per_tenant_keys: bool = False) -> list[str]:
+def _cfg_providers(
+    providers: list[str],
+    per_tenant_keys: bool = False,
+    provider_options: dict[str, dict[str, Any]] | None = None,
+) -> list[str]:
     lines: list[str] = []
+    options = provider_options or {}
     if per_tenant_keys:
         # Bring-your-own-key: let an active tenant override the deployment-global
         # provider key with its own (resolved from the secret provider under a
@@ -6033,6 +6059,18 @@ def _cfg_providers(providers: list[str], per_tenant_keys: bool = False) -> list[
         info = catalog.PROVIDERS.get(prov, {})
         lines.append(f"[providers.{prov}]")
         env_name = info.get("env")
+        if prov == "bedrock":
+            # Native Bedrock: IAM signing needs no key; a bearer token does.
+            mode = str((options.get("bedrock") or {}).get("auth_mode") or "iam")
+            lines.append("# iam = sign with AWS credentials/role (needs the bedrock "
+                         "extra); api_key = Bedrock bearer in BEDROCK_API_KEY.")
+            _emit_kv(lines, "auth_mode", mode)
+            if mode == "api_key":
+                lines.append(f'api_key = "${{{env_name}}}"')
+            lines.append('# endpoint = "mantle"   # Opus 4.7+ (anthropic.claude-*); '
+                         '"legacy" for Opus 4.6 and earlier')
+            lines.append("")
+            continue
         if env_name:
             lines.append(f'api_key = "${{{env_name}}}"')
         if prov == "ollama":
@@ -8023,6 +8061,7 @@ def write_config(
     capabilities: dict[str, bool] | None = None,
     *,
     advanced: dict[str, Any] | None = None,
+    provider_options: dict[str, dict[str, Any]] | None = None,
     mcp_servers: dict[str, dict[str, Any]] | None = None,
     mcp_registries: list[str] | None = None,
     template_registries: list[str] | None = None,
@@ -8149,7 +8188,9 @@ def write_config(
     ]
     lines += _cfg_deployment(deployment)
     lines += _cfg_governance(governance_profile, finance)
-    lines += _cfg_providers(providers, per_tenant_keys=per_tenant_keys)
+    lines += _cfg_providers(
+        providers, per_tenant_keys=per_tenant_keys, provider_options=provider_options,
+    )
     lines += _cfg_role_models(role_models)
     lines += _cfg_channels(channels)
     lines += _cfg_core(budget, safety, sandbox)
@@ -9302,6 +9343,14 @@ def run(fast: bool = False, resume: bool = False) -> int:
     state["providers"] = providers
     _save_partial(state)
 
+    provider_options = state.get("provider_options")
+    if provider_options is None:
+        provider_options = {}
+        if "bedrock" in providers:
+            provider_options["bedrock"] = pick_bedrock_auth()
+        state["provider_options"] = provider_options
+        _save_partial(state)
+
     per_tenant_keys = state.get("per_tenant_keys")
     if per_tenant_keys is None:
         per_tenant_keys = pick_per_tenant_keys()
@@ -9437,6 +9486,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         keys,
         capabilities,
         advanced=advanced,
+        provider_options=provider_options,
         mcp_servers=mcp_servers,
         plugins=plugins,
         plugin_grant=plugin_grant,

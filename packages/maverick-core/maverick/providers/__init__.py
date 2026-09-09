@@ -114,7 +114,14 @@ def get_provider_client(
         )
     if canon == "bedrock":
         from .bedrock_provider import BedrockClient
-        return BedrockClient(api_key=api_key, base_url=base_url)
+        # Native Anthropic Messages client (W1-10): region, auth mode and
+        # endpoint come from the same admitted environment snapshot.
+        return BedrockClient(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=default_headers,
+            environment=environment,
+        )
     if canon == "openai_compatible":
         from .openai_compatible_provider import OpenAICompatibleClient
         return OpenAICompatibleClient(api_key=api_key, base_url=base_url)
@@ -134,12 +141,16 @@ KNOWN_PROVIDERS = (
 )
 
 # The pip package each provider's client imports at construction/call time.
-# Everything OpenAI-translated (incl. bedrock, which subclasses OpenAIClient)
-# needs ``openai``; anthropic needs ``anthropic``. codex_cli needs NO pip SDK
-# -- it shells out to the Codex CLI binary (checked separately below).
+# Everything OpenAI-translated needs ``openai``; anthropic and bedrock (the
+# Anthropic SDK's Bedrock clients; IAM auth additionally needs boto3 via the
+# ``bedrock`` extra, checked at client construction) need ``anthropic``.
+# codex_cli needs NO pip SDK -- it shells out to the Codex CLI binary
+# (checked separately below).
 _SDK_MODULE: dict[str, str] = {
     "anthropic": "anthropic",
-    **{p: "openai" for p in KNOWN_PROVIDERS if p not in ("anthropic", "codex_cli")},
+    "bedrock": "anthropic",
+    **{p: "openai" for p in KNOWN_PROVIDERS
+       if p not in ("anthropic", "bedrock", "codex_cli")},
 }
 
 _SDK_HINT: dict[str, str] = {

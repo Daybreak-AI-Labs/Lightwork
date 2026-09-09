@@ -56,6 +56,21 @@ api_key = "${OPENROUTER_API_KEY}"
 [providers.ollama]
 base_url = "http://localhost:11434"
 
+[providers.bedrock]
+# Claude on AWS Bedrock through the native Anthropic Messages API (prompt
+# caching, thinking, tool_choice all work). auth_mode "iam" signs with your AWS
+# credentials or role (needs the `bedrock` extra: boto3); "api_key" sends a
+# Bedrock bearer token from BEDROCK_API_KEY. endpoint "mantle" is Claude in
+# Amazon Bedrock (Opus 4.7 and later; ids like anthropic.claude-opus-5);
+# "legacy" is Opus 4.6 and earlier (ids like global.anthropic.claude-opus-4-6-v1).
+# AWS_REGION is required; BEDROCK_MODEL_ID sets the default model.
+# Billing: Bedrock is invoiced by AWS at its own rates, which are not in
+# Lightwork's verified rate card. Planning estimates use the Claude API list
+# rate for the model behind the id; set [budget] strict_pricing=false to
+# account live usage at that estimate.
+auth_mode = "iam"
+# endpoint = "mantle"
+
 [models]
 # Per-role model picks. Format: "provider:model-id".
 # Any role omitted falls back to maverick.llm.ROLE_MODELS defaults.

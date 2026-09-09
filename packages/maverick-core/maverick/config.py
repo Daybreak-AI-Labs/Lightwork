@@ -653,7 +653,7 @@ PROVIDER_KEY_ENV_MAP: dict[str, tuple[str, ...]] = {
     "tgi": ("TGI_API_KEY",),
     "vllm": ("VLLM_API_KEY",),
     "azure": ("AZURE_OPENAI_API_KEY",),
-    "bedrock": ("BEDROCK_API_KEY",),
+    "bedrock": ("BEDROCK_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"),
     "openai_compatible": ("OPENAI_COMPATIBLE_API_KEY",),
     # ChatGPT/Codex access token for the codex_cli provider. Consumed by
     # `codex login --with-access-token` (fed on STDIN, never argv/logs).
@@ -904,6 +904,10 @@ def any_provider_configured() -> bool:
         if not isinstance(pcfg, dict):
             continue
         if str(pcfg.get("api_key", "")).strip() or str(pcfg.get("base_url", "")).strip():
+            return True
+        # Bedrock signing with AWS IAM credentials carries no key at all: the
+        # explicit auth_mode is the configuration (W1-10).
+        if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
             return True
     return False
 

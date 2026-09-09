@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import threading
 import time
 import uuid
@@ -251,6 +252,89 @@ def _estimate_policy_price(
     )
 
 
+_BEDROCK_INFERENCE_PROFILE_PREFIXES = ("global.", "us.", "eu.", "jp.", "apac.", "au.")
+_BEDROCK_VERSION_SUFFIX = re.compile(r"-v\d+(?::\d+)?$")
+_BEDROCK_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
+
+def bedrock_rate_card_model_id(model_id: str | None) -> str | None:
+    """The Claude API catalogue id behind a Bedrock model id, or ``None``.
+
+    ``anthropic.claude-opus-5`` -> ``claude-opus-5``;
+    ``us.anthropic.claude-sonnet-4-5-20250929-v1:0`` -> ``claude-sonnet-4-5``;
+    ``global.anthropic.claude-opus-4-6-v1`` -> ``claude-opus-4-6``. Accepts a
+    ``bedrock:`` spec prefix. Non-Anthropic Bedrock ids map to ``None``.
+    """
+    mid = (model_id or "").strip()
+    mid = mid.removeprefix("bedrock:")
+    for prefix in _BEDROCK_INFERENCE_PROFILE_PREFIXES:
+        if mid.startswith(prefix):
+            mid = mid[len(prefix):]
+            break
+    if not mid.startswith("anthropic."):
+        return None
+    mid = mid[len("anthropic."):]
+    mid = _BEDROCK_VERSION_SUFFIX.sub("", mid)
+    mid = _BEDROCK_DATE_SUFFIX.sub("", mid)
+    return mid or None
+
+
+def _bedrock_estimate_quote(
+    requested: str,
+    canonical: str,
+    *,
+    estimate_only: bool,
+) -> ModelPrice | None:
+    """Estimate-only quote for a Bedrock model id from the Claude API list rate
+    of the model behind it (W1-10).
+
+    AWS invoices Bedrock at its own rates (regional endpoints carry a 10%
+    premium over global), which are not in the verified rate card, so this is
+    never a bill: strict accounting raises with the remedy, and planning gets
+    a clearly provisional estimate.
+    """
+    from .llm import model_price_quote
+
+    try:
+        base = model_price_quote(canonical, estimate_only=True)
+    except UnverifiedRateError:
+        base = None
+    if base is None:
+        return None
+    if not estimate_only:
+        raise UnpricedModelError(
+            f"no verified USD price for Bedrock model {requested!r}: AWS invoices "
+            "Bedrock usage at its own rates (regional endpoints carry a 10% premium "
+            "over global), which are not in Lightwork's rate card. Planning "
+            f"estimates use the Claude API list rate for {canonical!r}; to account "
+            "live usage at that estimate set [budget] strict_pricing=false."
+        )
+    if requested not in _UNPRICED_WARNED:
+        _UNPRICED_WARNED.add(requested)
+        log.warning(
+            "estimate-only accounting for Bedrock model %r uses the Claude API "
+            "list rate for %r ($%.2f/$%.2f per Mtok); AWS invoices are "
+            "authoritative and this must not be used for billing",
+            requested, canonical, base.rates[0], base.rates[1],
+        )
+    return _estimate_policy_price(
+        requested,
+        base.rates,
+        source="maverick://pricing-policy/bedrock-anthropic-list-estimate",
+        confidence=0.6,
+        version="bedrock-anthropic-list-estimate-v1",
+        evidence_id="bedrock-anthropic-list-estimate-v1",
+        pricing_basis=(
+            f"Claude API list rate for {canonical} applied to the Bedrock model "
+            "id; AWS invoices are authoritative"
+        ),
+        applicability=(
+            "Estimate-only; assumes the Bedrock global endpoint (regional "
+            "endpoints carry a 10% premium)"
+        ),
+    )
+
+
 def _lookup_price_quote(
     model: str | None,
     *,
@@ -346,6 +430,16 @@ def _lookup_price_quote(
                     estimate_quote.confidence,
                 )
             return estimate_quote
+
+    # Bedrock model ids (W1-10): a provisional estimate from the Claude API
+    # list rate of the model behind the id; never a bill under strict pricing.
+    bedrock_canonical = bedrock_rate_card_model_id(bare)
+    if bedrock_canonical is not None:
+        quote = _bedrock_estimate_quote(
+            requested, bedrock_canonical, estimate_only=estimate_only,
+        )
+        if quote is not None:
+            return quote
 
     # Unknown self-hosted ids incur no metered API-token charge. This does not
     # claim infrastructure is free; the source makes the accounting scope
