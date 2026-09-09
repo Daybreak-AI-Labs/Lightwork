@@ -760,6 +760,16 @@ def tenant_over_quota(tenant_id: str | None) -> str | None:
     if spent >= cap:
         return (f"workspace {tid!r} is over its daily spend cap "
                 f"(${spent:.2f} >= ${cap:.2f}); resets at midnight UTC")
+    # Runs in flight hold the allowance they may still spend (W2-83). Without
+    # counting them here the gate admitted a run that reserve_tenant_budget
+    # then granted $0, so it was created, started, and died on its first
+    # model call with "budget exceeded" instead of a clean over-quota refusal.
+    held = _outstanding_reservations(tid)
+    if held > 0 and spent + held >= cap:
+        return (f"workspace {tid!r} has no daily spend allowance left: "
+                f"${spent:.2f} spent plus ${held:.2f} held by runs in flight "
+                f"reaches its ${cap:.2f} cap; retry when those runs finish or "
+                "after midnight UTC")
     return None
 
 

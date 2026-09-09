@@ -127,6 +127,16 @@ def test_vendor_status_note_and_onetrust_import():
         "csv_text": "Vendor Name,Vendor Type,Tier\nUmbrella,security,Tier 1\n"})
     assert imported.status_code == 201
     assert imported.json()["imported"] == 1
+    assert imported.json()["skipped"] == []
+    # Re-importing the same export reports the vendor as a duplicate (left
+    # untouched) instead of silently dropping the row.
+    again = client.post("/api/v1/vendors/import-onetrust", json={
+        "csv_text": "Vendor Name,Vendor Type,Tier\nUmbrella,security,Tier 1\n"})
+    assert again.status_code == 201
+    assert again.json()["imported"] == 0
+    assert [(s["row"], s["name"], s["reason"]) for s in again.json()["skipped"]] == [
+        (1, "Umbrella", "duplicate"),
+    ]
 
 
 def test_consent_round_trip_and_digest_only_export():

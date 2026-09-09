@@ -14,7 +14,7 @@ from typing import Any
 
 from .agent import Agent
 from .blackboard import Blackboard
-from .budget import Budget, BudgetExceeded, UnpricedModelError
+from .budget import Budget, BudgetExceeded, UnpricedModelError, UsageAccountingError
 from .git_safety import (
     git_env_without_user_config as _git_env_without_user_config,
 )
@@ -247,6 +247,30 @@ def _budget_exceeded_message(budget: Any, goal_id: Any) -> str:
         f"{budget.elapsed():.0f}s of {budget.max_wall_seconds:.0f}s).\n"
         f"Resume with a higher cap: "
         f"maverick resume {goal_id} --max-dollars <higher>"
+    )
+
+
+def _usage_accounting_message(detail: str, goal_id: Any) -> str:
+    """A provider mis-reported token usage (W1-17): a gateway fault, not a cap."""
+    return (
+        "Stopped: the model provider returned invalid usage accounting, so "
+        "Lightwork could not bill the call against your spending cap and "
+        "stopped rather than run uncounted.\n"
+        f"Detail: {detail}\n"
+        "This is a provider or gateway fault, not a budget problem -- raising "
+        "the cap will not fix it. Fix or route around the gateway, then: "
+        f"maverick resume {goal_id}"
+    )
+
+
+def _review_checkpoint_message(detail: str, goal_id: Any) -> str:
+    """The opt-in review checkpoint stopped the run (W1-33): a reviewer
+    decision, not a HALT file -- so no `maverick unhalt` advice."""
+    return (
+        f"Paused: the review checkpoint stopped this run at {detail} because "
+        "the reviewer did not approve continuing.\n"
+        "Review the work so far, then continue with: "
+        f"maverick resume {goal_id}"
     )
 
 
@@ -1410,6 +1434,12 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         _tenant_reason = tenant_over_quota(_tenant_id)
     except Exception as exc:
         _tenant_reason = f"tenant policy unavailable or inactive: {exc}"
+    if not _tenant_reason:
+        # W2-83: budget_from_config clamps a run to $0 when the tenant's
+        # allowance is exhausted by in-flight holds (or unreadable) and says
+        # why. Refuse here, before the run starts, rather than admit a
+        # $0-cap run that dies on its first model call.
+        _tenant_reason = getattr(budget, "_tenant_refusal", None)
     if _tenant_reason:
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_tenant_reason}")
         log.warning("goal #%s refused: %s", goal_id, _tenant_reason)
@@ -1652,6 +1682,27 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 "result": f"unpriced model: {e}",
             })
             return _unpriced_model_message(e, goal_id)
+        except UsageAccountingError as e:
+            # A provider mis-reported usage on a call made outside the agent
+            # loop (verifier, summariser...). Same reporting as the in-loop
+            # path below: a provider fault, not a cap breach (W1-17).
+            _lifecycle.end_episode(f"provider accounting: {e}", "failure")
+            try:  # default-on local failure telemetry; no-op when disabled
+                from . import failure_telemetry as _ft
+                _ft.record_failure("provider_accounting", goal_id=goal_id, detail=str(e))
+            except Exception:  # pragma: no cover -- telemetry never blocks a run
+                pass
+            _maybe_record_reflexion(
+                goal, failure_class="provider_accounting", failure_msg=str(e),
+                blackboard=blackboard, shield=shield, channel=channel,
+                user_id=user_id, domain=domain,
+            )
+            world.set_goal_status(goal_id, "blocked", result=f"provider usage accounting: {e}")
+            _fire_webhook("goal_finished", {
+                "goal_id": goal_id, "status": "blocked",
+                "result": f"provider usage accounting: {e}",
+            })
+            return _usage_accounting_message(str(e), goal_id)
         except BudgetExceeded as e:
             _lifecycle.end_episode(f"budget: {e}", "failure")
             try:  # default-on local failure telemetry; no-op when disabled
@@ -1814,10 +1865,33 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 # handler above, instead of doubling the label.
                 _detail = result.error.split(": ", 1)[-1]
                 return _unpriced_model_message(_detail, goal_id)
+            # W1-33: branch on the structured stop kind, not on substrings of
+            # the error text. A review-checkpoint stop is a reviewer decision:
+            # there is no HALT file and `maverick unhalt` would do nothing.
+            if result.stop_kind == "review_checkpoint":
+                _lifecycle.end_episode("review checkpoint", "interrupted")
+                world.set_goal_status(goal_id, "blocked", result=result.error)
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": result.error,
+                })
+                return _review_checkpoint_message(result.stop_detail, goal_id)
+            if result.stop_kind == "usage_accounting":
+                _lifecycle.end_episode(result.error, "failure")
+                _maybe_record_reflexion(
+                    goal, failure_class="provider_accounting",
+                    failure_msg=result.stop_detail,
+                    blackboard=blackboard, shield=shield, channel=channel,
+                    user_id=user_id, domain=domain,
+                )
+                world.set_goal_status(goal_id, "blocked", result=result.error)
+                _fire_webhook("goal_finished", {
+                    "goal_id": goal_id, "status": "blocked", "result": result.error,
+                })
+                return _usage_accounting_message(result.stop_detail, goal_id)
             # A halt tripped mid-run surfaces as result.error too. Give the
             # clear unhalt instruction rather than the generic error (whose
             # 'resume' advice would just halt again).
-            if "halt" in (result.error or "").lower():
+            if result.stop_kind == "killswitch":
                 _lifecycle.end_episode("halted", "interrupted")
                 world.set_goal_status(goal_id, "blocked", result="halted")
                 _fire_webhook("goal_finished", {

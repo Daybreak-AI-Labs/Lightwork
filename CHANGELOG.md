@@ -7,6 +7,54 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Bedrock through the Anthropic SDK** — `BedrockClient` now builds on
+  `AnthropicClient` using the SDK's Bedrock clients (Claude in Amazon Bedrock
+  by default, the legacy InvokeModel endpoint on request), so prompt caching,
+  adaptive thinking, thinking signatures and `tool_choice` work on Bedrock.
+  IAM/SigV4 auth from the AWS credential chain is the default (new `bedrock`
+  extra); a bearer token is used when `BEDROCK_API_KEY` or
+  `[providers.bedrock] auth_mode = "api_key"` is set. Bedrock ids map onto the
+  Claude API rate card for planning estimates only; live accounting under
+  strict pricing refuses with the remedy named (AWS rates are not verified).
+- **`tool_choice`, strict tools and serialised tool calls** reach the
+  providers: `LLM.complete`/`complete_async` accept `tool_choice` in Anthropic
+  vocabulary (translated to OpenAI `tool_choice`/`parallel_tool_calls`), a
+  `Tool.strict` flag emits `strict: true` on opt-in only, and a forced choice
+  is clamped to `auto` plus an instruction where the API rejects it (Claude
+  Fable/Mythos 5.1, manual extended thinking).
+- **Per-turn blackboard delta** — each tool-running turn appends what other,
+  unsealed agents posted since the agent's last turn (bounded by
+  `MAVERICK_BB_TURN_DELTA_ENTRIES`), so a running orchestrator sees fan-out
+  caps, seals and sibling findings instead of only its first-turn brief.
+- **Dashboard compression and fingerprinted shell assets** — gzip behind
+  `[dashboard] compress` (default on, wizard question) and content-hashed
+  `/static/*?v=` links with a one-year immutable cache for the shell CSS/JS.
+- **`/compartments` search and pagination** (`q`, `page`, `per_page`), like
+  `/tools`, instead of one multi-megabyte page.
+
+### Fixed
+- Wizard-generated Kubernetes sandbox could not run a command: the backend now
+  verifies a deny-all NetworkPolicy and runs under it (fails closed with the
+  manifest when none exists); the wizard asks for the namespace and networking.
+- VPS bootstrap installs the same `postgres`, `oidc` and `s3` extras as the
+  container image (`MAVERICK_CORE_EXTRAS`).
+- Malformed provider usage is a `UsageAccountingError` (a provider fault),
+  no longer reported as "budget exceeded"; a review-checkpoint stop is
+  reported as a reviewer decision via the new `AgentResult.stop_kind`, not as
+  "a HALT file is present".
+- Tenant over-quota gate counts in-flight reservations, so a run whose
+  allowance is already held is refused before it starts instead of dying on
+  its first model call with a $0 cap.
+- Oversight "Active now" table updates rows in place (keyboard focus and
+  screen-reader position survive the 5-second refresh); artifact version
+  history recovers from a failed fetch and retries.
+- `<html lang>` declares the language the page body is written in; the
+  translated chrome carries its own `lang`.
+- Executive PDF paginates by vertical space, so no line lands in the footer.
+- OneTrust vendor import reports every skipped row with its reason
+  (duplicate, invalid, capacity) in the API, CLI and privacy page.
+- Marketing page positions Lightwork as the governed AI workforce platform
+  with the Daybreak favicon and licensing-appropriate calls to action.
 - **Per-tenant BYOK provider keys** — a config-gated, default-off layer
   (`[providers] per_tenant_keys` / `MAVERICK_PER_TENANT_KEYS`) that lets an
   active tenant run on ITS OWN LLM/provider API key instead of the

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 import threading
 import time
 import uuid
@@ -32,6 +33,20 @@ log = logging.getLogger(__name__)
 
 class BudgetExceeded(Exception):
     pass
+
+
+class UsageAccountingError(RuntimeError):
+    """A provider reported malformed usage accounting -- a missing, non-finite
+    or negative token count -- for a call that was already paid for.
+
+    Fail closed: the spend cannot be billed against the cap, so the run stops.
+    Deliberately NOT a :class:`BudgetExceeded` subclass (platform audit W1-17):
+    reporting a broken gateway as "budget exceeded" sent operators to raise
+    ``max_dollars`` instead of fixing the gateway, hid the real cause from the
+    dashboard and CLI, and made provider failover treat it as a budget control
+    signal. It is still non-retryable (another model cannot repair a gateway's
+    accounting), and it counts as a provider failure for the circuit breaker.
+    """
 
 
 class UnpricedModelError(BudgetExceeded):
@@ -119,8 +134,9 @@ def _coerce_count(v: object) -> int:
     Providers occasionally return ``None`` in ``usage`` on streaming refusals;
     that remains a zero count for backwards-compatible null-safety. Non-finite,
     unparseable, or negative counts are invalid accounting data. Raise
-    ``BudgetExceeded`` so the run stops instead of silently recording a paid
-    call as $0 and bypassing later budget checks.
+    :class:`UsageAccountingError` so the run stops instead of silently
+    recording a paid call as $0 and bypassing later budget checks -- and so
+    the stop is reported as a provider fault, not a cap breach.
     """
     if v is None:
         return 0
@@ -129,9 +145,9 @@ def _coerce_count(v: object) -> int:
             raise ValueError("non-finite")
         n = int(v or 0)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise BudgetExceeded(f"invalid token usage count: {v!r}") from exc
+        raise UsageAccountingError(f"invalid token usage count: {v!r}") from exc
     if n < 0:
-        raise BudgetExceeded(f"invalid token usage count: negative value {n}")
+        raise UsageAccountingError(f"invalid token usage count: negative value {n}")
     return n
 
 # Anthropic cache multipliers (over the list input price).
@@ -236,6 +252,89 @@ def _estimate_policy_price(
     )
 
 
+_BEDROCK_INFERENCE_PROFILE_PREFIXES = ("global.", "us.", "eu.", "jp.", "apac.", "au.")
+_BEDROCK_VERSION_SUFFIX = re.compile(r"-v\d+(?::\d+)?$")
+_BEDROCK_DATE_SUFFIX = re.compile(r"-\d{8}$")
+
+
+def bedrock_rate_card_model_id(model_id: str | None) -> str | None:
+    """The Claude API catalogue id behind a Bedrock model id, or ``None``.
+
+    ``anthropic.claude-opus-5`` -> ``claude-opus-5``;
+    ``us.anthropic.claude-sonnet-4-5-20250929-v1:0`` -> ``claude-sonnet-4-5``;
+    ``global.anthropic.claude-opus-4-6-v1`` -> ``claude-opus-4-6``. Accepts a
+    ``bedrock:`` spec prefix. Non-Anthropic Bedrock ids map to ``None``.
+    """
+    mid = (model_id or "").strip()
+    mid = mid.removeprefix("bedrock:")
+    for prefix in _BEDROCK_INFERENCE_PROFILE_PREFIXES:
+        if mid.startswith(prefix):
+            mid = mid[len(prefix):]
+            break
+    if not mid.startswith("anthropic."):
+        return None
+    mid = mid[len("anthropic."):]
+    mid = _BEDROCK_VERSION_SUFFIX.sub("", mid)
+    mid = _BEDROCK_DATE_SUFFIX.sub("", mid)
+    return mid or None
+
+
+def _bedrock_estimate_quote(
+    requested: str,
+    canonical: str,
+    *,
+    estimate_only: bool,
+) -> ModelPrice | None:
+    """Estimate-only quote for a Bedrock model id from the Claude API list rate
+    of the model behind it (W1-10).
+
+    AWS invoices Bedrock at its own rates (regional endpoints carry a 10%
+    premium over global), which are not in the verified rate card, so this is
+    never a bill: strict accounting raises with the remedy, and planning gets
+    a clearly provisional estimate.
+    """
+    from .llm import model_price_quote
+
+    try:
+        base = model_price_quote(canonical, estimate_only=True)
+    except UnverifiedRateError:
+        base = None
+    if base is None:
+        return None
+    if not estimate_only:
+        raise UnpricedModelError(
+            f"no verified USD price for Bedrock model {requested!r}: AWS invoices "
+            "Bedrock usage at its own rates (regional endpoints carry a 10% premium "
+            "over global), which are not in Lightwork's rate card. Planning "
+            f"estimates use the Claude API list rate for {canonical!r}; to account "
+            "live usage at that estimate set [budget] strict_pricing=false."
+        )
+    if requested not in _UNPRICED_WARNED:
+        _UNPRICED_WARNED.add(requested)
+        log.warning(
+            "estimate-only accounting for Bedrock model %r uses the Claude API "
+            "list rate for %r ($%.2f/$%.2f per Mtok); AWS invoices are "
+            "authoritative and this must not be used for billing",
+            requested, canonical, base.rates[0], base.rates[1],
+        )
+    return _estimate_policy_price(
+        requested,
+        base.rates,
+        source="maverick://pricing-policy/bedrock-anthropic-list-estimate",
+        confidence=0.6,
+        version="bedrock-anthropic-list-estimate-v1",
+        evidence_id="bedrock-anthropic-list-estimate-v1",
+        pricing_basis=(
+            f"Claude API list rate for {canonical} applied to the Bedrock model "
+            "id; AWS invoices are authoritative"
+        ),
+        applicability=(
+            "Estimate-only; assumes the Bedrock global endpoint (regional "
+            "endpoints carry a 10% premium)"
+        ),
+    )
+
+
 def _lookup_price_quote(
     model: str | None,
     *,
@@ -331,6 +430,16 @@ def _lookup_price_quote(
                     estimate_quote.confidence,
                 )
             return estimate_quote
+
+    # Bedrock model ids (W1-10): a provisional estimate from the Claude API
+    # list rate of the model behind the id; never a bill under strict pricing.
+    bedrock_canonical = bedrock_rate_card_model_id(bare)
+    if bedrock_canonical is not None:
+        quote = _bedrock_estimate_quote(
+            requested, bedrock_canonical, estimate_only=estimate_only,
+        )
+        if quote is not None:
+            return quote
 
     # Unknown self-hosted ids incur no metered API-token charge. This does not
     # claim infrastructure is free; the source makes the accounting scope
@@ -790,20 +899,30 @@ def budget_from_config(*, defaults: dict | None = None,
     for key, val in overrides.items():
         if val is not None and key in _BUDGET_KEY_TYPES:
             kwargs[key] = val
-    reservation_id = _clamp_to_tenant_remainder(kwargs)
+    reservation_id, refusal = _clamp_to_tenant_remainder(kwargs)
     budget = Budget(**kwargs)
     if reservation_id:
         # Handle so the run can release the tenant hold when it records its
         # actual spend: ``quotas.record_usage(..., reservation_id=b._tenant_reservation_id)``.
         budget._tenant_reservation_id = reservation_id
+    if refusal:
+        # W2-83: the tenant allowance is exhausted (or unreadable), so this
+        # budget was clamped to $0. Carry the reason so the run gate refuses
+        # cleanly BEFORE the goal starts instead of admitting a run that dies
+        # on its first model call with "budget exceeded".
+        budget._tenant_refusal = refusal
     return budget
 
 
-def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
+def _clamp_to_tenant_remainder(kwargs: dict) -> tuple[str | None, str | None]:
     """Clamp ``kwargs['max_dollars']`` to the active tenant's remaining daily
     allowance (#78) in place, and RESERVE that clamped cap against the tenant so
-    concurrent runs coordinate (finding #2). Returns the reservation id, or
-    ``None`` when no reservation was made (no active tenant / no cap / clamp 0).
+    concurrent runs coordinate (finding #2). Returns ``(reservation_id,
+    refusal_reason)``: the reservation id is ``None`` when no reservation was
+    made (no active tenant / no cap / clamp 0); the refusal reason is set
+    exactly when the run was clamped to $0 by tenant policy (allowance
+    exhausted, policy unreadable, reservation failed) so callers can refuse
+    the start with a human-readable reason instead of running it into a wall.
 
     Highest precedence: the tenant's aggregate daily ceiling is a billing
     guarantee, so it overrides even an explicit ``--max-dollars``. Without it the
@@ -827,9 +946,9 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
         # rather than treating that policy outage as "unlimited".
         log.error("tenant budget policy unavailable; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, f"tenant budget policy unavailable: {exc}"
     if not tenant:
-        return None
+        return None, None
 
     # When no max_dollars was set, the requested amount is Budget's own default
     # (not "unbounded"). The atomic allocator can therefore only lower it.
@@ -841,10 +960,12 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
     except (TypeError, ValueError, OverflowError) as exc:
         log.error("tenant budget request is invalid; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, f"tenant budget request is invalid: {exc}"
     if not math.isfinite(requested) or requested <= 0:
+        # The caller asked for nothing (or nonsense); that is its own choice,
+        # not a tenant refusal.
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, None
 
     try:
         from .tenant.registry import reserve_tenant_budget
@@ -861,14 +982,19 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
         reservation_id = uuid.uuid4().hex
         granted = reserve_tenant_budget(tenant, requested, ttl, reservation_id)
         if granted is None:
-            return None
+            return None, None
         kwargs["max_dollars"] = granted
         if granted <= 0:
-            return None
-        return reservation_id
+            return None, (
+                f"workspace {tenant!r} has no daily spend allowance left for "
+                "this run: today's spend plus the amounts held by runs in "
+                "flight reach its cap; retry when those runs finish or after "
+                "midnight UTC"
+            )
+        return reservation_id, None
     except Exception as exc:
         # Running after a failed reservation reopens the concurrent overspend
         # window. Deny this start; a later retry can reserve after state heals.
         log.error("tenant budget reservation failed; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
-        return None
+        return None, f"tenant budget reservation failed: {exc}"

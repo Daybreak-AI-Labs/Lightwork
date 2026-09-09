@@ -76,3 +76,20 @@ def test_goal_page_shows_version_history_disclosure(tmp_path, monkeypatch):
     w.add_artifact(gid, "text", "Note", "v two")     # 2 versions -> disclosure shows
     t = client.get(f"/chat/goal/{gid}").text
     assert "artifact__history" in t and "Version history" in t
+
+
+def test_version_history_loader_checks_status_and_retries(tmp_path, monkeypatch):
+    """W3-75: the history fetch had no r.ok check and no error path that
+    cleared the loaded flag, so any non-2xx or network error left
+    'Loading…' forever and re-opening never retried."""
+    w = _world(tmp_path, monkeypatch)
+    gid = w.create_goal("g", "", domain="finance_cash13w")
+    w.add_artifact(gid, "text", "Note", "v one")
+    w.add_artifact(gid, "text", "Note", "v two")
+    t = client.get(f"/chat/goal/{gid}").text
+    loader = t[t.index("artifact__history').forEach"):]
+    loader = loader[:loader.index("</script>")]
+    assert "if (!r.ok)" in loader
+    assert "HTTP ' + r.status" in loader
+    assert "delete d.dataset.loaded" in loader
+    assert "Close and reopen to retry" in loader

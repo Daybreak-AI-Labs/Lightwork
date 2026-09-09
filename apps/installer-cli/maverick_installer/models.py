@@ -152,11 +152,13 @@ PROVIDERS: dict[str, dict] = {
     },
     "bedrock": {
         "status": "ready",
-        "label": "AWS Bedrock (OpenAI-compatible endpoint)",
+        "label": "AWS Bedrock (native Messages API; IAM role or bearer token)",
         "env": "BEDROCK_API_KEY",
         "env_vars": ["AWS_REGION"],
         "models": [
-            {"id": "bedrock",              "notes": "Set BEDROCK_MODEL_ID; needs AWS_REGION + BEDROCK_API_KEY (the Bedrock bearer)."},
+            {"id": "anthropic.claude-sonnet-5",  "notes": "Claude Sonnet 5 on Bedrock (global endpoint). Leave BEDROCK_API_KEY blank to sign with AWS IAM credentials (needs the bedrock extra: boto3)."},
+            {"id": "anthropic.claude-opus-4-8",  "notes": "Claude Opus 4.8 on Bedrock (global endpoint)."},
+            {"id": "anthropic.claude-haiku-4-5", "notes": "Claude Haiku 4.5 on Bedrock (global endpoint)."},
         ],
     },
 }

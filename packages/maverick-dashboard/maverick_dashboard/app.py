@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import hmac
 import ipaddress
 import json
@@ -141,10 +142,85 @@ templates.env.filters["humanize"] = _idfmt.humanize
 templates.env.globals.setdefault("theme", "dark")
 templates.env.globals.setdefault("font", "default")
 templates.env.globals.setdefault("lang", "en")
+templates.env.globals.setdefault("page_lang", "en")
 templates.env.globals.setdefault("density", "comfortable")
 templates.env.globals.setdefault("custom_theme_css", "")
 templates.env.globals.setdefault("custom_theme_names", [])
 templates.env.globals.setdefault("dir", "ltr")
+
+# Fingerprinted static URLs (W3-77). The shell CSS/JS links in base.html carry
+# a content hash (``/static/x.js?v=<sha256[:8]>``) computed once per process
+# from the file bytes, so a versioned request can be cached for a year while
+# an upgrade changes the URL and takes effect on the next page load -- no more
+# five minutes of mismatched CSS/JS against new HTML. Unversioned requests
+# (older pages, direct links) keep the short cache.
+_SHELL_STATIC_DIR = Path(__file__).parent / "static"
+_STATIC_VERSIONS: dict[str, str] = {}
+STATIC_IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
+STATIC_SHORT_CACHE = "public, max-age=300"
+
+
+def static_version(name: str) -> str:
+    """Short content hash of a bundled static asset ("" when unreadable, so
+    the link stays unversioned and short-cached rather than breaking)."""
+    cached = _STATIC_VERSIONS.get(name)
+    if cached is not None:
+        return cached
+    version = ""
+    if name and "/" not in name and not name.startswith("."):
+        try:
+            version = hashlib.sha256((_SHELL_STATIC_DIR / name).read_bytes()).hexdigest()[:8]
+        except OSError:
+            version = ""
+    _STATIC_VERSIONS[name] = version
+    return version
+
+
+def static_url(name: str) -> str:
+    """``/static/<name>?v=<hash>`` for a bundled asset (plain path if unknown)."""
+    version = static_version(name)
+    return f"/static/{name}?v={version}" if version else f"/static/{name}"
+
+
+templates.env.globals["static_url"] = static_url
+
+
+class StaticCacheMiddleware:
+    """Long-cache a ``/static/`` response only when its ``?v=`` matches the
+    asset's current content hash; every other static request keeps the route's
+    own short ``Cache-Control``. Pure ASGI so the 60+ static routes stay as
+    they are."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http" or not scope.get("path", "").startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+        name = scope["path"].rsplit("/", 1)[-1]
+        query = scope.get("query_string", b"").decode("latin-1")
+        wanted = static_version(name)
+        immutable = bool(wanted) and any(
+            part == f"v={wanted}" for part in query.split("&")
+        )
+        if not immutable:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_immutable(message) -> None:
+            if message.get("type") == "http.response.start" and message.get("status") == 200:
+                headers = [
+                    (k, v) for k, v in message.get("headers", [])
+                    if k.lower() != b"cache-control"
+                ]
+                headers.append((b"cache-control", STATIC_IMMUTABLE_CACHE.encode("ascii")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_immutable)
+
+
 from .i18n import t as _i18n_t  # noqa: E402
 from .themes import custom_themes, theme_css  # noqa: E402
 
@@ -233,7 +309,7 @@ def _resolve_font(request: Request) -> str:
 # body class + the theme switcher links, the `font` accessibility axis,
 # and the chrome-i18n helpers (`lang`, `t`).
 def _theme_context(request: Request) -> dict:
-    from .i18n import dir_for, resolve_lang
+    from .i18n import content_lang, dir_for, resolve_lang
     from .i18n import t as _t
 
     lang = resolve_lang(request)
@@ -244,7 +320,12 @@ def _theme_context(request: Request) -> dict:
         "density": resolve_density(request),
         "custom_theme_css": theme_css(custom),
         "custom_theme_names": sorted(custom),
+        # ``lang`` is the selected UI language (drives ``t()`` and ``dir``);
+        # ``page_lang`` is what the page body is actually written in and is
+        # what ``<html lang>`` declares (W3-73). They differ until the
+        # templates are translated.
         "lang": lang,
+        "page_lang": content_lang(lang),
         "dir": dir_for(lang),
         "t": lambda key: _t(key, lang),
     }
@@ -961,6 +1042,39 @@ app.include_router(support_router)
 app.include_router(voice_setup_router)
 app.state.voice_setup = VoiceSetup()
 app.add_middleware(RecoveryOnlyMiddleware, dashboard_app=app)
+
+
+def _compress_enabled() -> bool:
+    """``[dashboard] compress`` (default on), overridden by
+    ``MAVERICK_DASHBOARD_COMPRESS``. Response compression for a self-hosted
+    dashboard behind a bare uvicorn or a default ingress (W3-77); turn it off
+    when a proxy in front already compresses."""
+    env = os.environ.get("MAVERICK_DASHBOARD_COMPRESS", "").strip().lower()
+    if env:
+        return env in {"1", "true", "yes", "on"}
+    try:
+        from maverick.config import load_config
+
+        value = ((load_config() or {}).get("dashboard") or {}).get("compress")
+    except Exception:
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return True
+
+
+# Versioned static assets get the long cache; then gzip (outermost, so it
+# compresses every response including the static bundles). Starlette's
+# middleware skips text/event-stream and already-compressed media types.
+# Level 6 (zlib's default) instead of Starlette's 9: on the rendered pages
+# it halves the per-response CPU cost for a 1-3% larger body.
+app.add_middleware(StaticCacheMiddleware)
+if _compress_enabled():
+    from starlette.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 from .agent_control_plane_page import (  # noqa: E402
     create_agent_control_plane_page_router,
 )
@@ -5348,12 +5462,32 @@ async def simulate_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/compartments", response_class=HTMLResponse)
-async def compartments_page(request: Request) -> HTMLResponse:
+async def compartments_page(
+    request: Request,
+    q: str = Query(default="", max_length=128),
+    page: int = Query(default=1, ge=1, le=100_000),
+    per_page: int = Query(default=50, ge=1, le=100),
+) -> HTMLResponse:
     """The agent factory's roster: each domain pack and the bulkhead it runs in.
 
     Reads the discoverable domain packs (built-in + onboarded) so an operator
     can see which sealed agents exist and the capability envelope each runs
-    under -- the compartments a Rung-2 seal acts on."""
+    under -- the compartments a Rung-2 seal acts on. Searched and paginated
+    like /tools (W3-30): unscoped, the full roster is 2,000+ packs and rendered
+    every capability envelope into one multi-megabyte page."""
+    query = q.strip()
+    domain_page = {
+        "query": query,
+        "page": page,
+        "per_page": per_page,
+        "catalog_total": 0,
+        "filtered_total": 0,
+        "returned": 0,
+        "page_count": 1,
+        "first": 0,
+        "last": 0,
+    }
+    domains: list = []
     try:
         from maverick.domain import available_domains, suite_for
 
@@ -5362,14 +5496,46 @@ async def compartments_page(request: Request) -> HTMLResponse:
         # Job-function scoping: a scoped caller sees only their departments'
         # sealed agents and capability envelopes, matching /agents (this page
         # otherwise leaks every department's pack config).
-        domains = scope_to_suites(
+        catalog = scope_to_suites(
             request,
             sorted(available_domains().values(), key=lambda d: d.name),
             suite_of=lambda d: suite_for(d.name),
         )
+        folded = query.casefold()
+        filtered = [
+            d
+            for d in catalog
+            if not folded
+            or folded in d.name.casefold()
+            or folded in (getattr(d, "persona", "") or "").casefold()
+            or folded in (getattr(d, "compartment", "") or "").casefold()
+        ]
+        page_count = max(1, (len(filtered) + per_page - 1) // per_page)
+        if page > page_count:
+            raise HTTPException(
+                status_code=400,
+                detail="compartment page exceeds the available search results",
+            )
+        start = (page - 1) * per_page
+        domains = filtered[start : start + per_page]
+        domain_page = {
+            "query": query,
+            "page": page,
+            "per_page": per_page,
+            "catalog_total": len(catalog),
+            "filtered_total": len(filtered),
+            "returned": len(domains),
+            "page_count": page_count,
+            "first": start + 1 if domains else 0,
+            "last": start + len(domains),
+        }
+    except HTTPException:
+        raise
     except Exception:  # never 500 the page if the factory layer is unavailable
         domains = []
-    return templates.TemplateResponse(request, "compartments.html", {"domains": domains})
+    return templates.TemplateResponse(
+        request, "compartments.html", {"domains": domains, "domain_page": domain_page},
+    )
 
 
 @app.get("/agents", response_class=HTMLResponse)

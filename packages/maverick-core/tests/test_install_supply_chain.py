@@ -233,6 +233,27 @@ def test_vps_installer_requires_a_clean_immutable_checkout():
     assert "Lightwork/main/deploy/vps/install.sh" not in text
 
 
+def test_vps_installer_installs_the_container_images_core_extras():
+    """W5-48: the VPS path installed only release-runtime while the container
+    image installed postgres/oidc/s3 too, so MAVERICK_WORLD_BACKEND=postgres
+    or OIDC login on a VPS failed with an ImportError at first use."""
+    text = _read("deploy/vps/install.sh")
+    dockerfile = _read("deploy/docker/Dockerfile")
+
+    image_extras = re.search(r"--core-extra\s+([\w,-]+)", dockerfile).group(1)
+    default = re.search(
+        r'MAVERICK_CORE_EXTRAS="\$\{MAVERICK_CORE_EXTRAS:-([\w,-]+)\}"', text
+    )
+    assert default is not None, "install.sh must default MAVERICK_CORE_EXTRAS"
+    assert set(default.group(1).split(",")) == set(image_extras.split(","))
+    assert '--core-extra "$MAVERICK_CORE_EXTRAS"' in text
+    # The extras must exist so install_release_cohort's validation accepts them.
+    core = tomllib.loads(
+        _read("packages/maverick-core/pyproject.toml")
+    )["project"]["optional-dependencies"]
+    assert set(default.group(1).split(",")) <= set(core)
+
+
 def test_native_installer_build_ref_is_a_full_commit():
     build_rs = _read("apps/installer-desktop/src-tauri/build.rs")
     native_shell = _read("apps/installer-desktop/src-tauri/src/lib.rs")

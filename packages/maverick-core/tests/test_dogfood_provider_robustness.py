@@ -15,7 +15,7 @@ import os
 from types import SimpleNamespace
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded, _coerce_count
+from maverick.budget import Budget, BudgetExceeded, UsageAccountingError, _coerce_count
 
 
 def test_coerce_count_handles_none_and_valid_counts() -> None:
@@ -27,8 +27,18 @@ def test_coerce_count_handles_none_and_valid_counts() -> None:
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), "not a number", -5])
 def test_coerce_count_fails_closed_on_invalid_counts(bad) -> None:
-    with pytest.raises(BudgetExceeded, match="invalid token usage count"):
+    with pytest.raises(UsageAccountingError, match="invalid token usage count"):
         _coerce_count(bad)
+
+
+def test_usage_accounting_error_is_not_a_budget_cap_breach() -> None:
+    # W1-17: malformed provider usage is a gateway fault. It must stop the run
+    # but never masquerade as "budget exceeded" (raising the cap can't fix it)
+    # and provider failover must not mask it by trying another model.
+    from maverick.provider_failover import should_retry_llm_error
+
+    assert not issubclass(UsageAccountingError, BudgetExceeded)
+    assert should_retry_llm_error(UsageAccountingError("invalid usage")) is False
 
 
 def test_record_tokens_survives_none_usage_counts() -> None:
@@ -55,7 +65,7 @@ def test_record_tokens_survives_none_usage_counts() -> None:
 def test_record_tokens_fails_closed_on_invalid_usage_counts(kwargs) -> None:
     b = Budget(max_dollars=1.0)
 
-    with pytest.raises(BudgetExceeded, match="invalid token usage count"):
+    with pytest.raises(UsageAccountingError, match="invalid token usage count"):
         b.record_tokens(model="claude-haiku-4-5", **kwargs)
 
     assert b.dollars == 0.0
@@ -81,7 +91,7 @@ def test_openai_provider_fails_closed_on_malformed_usage() -> None:
         prompt_tokens_details=SimpleNamespace(cached_tokens="bad-cache"),
     )
 
-    with pytest.raises(BudgetExceeded, match="invalid OpenAI usage"):
+    with pytest.raises(UsageAccountingError, match="invalid OpenAI usage"):
         OpenAIClient._from_response(resp, b, model="gpt-5.4")
 
     assert b.input_tokens == 0
@@ -102,7 +112,7 @@ def test_openai_provider_fails_closed_when_usage_missing() -> None:
         usage=None,
     )
 
-    with pytest.raises(BudgetExceeded, match="missing token usage"):
+    with pytest.raises(UsageAccountingError, match="missing token usage"):
         OpenAIClient._from_response(resp, b, model="gpt-5.4")
 
     assert b.dollars == 0.0

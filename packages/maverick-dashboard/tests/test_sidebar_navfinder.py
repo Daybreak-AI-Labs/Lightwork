@@ -81,7 +81,8 @@ def test_page_finder_has_an_accessible_dialog_and_combobox_contract(monkeypatch,
     assert search["aria-expanded"] == "false"
     assert markup.ids["navfinder-results"]["role"] == "listbox"
     assert markup.ids["navfinder-count"]["role"] == "status"
-    assert "/static/lightwork-navfinder.js" in markup.scripts
+    # Shell assets carry a content-hash query (W3-77); compare the path.
+    assert "/static/lightwork-navfinder.js" in {src.split("?")[0] for src in markup.scripts}
 
 
 def test_page_finder_destinations_cover_the_visible_registry_beyond_the_sidebar(monkeypatch, tmp_path):

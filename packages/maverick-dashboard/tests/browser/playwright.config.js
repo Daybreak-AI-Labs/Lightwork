@@ -8,8 +8,11 @@ if(process.platform==='win32'){
   process.env.TEMP=temporary;process.env.TMP=temporary;
 }
 const port=Number(process.env.LIGHTWORK_BROWSER_PORT||8769);
+// The 36 journeys take about four minutes on one worker in CI (237-239 s on
+// main), so the suite budget sits well above that; the workflow's 20-minute
+// job limit is the backstop. Per-test time stays at 45 s.
 module.exports=defineConfig({
-  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:240000,
+  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:600000,
   outputDir:process.env.LIGHTWORK_BROWSER_OUTPUT||path.join(os.tmpdir(),'lightwork-browser-results'),
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],

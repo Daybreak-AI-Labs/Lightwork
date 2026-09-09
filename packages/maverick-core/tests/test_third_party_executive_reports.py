@@ -131,6 +131,62 @@ def test_pdf_is_deterministic_bounded_and_contains_no_active_content() -> None:
         brand(organization_name="https://example.test").normalized()
 
 
+def test_pdf_paginates_by_vertical_budget_so_no_line_lands_in_the_footer() -> None:
+    """W4-89: a report with every metric plus several sources used to overflow
+    the page (lines drawn at y=2, below the y=34 footer) because pagination
+    counted lines instead of the vertical space they consume."""
+    import re
+
+    metrics = tuple(reports.ReportMetric(m, 1) for m in sorted(reports.METRIC_IDS))
+    sources = tuple(
+        reports.SourceManifestEntry(
+            reports.SOURCE_SCHEMA, "contract_record", f"contract-{i}",
+            "available", 3, "2" * 64, 1, "none",
+        )
+        for i in range(6)
+    )
+    heavy = reports.ReportSnapshot(
+        schema=reports.SNAPSHOT_SCHEMA,
+        tenant_id="tenant-alpha",
+        role_view="operator",
+        sources=sources,
+        metrics=metrics,
+        captured_at=1_799_999_999.0,
+    )
+    pdf = reports.render_deterministic_pdf(
+        report_id="report-fixed",
+        brand=brand(),
+        snapshot=heavy,
+        created_at=1_800_000_000.0,
+        maximum_bytes=128 * 1024,
+    )
+    # (font size, baseline) per text operator; the 8pt footer at y=34 is the
+    # one line allowed in the footer band.
+    placed = [
+        (int(size), int(y))
+        for size, y in re.findall(rb"/F\d (\d+) Tf\n[\d. ]+ rg\n54 (-?\d+) Td", pdf)
+    ]
+    assert placed, "no text operators rendered"
+    body_ys = [y for size, y in placed if size != 8]
+    footer_ys = [y for size, y in placed if size == 8]
+    assert body_ys and footer_ys
+    assert set(footer_ys) == {34}
+    # Every body line stays above the footer band; nothing is clipped or
+    # overprinted on the page edge.
+    assert min(body_ys) >= 50, min(body_ys)
+    # Every source digest (the report's evidence) made it onto a page.
+    assert pdf.count(b"digest 2222") == 6
+    # Still deterministic.
+    again = reports.render_deterministic_pdf(
+        report_id="report-fixed",
+        brand=brand(),
+        snapshot=heavy,
+        created_at=1_800_000_000.0,
+        maximum_bytes=128 * 1024,
+    )
+    assert pdf == again
+
+
 def test_create_is_immutable_idempotent_role_aware_and_integrity_verified(tmp_path) -> None:
     clock = Clock()
     authority = store(tmp_path, clock)
