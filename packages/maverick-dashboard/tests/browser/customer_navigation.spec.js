@@ -59,7 +59,12 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     await expect(page.locator('#navfinder-dialog')).toHaveAttribute('data-navfinder-ready', 'true');
     await page.keyboard.press('Control+k');
     await expect(page.locator('#navfinder-input')).toBeFocused();
+    // Typing also schedules the finder's records search (300 ms debounce) and
+    // the answer re-renders the results, so wait for it before selecting: the
+    // selection stays put and Enter never aborts an in-flight request.
+    const recordsSearched = page.waitForResponse(response => response.url().endsWith('/api/v1/records/search'), {timeout: 10000});
     await page.keyboard.type(label);
+    await recordsSearched;
     const choice = page.locator(`#navfinder-results a[href="${path}"]`);
     await expect(choice).toBeVisible();
     // Select the existing registry option with the keyboard, including when
@@ -76,8 +81,8 @@ for (const zoom of [1, 2]) test(`five customer destinations support keyboard nav
     await expect.poll(() => page.evaluate(() => Number(getComputedStyle(document.documentElement).zoom))).toBe(zoom);
     await fits(page);
     await info.attach(`${label.toLowerCase()}-${zoom * 100}`, {body: await page.screenshot(), contentType: 'image/png'});
-    // Let the destination finish its own data requests before leaving it, so
-    // history navigation never aborts an in-flight fetch under load.
+    // Likewise let the destination finish its own requests before history
+    // navigation leaves it.
     await page.waitForLoadState('networkidle');
     // Headless Chromium does not implement the browser chrome Alt+Left action.
     // This exercises actual history navigation separately from page keyboard UI.

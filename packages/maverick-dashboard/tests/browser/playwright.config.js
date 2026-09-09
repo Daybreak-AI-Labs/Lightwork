@@ -17,10 +17,8 @@ const pythonExecutable=process.env.LIGHTWORK_BROWSER_PYTHON||(fs.existsSync(work
 const pythonCommand=JSON.stringify(pythonExecutable);
 // Capture this test-only opt-in before the server clears LIGHTWORK_* variables.
 const showVendorSetup=process.env.LIGHTWORK_BROWSER_SHOW_VENDOR_SETUP==='1'?' --show-vendor-setup':'';
-// The journeys run serially; the global ceiling must cover the whole suite
-// on a two-core runner, and stays under the workflow job timeout.
 module.exports=defineConfig({
-  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:900000,
+  testDir:'.',testMatch:'*.spec.js',fullyParallel:false,forbidOnly:!!process.env.CI,workers:1,retries:0,globalTimeout:600000,
   outputDir:process.env.LIGHTWORK_BROWSER_OUTPUT||path.join(os.tmpdir(),'lightwork-browser-results'),
   timeout:45000,expect:{timeout:10000},
   reporter:[['list'],['html',{outputFolder:'browser-report',open:'never'}],['json',{outputFile:'test-results/results.json'}]],

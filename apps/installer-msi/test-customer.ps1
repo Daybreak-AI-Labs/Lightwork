@@ -47,6 +47,11 @@ function Invoke-Msi([string]$Package, [string]$Action, [string[]]$Properties = @
             throw "MSI failed without completing the injected failure action; log: $log"
         }
     } elseif ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
+        # Surface the failing action inline; the full verbose log is retained
+        # as an acceptance diagnostic artifact.
+        Get-Content -LiteralPath $log |
+            Select-String -Pattern 'Return value 3|^Error \d+|MSI \(s\) \([^)]+\) \[[^\]]+\]: (Note|Error|Product: .* -- )' |
+            Select-Object -Last 40 | ForEach-Object { Write-Host $_.Line }
         throw "Windows Installer failed ($($process.ExitCode)); log: $log"
     }
 }
