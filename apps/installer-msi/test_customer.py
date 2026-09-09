@@ -287,8 +287,24 @@ def test_customer_recovery_fragment_uses_exact_msi_files_and_fixed_app_shortcut(
     assert copies["LightworkRecoveryRuntime"]["DestinationName"] == "maverick-recovery.exe"
     assert copies["LightworkRecoveryDesktop"]["FileId"] == "Path"
     assert copies["LightworkRecoveryDesktop"]["DestinationName"] == "maverick-recovery-desktop.exe"
-    assert copies["LightworkRecoveryInstaller"]["SourceProperty"] == "OriginalDatabase"
-    assert copies["LightworkRecoveryInstaller"]["DestinationName"] == "Lightwork-recovery.msi"
+    # The package itself is retained by an explicit deferred copy, not a
+    # MoveFile row: the installer reads a MoveFile source property as a
+    # directory and OriginalDatabase is a file path.
+    assert "LightworkRecoveryInstaller" not in copies
+    actions = {
+        node.attrib["Id"]: node.attrib
+        for node in root.findall("w:Fragment/w:CustomAction", ns)
+    }
+    retain = actions["LightworkRetainInstaller"]
+    assert retain["Execute"] == "deferred" and retain["Impersonate"] == "no" and retain["Return"] == "check"
+    assert '"[OriginalDatabase]" "[INSTALLDIR]Lightwork-recovery.msi"' in retain["ExeCommand"]
+    assert actions["LightworkRetainInstallerRollback"]["Execute"] == "rollback"
+    scheduled = {
+        node.attrib["Action"]: node
+        for node in root.findall("w:Fragment/w:InstallExecuteSequence/w:Custom", ns)
+    }
+    assert set(scheduled) == {"LightworkRetainInstaller", "LightworkRetainInstallerRollback"}
+    assert all(node.text == "NOT Installed" for node in scheduled.values())
     shortcut = components["LightworkRepairShortcut"].find("w:Shortcut", ns)
     assert shortcut.attrib["Name"] == "Repair Lightwork"
     assert shortcut.attrib["Target"] == "[INSTALLDIR]maverick-recovery-desktop.exe"
