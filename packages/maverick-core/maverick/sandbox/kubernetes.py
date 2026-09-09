@@ -28,7 +28,16 @@ Config::
                                                # other backend); streamed
                                                # into the pod's /workspace
     timeout = 120
-    allow_network = false        # adds NetworkPolicy-deny annotation hint
+    allow_network = false        # requires a deny-all NetworkPolicy (below)
+
+``allow_network = false`` (the default, and what the wizard writes) means
+"no egress". A transient ``kubectl run`` pod cannot enforce that on
+itself, so before the first command the backend checks the namespace for
+a deny-all NetworkPolicy (empty ``podSelector``, ``Egress`` in
+``policyTypes``, no egress rules). When one is present the commands run
+under it; when none is, exec() fails closed with exit code 2 and prints
+the manifest to apply (``_DENY_ALL_NETWORKPOLICY``). ``allow_network =
+true`` skips the check and lets pods use the cluster network.
 
 Loud-fallback: missing kubectl binary or ``kubectl version`` failure
 raises ``RuntimeError`` at construction so the wizard's smoke test
@@ -103,7 +112,43 @@ class KubernetesBackend:
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir).expanduser()
         self.workdir.mkdir(parents=True, exist_ok=True)
+        # Result of the deny-all NetworkPolicy check, verified once per
+        # backend instance (None = not yet checked).
+        self._deny_all_verified: bool | None = None
         self._verify_kubectl()
+
+    def deny_all_networkpolicy_manifest(self) -> str:
+        """The deny-all NetworkPolicy for this namespace, ready to apply."""
+        return _DENY_ALL_NETWORKPOLICY.format(ns=self.namespace)
+
+    def _deny_all_policy_present(self) -> bool:
+        """True when the namespace carries a NetworkPolicy that denies all
+        egress for every pod: an empty ``podSelector``, ``Egress`` in
+        ``policyTypes`` and no ``egress`` rules. Any kubectl or parse failure
+        counts as absent (fail closed)."""
+        args = [*self._kubectl_prefix(), "get", "networkpolicy", "-o", "json"]
+        try:
+            proc = subprocess.run(
+                args, capture_output=True, text=True, timeout=15, env=scrub_env(),
+            )
+            if proc.returncode != 0:
+                return False
+            items = json.loads(proc.stdout or "{}").get("items") or []
+        except (subprocess.TimeoutExpired, OSError, ValueError, AttributeError):
+            return False
+        for item in items:
+            spec = item.get("spec") if isinstance(item, dict) else None
+            if not isinstance(spec, dict):
+                continue
+            selector = spec.get("podSelector") or {}
+            if selector.get("matchLabels") or selector.get("matchExpressions"):
+                continue  # scoped to some pods, not the whole namespace
+            if "Egress" not in (spec.get("policyTypes") or []):
+                continue
+            if spec.get("egress"):
+                continue  # has allow rules, so not deny-all
+            return True
+        return False
 
     def _pod_overrides(self, container_name: str) -> dict:
         """A non-root, resource-bounded pod spec for ``kubectl run --overrides``.
@@ -332,28 +377,36 @@ class KubernetesBackend:
         pod_name = f"maverick-sb-{uuid.uuid4().hex[:12]}"
 
         if not self.allow_network:
-            # We can't make a single transient `kubectl run` pod enforce
-            # no-egress on its own -- that needs a cluster-level NetworkPolicy
-            # the operator applies once. Fail closed (don't silently run with
-            # network) but emit the concrete deny-all policy to apply, making
-            # good on the docstring's "NetworkPolicy-deny hint" promise.
-            log.warning(
-                "kubernetes backend: allow_network=false but a transient pod "
-                "cannot self-enforce no-egress. Apply a deny-all NetworkPolicy "
-                "to namespace %r once, then set allow_network=true:\n%s",
-                self.namespace, _DENY_ALL_NETWORKPOLICY.format(ns=self.namespace),
-            )
-            return ExecResult(
-                stdout="",
-                stderr=(
-                    "networking is disabled for kubernetes backend "
-                    "(allow_network=false), but a transient kubectl pod cannot "
-                    "enforce no-network on its own. Apply a deny-all "
-                    "NetworkPolicy to the namespace (see logs) and set "
-                    "allow_network=true."
-                ),
-                exit_code=2,
-            )
+            # A single transient `kubectl run` pod cannot enforce no-egress
+            # on its own -- that needs a namespace-level NetworkPolicy the
+            # operator applies once. Verify one is present (once per
+            # instance) and run under it; otherwise fail closed (never
+            # silently run with network) and print the manifest to apply.
+            # Previously this branch refused EVERY command, so the wizard's
+            # default config could not run anything (platform audit W1-104).
+            if self._deny_all_verified is None:
+                self._deny_all_verified = self._deny_all_policy_present()
+            if not self._deny_all_verified:
+                manifest = self.deny_all_networkpolicy_manifest()
+                log.warning(
+                    "kubernetes backend: allow_network=false but namespace %r "
+                    "has no deny-all NetworkPolicy, so a transient pod would "
+                    "have network. Apply this once, then retry:\n%s",
+                    self.namespace, manifest,
+                )
+                return ExecResult(
+                    stdout="",
+                    stderr=(
+                        "networking is disabled for the kubernetes backend "
+                        f"(allow_network=false), but namespace {self.namespace!r} "
+                        "has no deny-all NetworkPolicy and a transient pod cannot "
+                        "enforce no-network on its own. Apply this policy once "
+                        "(kubectl apply -f -), then retry -- or set "
+                        "allow_network=true to let pods use the network:\n"
+                        + manifest
+                    ),
+                    exit_code=2,
+                )
 
         # Always force-delete the pod on the way out, whichever step failed:
         # the pod is never started with --rm now (it has to survive past a

@@ -5244,7 +5244,50 @@ def pick_sandbox() -> dict[str, Any]:
         ).split()[0]
         if lang != "python":
             cfg["language"] = lang
+    if backend == "kubernetes":
+        # The backend fails closed when allow_network=false and the namespace
+        # has no deny-all NetworkPolicy (a transient pod can't block its own
+        # egress), so a config written without asking ran nothing (platform
+        # audit W1-104). Ask, and hand over the exact manifest to apply.
+        namespace = _q_text("  Kubernetes namespace for sandbox pods", default="default").strip()
+        cfg["namespace"] = namespace or "default"
+        net = _q_select(
+            "  Pod networking (a transient pod cannot block its own egress):",
+            [
+                "deny  - No network: apply the deny-all NetworkPolicy shown next (recommended)",
+                "allow - Pods may use the cluster network (package installs, HTTP fetches)",
+            ],
+            default="deny  - No network: apply the deny-all NetworkPolicy shown next (recommended)",
+        )
+        cfg["allow_network"] = net.split()[0] == "allow"
+        if not cfg["allow_network"]:
+            console.print(
+                "\n  Apply this once to the namespace before the first run "
+                "(commands fail closed until it is present):\n"
+            )
+            console.print(kubernetes_deny_all_manifest(cfg["namespace"]), highlight=False)
+            console.print("\n  kubectl apply -f - <<'EOF' ... EOF   (paste the manifest above)\n")
     return cfg
+
+
+def kubernetes_deny_all_manifest(namespace: str) -> str:
+    """The deny-all NetworkPolicy the kubernetes sandbox backend requires when
+    ``allow_network = false`` -- the kernel's own manifest when it is
+    importable, else an identical local copy (the wizard runs before core)."""
+    try:
+        from maverick.sandbox.kubernetes import _DENY_ALL_NETWORKPOLICY
+    except Exception:
+        _DENY_ALL_NETWORKPOLICY = (
+            "apiVersion: networking.k8s.io/v1\n"
+            "kind: NetworkPolicy\n"
+            "metadata:\n"
+            "  name: maverick-deny-all\n"
+            "  namespace: {ns}\n"
+            "spec:\n"
+            "  podSelector: {{}}\n"
+            "  policyTypes: [Ingress, Egress]"
+        )
+    return _DENY_ALL_NETWORKPOLICY.format(ns=namespace)
 
 
 # ---------- new wizard steps (council parity pass) ----------
