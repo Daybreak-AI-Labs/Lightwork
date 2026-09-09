@@ -276,6 +276,14 @@ _LOOP_GUARD_BLOCK = (max(_LOOP_GUARD_BLOCK, _LOOP_GUARD_THRESHOLD + 1)
 # 0 disables the nudge. Tune via MAVERICK_STEP_BUDGET_WARNING.
 _STEP_BUDGET_WARNING = max(0, env_int("MAVERICK_STEP_BUDGET_WARNING", 3))
 
+# W1-44: how many blackboard entries posted by OTHER agents since this agent's
+# last tool-running turn are appended to that turn's tool_results message, so
+# a running orchestrator sees fan-out caps, seals, denials and sibling findings
+# instead of only what the blackboard held on its first turn. 0 disables.
+# Tune via MAVERICK_BB_TURN_DELTA_ENTRIES; per-entry size follows
+# MAVERICK_BB_RENDER_ENTRY_CHARS.
+_BB_TURN_DELTA_ENTRIES = max(0, env_int("MAVERICK_BB_TURN_DELTA_ENTRIES", 12))
+
 # P0 filesystem-resource layer. In-process tools run in the Lightwork process,
 # outside Docker's read-only bind mounts, so every workspace path they read or
 # write is described here and enforced at the common dispatch chokepoint.
@@ -3556,6 +3564,9 @@ class Agent:
             f"Recent swarm activity:\n{bb.render(40) or '(empty)'}\n\n"
             "Plan briefly, then act. End with FINAL: <answer> when done."
         )
+        # Everything up to here is in the brief; later posts reach this agent
+        # as per-turn deltas (see the tool_results assembly below).
+        self._bb_cursor = bb.cursor()
         first_content: list[dict] | str
         if image_blocks:
             first_content = image_blocks + [{"type": "text", "text": brief_text}]
@@ -4651,6 +4662,28 @@ class Agent:
             # cut off with no answer. Appended after the tool_results (text
             # after tool_result blocks is a valid user turn); only on turns that
             # ran tools, which is exactly when a working agent risks the cutoff.
+            # W1-44: what other agents posted to the blackboard since this
+            # agent's last tool-running turn, as a trailing text block (same
+            # slot as the step-budget warning). Own posts and sealed agents
+            # are excluded; the block is bounded. Best-effort: never let a
+            # render problem break the turn.
+            if tool_results and _BB_TURN_DELTA_ENTRIES:
+                try:
+                    _bb_delta, self._bb_cursor = bb.render_since(
+                        getattr(self, "_bb_cursor", 0), exclude_agent=self.name,
+                        max_entries=_BB_TURN_DELTA_ENTRIES,
+                    )
+                except Exception:  # pragma: no cover -- coordination hint only
+                    _bb_delta = ""
+                if _bb_delta:
+                    tool_results.append({
+                        "type": "text",
+                        "text": (
+                            "New on the swarm blackboard since your last turn "
+                            "(other agents' posts; use them to adjust your plan):\n"
+                            + _bb_delta
+                        ),
+                    })
             remaining = self.max_steps - 1 - step
             if tool_results and _STEP_BUDGET_WARNING and 0 < remaining <= _STEP_BUDGET_WARNING:
                 tool_results.append({

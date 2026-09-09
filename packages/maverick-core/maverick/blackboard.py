@@ -27,6 +27,9 @@ class Entry:
     kind: str  # plan | observation | finding | artifact | error | verify
     content: str
     meta: dict[str, Any]
+    # Monotonic post sequence number (1-based); survives the oldest-entry trim
+    # so a reader's cursor (see ``render_since``) never shifts under it.
+    seq: int = 0
 
 
 class Blackboard:
@@ -49,6 +52,7 @@ class Blackboard:
 
     def __init__(self):
         self.entries: list[Entry] = []
+        self._seq = 0
         self._world = None
         self._goal_id: int | None = None
         # Agent compartments: optional QuarantineRegistry. When attached, posts
@@ -130,7 +134,8 @@ class Blackboard:
 
     def post(self, agent: str, kind: str, content: str, **meta: Any) -> None:
         with self._lock:
-            self.entries.append(Entry(time.time(), agent, kind, content, meta))
+            self._seq += 1
+            self.entries.append(Entry(time.time(), agent, kind, content, meta, seq=self._seq))
             if len(self.entries) > self._MAX_ENTRIES:
                 # Trim the oldest in one slice (amortised O(1) per post).
                 del self.entries[: len(self.entries) - self._MAX_ENTRIES]
@@ -209,6 +214,55 @@ class Blackboard:
             if self._is_sealed(agent):
                 return []
             return [e for e in self.entries if e.agent == agent]
+
+    def cursor(self) -> int:
+        """The sequence number of the latest post; feed it to ``render_since``."""
+        with self._lock:
+            return self._seq
+
+    def render_since(
+        self,
+        cursor: int,
+        *,
+        exclude_agent: str | None = None,
+        max_entries: int = 12,
+    ) -> tuple[str, int]:
+        """Entries posted after ``cursor`` by OTHER agents, rendered like
+        :meth:`render`, plus the new cursor (W1-44).
+
+        The orchestrator used to read the blackboard once, on its first turn,
+        so fan-out caps, quarantine seals, sibling findings and disagreement
+        notes posted afterwards never reached a running agent. Callers keep a
+        per-agent cursor and append this delta to each tool-running turn.
+        Sealed agents' posts are withheld exactly as in ``render``; the
+        caller's own posts (``exclude_agent``) are skipped since it wrote
+        them; and the block is bounded to the newest ``max_entries`` entries
+        (an omitted-count line notes any older ones) with each entry capped
+        by ``MAVERICK_BB_RENDER_ENTRY_CHARS``.
+        """
+        with self._lock:
+            snapshot = list(self.entries)
+            latest = self._seq
+        fresh = [
+            e for e in snapshot
+            if e.seq > cursor
+            and e.agent != exclude_agent
+            and not self._is_sealed(e.agent)
+        ]
+        if not fresh:
+            return "", latest
+        limit = max(1, int(max_entries))
+        omitted = max(0, len(fresh) - limit)
+        from ._envparse import env_int
+        from .compaction import excerpt
+        entry_cap = max(80, env_int("MAVERICK_BB_RENDER_ENTRY_CHARS", 800))
+        lines = [
+            f"[{e.agent}/{e.kind}] {excerpt(e.content, entry_cap)}"
+            for e in fresh[-limit:]
+        ]
+        if omitted:
+            lines.insert(0, f"({omitted} earlier new entr{'y' if omitted == 1 else 'ies'} omitted)")
+        return "\n".join(lines), latest
 
     def render(self, max_entries: int = 50) -> str:
         with self._lock:
