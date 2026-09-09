@@ -718,6 +718,49 @@ def _record_provider_call(provider: str) -> None:
 _TRANSPORT_FAILURE_CLASSES = frozenset({"rate_limit", "timeout", "network", "server", "other"})
 
 
+_TOOL_CHOICE_SUPPORT: dict[tuple[type, str], bool] = {}
+
+
+def _add_tool_choice(
+    kwargs: dict[str, Any],
+    tool_choice: dict | None,
+    client: Any,
+    method: str,
+    tools: list[dict] | None,
+) -> None:
+    """W1-11: thread a caller's ``tool_choice`` to the provider client when it
+    accepts one. Validated up front (a bad value is the caller's bug, raised
+    before any spend); dropped with a debug line for a client whose
+    ``complete``/``complete_async`` has no such parameter (e.g. codex_cli), so
+    an optional hint never breaks a provider that cannot honour it."""
+    if not tool_choice:
+        return
+    from .providers.base import normalize_tool_choice
+
+    choice = normalize_tool_choice(tool_choice)
+    if not tools:
+        return
+    key = (type(client), method)
+    supported = _TOOL_CHOICE_SUPPORT.get(key)
+    if supported is None:
+        import inspect
+
+        try:
+            params = inspect.signature(getattr(client, method)).parameters
+            supported = "tool_choice" in params or any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+            )
+        except (TypeError, ValueError):
+            supported = False
+        _TOOL_CHOICE_SUPPORT[key] = supported
+    if supported:
+        kwargs["tool_choice"] = choice
+    else:
+        logging.getLogger(__name__).debug(
+            "tool_choice ignored: %s.%s does not accept it",
+            type(client).__name__, method)
+
+
 def _is_provider_transport_failure(exc: BaseException) -> bool:
     """True only for a genuine provider-transport failure (429/5xx/timeout/
     connection) -- never for a LOCAL guard (budget, model-not-allowed,
@@ -1456,6 +1499,7 @@ class LLM:
         model: str | None = None,
         on_delta=None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
         _no_failover: bool = False,
     ) -> LLMResponse:
         raw_requested_model = model or self.model
@@ -1478,7 +1522,8 @@ class LLM:
                     (m, (lambda m=m: self.complete(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, on_delta=on_delta, effort=effort, _no_failover=True)))
+                        model=m, on_delta=on_delta, effort=effort,
+                        tool_choice=tool_choice, _no_failover=True)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -1526,6 +1571,7 @@ class LLM:
             model_effort = effort_for_model(effort, model_id)
             if model_effort:
                 kwargs["effort"] = model_effort
+        _add_tool_choice(kwargs, tool_choice, client, "complete", tools)
         import time as _time
         try:
             from .chaos import maybe_fail
@@ -1622,6 +1668,7 @@ class LLM:
         thinking_budget: int | None = None,
         model: str | None = None,
         effort: str | None = None,
+        tool_choice: dict | None = None,
         _no_failover: bool = False,
     ) -> LLMResponse:
         raw_requested_model = model or self.model
@@ -1640,7 +1687,8 @@ class LLM:
                     (m, (lambda m=m: self.complete_async(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
-                        model=m, effort=effort, _no_failover=True)))
+                        model=m, effort=effort, tool_choice=tool_choice,
+                        _no_failover=True)))
                     for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(requested_model)
@@ -1719,6 +1767,7 @@ class LLM:
                     model_effort = effort_for_model(effort, model_id)
                     if model_effort:
                         _ekw["effort"] = model_effort
+                _add_tool_choice(_ekw, tool_choice, client, "complete_async", tools)
 
                 async def _call():
                     # Each physical hedge has independent capacity and a receipt.

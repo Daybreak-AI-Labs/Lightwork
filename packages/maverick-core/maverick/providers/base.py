@@ -105,6 +105,7 @@ class Provider(Protocol):
         thinking_budget: int | None = None,
         model: str | None = None,
         on_delta: Callable[[str], None] | None = None,
+        tool_choice: dict | None = None,
     ) -> LLMResponse: ...
 
     async def complete_async(
@@ -116,7 +117,38 @@ class Provider(Protocol):
         max_tokens: int = 4096,
         thinking_budget: int | None = None,
         model: str | None = None,
+        tool_choice: dict | None = None,
     ) -> LLMResponse: ...
 
 
-__all__ = ["Provider", "llm_http_timeout", "sdk_http_timeout"]
+# W1-11: ``tool_choice`` is expressed in Anthropic's vocabulary and translated
+# per provider: ``{"type": "auto" | "any" | "tool" | "none", "name": <tool>,
+# "disable_parallel_tool_use": bool}``. Providers that cannot honour a forced
+# choice clamp it to ``auto`` rather than fail the call.
+TOOL_CHOICE_TYPES = frozenset({"auto", "any", "tool", "none"})
+
+
+def normalize_tool_choice(tool_choice: dict | None) -> dict | None:
+    """Validate and copy a caller's ``tool_choice`` (None when unset)."""
+    if not tool_choice:
+        return None
+    if not isinstance(tool_choice, dict):
+        raise ValueError("tool_choice must be a dict in Anthropic vocabulary")
+    kind = str(tool_choice.get("type") or "").strip().lower()
+    if kind not in TOOL_CHOICE_TYPES:
+        raise ValueError(
+            f"tool_choice.type must be one of {sorted(TOOL_CHOICE_TYPES)}, not {kind!r}"
+        )
+    out: dict = {"type": kind}
+    if kind == "tool":
+        name = str(tool_choice.get("name") or "").strip()
+        if not name:
+            raise ValueError("tool_choice.type='tool' requires a tool name")
+        out["name"] = name
+    if tool_choice.get("disable_parallel_tool_use"):
+        out["disable_parallel_tool_use"] = True
+    return out
+
+
+__all__ = ["Provider", "TOOL_CHOICE_TYPES", "llm_http_timeout",
+           "normalize_tool_choice", "sdk_http_timeout"]

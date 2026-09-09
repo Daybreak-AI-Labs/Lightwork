@@ -384,17 +384,41 @@ class OpenAIClient:
     def _to_openai_tools(anthropic_tools: list[dict] | None) -> list[dict] | None:
         if not anthropic_tools:
             return None
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t.get("description", ""),
-                    "parameters": t.get("input_schema", {"type": "object"}),
-                },
+        out = []
+        for t in anthropic_tools:
+            fn: dict[str, Any] = {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object"}),
             }
-            for t in anthropic_tools
-        ]
+            if t.get("strict"):
+                # W1-11: Anthropic strict tool use -> OpenAI strict function
+                # calling (schema-validated arguments). Only when the tool
+                # opted in, so the translated catalog is otherwise unchanged.
+                fn["strict"] = True
+            out.append({"type": "function", "function": fn})
+        return out
+
+    @staticmethod
+    def _to_openai_tool_choice(tool_choice: dict | None) -> tuple[Any, bool]:
+        """Anthropic ``tool_choice`` -> ``(openai tool_choice, parallel_tool_calls_off)``.
+
+        ``auto``->"auto", ``any``->"required", ``tool``->the named function,
+        ``none``->"none"; ``disable_parallel_tool_use`` maps to
+        ``parallel_tool_calls: false``.
+        """
+        from .base import normalize_tool_choice
+
+        choice = normalize_tool_choice(tool_choice)
+        if choice is None:
+            return None, False
+        kind = choice["type"]
+        mapped: Any
+        if kind == "tool":
+            mapped = {"type": "function", "function": {"name": choice["name"]}}
+        else:
+            mapped = {"auto": "auto", "any": "required", "none": "none"}[kind]
+        return mapped, bool(choice.get("disable_parallel_tool_use"))
 
     @classmethod
     def _from_response(
@@ -514,6 +538,7 @@ class OpenAIClient:
         max_tokens: int,
         model: str | None,
         thinking_budget: int | None = None,
+        tool_choice: dict | None = None,
     ) -> dict[str, Any]:
         chosen_model = model or self.DEFAULT_MODEL
         # Write-side prompt-cache friendliness for gpt-4.1 / o-series / gpt-5,
@@ -552,6 +577,12 @@ class OpenAIClient:
         oai_tools = self._to_openai_tools(tools)
         if oai_tools:
             kwargs["tools"] = oai_tools
+            # W1-11: forced / restricted tool selection and serialised calls.
+            mapped_choice, no_parallel = self._to_openai_tool_choice(tool_choice)
+            if mapped_choice is not None:
+                kwargs["tool_choice"] = mapped_choice
+            if no_parallel:
+                kwargs["parallel_tool_calls"] = False
         return kwargs
 
     def complete(
@@ -564,11 +595,15 @@ class OpenAIClient:
         thinking_budget: int | None = None,
         model: str | None = None,
         on_delta: Callable[[str], None] | None = None,
+        tool_choice: dict | None = None,
     ) -> LLMResponse:
         # on_delta accepted for Provider-protocol parity; this client doesn't
         # stream token deltas (the Anthropic client does). Ignored, not error.
+        # tool_choice is passed only when set so subclass _build_kwargs
+        # overrides with the older signature keep working.
         kwargs = self._build_kwargs(
             system, messages, tools, max_tokens, model, thinking_budget,
+            **({"tool_choice": tool_choice} if tool_choice else {}),
         )
         resp = sync_retry(lambda: self._sync.chat.completions.create(**kwargs))
         return self._from_response(
@@ -586,9 +621,11 @@ class OpenAIClient:
         max_tokens: int = 4096,
         thinking_budget: int | None = None,
         model: str | None = None,
+        tool_choice: dict | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
             system, messages, tools, max_tokens, model, thinking_budget,
+            **({"tool_choice": tool_choice} if tool_choice else {}),
         )
         resp = await async_retry(lambda: self._async.chat.completions.create(**kwargs))
         return self._from_response(
