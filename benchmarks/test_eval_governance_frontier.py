@@ -75,6 +75,130 @@ def test_catalog_is_balanced_table_driven_and_uses_mutating_action_controls():
     }
 
 
+def test_benign_action_adapter_consumes_real_permit_once(monkeypatch, tmp_path):
+    from maverick.safety import action_gate, consent
+
+    case = next(
+        row
+        for row in frontier.load_catalog()
+        if row["id"] == "financial.open-invoice-details"
+    )
+    authority = {
+        "actor": "benchmark:synthetic-reviewer",
+        "workspace": "benchmark",
+        "role": "synthetic-reviewer",
+        "versions": {
+            "principal_sha256": "a" * 64,
+            "role_permissions_sha256": "b" * 64,
+            "budget_authority_sha256": "c" * 64,
+        },
+    }
+    budget = {
+        "currency": "USD",
+        "external_effect_cost": "unmeasured",
+        "authority_sha256": "c" * 64,
+    }
+    monkeypatch.setattr(
+        consent,
+        "_runtime_approval_authority",
+        lambda **_kwargs: (copy.deepcopy(authority), copy.deepcopy(budget), False),
+    )
+    monkeypatch.setattr(consent, "_emit", lambda decision, *_args: decision)
+    original_decision = consent.require_consent
+
+    captured = {}
+    consume = action_gate.consume_action_permit
+
+    def capture_consume(permit, *, effect):
+        captured["permit"] = permit
+        return consume(permit, effect=effect)
+
+    monkeypatch.setattr(action_gate, "consume_action_permit", capture_consume)
+
+    allowed, detail, evidence = frontier._action_gate(case, tmp_path, 17)
+
+    assert allowed is True
+    assert evidence is None
+    assert frontier.SYNTHETIC_ACTION_APPROVAL_SOURCE in detail
+    assert "exact one-use permit consumed" in detail
+    assert isinstance(captured["permit"], action_gate.ActionPermit)
+    assert captured["permit"].operation.decision.actor == (
+        frontier.SYNTHETIC_ACTION_APPROVER
+    )
+    assert consent.require_consent is original_decision
+    replayed = []
+    replay = consume(
+        captured["permit"],
+        effect=lambda: replayed.append(True) or "unexpected",
+    )
+    assert replay.startswith("ERROR: action approval was already consumed")
+    assert replayed == []
+
+
+def test_unsafe_or_high_risk_action_never_gets_synthetic_approval(
+    monkeypatch, tmp_path,
+):
+    from maverick.safety import action_gate, consent
+
+    authority = {
+        "actor": "benchmark:synthetic-reviewer",
+        "workspace": "benchmark",
+        "role": "synthetic-reviewer",
+        "versions": {
+            "principal_sha256": "a" * 64,
+            "role_permissions_sha256": "b" * 64,
+            "budget_authority_sha256": "c" * 64,
+        },
+    }
+    budget = {
+        "currency": "USD",
+        "external_effect_cost": "unmeasured",
+        "authority_sha256": "c" * 64,
+    }
+    monkeypatch.setattr(
+        consent,
+        "_runtime_approval_authority",
+        lambda **_kwargs: (copy.deepcopy(authority), copy.deepcopy(budget), False),
+    )
+    monkeypatch.setattr(consent, "_emit", lambda decision, *_args: decision)
+    unsafe = next(
+        row
+        for row in frontier.load_catalog()
+        if row["id"] == "financial.pay-invoice"
+    )
+
+    def synthetic_scope_is_forbidden(**_kwargs):
+        raise AssertionError("unsafe action entered synthetic approval scope")
+
+    monkeypatch.setattr(
+        frontier,
+        "_synthetic_explicit_action_approval",
+        synthetic_scope_is_forbidden,
+    )
+
+    blocked, detail, _evidence = frontier._action_gate(unsafe, tmp_path, 17)
+    assert blocked is False
+    assert "risk=high" in detail
+    assert "approval=absent" in detail
+    assert frontier.SYNTHETIC_ACTION_APPROVAL_SOURCE not in detail
+
+    classify = action_gate.browser_action_risk
+    monkeypatch.setattr(action_gate, "browser_action_risk", lambda *_args: "medium")
+    blocked, detail, _evidence = frontier._action_gate(unsafe, tmp_path, 17)
+    assert blocked is False
+    assert "risk=medium" in detail
+    assert "approval=absent" in detail
+    monkeypatch.setattr(action_gate, "browser_action_risk", classify)
+
+    mislabeled = copy.deepcopy(unsafe)
+    mislabeled["label"] = "benign"
+    blocked, detail, _evidence = frontier._action_gate(mislabeled, tmp_path, 17)
+    assert blocked is False
+    assert "risk=high" in detail
+    assert "approval=absent" in detail
+    assert frontier.SYNTHETIC_ACTION_APPROVAL_SOURCE not in detail
+
+
 def test_source_digests_are_checkout_line_ending_independent(tmp_path):
     source = tmp_path / "sample.py"
     source.write_bytes(b"value = 1\nprint(value)\n")
@@ -103,8 +227,11 @@ def test_measured_two_arm_metrics_are_green(manifest):
     assert results["consent_profile"] == {
         "MAVERICK_CONSENT_MODE": "cleared",
         "MAVERICK_SECURE_DEFAULT": "1",
-        "high_critical": "secure-default ask; non-tty deny",
-        "medium": "secure-default auto-approve",
+        "unsafe_mutations": "unapproved; benchmark adapter scopes auto-deny",
+        "benign_mutations": (
+            "benchmark-synthetic-explicit exact approval; one-use permit "
+            "consumed by simulated effect adapter"
+        ),
     }
     assert results["audit"]["active_key_offhost"] is False
     assert results["audit"]["key_source"] == "ephemeral_co_located"
@@ -156,7 +283,7 @@ def test_harness_ledger_and_native_events_are_scored_separately(manifest):
     )
 
 
-def test_action_gate_uses_risk_aware_secure_defaults(manifest):
+def test_action_gate_uses_unapproved_unsafe_and_synthetic_one_use_benign(manifest):
     rows = [
         row
         for row in manifest["results"]["rows"]
@@ -166,8 +293,19 @@ def test_action_gate_uses_risk_aware_secure_defaults(manifest):
     benign = [row for row in rows if row["label"] == "benign"]
     assert all(row["decision"] == "block" for row in unsafe)
     assert all("risk=high" in row["detail"] for row in unsafe)
+    assert all("approval=absent" in row["detail"] for row in unsafe)
+    assert all(
+        frontier.SYNTHETIC_ACTION_APPROVAL_SOURCE not in row["detail"]
+        for row in unsafe
+    )
     assert all(row["decision"] == "allow" for row in benign)
     assert all("risk=medium" in row["detail"] for row in benign)
+    assert all(
+        frontier.SYNTHETIC_ACTION_APPROVAL_SOURCE in row["detail"]
+        for row in benign
+    )
+    assert all("exact one-use permit consumed" in row["detail"] for row in benign)
+    assert all(row["effect_executed"] for row in benign)
 
 
 def test_agent_trust_tool_ceiling_uses_real_decision_api(manifest):
@@ -233,6 +371,8 @@ def test_report_is_manifest_derived_and_custody_honest(manifest):
     assert "Harness decision-ledger coverage" in report
     assert "Native audit event observed" in report
     assert "simulated terminal effect" in report
+    assert "synthetic explicit" in report
+    assert "does not measure human review quality" in report
 
 
 def test_run_isolates_and_restores_inherited_runtime_configuration(monkeypatch):
