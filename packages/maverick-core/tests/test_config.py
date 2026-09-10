@@ -562,7 +562,7 @@ def test_unseal_config_tree_does_not_reenter_itself():
     unseal -- the tokens are never needed to resolve an identity."""
     import maverick.config as cfg_mod
 
-    tree = {"providers": {"openai": {"api_key": "MVKAR1:AAAA"}}}
+    tree = {"providers": {"openai": {"api_key": "MVKAR1:AAAA"}}}  # pragma: allowlist secret
     token = cfg_mod._UNSEALING.set(True)
     try:
         assert cfg_mod._unseal_config_tree(tree) is tree
