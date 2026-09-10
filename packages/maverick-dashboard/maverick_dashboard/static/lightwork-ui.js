@@ -784,9 +784,14 @@
   refs.forEach(function (input) { if (!input.value) input.value = fresh(); });
   function renew(ev) {
     var t = ev.target;
-    if (!t || !t.hasAttribute || t.hasAttribute('data-auto-reference')) return;
+    // Only a named field of the operation counts as a change; a record
+    // picker's own search box and lists live inside the form but are not
+    // part of what gets submitted, and the picker refuses to apply a
+    // selection when the draft changed underneath it.
+    if (!t || !t.name || !t.hasAttribute || t.hasAttribute('data-auto-reference')) return;
     refs.forEach(function (input) { if (scopeOf(input).contains(t)) input.value = fresh(); });
   }
+  // 'input' only: a 'change' event also fires when focus leaves an edited
+  // field, which would renew the reference on the click that submits it.
   document.addEventListener('input', renew, true);
-  document.addEventListener('change', renew, true);
 })();
