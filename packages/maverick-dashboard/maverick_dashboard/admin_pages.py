@@ -102,12 +102,20 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         provider["readiness"] = provider_readiness(
             provider["name"], configured=provider["configured"]
         )
+    # Grouped pickers: every model the configured keys can reach (cached live
+    # discovery) plus the shipped catalog, capped by the allow-list.
+    from maverick_dashboard import model_pickers
+    pickers = model_pickers.build(cfg_state["providers"], allow)
+    groups_by_name = {g["name"]: g for g in pickers["model_groups"]}
+    for provider in cfg_state["providers"]:
+        provider["discovery"] = groups_by_name.get(provider["name"])
     saved_msg = {
         "appearance": "Appearance updated.",
         "models": "Default model updated.",
         "roles": "Per-role models updated.",
         "budget": "Spend cap updated.",
         "allowed": "Allowed models updated.",
+        "discover": "Model lists refreshed from the provider keys.",
         "providers": "Provider keys updated.",
         "provider_test": "Provider readiness check finished.",
         "webhooks": "Webhook signing secret updated.",
@@ -122,6 +130,7 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "models": "models",
         "roles": "models",
         "allowed": "models",
+        "discover": "models",
         "providers": "integrations",
         "provider_test": "integrations",
         "webhooks": "integrations",
@@ -139,6 +148,7 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "picker_options": picker_options,
         "allowed_models": sorted(allow),
         "pinned_model": default_model_override(),
+        **pickers,
         "providers": cfg_state["providers"],
         "capabilities": cfg_state["capabilities"],
         "features": cfg_state["features"],
@@ -151,11 +161,13 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
 
 
 @router.post("/settings/models")
-async def settings_set_model(request: Request, model: str = Form("")) -> RedirectResponse:
+async def settings_set_model(request: Request) -> RedirectResponse:
     """Pin (or clear) the dashboard's default model via the runtime overlay.
 
-    An empty value clears the pin, reverting to config.toml / built-in
-    defaults. config.toml is never written."""
+    ``model`` is the picker value; when it is the custom marker the typed
+    ``model_custom`` id is used instead. An empty value clears the pin,
+    reverting to config.toml / built-in defaults. config.toml is never
+    written."""
     _app()._require_same_origin(request)
     auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import (
@@ -163,7 +175,9 @@ async def settings_set_model(request: Request, model: str = Form("")) -> Redirec
         clear_default_model,
         set_default_model,
     )
-    model = (model or "").strip()
+
+    from maverick_dashboard.model_pickers import chosen
+    model = chosen(await request.form(), "model")
     allow = allowed_models()
     if model and allow and model not in allow:
         raise HTTPException(status_code=400, detail="model not in the allowed list")
@@ -207,8 +221,9 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
     from maverick.runtime_overrides import allowed_models, set_role_models
     roles = ("orchestrator", "coder", "researcher", "writer",
              "analyst", "verifier", "summarizer")
+    from maverick_dashboard.model_pickers import chosen
     form = await request.form()
-    updates = {r: (form.get(r) or "").strip() for r in roles}
+    updates = {r: chosen(form, r) for r in roles}
     allow = allowed_models()
     if allow:
         for spec in updates.values():
@@ -236,6 +251,31 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     return RedirectResponse("/settings?saved=allowed", status_code=303)
+
+
+@router.post("/settings/models/discover")
+async def settings_discover_models(request: Request, provider: str = Form("")) -> RedirectResponse:
+    """Ask every configured provider (or one) which models its key can reach and
+    cache the answer for the pickers. Bounded live requests; nothing is pinned."""
+    _app()._require_same_origin(request)
+    auth.require_global_permission(request, "admin")
+    from maverick import model_discovery
+    from maverick.providers import KNOWN_PROVIDERS, _canonical
+    name = _canonical(provider.strip()) if provider.strip() else ""
+    if name and name not in KNOWN_PROVIDERS:
+        raise HTTPException(status_code=400, detail="unknown provider")
+    await run_in_threadpool(model_discovery.refresh, [name] if name else None)
+    return RedirectResponse("/settings?saved=discover", status_code=303)
+
+
+def _refresh_models_quietly(provider: str) -> None:
+    """Refresh one provider's reachable-model list after its key changed; a
+    discovery failure is recorded in the cache, never surfaced as a save error."""
+    try:
+        from maverick import model_discovery
+        model_discovery.refresh([provider])
+    except Exception:  # pragma: no cover -- best effort by design
+        pass
 
 
 def _webhook_secret_configured() -> bool:
@@ -298,6 +338,7 @@ async def settings_set_provider(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await run_in_threadpool(_refresh_models_quietly, provider_name)
     return RedirectResponse("/settings?saved=providers", status_code=303)
 
 
@@ -333,6 +374,7 @@ async def settings_test_provider(
     if not state["configured"]:
         raise HTTPException(status_code=409, detail="provider is not configured")
     await run_in_threadpool(test_provider, name)
+    await run_in_threadpool(_refresh_models_quietly, name)
     return RedirectResponse("/settings?saved=provider_test", status_code=303)
 
 

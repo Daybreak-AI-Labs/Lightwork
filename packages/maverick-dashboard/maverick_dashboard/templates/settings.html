@@ -86,36 +86,158 @@
   <div class="section-head" data-settings-group="models"><h2>Models</h2></div>
   <div class="panel" data-settings-group="models">
     <p class="muted" style="margin-top: 0;">
-      Pick any configured provider's model (see Provider keys below) or type any model
-      id — e.g. <code>openai:gpt-5.4</code>, <code>gemini:gemini-3.5-pro</code>,
-      <code>ollama:llama-4-maverick</code>. Changes apply on the next run; a
-      model pinned for a specific role below still wins for that role.
+      Lightwork offers every model your saved provider keys can reach. Each
+      configured provider's own model list is read and cached; the shipped
+      catalog fills in the rest. Nothing changes until you save a choice below.
     </p>
-    <datalist id="model-catalog">
-      {% for spec, plabel in picker_options %}
-      <option value="{{ spec }}">{{ plabel }}</option>
+    <div class="models-overview" role="group" aria-label="Model availability">
+      <div class="stat"><span class="num">{{ configured_count }}</span><span class="muted">provider{{ '' if configured_count == 1 else 's' }} with a key</span></div>
+      <div class="stat"><span class="num">{{ offered_specs|length }}</span><span class="muted">model{{ '' if offered_specs|length == 1 else 's' }} offered</span></div>
+      <div class="stat"><span class="num">{{ live_count }}</span><span class="muted">live list{{ '' if live_count == 1 else 's' }}{% if last_refresh_ago %} · refreshed {{ last_refresh_ago }}{% endif %}</span></div>
+      <form method="post" action="/settings/models/discover" class="models-overview-action">
+        <button type="submit" class="btn btn--primary"{% if not discovery_enabled or not configured_count %} disabled aria-disabled="true"{% endif %}>Refresh model lists</button>
+      </form>
+    </div>
+    {% if not discovery_enabled %}
+    <p class="muted">Live model discovery is switched off (<code>[models] discovery</code> or <code>MAVERICK_MODEL_DISCOVERY</code>), so the pickers show the shipped catalog only. Any model id can still be typed.</p>
+    {% elif not configured_count %}
+    <p class="muted">No provider key is saved yet. Add one under <a href="#settings-integrations" data-settings-jump="integrations">Provider keys</a> and its models will appear here.</p>
+    {% endif %}
+    <ul class="models-status" aria-label="Model list status by provider">
+      {% for g in model_groups if g.name != 'custom' %}
+      <li data-settings-search-item>
+        <span class="models-status-label">{{ g.label }}</span>
+        <span class="badge {{ 'active' if g.status == 'live' else ('blocked' if g.status == 'unavailable' else '') }}">{{ {'live': 'live', 'unavailable': 'failed', 'unconfigured': 'no key', 'pending': 'not checked', 'disabled': 'off', 'unsupported': 'catalog'}[g.status] }}</span>
+        <span class="muted">{{ g.detail }}{% if g.fetched_ago %} · refreshed {{ g.fetched_ago }}{% endif %}{% if g.stale %} · stale, refresh to update{% endif %}</span>
+      </li>
       {% endfor %}
-    </datalist>
+    </ul>
+  </div>
+
+  <div class="section-head" data-settings-group="models"><h2>Default model</h2></div>
+  <div class="panel" data-settings-group="models">
+    <p class="muted" style="margin-top: 0;">
+      Used by every role unless a role below overrides it. Pick from the models
+      your keys reach, or choose "Type a model id" for anything else — e.g.
+      <code>openai:gpt-5.4</code>, <code>ollama:llama-4-maverick</code>. Changes
+      apply on the next run.
+    </p>
     {% if allowed_models %}
     <p class="muted" style="margin-top: 0;">
       An admin allow-list is active — pickers are limited to the
       {{ allowed_models|length }} model(s) approved below.
     </p>
     {% endif %}
-    <form method="post" action="/settings/models"
-          style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
-      <label style="display: flex; flex-direction: column; gap: var(--space-1); min-width: 20rem;">
+    {% set pinned_typed = pinned_model and pinned_model not in offered_specs %}
+    <form method="post" action="/settings/models" class="model-pick-form">
+      <label class="model-pick">
         <span>Default model</span>
-        <input class="ctl" type="text" name="model" list="model-catalog"
-               value="{{ pinned_model or '' }}"
-               placeholder="Use server default — type or pick"
-               aria-label="Default model" />
+        <select class="ctl" name="model" data-model-picker="default-model-custom" aria-label="Default model">
+          <option value=""{% if not pinned_model %} selected{% endif %}>Use server default</option>
+          {% for pg in picker_groups %}
+          <optgroup label="{{ pg.label }}">
+            {% for m in pg.options %}
+            <option value="{{ m.spec }}"{% if pinned_model == m.spec %} selected{% endif %}>{{ m.spec }}{% if m.live %} · live{% endif %}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+          <option value="{{ custom_marker }}"{% if pinned_typed %} selected{% endif %}>Type a model id…</option>
+        </select>
       </label>
-      <button type="submit" class="btn btn--primary">Save model</button>
+      <label class="model-pick" id="default-model-custom"{% if not pinned_typed %} hidden{% endif %}>
+        <span>Model id</span>
+        <input class="ctl" type="text" name="model_custom" value="{{ pinned_model if pinned_typed else '' }}" placeholder="provider:model-id" aria-label="Default model id" />
+      </label>
+      <button type="submit" class="btn btn--primary">Save default</button>
     </form>
     {% if pinned_model %}
-    <p class="muted" style="margin-bottom: 0;">Currently pinned: <code>{{ pinned_model }}</code></p>
+    <p class="muted" style="margin-bottom: 0;">Currently pinned: <code>{{ pinned_model }}</code>. Choose "Use server default" and save to clear it.</p>
     {% endif %}
+  </div>
+
+  <div class="section-head" data-settings-group="models"><h2>Per-role models</h2></div>
+  <div class="panel" data-settings-group="models">
+    <p class="muted" style="margin-top: 0;">
+      Give a role its own model — a strong model for the orchestrator, a cheap
+      one for the summarizer. "Use default" follows the default model above,
+      then the platform default. The Effective column is what each role will
+      actually use on the next run.
+    </p>
+    <form method="post" action="/settings/models/roles">
+      <table>
+        <thead><tr>
+          <th scope="col">Role</th>
+          <th scope="col">Model override</th>
+          <th scope="col">Effective</th>
+        </tr></thead>
+        <tbody>
+          {% for label, role, effective, override in role_models %}
+          {% set typed = override and override not in offered_specs %}
+          <tr>
+            <td>{{ label }}</td>
+            <td>
+              <div class="model-pick-row">
+                <select class="ctl" name="{{ role }}" data-model-picker="{{ role }}-model-custom" aria-label="Model for {{ label }}">
+                  <option value=""{% if not override %} selected{% endif %}>Use default</option>
+                  {% for pg in picker_groups %}
+                  <optgroup label="{{ pg.label }}">
+                    {% for m in pg.options %}
+                    <option value="{{ m.spec }}"{% if override == m.spec %} selected{% endif %}>{{ m.spec }}{% if m.live %} · live{% endif %}</option>
+                    {% endfor %}
+                  </optgroup>
+                  {% endfor %}
+                  <option value="{{ custom_marker }}"{% if typed %} selected{% endif %}>Type a model id…</option>
+                </select>
+                <input class="ctl" type="text" id="{{ role }}-model-custom" name="{{ role }}_custom" value="{{ override if typed else '' }}" placeholder="provider:model-id" aria-label="Typed model id for {{ label }}"{% if not typed %} hidden{% endif %} />
+              </div>
+            </td>
+            <td><code>{{ effective }}</code></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="submit" class="btn btn--primary" style="margin-top: var(--space-3);">Save per-role models</button>
+    </form>
+  </div>
+
+  <div class="section-head" data-settings-group="models"><h2>Allowed models</h2></div>
+  <div class="panel" data-settings-group="models">
+    <p class="muted" style="margin-top: 0;">
+      Restrict which models anyone may use. Tick the ones you approve and save:
+      the pickers above then offer only those, and <strong>every agent is
+      hard-capped to them</strong> — a model pinned anywhere else cannot run
+      outside this list. Leave every box unticked to allow all models. Models
+      marked <span class="badge active">live</span> were reported by the
+      provider for your key; the rest come from the shipped catalog. Changes
+      apply on the next run.
+    </p>
+    <form method="post" action="/settings/models/allowed">
+      {% for g in model_groups %}
+      <details data-model-group="{{ g.name }}"{% if g.configured %} open{% endif %} class="model-group">
+        <summary>
+          <span class="model-group-title">{{ g.label }}</span>
+          <span class="muted">{{ g.models|length }} model{{ '' if g.models|length == 1 else 's' }}{% if g.live_count %} · {{ g.live_count }} live{% endif %}{% if not g.configured and g.name != 'custom' %} · no key{% endif %}</span>
+        </summary>
+        {% if g.models %}
+        <div class="model-group-actions">
+          <button type="button" class="btn btn--ghost" data-model-select-all="{{ g.name }}">Select all</button>
+          <button type="button" class="btn btn--ghost" data-model-select-none="{{ g.name }}">Clear</button>
+        </div>
+        {% endif %}
+        {% for m in g.models %}
+        <label class="model-row" data-settings-search-item data-model-source="{{ 'live' if m.live else 'catalog' }}">
+          <span><code>{{ m.spec }}</code>{% if m.live %} <span class="badge active">live</span>{% endif %}</span>
+          <input type="checkbox" name="models" value="{{ m.spec }}"{% if m.spec in allowed_models %} checked{% endif %} />
+        </label>
+        {% endfor %}
+        {% if not g.models %}<p class="muted">No models known for this provider yet.</p>{% endif %}
+      </details>
+      {% endfor %}
+      <p style="margin-bottom: 0; margin-top: var(--space-3);">
+        <button type="submit" class="btn btn--primary">Save allowed models</button>
+        {% if allowed_models %}<span class="muted" style="margin-left: var(--space-3);">{{ allowed_models|length }} model(s) allowed. Untick all and save to allow every model.</span>{% endif %}
+      </p>
+    </form>
   </div>
 
   <div class="section-head" data-settings-group="models"><h2 id="voice-model-setup">Optional local voice</h2></div>
@@ -138,62 +260,6 @@
     <p><a class="btn" id="voice-setup-try" href="/chat" hidden>Try dictation in Chat</a></p>
     <p class="muted">You can leave Settings and return to check progress. Lightwork verifies the downloaded file before use.</p>
   </section>
-
-  <div class="section-head" data-settings-group="models"><h2>Per-role models</h2></div>
-  <div class="panel" data-settings-group="models">
-    <p class="muted" style="margin-top: 0;">
-      Override the model for a specific agent role — the platform's strength is
-      role-specialised models. "Use default" falls back to the default model
-      above, then the platform default. The Effective column is what each role
-      will actually use.
-    </p>
-    <form method="post" action="/settings/models/roles">
-      <table>
-        <thead><tr>
-          <th scope="col">Role</th>
-          <th scope="col">Model override</th>
-          <th scope="col">Effective</th>
-        </tr></thead>
-        <tbody>
-          {% for label, role, effective, override in role_models %}
-          <tr>
-            <td>{{ label }}</td>
-            <td>
-              <input class="ctl" type="text" name="{{ role }}" list="model-catalog"
-                     value="{{ override or '' }}" placeholder="Use default"
-                     aria-label="Model for {{ label }}" style="min-width: 13rem;" />
-            </td>
-            <td><code>{{ effective }}</code></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <button type="submit" class="btn btn--primary" style="margin-top: var(--space-3);">Save per-role models</button>
-    </form>
-  </div>
-
-  <div class="section-head" data-settings-group="models"><h2>Allowed models</h2></div>
-  <div class="panel" data-settings-group="models">
-    <p class="muted" style="margin-top: 0;">
-      Restrict which models anyone may use. Check the ones you approve and save;
-      the default and per-role pickers above are then limited to your selection,
-      and <strong>every agent is hard-capped to it</strong> — a model pinned
-      anywhere else cannot run outside this list. Leave every box unchecked to
-      allow all models. Changes apply on the next run.
-    </p>
-    <form method="post" action="/settings/models/allowed">
-      {% for spec, plabel in model_options %}
-      <label data-settings-search-item style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
-        <span><code>{{ spec }}</code> <span class="muted">· {{ plabel }}</span></span>
-        <input type="checkbox" name="models" value="{{ spec }}"{% if spec in allowed_models %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand);" />
-      </label>
-      {% endfor %}
-      <p style="margin-bottom: 0; margin-top: var(--space-3);">
-        <button type="submit" class="btn btn--primary">Save allowed models</button>
-        {% if allowed_models %}<span class="muted" style="margin-left: var(--space-3);">{{ allowed_models|length }} model(s) allowed. Uncheck all and save to allow every model.</span>{% endif %}
-      </p>
-    </form>
-  </div>
 
   <div class="section-head" data-settings-group="general"><h2>Spend cap</h2></div>
   <div class="panel" data-settings-group="general">
@@ -239,6 +305,14 @@
           {% if p.base_url_field and not p.dashboard_can_set_base_url %}<div>The base URL is managed elsewhere ({{ p.base_url_source }}); update it there.</div>{% endif %}
         </div>
         <div style="margin-top: var(--space-2);">{{ integration_readiness(p.readiness) }}</div>
+        {% if p.discovery %}
+        <div class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">
+          Models:
+          {% if p.discovery.status == 'live' %}<span class="badge active">{{ p.discovery.live_count }} reachable</span>{% if p.discovery.fetched_ago %} refreshed {{ p.discovery.fetched_ago }}{% endif %}
+          {% elif p.discovery.status == 'unavailable' %}<span class="badge blocked">list failed</span> {{ p.discovery.detail }}
+          {% else %}{{ p.discovery.detail }}{% endif %}
+        </div>
+        {% endif %}
       </div>
       <form method="post" action="/settings/providers" style="display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end;">
         <input type="hidden" name="provider" value="{{ p.name }}" />
@@ -263,6 +337,12 @@
       <form method="post" action="/settings/providers/test">
         <input type="hidden" name="provider" value="{{ p.name }}" />
         <button type="submit" class="btn btn--ghost">Test live readiness</button>
+      </form>
+      {% endif %}
+      {% if p.configured and p.discovery and p.discovery.supported and discovery_enabled %}
+      <form method="post" action="/settings/models/discover">
+        <input type="hidden" name="provider" value="{{ p.name }}" />
+        <button type="submit" class="btn btn--ghost">Refresh models</button>
       </form>
       {% endif %}
     </div>
@@ -387,6 +467,21 @@
     .voice-setup-confirm input { flex: 0 0 auto; width: auto; margin-top: .25em; }
     .voice-setup-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0; }
     .voice-setup-actions .btn { max-width: 100%; white-space: normal; }
+    .models-overview { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; margin: var(--space-3) 0; }
+    .models-overview .stat { display: flex; flex-direction: column; min-width: 8rem; }
+    .models-overview .num { font-size: 1.5rem; font-weight: 600; line-height: 1.2; }
+    .models-status { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
+    .models-status li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
+    .models-status-label { min-width: 11rem; font-weight: var(--font-medium); }
+    .model-pick-form { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end; }
+    .model-pick { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(100%, 20rem); }
+    .model-pick-row { display: grid; gap: var(--space-2); min-width: 13rem; }
+    .model-group { border-top: 1px solid var(--hairline); padding: var(--space-2) 0; }
+    .model-group > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+    .model-group-title { font-weight: var(--font-medium); }
+    .model-group-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
+    .model-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-1) 0; }
+    .model-row input { width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0; }
     .settings-index { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-3); align-items: end; margin-bottom: var(--space-4); padding: var(--space-4); border: 1px solid color-mix(in srgb, var(--border) 72%, white 18%); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 78%, transparent); box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, white 15%, transparent); backdrop-filter: blur(22px) saturate(145%); -webkit-backdrop-filter: blur(22px) saturate(145%); }
     .settings-index > * { min-width: 0; }
     .settings-index h2, .settings-index p { margin: 0; }
@@ -513,6 +608,35 @@
           if (form.requestSubmit) form.requestSubmit(submitter || undefined);
           else form.submit();
         });
+      });
+    });
+
+    document.querySelectorAll('[data-model-picker]').forEach(function (select) {
+      var custom = document.getElementById(select.dataset.modelPicker);
+      if (!custom) return;
+      var field = custom.tagName === 'INPUT' ? custom : custom.querySelector('input');
+      function sync(focus) {
+        var typed = select.value === '__custom__';
+        custom.hidden = !typed;
+        if (typed && focus && field) field.focus();
+      }
+      select.addEventListener('change', function () { sync(true); });
+      sync(false);
+    });
+    document.querySelectorAll('[data-model-select-all], [data-model-select-none]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var group = button.closest('.model-group');
+        var checked = button.hasAttribute('data-model-select-all');
+        if (!group) return;
+        group.querySelectorAll('input[type="checkbox"]').forEach(function (box) { box.checked = checked; });
+        var form = button.closest('form');
+        if (form) dirty.add(form);
+      });
+    });
+    document.querySelectorAll('[data-settings-jump]').forEach(function (link) {
+      link.addEventListener('click', function (event) {
+        event.preventDefault();
+        selectGroup(link.dataset.settingsJump, true);
       });
     });
 

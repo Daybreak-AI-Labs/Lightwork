@@ -80,9 +80,10 @@ def test_post_allowlist_restricts_pickers(monkeypatch, tmp_path):
     from maverick.runtime_overrides import allowed_models
     assert allowed_models() == {_SONNET, _OPUS}
     page = c.get("/settings").text
-    # the datalist now offers only the two approved models, not the rest
+    # the default picker now offers only the two approved models, not the rest
     assert 'allow-list is active' in page
-    assert "openai:gpt-5.4" not in page.split("<datalist")[1].split("</datalist>")[0]
+    picker = page.split('name="model"', 1)[1].split("</select>", 1)[0]
+    assert "openai:gpt-5.4" not in picker and _SONNET in picker and _OPUS in picker
     # and the approved boxes render checked
     assert f'name="models" value="{_SONNET}" checked' in page
 
