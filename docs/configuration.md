@@ -72,6 +72,15 @@ auth_mode = "iam"
 # endpoint = "mantle"
 
 [models]
+# Settings > Models offers every model a saved provider key can reach: each
+# configured provider's own model-list endpoint is read (one bounded request,
+# cached for discovery_ttl_minutes) on top of the shipped catalog. Off means
+# the shipped catalog only; any model id can still be typed. The
+# MAVERICK_MODEL_DISCOVERY=0|1 environment variable overrides the setting.
+# discovery = true
+# discovery_ttl_minutes = 60
+# Extra picker entries, any "provider:model-id":
+# catalog = ["openai:gpt-6"]
 # Per-role model picks. Format: "provider:model-id".
 # Any role omitted falls back to maverick.llm.ROLE_MODELS defaults.
 orchestrator    = "anthropic:claude-opus-4-8"
