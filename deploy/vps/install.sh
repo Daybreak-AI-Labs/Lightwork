@@ -17,14 +17,15 @@
 #
 # Optional:
 #   MAVERICK_CORE_EXTRAS  comma-separated maverick-agent extras to install
-#     (default: release-runtime,postgres,oidc,s3 -- the same set the container
-#     image installs, so MAVERICK_WORLD_BACKEND=postgres, OIDC browser login
-#     and S3 attachments work on a VPS without a second install step).
+#     (default: release-runtime,postgres,oidc,s3,evidence-analysis -- the same
+#     set the container image installs, so MAVERICK_WORLD_BACKEND=postgres,
+#     OIDC browser login, S3 attachments and the AI evidence parsers work on a
+#     VPS without a second install step).
 
 set -euo pipefail
 
 MAVERICK_REF="${MAVERICK_REF:-}"
-MAVERICK_CORE_EXTRAS="${MAVERICK_CORE_EXTRAS:-release-runtime,postgres,oidc,s3}"
+MAVERICK_CORE_EXTRAS="${MAVERICK_CORE_EXTRAS:-release-runtime,postgres,oidc,s3,evidence-analysis}"
 STAGED_SOURCE=""
 
 cleanup_staged_source() {
