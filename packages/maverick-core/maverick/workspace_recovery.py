@@ -353,7 +353,8 @@ def encryption_custody() -> dict:
     from . import crypto_at_rest
     from .config import load_config
 
-    sources = [crypto_at_rest._KEY_PATH] if crypto_at_rest._KEY_PATH.is_file() else []
+    key_path = crypto_at_rest._key_path()
+    sources = [key_path] if key_path.is_file() else []
     sources.extend(crypto_at_rest._keyring_dir().glob("*.key"))
     kms = load_config().get("kms") or {}
     external = bool(os.environ.get("MAVERICK_ENCRYPTION_KEY") or os.environ.get("MAVERICK_KMS_KEK")
@@ -1016,7 +1017,7 @@ def install_retained_keys(  # noqa: C901 - crash-safe exact-key transaction
                     "The retained-key ZIP failed authentication or validation. No keys were installed."
                 ) from exc
         destinations = {
-            name: (crypto_at_rest._KEY_PATH if name == "at_rest.key"
+            name: (crypto_at_rest._key_path() if name == "at_rest.key"
                    else crypto_at_rest._keyring_dir() / name)
             for name in keys
         }
@@ -1064,11 +1065,12 @@ def install_retained_keys(  # noqa: C901 - crash-safe exact-key transaction
         # Serialize this narrow installation transaction separately from the
         # workspace recovery lock.  A signed ``installing`` receipt is written
         # first, so an interruption can only resume the exact reviewed bytes.
-        key_lock = crypto_at_rest._KEY_PATH.parent / ".bootstrap-key-install"
+        key_path = crypto_at_rest._key_path()
+        key_lock = key_path.parent / ".bootstrap-key-install"
         with file_lock.cross_process_lock(key_lock, strict=True):
             actual_paths: dict[str, Path] = {}
-            if os.path.lexists(crypto_at_rest._KEY_PATH):
-                actual_paths["at_rest.key"] = crypto_at_rest._KEY_PATH
+            if os.path.lexists(key_path):
+                actual_paths["at_rest.key"] = key_path
             ring = crypto_at_rest._keyring_dir()
             if os.path.lexists(ring):
                 file_lock.ensure_private_directory(ring)
@@ -1149,7 +1151,7 @@ def _installed_key_material(marker: dict) -> dict[str, bytes]:
             "Install the separately tested encryption-key copy before validating encrypted records."
         )
     paths: dict[str, Path] = {}
-    primary = crypto_at_rest._KEY_PATH
+    primary = crypto_at_rest._key_path()
     if primary.exists():
         paths["at_rest.key"] = primary
     ring = crypto_at_rest._keyring_dir()

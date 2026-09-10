@@ -35,6 +35,7 @@ import math
 import os
 import re
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -263,6 +264,18 @@ def _tree_contains_sealed_value(value: object) -> bool:
     return False
 
 
+# True while this thread/task is inside ``_unseal_config_tree``. Opening the
+# overlay imports the encryption stack and resolves key material, and both can
+# resolve the active tenant -> client id -> ``load_config()`` -> this overlay
+# again. A nested load only ever needs plaintext keys (``[client] id`` is never
+# sealed), so it gets the tree with its tokens left opaque instead of a second
+# unseal -- which, before this guard, was an import cycle that killed every
+# production task at boot (2026-09-10) and would otherwise be unbounded
+# recursion. A ContextVar, not a global: concurrent requests on other tasks
+# must not observe one another's in-progress unseal.
+_UNSEALING: ContextVar[bool] = ContextVar("maverick_config_unsealing", default=False)
+
+
 def _unseal_config_tree(value: object) -> object:
     """Return a detached config tree with authenticated ciphertext opened.
 
@@ -270,28 +283,33 @@ def _unseal_config_tree(value: object) -> object:
     must use the process/deployment key even when a request currently carries a
     tenant context.  Legacy plaintext remains readable; a genuine ciphertext
     that cannot be authenticated fails closed through ``unseal_from_str``.
+    Re-entrant loads (see ``_UNSEALING``) receive the tokens unopened.
     """
-    if not _tree_contains_sealed_value(value):
+    if not _tree_contains_sealed_value(value) or _UNSEALING.get():
         return value
-    from .crypto_at_rest import (
-        deployment_key_scope,
-        is_sealed_str,
-        unseal_from_str,
-    )
+    token = _UNSEALING.set(True)
+    try:
+        from .crypto_at_rest import (
+            deployment_key_scope,
+            is_sealed_str,
+            unseal_from_str,
+        )
 
-    def walk(item: object) -> object:
-        if isinstance(item, str):
-            return unseal_from_str(item) if is_sealed_str(item) else item
-        if isinstance(item, dict):
-            return {key: walk(child) for key, child in item.items()}
-        if isinstance(item, list):
-            return [walk(child) for child in item]
-        if isinstance(item, tuple):
-            return tuple(walk(child) for child in item)
-        return item
+        def walk(item: object) -> object:
+            if isinstance(item, str):
+                return unseal_from_str(item) if is_sealed_str(item) else item
+            if isinstance(item, dict):
+                return {key: walk(child) for key, child in item.items()}
+            if isinstance(item, list):
+                return [walk(child) for child in item]
+            if isinstance(item, tuple):
+                return tuple(walk(child) for child in item)
+            return item
 
-    with deployment_key_scope():
-        return walk(value)
+        with deployment_key_scope():
+            return walk(value)
+    finally:
+        _UNSEALING.reset(token)
 
 
 def _load_config_file(path: Path) -> dict:

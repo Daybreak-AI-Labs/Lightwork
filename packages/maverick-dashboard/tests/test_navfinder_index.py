@@ -43,19 +43,28 @@ def test_finder_pages_lists_folded_pages_that_nav_groups_excludes(monkeypatch, t
 
     nav = set(_hrefs(ui_visibility.nav_groups("admin")))
     finder = _hrefs(ui_visibility.finder_pages("admin"))
-    assert set(FOLDED) <= set(finder)
+    offered = {p for p in FOLDED if ui_visibility.customer_ready(ui_visibility.page_for(p))}
+    held = set(FOLDED) - offered
+    assert offered and offered <= set(finder)
+    # Folded pages held back as not ready are offered nowhere, finder included.
+    assert held and held.isdisjoint(finder)
     assert set(FOLDED).isdisjoint(nav)
     # The sidebar is a strict subset of the finder; nothing is finder-only
     # beyond in_nav=False pages, and the finder has no duplicates.
     assert nav <= set(finder)
     assert len(finder) == len(set(finder))
     assert set(finder) - nav == {
-        p["path"] for p in ui_visibility.PAGES if not p.get("in_nav", True)
+        p["path"] for p in ui_visibility.PAGES
+        if not p.get("in_nav", True) and ui_visibility.customer_ready(p)
     }
-    # auth off: every registered page exactly once (grouped by label like the
-    # nav, so a group split in the registry is merged, not duplicated).
+    # auth off: every customer-ready registered page exactly once (grouped by
+    # label like the nav, so a group split in the registry is merged, not
+    # duplicated); pages held back as not ready are offered nowhere.
     auth_off = _hrefs(ui_visibility.finder_pages(None))
-    assert sorted(auth_off) == sorted(p["path"] for p in ui_visibility.PAGES)
+    assert sorted(auth_off) == sorted(
+        p["path"] for p in ui_visibility.PAGES if ui_visibility.customer_ready(p)
+    )
+    assert set(auth_off).isdisjoint(ui_visibility.not_ready_paths())
     # Groups merge by label like the nav (no duplicate sections).
     labels = [g["label"] for g in ui_visibility.finder_pages("admin")]
     assert len(labels) == len(set(labels))
@@ -87,7 +96,8 @@ def test_finder_pages_applies_the_same_rbac_and_overrides_as_nav_groups(monkeypa
         assert [h for h in finder if h in set(nav)] == nav
         expected_extra = {
             p["path"] for p in ui_visibility.PAGES
-            if not p.get("in_nav", True) and ui_visibility.is_visible(p, role)
+            if not p.get("in_nav", True) and ui_visibility.customer_ready(p)
+            and ui_visibility.is_visible(p, role)
         }
         assert set(finder) - set(nav) == expected_extra, role
 
@@ -160,7 +170,11 @@ def test_rendered_finder_indexes_folded_pages_and_sidebar_does_not(monkeypatch, 
     markup = _ShellLinks()
     markup.feed(response.text)
 
-    assert set(FOLDED) | set(NEWLY_GOVERNED) <= set(markup.finder_hrefs)
+    registered = set(FOLDED) | set(NEWLY_GOVERNED)
+    offered = {p for p in registered if ui_visibility.customer_ready(ui_visibility.page_for(p))}
+    assert offered and offered <= set(markup.finder_hrefs)
+    # Folded pages held back as not ready never reach the rendered finder.
+    assert (registered - offered).isdisjoint(markup.finder_hrefs)
     assert set(FOLDED).isdisjoint(markup.sidebar_hrefs)
     assert set(NEWLY_GOVERNED).isdisjoint(markup.sidebar_hrefs)
     # The sidebar stays the curated rail; the finder is the governed whole.

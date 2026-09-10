@@ -751,3 +751,68 @@ def test_backup_key_material_errors_when_no_key(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     with pytest.raises(car.EncryptionUnavailable, match="no at-rest key material"):
         car.backup_key_material(tmp_path / "escrow")
+
+
+# ---- the on-disk key path is resolved at call time, never at import ---------
+
+
+def test_importing_the_module_does_not_resolve_the_data_dir():
+    """Regression for the 2026-09-10 boot outage: a module-level
+    ``data_dir(...)`` binding ran DURING import, re-entered config loading
+    (tenant -> client id -> load_config -> unseal overlay -> import this
+    module) and died on the half-initialised module. The path must be lazy."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import maverick.crypto_at_rest as car\n"
+        "assert car._KEY_PATH is None, car._KEY_PATH\n"
+        "assert car._key_path().name == 'at_rest.key'\n"
+    )
+    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_key_path_is_deployment_wide_not_request_scoped(tmp_path, monkeypatch):
+    """One key per deployment: a request bound to a workspace must seal with
+    the same key every other scope reads with (a row sealed inside a
+    tenant-bound request was unreadable to the owner-invite flow otherwise).
+    MAVERICK_TENANT, a deployment-level binding, still picks the directory."""
+    from maverick.paths import reset_tenant, set_tenant
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
+    monkeypatch.setattr(car, "_KEY_PATH", None)   # the production default
+
+    unbound = car._key_path()
+    tok = set_tenant("tenant-a")
+    try:
+        path_a = car._key_path()
+    finally:
+        reset_tenant(tok)
+    tok = set_tenant("tenant-b")
+    try:
+        path_b = car._key_path()
+    finally:
+        reset_tenant(tok)
+    assert unbound == path_a == path_b == home / "keys" / "at_rest.key"
+
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-env")
+    bound = car._key_path()
+    assert "tenant-env" in str(bound) and bound.name == "at_rest.key"
+    tok = set_tenant("tenant-a")
+    try:
+        assert car._key_path() == bound
+    finally:
+        reset_tenant(tok)
+
+
+def test_key_path_override_still_wins(tmp_path, monkeypatch):
+    # The test-suite convention (and an operator escape hatch): a pinned
+    # module attribute takes precedence over tenant resolution.
+    pinned = tmp_path / "pinned" / "at_rest.key"
+    monkeypatch.setattr(car, "_KEY_PATH", pinned)
+    assert car._key_path() == pinned
+    assert car._keyring_dir() == pinned.parent / "at_rest.d"

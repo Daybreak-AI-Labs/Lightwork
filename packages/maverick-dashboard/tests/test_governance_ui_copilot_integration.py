@@ -201,37 +201,21 @@ def test_all_copilot_contexts_have_registered_pages_and_new_role_nav_links(
             expected_default = expected_floors[path]
         assert page["default"] == expected_default
         assert page.get("in_nav", True) is True
+        # Every one of these is an operator workbench of record ids, fingerprints
+        # and raw status documents: governed and reachable by URL, but held back
+        # from every customer surface until it speaks to a non-technical user.
+        assert ui_visibility.customer_ready(page) is False
 
-    def nav_paths(role: str) -> set[str]:
-        return {link["href"] for group in ui_visibility.nav_groups(role) for link in group["links"]}
+    def offered(role: str) -> set[str]:
+        return {
+            link["href"]
+            for groups in (ui_visibility.nav_groups(role), ui_visibility.finder_pages(role))
+            for group in groups
+            for link in group["links"]
+        }
 
-    audit_only_paths = {
-        "/consent/bulk-jobs",
-        "/consent/publish-settings",
-        "/consent/global-opt-out",
-    }
-    admin_only_paths = {"/administration/document-vault"}
-    assert new_paths - audit_only_paths - admin_only_paths <= nav_paths("operator")
-    assert new_paths <= nav_paths("admin")
-    read_only_workbenches = {
-        "/ai-evidence-analysis",
-        "/assess/evidence-autopopulation",
-        "/privacy/drop",
-        "/privacy/data-discovery",
-        "/governance/inventory",
-        "/ai-entity-tasks",
-        "/consent/custom-indexes",
-        "/third-party/contracts",
-        "/third-party/executive-reports",
-    }
-    assert read_only_workbenches <= nav_paths("auditor")
-    assert read_only_workbenches <= nav_paths("viewer")
-    assert "/consent/bulk-jobs" in nav_paths("auditor")
-    assert "/consent/bulk-jobs" not in nav_paths("viewer")
-    assert "/consent/publish-settings" in nav_paths("auditor")
-    assert "/consent/publish-settings" not in nav_paths("viewer")
-    assert "/consent/global-opt-out" in nav_paths("auditor")
-    assert "/consent/global-opt-out" not in nav_paths("viewer")
+    for role in ("admin", "operator", "auditor", "viewer"):
+        assert new_paths.isdisjoint(offered(role)), role
 
 
 def test_authenticated_ui_uses_resolved_shared_token_names() -> None:

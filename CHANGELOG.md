@@ -19,6 +19,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `discovery_ttl_minutes` sets freshness.
 
 ### Changed
+- **Operator workbenches are held back from customers until they are
+  ready** — 44 operator consoles (the consent, privacy, data-use, AI
+  oversight, third-party and compliance workbenches of record ids,
+  verification fingerprints and JSON request bodies, plus the agent control
+  plane, the evolution ledger and the document vault) and the Research lab
+  carry `ready: False` in the page registry: their routes and permission
+  gates stay, but they appear in no sidebar, page finder or Settings
+  visibility matrix. The Autonomous Compliance landing links only offered
+  modules and drops a suite with none. The AI Governance page no longer
+  shows a CLI hint.
+- **The first administrator gets a workspace, not a dead end** — a signed-in
+  global administrator who reaches a tenant gate on an installation with no
+  workspace has the one-click `local` workspace created and selected and is
+  sent back to the page, instead of "No workspaces exist yet".
 - **Settings > Models is grouped by provider** — the default and per-role
   pickers are real selects grouped by configured provider (allow-listed models
   stay offered before their key is saved) with a "Type a model id" option
@@ -53,6 +67,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `/tools`, instead of one multi-megabyte page.
 
 ### Fixed
+- **A sealed value in the dashboard Settings overlay no longer stops the
+  process from starting.** Once Settings had encrypted a provider key into
+  `dashboard-config.toml`, the next boot died before listening: the first
+  `data_dir()` call resolved the tenant, which loaded config, which opened the
+  overlay, which imported `crypto_at_rest` -- whose import-time key-path
+  binding called `data_dir()` again and hit its own half-initialised module
+  (`cannot import name 'deployment_key_scope' ... circular import`). The
+  key path is now resolved when used, never at import, and config loading
+  will not re-enter its own unseal (a nested load during decryption sees the
+  tokens unopened; it only ever needs plaintext keys such as `[client] id`).
+  Both the running image and the previous one were affected; the fault was
+  latent from the day the overlay learned to seal values and only a restart
+  with a sealed value present triggered it.
 - Wizard-generated Kubernetes sandbox could not run a command: the backend now
   verifies a deny-all NetworkPolicy and runs under it (fails closed with the
   manifest when none exists); the wizard asks for the namespace and networking.

@@ -76,7 +76,47 @@ _TENANT_MAGIC = b"MVKTEN1\n"
 _NONCE_BYTES = 12
 _KEY_BYTES = 32              # AES-256
 _KEYID_BYTES = 8             # short key fingerprint embedded in v2 blobs
-_KEY_PATH = data_dir("keys", "at_rest.key")
+# On-disk key location. ``_KEY_PATH`` is an OVERRIDE (tests pin it to a tmp
+# dir; an operator could too); ``None`` -- the production default -- means
+# "resolve <home>/keys/at_rest.key for the DEPLOYMENT when asked" via
+# :func:`_key_path`. This used to be ``_KEY_PATH = data_dir(...)`` evaluated
+# at import, which ran ``data_dir()`` DURING import: it resolves the tenant
+# through the client binding, which loads config, which -- when the dashboard
+# overlay holds a sealed value -- imports THIS module to open it. With the
+# import still in progress that raised "cannot import name
+# 'deployment_key_scope' from partially initialized module" on the very first
+# ``data_dir()`` call of a fresh process, and every production task exited
+# before it could listen (2026-09-10). Nothing may touch the data directory at
+# import time here.
+#
+# The key is one per deployment, not one per request tenant. The old
+# import-time binding always landed before any request scope existed, so every
+# row -- tenant-scoped or shared -- has been sealed under the deployment key
+# (MAVERICK_TENANT / the client binding decide its directory); per-tenant
+# separation is the KEK derivation on top of it. Resolving the path from the
+# request-scoped tenant instead would mint a fresh key per workspace and leave
+# a row sealed inside a tenant-bound request unreadable to any reader outside
+# that scope (the owner-invite flow proved it), so the request context is
+# deliberately ignored here.
+_KEY_PATH: Path | None = None
+
+
+def _deployment_tenant() -> str | None:
+    """The tenant the deployment itself is bound to (``MAVERICK_TENANT`` or the
+    client binding), ignoring any request-scoped ``set_tenant`` context."""
+    env = os.environ.get("MAVERICK_TENANT", "").strip()
+    if env:
+        return env
+    from .client import strict_client_id
+
+    return strict_client_id()
+
+
+def _key_path() -> Path:
+    """The deployment's at-rest key file, resolved when asked (never at import)."""
+    if _KEY_PATH is not None:
+        return _KEY_PATH
+    return data_dir("keys", "at_rest.key", tenant=_deployment_tenant())
 _KEY_ENV = "MAVERICK_ENCRYPTION_KEY"
 _KEY_DIGEST_ENV = "MAVERICK_ENCRYPTION_KEY_DIGEST"
 _SHA256_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -540,41 +580,41 @@ def _reset_shared_key_identity_for_testing() -> None:
 def _secure_key_dir() -> None:
     """Ensure the on-disk key directory is private before touching key material."""
     try:
-        file_lock.ensure_private_directory(_KEY_PATH.parent)
+        file_lock.ensure_private_directory(_key_path().parent)
     except OSError as e:
         raise EncryptionUnavailable(
-            f"cannot secure at-rest key directory {_KEY_PATH.parent}: {e}"
+            f"cannot secure at-rest key directory {_key_path().parent}: {e}"
         ) from e
 
 
 def _ensure_private_key_file() -> None:
     """Tighten existing key-file permissions before loading it."""
     try:
-        file_lock.ensure_private_file(_KEY_PATH)
+        file_lock.ensure_private_file(_key_path())
     except OSError as e:
-        raise EncryptionUnavailable(f"cannot secure at-rest key {_KEY_PATH}: {e}") from e
+        raise EncryptionUnavailable(f"cannot secure at-rest key {_key_path()}: {e}") from e
 
 
 def _read_key_file() -> bytes:
     _secure_key_dir()
     _ensure_private_key_file()
     try:
-        key = bytes.fromhex(file_lock.atomic_read_text(_KEY_PATH).strip())
+        key = bytes.fromhex(file_lock.atomic_read_text(_key_path()).strip())
     except (OSError, ValueError) as e:
-        raise EncryptionUnavailable(f"cannot read at-rest key {_KEY_PATH}: {e}") from e
+        raise EncryptionUnavailable(f"cannot read at-rest key {_key_path()}: {e}") from e
     if len(key) != _KEY_BYTES:
-        raise EncryptionUnavailable(f"at-rest key {_KEY_PATH} is malformed")
+        raise EncryptionUnavailable(f"at-rest key {_key_path()} is malformed")
     return key
 
 
 def _write_new_key_file(key: bytes) -> None:
     _secure_key_dir()
     try:
-        file_lock.atomic_create_text(_KEY_PATH, key.hex())
+        file_lock.atomic_create_text(_key_path(), key.hex())
     except FileExistsError:
         raise
     except OSError as e:
-        raise EncryptionUnavailable(f"cannot write at-rest key {_KEY_PATH}: {e}") from e
+        raise EncryptionUnavailable(f"cannot write at-rest key {_key_path()}: {e}") from e
 
 
 def _load_or_create_key() -> bytes:
@@ -586,7 +626,7 @@ def _load_or_create_key() -> bytes:
                 f"MAVERICK_ENCRYPTION_KEY must decode to {_KEY_BYTES} bytes, got {len(key)}"
             )
         return key
-    if _KEY_PATH.exists():
+    if _key_path().exists():
         return _read_key_file()
     # First use: generate + persist atomically with private directory/file modes.
     key = secrets.token_bytes(_KEY_BYTES)
@@ -603,7 +643,7 @@ def _load_or_create_key() -> bytes:
         "to decrypt sealed data; if it is lost, that data is unrecoverable. Back "
         "it up now to a secure location: `maverick encryption backup-key --to "
         "<dir>` (or inject your own via MAVERICK_ENCRYPTION_KEY).",
-        _KEY_PATH,
+        _key_path(),
     )
     return key
 
@@ -622,15 +662,15 @@ def backup_key_material(dest_dir: Path) -> list[Path]:
     in your secrets manager already and is not on disk to copy.
     """
     sources: list[Path] = []
-    if _KEY_PATH.exists():
-        sources.append(_KEY_PATH)
+    if _key_path().exists():
+        sources.append(_key_path())
     try:
         sources.extend(sorted(_keyring_dir().glob("*.key")))
     except OSError:
         pass
     if not sources:
         raise EncryptionUnavailable(
-            f"no at-rest key material to back up under {_KEY_PATH.parent} "
+            f"no at-rest key material to back up under {_key_path().parent} "
             "(nothing has been sealed yet, or the key is injected via "
             "MAVERICK_ENCRYPTION_KEY and not stored on disk)."
         )
@@ -670,9 +710,9 @@ def _key_fingerprint(key: bytes) -> bytes:
 
 
 def _keyring_dir() -> Path:
-    # Derived from _KEY_PATH.parent so tests that monkeypatch _KEY_PATH (or set
+    # Derived from _key_path().parent so tests that monkeypatch _KEY_PATH (or set
     # HOME) relocate the keyring with it.
-    return _KEY_PATH.parent / "at_rest.d"
+    return _key_path().parent / "at_rest.d"
 
 
 def _read_keyring_key(path: Path) -> bytes:

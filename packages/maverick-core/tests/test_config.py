@@ -470,3 +470,101 @@ def test_data_use_governance_enabled_env_first_then_config(monkeypatch):
     assert data_use_governance_enabled({}) is True
     monkeypatch.setenv("MAVERICK_DATA_USE_GOVERNANCE", "0")
     assert data_use_governance_enabled({"data_use_governance": {"enable": True}}) is False
+
+
+# ---- boot-time import cycle through a sealed dashboard overlay --------------
+#
+# Production outage, 2026-09-10: the dashboard Settings page had sealed two
+# provider keys into ~/.maverick/dashboard-config.toml. On the next process
+# start, the FIRST thing the CLI does is resolve the data directory
+# (Workspace.current().db_path -> paths.data_dir()), which resolves the tenant
+# through the client binding, which loads config, which sees the sealed token
+# and imports crypto_at_rest to open it -- and crypto_at_rest, at IMPORT time,
+# called data_dir() for its key path, re-entering the same chain and hitting its
+# own half-initialised module:
+#
+#   ImportError: cannot import name 'deployment_key_scope' from partially
+#   initialized module 'maverick.crypto_at_rest' (most likely due to a
+#   circular import)
+#
+# Every task exited 1 before listening; the load balancer answered 503 until
+# the file was moved aside. Both the running image and the previous one were
+# affected: the bug was latent since the overlay learned to seal values, and
+# only a reboot with a sealed value present triggers it.
+
+
+def _cold_boot_env(home: Path) -> dict:
+    import os
+
+    env = {
+        k: v for k, v in os.environ.items()
+        if k not in {"MAVERICK_CLIENT_ID", "MAVERICK_TENANT", "MAVERICK_CONFIG",
+                     "MAVERICK_CONFIG_OVERLAY", "MAVERICK_ENCRYPT_AT_REST"}
+    }
+    env["MAVERICK_HOME"] = str(home)
+    # A deployment-injected key, exactly as the ECS task definition provides it.
+    env["MAVERICK_ENCRYPTION_KEY"] = "7f" * 32
+    env["MAVERICK_ENCRYPT_AT_REST"] = "1"
+    return env
+
+
+def test_sealed_dashboard_overlay_survives_a_cold_boot(tmp_path):
+    """A sealed value in dashboard-config.toml must not break the very first
+    data_dir() call of a fresh process -- the exact boot order of `maverick
+    dashboard` -- and load_config() must still open the value afterwards."""
+    import subprocess
+    import sys
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = _cold_boot_env(home)
+
+    # Seal the value the way the dashboard Settings page does
+    # (settings_store: deployment_key_scope() + seal_to_str()), in its own
+    # interpreter so this test process's import state plays no part.
+    seal = (
+        "import sys\n"
+        "from maverick.crypto_at_rest import deployment_key_scope, seal_to_str\n"
+        "with deployment_key_scope():\n"
+        "    sys.stdout.write(seal_to_str('sk-test-openai'))\n"
+    )
+    sealed = subprocess.run(
+        [sys.executable, "-c", seal], env=env, capture_output=True, text=True,
+    )
+    assert sealed.returncode == 0, sealed.stderr
+    token = sealed.stdout.strip()
+    assert token.startswith("MVKAR1:")
+    (home / "dashboard-config.toml").write_text(
+        f'[providers.openai]\napi_key = "{token}"\n', encoding="utf-8",
+    )
+
+    # Cold boot. The assertion mirrors production: nothing has imported the
+    # encryption module when the data directory is first resolved.
+    boot = (
+        "import sys\n"
+        "from maverick.paths import data_dir\n"
+        "assert 'maverick.crypto_at_rest' not in sys.modules, 'test precondition'\n"
+        "data_dir()\n"
+        "from maverick.config import load_config\n"
+        "sys.stdout.write(load_config()['providers']['openai']['api_key'])\n"
+    )
+    booted = subprocess.run(
+        [sys.executable, "-c", boot], env=env, capture_output=True, text=True,
+    )
+    assert booted.returncode == 0, booted.stderr
+    assert booted.stdout.strip() == "sk-test-openai"
+
+
+def test_unseal_config_tree_does_not_reenter_itself():
+    """While the overlay is being opened, any nested config load (the tenant /
+    client-id resolution the encryption module triggers) gets the overlay
+    with its sealed tokens left opaque instead of recursing into another
+    unseal -- the tokens are never needed to resolve an identity."""
+    import maverick.config as cfg_mod
+
+    tree = {"providers": {"openai": {"api_key": "MVKAR1:AAAA"}}}  # pragma: allowlist secret
+    token = cfg_mod._UNSEALING.set(True)
+    try:
+        assert cfg_mod._unseal_config_tree(tree) is tree
+    finally:
+        cfg_mod._UNSEALING.reset(token)

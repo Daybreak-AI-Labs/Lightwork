@@ -468,10 +468,16 @@ def test_research_page_asset_and_visible_navigation_are_customer_reachable(clien
 
     from maverick_dashboard import ui_visibility
 
+    # The lab is governed but not ready for customers: no sidebar tab and no
+    # finder entry, while the page stays enforced and reachable by URL.
     entry = ui_visibility.page_for("/research")
-    assert entry and entry["label"] == "Research lab" and entry.get("in_nav", True) is True
-    assert "/research" in {
+    assert entry and entry["label"] == "Research lab"
+    assert ui_visibility.customer_ready(entry) is False
+    assert "/research" not in {
         link["href"] for group in ui_visibility.nav_groups("operator") for link in group["links"]
+    }
+    assert "/research" not in {
+        link["href"] for group in ui_visibility.finder_pages("operator") for link in group["links"]
     }
 
 
