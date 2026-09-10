@@ -46,8 +46,10 @@ PAGES: tuple[dict, ...] = (
      "icon": "check", "floor": "view", "default": "view"},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    # Research lab is not ready for customers: kept governed (enforced, in the
+    # Settings matrix, reachable by URL from Knowledge access) but off the rail.
     {"path": "/research", "label": "Research lab", "aliases": "experiments candidates evaluation",
-     "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
+     "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
