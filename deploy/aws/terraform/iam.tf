@@ -9,6 +9,7 @@ locals {
     aws_secretsmanager_secret.oidc_session_secret.arn,
     aws_secretsmanager_secret.oidc_client_secret.arn,
     aws_secretsmanager_secret.at_rest_key.arn,
+    aws_secretsmanager_secret.consent_receipt_root.arn,
   ]
 }
 

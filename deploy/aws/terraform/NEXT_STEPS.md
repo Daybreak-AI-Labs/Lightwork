@@ -160,6 +160,68 @@ isn't). Then open the `app_url` in a browser and log in with the token
 (bearer token / `Authorization: Bearer <token>`, or however the dashboard's
 login screen wants it — see `packages/maverick-dashboard`).
 
+### 7. Module configuration that lives on the state volume
+
+A few governed modules have a closed configuration contract that the Settings
+page cannot write (lists and nested tables): AI evidence analysis, assessment
+evidence auto-population, and the native consent SDK. They read
+`~/.maverick/config.toml` on the EFS state volume, which the image does not
+ship. Place it with the maintenance task in `fstask.tf` (same access point the
+app mounts; run it with the app's public subnets and security group):
+
+```bash
+cat > config.toml <<'EOF'
+[evidence_gateway]
+enable = true
+
+[ai_evidence_analysis]
+enable = true
+# Closed allowlist; "xls" additionally needs [ai_evidence_analysis.legacy_xls]
+# and OCR needs [ai_evidence_analysis.ocr], both with SHA-pinned binaries.
+enabled_media_types = ["pdf", "png", "jpeg", "text", "xlsx"]
+
+[assessment_evidence_autopopulation]
+enable = true
+apply_enabled = true
+
+[consent_preferences]
+enable = true
+
+[consent_preferences.publishing]
+enable = true
+
+[consent_preferences.public_api]
+enable = true
+
+[consent_preferences.native_sdk]
+enable = true
+receipt_key_id = "lightwork-prod-2026-09"
+receipt_key_revision = 1
+# Names the task environment variable that secrets.tf injects.
+receipt_key_secret_ref = "MAVERICK_CONSENT_RECEIPT_ROOT" # pragma: allowlist secret -- variable name, not a value
+EOF
+
+B64=$(base64 -w0 config.toml)
+ARN=$(aws ecs run-task --cluster lightwork-prod --task-definition lightwork-prod-fstask \
+  --launch-type FARGATE --platform-version 1.4.0 \
+  --network-configuration "awsvpcConfiguration={subnets=[<public-subnet-a>,<public-subnet-b>],securityGroups=[<app-sg>],assignPublicIp=ENABLED}" \
+  --overrides "{\"containerOverrides\":[{\"name\":\"fs\",\"command\":[\"cd /home/maverick/.maverick && echo $B64 | base64 -d > config.toml && chmod 600 config.toml && cat config.toml\"]}]}" \
+  --query 'tasks[0].taskArn' --output text --profile lightwork --region us-east-2)
+aws ecs wait tasks-stopped --cluster lightwork-prod --tasks "$ARN" --profile lightwork --region us-east-2
+aws logs get-log-events --log-group-name /ecs/lightwork-prod \
+  --log-stream-name "fstask/fs/${ARN##*/}" --query 'events[].message' --output text \
+  --profile lightwork --region us-east-2
+```
+
+The native consent SDK also needs the receipt signing root in the task
+environment (`MAVERICK_CONSENT_RECEIPT_ROOT`, from `secrets.tf`); `terraform
+apply` creates the secret and rolls a task revision that carries it. The
+evidence parsers (pypdf, openpyxl, pillow, xlrd, olefile) come from the
+`evidence-analysis` extra, which `deploy/docker/Dockerfile` now includes in the
+image build, so rebuild and redeploy (step 3 and step 5) after this change.
+Then `GET /api/v1/features/modules` should report the three modules as
+`configured` instead of `incomplete`.
+
 ## Fast-follow (not tonight-blocking)
 
 - HTTPS + a real domain: ACM cert + a Cloudflare CNAME for a

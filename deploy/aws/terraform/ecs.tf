@@ -83,6 +83,9 @@ resource "aws_ecs_task_definition" "app" {
           { name = "MAVERICK_DASHBOARD_TOKEN", valueFrom = aws_secretsmanager_secret.dashboard_token.arn },
           { name = "ANTHROPIC_API_KEY", valueFrom = aws_secretsmanager_secret.anthropic_api_key.arn },
           { name = "MAVERICK_ENCRYPTION_KEY", valueFrom = aws_secretsmanager_secret.at_rest_key.arn },
+          # Receipt signing root for [consent_preferences.native_sdk]; the
+          # config's receipt_key_secret_ref must name this variable.
+          { name = "MAVERICK_CONSENT_RECEIPT_ROOT", valueFrom = aws_secretsmanager_secret.consent_receipt_root.arn },
         ],
         var.oidc_issuer == "" ? [] : [
           { name = "MAVERICK_OIDC_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.oidc_client_secret.arn },

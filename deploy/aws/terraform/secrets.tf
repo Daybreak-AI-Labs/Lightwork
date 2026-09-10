@@ -122,3 +122,24 @@ resource "aws_secretsmanager_secret_version" "at_rest_key" {
   secret_id     = aws_secretsmanager_secret.at_rest_key.id
   secret_string = random_id.at_rest_key.hex
 }
+
+# Native consent SDK receipt signing root. The dashboard's
+# [consent_preferences.native_sdk] contract names an environment variable
+# (receipt_key_secret_ref) and derives a per-tenant Ed25519 receipt key from
+# its value; without it the module reports its configuration as incomplete
+# and refuses to start. 32 bytes of entropy, "hex:"-prefixed as
+# consent_native_composition._secret_material expects. Rotating it
+# invalidates every receipt signed so far, hence the recovery window.
+resource "random_id" "consent_receipt_root" {
+  byte_length = 32
+}
+
+resource "aws_secretsmanager_secret" "consent_receipt_root" {
+  name                    = "${local.name}/consent-receipt-root"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "consent_receipt_root" {
+  secret_id     = aws_secretsmanager_secret.consent_receipt_root.id
+  secret_string = "hex:${random_id.consent_receipt_root.hex}" # pragma: allowlist secret -- Terraform interpolation, no literal secret
+}
