@@ -16,6 +16,12 @@ can still be refused:
 * ``push`` to ``main`` -- detective. If something slipped past, ``main`` goes
   red instead of quietly accumulating trailers.
 
+The commit AUTHOR and COMMITTER identities are inspected as well as the
+message: GitHub's squash merge appends a ``Co-authored-by:`` trailer for every
+distinct author in the squashed commits, so a branch whose commits are merely
+*authored* as an assistant lands the trailer on ``main`` without a single
+offending line in any message (this is how ``main`` went red at 3b2c9cf).
+
 Usage::
 
     python scripts/check_attribution.py --commits BASE..HEAD [--text FILE ...]
@@ -56,6 +62,20 @@ RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+#: An author/committer identity that the squash merge would turn into an AI
+#: co-author trailer. Human GitHub no-reply identities pass.
+IDENTITY_RULE = re.compile(rf"\b{_ASSISTANTS}\b|noreply@anthropic\.com", re.IGNORECASE)
+
+
+def identity_findings(author: str, committer: str, source: str) -> list[str]:
+    """Author/committer identities of one commit that are assistant identities."""
+    out: list[str] = []
+    for role, identity in (("author", author), ("committer", committer)):
+        if IDENTITY_RULE.search(identity):
+            out.append(f"{source}: AI {role} identity: {identity}")
+    return out
+
+
 def findings(text: str, source: str) -> list[str]:
     """Every line of ``text`` that carries AI attribution, labelled by rule."""
     out: list[str] = []
@@ -67,18 +87,19 @@ def findings(text: str, source: str) -> list[str]:
     return out
 
 
-def commit_messages(rev_range: str, repo: Path | None = None) -> list[tuple[str, str]]:
-    """(sha, full message) for every commit in ``rev_range``, newest first."""
+def commit_records(rev_range: str, repo: Path | None = None) -> list[tuple[str, str, str, str]]:
+    """(sha, author, committer, full message) for every commit in ``rev_range``,
+    newest first. Identities are ``Name <email>``."""
     proc = subprocess.run(
-        ["git", "log", "-z", "--format=%H%n%B", rev_range],
+        ["git", "log", "-z", "--format=%H%n%an <%ae>%n%cn <%ce>%n%B", rev_range],
         cwd=repo, capture_output=True, text=True, check=True,
     )
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, str, str]] = []
     for chunk in proc.stdout.split("\0"):
         if not chunk.strip():
             continue
-        sha, _, body = chunk.partition("\n")
-        out.append((sha, body))
+        sha, author, committer, body = (chunk.split("\n", 3) + ["", "", ""])[:4]
+        out.append((sha, author, committer, body))
     return out
 
 
@@ -101,14 +122,16 @@ def main(argv: list[str] | None = None) -> int:
     problems: list[str] = []
     if args.commits:
         try:
-            messages = commit_messages(args.commits, args.repo)
+            records = commit_records(args.commits, args.repo)
         except subprocess.CalledProcessError as exc:
             print(f"check-attribution: ERROR -- git log {args.commits!r} failed: "
                   f"{exc.stderr.strip()}", file=sys.stderr)
             return 2
-        for sha, body in messages:
+        for sha, author, committer, body in records:
             inspected += 1
-            problems.extend(findings(body, f"commit {sha[:12]}"))
+            source = f"commit {sha[:12]}"
+            problems.extend(identity_findings(author, committer, source))
+            problems.extend(findings(body, source))
     for path in args.text:
         inspected += 1
         problems.extend(findings(path.read_text(encoding="utf-8", errors="replace"),
@@ -128,9 +151,12 @@ def main(argv: list[str] | None = None) -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         print("\nDrop the trailer/footer and rewrite the commit (git commit --amend, "
-              "or git rebase -i for older ones), or edit the PR description. The "
-              "squash merge is prefilled from these, so they must be clean before "
-              "the merge, not after.", file=sys.stderr)
+              "or git rebase -i for older ones), or edit the PR description. An AI "
+              "author/committer identity must be recommitted under a human one "
+              "(git config user.name/user.email, then git commit --amend "
+              "--reset-author, or git rebase --exec for older commits): the squash "
+              "merge turns every distinct author into a Co-authored-by trailer. All "
+              "of this must be clean before the merge, not after.", file=sys.stderr)
         return 1
     print(f"check-attribution: clean ({inspected} message(s) inspected)")
     return 0

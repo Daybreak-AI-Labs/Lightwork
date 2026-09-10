@@ -103,6 +103,48 @@ def test_commit_range_names_only_the_offending_commit(tmp_path, capsys):
     assert "AI co-author trailer" in err
 
 
+def _commit_as(repo: Path, message: str, *, author: tuple[str, str],
+               committer: tuple[str, str] | None = None) -> str:
+    """Commit with explicit identities (env beats the -c user.* config)."""
+    import os
+    committer = committer or author
+    env = dict(os.environ, GIT_AUTHOR_NAME=author[0], GIT_AUTHOR_EMAIL=author[1],
+               GIT_COMMITTER_NAME=committer[0], GIT_COMMITTER_EMAIL=committer[1])
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", message],
+                   cwd=repo, check=True, capture_output=True, text=True, env=env)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+ASSISTANT = ("Claude", "noreply@anthropic.com")
+HUMAN = ("Christopher Day", "131784708+cdayAI@users.noreply.github.com")
+
+
+@pytest.mark.parametrize("role", ["author", "committer"])
+def test_assistant_identity_is_caught_even_with_a_clean_message(tmp_path, capsys, role):
+    """GitHub's squash merge adds a Co-authored-by trailer for every distinct
+    commit author, so an assistant *identity* lands the banned trailer on main
+    with no offending line in any message (main went red this way at 3b2c9cf)."""
+    repo, shas = _repo(tmp_path, ["chore: base"])
+    identities = {"author": HUMAN, "committer": HUMAN}
+    identities[role] = ASSISTANT
+    tainted = _commit_as(repo, "fix: clean message", author=identities["author"],
+                         committer=identities["committer"])
+    gate = _load()
+    assert gate.main(["--commits", f"{shas[0]}..{tainted}", "--repo", str(repo)]) == 1
+    err = capsys.readouterr().err
+    assert f"commit {tainted[:12]}: AI {role} identity: Claude <noreply@anthropic.com>" in err
+    assert "--reset-author" in err
+
+
+def test_human_github_noreply_identity_passes(tmp_path, capsys):
+    """'cdayAI' contains 'AI'; a human no-reply identity must not trip the rule."""
+    repo, shas = _repo(tmp_path, ["chore: base"])
+    clean = _commit_as(repo, "fix: clean", author=HUMAN)
+    gate = _load()
+    assert gate.main(["--commits", f"{shas[0]}..{clean}", "--repo", str(repo)]) == 0
+    assert "1 message(s) inspected" in capsys.readouterr().out
+
+
 def test_clean_range_passes_and_reports_the_count(tmp_path, capsys):
     repo, shas = _repo(tmp_path, ["chore: base", "feat: a", "fix: b"])
     gate = _load()
