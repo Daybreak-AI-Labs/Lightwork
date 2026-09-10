@@ -164,6 +164,24 @@ def test_allow_list_still_caps_the_grouped_pickers(monkeypatch, tmp_path):
     assert "1 model(s) approved" in text or "1 model(s) allowed" in text
 
 
+def test_allow_listed_models_are_offered_before_their_key_is_saved(monkeypatch, tmp_path):
+    # An admin approves Claude models on a deployment with only an OpenAI key
+    # (or no key at all): the pickers mirror the allow-list, flagged as keyless,
+    # rather than silently dropping the approved models.
+    _prep(monkeypatch, tmp_path, configured=("openai",))
+    from maverick.runtime_overrides import set_allowed_models
+    set_allowed_models(["claude-sonnet-4-6", "openai:gpt-5.4"])
+    text = _client().get("/settings").text
+    picker = text.split('name="model"', 1)[1].split("</select>", 1)[0]
+    assert '<optgroup label="Anthropic (Claude) (no key yet)">' in picker
+    assert 'value="claude-sonnet-4-6"' in picker and 'value="openai:gpt-5.4"' in picker
+    assert 'value="claude-opus-4-8"' not in picker
+    # Without an allow-list an unconfigured provider is still not offered.
+    set_allowed_models([])
+    picker = _client().get("/settings").text.split('name="model"', 1)[1].split("</select>", 1)[0]
+    assert "Anthropic" not in picker and 'value="openai:gpt-5.4"' in picker
+
+
 def test_discovery_switched_off_is_explained_not_silent(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path, snapshot={})
     monkeypatch.setenv("MAVERICK_MODEL_DISCOVERY", "0")

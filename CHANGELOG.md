@@ -20,8 +20,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **Settings > Models is grouped by provider** — the default and per-role
-  pickers are real selects grouped by configured provider with a "Type a model
-  id" option instead of free-text fields with a hidden datalist, the allow-list
+  pickers are real selects grouped by configured provider (allow-listed models
+  stay offered before their key is saved) with a "Type a model id" option
+  instead of free-text fields with a hidden datalist, the allow-list
   is grouped per provider with select-all/clear and a live/catalog marker,
   and an overview shows how many providers, models and live lists are in
   play. Provider rows under Provider keys show how many models each key

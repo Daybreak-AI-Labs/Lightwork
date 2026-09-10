@@ -2,9 +2,9 @@
 
 Builds, from the shipped catalog plus the cached live discovery, one group per
 provider: what the saved key can reach (live), what the catalog knows
-(catalog), and the discovery status the admin sees. Only configured providers
-are offered in the pickers; every provider is listed in the allow-list so an
-admin can approve models before adding a key.
+(catalog), and the discovery status the admin sees. The pickers offer the
+configured providers plus whatever the admin allow-listed; every provider is
+listed in the allow-list so an admin can approve models before adding a key.
 """
 from __future__ import annotations
 
@@ -120,11 +120,15 @@ def build(providers: list[dict], allow: set[str]) -> dict:
         })
     picker_groups = []
     for g in groups:
-        if not g["configured"]:
-            continue
         options = [m for m in g["models"] if not allow or m["spec"] in allow]
-        if options:
+        if not options:
+            continue
+        if g["configured"]:
             picker_groups.append({"label": g["label"], "options": options})
+        elif allow:
+            # The admin approved these explicitly: the pickers mirror the
+            # allow-list even before that provider's key is saved.
+            picker_groups.append({"label": g["label"] + " (no key yet)", "options": options})
     offered = {m["spec"] for pg in picker_groups for m in pg["options"]}
     leftovers = sorted(allow - known - set(custom)) if allow else []
     if leftovers:
