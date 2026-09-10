@@ -26,6 +26,7 @@ fully-opt-in behavior.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -36,10 +37,12 @@ import secrets
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
+from typing import Any
 
 from ..file_lock import (
     atomic_create_bytes,
@@ -125,6 +128,35 @@ class ConsentDecision:
     risk: str             # "low" | "medium" | "high" | "critical"
     ts: float
     actor: str = ""        # authenticated dashboard approver when available
+
+
+@dataclass
+class ConsentPermit:
+    """One-use proof for one exact operation, rechecked at its effect boundary.
+
+    Raw targets and parameters stay in memory behind providers.  Only their
+    canonical digests are written to an approval card.  A failed validation
+    burns the permit so a caller must obtain a fresh human review.
+    """
+
+    card: dict[str, Any]
+    decision: ConsentDecision
+    target_provider: Callable[[], object]
+    parameters_provider: Callable[[], object]
+    input_versions_provider: Callable[[], Mapping[str, Any]] | None
+    credential_versions_provider: Callable[[], Mapping[str, Any]] | None
+    budget_provider: Callable[[], Mapping[str, Any]] | None
+    actor_hint: str | None = None
+    principal_bound_at_issue: bool = False
+    _lock: threading.Lock = dataclass_field(default_factory=threading.Lock, repr=False)
+    _consumed: bool = dataclass_field(default=False, repr=False)
+
+    def claim(self) -> bool:
+        with self._lock:
+            if self._consumed:
+                return False
+            self._consumed = True
+            return True
 
 
 _prompt_lock = threading.Lock()
@@ -514,6 +546,7 @@ def require_consent(
     raise_on_deny: bool = False,
     allow_auto_approve: bool = True,
     consult_ledger: bool = True,
+    approval_card: Mapping[str, object] | None = None,
 ) -> ConsentDecision:
     """Gate a destructive action through user (or env) approval.
 
@@ -538,6 +571,10 @@ def require_consent(
     ``(action, scope)`` exists. Used by the governance EU AI Act Art-14 gate
     when an operator opts into per-action human oversight
     (``[governance] require_fresh_human_approval``).
+
+    ``approval_card`` is a pre-built, integrity-bound description of one exact
+    operation.  Dashboard mode persists it in the encrypted detail column;
+    other consent modes continue to receive the ordinary safe ``detail`` label.
     """
     ts = time.time()
     # 1) Ledger fast-path (skipped when a fresh decision is demanded).
@@ -559,7 +596,9 @@ def require_consent(
             raise ConsentDenied(action)
         return d
     if mode == "dashboard":
-        d = _decide_via_dashboard(action, risk, scope, detail, provenance)
+        d = _decide_via_dashboard(
+            action, risk, scope, detail, provenance, approval_card,
+        )
         if d is not None:
             d = _emit(d, action, scope, detail)
             if not d.granted and raise_on_deny:
@@ -574,7 +613,22 @@ def require_consent(
             raise ConsentDenied(action)
         return d
     with _prompt_lock:
-        msg = _format_prompt(action, risk, scope, detail)
+        try:
+            msg = _format_prompt(
+                action, risk, scope, detail, approval_card=approval_card,
+            )
+        except Exception as exc:
+            # A malformed exact card must not collapse into a broader prompt.
+            log.warning("consent: exact approval card is invalid: %s", exc)
+            d = _emit(
+                ConsentDecision(False, "approval-card-invalid", risk, ts),
+                action,
+                scope,
+                detail,
+            )
+            if raise_on_deny:
+                raise ConsentDenied(action) from exc
+            return d
         sys.stderr.write(msg)
         sys.stderr.flush()
         try:
@@ -626,12 +680,420 @@ def _consent_requester(wm) -> str | None:
         return None
 
 
+def _runtime_approval_authority(
+    *, actor_hint: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Resolve the live actor, workspace, role policy, and budget authority.
+
+    Core remains usable without the dashboard package.  When dashboard RBAC is
+    installed and enabled, an unresolved role is an authorization failure, not
+    a reason to fall back to a synthetic role.
+    """
+
+    from ..approval_cards import ApprovalCardError, digest
+
+    try:
+        from ..connections import current_principal
+
+        current_actor = str(current_principal() or "").strip()
+    except Exception as exc:
+        raise ApprovalCardError("current consent actor is unavailable") from exc
+    principal_is_current = bool(current_actor)
+    actor = current_actor or str(actor_hint or "local:operator").strip()
+    if not actor:
+        raise ApprovalCardError("current consent actor is unavailable")
+    try:
+        workspace = str(current_tenant_id_strict() or "local")
+    except Exception as exc:
+        raise ApprovalCardError("current consent workspace is unavailable") from exc
+
+    role = "local-operator"
+    permissions: list[str] = []
+    try:
+        from maverick_dashboard.auth import auth_genuinely_off, role_for_principal
+        from maverick_dashboard.rbac import permissions_for
+
+        resolved = role_for_principal(None if actor == "local:operator" else actor)
+        if resolved:
+            role = str(resolved)
+            permissions = sorted(str(item) for item in permissions_for(resolved))
+        elif not auth_genuinely_off():
+            raise ApprovalCardError("current dashboard role authority is unavailable")
+    except ImportError:
+        pass
+    except ApprovalCardError:
+        raise
+    except Exception as exc:
+        try:
+            from maverick_dashboard.auth import auth_genuinely_off
+
+            auth_off = auth_genuinely_off()
+        except Exception:
+            auth_off = False
+        if not auth_off:
+            raise ApprovalCardError(
+                "current dashboard role authority is unavailable"
+            ) from exc
+
+    budget_material: dict[str, Any] = {
+        "schema": "lightwork.runtime-budget-authority.v1",
+        "configured": {},
+        "dashboard_dollar_cap": None,
+        "environment_dollar_cap": os.environ.get("MAVERICK_BUDGET_DOLLARS"),
+    }
+    try:
+        from ..config import get_budget_overrides
+
+        configured = get_budget_overrides()
+        if not isinstance(configured, dict):
+            raise TypeError("budget overrides are not an object")
+        budget_material["configured"] = configured
+    except Exception as exc:
+        raise ApprovalCardError("current consent budget is unavailable") from exc
+    try:
+        from ..runtime_overrides import budget_override
+
+        budget_material["dashboard_dollar_cap"] = budget_override()
+    except Exception as exc:
+        raise ApprovalCardError("current consent budget is unavailable") from exc
+
+    budget_digest = digest(budget_material)
+    authority = {
+        "actor": actor,
+        "workspace": workspace,
+        "role": role,
+        "versions": {
+            "principal_sha256": digest(actor),
+            "role_permissions_sha256": digest(
+                {"role": role, "permissions": permissions}
+            ),
+            "budget_authority_sha256": budget_digest,
+        },
+    }
+    budget = {
+        "currency": "USD",
+        "external_effect_cost": "unmeasured",
+        "authority_sha256": budget_digest,
+    }
+    return authority, budget, principal_is_current
+
+
+def _constant_provider(value: object) -> Callable[[], object]:
+    frozen = copy.deepcopy(value)
+    return lambda: copy.deepcopy(frozen)
+
+
+def _provider_value(
+    provider: Callable[[], object], *, name: str,
+) -> object:
+    from ..approval_cards import ApprovalCardError, digest
+
+    try:
+        value = provider()
+        digest(value)
+        return value
+    except ApprovalCardError:
+        raise
+    except Exception as exc:
+        raise ApprovalCardError(f"current consent {name} is unavailable") from exc
+
+
+def _provider_mapping(
+    provider: Callable[[], Mapping[str, Any]] | None,
+    *,
+    name: str,
+    default: Mapping[str, Any],
+) -> dict[str, Any]:
+    from ..approval_cards import ApprovalCardError, digest
+
+    if provider is None:
+        value: object = dict(default)
+    else:
+        try:
+            value = provider()
+        except Exception as exc:
+            raise ApprovalCardError(
+                f"current consent {name} is unavailable"
+            ) from exc
+    if not isinstance(value, Mapping):
+        raise ApprovalCardError(f"current consent {name} must be an object")
+    result = dict(value)
+    digest(result)
+    return result
+
+
+def _operation_budget(
+    runtime_budget: Mapping[str, Any],
+    provider: Callable[[], Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    return {
+        "runtime": dict(runtime_budget),
+        "operation": _provider_mapping(
+            provider,
+            name="operation budget",
+            default={"state": "not_applicable"},
+        ),
+    }
+
+
+def _card_label(value: object, fallback: str) -> str:
+    text = " ".join(str(value or "").split())
+    try:
+        from .secret_detector import redact
+
+        text, _matches = redact(text)
+    except Exception as exc:
+        from ..approval_cards import ApprovalCardError
+
+        raise ApprovalCardError("approval label redaction is unavailable") from exc
+    return (text or fallback)[:500]
+
+
+def _validate_operation_permit(permit: ConsentPermit) -> dict[str, Any]:
+    """Rebuild every current commitment and compare it with the reviewed card."""
+
+    from ..approval_cards import ApprovalCardError, digest, require_current_approval_card
+
+    if not isinstance(permit, ConsentPermit):
+        raise ApprovalCardError("an exact consent permit is required")
+    card = require_current_approval_card(permit.card)
+    target = _provider_value(permit.target_provider, name="target")
+    parameters = _provider_value(permit.parameters_provider, name="parameters")
+    inputs = _provider_mapping(
+        permit.input_versions_provider,
+        name="input versions",
+        default={"parameters_sha256": digest(parameters)},
+    )
+    credentials = _provider_mapping(
+        permit.credential_versions_provider,
+        name="credential versions",
+        default={"state": "not_applicable"},
+    )
+    authority, runtime_budget, principal_is_current = _runtime_approval_authority(
+        actor_hint=permit.actor_hint,
+    )
+    if permit.principal_bound_at_issue and not principal_is_current:
+        # A bound principal disappearing must never be repaired from the
+        # issuance-time actor hint.  The hint exists solely for legacy,
+        # deliberately unbound local execution.
+        raise ApprovalCardError("current consent actor is unavailable")
+    budget = _operation_budget(runtime_budget, permit.budget_provider)
+    if (
+        not hmac.compare_digest(card["target"]["sha256"], digest(target))
+        or not hmac.compare_digest(
+            card["parameters"]["sha256"], digest(parameters)
+        )
+        or card["inputs"] != inputs
+        or card["credentials"] != credentials
+        or card["authority"] != authority
+        or card["budget"] != budget
+    ):
+        raise ApprovalCardError(
+            "the operation or its current authority changed after approval"
+        )
+    return card
+
+
+def require_operation_consent(
+    action: str,
+    *,
+    risk: str,
+    scope: str | None,
+    detail: str,
+    provenance: str,
+    target: object,
+    parameters: object,
+    parameter_summary: list[str],
+    known_effects: list[str],
+    unresolved_assumptions: list[str],
+    before: str,
+    after: str,
+    irreversible: bool,
+    target_provider: Callable[[], object] | None = None,
+    parameters_provider: Callable[[], object] | None = None,
+    input_versions_provider: Callable[[], Mapping[str, Any]] | None = None,
+    credential_versions_provider: Callable[[], Mapping[str, Any]] | None = None,
+    budget_provider: Callable[[], Mapping[str, Any]] | None = None,
+    allow_auto_approve: bool = False,
+    consult_ledger: bool = False,
+    ttl_seconds: float = 300.0,
+) -> ConsentPermit:
+    """Obtain a one-use exact-operation permit for a mutating boundary."""
+
+    from ..approval_cards import ApprovalCardError, build_approval_card, digest
+
+    target_fn = target_provider or _constant_provider(target)
+    parameters_fn = parameters_provider or _constant_provider(parameters)
+    current_target = _provider_value(target_fn, name="target")
+    current_parameters = _provider_value(parameters_fn, name="parameters")
+    if (
+        not hmac.compare_digest(digest(target), digest(current_target))
+        or not hmac.compare_digest(
+            digest(parameters), digest(current_parameters),
+        )
+    ):
+        raise ApprovalCardError(
+            "the declared operation already differs from its live boundary"
+        )
+    current_inputs = _provider_mapping(
+        input_versions_provider,
+        name="input versions",
+        default={"parameters_sha256": digest(current_parameters)},
+    )
+    current_credentials = _provider_mapping(
+        credential_versions_provider,
+        name="credential versions",
+        default={"state": "not_applicable"},
+    )
+    actor_hint: str | None = None
+    try:
+        authority, runtime_budget, principal_bound_at_issue = (
+            _runtime_approval_authority()
+        )
+        actor_hint = str(authority["actor"])
+        display_action = _card_label(action, "reviewed operation")
+        display_scope = (
+            _card_label(scope, "reviewed target") if scope is not None else None
+        )
+        display_detail = _card_label(detail, "Review this exact operation.")
+        display_provenance = _card_label(provenance, "operation-consent")
+        ttl = float(ttl_seconds)
+        if not math.isfinite(ttl) or ttl <= 0:
+            raise ApprovalCardError("consent permit ttl must be positive and finite")
+        card = build_approval_card(
+            action=display_action,
+            summary=display_detail,
+            target_label=display_scope or display_action,
+            target=current_target,
+            parameters=current_parameters,
+            parameter_summary=parameter_summary,
+            actor=str(authority["actor"]),
+            workspace=str(authority["workspace"]),
+            role=str(authority["role"]),
+            authority_versions=dict(authority["versions"]),
+            input_versions=current_inputs,
+            credential_versions=current_credentials,
+            budget=_operation_budget(runtime_budget, budget_provider),
+            expires_at=time.time() + min(ttl, 24 * 3600.0),
+            known_effects=known_effects,
+            unresolved_assumptions=unresolved_assumptions,
+            before=before,
+            after=after,
+            irreversible=irreversible,
+        )
+        decision = require_consent(
+            display_action,
+            risk=risk,
+            scope=display_scope,
+            detail=display_detail,
+            provenance=display_provenance,
+            raise_on_deny=True,
+            allow_auto_approve=allow_auto_approve,
+            consult_ledger=consult_ledger,
+            approval_card=card,
+        )
+        if not decision.granted:
+            raise ConsentDenied(display_action)
+        permit = ConsentPermit(
+            card=card,
+            decision=decision,
+            target_provider=target_fn,
+            parameters_provider=parameters_fn,
+            input_versions_provider=input_versions_provider,
+            credential_versions_provider=credential_versions_provider,
+            budget_provider=budget_provider,
+            actor_hint=actor_hint,
+            principal_bound_at_issue=principal_bound_at_issue,
+        )
+        _validate_operation_permit(permit)
+        return permit
+    except ConsentDenied:
+        raise
+    except ApprovalCardError:
+        raise
+
+
+@contextmanager
+def consume_operation_consent(
+    permit: ConsentPermit,
+) -> Iterator[dict[str, Any]]:
+    """Spend and revalidate a permit while excluding local authority changes."""
+
+    from ..approval_cards import ApprovalCardError
+    from ..authority_effects import authority_effect_fence
+
+    with authority_effect_fence():
+        if not isinstance(permit, ConsentPermit) or not permit.claim():
+            raise ApprovalCardError(
+                "the operation consent was already consumed; request a fresh review"
+            )
+        card = _validate_operation_permit(permit)
+        yield card
+
+
+def _dashboard_approval_card(
+    action: str,
+    risk: str,
+    scope: str | None,
+    detail: str | None,
+    provenance: str | None,
+    requester: str | None,
+) -> dict[str, object]:
+    """Build a conservative exact-request card for unadapted consent callers."""
+
+    from ..approval_cards import build_approval_card, digest
+
+    def label(value: object, fallback: str) -> str:
+        text = " ".join(str(value or "").split())
+        return (text or fallback)[:500]
+
+    authority, runtime_budget, _principal_is_current = _runtime_approval_authority(
+        actor_hint=requester,
+    )
+    action_label = label(action, "requested operation")
+    target_label = label(scope, "the exact committed request scope")
+    effect = label(detail, f"Run {action_label} once for the reviewed scope.")
+    request = {
+        "action": action,
+        "risk": risk,
+        "scope": scope,
+        "detail": detail,
+        "provenance": provenance,
+    }
+    return build_approval_card(
+        action=action_label,
+        summary=effect,
+        target_label=target_label,
+        target={"scope": scope},
+        parameters=request,
+        parameter_summary=[
+            "Authorize this exact committed action, scope, detail, and provenance once."
+        ],
+        actor=str(authority["actor"]),
+        workspace=str(authority["workspace"]),
+        role=str(authority["role"]),
+        authority_versions=dict(authority["versions"]),
+        input_versions={"request_sha256": digest(request)},
+        credential_versions={"state": "not_applicable"},
+        budget=_operation_budget(runtime_budget, None),
+        expires_at=time.time() + max(60.0, min(_dashboard_timeout(), 3600.0)),
+        known_effects=[effect],
+        unresolved_assumptions=[
+            "This compatibility caller supplied no operation-specific credential metadata."
+        ],
+        before="The requested operation has not been authorized.",
+        after="The exact committed request may execute once after this decision.",
+        irreversible=risk in {"high", "critical"},
+    )
+
+
 def _decide_via_dashboard(
     action: str,
     risk: str,
     scope: str | None,
     detail: str | None,
     provenance: str | None,
+    approval_card: Mapping[str, object] | None = None,
 ) -> ConsentDecision | None:
     """Park the action in the world model and poll for a dashboard decision.
 
@@ -666,10 +1128,18 @@ def _decide_via_dashboard(
         required = required_approvals(risk)
     except Exception:  # pragma: no cover -- config never blocks consent
         required = 1
+    requester = _consent_requester(wm)
     try:
+        from ..approval_cards import encode_approval_detail
+
+        if approval_card is None:
+            approval_card = _dashboard_approval_card(
+                action, risk, scope, detail, provenance, requester,
+            )
+        detail = encode_approval_detail(approval_card)
         approval_id = wm.create_approval(
             action, risk=risk, scope=scope, detail=detail, provenance=provenance,
-            approvals_required=required, requested_by=_consent_requester(wm),
+            approvals_required=required, requested_by=requester,
         )
     except Exception as e:
         log.warning("consent: cannot queue approval, falling back: %s", e)
@@ -688,9 +1158,30 @@ def _decide_via_dashboard(
             return None
         if row is not None and row.status != "pending":
             granted = row.status == "approved"
+            source = "dashboard"
+            if granted:
+                try:
+                    from ..approval_cards import (
+                        decode_approval_detail,
+                        require_current_approval_card,
+                    )
+
+                    stored = decode_approval_detail(row.detail)
+                    if stored is None:
+                        raise ValueError("legacy approval detail")
+                    expected_binding = str(approval_card["binding_sha256"])
+                    require_current_approval_card(
+                        stored, expected_binding=expected_binding,
+                    )
+                except Exception:
+                    # A decision can become stale between the API vote and this
+                    # poll. Return a denial; operation-permit consumers also
+                    # rebuild all live authority immediately before the effect.
+                    granted = False
+                    source = "dashboard-stale"
             decision = ConsentDecision(
                 granted,
-                "dashboard",
+                source,
                 risk,
                 time.time(),
                 actor=str(getattr(row, "decided_by", "") or ""),
@@ -702,8 +1193,24 @@ def _decide_via_dashboard(
     return None  # timed out: caller falls back
 
 
-def _format_prompt(action: str, risk: str, scope: str | None, detail: str | None) -> str:
+def _format_prompt(
+    action: str,
+    risk: str,
+    scope: str | None,
+    detail: str | None,
+    *,
+    approval_card: Mapping[str, object] | None = None,
+) -> str:
     risk_tag = {"low": "?", "medium": "!", "high": "!!", "critical": "!!!"}.get(risk, "?")
+    if approval_card is not None:
+        from ..approval_cards import validate_approval_card
+
+        card = validate_approval_card(approval_card)
+        rendered = json.dumps(card, indent=2, sort_keys=True, ensure_ascii=False)
+        return (
+            f"\n[CONSENT {risk_tag}] Exact operation approval card\n"
+            f"{rendered}\nAllow this exact binding? [y/N]: "
+        )
     parts = [
         f"\n[CONSENT {risk_tag}] {action}",
     ]
@@ -742,10 +1249,13 @@ def _emit(
 
 
 __all__ = [
+    "ConsentPermit",
     "ConsentDecision",
     "ConsentDenied",
     "ConsentLedgerError",
+    "consume_operation_consent",
     "require_consent",
+    "require_operation_consent",
     "grant_persistent",
     "revoke",
     "list_grants",

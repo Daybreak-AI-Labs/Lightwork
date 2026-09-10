@@ -129,6 +129,18 @@ def _humanize_run_error(e: Exception) -> str:
             "  Restore or repair runtime-overrides.toml, then run "
             "`maverick doctor` before retrying."
         )
+    from ..budget import UsageAccountingError
+
+    if isinstance(e, UsageAccountingError):
+        # A gateway fault, not a cap breach (W1-17): say so, and don't send
+        # the user off to raise max_dollars.
+        return (
+            "The model provider returned invalid usage accounting, so Lightwork "
+            "stopped rather than run uncounted against your spending cap.\n"
+            f"  {msg}\n"
+            "  This is a provider/gateway fault, not a budget problem: fix or "
+            "route around the gateway, then retry."
+        )
     # Sandbox backends already raise an actionable RuntimeError, e.g.
     # "Docker not available. ... change [sandbox] backend to 'local'".
     if isinstance(e, RuntimeError) and (
@@ -347,7 +359,12 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     _configure_cli_text_streams()
     _configure_cli_logging()
     ctx.ensure_object(dict)
-    if ctx.invoked_subcommand not in {"dashboard", "installation-maintenance", "version", "doctor", "config-lint"}:
+    # Diagnostic commands must keep running on a broken installation so they
+    # can report it; everything else stays behind the recovery gate.
+    if ctx.invoked_subcommand not in {
+        "dashboard", "installation-maintenance", "version", "doctor",
+        "config-lint", "preflight",
+    }:
         from ..installation_recovery import MaintenanceError, assert_normal_start_allowed
         try:
             assert_normal_start_allowed()
@@ -410,7 +427,13 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
 
 
 @main.command("installation-maintenance", hidden=True)
-@click.argument("step", type=click.Choice(["status", "inspect", "prepare", "execute", "resume", "logs"]))
+@click.argument(
+    "step",
+    type=click.Choice([
+        "status", "repair-capability", "authorize-repair", "inspect", "prepare",
+        "execute", "resume", "logs",
+    ]),
+)
 def installation_maintenance_cmd(step: str) -> None:
     """Fixed native maintenance protocol; authorization travels over stdin."""
     import json
@@ -423,6 +446,25 @@ def installation_maintenance_cmd(step: str) -> None:
         request = json.loads(raw)
         if step == "status":
             result = recovery.status()
+        elif step == "repair-capability":
+            result = recovery.repair_capability(
+                expected_runtime_sha256=request.get("runtime_sha256"),
+                expected_installer_sha256=request.get("installer_sha256"),
+                expected_public_key=request.get("public_key"),
+                expected_version=request.get("version"),
+            )
+        elif step == "authorize-repair":
+            expected = {
+                "expected_runtime_sha256": request.get("runtime_sha256"),
+                "expected_installer_sha256": request.get("installer_sha256"),
+                "expected_public_key": request.get("public_key"),
+                "expected_version": request.get("version"),
+            }
+            result = recovery.authorize_repair(
+                actor="native-desktop-repair",
+                confirm_all_workspaces=request.get("confirm") is True,
+                **({} if all(value is None for value in expected.values()) else expected),
+            )
         elif step == "logs":
             result = recovery.logs(request.get("id"))
         elif step == "inspect":
@@ -459,7 +501,9 @@ def installation_maintenance_cmd(step: str) -> None:
             finally:
                 record = recovery._read(directory / "record.json")
                 installed = Path(record["installed_runtime"]).parent / "maverick-desktop.exe"
-                desktop = installed if installed.is_file() and record.get("status") in {"upgraded", "rolled_back"} else directory / "maverick-desktop.exe"
+                desktop = installed if installed.is_file() and record.get("status") in {
+                    "upgraded", "upgrade_recovered", "rolled_back", "repaired", "repair_recovered",
+                } else directory / "maverick-desktop.exe"
                 import subprocess
                 # Native production calls always open their result window.
                 # The disposable CI protocol harness may suppress the window;

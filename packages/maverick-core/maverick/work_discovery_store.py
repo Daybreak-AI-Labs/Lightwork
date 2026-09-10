@@ -2220,6 +2220,98 @@ class WorkDiscoveryStore:
     def discover(self, **kwargs):
         return discover_candidates(self.list_events(limit=_MAX_LIST_EVENTS), **kwargs)
 
+    def governed_candidate_projection(self) -> dict[str, Any]:
+        """Return exact work-discovery candidates under live owner consent.
+
+        This is the only projection intended for the governed knowledge plane.
+        It keeps deployment, consent, and every session rollback authority
+        locked from the first enrollment read through final assembly. Raw event
+        content never leaves the method; the result carries a commitment to
+        the exact content-free events that support the candidate evidence.
+        """
+        with self._deployment_control_barrier(), self._consent_barrier():
+            trusted_now = self._now()
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT active,grant_id,policy_digest,policy_blob,enrolled_at,"
+                    "updated_at,expires_at FROM ekko_enrollments WHERE tenant_key=? "
+                    "AND owner_key=? AND device_key=?",
+                    self._scope,
+                ).fetchone()
+                if row is None:
+                    raise EnrollmentRequired("this owner and device are not enrolled")
+                enrollment, policy = self._decode_enrollment_row(row, now=trusted_now)
+                if not enrollment.active:
+                    raise EnrollmentRequired("this owner and device enrollment expired")
+                policy.require_valid(require_enabled=True)
+                self._authority_check(policy)
+                policy_digest, grant_id = self._active_enrollment(conn, policy)
+                session_ids = [
+                    str(item["session_id"])
+                    for item in conn.execute(
+                        "SELECT session_id FROM ekko_sessions WHERE tenant_key=? "
+                        "AND owner_key=? AND device_key=? ORDER BY session_id",
+                        self._scope,
+                    ).fetchall()
+                ]
+            with self._session_authority_barriers(session_ids):
+                self._purge_expired_events(now=trusted_now)
+                events = self._list_events_locked(
+                    session_id=None,
+                    since=None,
+                    limit=_MAX_LIST_EVENTS,
+                    trusted_now=trusted_now,
+                )
+                opportunities = discover_candidates(
+                    events,
+                    min_occurrences=policy.min_occurrences,
+                    min_distinct_days=policy.min_distinct_days,
+                )
+                final_now = self._now()
+                with self._connect() as conn:
+                    final_digest, final_grant_id = self._active_enrollment(conn, policy)
+                if (
+                    final_now >= enrollment.expires_at
+                    or not hmac.compare_digest(policy_digest, final_digest)
+                    or not hmac.compare_digest(grant_id, final_grant_id)
+                ):
+                    raise EnrollmentRequired(
+                        "work-discovery consent changed during projection"
+                    )
+                event_material = [event.to_dict() for event in events]
+                event_sha256 = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "scope": list(self._scope),
+                            "events": event_material,
+                        },
+                        allow_nan=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode("utf-8")
+                ).hexdigest()
+                return {
+                    "schema": "lightwork.ekko-knowledge-projection.v1",
+                    "owner_sha256": _scope_key(
+                        "knowledge-owner",
+                        f"{self._tenant_key}:{self._owner_key}",
+                    ),
+                    "device_sha256": _scope_key(
+                        "knowledge-device",
+                        ":".join(self._scope),
+                    ),
+                    "consent": {
+                        "policy_sha256": policy_digest,
+                        "enrolled_at": enrollment.enrolled_at,
+                        "valid_until": enrollment.expires_at,
+                    },
+                    "lineage": {
+                        "event_count": len(events),
+                        "event_sha256": event_sha256,
+                    },
+                    "candidates": [item.to_dict() for item in opportunities],
+                }
+
     def prune(self, retention_days: int, *, now: float | None = None) -> dict[str, int]:
         if not isinstance(retention_days, int) or not 1 <= retention_days <= MAX_RETENTION_DAYS:
             raise ValueError(f"retention_days must be between 1 and {MAX_RETENTION_DAYS}")

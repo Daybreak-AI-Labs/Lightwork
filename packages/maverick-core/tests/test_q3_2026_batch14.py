@@ -244,9 +244,9 @@ def test_static_azure_ad_token_does_not_require_identity_sdk(monkeypatch):
     assert providers.missing_sdks(["azure:gpt5"]) == []
 
 
-@_needs_openai
 def test_bedrock_requires_region(monkeypatch):
     monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     from maverick.providers.bedrock_provider import BedrockClient
     try:
         BedrockClient()
@@ -256,13 +256,18 @@ def test_bedrock_requires_region(monkeypatch):
     raise AssertionError("expected RuntimeError")
 
 
-@_needs_openai
 def test_bedrock_builds_url(monkeypatch):
+    # W1-10: the native Messages endpoint (Claude in Amazon Bedrock), not the
+    # OpenAI-compatible one; a bearer token selects api_key auth.
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.setenv("BEDROCK_API_KEY", "k")
+    monkeypatch.delenv("BEDROCK_AUTH_MODE", raising=False)
+    monkeypatch.delenv("BEDROCK_ENDPOINT", raising=False)
     from maverick.providers.bedrock_provider import BedrockClient
     c = BedrockClient()
-    assert "bedrock-runtime.us-east-1.amazonaws.com" in c.base_url
+    assert "bedrock-mantle.us-east-1.api.aws" in c.base_url
+    assert "/openai/" not in c.base_url
+    assert c.auth_mode == "api_key" and c.endpoint == "mantle"
 
 
 # ---------- Trello ----------

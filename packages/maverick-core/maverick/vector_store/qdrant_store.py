@@ -22,6 +22,7 @@ import uuid as _uuid
 from pathlib import Path
 
 from ..paths import data_dir
+from ._provider_accounting import BestEffortTransportError, metered_transport_call
 
 log = logging.getLogger(__name__)
 
@@ -92,9 +93,17 @@ class QdrantStore:
 
         url = url or os.environ.get("MAVERICK_QDRANT_URL")
         api_key = api_key or os.environ.get("MAVERICK_QDRANT_API_KEY")
+        self._remote = bool(url)
 
         if url:
-            self._client = QdrantClient(url=url, api_key=api_key)
+            # Qdrant's default compatibility check may contact the server while
+            # the client is constructed. Keep that physical call behind the
+            # same fail-closed admission boundary as every explicit method.
+            self._client = metered_transport_call(
+                "qdrant",
+                lambda: QdrantClient(url=url, api_key=api_key),
+                category="retrieval",
+            )
         else:
             store_path = Path(path or os.environ.get("MAVERICK_QDRANT_PATH") or _default_path())
             store_path.mkdir(parents=True, exist_ok=True)
@@ -150,11 +159,16 @@ class QdrantStore:
             m = dict(metadatas[i]) if metadatas else {}
             m[_NSID_KEY] = _stored_id(ids[i], tenant_id)
             metas.append(m)
-        self._client.add(
-            collection_name=self._collection,
-            documents=documents,
-            ids=[_point_id(i, tenant_id) for i in ids],
-            metadata=metas,
+        metered_transport_call(
+            "qdrant",
+            lambda: self._client.add(
+                collection_name=self._collection,
+                documents=documents,
+                ids=[_point_id(i, tenant_id) for i in ids],
+                metadata=metas,
+            ),
+            hosted=self._remote,
+            category="storage",
         )
 
     def query(self, text: str, *, top_k: int = 5) -> list[dict]:
@@ -182,10 +196,15 @@ class QdrantStore:
         # whose vectors are sparse among many may get < top_k -- a server-side
         # payload filter would be exact, but this matches the id-namespacing design.)
         fetch = want if prefix is None else min(100, want * 10)
-        results = self._client.query(
-            collection_name=self._collection,
-            query_text=text,
-            limit=fetch,
+        results = metered_transport_call(
+            "qdrant",
+            lambda: self._client.query(
+                collection_name=self._collection,
+                query_text=text,
+                limit=fetch,
+            ),
+            hosted=self._remote,
+            category="retrieval",
         )
         out: list[dict] = []
         for r in results:
@@ -218,19 +237,39 @@ class QdrantStore:
             return
         from qdrant_client.models import PointIdsList
         tenant_id = _active_tenant()
-        self._client.delete(
-            collection_name=self._collection,
-            points_selector=PointIdsList(
-                points=[_point_id(i, tenant_id) for i in ids]),
+        metered_transport_call(
+            "qdrant",
+            lambda: self._client.delete(
+                collection_name=self._collection,
+                points_selector=PointIdsList(
+                    points=[_point_id(i, tenant_id) for i in ids]
+                ),
+            ),
+            hosted=self._remote,
+            category="update",
         )
 
     def count(self) -> int:
+        def dispatch():
+            try:
+                return self._client.count(
+                    collection_name=self._collection,
+                    exact=True,
+                )
+            except Exception as exc:
+                raise BestEffortTransportError("qdrant count failed") from exc
+
         try:
-            res = self._client.count(collection_name=self._collection, exact=True)
+            res = metered_transport_call(
+                "qdrant",
+                dispatch,
+                hosted=self._remote,
+                category="retrieval",
+            )
             return int(getattr(res, "count", 0))
-        except Exception as e:
+        except BestEffortTransportError as exc:
             # Log so a backend outage isn't silently reported as an empty store.
-            log.warning("qdrant: count failed (%s); reporting 0", e)
+            log.warning("qdrant: count failed (%s); reporting 0", exc.__cause__)
             return 0
 
     def reset(self) -> None:
@@ -242,17 +281,31 @@ class QdrantStore:
         fastembed vector params, so recreate with the same params; if the
         client can't supply them (older versions / no model loaded) we leave
         the next ``add`` to lazily recreate."""
+        def dispatch() -> None:
+            first_error: Exception | None = None
+            try:
+                self._client.delete_collection(self._collection)
+            except Exception as exc:
+                first_error = exc
+            try:
+                self._client.create_collection(
+                    collection_name=self._collection,
+                    vectors_config=self._client.get_fastembed_vector_params(),
+                )
+            except Exception as exc:  # next add() recreates lazily
+                first_error = first_error or exc
+            if first_error is not None:
+                raise BestEffortTransportError("qdrant reset failed") from first_error
+
         try:
-            self._client.delete_collection(self._collection)
-        except Exception:
-            pass
-        try:
-            self._client.create_collection(
-                collection_name=self._collection,
-                vectors_config=self._client.get_fastembed_vector_params(),
+            metered_transport_call(
+                "qdrant",
+                dispatch,
+                hosted=self._remote,
+                category="update",
             )
-        except Exception:  # pragma: no cover -- next add() recreates lazily
-            pass
+        except BestEffortTransportError as exc:
+            log.debug("qdrant: reset failed: %s", exc.__cause__)
 
 
 __all__ = ["QdrantStore", "DEFAULT_PATH"]

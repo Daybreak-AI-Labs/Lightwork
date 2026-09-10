@@ -2,6 +2,12 @@
 # Never invokes Windows Installer, a native executable, or the acceptance body.
 param([Parameter(Mandatory=$true)][string]$ScriptDirectory)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $ScriptDirectory 'msi-acceptance-preflight.ps1')
+# These old process/quoting cases deliberately double metadata. Real read-only
+# Windows Installer COM inspection has separate inert-database tests.
+function Read-AcceptanceMsiProperties([string]$Package) {
+    return @{ProductName='Lightwork Desktop';ProductVersion='0.1.7';UpgradeCode='{AB5BC260-7EC9-4B70-AF78-28F4067BC530}'}
+}
 
 function Import-Function([string]$File,[string]$Name) {
     $tokens=$null; $errors=$null
@@ -37,6 +43,8 @@ New-Item -ItemType Directory -Path $env:RUNNER_TEMP | Out-Null
 try {
     $fixturePackage=Join-Path $env:RUNNER_TEMP 'Lightwork fixture.msi'
     [IO.File]::WriteAllText($fixturePackage,'Not an MSI: process calls are mocked.')
+    $packageExpectations=@{}
+    $packageExpectations[$fixturePackage]=Resolve-AcceptanceMsi $fixturePackage '0.1.7'
     [xml]$fragment=Get-Content -Raw -LiteralPath (Join-Path $ScriptDirectory 'acceptance-failure.wxs')
     $fault=$fragment.SelectSingleNode('//*[local-name()="CustomAction"]')
     $errorMessage=$fault.GetAttribute('Error')

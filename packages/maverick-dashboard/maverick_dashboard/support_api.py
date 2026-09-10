@@ -4,15 +4,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import threading
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from maverick import config, support_bundle
 from maverick.crypto_at_rest import is_sealed, seal, unseal
 from maverick.file_lock import (
+    _windows_extended_path,
     atomic_read_bytes,
     atomic_write_bytes,
     cross_process_lock,
@@ -60,7 +63,14 @@ def _enabled() -> bool:
 
 
 def _directory(context):
-    return ensure_private_directory(data_dir("support-previews", context))
+    return ensure_private_directory(_io_path(data_dir("support-previews", context)))
+
+
+def _io_path(path) -> Path:
+    """Return a Win32-safe spelling for a private preview path."""
+
+    value = Path(path)
+    return Path(_windows_extended_path(value)) if os.name == "nt" else value
 
 
 def _prepare(context):
@@ -75,7 +85,10 @@ def _prepare(context):
     with _LOCK, cross_process_lock(directory / "index", strict=True):
         # Ephemeral previews are bounded per identity/context. A replaced
         # preview yields an explicit refresh requirement, never another report.
-        previews = sorted(directory.glob("*.preview"), key=lambda path: path.stat().st_mtime)
+        previews = sorted(
+            _io_path(directory).glob("*.preview"),
+            key=lambda path: path.stat().st_mtime,
+        )
         for path in previews[:-15]:
             path.unlink()
         identifier = secrets.token_hex(16)
@@ -88,10 +101,14 @@ def _prepare(context):
 def _download(context, body):
     directory = _directory(context)
     with _LOCK, cross_process_lock(directory / "index", strict=True):
-        path = directory / (body.preview_id + ".preview")
-        if not path.exists():
-            raise ValueError("This preview is no longer available. Prepare and review a new report.")
-        if path.stat().st_size > MAX_BYTES * 3:
+        path = _io_path(directory / (body.preview_id + ".preview"))
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            raise ValueError(
+                "This preview is no longer available. Prepare and review a new report."
+            ) from None
+        if size > MAX_BYTES * 3:
             raise ValueError("The saved preview could not be verified.")
         raw = atomic_read_bytes(path)
         if not is_sealed(raw):

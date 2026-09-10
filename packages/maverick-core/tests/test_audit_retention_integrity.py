@@ -311,9 +311,13 @@ def test_the_purged_day_listing_is_empty_without_a_purge(audit_dir) -> None:
 
 def test_a_purge_preserves_the_coordination_sidecar(purged) -> None:
     """The stable lock inode prevents an unlink/recreate ABA race."""
+    # The two purged days can straddle a month boundary (e.g. 07-31 / 08-01),
+    # so match both months; the retained day is always 38+ days later and
+    # never shares a month with either.
+    purged_months = {_day(40)[:7], _day(39)[:7]}
     leftovers = sorted(
         p.name for p in purged.iterdir()
-        if p.name.endswith(".lock") and p.name.startswith(_day(40)[:7])
+        if p.name.endswith(".lock") and p.name[:7] in purged_months
     )
     assert leftovers == sorted(
         [f"{_day(40)}.ndjson.lock", f"{_day(39)}.ndjson.lock"]

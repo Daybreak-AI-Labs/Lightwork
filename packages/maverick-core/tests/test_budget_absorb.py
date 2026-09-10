@@ -47,3 +47,17 @@ def test_absorb_trips_token_cap():
     child.input_tokens = 2000
     with pytest.raises(BudgetExceeded):
         parent.absorb(child)
+
+
+def test_absorb_rejects_corrupt_child_without_poisoning_parent():
+    parent = Budget(max_dollars=1.0)
+    child = Budget()
+    child.dollars = float("nan")
+
+    with pytest.raises(BudgetExceeded, match="invalid dollars"):
+        parent.absorb(child)
+
+    assert parent.dollars == 0
+    parent.reserve(1.0)
+    with pytest.raises(BudgetExceeded):
+        parent.reserve(0.01)

@@ -25,7 +25,7 @@ def test_page_initializers_follow_shared_helpers(monkeypatch, tmp_path, path, he
     client = TestClient(dashboard.app, headers={"Origin": "http://testserver"})
     page = client.get(path)
     assert page.status_code == 200
-    dependency = page.text.index('<script src="/static/lightwork-ui.js">')
+    dependency = page.text.index('<script src="/static/lightwork-ui.js')
     dependent_call = page.text.index(helper_call)
     initializer = page.text.rfind("<script", 0, dependent_call)
     assert dependency < initializer < dependent_call

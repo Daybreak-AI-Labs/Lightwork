@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from maverick.budget import Budget
-from maverick.orchestrator import run_goal
+from maverick.orchestrator import _safe_exception_text, run_goal
 from maverick.sandbox import LocalBackend
 from maverick.world_model import WorldModel
 
@@ -39,6 +39,21 @@ class _SentinelShield:
         if "BLOCKME" in (text or ""):
             return _verdict(False, ["test-policy"])
         return _verdict(True, [])
+
+
+def test_orchestrator_exception_text_redacts_lightwork_capabilities():
+    rest_token = "lw-rest-" + "A" * 43
+    flow_token = "eyJ" + "B" * 32 + "." + "c" * 64
+
+    result = _safe_exception_text(
+        RuntimeError(f"request {rest_token} approval {flow_token}"),
+        fallback="run failed",
+    )
+
+    assert rest_token not in result
+    assert flow_token not in result
+    assert "REDACTED:lightwork_agent_token" in result
+    assert "REDACTED:lightwork_flow_approval_token" in result
 
 
 @pytest.mark.asyncio

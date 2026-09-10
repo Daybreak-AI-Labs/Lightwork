@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 35
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -622,6 +622,20 @@ MIGRATIONS: dict[int, list[str]] = {
         " period_key TEXT NOT NULL, provider TEXT NOT NULL,"
         " receipts_json TEXT NOT NULL, PRIMARY KEY (period_key, provider))",
     ],
+    # v35 prevents crash/replay from admitting the same physical provider
+    # operation attempt through another provider or accounting period.
+    35: [
+        "CREATE TABLE IF NOT EXISTS provider_operation_attempts ("
+        " scope_sha256 TEXT NOT NULL, operation_id TEXT NOT NULL,"
+        " attempt_no INTEGER NOT NULL, category TEXT NOT NULL,"
+        " parent_category TEXT NOT NULL, service TEXT, provider TEXT NOT NULL,"
+        " period_key TEXT NOT NULL, request_id TEXT NOT NULL,"
+        " PRIMARY KEY (scope_sha256, operation_id, attempt_no),"
+        " UNIQUE (provider, period_key, request_id))",
+        "CREATE TABLE IF NOT EXISTS provider_operation_attempt_backfill ("
+        " singleton INTEGER PRIMARY KEY CHECK(singleton = 1),"
+        " completed INTEGER NOT NULL CHECK(completed = 1))",
+    ],
 }
 
 
@@ -983,6 +997,62 @@ def _resolve_world_path(path: Path | str | None) -> tuple[Path, bool]:
     return Path(path), False
 
 
+class WorldSchemaCompatibilityError(RuntimeError):
+    """The installed release cannot safely open this persisted world."""
+
+    def __init__(self, message: str, *, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _existing_world_has_data(path: Path) -> bool:
+    try:
+        return str(path) != ":memory:" and path.exists() and path.stat().st_size > 0
+    except OSError:  # pragma: no cover -- stat race; assume fresh
+        return False
+
+
+def _check_world_schema_compatibility(path: Path) -> None:
+    """Admit existing worlds read-only, including committed WAL state.
+
+    Called under the existing cross-process initialization lock and before
+    opening a writable connection, journal-mode changes or schema bootstrap.
+    Do not use immutable=1: it ignores committed versions still in a WAL.
+    Missing/empty version tables retain the supported legacy-v1 reader policy.
+    """
+    invalid = (
+        "World database schema metadata is invalid or ambiguous. "
+        "Restore a compatible backup or open it with the release that created it; "
+        "the database has not been migrated."
+    )
+    try:
+        with contextlib.closing(sqlite3.connect(
+            path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10.0,
+        )) as conn:
+            table = conn.execute(
+                "SELECT type FROM sqlite_master WHERE name='schema_version' COLLATE NOCASE",
+            ).fetchone()
+            if table is None:
+                return
+            if table[0] != "table":
+                raise WorldSchemaCompatibilityError(invalid, code="invalid_world_schema")
+            rows = conn.execute("SELECT version FROM schema_version LIMIT 2").fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise WorldSchemaCompatibilityError(invalid, code="invalid_world_schema") from exc
+    if not rows:
+        return
+    if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] < 1:
+        raise WorldSchemaCompatibilityError(invalid, code="invalid_world_schema")
+    current = rows[0][0]
+    if current > SCHEMA_VERSION:
+        raise WorldSchemaCompatibilityError(
+            f"World database uses schema {current}; this release supports up to {SCHEMA_VERSION}. "
+            "Install a newer Lightwork release that supports this schema or restore a compatible backup; "
+            "the database has not been migrated.",
+            code="unsupported_world_schema",
+        )
+
+
 def _serialize_world_initialization(init):
     """Serialize one world's open/WAL/schema bootstrap across processes.
 
@@ -1019,14 +1089,9 @@ class WorldModel:
         # any file creation below so a brand-new world.db (every fresh
         # install/tenant) is not mistaken for a legacy DB needing a
         # pre-migration backup -- only a pre-existing, non-empty DB gets one.
-        try:
-            self._db_preexisted = (
-                str(path) != ":memory:"
-                and path.exists()
-                and path.stat().st_size > 0
-            )
-        except OSError:  # pragma: no cover -- stat race; assume fresh
-            self._db_preexisted = False
+        self._db_preexisted = _existing_world_has_data(path)
+        if self._db_preexisted:
+            _check_world_schema_compatibility(path)
         # world.db holds all conversation content, messages, and facts.
         # The audit dir is locked to 0700/0600 but this DB inherited the
         # default umask (often world-readable 0644) — any local user or
@@ -4079,6 +4144,240 @@ class WorldModel:
         if row[0] is None and row[1] is not None:
             raise RuntimeError("Provider accounting total is missing")
         return (float(row[0] or 0), json.loads(row[1]) if row[1] is not None else {})
+
+    @staticmethod
+    def _provider_cap_period_sql(period_kind: str) -> str:
+        if period_kind == "day":
+            return "strftime('%Y-%m-%d', 'now')"
+        if period_kind == "month":
+            return "strftime('%Y-%m', 'now')"
+        raise ValueError("provider cap period kind is invalid")
+
+    def provider_cap_period(self, period_kind: str) -> str:
+        """Return the current UTC period from the shared database clock."""
+        row = self._read_one(f"SELECT {self._provider_cap_period_sql(period_kind)}")
+        if row is None or not isinstance(row[0], str):
+            raise RuntimeError("Provider accounting clock is unavailable")
+        return row[0]
+
+    def mutate_current_provider_cap(self, period_kind: str, provider: str, operation):
+        """Mutate the current provider bucket using one database-clock transaction."""
+        period_sql = self._provider_cap_period_sql(period_kind)
+        with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            period = conn.execute(f"SELECT {period_sql}").fetchone()[0]
+            conn.execute(
+                "INSERT INTO provider_spend(period_key, provider, dollars) VALUES(?, ?, 0) "
+                "ON CONFLICT(period_key, provider) DO NOTHING", (period, provider),
+            )
+            row = conn.execute(
+                "SELECT dollars FROM provider_spend WHERE period_key = ? AND provider = ?",
+                (period, provider),
+            ).fetchone()
+            state = conn.execute(
+                "SELECT receipts_json FROM provider_cap_receipts WHERE period_key = ? AND provider = ?",
+                (period, provider),
+            ).fetchone()
+            total, receipts, result = operation(
+                period, float(row[0]), json.loads(state[0]) if state else {},
+            )
+            conn.execute(
+                "UPDATE provider_spend SET dollars = ? WHERE period_key = ? AND provider = ?",
+                (total, period, provider),
+            )
+            conn.execute(
+                "INSERT INTO provider_cap_receipts(period_key, provider, receipts_json) VALUES(?, ?, ?) "
+                "ON CONFLICT(period_key, provider) DO UPDATE SET receipts_json = excluded.receipts_json",
+                (period, provider, json.dumps(receipts, allow_nan=False)),
+            )
+            return period, result
+
+    @staticmethod
+    def _backfill_provider_operation_attempts(conn) -> None:
+        """Index legacy JSON receipts once, inside the first v35 admission."""
+        if conn.execute(
+            "SELECT completed FROM provider_operation_attempt_backfill WHERE singleton = 1"
+        ).fetchone() is not None:
+            return
+        # Plain INSERT is intentional: two legacy receipts claiming the same
+        # operation attempt abort the transaction and keep admission closed.
+        conn.execute(
+            "INSERT INTO provider_operation_attempts("
+            "scope_sha256, operation_id, attempt_no, category, parent_category, "
+            "service, provider, period_key, request_id) "
+            "SELECT COALESCE(json_extract(j.value, '$.operation_scope_sha256'), "
+            "json_extract(j.value, '$.work_item_sha256'), "
+            "'c544f4564db872e0ffb51fa1bb81b3d7089460a7a9a79ad21cd3952e77f0efec'), "  # pragma: allowlist secret
+            "json_extract(j.value, '$.operation.operation_id'), "
+            "json_extract(j.value, '$.operation.attempt_no'), "
+            "json_extract(j.value, '$.operation.category'), "
+            "json_extract(j.value, '$.operation.parent_category'), "
+            "json_extract(j.value, '$.operation.service'), "
+            "p.provider, p.period_key, CAST(j.key AS TEXT) "
+            "FROM provider_cap_receipts AS p, json_each(p.receipts_json) AS j "
+            "WHERE json_type(j.value, '$.operation') = 'object' "
+            "AND NOT EXISTS (SELECT 1 FROM provider_operation_attempts AS a "
+            "WHERE a.provider = p.provider AND a.period_key = p.period_key "
+            "AND a.request_id = CAST(j.key AS TEXT))"
+        )
+        conn.execute(
+            "INSERT INTO provider_operation_attempt_backfill(singleton, completed) "
+            "VALUES(1, 1)"
+        )
+
+    def reserve_current_provider_cap(
+        self,
+        period_kind: str,
+        provider: str,
+        operation,
+        attempt: dict[str, object],
+    ):
+        """Atomically claim a global operation attempt and reserve its bucket.
+
+        The uniqueness key deliberately excludes provider and period so a
+        restored worker cannot replay the same physical attempt by failing over
+        or crossing a UTC accounting boundary.
+        """
+        period_sql = self._provider_cap_period_sql(period_kind)
+        with self._writing() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            period = conn.execute(f"SELECT {period_sql}").fetchone()[0]
+            self._backfill_provider_operation_attempts(conn)
+            existing = conn.execute(
+                "SELECT category, parent_category, service, provider, period_key, request_id "
+                "FROM provider_operation_attempts "
+                "WHERE scope_sha256 = ? AND operation_id = ? AND attempt_no = ?",
+                (
+                    attempt["scope_sha256"],
+                    attempt["operation_id"],
+                    attempt["attempt_no"],
+                ),
+            ).fetchone()
+            if existing is not None:
+                return period, False, {
+                    "category": existing[0],
+                    "parent_category": existing[1],
+                    "service": existing[2],
+                    "provider": existing[3],
+                    "period": existing[4],
+                    "request_id": existing[5],
+                }
+            conn.execute(
+                "INSERT INTO provider_operation_attempts("
+                "scope_sha256, operation_id, attempt_no, category, parent_category, "
+                "service, provider, period_key, request_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    attempt["scope_sha256"],
+                    attempt["operation_id"],
+                    attempt["attempt_no"],
+                    attempt["category"],
+                    attempt["parent_category"],
+                    attempt["service"],
+                    provider,
+                    period,
+                    attempt["request_id"],
+                ),
+            )
+            conn.execute(
+                "INSERT INTO provider_spend(period_key, provider, dollars) VALUES(?, ?, 0) "
+                "ON CONFLICT(period_key, provider) DO NOTHING",
+                (period, provider),
+            )
+            row = conn.execute(
+                "SELECT dollars FROM provider_spend WHERE period_key = ? AND provider = ?",
+                (period, provider),
+            ).fetchone()
+            state = conn.execute(
+                "SELECT receipts_json FROM provider_cap_receipts WHERE period_key = ? AND provider = ?",
+                (period, provider),
+            ).fetchone()
+            total, receipts, result = operation(
+                period,
+                float(row[0]),
+                json.loads(state[0]) if state else {},
+            )
+            conn.execute(
+                "UPDATE provider_spend SET dollars = ? WHERE period_key = ? AND provider = ?",
+                (total, period, provider),
+            )
+            conn.execute(
+                "INSERT INTO provider_cap_receipts(period_key, provider, receipts_json) VALUES(?, ?, ?) "
+                "ON CONFLICT(period_key, provider) DO UPDATE SET receipts_json = excluded.receipts_json",
+                (period, provider, json.dumps(receipts, allow_nan=False)),
+            )
+            return period, True, result
+
+    def read_current_provider_cap(self, period_kind: str, provider: str):
+        """Read the database-clock period and its bucket in one statement."""
+        period_sql = self._provider_cap_period_sql(period_kind)
+        row = self._read_one(
+            f"SELECT {period_sql}, "
+            f"(SELECT dollars FROM provider_spend WHERE period_key = {period_sql} AND provider = ?), "
+            f"(SELECT receipts_json FROM provider_cap_receipts WHERE period_key = {period_sql} AND provider = ?)",
+            (provider, provider),
+        )
+        if row is None or not isinstance(row[0], str):
+            raise RuntimeError("Provider accounting clock is unavailable")
+        if row[1] is None and row[2] is not None:
+            raise RuntimeError("Provider accounting total is missing")
+        return row[0], float(row[1] or 0), json.loads(row[2]) if row[2] is not None else {}
+
+    def snapshot_provider_cap_reservations(
+        self,
+        work_item_sha256: str,
+        *,
+        limit: int,
+    ) -> list[tuple[str, str, float | None, str]]:
+        """Return complete matching buckets from one point-in-time SQL snapshot."""
+        if (
+            not isinstance(work_item_sha256, str)
+            or len(work_item_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in work_item_sha256)
+            or isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 2001
+        ):
+            raise ValueError("provider reservation snapshot request is invalid")
+        sql = (
+            "SELECT r.period_key, r.provider, s.dollars, r.receipts_json "
+            "FROM provider_cap_receipts AS r "
+            "LEFT JOIN provider_spend AS s "
+            "ON s.period_key = r.period_key AND s.provider = r.provider "
+            "WHERE EXISTS (SELECT 1 FROM json_each(r.receipts_json) AS j "
+            "WHERE json_extract(j.value, '$.work_item_sha256') = ?) "
+            "ORDER BY r.period_key, r.provider LIMIT ?"
+        )
+        return [tuple(row) for row in self._read_all(sql, (work_item_sha256, limit))]
+
+    def find_provider_cap_reservations(
+        self,
+        work_item_sha256: str,
+        *,
+        limit: int,
+        after: tuple[str, str, str] | None = None,
+    ) -> list[tuple[str, str, str]]:
+        """Return bounded reservation keys for one opaque tenant/work hash."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 201:
+            raise ValueError("provider reservation discovery limit is invalid")
+        sql = (
+            "SELECT p.period_key, p.provider, CAST(j.key AS TEXT) "
+            "FROM provider_cap_receipts AS p "
+            "JOIN json_each(p.receipts_json) AS j "
+            "WHERE json_extract(j.value, '$.work_item_sha256') = ?"
+        )
+        params: list[object] = [work_item_sha256]
+        if after is not None:
+            period, provider, request_id = after
+            sql += (
+                " AND (p.period_key > ? OR (p.period_key = ? AND p.provider > ?) "
+                "OR (p.period_key = ? AND p.provider = ? AND CAST(j.key AS TEXT) > ?))"
+            )
+            params.extend([period, period, provider, period, provider, request_id])
+        sql += " ORDER BY p.period_key, p.provider, CAST(j.key AS TEXT) LIMIT ?"
+        params.append(limit)
+        return [tuple(row) for row in self._read_all(sql, tuple(params))]
 
     # ----- attachments -----
     def add_attachment(

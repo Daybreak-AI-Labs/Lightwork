@@ -108,6 +108,7 @@ class JobQueue:
 
     def __init__(self, db_path: Path | None = None) -> None:
         selected = db_path if db_path is not None else _default_db()
+        self._workspace_scoped = db_path is None
         self.db_path = Path(selected).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
@@ -220,6 +221,10 @@ class JobQueue:
         values separate prevents a long-running drain from claiming later jobs
         with a stale heartbeat that another worker could reclaim.
         """
+        if self._workspace_scoped:
+            from .workspace_recovery import assert_bootstrap_start_allowed
+
+            assert_bootstrap_start_allowed()
         n = now if now is not None else time.time()
         cutoff = ready_at if ready_at is not None else n
         with self._lock, self._conn() as c:

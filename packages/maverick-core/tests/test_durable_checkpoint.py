@@ -201,13 +201,15 @@ async def test_resume_works_without_pinning_name(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_goal_resume_reuses_checkpoint_episode(tmp_path, monkeypatch):
+async def test_run_goal_resume_reuses_checkpoint_episode(
+    tmp_path, monkeypatch, fresh_human_decision,
+):
     """A fresh run_goal() resume must look up checkpoints in the crashed
     episode, not in a brand-new episode created for the resume invocation."""
     monkeypatch.setenv("MAVERICK_DURABLE", "1")
     # The scripted shell call must actually run so its output lands in the
-    # checkpoint; grant consent explicitly (the posture would deny shell).
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    # checkpoint; the shared fixture supplies the fresh human decision the
+    # shell permit requires (auto-approve would deny it).
     world_path = tmp_path / "w.db"
     world = WorldModel(world_path)
     gid = world.create_goal("durable run_goal", "")

@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Simulate · Lightwork{% endblock %}
+{% block head_extra %}
+<style{% if csp_style_nonce is defined %} nonce="{{ csp_style_nonce }}"{% endif %}>
+  .research-simulation-table { table-layout: fixed; }
+  .research-simulation-table td:first-child { width: 13rem; }
+  .research-simulation-table td:last-child { overflow-wrap: anywhere; }
+  @media (max-width: 480px) {
+    .research-simulation-table td:first-child { width: 38%; }
+  }
+</style>
+{% endblock %}
 {% block content %}
   <h1 class="page-title">Pre-action simulation</h1>
   <p class="page-subtitle">Dry-run a proposed action to see its risk and whether it would be gated — before anything runs.</p>
@@ -19,7 +29,59 @@
     </form>
   </div>
 
+  <div class="panel" data-testid="research-simulation-launcher">
+    <h2>Isolated research world</h2>
+    <p>Run a built-in synthetic study through the real research component process boundary, approval gate, action lineage, cost receipt, and controller-only oracle.</p>
+    <p>No connector, provider, customer data, or live environment is available to this fixture.</p>
+    <form method="post" action="/simulate/research" class="grid">
+      <label>Research component
+        <select name="component">
+          <option value="tabular" {{ 'selected' if research_component == 'tabular' else '' }}>Tabular baseline</option>
+          <option value="feature-prefix" {{ 'selected' if research_component == 'feature-prefix' else '' }}>Feature-prefix backoff baseline</option>
+        </select>
+      </label>
+      <button class="btn btn--primary" type="submit">Approve and run synthetic study</button>
+    </form>
+  </div>
+
+  {% if research_result %}
+  <div class="panel" role="status" data-testid="research-simulation-boundary">
+    <h2><span class="badge">Simulation only</span> Research study completed</h2>
+    <p><strong>No live action ran and no external system changed.</strong></p>
+    <p>This is successful simulated evidence from a built-in synthetic fixture. It cannot be accepted as a live business outcome.</p>
+    <table class="research-simulation-table" data-testid="research-simulation-table">
+      <tbody>
+        <tr><td>Scenario</td><td>{{ research_result.scenario_id }}</td></tr>
+        <tr><td>Fixture</td><td>{{ research_result.fixture_label }}</td></tr>
+        <tr><td>Component</td><td>{{ research_result.baseline_label }}</td></tr>
+        <tr><td>Result</td><td><span class="badge active">{{ research_result.status }}</span></td></tr>
+        <tr><td>Predicted effect</td><td>{{ research_result.predicted_external_effect }} inside the synthetic world</td></tr>
+        <tr><td>Component process</td><td>{{ 'Isolated' if research_result.component_process_isolated else 'Unavailable' }}</td></tr>
+        <tr><td>Controller oracle</td><td>{{ 'Passed' if research_result.oracle_passed else 'Did not pass' }}</td></tr>
+        <tr><td>Approval</td><td>{{ research_result.approver_principal }} · named-human approval required</td></tr>
+        <tr><td>Action lineage</td><td>{{ 'Verified' if research_result.action_lineage_valid else 'Invalid' }}</td></tr>
+        <tr><td>Cost receipt</td><td>1 simulated operation · USD 0 · controller-local</td></tr>
+        <tr><td>Evidence class</td><td>Simulated</td></tr>
+        <tr><td>Evidence source</td><td>{{ research_result.source_ref }}</td></tr>
+        <tr><td>Live effect</td><td>No</td></tr>
+        <tr><td>Business outcome</td><td>Not eligible for acceptance</td></tr>
+        <tr><td>Controller evidence</td><td title="{{ research_result.controller_evidence_sha256 }}">{{ research_result.controller_evidence_sha256[:16] }}…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% elif research_error %}
+  <div class="panel" role="alert" data-testid="research-simulation-boundary">
+    <p><span class="badge danger">{{ research_error }}</span></p>
+    <p>No simulated or live action was completed.</p>
+  </div>
+  {% endif %}
+
   {% if result and result.decision %}
+  <div class="panel" role="status" data-testid="simulation-boundary">
+    <h2><span class="badge">Simulation only</span></h2>
+    <p><strong>No live action ran and no external system changed.</strong></p>
+    <p>This preview is simulated evidence. It cannot be accepted as a live business outcome.</p>
+  </div>
   <div class="panel">
     <h2>Decision:
       <span class="badge {{ 'danger' if result.decision == 'DENY' else ('active' if ('allow' in result.decision or result.decision == 'exposed') else '') }}">{{ result.decision }}</span>
@@ -30,11 +92,17 @@
         <tr><td>Action</td><td>{{ result.action }}</td></tr>
         <tr><td>Risk</td><td><span class="badge {{ 'danger' if result.risk == 'high' else '' }}">{{ result.risk }}</span></td></tr>
         <tr><td>Consent mode</td><td>{{ result.consent_mode }}</td></tr>
+        <tr><td>Evidence class</td><td>Simulated</td></tr>
+        <tr><td>Live effect</td><td>No</td></tr>
+        <tr><td>Business outcome</td><td>Not eligible for acceptance</td></tr>
         <tr><td>Why</td><td>{{ result.why }}</td></tr>
       </tbody>
     </table>
   </div>
   {% elif result and result.error %}
-  <div class="panel"><p><span class="badge danger">{{ result.error }}</span></p></div>
+  <div class="panel" role="alert" data-testid="simulation-boundary">
+    <p><span class="badge danger">{{ result.error }}</span></p>
+    <p>This request did not run a live action and cannot be used as a live business outcome.</p>
+  </div>
   {% endif %}
 {% endblock %}

@@ -42,3 +42,12 @@ def test_suite_and_role_filtering_keeps_unavailable_operations_out_of_links(monk
     rows = readiness.for_request(None)
     assert not any(row.get("suite") == "privacy" for row in rows)
     assert not any(row["can_open"] and row["permission"] != "view" for row in rows)
+
+
+def test_supplier_catalog_points_to_setup_and_reports_unsupported_profile(monkeypatch):
+    row = next(row for row in readiness.for_request(None) if row["href"] == "/third-party/vendor-onboarding")
+    assert row["configuration"] == "Open workflow to review owner and Jira setup"
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "2")
+    row = next(row for row in readiness.for_request(None) if row["href"] == "/third-party/vendor-onboarding")
+    assert row["configuration"] != "Open workflow to review owner and Jira setup"
+    assert row["stage_label"] == "Live validation required"

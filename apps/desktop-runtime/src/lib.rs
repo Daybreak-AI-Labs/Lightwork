@@ -20,6 +20,7 @@ struct Control {
     child: Option<Child>,
     logs: Logs,
     binary: Option<PathBuf>,
+    child_environment: Vec<(OsString, OsString)>,
     recovery: bool,
 }
 
@@ -116,7 +117,12 @@ fn maverick_bin() -> OsString {
         .unwrap_or_else(|| exe.into())
 }
 
-fn spawn_dashboard(logs: &Logs, binary: Option<&Path>, recovery: bool) -> Result<Child, String> {
+fn spawn_dashboard(
+    logs: &Logs,
+    binary: Option<&Path>,
+    recovery: bool,
+    child_environment: &[(OsString, OsString)],
+) -> Result<Child, String> {
     let mut command = Command::new(
         binary
             .map(|path| path.as_os_str().to_owned())
@@ -127,6 +133,7 @@ fn spawn_dashboard(logs: &Logs, binary: Option<&Path>, recovery: bool) -> Result
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    command.envs(child_environment.iter().cloned());
     if recovery {
         command.arg("--recovery-mode");
     }
@@ -205,12 +212,34 @@ impl Dashboard {
         }))
     }
 
+    /// Configure a single child-only authority without adding it to the
+    /// desktop process environment or unrelated children.
+    pub fn with_environment(name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        Self(Mutex::new(Control {
+            child_environment: vec![(name.into(), value.into())],
+            ..Control::default()
+        }))
+    }
+
+    pub fn with_binary_and_environment(
+        binary: PathBuf,
+        name: impl Into<OsString>,
+        value: impl Into<OsString>,
+    ) -> Self {
+        Self(Mutex::new(Control {
+            binary: Some(binary),
+            child_environment: vec![(name.into(), value.into())],
+            ..Control::default()
+        }))
+    }
+
     pub fn start(&self) -> Result<String, String> {
         let mut control = self.0.lock().map_err(|_| "Startup state is unavailable.")?;
         let binary = control.binary.clone();
+        let child_environment = control.child_environment.clone();
         let recovery = control.recovery;
         ensure_started(&mut control, listening, |logs| {
-            spawn_dashboard(logs, binary.as_deref(), recovery)
+            spawn_dashboard(logs, binary.as_deref(), recovery, &child_environment)
         })
     }
 
@@ -229,10 +258,11 @@ impl Dashboard {
         }
         control.recovery = recovery;
         let binary = control.binary.clone();
+        let child_environment = control.child_environment.clone();
         ensure_started(
             &mut control,
             || false,
-            |logs| spawn_dashboard(logs, binary.as_deref(), recovery),
+            |logs| spawn_dashboard(logs, binary.as_deref(), recovery, &child_environment),
         )
     }
 
@@ -423,7 +453,7 @@ mod tests {
     fn missing_customer_runtime_cannot_fall_back_to_an_installed_cli() {
         let missing = std::env::temp_dir().join("lightwork-no-such-customer-runtime.exe");
         let logs = Logs::default();
-        assert!(spawn_dashboard(&logs, Some(&missing), false).is_err());
+        assert!(spawn_dashboard(&logs, Some(&missing), false, &[]).is_err());
         assert!(logs.lock().unwrap().contains("could not start"));
     }
 

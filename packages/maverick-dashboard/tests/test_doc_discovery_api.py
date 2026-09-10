@@ -144,6 +144,37 @@ def test_memory_similar_returns_precedents_and_suggestions():
     assert body["suggestions"]["pia_necessity"]["answer"] == "yes"
 
 
+def test_memory_lessons_search_only_the_governed_assessment_collection(monkeypatch):
+    import maverick_dashboard.knowledge_access_api as knowledge_access_api
+    from maverick import assessment_memory
+
+    calls = []
+
+    class Reader:
+        def search(self, tenant, principal, **kwargs):
+            calls.append((tenant, principal, kwargs))
+            return {"items": [{"summary": "Keep the reviewer rationale."}]}
+
+    monkeypatch.setattr(knowledge_access_api, "_service", lambda _request: Reader())
+
+    response = client.get(
+        "/api/v1/assessment-memory/similar",
+        params={"subject": "Acme CRM rollout", "k": 2},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lessons"] == ["Keep the reviewer rationale."]
+    assert len(calls) == 1
+    assert calls[0][2] == {
+        "query": "Acme CRM rollout",
+        "purpose": "product_research",
+        "limit": 2,
+        "source_selectors": (
+            f"catalog:vector-knowledge/{assessment_memory.KNOWLEDGE_COLLECTION}/",
+        ),
+    }
+
+
 def test_memory_similar_requires_subject():
     assert client.get("/api/v1/assessment-memory/similar",
                       params={"subject": "  "}).status_code == 422

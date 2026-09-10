@@ -60,8 +60,9 @@ class RecoveryOnlyMiddleware:
     async def __call__(self, scope, receive, send):
         if enabled(self.dashboard_app) and scope["type"] in {"http", "websocket"}:
             path = scope.get("path", "")
-            allowed = (path in {"/workspace/recovery", "/provider-spending", "/livez"}
-                       or path.startswith("/api/v1/recovery/") or path.startswith("/auth/")
+            allowed = (path in {"/workspace/recovery", "/provider-spending", "/help", "/livez"}
+                       or path.startswith("/api/v1/recovery/")
+                       or path.startswith("/api/v1/support/") or path.startswith("/auth/")
                        or (path.startswith("/static/") and scope.get("method") in {"GET", "HEAD"}))
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})

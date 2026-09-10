@@ -56,6 +56,21 @@ api_key = "${OPENROUTER_API_KEY}"
 [providers.ollama]
 base_url = "http://localhost:11434"
 
+[providers.bedrock]
+# Claude on AWS Bedrock through the native Anthropic Messages API (prompt
+# caching, thinking, tool_choice all work). auth_mode "iam" signs with your AWS
+# credentials or role (needs the `bedrock` extra: boto3); "api_key" sends a
+# Bedrock bearer token from BEDROCK_API_KEY. endpoint "mantle" is Claude in
+# Amazon Bedrock (Opus 4.7 and later; ids like anthropic.claude-opus-5);
+# "legacy" is Opus 4.6 and earlier (ids like global.anthropic.claude-opus-4-6-v1).
+# AWS_REGION is required; BEDROCK_MODEL_ID sets the default model.
+# Billing: Bedrock is invoiced by AWS at its own rates, which are not in
+# Lightwork's verified rate card. Planning estimates use the Claude API list
+# rate for the model behind the id; set [budget] strict_pricing=false to
+# account live usage at that estimate.
+auth_mode = "iam"
+# endpoint = "mantle"
+
 [models]
 # Per-role model picks. Format: "provider:model-id".
 # Any role omitted falls back to maverick.llm.ROLE_MODELS defaults.
@@ -140,6 +155,14 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # request — the first-admin invite link printed by `maverick tenant onboard`
 # and flow-approval links. MAVERICK_PUBLIC_URL overrides.
 # public_url = "https://dashboard.example.com"
+
+# Gzip responses over 1 KB (pages, JSON, the shell CSS/JS). On by default so a
+# dashboard behind a bare uvicorn or a default ingress does not ship ~160 KB
+# of uncompressed shell assets per cold load; set false when a proxy in front
+# already compresses. MAVERICK_DASHBOARD_COMPRESS=0|1 overrides. Shell assets
+# are also served with a content hash in the URL and a one-year cache, so an
+# upgrade restyles on the next page load without a hard refresh.
+# compress = true
 
 # Department (suite) access for authenticated users with NO explicit grant on
 # the Users page (job-function scoping: a finance analyst sees and runs only
@@ -394,6 +417,11 @@ risk_limited = true              # require >=8 held-out
 #   eval_corpus = "/path.json"   {model|domain: [{goal, expected}]} — enables
 #                                the auto-built live A/B on scheduled runs
 #   eval_budget_dollars = 5.0    spend cap per auto-evaluated cycle (fail-closed)
+# Environment: MAVERICK_SELF_HARNESS_EVALUATOR_IMAGE selects a reviewed local
+# Linux image (never pulled; default request `python:3.12-slim`).
+# MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY=1 requests confirmatory
+# custody and currently fails closed on local/Windows deployments because the
+# controller account also administers the ledger and Docker daemon.
 auto_run = true                  # run the fleet cycle as part of `maverick dream`
 #   promote_as_canary = true     stage every promotion on probation
 #   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
@@ -504,6 +532,15 @@ enable = true              # one governed recall/deposit surface over knowledge
                            #   source's own toggle still applies. Operator
                            #   commands: `maverick cortex status|recall|deposit`.
                            #   Env: MAVERICK_CORTEX.
+
+[knowledge_access]         # current-rights Knowledge page and API (default on)
+enable = true              # exact registry versions only; every display/cache/
+                           #   export rechecks purpose, requested action, source
+                           #   checksum, approval, freshness, consent, lineage,
+                           #   and current named-user authority. Explicit false
+                           #   disables the page and API. Env override:
+                           #   MAVERICK_KNOWLEDGE_ACCESS.
+
 [commerce]                 # Commerce suite tools (com_shop_* / com_merch_* packs)
 enable = false             # explicit opt-in; env: MAVERICK_COMMERCE
 backend = "demo"           # in-memory reference backend; a real storefront/

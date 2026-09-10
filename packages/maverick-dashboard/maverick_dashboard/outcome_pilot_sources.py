@@ -2,16 +2,28 @@
 from __future__ import annotations
 
 import math
+from dataclasses import asdict
 
 from .auth import caller_principal, can_access_goal, goal_owner_filter, suite_allowed
 from .outcome_pilots import digest
 
 PREPARED = "Prepared for a workflow pilot. Start this task after the pilot plan is frozen."
+_MAX_PROVIDER_RECEIPTS = 2000
 
 
 def _is_prepared(goal, episodes):
     return not episodes and ((goal.status == "pending" and not goal.result)
                              or (goal.status == "blocked" and goal.result == PREPARED))
+
+
+def _provider_receipts(work_item_id: str) -> tuple[list[dict], str]:
+    from maverick.provider_cost_cap import reservation_catalogue_for_work_item
+
+    catalogue = reservation_catalogue_for_work_item(
+        work_item_id,
+        limit=_MAX_PROVIDER_RECEIPTS,
+    )
+    return [asdict(receipt) for receipt in catalogue.receipts], catalogue.version
 
 
 def goal_source(request, reference):
@@ -32,6 +44,15 @@ def goal_source(request, reference):
     values = [e.cost_dollars for e in episodes]
     if any(not math.isfinite(v) or v < 0 for v in values):
         raise ValueError("Task pricing history is unavailable.")
+    provider_receipt_error = None
+    provider_catalog_version = None
+    try:
+        provider_receipts, provider_catalog_version = _provider_receipts(
+            f"goal:{goal.id}",
+        )
+    except Exception as exc:
+        provider_receipts = []
+        provider_receipt_error = type(exc).__name__
     source = {"title": goal.title, "href": f"/chat/goal/{goal.id}", "status": goal.status,
         "input_version": digest([goal.id, goal.title, goal.description, goal.domain]),
         "unstarted": _is_prepared(goal, episodes),
@@ -41,8 +62,29 @@ def goal_source(request, reference):
         "reviewer": reviewer if human else None,
         "runtime_cost_usd": sum(values) if episodes else None,
         "runtime_cost_basis": "recorded episode prices; provider invoice unverified",
+        "provider_cost_receipts": provider_receipts,
+        "provider_cost_receipts_complete": (
+            provider_receipt_error is None and (bool(provider_receipts) or not episodes)
+        ),
+        "provider_cost_receipts_catalog_version": provider_catalog_version,
+        "provider_cost_receipts_error": provider_receipt_error,
         "sample": False}
-    source["version"] = digest([source, goal.result, signoff, [vars(e) for e in episodes]])
+    # Provider reservations are an independently versioned accounting stream.
+    # Settling, claiming, or pruning one must not make the task's technical
+    # outcome observation stale; the bridge advances those receipts by their
+    # own opaque reference and ledger state.
+    version_source = {
+        key: value for key, value in source.items()
+        if key not in {
+            "provider_cost_receipts",
+            "provider_cost_receipts_complete",
+            "provider_cost_receipts_catalog_version",
+            "provider_cost_receipts_error",
+        }
+    }
+    source["version"] = digest([
+        version_source, goal.result, signoff, [vars(e) for e in episodes],
+    ])
     return source
 
 
@@ -53,6 +95,15 @@ def vendor_source(request, reference):
     outcome, metrics = row.get("outcome") or {}, row.get("metrics") or {}
     sample = (row.get("integration_mode") or {}).get("tickets") != "live_unverified"
     reviewer = str(outcome.get("reviewer") or "")
+    provider_receipt_error = None
+    provider_catalog_version = None
+    try:
+        provider_receipts, provider_catalog_version = _provider_receipts(
+            f"vendor:{row['id']}",
+        )
+    except Exception as exc:
+        provider_receipts = []
+        provider_receipt_error = type(exc).__name__
     source = {"title": row["vendor_name"], "href": "/third-party/vendor-onboarding", "status": row["stage"],
         "input_version": digest({k: row.get(k) for k in
             ("id", "vendor_name", "purpose", "project", "document_ids", "uploads", "freshness_days")}),
@@ -63,8 +114,19 @@ def vendor_source(request, reference):
             and outcome.get("execution_completed") is True and outcome.get("validation") == "verified_external_record"
             and reviewer.startswith("user:"),
         "reviewer": reviewer or None, "runtime_cost_usd": metrics.get("execution_cost_usd"),
-        "runtime_cost_basis": metrics.get("cost_basis"), "sample": sample}
-    source["version"] = digest([source, row["revision"], outcome])
+        "runtime_cost_basis": metrics.get("cost_basis"), "sample": sample,
+        "provider_cost_receipts": provider_receipts,
+        "provider_cost_receipts_complete": (
+            provider_receipt_error is None and bool(provider_receipts)
+        ),
+        "provider_cost_receipts_catalog_version": provider_catalog_version,
+        "provider_cost_receipts_error": provider_receipt_error}
+    version_source = {key: value for key, value in source.items() if key not in {
+        "provider_cost_receipts", "provider_cost_receipts_complete",
+        "provider_cost_receipts_catalog_version",
+        "provider_cost_receipts_error",
+    }}
+    source["version"] = digest([version_source, row["revision"], outcome])
     return source
 
 

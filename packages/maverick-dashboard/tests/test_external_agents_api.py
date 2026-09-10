@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac as hmac_mod
+import threading
 import time
 
 import pytest
@@ -162,11 +163,35 @@ def test_screen_flow_and_approval_poll_over_http():
                        json={"tool": "send_contract", "risk": "high"}).json()
     assert parked["requires_approval"] is True
     poll = bare.get(f"/api/v1/external/approvals/{parked['approval_id']}",
+                    params={"binding_sha256": parked["approval_binding_sha256"]},
                     headers=hdr)
     assert poll.status_code == 200
     assert poll.json()["status"] == "pending"
+    assert (
+        poll.json()["approval_binding_sha256"]
+        == parked["approval_binding_sha256"]
+    )
+    stale = bare.get(
+        f"/api/v1/external/approvals/{parked['approval_id']}",
+        params={"binding_sha256": "0" * 64},
+        headers=hdr,
+    )
+    assert stale.status_code == 409
     assert bare.get("/api/v1/external/approvals/999999",
                     headers=hdr).status_code == 404
+
+    assert _enroll(
+        id="other-agent", owner="other@corp.test", max_risk="high"
+    ).status_code == 201
+    other_token = client.post(
+        "/api/v1/external-agents/other-agent/credentials",
+        json={"surface": "rest"},
+    ).json()["token"]
+    cross_owner = bare.get(
+        f"/api/v1/external/approvals/{parked['approval_id']}",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert cross_owner.status_code == 404
 
 
 def test_gateway_404s_while_disabled(monkeypatch):
@@ -405,6 +430,133 @@ def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypat
         headers=headers,
         json=missing,
     ).status_code == 409
+
+
+def test_runtime_policy_mutation_before_core_boundary_blocks_provider(monkeypatch):
+    from maverick import ai_runtime_guardrails as runtime
+    from maverick import governed_rest
+    from maverick import model_risk_assurance as assurance
+
+    _enroll()
+    token = _mint()
+    headers = {"Authorization": f"Bearer {token}"}
+    bare = TestClient(app)
+    asset_id = "MAA-" + ("6" * 32)
+    digest = "7" * 64
+    state = {"risk_tier": "high"}
+    initial_evaluated = threading.Event()
+    mutation_done = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    class FakeConnector:
+        def __init__(self):
+            self.reads = []
+
+        def read(self, params):
+            self.reads.append(dict(params))
+            return "stale effect"
+
+    connector = FakeConnector()
+    monkeypatch.setitem(
+        governed_rest.GOVERNED_REST_FACTORIES,
+        "fakecrm",
+        lambda: connector,
+    )
+    monkeypatch.setenv("MAVERICK_EXTERNAL_CONNECTORS", "fakecrm")
+
+    class Service:
+        def evaluate(self, request):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+                current_call = calls
+            risk_tier = request.policy_context.risk_tier
+            result = runtime.RuntimeGuardrailResult(
+                decision="allow",
+                redacted_content=None,
+                receipt={
+                    "stage": "action",
+                    "decision": "allow",
+                    "categories": [],
+                    "rule_ids": [],
+                    "control_ids": [],
+                    "input_sha256": "8" * 64,
+                    "output_sha256": "8" * 64,
+                    "policy_sha256": (
+                        "a" * 64 if risk_tier == "high" else "b" * 64
+                    ),
+                    "evaluated_at": 1_800_000_000.0 + current_call,
+                    "asset_binding": {
+                        "tenant_ref": "TEN-" + ("b" * 24),
+                        "asset_id": asset_id,
+                        "asset_revision": 2,
+                        "asset_version_digest": digest,
+                    },
+                },
+            )
+            if current_call == 1:
+                initial_evaluated.set()
+                assert mutation_done.wait(5), "policy mutation did not complete"
+            return result
+
+    monkeypatch.setattr(runtime, "enabled", lambda: True)
+    monkeypatch.setattr(runtime, "default_service", Service())
+    monkeypatch.setattr(assurance, "enabled", lambda: True)
+    monkeypatch.setattr(
+        assurance,
+        "get_observation",
+        lambda _asset_id: {
+            "asset_id": asset_id,
+            "revision": 2,
+            "version_digest": digest,
+            "identity": {"asset_type": "agent"},
+        },
+    )
+    monkeypatch.setattr(
+        assurance,
+        "get_declaration",
+        lambda _asset_id: {
+            "status": "approved",
+            "observed_version_digest": digest,
+            "risk_tier": state["risk_tier"],
+            "risk_context": {},
+        },
+    )
+
+    def mutate_policy():
+        try:
+            assert initial_evaluated.wait(5), "initial runtime check did not run"
+            state["risk_tier"] = "low"
+        finally:
+            mutation_done.set()
+
+    mutation = threading.Thread(target=mutate_policy)
+    mutation.start()
+    try:
+        response = bare.post(
+            "/api/v1/external/execute",
+            headers=headers,
+            json={
+                "connector": "fakecrm",
+                "op": "get",
+                "path": "/opportunities",
+                "detail": "read the reviewed opportunity set",
+                "runtime_asset_id": asset_id,
+                "runtime_asset_revision": 2,
+                "runtime_asset_version_digest": digest,
+            },
+        )
+    finally:
+        mutation_done.set()
+        mutation.join(timeout=10)
+
+    assert not mutation.is_alive()
+    assert response.status_code == 200
+    assert response.json()["allowed"] is False
+    assert response.json()["rule"] == "runtime_authority_changed"
+    assert calls == 2
+    assert connector.reads == []
 
 
 def test_openapi_advertises_red_team_only_when_its_plane_is_enabled(monkeypatch):

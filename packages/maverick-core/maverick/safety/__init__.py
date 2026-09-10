@@ -17,9 +17,12 @@ from .canaries import (  # noqa: F401
 from .consent import (  # noqa: F401
     ConsentDecision,
     ConsentDenied,
+    ConsentPermit,
+    consume_operation_consent,
     grant_persistent,
     list_grants,
     require_consent,
+    require_operation_consent,
     revoke,
 )
 from .pii_detector import PIIMatch  # noqa: F401
@@ -45,7 +48,8 @@ from .unicode_filter import (
 __all__ = [
     "redact", "scan", "SecretMatch",
     "pii_redact", "pii_scan", "PIIMatch",
-    "ConsentDecision", "ConsentDenied", "require_consent",
+    "ConsentDecision", "ConsentDenied", "ConsentPermit", "require_consent",
+    "require_operation_consent", "consume_operation_consent",
     "grant_persistent", "revoke", "list_grants",
     "filter_tools", "apply_to_registry", "resolve_max_risk",
     "tool_risk", "tools_exceeding",

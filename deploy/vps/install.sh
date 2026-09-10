@@ -14,10 +14,17 @@
 #   3. Runs `maverick init` interactively
 #   4. Drops a systemd unit so maverick serve runs at boot
 #   5. Optionally configures Caddy for HTTPS (see Caddyfile next to this script)
+#
+# Optional:
+#   MAVERICK_CORE_EXTRAS  comma-separated maverick-agent extras to install
+#     (default: release-runtime,postgres,oidc,s3 -- the same set the container
+#     image installs, so MAVERICK_WORLD_BACKEND=postgres, OIDC browser login
+#     and S3 attachments work on a VPS without a second install step).
 
 set -euo pipefail
 
 MAVERICK_REF="${MAVERICK_REF:-}"
+MAVERICK_CORE_EXTRAS="${MAVERICK_CORE_EXTRAS:-release-runtime,postgres,oidc,s3}"
 STAGED_SOURCE=""
 
 cleanup_staged_source() {
@@ -134,7 +141,7 @@ install_maverick() {
   run_as_user python3 /opt/maverick/scripts/install_release_cohort.py \
     --source-root /opt/maverick \
     --target-python "$target_python" \
-    --core-extra release-runtime
+    --core-extra "$MAVERICK_CORE_EXTRAS"
 }
 
 run_wizard() {

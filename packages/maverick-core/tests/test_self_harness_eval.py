@@ -199,6 +199,41 @@ def test_llm_judge_parses_yes_no():
     assert ev.llm_judge(_FakeLLM(text="no"))("g", "out", "exp") is False
 
 
+def test_llm_eval_operations_bind_work_item_and_semantic_cost_category():
+    from maverick import provider_cost_cap
+
+    seen = []
+
+    class ContextLLM:
+        model = "fake:context"
+
+        def complete(self, _system, _messages, **_kwargs):
+            operation = provider_cost_cap.current_provider_operation()
+            assert operation is not None
+            seen.append((
+                provider_cost_cap._current_work_item(), operation.category,
+                operation.service, operation.operation_id,
+            ))
+            text = "yes" if operation.category == "evaluation" else "rewritten"
+            return type("R", (), {"text": text})()
+
+    llm = ContextLLM()
+    work_item = "outcome-work:self-harness-context-9"
+    assert ev.llm_runner(llm, work_item_id=work_item)("line", "goal") == "rewritten"
+    assert ev.llm_judge(llm, work_item_id=work_item)("g", "o", "e") is True
+    assert ev.llm_paraphraser(llm, work_item_id=work_item)(["goal"]) == ["rewritten"]
+
+    assert [(item[0], item[1], item[2]) for item in seen] == [
+        (work_item, "generation", "self-harness-candidate"),
+        (work_item, "evaluation", "self-harness-judge"),
+        (work_item, "generation", "self-harness-paraphraser"),
+    ]
+    assert len({item[3] for item in seen}) == 3
+    assert all(item[3].startswith("self-harness.") for item in seen)
+    assert provider_cost_cap._current_work_item() is None
+    assert provider_cost_cap.current_provider_operation() is None
+
+
 class _SeqLLM:
     """Returns a scripted sequence of texts across successive complete() calls --
     so a self-consistency judge sees diverse votes."""

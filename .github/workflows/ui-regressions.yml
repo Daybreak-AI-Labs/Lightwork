@@ -59,6 +59,10 @@ jobs:
         working-directory: packages/maverick-dashboard/tests/browser
         run: |
           npm ci --ignore-scripts
+          # The runner image ships a Google Chrome apt source whose index
+          # intermittently fails verification (Hash Sum mismatch); Playwright
+          # brings its own Chromium, so drop it before --with-deps runs apt.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list
           npx playwright install --with-deps chromium
       - name: Real Chromium customer journeys with synthetic local integrations
         working-directory: packages/maverick-dashboard/tests/browser

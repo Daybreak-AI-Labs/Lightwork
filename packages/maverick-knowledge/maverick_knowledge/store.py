@@ -16,10 +16,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from .provider_accounting import metered_operation
+
 
 @dataclass
 class Match:
     score: float
+    text: str
+    meta: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class StoredChunk:
+    """One exact stored chunk returned without similarity ranking."""
+
+    chunk_id: str
     text: str
     meta: dict[str, Any]
 
@@ -38,6 +49,10 @@ class VectorStore(Protocol):
     def count_where(self, collection: str, key: str, value: str) -> int: ...
 
     def count(self, collection: str) -> int: ...
+
+    def read_where(
+        self, collection: str, key: str, value: str, *, limit: int,
+    ) -> list[StoredChunk]: ...
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -166,6 +181,27 @@ class SqliteVectorStore:
             ).fetchone()
         return n
 
+    def read_where(
+        self, collection: str, key: str, value: str, *, limit: int,
+    ) -> list[StoredChunk]:
+        """Return exact metadata matches plus one possible overflow sentinel."""
+        maximum = int(limit)
+        if maximum < 1:
+            raise ValueError("knowledge exact-read limit must be positive")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, text, meta FROM chunks WHERE collection = ? ORDER BY id",
+                (collection,),
+            ).fetchall()
+        result: list[StoredChunk] = []
+        for chunk_id, text, raw_meta in rows:
+            meta = json.loads(raw_meta or "{}")
+            if meta.get(key) == value:
+                result.append(StoredChunk(str(chunk_id), str(text), dict(meta)))
+                if len(result) > maximum:
+                    break
+        return result
+
     def close(self) -> None:
         """Close the underlying SQLite connection (idempotent)."""
         db = getattr(self, "_db", None)
@@ -254,19 +290,34 @@ class PgVectorStore:
         self._table = table
         self._namespace = str(namespace or "default")
         self._lock = threading.Lock()
-        self._db = psycopg.connect(self._dsn, autocommit=True)
+        with metered_operation(
+            "pgvector",
+            category="update",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-initialize",
+        ) as provider_call:
+            self._db = provider_call(
+                lambda: psycopg.connect(self._dsn, autocommit=True)
+            )
+            self._initialize_schema(provider_call)
+
+    def _initialize_schema(self, provider_call) -> None:
         try:
-            self._db.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            provider_call(
+                lambda: self._db.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            )
         except Exception as e:  # pragma: no cover -- perms vary by deployment
             raise RuntimeError(
                 "pgvector store: could not enable the 'vector' extension "
                 f"({e}). Install pgvector and grant CREATE on the database."
             ) from e
-        self._db.execute(
-            f"CREATE TABLE IF NOT EXISTS {self._table} ("
-            "namespace TEXT, collection TEXT, id TEXT, text TEXT, "
-            f"embedding vector({self._dim}), meta JSONB, "
-            "PRIMARY KEY (namespace, collection, id))"
+        provider_call(
+            lambda: self._db.execute(
+                f"CREATE TABLE IF NOT EXISTS {self._table} ("
+                "namespace TEXT, collection TEXT, id TEXT, text TEXT, "
+                f"embedding vector({self._dim}), meta JSONB, "
+                "PRIMARY KEY (namespace, collection, id))"
+            )
         )
         # Migrate a pre-namespacing table in place. Older installs created
         # {table} with PRIMARY KEY (collection, id) and no namespace column, so a
@@ -277,58 +328,90 @@ class PgVectorStore:
         # multiple workspaces and ON CONFLICT (namespace, collection, id) upserts
         # resolve. Guarded on the column's absence so it runs once, not per init.
         with self._db.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = %s AND column_name = 'namespace'",
-                (self._table,),
-            )
-            has_namespace = cur.fetchone() is not None
+            has_namespace = provider_call(
+                lambda: (
+                    cur.execute(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = %s AND column_name = 'namespace'",
+                        (self._table,),
+                    ),
+                    cur.fetchone(),
+                )[1]
+            ) is not None
         if not has_namespace:
-            self._db.execute(f"ALTER TABLE {self._table} ADD COLUMN namespace TEXT")
-            self._db.execute(
-                f"UPDATE {self._table} SET namespace = 'default' "
-                "WHERE namespace IS NULL"
+            provider_call(
+                lambda: self._db.execute(
+                    f"ALTER TABLE {self._table} ADD COLUMN namespace TEXT"
+                )
             )
-            self._db.execute(
-                f"ALTER TABLE {self._table} ALTER COLUMN namespace SET NOT NULL"
+            provider_call(
+                lambda: self._db.execute(
+                    f"UPDATE {self._table} SET namespace = 'default' "
+                    "WHERE namespace IS NULL"
+                )
             )
-            self._db.execute(
-                f"ALTER TABLE {self._table} DROP CONSTRAINT IF EXISTS {self._table}_pkey"
+            provider_call(
+                lambda: self._db.execute(
+                    f"ALTER TABLE {self._table} "
+                    "ALTER COLUMN namespace SET NOT NULL"
+                )
             )
-            self._db.execute(
-                f"ALTER TABLE {self._table} ADD CONSTRAINT {self._table}_pkey "
-                "PRIMARY KEY (namespace, collection, id)"
+            provider_call(
+                lambda: self._db.execute(
+                    f"ALTER TABLE {self._table} "
+                    f"DROP CONSTRAINT IF EXISTS {self._table}_pkey"
+                )
+            )
+            provider_call(
+                lambda: self._db.execute(
+                    f"ALTER TABLE {self._table} "
+                    f"ADD CONSTRAINT {self._table}_pkey "
+                    "PRIMARY KEY (namespace, collection, id)"
+                )
             )
         # Cosine IVFFlat index -- approximate but the point of the scale backend.
-        self._db.execute(
-            f"CREATE INDEX IF NOT EXISTS {self._table}_embedding_idx "
-            f"ON {self._table} USING ivfflat (embedding vector_cosine_ops) "
-            "WITH (lists = 100)"
+        provider_call(
+            lambda: self._db.execute(
+                f"CREATE INDEX IF NOT EXISTS {self._table}_embedding_idx "
+                f"ON {self._table} USING ivfflat (embedding vector_cosine_ops) "
+                "WITH (lists = 100)"
+            )
         )
 
     def add(self, collection, items) -> None:
         if not items:
             return
-        with self._lock, self._db.cursor() as cur:
-            cur.executemany(
-                f"INSERT INTO {self._table} "
-                "(namespace, collection, id, text, embedding, meta) "
-                "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb) "
-                "ON CONFLICT (namespace, collection, id) DO UPDATE SET "
-                "text = EXCLUDED.text, embedding = EXCLUDED.embedding, "
-                "meta = EXCLUDED.meta",
-                [
-                    (
-                        self._namespace,
-                        collection,
-                        cid,
-                        text,
-                        _to_pgvector(vec),
-                        json.dumps(meta),
-                    )
-                    for cid, text, vec, meta in items
-                ],
+        params = [
+            (
+                self._namespace,
+                collection,
+                cid,
+                text,
+                _to_pgvector(vec),
+                json.dumps(meta),
             )
+            for cid, text, vec, meta in items
+        ]
+
+        def dispatch() -> None:
+            with self._lock, self._db.cursor() as cur:
+                cur.executemany(
+                    f"INSERT INTO {self._table} "
+                    "(namespace, collection, id, text, embedding, meta) "
+                    "VALUES (%s, %s, %s, %s, %s::vector, %s::jsonb) "
+                    "ON CONFLICT (namespace, collection, id) DO UPDATE SET "
+                    "text = EXCLUDED.text, embedding = EXCLUDED.embedding, "
+                    "meta = EXCLUDED.meta",
+                    params,
+                )
+
+        with metered_operation(
+            "pgvector",
+            category="storage",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-add",
+        ) as provider_call:
+            provider_call(dispatch)
 
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
@@ -341,19 +424,30 @@ class PgVectorStore:
                 f"{self._dim}; the corpus was embedded with a different "
                 "embedder/model than this query"
             )
-        with self._lock, self._db.cursor() as cur:
-            rows = cur.execute(
-                f"SELECT text, meta, 1 - (embedding <=> %s::vector) AS score "
-                f"FROM {self._table} WHERE namespace = %s AND collection = %s "
-                "ORDER BY embedding <=> %s::vector LIMIT %s",
-                (
-                    _to_pgvector(vector),
-                    self._namespace,
-                    collection,
-                    _to_pgvector(vector),
-                    int(k),
-                ),
-            ).fetchall()
+        vector_literal = _to_pgvector(vector)
+
+        def dispatch():
+            with self._lock, self._db.cursor() as cur:
+                return cur.execute(
+                    f"SELECT text, meta, 1 - (embedding <=> %s::vector) AS score "
+                    f"FROM {self._table} WHERE namespace = %s AND collection = %s "
+                    "ORDER BY embedding <=> %s::vector LIMIT %s",
+                    (
+                        vector_literal,
+                        self._namespace,
+                        collection,
+                        vector_literal,
+                        int(k),
+                    ),
+                ).fetchall()
+
+        with metered_operation(
+            "pgvector",
+            category="retrieval",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-search",
+        ) as provider_call:
+            rows = provider_call(dispatch)
         # psycopg adapts JSONB to a dict already; tolerate a str just in case.
         return [
             Match(float(score), text, meta if isinstance(meta, dict) else json.loads(meta or "{}"))
@@ -361,20 +455,39 @@ class PgVectorStore:
         ]
 
     def delete_collection(self, collection: str) -> None:
-        with self._lock:
-            self._db.execute(
-                f"DELETE FROM {self._table} WHERE namespace = %s AND collection = %s",
-                (self._namespace, collection),
-            )
+        def dispatch() -> None:
+            with self._lock:
+                self._db.execute(
+                    f"DELETE FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s",
+                    (self._namespace, collection),
+                )
+
+        with metered_operation(
+            "pgvector",
+            category="update",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-delete-collection",
+        ) as provider_call:
+            provider_call(dispatch)
 
     def collections(self) -> list[str]:
         """Every collection with at least one chunk in this namespace."""
-        with self._lock, self._db.cursor() as cur:
-            rows = cur.execute(
-                f"SELECT DISTINCT collection FROM {self._table} "
-                "WHERE namespace = %s ORDER BY collection",
-                (self._namespace,),
-            ).fetchall()
+        def dispatch():
+            with self._lock, self._db.cursor() as cur:
+                return cur.execute(
+                    f"SELECT DISTINCT collection FROM {self._table} "
+                    "WHERE namespace = %s ORDER BY collection",
+                    (self._namespace,),
+                ).fetchall()
+
+        with metered_operation(
+            "pgvector",
+            category="retrieval",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-collections",
+        ) as provider_call:
+            rows = provider_call(dispatch)
         return [r[0] for r in rows]
 
     def delete_where(self, collection: str, key: str, value: str) -> int:
@@ -382,30 +495,98 @@ class PgVectorStore:
 
         JSONB containment (``@>``) keeps the erasure sweep in Postgres.
         """
-        with self._lock, self._db.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM {self._table} "
-                "WHERE namespace = %s AND collection = %s AND meta @> %s::jsonb",
-                (self._namespace, collection, json.dumps({key: value})),
-            )
-            return int(cur.rowcount or 0)
+        def dispatch() -> int:
+            with self._lock, self._db.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s "
+                    "AND meta @> %s::jsonb",
+                    (self._namespace, collection, json.dumps({key: value})),
+                )
+                return int(cur.rowcount or 0)
+
+        with metered_operation(
+            "pgvector",
+            category="update",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-delete-where",
+        ) as provider_call:
+            return provider_call(dispatch)
 
     def count_where(self, collection: str, key: str, value: str) -> int:
-        with self._lock, self._db.cursor() as cur:
-            (n,) = cur.execute(
-                f"SELECT COUNT(*) FROM {self._table} "
-                "WHERE namespace = %s AND collection = %s AND meta @> %s::jsonb",
-                (self._namespace, collection, json.dumps({key: value})),
-            ).fetchone()
-        return int(n)
+        def dispatch() -> int:
+            with self._lock, self._db.cursor() as cur:
+                (n,) = cur.execute(
+                    f"SELECT COUNT(*) FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s "
+                    "AND meta @> %s::jsonb",
+                    (self._namespace, collection, json.dumps({key: value})),
+                ).fetchone()
+            return int(n)
+
+        with metered_operation(
+            "pgvector",
+            category="retrieval",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-count-where",
+        ) as provider_call:
+            return provider_call(dispatch)
 
     def count(self, collection: str) -> int:
-        with self._lock, self._db.cursor() as cur:
-            (n,) = cur.execute(
-                f"SELECT COUNT(*) FROM {self._table} WHERE namespace = %s AND collection = %s",
-                (self._namespace, collection),
-            ).fetchone()
-        return int(n)
+        def dispatch() -> int:
+            with self._lock, self._db.cursor() as cur:
+                (n,) = cur.execute(
+                    f"SELECT COUNT(*) FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s",
+                    (self._namespace, collection),
+                ).fetchone()
+            return int(n)
+
+        with metered_operation(
+            "pgvector",
+            category="retrieval",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-count",
+        ) as provider_call:
+            return provider_call(dispatch)
+
+    def read_where(
+        self, collection: str, key: str, value: str, *, limit: int,
+    ) -> list[StoredChunk]:
+        maximum = int(limit)
+        if maximum < 1:
+            raise ValueError("knowledge exact-read limit must be positive")
+
+        def dispatch():
+            with self._lock, self._db.cursor() as cur:
+                return cur.execute(
+                    f"SELECT id, text, meta FROM {self._table} "
+                    "WHERE namespace = %s AND collection = %s "
+                    "AND meta ->> %s = %s ORDER BY id LIMIT %s",
+                    (
+                        self._namespace,
+                        collection,
+                        str(key),
+                        str(value),
+                        maximum + 1,
+                    ),
+                ).fetchall()
+
+        with metered_operation(
+            "pgvector",
+            category="retrieval",
+            service="vector-store:pgvector",
+            operation="knowledge-pgvector-exact-read",
+        ) as provider_call:
+            rows = provider_call(dispatch)
+        return [
+            StoredChunk(
+                str(chunk_id),
+                str(text),
+                meta if isinstance(meta, dict) else json.loads(meta or "{}"),
+            )
+            for chunk_id, text, meta in rows
+        ]
 
     def close(self) -> None:
         """Close the underlying connection (idempotent)."""
@@ -457,20 +638,37 @@ class QdrantStore:
             raise ValueError(f"qdrant store needs a positive dim, got {dim}")
         self._dim = int(dim)
         self._namespace = str(namespace or "default")
-        self._client = QdrantClient(
-            url=self._url, api_key=api_key or os.environ.get("QDRANT_API_KEY") or None)
+        selected_api_key = api_key or os.environ.get("QDRANT_API_KEY") or None
+        # Qdrant performs a server compatibility check by default during
+        # construction. Treat the constructor as the first physical hosted
+        # call so a configured unknown-price cap blocks before any dispatch.
+        with metered_operation(
+            "qdrant",
+            category="retrieval",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-initialize",
+        ) as provider_call:
+            self._client = provider_call(
+                lambda: QdrantClient(url=self._url, api_key=selected_api_key)
+            )
 
     def _cname(self, collection: str) -> str:
         return f"{self._namespace}__{collection}"
 
-    def _ensure(self, collection: str) -> str:
+    def _ensure(self, collection: str, provider_call) -> str:
         from qdrant_client import models
         name = self._cname(collection)
-        if not self._client.collection_exists(name):
-            self._client.create_collection(
-                collection_name=name,
-                vectors_config=models.VectorParams(
-                    size=self._dim, distance=models.Distance.COSINE),
+        exists = provider_call(lambda: self._client.collection_exists(name))
+        if not exists:
+            vectors_config = models.VectorParams(
+                size=self._dim,
+                distance=models.Distance.COSINE,
+            )
+            provider_call(
+                lambda: self._client.create_collection(
+                    collection_name=name,
+                    vectors_config=vectors_config,
+                )
             )
         return name
 
@@ -491,18 +689,27 @@ class QdrantStore:
         if not items:
             return
         from qdrant_client import models
-        name = self._ensure(collection)
-        self._client.upsert(
-            collection_name=name,
-            points=[
-                models.PointStruct(
-                    id=self._point_id(cid),
-                    vector=[float(x) for x in vec],
-                    payload={"text": text, "meta": dict(meta or {}), "chunk_id": cid},
+        points = [
+            models.PointStruct(
+                id=self._point_id(cid),
+                vector=[float(x) for x in vec],
+                payload={"text": text, "meta": dict(meta or {}), "chunk_id": cid},
+            )
+            for cid, text, vec, meta in items
+        ]
+        with metered_operation(
+            "qdrant",
+            category="storage",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-add",
+        ) as provider_call:
+            name = self._ensure(collection, provider_call)
+            provider_call(
+                lambda: self._client.upsert(
+                    collection_name=name,
+                    points=points,
                 )
-                for cid, text, vec, meta in items
-            ],
-        )
+            )
 
     def search(self, collection, vector, k: int = 5) -> list[Match]:
         if k <= 0:
@@ -513,12 +720,23 @@ class QdrantStore:
                 f"{self._dim}; the corpus was embedded with a different "
                 "embedder/model than this query")
         name = self._cname(collection)
-        if not self._client.collection_exists(name):
-            return []
-        hits = self._client.query_points(
-            collection_name=name, query=[float(x) for x in vector], limit=int(k),
-            with_payload=True,
-        ).points
+        query_vector = [float(x) for x in vector]
+        with metered_operation(
+            "qdrant",
+            category="retrieval",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-search",
+        ) as provider_call:
+            if not provider_call(lambda: self._client.collection_exists(name)):
+                return []
+            hits = provider_call(
+                lambda: self._client.query_points(
+                    collection_name=name,
+                    query=query_vector,
+                    limit=int(k),
+                    with_payload=True,
+                )
+            ).points
         return [
             Match(
                 float(h.score),
@@ -530,42 +748,131 @@ class QdrantStore:
 
     def delete_collection(self, collection: str) -> None:
         name = self._cname(collection)
-        if self._client.collection_exists(name):
-            self._client.delete_collection(name)
+        with metered_operation(
+            "qdrant",
+            category="update",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-delete-collection",
+        ) as provider_call:
+            if provider_call(lambda: self._client.collection_exists(name)):
+                provider_call(lambda: self._client.delete_collection(name))
 
     def collections(self) -> list[str]:
         prefix = f"{self._namespace}__"
-        names = [c.name for c in self._client.get_collections().collections]
+        with metered_operation(
+            "qdrant",
+            category="retrieval",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-collections",
+        ) as provider_call:
+            result = provider_call(self._client.get_collections)
+        names = [c.name for c in result.collections]
         return sorted(n[len(prefix):] for n in names if n.startswith(prefix))
 
     def delete_where(self, collection: str, key: str, value: str) -> int:
         from qdrant_client import models
         name = self._cname(collection)
-        if not self._client.collection_exists(name):
-            return 0
-        doomed = self.count_where(collection, key, value)
-        if doomed:
-            self._client.delete(
-                collection_name=name,
-                points_selector=models.FilterSelector(
-                    filter=self._meta_filter(key, value)),
+        meta_filter = self._meta_filter(key, value)
+        with metered_operation(
+            "qdrant",
+            category="update",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-delete-where",
+        ) as provider_call:
+            if not provider_call(lambda: self._client.collection_exists(name)):
+                return 0
+            doomed = int(
+                provider_call(
+                    lambda: self._client.count(
+                        collection_name=name,
+                        count_filter=meta_filter,
+                        exact=True,
+                    )
+                ).count
             )
-        return doomed
+            if doomed:
+                selector = models.FilterSelector(filter=meta_filter)
+                provider_call(
+                    lambda: self._client.delete(
+                        collection_name=name,
+                        points_selector=selector,
+                    )
+                )
+            return doomed
 
     def count_where(self, collection: str, key: str, value: str) -> int:
         name = self._cname(collection)
-        if not self._client.collection_exists(name):
-            return 0
-        return int(self._client.count(
-            collection_name=name, count_filter=self._meta_filter(key, value),
-            exact=True,
-        ).count)
+        meta_filter = self._meta_filter(key, value)
+        with metered_operation(
+            "qdrant",
+            category="retrieval",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-count-where",
+        ) as provider_call:
+            if not provider_call(lambda: self._client.collection_exists(name)):
+                return 0
+            return int(
+                provider_call(
+                    lambda: self._client.count(
+                        collection_name=name,
+                        count_filter=meta_filter,
+                        exact=True,
+                    )
+                ).count
+            )
 
     def count(self, collection: str) -> int:
         name = self._cname(collection)
-        if not self._client.collection_exists(name):
-            return 0
-        return int(self._client.count(collection_name=name, exact=True).count)
+        with metered_operation(
+            "qdrant",
+            category="retrieval",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-count",
+        ) as provider_call:
+            if not provider_call(lambda: self._client.collection_exists(name)):
+                return 0
+            return int(
+                provider_call(
+                    lambda: self._client.count(
+                        collection_name=name,
+                        exact=True,
+                    )
+                ).count
+            )
+
+    def read_where(
+        self, collection: str, key: str, value: str, *, limit: int,
+    ) -> list[StoredChunk]:
+        maximum = int(limit)
+        if maximum < 1:
+            raise ValueError("knowledge exact-read limit must be positive")
+        name = self._cname(collection)
+        meta_filter = self._meta_filter(str(key), str(value))
+        with metered_operation(
+            "qdrant",
+            category="retrieval",
+            service="vector-store:qdrant",
+            operation="knowledge-qdrant-exact-read",
+        ) as provider_call:
+            if not provider_call(lambda: self._client.collection_exists(name)):
+                return []
+            points, _offset = provider_call(
+                lambda: self._client.scroll(
+                    collection_name=name,
+                    scroll_filter=meta_filter,
+                    limit=maximum + 1,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            )
+        return [
+            StoredChunk(
+                str((point.payload or {}).get("chunk_id", point.id)),
+                str((point.payload or {}).get("text", "")),
+                dict((point.payload or {}).get("meta") or {}),
+            )
+            for point in points
+        ]
 
     def close(self) -> None:
         client = getattr(self, "_client", None)

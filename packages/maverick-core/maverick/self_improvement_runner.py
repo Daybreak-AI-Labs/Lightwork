@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 import unicodedata
 import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from decimal import ROUND_CEILING, Decimal
 
 from .learning_guard import Halted
 from .si_producers import ToolOutcomeTracker, propose_policy, propose_prompt, propose_tool
@@ -427,7 +430,25 @@ def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
         if reflexions is None:
             from . import reflexion
             reflexions = [r.to_dict() for r in reflexion.list_recent(limit=limit)]
-        return self_harness.run_self_harness(
+        sealed_holdout = (
+            holdout_authorize
+            if isinstance(holdout_authorize, _SealedHoldoutAuthorizer)
+            else None
+        )
+        final_promotion_authorize = promotion_authorize
+        if sealed_holdout is not None:
+            calibration_authorize = promotion_authorize
+
+            def _authorize_after_sealed_evaluation() -> bool:
+                if not sealed_holdout.finalize_for_promotion():
+                    return False
+                return (
+                    True if calibration_authorize is None
+                    else calibration_authorize() is True
+                )
+
+            final_promotion_authorize = _authorize_after_sealed_evaluation
+        report = self_harness.run_self_harness(
             reflexions, model_id=model_id, held_in=held_in, held_out=held_out,
             score_with=score_with, score_without=score_without,
             propose_fn=propose_fn, controller=controller, min_support=min_support,
@@ -445,7 +466,12 @@ def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
             holdout_rotations=holdout_rotations, canary=bool(canary),
             holdout_authorize=holdout_authorize,
             eval_for_context=eval_for_context,
-            promotion_authorize=promotion_authorize)
+            promotion_authorize=final_promotion_authorize)
+        if (sealed_holdout is not None
+                and not sealed_holdout.finalize_remaining()):
+            report.skipped.append(
+                sealed_holdout.failure or "sealed evaluator failed closed")
+        return report
     except Halted:
         raise
     except Exception:  # pragma: no cover -- learning never perturbs a run
@@ -795,6 +821,247 @@ def _eval_budget(settings: dict):
             "self-harness evaluation budget policy is invalid") from exc
 
 
+_SELF_HARNESS_EVALUATOR_SOURCE = b"""\
+def evaluate(observations):
+    return {"output": {
+        "case_count": observations["case_count"],
+        "purpose": observations["purpose"],
+    }}
+"""
+
+
+@dataclass
+class _PendingHoldoutEvaluation:
+    query: object
+    permit: object
+    private_task: dict[str, object]
+    protocol: object
+    started: float
+    input_tokens: int
+    output_tokens: int
+    dollars: float
+    charged_provider_calls: int
+
+
+class _SealedHoldoutAuthorizer:
+    """Two-phase final-query broker used by the production harness runner.
+
+    ``__call__`` atomically reserves a query and its resource allocation before
+    a scorer sees the final cases. The next authorization, the promotion gate,
+    or the pass-finally hook completes that reservation only after scoring by
+    executing the registered evaluator candidate in ``ResearchContainerRunner``.
+    """
+
+    def __init__(
+        self, *, ledger, policy, study_digest: str,
+        effective_index: Mapping[str, object], evaluator_epoch: str,
+        image: str, evaluation_budget, judge_samples: int,
+        metamorphic_enabled: bool,
+    ) -> None:
+        self.ledger = ledger
+        self.policy = policy
+        self.study_digest = study_digest
+        self.effective_index = effective_index
+        self.evaluator_epoch = evaluator_epoch
+        self.image = image
+        self.evaluation_budget = evaluation_budget
+        self.judge_samples = judge_samples
+        self.metamorphic_enabled = metamorphic_enabled
+        self.cycle_id = uuid.uuid4().hex
+        self.counter = 0
+        self.pending: list[_PendingHoldoutEvaluation] = []
+        self.failure: str | None = None
+
+    def _declared_cost(self):
+        status = self.ledger.status(self.study_digest)
+        # Reserve the whole currently available envelope. This permits only one
+        # outstanding final query across concurrent processes; finalization
+        # atomically releases the difference between the reservation and the
+        # measured/charged cost for the next query.
+        return (
+            self.policy.cost_limit
+            if status.policy is None
+            else status.cost_remaining
+        )
+
+    def _score_cost(self, pending: _PendingHoldoutEvaluation, finished: float):
+        from .self_harness_holdout import EvaluationCost
+
+        budget = self.evaluation_budget
+        if budget is None:
+            input_tokens = output_tokens = 0
+            dollars = Decimal("0")
+        else:
+            input_tokens = max(0, int(budget.input_tokens) - pending.input_tokens)
+            output_tokens = max(0, int(budget.output_tokens) - pending.output_tokens)
+            dollars = max(
+                Decimal("0"),
+                Decimal(str(budget.dollars)) - Decimal(str(pending.dollars)),
+            ).quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
+        return EvaluationCost(
+            # Provider responses do not expose a durable request count. Charge
+            # the deterministic worst-case count for the scorer protocol.
+            provider_calls=pending.charged_provider_calls,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            compute_millis=max(0, math.ceil(
+                (finished - pending.started) * 1000)),
+            dollars=format(dollars, "f"),
+        )
+
+    def _finish_pending(self) -> bool:
+        if not self.pending:
+            return self.failure is None
+        from .self_harness_isolation import (
+            EvaluatorVerdict,
+            IsolatedEvaluator,
+            ResearchContainerCandidate,
+        )
+
+        current = list(self.pending)
+        self.pending.clear()
+        for pending in current:
+            scoring_finished = time.monotonic()
+            score_cost = self._score_cost(pending, scoring_finished)
+            expected = {
+                field: pending.private_task[field]
+                for field in ("case_count", "purpose")
+            }
+
+            def _evaluator(_private, output, *, expected=expected, cost=score_cost):
+                return EvaluatorVerdict(
+                    accepted=output == expected,
+                    resource_cost=cost,
+                )
+
+            candidate = ResearchContainerCandidate(
+                candidate_identity="self-harness-evaluator-candidate",
+                image=self.image,
+                files={"main.py": _SELF_HARNESS_EVALUATOR_SOURCE},
+            )
+            try:
+                result = IsolatedEvaluator(
+                    ledger=self.ledger,
+                    policy=self.policy,
+                    evaluator_identity="self-harness-controller",
+                    final_set_generator_identity="self-harness-final-set-generator",
+                    evaluator_epoch=self.evaluator_epoch,
+                ).evaluate(
+                    query=pending.query,
+                    private_task=pending.private_task,
+                    protocol=pending.protocol,
+                    sandbox=candidate,
+                    evaluator=_evaluator,
+                    permit=pending.permit,
+                )
+            except Exception:
+                log.debug("sealed holdout completion failed", exc_info=True)
+                self.failure = "sealed evaluator container failed closed"
+                return False
+            if result.accepted is not True:
+                self.failure = "sealed evaluator candidate did not validate"
+                return False
+        return True
+
+    def __call__(self, purpose: str, signature: str, cases: list[str]) -> float:
+        from .self_harness_holdout import (
+            FinalSetRetired,
+            HoldoutBudgetExhausted,
+            HoldoutQuery,
+            fingerprint_manifest,
+        )
+        from .self_harness_isolation import ObservationProtocol
+
+        family_digest = fingerprint_manifest(
+            _effective_eval_family(self.effective_index, cases))
+        purpose_value = str(purpose)
+        if purpose_value == "metamorphic" and self.pending:
+            pending = self.pending[-1]
+            same_protocol_query = (
+                pending.query.signature == str(signature)
+                and pending.private_task["effective_family_sha256"] == family_digest
+                and pending.private_task["cases"] == sorted(cases)
+            )
+            if not same_protocol_query:
+                raise FinalSetRetired(
+                    "metamorphic continuation is not bound to the reserved query")
+            # Confirmation and its meaning-preserving metamorphic check are one
+            # evaluation protocol over one physical final set, not two fresh
+            # confirmatory queries. The receipt remains pending until both score.
+            return pending.permit.critical_z_two_sided
+        # A subsequent final query can only occur after the prior scorer call
+        # returned. Complete that receipt now; a failure consumes its reservation
+        # and prevents any further final-set exposure.
+        if not self._finish_pending():
+            raise RuntimeError(self.failure or "sealed evaluator failed")
+        self.counter += 1
+        private_task = {
+            "schema": "maverick-self-harness-final-set-v2",
+            # The physical final-set identity must not change when a caller
+            # renames the evaluation purpose. Keep the candidate-visible task
+            # marker constant and bind the purpose separately in ``view``.
+            "purpose": "final-score-completion",
+            "case_count": len(cases),
+            "effective_family_sha256": family_digest,
+            "cases": sorted(cases),
+        }
+        protocol = ObservationProtocol(
+            protocol_id="self-harness-score-completion-v1",
+            allowed_fields=(
+                "purpose", "case_count",
+            ),
+            required_for_solution=(
+                "purpose", "case_count",
+            ),
+            timeout_seconds=30.0,
+        )
+        declared_cost = self._declared_cost()
+        charged_calls = 2 * len(self.effective_index) * (
+            1 + self.judge_samples)
+        if self.metamorphic_enabled:
+            charged_calls += len(cases) * (
+                1 + 2 * (1 + self.judge_samples))
+        if charged_calls > declared_cost.provider_calls:
+            raise HoldoutBudgetExhausted(
+                "declared provider-call budget cannot cover this final query")
+        query = HoldoutQuery(
+            holdout_sha256=self.study_digest,
+            view_sha256=fingerprint_manifest({
+                "purpose": purpose_value,
+                "effective_family_sha256": family_digest,
+                "cases": sorted(cases),
+            }),
+            query_id=f"{self.cycle_id}:{self.counter}",
+            cycle_id=self.cycle_id,
+            signature=str(signature),
+            evaluator_epoch=self.evaluator_epoch,
+            purpose=purpose_value,
+            final_set_sha256=fingerprint_manifest(private_task),
+            protocol_sha256=protocol.sha256,
+            declared_cost=declared_cost,
+        )
+        permit = self.ledger.authorize(query, self.policy)
+        budget = self.evaluation_budget
+        self.pending.append(_PendingHoldoutEvaluation(
+            query=query,
+            permit=permit,
+            private_task=private_task,
+            protocol=protocol,
+            started=time.monotonic(),
+            input_tokens=int(budget.input_tokens) if budget is not None else 0,
+            output_tokens=int(budget.output_tokens) if budget is not None else 0,
+            dollars=float(budget.dollars) if budget is not None else 0.0,
+            charged_provider_calls=charged_calls,
+        ))
+        return permit.critical_z_two_sided
+
+    def finalize_for_promotion(self) -> bool:
+        return self._finish_pending()
+
+    def finalize_remaining(self) -> bool:
+        return self._finish_pending()
+
+
 def _build_holdout_authorizer(
     settings: Mapping[str, object], *, corpus_path: str,
     model_id: str, evaluation_system: str,
@@ -802,13 +1069,13 @@ def _build_holdout_authorizer(
     metamorphic_model: str | None = None,
     held_out_frac: float = 0.3,
     corpus_manifest: Mapping[str, object] | None = None,
+    evaluation_budget=None,
 ):
-    """Bind one cycle to an explicitly provisioned cross-cycle holdout ledger."""
+    """Bind one cycle to an atomic, Docker-completed final-query ledger."""
     from . import self_harness_eval as ev
     from .llm import model_for_role
     from .self_harness_holdout import (
         AlphaBudget,
-        HoldoutQuery,
         HoldoutQueryLedger,
         fingerprint_manifest,
     )
@@ -826,20 +1093,42 @@ def _build_holdout_authorizer(
     effective_index = _effective_eval_index(raw_manifest)
     ledger = HoldoutQueryLedger(ledger_path)
     ledger_status = ledger.verify()
-    # One provisioned ledger is one statistical study. Every exact or
-    # overlapping case family in that study shares the same global query/alpha
-    # budget; corpus edits cannot mint a fresh allowance. Starting a new study
-    # requires the explicit, auditable act of provisioning a new ledger.
+    custody_mode = os.environ.get(
+        "MAVERICK_SELF_HARNESS_REQUIRE_INDEPENDENT_CUSTODY", "0",
+    ).strip().lower()
+    if custody_mode not in {"0", "1", "false", "true", "no", "yes", "off", "on"}:
+        raise ValueError("self-harness custody mode is invalid")
+    if (bool(settings.get("holdout_require_independent_custody", False))
+            or custody_mode in {"1", "true", "yes", "on"}):
+        # Local ACL/path verification is not independent custody, including on
+        # Windows where the controller account can administer the ledger and
+        # Docker daemon. A confirmatory deployment must provide another
+        # custodian; the local implementation therefore fails closed here.
+        ledger.require_independent_custody()
     study_digest = fingerprint_manifest({
         "schema": "maverick-self-harness-ledger-study-v1",
         "ledger_id": ledger_status.ledger_id,
     })
+    max_queries = int(settings.get("holdout_max_queries", 2))
+    eval_max_input = int(getattr(evaluation_budget, "max_input_tokens", 10**9))
+    eval_max_output = int(getattr(evaluation_budget, "max_output_tokens", 10**9))
+    eval_max_dollars = str(getattr(
+        evaluation_budget, "max_dollars",
+        settings.get("eval_budget_dollars", 5.0),
+    ))
+    eval_max_compute = math.ceil(float(getattr(
+        evaluation_budget, "max_wall_seconds", 3600.0,
+    )) * 1000)
     policy = AlphaBudget(
         family_alpha=float(settings.get("holdout_family_alpha", 0.05)),
         query_alpha=float(settings.get("holdout_query_alpha", 0.025)),
-        max_queries=int(settings.get("holdout_max_queries", 2)),
+        max_queries=max_queries,
+        max_provider_calls=max_queries * 10_000,
+        max_input_tokens=eval_max_input,
+        max_output_tokens=eval_max_output,
+        max_compute_millis=eval_max_compute,
+        max_dollars=eval_max_dollars,
     )
-    cycle_id = uuid.uuid4().hex
     bound_verifier = str(verifier_model or model_for_role("verifier")).strip()
     if not bound_verifier:
         raise ValueError("verifier model is unavailable")
@@ -854,8 +1143,13 @@ def _build_holdout_authorizer(
     bound_evaluator_id = ev.judge_evaluator_identity(
         bound_verifier, samples=int(settings.get("judge_samples", 1)),
         strict=True)
-    evaluator_epoch = fingerprint_manifest({
-        "schema": "maverick-self-harness-evaluator-v3",
+    image = str(
+        settings.get("holdout_container_image")
+        or os.environ.get("MAVERICK_SELF_HARNESS_EVALUATOR_IMAGE")
+        or "python:3.12-slim"
+    ).strip()
+    evaluator_epoch = "eval-" + fingerprint_manifest({
+        "schema": "maverick-self-harness-evaluator-v4",
         "candidate_model": str(model_id),
         "verifier_model": bound_verifier,
         "runner_protocol": "llm-runner-v1",
@@ -870,30 +1164,22 @@ def _build_holdout_authorizer(
         ),
         "metamorphic_model": bound_metamorphic,
         "deployed_system_sha256": fingerprint_manifest(str(evaluation_system)),
+        "container_image_request": image,
+        "contained_candidate_sha256": fingerprint_manifest(
+            _SELF_HARNESS_EVALUATOR_SOURCE),
+        "cost_policy": policy.to_dict(),
     })
-    counter = 0
-
-    def _authorize(purpose: str, signature: str, cases: list[str]) -> float:
-        nonlocal counter
-        family_digest = fingerprint_manifest(
-            _effective_eval_family(effective_index, cases))
-        counter += 1
-        query = HoldoutQuery(
-            holdout_sha256=study_digest,
-            view_sha256=fingerprint_manifest({
-                "purpose": str(purpose),
-                "effective_family_sha256": family_digest,
-                "cases": sorted(cases),
-            }),
-            query_id=f"{cycle_id}:{counter}",
-            cycle_id=cycle_id,
-            signature=str(signature),
-            evaluator_epoch=evaluator_epoch,
-            purpose=str(purpose),
-        )
-        return ledger.authorize(query, policy).critical_z_two_sided
-
-    return _authorize
+    return _SealedHoldoutAuthorizer(
+        ledger=ledger,
+        policy=policy,
+        study_digest=study_digest,
+        effective_index=effective_index,
+        evaluator_epoch=evaluator_epoch,
+        image=image,
+        evaluation_budget=evaluation_budget,
+        judge_samples=int(settings.get("judge_samples", 1)),
+        metamorphic_enabled=metamorphic_enabled,
+    )
 
 
 def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration boundary
@@ -901,6 +1187,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     retire: bool = True, retire_after_days: float | None = None,
     held_in=None, held_out=None, score_with=None, score_without=None,
     propose_fn=None, controller=None, evaluation_system: str | None = None,
+    work_item_id: str | None = None,
     **pass_kwargs,
 ):
     """One full DRIVER cycle -- a governed learning pass THEN stale-line
@@ -1022,7 +1309,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                             evaluation_system=str(evaluation_system),
                             verifier_model=bound_verifier_model,
                             metamorphic_model=bound_metamorphic_model,
-                            corpus_manifest=corpus_manifest)
+                            corpus_manifest=corpus_manifest,
+                            evaluation_budget=eval_budget)
                     except Exception:
                         report = self_harness.SelfHarnessReport(model_id=str(model_id))
                         report.skipped.append(
@@ -1097,11 +1385,22 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                         "risk-limited metamorphic evaluation could not construct "
                         "the authorized paraphraser")
                     return report, 0
-        report = run_self_harness_pass(
-            reflexions, model_id=model_id, limit=limit,
-            held_in=held_in, held_out=held_out, score_with=score_with,
-            score_without=score_without, propose_fn=propose_fn,
-            controller=controller, **pass_kwargs)
+        # Keep every physical provider attempt in this cycle discoverable under
+        # one exact work item.  Callers may bind an authoritative business work
+        # item; scheduled/local cycles receive a fresh opaque operation id.
+        from .provider_cost_cap import work_item_scope
+
+        provider_work_item = (
+            work_item_id
+            if work_item_id is not None
+            else f"self-harness-cycle:{uuid.uuid4().hex}"
+        )
+        with work_item_scope(provider_work_item):
+            report = run_self_harness_pass(
+                reflexions, model_id=model_id, limit=limit,
+                held_in=held_in, held_out=held_out, score_with=score_with,
+                score_without=score_without, propose_fn=propose_fn,
+                controller=controller, **pass_kwargs)
         resolved = (report.model_id or model_id) or None
         # OUTCOME-DRIVEN LIFECYCLE: graduate/demote canaries from the accumulated
         # recall->outcome counters (safe -- only touches canary-flagged lines), and
@@ -1132,9 +1431,10 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                     and score_with is not None and score_without is not None):
                 try:
                     cases = list(held_out or []) + list(held_in or [])
-                    report.demoted += self_harness.review_efficacy(
-                        resolved, cases, score_with=score_with,
-                        score_without=score_without)
+                    with work_item_scope(provider_work_item):
+                        report.demoted += self_harness.review_efficacy(
+                            resolved, cases, score_with=score_with,
+                            score_without=score_without)
                 except Exception:  # pragma: no cover
                     log.debug("self-harness efficacy review failed", exc_info=True)
         retired = 0
@@ -1351,6 +1651,7 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
                               corpus_path: str | None = None,
                               controller=None, force: bool = False,
                               raise_errors: bool = False,
+                              work_item_id: str | None = None,
                               _context=None) -> dict:
     """Driver entry for a governed cross-model transfer trial: try
     ``source_model``'s graduated lines on ``targets`` (default: the whole
@@ -1380,10 +1681,18 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
                 "risk-limited transfer context lacks holdout authorization")
         if targets is None:
             targets = harness_fleet_models()
-        return self_harness.run_transfer(
-            str(source_model), list(targets), eval_for_target=eval_for_target,
-            controller=controller, force=force, validate_kwargs=validate_kwargs,
-            holdout_rotations=int(st.get("holdout_rotations", 1) or 1))
+        from .provider_cost_cap import work_item_scope
+
+        provider_work_item = (
+            work_item_id
+            if work_item_id is not None
+            else f"self-harness-transfer:{uuid.uuid4().hex}"
+        )
+        with work_item_scope(provider_work_item):
+            return self_harness.run_transfer(
+                str(source_model), list(targets), eval_for_target=eval_for_target,
+                controller=controller, force=force, validate_kwargs=validate_kwargs,
+                holdout_rotations=int(st.get("holdout_rotations", 1) or 1))
     except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
         if raise_errors:
             raise
@@ -1476,7 +1785,8 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
 
 
 def run_corpus_quality(*, key: str | None = None, corpus_path: str | None = None,
-                       samples: int = 2, raise_errors: bool = False) -> list[dict]:
+                       samples: int = 2, raise_errors: bool = False,
+                       work_item_id: str | None = None) -> list[dict]:
     """Driver entry for the corpus quality probe: measure each live case's
     baseline discriminativeness with the same model-generates /
     verifier-judges seams and eval-budget pot the A/B uses (``key`` is the
@@ -1499,12 +1809,21 @@ def run_corpus_quality(*, key: str | None = None, corpus_path: str | None = None
         if not cases:
             return []
         budget = _eval_budget(st)
-        rows = ev.corpus_quality(
-            cases,
-            run_fn=ev.llm_runner(LLM(str(key)), budget=budget),
-            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
-                                  samples=st.get("judge_samples", 1)),
-            samples=samples)
+        from .provider_cost_cap import work_item_scope
+
+        provider_work_item = (
+            work_item_id
+            if work_item_id is not None
+            else f"self-harness-corpus-quality:{uuid.uuid4().hex}"
+        )
+        with work_item_scope(provider_work_item):
+            rows = ev.corpus_quality(
+                cases,
+                run_fn=ev.llm_runner(LLM(str(key)), budget=budget),
+                judge_fn=ev.llm_judge(
+                    LLM(model_for_role("verifier")), budget=budget,
+                    samples=st.get("judge_samples", 1)),
+                samples=samples)
         added: dict[str, float] = {}
         for r in ev._load_raw(corpus_path).get(str(key), []) or []:
             if isinstance(r, dict) and r.get("goal") and r.get("added_at"):

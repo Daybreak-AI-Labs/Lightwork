@@ -1,9 +1,15 @@
 """Independent failure-injection review of exact approvals and promotion proof."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from maverick import config
-from maverick.governed_operations import ServiceContext
+from maverick.governed_operations import (
+    ActionReviewRequiredError,
+    ApprovalBindingError,
+    ServiceContext,
+)
 from maverick.paths import current_tenant_id, tenant_scope
 from maverick.vendor_evidence_evolution import BINDINGS, EvidenceRenewalEvolution
 from maverick.vendor_onboarding import VendorOnboardingService
@@ -58,7 +64,65 @@ def _approved(service, ctx):
     row = _assessed(service, ctx)
     row = service.review(ctx, row["id"], row["revision"], "approved", "Limited synthetic pilot")
     row = service.prepare_action(ctx, row["id"], row["revision"])
-    return service.approve_action(ctx, row["id"], row["revision"])
+    return service.approve_action(
+        ctx,
+        row["id"],
+        row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
+
+
+@pytest.mark.parametrize("reviewed_binding", [None, "0" * 64, "not-a-digest"])
+def test_direct_approval_requires_the_exact_reviewed_card(
+    environment, reviewed_binding,
+):
+    service, ctx, _, tickets, _ = environment
+    row = _assessed(service, ctx)
+    row = service.review(
+        ctx,
+        row["id"],
+        row["revision"],
+        "approved",
+        "Limited synthetic pilot",
+    )
+    row = service.prepare_action(ctx, row["id"], row["revision"])
+
+    with pytest.raises(ApprovalBindingError) as rejected:
+        service.approve_action(
+            ctx,
+            row["id"],
+            row["revision"],
+            reviewed_binding,
+        )
+
+    assert rejected.value.code == "approval_binding_invalid"
+    assert service.get(ctx, row["id"]) == row
+    assert tickets.creates == 0
+
+
+def test_expired_review_card_is_retired_before_direct_approval(environment):
+    service, ctx, _, tickets, _ = environment
+    row = _assessed(service, ctx)
+    row = service.review(
+        ctx,
+        row["id"],
+        row["revision"],
+        "approved",
+        "Limited synthetic pilot",
+    )
+    row = service.prepare_action(ctx, row["id"], row["revision"])
+    binding = row["operation"]["approval_card"]["binding_sha256"]
+    service.clock = lambda: NOW + 3601
+
+    with pytest.raises(ApprovalBindingError) as rejected:
+        service.approve_action(ctx, row["id"], row["revision"], binding)
+
+    assert rejected.value.code == "approval_expired"
+    current = service.get(ctx, row["id"])
+    assert current["stage"] == "review_approved"
+    assert current["operation"] is None
+    assert current["operation_history"][-1]["invalidated_reason"] == "approval_expired"
+    assert tickets.creates == 0
 
 
 @pytest.mark.parametrize("change", ["expired", "reviewer_revoked"])
@@ -77,9 +141,13 @@ def test_approval_changes_during_durable_claim_cannot_execute(environment, monke
         return stored
 
     monkeypatch.setattr(service, "_save", claim_then_change)
-    result = service.execute(ctx, row["id"])
+    with pytest.raises(ApprovalBindingError):
+        service.execute(ctx, row["id"])
     assert tickets.creates == 0
-    assert result["operation"]["state"] == "reconciliation_required"
+    result = service.get(ctx, row["id"])
+    assert result["stage"] == "review_approved"
+    assert result["operation"] is None
+    assert result["operation_history"][-1]["state"] == "invalidated"
 
 
 def test_credential_rotation_after_last_service_check_cannot_change_effect_authority(environment, monkeypatch):
@@ -94,9 +162,42 @@ def test_credential_rotation_after_last_service_check_cannot_change_effect_autho
         return apply(operation, callback)
 
     monkeypatch.setattr(vendor_onboarding, "apply_declared", rotate_then_apply)
-    result = service.execute(ctx, row["id"])
+    with pytest.raises(ActionReviewRequiredError) as rejected:
+        service.execute(ctx, row["id"])
+
+    assert rejected.value.code == "approval_authority_changed"
     assert tickets.creates == 0
-    assert result["operation"]["state"] == "reconciliation_required"
+    result = service.get(ctx, row["id"])
+    assert result["stage"] == "review_approved"
+    assert result["operation"] is None
+    assert result["operation_history"][-1]["state"] == "invalidated"
+    assert result["operation_history"][-1]["invalidated_reason"] == "approval_authority_changed"
+
+
+def test_role_loss_before_read_retires_approval_before_role_restore(environment):
+    service, ctx, _, tickets, _ = environment
+    row = _approved(service, ctx)
+    denied_ctx = replace(
+        ctx,
+        authorization_role="read_only",
+        authorization_policy="read-only-policy-v2",
+    )
+    service.authorize = lambda candidate, *_: candidate.authorization_role != "read_only"
+
+    with pytest.raises(ApprovalBindingError) as rejected:
+        service.execute(denied_ctx, row["id"])
+
+    assert rejected.value.code == "approval_authority_changed"
+    assert tickets.creates == 0
+    current = service.get(ctx, row["id"])
+    assert current["stage"] == "review_approved"
+    assert current["operation"] is None
+    assert current["operation_history"][-1]["state"] == "invalidated"
+    assert current["operation_history"][-1]["invalidated_reason"] == "approval_authority_changed"
+
+    with pytest.raises(ValueError, match="approved operation required"):
+        service.execute(ctx, row["id"])
+    assert tickets.creates == 0
 
 
 def _renewal_input(now):

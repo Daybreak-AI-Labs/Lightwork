@@ -134,11 +134,40 @@ def test_compartments_page_renders(tmp_path, monkeypatch):
     resp = client.get("/compartments")
     assert resp.status_code == 200
     assert "compartments" in resp.text.lower()
-    # the built-in finance pack shows up as a domain in the roster
-    assert "finance" in resp.text
     # a pack that declares an output contract surfaces its deliverable
     assert "Delivers:" in resp.text
-    assert "13-week cash forecast" in resp.text
+    # the built-in finance packs are findable through the search box
+    found = client.get("/compartments", params={"q": "finance"})
+    assert found.status_code == 200
+    assert "finance" in found.text
+    assert "matching agents" in found.text
+    # the deliverable of a specific pack is on its search result
+    cash = client.get("/compartments", params={"q": "finance_cash13w"})
+    assert "13-week cash forecast" in cash.text
+
+
+def test_compartments_page_is_searched_and_paginated(tmp_path, monkeypatch):
+    """W3-30: unscoped, the roster is 2,000+ packs and rendered every
+    capability envelope into one multi-megabyte page. It now renders one
+    bounded slice, like /tools."""
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    resp = client.get("/compartments", params={"per_page": 5})
+    assert resp.status_code == 200
+    assert len(resp.content) < 300_000, len(resp.content)
+    assert resp.text.count('<tr>') <= 6          # header row + 5 packs
+    assert "Showing 1–5 of" in resp.text
+    assert "Page 1 of" in resp.text and "Next" in resp.text
+    second = client.get("/compartments", params={"per_page": 5, "page": 2})
+    assert second.status_code == 200
+    assert "Showing 6–10 of" in second.text and "Previous" in second.text
+    # Beyond the last page is a clean 400, not an empty table.
+    assert client.get("/compartments", params={"per_page": 100, "page": 100_000}).status_code == 400
+    # A search narrows the slice and is reflected in the pager links.
+    found = client.get("/compartments", params={"q": "finance", "per_page": 5})
+    assert found.status_code == 200
+    assert "finance" in found.text
+    assert "q=finance" in found.text or "Page 1 of 1" in found.text
 
 
 def test_facts_page_renders(tmp_path, monkeypatch):
@@ -146,3 +175,53 @@ def test_facts_page_renders(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     resp = client.get("/facts")
     assert resp.status_code == 200
+
+
+def test_shell_assets_are_fingerprinted_and_long_cached(tmp_path, monkeypatch):
+    """W3-77: the shell CSS/JS links carry a content hash and the versioned
+    URL is cached for a year; unversioned or stale requests keep the short
+    cache so an upgrade can never pin an old bundle."""
+    import re
+
+    from maverick import world_model
+    from maverick_dashboard.app import STATIC_IMMUTABLE_CACHE, STATIC_SHORT_CACHE, static_version
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    page = client.get("/overview").text
+    links = re.findall(r'/static/(lightwork[\w.-]+)\?v=([0-9a-f]{8})', page)
+    assert links, "no fingerprinted shell asset links rendered"
+    assert ("lightwork.css", static_version("lightwork.css")) in links
+    assert ("lightwork-ui.js", static_version("lightwork-ui.js")) in links
+    for name, version in links:
+        assert version == static_version(name)
+
+    versioned = client.get(f"/static/lightwork.css?v={static_version('lightwork.css')}")
+    assert versioned.status_code == 200
+    assert versioned.headers["cache-control"] == STATIC_IMMUTABLE_CACHE
+    plain = client.get("/static/lightwork.css")
+    assert plain.headers["cache-control"] == STATIC_SHORT_CACHE
+    stale = client.get("/static/lightwork.css?v=00000000")
+    assert stale.headers["cache-control"] == STATIC_SHORT_CACHE
+    assert static_version("does-not-exist.js") == ""
+
+
+def test_responses_are_gzipped_when_the_client_accepts_it(tmp_path, monkeypatch):
+    from maverick import world_model
+    from maverick_dashboard import app as app_module
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    r = client.get("/static/lightwork.css", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers.get("content-encoding") == "gzip"
+    assert "lightwork" in r.text                      # transparently decoded
+    # The knob: env wins, then [dashboard] compress, default on.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_COMPRESS", "0")
+    assert app_module._compress_enabled() is False
+    monkeypatch.setenv("MAVERICK_DASHBOARD_COMPRESS", "1")
+    assert app_module._compress_enabled() is True
+    monkeypatch.delenv("MAVERICK_DASHBOARD_COMPRESS")
+    import maverick.config as cfg
+    monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {"compress": False}})
+    assert app_module._compress_enabled() is False
+    monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {}})
+    assert app_module._compress_enabled() is True

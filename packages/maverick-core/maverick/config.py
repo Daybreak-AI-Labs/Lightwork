@@ -905,6 +905,10 @@ def any_provider_configured() -> bool:
             continue
         if str(pcfg.get("api_key", "")).strip() or str(pcfg.get("base_url", "")).strip():
             return True
+        # Bedrock signing with AWS IAM credentials carries no key at all: the
+        # explicit auth_mode is the configuration (W1-10).
+        if provider == "bedrock" and str(pcfg.get("auth_mode", "")).strip().lower() == "iam":
+            return True
     return False
 
 
@@ -1456,6 +1460,17 @@ def get_self_harness() -> dict:
         except (OverflowError, TypeError, ValueError):
             return default
 
+    def _holdout_image() -> str | None:
+        if "holdout_container_image" not in cfg:
+            return None
+        value = cfg.get("holdout_container_image")
+        if (type(value) is not str
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", value.strip())):
+            raise ValueError(
+                "holdout_container_image must be an immutable local sha256 image ID"
+            )
+        return value.strip()
+
     raw_by_class = cfg.get("min_support_by_class", {})
     by_class = {}
     if isinstance(raw_by_class, dict):
@@ -1603,6 +1618,20 @@ def get_self_harness() -> dict:
         # runtime code never creates it because deletion must not reset budget.
         "holdout_ledger": (str(cfg["holdout_ledger"])
                            if cfg.get("holdout_ledger") else None),
+        # Local container evaluation is development evidence unless a separate
+        # evaluator custodian is installed.  Keep this as a strict boolean so a
+        # malformed dashboard/config value cannot accidentally disable a
+        # deployment's fail-closed confirmatory posture.
+        "holdout_require_independent_custody": _strict_config_bool(
+            cfg,
+            "holdout_require_independent_custody",
+            False,
+            invalid=True,
+        ),
+        # An operator may pin the already-reviewed local evaluator image in
+        # config instead of relying on the environment-only override. A present
+        # malformed value must not silently select an environment/default image.
+        "holdout_container_image": _holdout_image(),
         "holdout_family_alpha": family_alpha,
         "holdout_query_alpha": query_alpha,
         "holdout_max_queries": holdout_max_queries,
@@ -2871,6 +2900,52 @@ def data_use_governance_enabled(cfg: dict | None = None) -> bool:
             return v
         section = loaded.get("data_use_governance", {})
     except Exception:  # pragma: no cover -- config must never block
+        return False
+    return isinstance(section, dict) and section.get("enable") is True
+
+
+def knowledge_access_enabled(cfg: dict | None = None) -> bool:
+    """Whether the governed in-app organizational-memory surface is enabled.
+
+    Existing installations keep the feature available when the section is
+    absent.  An explicit false disables it, and malformed or unreadable active
+    configuration fails closed. ``MAVERICK_KNOWLEDGE_ACCESS`` has the same
+    deployment override semantics as other product feature gates.
+    """
+
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            return False
+        override = env_flag("MAVERICK_KNOWLEDGE_ACCESS")
+        if override is not None:
+            return override
+        if "knowledge_access" not in loaded:
+            return True
+        section = loaded.get("knowledge_access")
+    except Exception:  # pragma: no cover - authority reads fail closed
+        return False
+    return isinstance(section, dict) and section.get("enable", True) is True
+
+
+def candidate_promotion_enabled(cfg: dict | None = None) -> bool:
+    """Whether guarded research-candidate promotion is enabled.
+
+    Promotion can change production state, so the capability is opt-in and
+    malformed or unreadable active configuration fails closed. The deployment
+    override follows the same environment-first convention as other feature
+    gates.
+    """
+
+    try:
+        loaded = cfg if cfg is not None else load_config()
+        if cfg is None and config_source_errors():
+            return False
+        override = env_flag("MAVERICK_CANDIDATE_PROMOTION")
+        if override is not None:
+            return override
+        section = loaded.get("candidate_promotion", {})
+    except Exception:  # pragma: no cover - authority reads fail closed
         return False
     return isinstance(section, dict) and section.get("enable") is True
 

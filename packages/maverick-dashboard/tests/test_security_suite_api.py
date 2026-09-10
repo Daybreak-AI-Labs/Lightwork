@@ -1425,6 +1425,12 @@ def test_platform_scan_creates_cited_investigation_is_idempotent_and_never_execu
     assert investigation["evidence"]
     assert investigation["containment"]["evidence"]
     assert investigation["approval_id"]
+    from maverick.approval_cards import decode_approval_detail
+    from maverick_dashboard._shared import _world
+    containment_approval = _world().get_approval(investigation["approval_id"])
+    containment_card = decode_approval_detail(containment_approval.detail)
+    assert containment_card is not None
+    assert containment_card["action"] == "security.platform_containment"
 
     second = _assert_ok(client.post("/api/v1/security/threats/scan", json={}))
     assert second["findings_created"] == 0
@@ -2079,6 +2085,8 @@ def test_environment_response_requires_executor_opt_in_and_exact_approval_bindin
 
     class TestExecutor:
         name = "test-edr"
+        approval_revision = "test-edr.v1"
+        approval_credential_sha256 = "a" * 64
 
         def __init__(self):
             self.calls = 0
@@ -2102,6 +2110,25 @@ def test_environment_response_requires_executor_opt_in_and_exact_approval_bindin
         approval_id, "approved", decided_by=decider
     ) is True
     proposal_model = security_api._response_proposal_from_record(proposal)
+    current_approval = world.get_approval(approval_id)
+    from dataclasses import replace
+
+    from maverick.approval_cards import decode_approval_detail
+    response_card = decode_approval_detail(current_approval.detail)
+    assert response_card is not None
+    assert response_card["inputs"] == {"proposal_sha256": proposal_model.digest}
+    assert response_card["credentials"]["revision"] == "test-edr.v1"
+    assert response_card["credentials"]["credential_sha256"] == "a" * 64
+    assert security_api._world_approval_matches(
+        proposal_model, current_approval, approval_id
+    )
+    changed_proposal = replace(
+        proposal_model,
+        parameters={**proposal_model.parameters, "changed": True},
+    )
+    assert not security_api._world_approval_matches(
+        changed_proposal, current_approval, approval_id
+    )
     private = ed25519.Ed25519PrivateKey.generate()
     private_hex = private.private_bytes(
         serialization.Encoding.Raw,
@@ -2140,6 +2167,24 @@ def test_environment_response_requires_executor_opt_in_and_exact_approval_bindin
     )
     assert swapped_executor.status_code == 403
 
+    class SameNameReplacement:
+        name = "test-edr"
+        approval_revision = "test-edr.v2"
+        approval_credential_sha256 = "b" * 64
+
+        def execute(self, candidate, governed_approval):
+            raise AssertionError("drifted executor must never run")
+
+    registry = security_api.environment_response_registry()
+    registry._executors[executor.name] = SameNameReplacement()
+    drifted = client.post(
+        "/api/v1/security/soc/responses/execute",
+        json=base,
+    )
+    assert drifted.status_code == 403
+    assert "current executor binding" in drifted.json()["detail"]
+    registry._executors[executor.name] = executor
+
     disabled = client.post(
         "/api/v1/security/soc/responses/execute",
         json=base,
@@ -2175,6 +2220,17 @@ pivot_enable = false
         encoding="utf-8",
     )
     config.reset_config_cache()
+    real_actor = security_api._actor
+    actors = iter(("user:admin", "user:mallory"))
+    monkeypatch.setattr(security_api, "_actor", lambda _request: next(actors))
+    authority_drift = client.post(
+        "/api/v1/security/soc/responses/execute",
+        json=base,
+    )
+    assert authority_drift.status_code == 403
+    assert "authority changed" in authority_drift.json()["detail"]
+    assert executor.calls == 0
+    monkeypatch.setattr(security_api, "_actor", real_actor)
     executed = _assert_ok(
         client.post(
             "/api/v1/security/soc/responses/execute",
@@ -2193,10 +2249,7 @@ pivot_enable = false
         "security.environment_response",
         risk="critical",
         scope=proposal["target"],
-        detail=security_api._approval_detail(
-            "environment_response_v1",
-            security_api._response_payload(proposal_model),
-        ),
+        detail=security_api._environment_response_approval_detail(proposal_model),
         provenance="security.env_hunt.response.v1",
         requested_by="system:env_hunt",
     )

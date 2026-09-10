@@ -1025,10 +1025,44 @@
         if (run.origin && run.origin !== 'manual') bits.push('via ' + run.origin);
         if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
         if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
-        li.appendChild(main);
         if (run.status === 'paused_approval') {
-          li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
-          li.appendChild(mkBtn('Reject', function () { resumeRun(run.run_id, 'rejected'); }));
+          var card = run.human && run.human.approval_card;
+          var reviewed = run.approval_card_status === 'current'
+            && typeof run.approval_binding_sha256 === 'string'
+            && run.approval_binding_sha256.length === 64 && card;
+          var review = el('div', 'mv-row__sub');
+          if (card) {
+            var effects = (card.consequences && card.consequences.known_effects) || [];
+            var assumptions = (card.consequences && card.consequences.unresolved_assumptions) || [];
+            review.textContent = 'Recommendation only; prediction does not grant authority. '
+              + 'Target: ' + ((card.target && card.target.label) || 'Unavailable') + '. '
+              + 'Exact inputs: ' + (((card.parameters || {}).summary || []).join('; ') || 'Unavailable') + '. '
+              + 'Known effects: ' + (effects.join('; ') || 'None recorded') + '. '
+              + 'Unresolved assumptions: ' + (assumptions.join('; ') || 'None recorded') + '. '
+              + 'Expires: ' + String(card.expires_at || 'Unavailable') + '. '
+              + 'Current role: ' + ((run.approval_authority || {}).role || 'Unavailable') + '. '
+              + 'Credential revision: '
+              + ((run.approval_authority || {}).credential_inventory_sha256 || 'Unavailable') + '. '
+              + 'Budget revision: '
+              + ((run.approval_authority || {}).budget_authority_sha256 || 'Unavailable') + '.';
+          } else {
+            review.textContent = 'Current integrity-checked approval details are unavailable.';
+          }
+          main.appendChild(review);
+          var inspect = document.createElement('a');
+          inspect.href = '/flows/' + encodeURIComponent(run.flow_id) + '/runs/'
+            + encodeURIComponent(run.run_id);
+          inspect.textContent = 'Review full operation'; main.appendChild(inspect);
+          run._canDecide = Boolean(reviewed);
+        }
+        li.appendChild(main);
+        if (run.status === 'paused_approval' && run._canDecide) {
+          li.appendChild(mkBtn('Approve exact operation', function () {
+            resumeRun(run, 'approved');
+          }));
+          li.appendChild(mkBtn('Reject / request revision', function () {
+            resumeRun(run, 'rejected');
+          }));
         }
         if (run.status === 'failed' && run.cursor) {
           li.appendChild(mkBtn('Retry from failed step', function () { retryRun(run.run_id, true); }));
@@ -1049,13 +1083,16 @@
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not retry.'; }
     }
-    async function resumeRun(runId, decision) {
+    async function resumeRun(run, decision) {
       try {
-        await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/resume', {
+        var r = await fetch('/api/v1/flows/runs/' + encodeURIComponent(run.run_id) + '/resume', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decision: decision }),
+          body: JSON.stringify({ decision: decision,
+            approval_binding_sha256: run.approval_binding_sha256 || '' }),
         });
-        flowsMsg.textContent = decision === 'approved' ? 'Approved — resuming.' : 'Rejected.';
+        flowsMsg.textContent = r.ok
+          ? (decision === 'approved' ? 'Approved — resuming.' : 'Rejected.')
+          : 'Approval changed or expired. Review the current operation again.';
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not resume.'; }
     }

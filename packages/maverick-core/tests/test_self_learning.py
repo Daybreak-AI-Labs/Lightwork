@@ -26,17 +26,27 @@ from maverick.catalog import CatalogEntry
 from maverick.file_lock import private_path_is_restricted
 from maverick.llm import LLMResponse
 from maverick.paths import TenantPolicyError, current_tenant_id, tenant_scope
+from maverick.safety import consent as consent_module
 from maverick.tools import Tool, ToolRegistry
+
+_ORIGINAL_REQUIRE_CONSENT = consent_module.require_consent
 
 
 @pytest.fixture(autouse=True)
 def _generation_consented(monkeypatch):
     """These tests exercise generated-tool ISOLATION and registration
-    semantics; consenting to the generation actions is a given, stated
-    explicitly so the secure-by-default posture (consent fail-closed for
-    high-risk actions) tests the same behavior the legacy default did.
+    semantics; a fresh human decision is a given, stated explicitly so the
+    secure-by-default posture tests the effect body without weakening the
+    production boundary to silent auto-approval or a standing grant.
     The consent gate itself is covered by its own test files."""
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    def approve(*_args, **kwargs):
+        assert kwargs["allow_auto_approve"] is False
+        assert kwargs["consult_ledger"] is False
+        return SimpleNamespace(
+            granted=True, source="dashboard", actor="user:reviewer",
+        )
+
+    monkeypatch.setattr(consent_module, "require_consent", approve)
 
 
 def make_response(text: str = "") -> LLMResponse:
@@ -797,6 +807,9 @@ class TestAcquireMcpServer:
     def test_consent_denied_not_persisted(self, monkeypatch, tmp_path):
         from maverick.safety.consent import ConsentDenied
         cfg = tmp_path / "config.toml"
+        monkeypatch.setattr(
+            consent_module, "require_consent", _ORIGINAL_REQUIRE_CONSENT,
+        )
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
         monkeypatch.setattr("maverick.catalog.resolve", lambda *a, **k: self._entry())
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
@@ -807,6 +820,9 @@ class TestAcquireMcpServer:
     def test_default_auto_approve_not_explicit_enough(self, monkeypatch, tmp_path):
         from maverick.safety.consent import ConsentDenied
         cfg = tmp_path / "config.toml"
+        monkeypatch.setattr(
+            consent_module, "require_consent", _ORIGINAL_REQUIRE_CONSENT,
+        )
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
         monkeypatch.setattr("maverick.catalog.resolve", lambda *a, **k: self._entry())
         monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
@@ -814,19 +830,22 @@ class TestAcquireMcpServer:
             self_learning.acquire_mcp_server("weather")
         assert not cfg.exists()
 
-    def test_approved_persists_with_pin(self, monkeypatch, tmp_path):
+    def test_fresh_explicit_approval_persists_with_pin(self, monkeypatch, tmp_path):
         from maverick.safety import consent
         cfg = tmp_path / "config.toml"
         source = "weather-mcp --stdio"
         pin = "cd" * 32
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
-        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
         monkeypatch.setattr(
             "maverick.catalog.resolve",
             lambda *a, **k: self._entry(source=source, sha256=pin))
-        monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-        consent.grant_persistent(
-            "add-mcp-server", scope=self._consent_scope(source, pin))
+        monkeypatch.setattr(
+            consent,
+            "require_consent",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            ),
+        )
         spec = self_learning.acquire_mcp_server("weather")
         assert spec.command == "weather-mcp"
         assert spec.args == ["--stdio"]
@@ -915,17 +934,23 @@ class TestAcquireMcpServer:
         from maverick.safety import consent
 
         cfg = tmp_path / "config.toml"
-        tenants = iter(("acme", "globex"))
+        tenant = {"value": "acme"}
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
         monkeypatch.setattr(
             "maverick.catalog.resolve", lambda *a, **k: self._entry())
-        monkeypatch.setattr(paths, "current_tenant_id", lambda: next(tenants))
-        monkeypatch.setattr(
-            consent, "require_consent",
-            lambda *_args, **_kwargs: SimpleNamespace(granted=True),
-        )
+        monkeypatch.setattr(paths, "current_tenant_id", lambda: tenant["value"])
 
-        with pytest.raises(ValueError, match="active tenant changed"):
+        def approve(*_args, **_kwargs):
+            tenant["value"] = "globex"
+            return SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            )
+
+        monkeypatch.setattr(consent, "require_consent", approve)
+
+        from maverick.approval_cards import ApprovalCardError
+
+        with pytest.raises(ApprovalCardError, match="changed after approval"):
             self_learning.acquire_mcp_server("weather")
 
         assert not cfg.exists()
@@ -1680,6 +1705,9 @@ class TestGeneratedToolIsolationAndConsent:
         assert "host import failed" in tool.fn({})
 
     def test_consent_denied_blocks_registration(self, monkeypatch):
+        monkeypatch.setattr(
+            consent_module, "require_consent", _ORIGINAL_REQUIRE_CONSENT,
+        )
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
         from maverick.safety.consent import ConsentDenied
         sandbox = SecureSandbox()
@@ -1693,16 +1721,46 @@ class TestGeneratedToolIsolationAndConsent:
         assert sandbox.commands == []
         assert not (self_learning.GENERATED_TOOLS_DIR / "denied_tool.py").exists()
 
-    def test_consent_approved_allows_registration(self, monkeypatch):
-        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
-        tool = self_learning.write_generated_tool(
-            "approved_tool",
-            good_tool_source("approved_tool"),
-            sandbox=SecureSandbox(),
+    def test_silent_auto_approval_cannot_register(self, monkeypatch):
+        monkeypatch.setattr(
+            consent_module, "require_consent", _ORIGINAL_REQUIRE_CONSENT,
         )
-        assert tool.name == "approved_tool"
-        assert (self_learning.GENERATED_TOOLS_DIR / "approved_tool.py").exists()
-        assert not list(self_learning.GENERATED_TOOLS_DIR.glob(".staging_*.py"))
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+        from maverick.safety.consent import ConsentDenied
+
+        with pytest.raises(ConsentDenied):
+            self_learning.write_generated_tool(
+                "approved_tool",
+                good_tool_source("approved_tool"),
+                sandbox=SecureSandbox(),
+            )
+        assert not (self_learning.GENERATED_TOOLS_DIR / "approved_tool.py").exists()
+
+    def test_sandbox_generation_change_after_review_blocks_probe(
+        self, monkeypatch,
+    ):
+        from maverick.approval_cards import ApprovalCardError
+        from maverick.safety import consent
+
+        sandbox = SecureSandbox()
+
+        def approve(*_args, **_kwargs):
+            sandbox.generated_tool_safe = False
+            return SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            )
+
+        monkeypatch.setattr(consent, "require_consent", approve)
+        with pytest.raises(ApprovalCardError, match="changed after approval"):
+            self_learning.write_generated_tool(
+                "drifted_sandbox",
+                good_tool_source("drifted_sandbox"),
+                sandbox=sandbox,
+            )
+        assert sandbox.commands == []
+        assert not (
+            self_learning.GENERATED_TOOLS_DIR / "drifted_sandbox.py"
+        ).exists()
 
     def test_revoked_digest_blocks_loaded_and_live_proxy_execution(self):
         from maverick.safety import consent
@@ -1722,6 +1780,9 @@ class TestGeneratedToolIsolationAndConsent:
         assert self_learning.load_generated_tools(sandbox=SecureSandbox()) == []
 
     def test_require_approval_false_cannot_bypass_consent(self, monkeypatch):
+        monkeypatch.setattr(
+            consent_module, "require_consent", _ORIGINAL_REQUIRE_CONSENT,
+        )
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
         from maverick.safety.consent import ConsentDenied
 
@@ -1840,7 +1901,7 @@ class TestLearnTool:
     @pytest.mark.asyncio
     async def test_add_mcp_server_catalog_pinned_consent_gate(self, monkeypatch, tmp_path, stub_agent):
         # Opt-in ON + a catalog entry + consent auto-deny/default-auto-approve
-        # -> NOT persisted, NOT started. Then an explicit ledger grant ->
+        # -> NOT persisted, NOT started. Then an explicit fresh decision ->
         # persisted (start is attempted but the fake command fails to spawn,
         # which is fine for this assertion).
         cfg = tmp_path / "config.toml"
@@ -1853,6 +1914,9 @@ class TestLearnTool:
         )
         monkeypatch.setattr(
             "maverick.catalog.resolve", lambda name, kind, **kw: entry)
+        monkeypatch.setattr(
+            consent_module, "require_consent", _ORIGINAL_REQUIRE_CONSENT,
+        )
         from maverick.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
 
@@ -1870,20 +1934,14 @@ class TestLearnTool:
         assert not cfg.exists()
         assert stub_agent.ctx.mcp_clients == []
 
-        # Explicitly approved -> persisted to config (start will fail on the fake cmd).
+        # Explicit fresh decision -> persisted (the fake executable will not start).
         from maverick.safety import consent
-        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
-        command, args = self_learning._parse_catalog_mcp_source(entry.source)
-        from maverick.mcp_client import MCPServerSpec
-        mcp_spec = MCPServerSpec(
-            name="weather", command=command, args=args,
-            pin_sha256=entry.sha256,
-        )
-        spec_digest = self_learning._canonical_mcp_spec_digest(mcp_spec)
-        consent.grant_persistent(
-            "add-mcp-server",
-            scope=self_learning._mcp_consent_scope(
-                "shared", "weather", spec_digest),
+        monkeypatch.setattr(
+            consent,
+            "require_consent",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                granted=True, source="dashboard", actor="user:reviewer",
+            ),
         )
         out = await tool.fn({"op": "add_mcp_server", "name": "weather"})
         assert "[mcp_servers.weather]" in cfg.read_text()

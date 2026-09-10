@@ -32,7 +32,7 @@ def _enable_sealing(monkeypatch):
 
 def test_computer_action_risk():
     assert computer_action_risk("screenshot", {}) is None
-    assert computer_action_risk("mouse_move", {"coordinate": [1, 2]}) is None
+    assert computer_action_risk("mouse_move", {"coordinate": [1, 2]}) == "medium"
     assert computer_action_risk("left_click", {"coordinate": [1, 2]}) == "medium"
     assert computer_action_risk("key", {"text": "Return"}) == "high"
     assert computer_action_risk("type", {"text": "please pay now"}) == "high"

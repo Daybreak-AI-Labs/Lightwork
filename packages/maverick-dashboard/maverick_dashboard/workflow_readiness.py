@@ -54,6 +54,30 @@ LABELS = {"available": "Available in app", "live_validation": "Live validation r
     "experimental": "Experimental", "prototype": "Prototype"}
 
 
+def supplier_setup_readiness(state):
+    """Configuration checklist from the caller's sanitized setup snapshot."""
+    deployment = state["deployment"]
+    actions = []
+    if not deployment["supported"]:
+        actions.append({"id": "deployment", "label": deployment["next_action"], "href": "#vs-deployment"})
+    else:
+        if not state["modules_enabled"] or not state["connections_enabled"]:
+            actions.append({"id": "enable", "label": "Ask a workspace administrator to enable the vendor workflow below.", "href": "#vs-enable"})
+        if not state["binding"].get("resource_owner"):
+            actions.append({"id": "owner", "label": "Choose an active workspace member to own vendor reviews.", "href": "#vs-resource-owner"})
+        ticket = state["binding"].get("ticket_connection")
+        usable = [row for row in state["connections"] if row["connector"] == "jira" and row["has_token"]]
+        if not usable:
+            actions.append({"id": "jira", "label": "Connect a Jira account with access to the project where approved tasks will be created.", "href": "/connections"})
+        elif not any(row["name"] == ticket for row in usable):
+            actions.append({"id": "jira", "label": "Select your Jira connection for task delivery.", "href": "#vs-ticket"})
+        if not state["revision"]:
+            actions.append({"id": "save", "label": "Review the owner and connection choices, confirm, then save workspace setup.", "href": "#vs-confirm"})
+    return {"state": "blocked" if not deployment["supported"] else "setup_required" if actions else "configured",
+            "configuration_complete": not actions, "actions": actions, "deployment": deployment,
+            "live_provider_verified": False}
+
+
 def for_request(request):
     from maverick import config
 
@@ -67,6 +91,11 @@ def for_request(request):
         row = {**record, "stage_label": LABELS[record["stage"]]}
         row["configuration"] = "Enabled" if record["feature"] and features.get(record["feature"]) is True else (
             "Disabled in Settings" if record["feature"] else "Module-specific setup")
+        if record["href"] == "/third-party/vendor-onboarding":
+            from maverick.vendor_onboarding import deployment_readiness
+
+            profile = deployment_readiness()
+            row["configuration"] = "Open workflow to review owner and Jira setup" if profile["supported"] else profile["message"]
         row["can_open"] = bool(record["href"] and has_permission(request, record["permission"])
                                and (not record["feature"] or features.get(record["feature"]) is True))
         rows.append(row)

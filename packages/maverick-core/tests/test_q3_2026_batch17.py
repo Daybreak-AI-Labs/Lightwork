@@ -37,6 +37,7 @@ class _FakeSession:
 def _use(monkeypatch, page):
     monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
     monkeypatch.setattr(browser_mod, "_get_session", lambda: _FakeSession(page))
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *args, **kwargs: None)
 
 
 def test_fill_form_fills_all_fields(monkeypatch):

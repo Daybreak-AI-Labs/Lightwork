@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -30,6 +31,48 @@ def _client():
     return TestClient(app)
 
 
+def _create_structured_approval(
+    world,
+    action: str,
+    *,
+    risk: str,
+    approvals_required: int = 1,
+) -> tuple[int, dict[str, str]]:
+    from maverick.approval_cards import build_approval_card, encode_approval_detail
+
+    card = build_approval_card(
+        action=action,
+        summary="Review the exact queued operation",
+        target_label="Customer operation",
+        target={"action": action},
+        parameters={"risk": risk},
+        parameter_summary=["Apply the reviewed operation once"],
+        actor="u:requester",
+        workspace="tenant-a",
+        role="operator",
+        authority_versions={"role_revision": "role-v1"},
+        input_versions={"request_revision": "request-v1"},
+        credential_versions={},
+        budget={},
+        expires_at=time.time() + 300,
+        known_effects=["The reviewed operation can take effect."],
+        unresolved_assumptions=[],
+        before="The operation is awaiting review.",
+        after="The reviewed operation may proceed.",
+        irreversible=risk == "critical",
+    )
+    approval_id = world.create_approval(
+        action,
+        risk=risk,
+        detail=encode_approval_detail(card),
+        approvals_required=approvals_required,
+    )
+    return approval_id, {
+        **_ORIGIN,
+        "X-Lightwork-Approval-Binding": card["binding_sha256"],
+    }
+
+
 def test_openapi_documents_pending_and_uncertain_decision_outcomes(
     approval_env,
 ):
@@ -50,7 +93,9 @@ def test_audit_refusal_keeps_final_decision_non_effective_and_retry_is_safe(
 ):
     api, _ = approval_env
     world = api._world()
-    approval_id = world.create_approval("wire-funds", risk="critical")
+    approval_id, headers = _create_structured_approval(
+        world, "wire-funds", risk="critical",
+    )
 
     import maverick.audit as audit
     from maverick.audit import AuditRefused
@@ -64,7 +109,7 @@ def test_audit_refusal_keeps_final_decision_non_effective_and_retry_is_safe(
     monkeypatch.setattr(audit, "record", refuse)
     first = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
-        headers=_ORIGIN,
+        headers=headers,
     )
 
     assert first.status_code == 202
@@ -93,7 +138,7 @@ def test_audit_refusal_keeps_final_decision_non_effective_and_retry_is_safe(
     monkeypatch.setattr(audit, "record", accept)
     retry = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
-        headers=_ORIGIN,
+        headers=headers,
     )
 
     assert retry.status_code == 204
@@ -150,7 +195,8 @@ def test_later_quorum_vote_repairs_older_audit_event_before_becoming_effective(
 ):
     api, _ = approval_env
     world = api._world()
-    approval_id = world.create_approval(
+    approval_id, headers = _create_structured_approval(
+        world,
         "wire-funds",
         risk="critical",
         approvals_required=2,
@@ -169,7 +215,7 @@ def test_later_quorum_vote_repairs_older_audit_event_before_becoming_effective(
     monkeypatch.setattr(audit, "record", record)
     first = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
-        headers=_ORIGIN,
+        headers=headers,
     )
     assert first.status_code == 202
     first_id = first.json()["decision_id"]
@@ -178,7 +224,7 @@ def test_later_quorum_vote_repairs_older_audit_event_before_becoming_effective(
     monkeypatch.setattr(api, "_supervisor", lambda _request: "u:bob")
     second = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
-        headers=_ORIGIN,
+        headers=headers,
     )
 
     assert second.status_code == 204
@@ -196,7 +242,9 @@ def test_lost_commit_ack_is_reconciled_from_outbox_before_response(
 ):
     api, _ = approval_env
     world = api._world()
-    approval_id = world.create_approval("deploy", risk="high")
+    approval_id, headers = _create_structured_approval(
+        world, "deploy", risk="high",
+    )
 
     import maverick.audit as audit
 
@@ -216,7 +264,7 @@ def test_lost_commit_ack_is_reconciled_from_outbox_before_response(
     monkeypatch.setattr(world, "_writing", uncertain_commit)
     response = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
-        headers=_ORIGIN,
+        headers=headers,
     )
 
     assert response.status_code == 204
@@ -232,7 +280,9 @@ def test_postcommit_state_read_failure_does_not_turn_success_into_retry(
 ):
     api, _ = approval_env
     world = api._world()
-    approval_id = world.create_approval("deploy", risk="high")
+    approval_id, headers = _create_structured_approval(
+        world, "deploy", risk="high",
+    )
 
     import maverick.audit as audit
 
@@ -246,7 +296,7 @@ def test_postcommit_state_read_failure_does_not_turn_success_into_retry(
     )
     response = _client().post(
         f"/api/v1/approvals/{approval_id}/approve",
-        headers=_ORIGIN,
+        headers=headers,
     )
 
     assert response.status_code == 204

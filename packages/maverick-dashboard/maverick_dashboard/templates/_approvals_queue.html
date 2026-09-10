@@ -11,18 +11,48 @@
     </tr></thead>
     <tbody>
     {% for a in approvals %}
-      <tr data-id="{{ a.id }}" id="approval-{{ a.id }}">
-        <td><code>{{ a.action }}</code></td>
+      {% set assessment_id = assessment_ids.get(a.id) if assessment_ids else None %}
+      <tr data-id="{{ a.id }}"{% if assessment_id %} data-assessment-id="{{ assessment_id }}"{% endif %} id="approval-{{ a.id }}">
+        <td><code>{{ approval_actions.get(a.id, 'reviewed operation') if approval_actions else 'reviewed operation' }}</code></td>
         <td><span class="badge {{ 'blocked' if a.risk in ('high', 'critical') else 'pending' }}">{{ a.risk | humanize }}</span></td>
         <td>
           {% set _src = sources.get(a.id) if sources else None %}
           {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">Consent</span>{% endif %}
         </td>
-        <td>{{ a.scope or '—' }}</td>
-        <td class="muted approval-detail">{{ a.detail or '' }}</td>
+        <td>{{ approval_scopes.get(a.id, 'reviewed target') if approval_scopes else 'reviewed target' }}</td>
+        <td class="muted approval-detail">
+          {% set card = cards.get(a.id) if cards else None %}
+          {% set card_status = card_statuses.get(a.id, 'legacy') if card_statuses else 'legacy' %}
+          <p>{{ approval_details.get(a.id, a.detail or '') if approval_details else (a.detail or '') }}</p>
+          {% if card %}
+          <section class="approval-card" aria-label="Exact operation review">
+            <p class="approval-authority-note"><strong>Recommendation only.</strong>
+              A prediction does not grant authority. Your decision applies only to the exact operation below.</p>
+            <dl class="approval-card-grid">
+              <div><dt>Target</dt><dd>{{ card.target.label }}<br><code>{{ card.target.sha256 }}</code></dd></div>
+              <div><dt>Actor and workspace</dt><dd>{{ card.authority.actor | identity }} · {{ card.authority.workspace }}<br>Role: {{ card.authority.role | role_label }}</dd></div>
+              <div><dt>Exact input digest</dt><dd><code>{{ card.parameters.sha256 }}</code></dd></div>
+              <div><dt>Expires</dt><dd>{{ card.expires_at | datetime }}{% if card_status == 'expired' %} <span class="badge blocked">expired</span>{% endif %}</dd></div>
+              <div><dt>Credential versions</dt><dd>{% for key, value in card.credentials.items() %}<span><strong>{{ key | humanize }}:</strong> {{ value }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</dd></div>
+              <div><dt>Budget</dt><dd>{% for key, value in card.budget.items() %}<span><strong>{{ key | humanize }}:</strong> {{ value }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}</dd></div>
+            </dl>
+            <div class="approval-parameters"><strong>Exact parameter summary</strong><ul>{% for item in card.parameters.summary %}<li>{{ item }}</li>{% endfor %}</ul></div>
+            <div class="approval-preview"><div><strong>Before</strong><p>{{ card.preview.before }}</p></div><div><strong>After</strong><p>{{ card.preview.after }}</p></div></div>
+            <div class="approval-consequences">
+              <div><strong>Known effects{% if card.consequences.irreversible %} · irreversible or externally persistent{% endif %}</strong><ul>{% for item in card.consequences.known_effects %}<li>{{ item }}</li>{% endfor %}</ul></div>
+              <div><strong>Unresolved assumptions</strong>{% if card.consequences.unresolved_assumptions %}<ul>{% for item in card.consequences.unresolved_assumptions %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p>None recorded.</p>{% endif %}</div>
+            </div>
+          </section>
+          {% elif card_status == 'invalid' %}
+            <p class="approval-card-error" role="alert">Approval is blocked. Ask the requester to prepare a fresh review.</p>
+          {% elif card_status == 'legacy' %}
+            <p class="approval-card-error" role="alert">This older request has no exact-operation review. Reject it and ask the requester to prepare a fresh review.</p>
+          {% endif %}
+        </td>
         <td>
-          <button class="approval-btn" data-id="{{ a.id }}" data-action="approve">Approve</button>
-          <button class="approval-btn" data-id="{{ a.id }}" data-action="deny">Deny</button>
+          <button class="approval-btn" data-id="{{ a.id }}" data-action="approve"{% if card %} data-binding="{{ card.binding_sha256 }}"{% endif %}{% if card_status in ('expired', 'invalid', 'legacy') %} disabled title="A fresh review is required"{% endif %}>Approve exact operation</button>
+          <button class="approval-btn" data-id="{{ a.id }}" data-action="deny">Reject</button>
+          <button class="approval-btn" data-id="{{ a.id }}" data-action="revise">Request revision</button>
         </td>
       </tr>
     {% endfor %}
@@ -46,6 +76,17 @@
   .approval-detail details { margin-top: var(--space-2); }
   .approval-detail summary { cursor: pointer; color: var(--brand); font-size: var(--text-xs); }
   .approval-detail details > div { margin-top: var(--space-2); font-size: var(--text-sm); white-space: pre-wrap; }
+  .approval-card { margin-top: var(--space-3); padding: var(--space-3); color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: min(54rem, 70vw); }
+  .approval-authority-note { margin-top: 0; }
+  .approval-card-grid, .approval-preview, .approval-consequences { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+  .approval-card-grid div, .approval-preview div, .approval-consequences div { min-width: 0; }
+  .approval-card dt { font-weight: var(--font-semibold); }
+  .approval-card dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+  .approval-card code { white-space: normal; overflow-wrap: anywhere; }
+  .approval-card ul { margin: var(--space-1) 0 var(--space-2); padding-left: 1.25rem; }
+  .approval-preview, .approval-consequences { margin-top: var(--space-3); }
+  .approval-card-error { color: var(--danger); font-weight: var(--font-semibold); }
+  @media (max-width: 760px) { .approval-card { min-width: 0; } .approval-card-grid, .approval-preview, .approval-consequences { grid-template-columns: 1fr; } }
 </style>
 
 {% include "_assessment_review.html" %}
@@ -63,28 +104,30 @@
       return n;
     }
     document.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      const assessmentId = tr.dataset.assessmentId || '';
+      if (!assessmentId) return;
       const detail = tr.querySelector('.approval-detail');
-      const m = detail && /assessment:([A-Za-z0-9._-]+)/.exec(detail.textContent || '');
-      if (!m) return;
-      const full = (detail.textContent || '')
+      const summary = detail && detail.querySelector(':scope > p');
+      if (!summary) return;
+      const full = (summary.textContent || '')
         .replace(/\s*\[assessment:[^\]]+\]\s*$/, '').trim();
       const brief = full.split(/\sFindings:/)[0].trim();
-      detail.innerHTML = '';
-      detail.appendChild(el('div', 'adx', brief +
-        ' Open Review to read the answers, findings, and follow-up thread.'));
+      summary.className = 'adx';
+      summary.textContent = brief +
+        ' Open Review to read the answers, findings, and follow-up thread.';
       if (full.length > brief.length) {
         const dts = document.createElement('details');
         const sum = document.createElement('summary');
         sum.textContent = 'Show raw detail';
         dts.append(sum, el('div', 'muted', full));
-        detail.appendChild(dts);
+        summary.insertAdjacentElement('afterend', dts);
       }
       const cell = tr.querySelector('td:last-child');
       const btn = el('button', 'approval-review', 'Review assessment');
       btn.type = 'button';
-      btn.addEventListener('click', function () { window.mvAssessmentReview.open(m[1]); });
+      btn.addEventListener('click', function () { window.mvAssessmentReview.open(assessmentId); });
       cell.insertBefore(btn, cell.firstChild);
-      tr.dataset.assessment = m[1];
+      tr.dataset.assessment = assessmentId;
     });
 
     // One decision, not two clicks: approving/rejecting the assessment in
@@ -105,19 +148,39 @@
     document.querySelectorAll('button.approval-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         const id = btn.dataset.id;
-        const action = btn.dataset.action;  // "approve" | "deny"
-        document.querySelectorAll('tr[data-id="' + id + '"] button.approval-btn')
-          .forEach(function(b) { b.disabled = true; });
+        const action = btn.dataset.action;  // "approve" | "deny" | "revise"
+        const rowButtons = Array.from(document.querySelectorAll(
+          'tr[data-id="' + id + '"] button.approval-btn'));
+        const originalDisabled = rowButtons.map(function(b) { return b.disabled; });
+        function restoreDisabledStates() {
+          rowButtons.forEach(function(b, index) {
+            b.disabled = originalDisabled[index];
+          });
+        }
+        let revisionRationale = '';
+        if (action === 'revise') {
+          revisionRationale = (window.prompt('Why must this request be revised?') || '').trim();
+          if (!revisionRationale) {
+            msg.style.color = 'var(--danger)';
+            msg.textContent = 'A revision rationale is required.';
+            return;
+          }
+        }
+        rowButtons.forEach(function(b) { b.disabled = true; });
         msg.style.color = 'var(--muted)';
-        msg.textContent = (action === 'approve' ? 'Approving #' : 'Denying #') + id + '…';
+        msg.textContent = (action === 'approve' ? 'Approving #' :
+          action === 'deny' ? 'Denying #' : 'Requesting revision for #') + id + '…';
         try {
+          const headers = {};
+          if (btn.dataset.binding) headers['X-Lightwork-Approval-Binding'] = btn.dataset.binding;
+          if (action === 'revise') headers['Content-Type'] = 'application/json';
           const r = await fetch('/api/v1/approvals/' + encodeURIComponent(id) + '/' + action, {
-            method: 'POST',
+            method: 'POST', headers,
+            body: action === 'revise' ? JSON.stringify({rationale: revisionRationale}) : undefined,
           });
           if (r.status === 202) {
             const pending = await r.json().catch(function() { return {}; });
-            document.querySelectorAll('tr[data-id="' + id + '"] button.approval-btn')
-              .forEach(function(b) { b.disabled = false; });
+            restoreDisabledStates();
             msg.style.color = 'var(--warn)';
             msg.textContent = '#' + id + ' decision recorded but not yet in effect: ' +
               'the secure audit record is still being written. It is safe to try again.';
@@ -127,8 +190,7 @@
               // This vote is signed, but an N-of-M approval still needs quorum.
               // Keep the shared queue row visible rather than implying that the
               // underlying high-risk action is already effective.
-              document.querySelectorAll('tr[data-id="' + id + '"] button.approval-btn')
-                .forEach(function(b) { b.disabled = false; });
+              restoreDisabledStates();
               msg.style.color = 'var(--accent)';
               msg.textContent = '#' + id + ' vote recorded; approval is still pending quorum.';
               return;
@@ -149,16 +211,21 @@
                 if (table) table.replaceWith(empty);
               }
             }
+          } else if (r.status === 200 && action === 'revise') {
+            const revised = await r.json().catch(function() { return {}; });
+            msg.style.color = 'var(--accent)';
+            msg.textContent = '#' + id + ' superseded; ' +
+              (revised.next_action || 'the originating producer must submit a fresh review.');
+            const row = document.querySelector('tr[data-id="' + id + '"]');
+            if (row && row.parentElement) row.remove();
           } else {
             const j = await r.json().catch(function() { return {}; });
-            document.querySelectorAll('tr[data-id="' + id + '"] button.approval-btn')
-              .forEach(function(b) { b.disabled = false; });
+            restoreDisabledStates();
             msg.style.color = 'var(--danger)';
             msg.textContent = (j.detail || ('Failed: ' + r.status));
           }
         } catch (e) {
-          document.querySelectorAll('tr[data-id="' + id + '"] button.approval-btn')
-            .forEach(function(b) { b.disabled = false; });
+          restoreDisabledStates();
           msg.style.color = 'var(--danger)';
           msg.textContent = String(e);
         }

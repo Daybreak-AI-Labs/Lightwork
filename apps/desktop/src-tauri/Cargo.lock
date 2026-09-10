@@ -1745,6 +1745,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightwork-desktop-oauth-return"
+version = "0.1.0"
+
+[[package]]
 name = "lightwork-desktop-runtime"
 version = "0.1.0"
 
@@ -1790,6 +1794,7 @@ dependencies = [
 name = "maverick-desktop"
 version = "0.1.7"
 dependencies = [
+ "lightwork-desktop-oauth-return",
  "lightwork-desktop-runtime",
  "serde",
  "serde_json",

@@ -646,15 +646,15 @@ def _ctx(tmp_path, fake_llm):
 
 @pytest.mark.asyncio
 async def test_agent_pins_rehearsal_prediction_as_card(
-    tmp_path, fake_llm, monkeypatch,
+    tmp_path, fake_llm, monkeypatch, fresh_human_decision,
 ):
     from maverick import rehearsal
     from maverick.agent import Agent
 
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
     # Subject is the rehearsal→card pipeline; the shell tool must actually
-    # run, so grant its consent explicitly (the posture would deny it).
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    # run, so the shared fixture supplies the fresh human decision its
+    # permit requires (auto-approve would deny it).
     monkeypatch.setattr(
         "maverick.rehearsal_runtime.gate_tool",
         lambda **kw: rehearsal.RehearsalVerdict(

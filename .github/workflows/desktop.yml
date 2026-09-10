@@ -11,6 +11,7 @@ on:
       - "apps/installer-desktop/**"
       - "apps/desktop/**"
       - "apps/desktop-runtime/**"
+      - "apps/desktop-oauth-return/**"
       - "apps/apple-companion-core/**"
       - "apps/watch-glance/**"
       - "apps/visionos-plan-tree/**"
@@ -59,6 +60,9 @@ jobs:
           persist-credentials: false
       - name: Install Linux validation dependencies
         run: |
+          # The runner image ships a Google Chrome apt source whose index
+          # intermittently fails verification (Hash Sum mismatch); unused here.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev
@@ -90,6 +94,7 @@ jobs:
           pnpm build
           cargo check --locked --manifest-path src-tauri/Cargo.toml
           cargo test --locked --lib --manifest-path ../desktop/src-tauri/Cargo.toml
+          cargo test --locked --manifest-path ../desktop-oauth-return/Cargo.toml
           cargo test --locked --manifest-path ../desktop-runtime/Cargo.toml
 
   bundle:
@@ -127,6 +132,9 @@ jobs:
       - name: Install Linux bundle deps
         if: matrix.os == 'ubuntu-22.04'
         run: |
+          # The runner image ships a Google Chrome apt source whose index
+          # intermittently fails verification (Hash Sum mismatch); unused here.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf

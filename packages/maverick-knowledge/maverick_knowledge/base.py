@@ -12,18 +12,21 @@ external writes regardless of whether a Shield is wired).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import re
 import time
-import uuid
 from dataclasses import dataclass
 
-from .chunk import chunk_text
 from .embed import DeterministicEmbedder
 from .parse import extract_text
+from .provider_accounting import operation_scope
 from .store import SqliteVectorStore
 
 log = logging.getLogger(__name__)
+
+_EXACT_DOCUMENT_SCHEMA = "lightwork.vector-document-layout.v1"
+_EXACT_CHUNK_KEYS = {"chunk_index", "chunk_start", "chunk_end"}
 
 # Built-in injection tripwire applied to every ingested chunk, even when no
 # Shield is configured. maverick-knowledge is standalone (no maverick-core dep),
@@ -184,38 +187,272 @@ class KnowledgeBase:
         * ``ingested_by``— the principal that loaded it (audit attribution).
         * ``doc_sha256`` — content hash (dedup + tamper-evidence).
         """
-        raw_chunks = list(chunk_text(text, self.chunk_size, self.chunk_overlap))
-        chunks = [c for c in raw_chunks if self._safe(c)]
+        document_text = str(text or "")
+        if not document_text.strip():
+            return 0
+        size = max(1, int(self.chunk_size))
+        overlap = max(0, min(int(self.chunk_overlap), size - 1))
+        step = size - overlap
+        raw_chunks = [
+            (start, min(start + size, len(document_text)), document_text[start:start + size])
+            for start in range(0, len(document_text), step)
+        ]
+        chunks = [chunk for _start, _end, chunk in raw_chunks]
         # Boundary-split evasion guard: an attacker can straddle an injection
         # tripwire across a chunk edge (or pick a small chunk_size) so no single
         # chunk matches the marker even though the full document does. Screen the
         # FULL text unconditionally -- the old `len(chunks) == len(raw_chunks)`
         # guard skipped this whenever any one chunk was also independently
         # dropped, letting a straddled payload's remaining chunks through.
-        if not self._safe(text):
+        if not self._safe(document_text):
             log.warning("knowledge: dropping document with boundary-split "
                         "injection marker on ingest")
             return 0
-        if not chunks:
+        # Exact projection cannot reconstruct a document with a screened-out
+        # middle range. Drop the whole document rather than storing a partial
+        # source whose digest and offsets could never validate.
+        if not chunks or any(not self._safe(chunk) for chunk in chunks):
             return 0
-        vectors = self.embedder.embed(chunks)
+        document_sha256 = hashlib.sha256(document_text.encode("utf-8")).hexdigest()
         base_meta = {
             "source": source,
             "subject": subject,
             "trust_tier": int(trust_tier),
             "sensitivity": sensitivity,
             "ingested_by": ingested_by,
-            "ingested_at": time.time(),
-            "doc_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         }
         if extra_meta:
             base_meta.update(extra_meta)
+        base_meta.pop("ingested_at", None)
+        # Exact-layout keys are reserved. They bind every row to one complete
+        # immutable document and may not be replaced through extra metadata.
+        base_meta.update(
+            document_schema=_EXACT_DOCUMENT_SCHEMA,
+            document_length=len(document_text),
+            doc_sha256=document_sha256,
+            chunk_count=len(chunks),
+        )
+        exact_reader = getattr(self.store, "read_where", None)
+        try:
+            existing = (
+                self.exact_document(collection, document_sha256)
+                if callable(exact_reader)
+                else None
+            )
+        except LookupError:
+            existing = None
+        except RuntimeError as reconstruction_error:
+            # An interrupted deterministic upsert is repairable, but the rows
+            # that survived already bind this digest to their provenance.  Do
+            # not let a retry silently replace that provenance merely because
+            # the incomplete set cannot yet pass exact reconstruction.
+            with operation_scope(
+                category="retrieval",
+                service=f"vector-store:{type(self.store).__name__}",
+                operation="knowledge-interrupted-document-read",
+            ):
+                surviving = list(
+                    exact_reader(
+                        collection,
+                        "doc_sha256",
+                        document_sha256,
+                        limit=max(2048, len(chunks) + 1),
+                    )
+                )
+            for row in surviving:
+                surviving_meta = {
+                    key: value
+                    for key, value in row.meta.items()
+                    if key not in _EXACT_CHUNK_KEYS and key != "ingested_at"
+                }
+                if surviving_meta != base_meta:
+                    raise RuntimeError(
+                        "knowledge document digest is already bound to different provenance"
+                    ) from reconstruction_error
+            existing = None
+        if existing is not None:
+            existing_meta = dict(existing["metadata"])
+            existing_meta.pop("ingested_at", None)
+            if existing["text"] != document_text or existing_meta != base_meta:
+                raise RuntimeError(
+                    "knowledge document digest is already bound to different provenance"
+                )
+            return int(existing["chunk_count"])
+        with operation_scope(
+            category="storage",
+            service=f"embedder:{type(self.embedder).__name__}",
+            operation="knowledge-document-embedding",
+        ):
+            vectors = self.embedder.embed(chunks)
+        base_meta["ingested_at"] = time.time()
         items = [
-            (uuid.uuid4().hex, c, v, dict(base_meta))
-            for c, v in zip(chunks, vectors, strict=False)
+            (
+                hashlib.sha256(
+                    (
+                        "lightwork:vector-document-chunk:v1\0"
+                        f"{collection}\0{document_sha256}\0{index}"
+                    ).encode()
+                ).hexdigest(),
+                c,
+                v,
+                {
+                    **base_meta,
+                    "chunk_index": index,
+                    "chunk_start": start,
+                    "chunk_end": end,
+                },
+            )
+            for index, ((start, end, c), v) in enumerate(
+                zip(raw_chunks, vectors, strict=True)
+            )
         ]
-        self.store.add(collection, items)
+        with operation_scope(
+            category="storage",
+            service=f"vector-store:{type(self.store).__name__}",
+            operation="knowledge-document-storage",
+        ):
+            self.store.add(collection, items)
+        if callable(exact_reader):
+            stored = self.exact_document(collection, document_sha256)
+            if stored["text"] != document_text or stored["metadata"] != base_meta:
+                raise RuntimeError("knowledge document storage verification failed")
+            return int(stored["chunk_count"])
         return len(items)
+
+    def exact_document(
+        self,
+        collection: str,
+        doc_sha256: str,
+        *,
+        max_chunks: int = 2048,
+    ) -> dict:
+        """Read one complete ingested document by its immutable digest.
+
+        Only documents ingested with explicit chunk positions are eligible.
+        Duplicate or partial copies fail closed because neither similarity
+        ranking nor database row order can prove the original document order.
+        """
+        if (
+            not isinstance(doc_sha256, str)
+            or len(doc_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in doc_sha256)
+        ):
+            raise ValueError("knowledge document digest must be lowercase SHA-256")
+        if not isinstance(max_chunks, int) or isinstance(max_chunks, bool) or max_chunks < 1:
+            raise ValueError("knowledge exact document chunk limit must be positive")
+        reader = getattr(self.store, "read_where", None)
+        if not callable(reader):
+            raise RuntimeError("knowledge store cannot perform exact document reads")
+        with operation_scope(
+            category="retrieval",
+            service=f"vector-store:{type(self.store).__name__}",
+            operation="knowledge-exact-document-read",
+        ):
+            rows = list(
+                reader(
+                    collection,
+                    "doc_sha256",
+                    doc_sha256,
+                    limit=max_chunks,
+                )
+            )
+        if not rows:
+            raise LookupError("knowledge document was not found")
+        if len(rows) > max_chunks:
+            raise RuntimeError("knowledge document exceeds its exact projection boundary")
+        first = rows[0].meta
+        count = first.get("chunk_count")
+        if (
+            not isinstance(count, int)
+            or isinstance(count, bool)
+            or count != len(rows)
+            or count < 1
+        ):
+            raise RuntimeError("knowledge document ordering commitment is incomplete")
+        if first.get("document_schema") != _EXACT_DOCUMENT_SCHEMA:
+            raise RuntimeError("knowledge document exact-layout commitment is unavailable")
+        document_length = first.get("document_length")
+        if (
+            not isinstance(document_length, int)
+            or isinstance(document_length, bool)
+            or document_length < 1
+        ):
+            raise RuntimeError("knowledge document exact-layout commitment is malformed")
+        positions: dict[int, tuple[int, int, str]] = {}
+        stable = {
+            key: value for key, value in first.items() if key not in _EXACT_CHUNK_KEYS
+        }
+        for row in rows:
+            meta = row.meta
+            index = meta.get("chunk_index")
+            start = meta.get("chunk_start")
+            end = meta.get("chunk_end")
+            if (
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or not 0 <= index < count
+                or index in positions
+                or not isinstance(start, int)
+                or isinstance(start, bool)
+                or not isinstance(end, int)
+                or isinstance(end, bool)
+                or not 0 <= start < end <= document_length
+                or len(row.text) != end - start
+                or {
+                    key: value
+                    for key, value in meta.items()
+                    if key not in _EXACT_CHUNK_KEYS
+                } != stable
+            ):
+                raise RuntimeError("knowledge document ordering commitment is ambiguous")
+            positions[index] = (start, end, row.text)
+        if set(positions) != set(range(count)):
+            raise RuntimeError("knowledge document ordering commitment is incomplete")
+        reconstructed = ""
+        covered = 0
+        for index in range(count):
+            start, end, chunk = positions[index]
+            if start > covered:
+                raise RuntimeError("knowledge document ordering commitment is incomplete")
+            overlap_end = min(end, covered)
+            if overlap_end > start and reconstructed[start:overlap_end] != chunk[:overlap_end - start]:
+                raise RuntimeError("knowledge document overlapping chunks conflict")
+            if end > covered:
+                reconstructed += chunk[covered - start:]
+                covered = end
+        if covered != document_length or len(reconstructed) != document_length:
+            raise RuntimeError("knowledge document ordering commitment is incomplete")
+        actual_sha256 = hashlib.sha256(reconstructed.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(actual_sha256, doc_sha256):
+            raise RuntimeError("knowledge document content does not match its declared digest")
+        return {
+            "schema": "lightwork.vector-knowledge-document.v1",
+            "collection": str(collection),
+            "doc_sha256": doc_sha256,
+            "source": str(stable["source"] or ""),
+            "subject": str(stable["subject"] or ""),
+            "trust_tier": stable["trust_tier"],
+            "sensitivity": str(stable["sensitivity"] or ""),
+            "ingested_by": str(stable["ingested_by"] or ""),
+            "ingested_at": stable["ingested_at"],
+            "document_schema": _EXACT_DOCUMENT_SCHEMA,
+            "document_length": document_length,
+            "chunk_count": count,
+            "metadata": stable,
+            "text": reconstructed,
+            "chunks": [
+                {
+                    "index": index,
+                    "start": positions[index][0],
+                    "end": positions[index][1],
+                    "text": positions[index][2],
+                    "sha256": hashlib.sha256(
+                        positions[index][2].encode("utf-8")
+                    ).hexdigest(),
+                }
+                for index in range(count)
+            ],
+        }
 
     def ingest_path(self, collection: str, path, *, subject: str = "",
                     trust_tier: int = 2, sensitivity: str = "internal",
@@ -233,7 +470,12 @@ class KnowledgeBase:
                 log.info("knowledge: skipping image %s (no image_describer set)", path)
                 return 0
             try:
-                text = self.image_describer(str(path))
+                with operation_scope(
+                    category="generation",
+                    service="knowledge-image-describer",
+                    operation="knowledge-image-description",
+                ):
+                    text = self.image_describer(str(path))
             except Exception as e:  # a describer failure must not abort ingestion
                 log.warning("knowledge: image describer failed on %s: %s", path, e)
                 return 0
@@ -251,7 +493,12 @@ class KnowledgeBase:
         fn = getattr(self.store, "collections", None)
         if not callable(fn):
             raise RuntimeError("knowledge store cannot enumerate collections")
-        return list(fn())
+        with operation_scope(
+            category="retrieval",
+            service=f"vector-store:{type(self.store).__name__}",
+            operation="knowledge-collection-list",
+        ):
+            return list(fn())
 
     def erase_subject(self, subject: str, collections=None) -> dict[str, int]:
         """Delete every chunk belonging to ``subject`` (GDPR Art. 17).
@@ -266,7 +513,12 @@ class KnowledgeBase:
         cols = list(collections) if collections is not None else self.collections()
         out: dict[str, int] = {}
         for c in cols:
-            n = self.store.delete_where(c, "subject", subject)
+            with operation_scope(
+                category="update",
+                service=f"vector-store:{type(self.store).__name__}",
+                operation="knowledge-subject-erasure",
+            ):
+                n = self.store.delete_where(c, "subject", subject)
             if n:
                 out[c] = n
         return out
@@ -279,7 +531,12 @@ class KnowledgeBase:
         cols = list(collections) if collections is not None else self.collections()
         out: dict[str, int] = {}
         for c in cols:
-            n = self.store.delete_where(c, "source", source)
+            with operation_scope(
+                category="update",
+                service=f"vector-store:{type(self.store).__name__}",
+                operation="knowledge-source-erasure",
+            ):
+                n = self.store.delete_where(c, "source", source)
             if n:
                 out[c] = n
         return out
@@ -290,21 +547,43 @@ class KnowledgeBase:
         if not subject:
             return 0
         cols = list(collections) if collections is not None else self.collections()
-        return sum(self.store.count_where(c, "subject", subject) for c in cols)
+        total = 0
+        for collection in cols:
+            with operation_scope(
+                category="retrieval",
+                service=f"vector-store:{type(self.store).__name__}",
+                operation="knowledge-subject-count",
+            ):
+                total += self.store.count_where(collection, "subject", subject)
+        return total
 
     def delete_collection(self, collection: str) -> None:
         """Delete an unapproved or retired collection from the backing store."""
-        self.store.delete_collection(collection)
+        with operation_scope(
+            category="update",
+            service=f"vector-store:{type(self.store).__name__}",
+            operation="knowledge-collection-delete",
+        ):
+            self.store.delete_collection(collection)
 
     def _search_vec(self, collection: str, vector, k: int) -> list[Hit]:
         """Store lookup for an already-embedded query; one Hit-wrap site."""
-        return [
-            Hit(m.score, m.text, m.meta.get("source", ""))
-            for m in self.store.search(collection, vector, k)
-        ]
+        with operation_scope(
+            category="retrieval",
+            service=f"vector-store:{type(self.store).__name__}",
+            operation="knowledge-vector-search",
+        ):
+            matches = self.store.search(collection, vector, k)
+        return [Hit(m.score, m.text, m.meta.get("source", "")) for m in matches]
 
     def search(self, collection: str, query: str, k: int = 5) -> list[Hit]:
-        return self._search_vec(collection, self.embedder.embed([query])[0], k)
+        with operation_scope(
+            category="retrieval",
+            service=f"embedder:{type(self.embedder).__name__}",
+            operation="knowledge-query-embedding",
+        ):
+            vector = self.embedder.embed([query])[0]
+        return self._search_vec(collection, vector, k)
 
     def search_formatted(self, collections, query: str, k: int = 5) -> str:
         """Search one or more domain collections and render the top-k chunks with
@@ -316,7 +595,12 @@ class KnowledgeBase:
         is collapsed before the k-slice -- absorbed duplicates make room for
         the next-best distinct chunk rather than shrinking the result, and the
         model never pays tokens for the same span twice."""
-        vector = self.embedder.embed([query])[0]
+        with operation_scope(
+            category="retrieval",
+            service=f"embedder:{type(self.embedder).__name__}",
+            operation="knowledge-query-embedding",
+        ):
+            vector = self.embedder.embed([query])[0]
         hits: list[Hit] = []
         for c in collections:
             hits.extend(self._search_vec(c, vector, k))

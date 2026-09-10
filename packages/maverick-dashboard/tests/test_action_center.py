@@ -109,6 +109,296 @@ def test_project_review_actions_use_authorized_inbox_and_current_assignment():
     assert reviews[0]["reason"].startswith("Source changed")
 
 
+def _reconciliation_case(**changes):
+    value = {
+        "id": "VON-uncertain",
+        "schema": "lightwork.vendor-onboarding.v1",
+        "vendor_name": "Northstar AI",
+        "revision": 7,
+        "owner": "procurement",
+        "stage": "reconciliation_required",
+        "updated_at": 90,
+        "due_at": 120,
+        "reconciliation": {
+            "schema": "lightwork.vendor-onboarding.reconciliation-summary.v1",
+            "attempted_action": {
+                "operation_id": "VOP-" + "1" * 32,
+                "action": "jira.create",
+                "attempt_count": 1,
+                "started_at": 80,
+                "target": {"provider": "jira", "project": "VEND"},
+            },
+            "known_observations": [
+                {"kind": "execution_attempt", "state": "recorded", "count": 1,
+                 "observed_at": 80},
+                {"kind": "provider_receipt", "state": "not_recorded"},
+                {"kind": "authoritative_readback", "state": "no_match", "match_count": 0,
+                 "observed_at": 85},
+            ],
+            "uncertainty": {
+                "state": "unresolved",
+                "reason": "no_matching_effect_observed",
+                "explanation": "No matching Jira task was observed; absence is not proof of no effect.",
+            },
+            "safe_next_check": {
+                "kind": "check_status",
+                "label": "Check the original Jira destination again",
+                "mode": "read_only",
+            },
+            "responsible_operator": {
+                "principal": "user:alice",
+                "business_owner": "procurement",
+            },
+            "resolution": {
+                "automatic_compensation_supported": False,
+                "unreviewed_replacement_allowed": False,
+                "requires_separate_review": True,
+                "explanation": "Any supported resolution requires a separate reviewed action.",
+            },
+        },
+    }
+    value.update(changes)
+    return value
+
+
+def _case_page(cases, *, has_more=False, next_cursor=None, limit=100, **changes):
+    value = {
+        "schema": "lightwork.vendor-onboarding.case-page.v1",
+        "cases": cases,
+        "view": "unresolved",
+        "limit": limit,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
+        "record_reads": len(cases),
+        "scan_complete": not has_more,
+        "order": "case_id_ascending",
+    }
+    value.update(changes)
+    return value
+
+
+def test_vendor_reconciliation_is_actionable_without_exposing_or_authorizing_a_write():
+    result = center.collect(
+        World(), principal="user:alice", owner="user:alice", specs=[],
+        assessments=list, assessment_allowed=lambda row: True,
+        vendor_reconciliations=lambda: {
+            "items": [_reconciliation_case()], "complete": True,
+        },
+        now=100,
+    )
+    item = next(row for row in result["items"] if row["kind"] == "vendor_reconciliation")
+    assert item["title"] == "Resolve uncertain Jira task for Northstar AI"
+    assert item["href"] == "/third-party/vendor-onboarding?case=VON-uncertain"
+    assert item["assignment"] == "mine"
+    assert item["reconciliation"]["safe_next_check"]["mode"] == "read_only"
+    assert item["reconciliation"]["resolution"]["unreviewed_replacement_allowed"] is False
+    assert {row["kind"]: row["status"] for row in result["coverage"]}[
+        "vendor_reconciliation"
+    ] == "current"
+
+
+def test_current_access_loss_is_an_in_app_resolution_path_without_a_retry_write():
+    case = _reconciliation_case()
+    case["reconciliation"]["uncertainty"] = {
+        "state": "unresolved",
+        "reason": "current_connection_access_unavailable",
+        "explanation": "Current Jira access is unavailable; no provider request was made.",
+    }
+    case["reconciliation"]["safe_next_check"] = {
+        "kind": "restore_access",
+        "label": "Restore the original Jira connection access, then check status",
+        "mode": "read_only",
+        "href": "/connections",
+    }
+    result = center.collect(
+        World(), principal="user:alice", owner="user:alice", specs=[],
+        assessments=list, assessment_allowed=lambda row: True,
+        vendor_reconciliations=lambda: {"items": [case], "complete": True}, now=100,
+    )
+    item = next(row for row in result["items"] if row["kind"] == "vendor_reconciliation")
+    assert item["reconciliation"]["safe_next_check"] == case["reconciliation"][
+        "safe_next_check"
+    ]
+    assert item["reconciliation"]["resolution"]["requires_separate_review"] is True
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda value: value.pop("revision"), id="missing-revision"),
+        pytest.param(lambda value: value.__setitem__("revision", "7"), id="string-revision"),
+        pytest.param(lambda value: value.pop("owner"), id="missing-owner"),
+        pytest.param(lambda value: value.__setitem__("vendor_name", ""), id="empty-vendor"),
+        pytest.param(lambda value: value.__setitem__("due_at", "soon"), id="string-due"),
+        pytest.param(lambda value: value.__setitem__("updated_at", float("nan")), id="nan-update"),
+        pytest.param(
+            lambda value: value["reconciliation"]["attempted_action"].__setitem__("action", ""),
+            id="empty-attempted-action",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["attempted_action"]["target"].__setitem__(
+                "project", "vend",
+            ),
+            id="malformed-target",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["attempted_action"].__setitem__(
+                "attempt_count", -1,
+            ),
+            id="negative-attempt-count",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["known_observations"].__setitem__(0, None),
+            id="null-observation",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["known_observations"].__setitem__(1, "recorded"),
+            id="string-observation",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["known_observations"][2].__setitem__(
+                "provider_body", "PRIVATE_PROVIDER_BODY",
+            ),
+            id="nested-extra-field",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["uncertainty"].pop("reason"),
+            id="missing-reason",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["safe_next_check"].__setitem__("label", ""),
+            id="empty-next-label",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["responsible_operator"].__setitem__(
+                "principal", " user:alice ",
+            ),
+            id="whitespace-principal",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["responsible_operator"].pop(
+                "business_owner",
+            ),
+            id="missing-business-owner",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["resolution"].__setitem__(
+                "automatic_compensation_supported", True,
+            ),
+            id="compensation-claimed",
+        ),
+        pytest.param(
+            lambda value: value["reconciliation"]["resolution"].__setitem__(
+                "explanation", "",
+            ),
+            id="empty-resolution-explanation",
+        ),
+    ],
+)
+def test_malformed_reconciliation_fields_fail_closed_without_detail_leak(mutate):
+    case = _reconciliation_case()
+    mutate(case)
+    result = center.collect(
+        World(), principal="user:alice", owner="user:alice", specs=[],
+        assessments=list, assessment_allowed=lambda row: True,
+        vendor_reconciliations=lambda: {"items": [case], "complete": True}, now=100,
+    )
+    assert not any(row["kind"] == "vendor_reconciliation" for row in result["items"])
+    assert {row["kind"]: row["status"] for row in result["coverage"]}[
+        "vendor_reconciliation"
+    ] == "unavailable"
+    assert "PRIVATE_PROVIDER_BODY" not in str(result)
+
+
+def test_failed_reconciliation_source_is_explicitly_unavailable_without_detail_leak():
+    private = "provider response containing private details"
+
+    def broken():
+        raise RuntimeError(private)
+
+    result = center.collect(
+        World(), principal="user:alice", owner="user:alice", specs=[],
+        assessments=list, assessment_allowed=lambda row: True,
+        vendor_reconciliations=broken, now=100,
+    )
+    assert {row["kind"]: row["status"] for row in result["coverage"]}[
+        "vendor_reconciliation"
+    ] == "unavailable"
+    assert private not in str(result)
+
+
+def test_request_bound_reconciliation_source_pages_without_provider_mutation(monkeypatch):
+    from maverick_dashboard import vendor_onboarding_api
+
+    calls = []
+
+    class Service:
+        def list_page(self, context, **kwargs):
+            calls.append((context, kwargs))
+            if len(calls) == 1:
+                return _case_page(
+                    [_reconciliation_case()], has_more=True, next_cursor="next-page",
+                )
+            return _case_page([_reconciliation_case(id="VON-second")])
+
+    binding = SimpleNamespace(service=Service(), context="current-authority")
+    monkeypatch.setattr(vendor_onboarding_api, "_binding", lambda request: binding)
+    result = api._vendor_reconciliation_rows(object())
+    assert [row["id"] for row in result["items"]] == ["VON-uncertain", "VON-second"]
+    assert result["complete"] is True
+    assert calls == [
+        ("current-authority", {"limit": 100, "cursor": "", "view": "unresolved"}),
+        ("current-authority", {"limit": 100, "cursor": "next-page", "view": "unresolved"}),
+    ]
+
+
+def test_request_bound_reconciliation_source_has_a_hard_page_cap(monkeypatch):
+    from maverick_dashboard import vendor_onboarding_api
+
+    calls = 0
+
+    class Service:
+        def list_page(self, context, **kwargs):
+            nonlocal calls
+            calls += 1
+            return _case_page([], has_more=True, next_cursor=f"page-{calls}")
+
+    binding = SimpleNamespace(service=Service(), context="current-authority")
+    monkeypatch.setattr(vendor_onboarding_api, "_binding", lambda request: binding)
+    result = api._vendor_reconciliation_rows(object())
+    assert result == {"items": [], "complete": False}
+    assert calls == 20
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema": "lightwork.vendor-onboarding.case-page.v2"},
+        {"view": "all"},
+        {"limit": 99},
+        {"scan_complete": True},
+        {"has_more": False, "scan_complete": True,
+         "next_cursor": "cursor-without-has-more"},
+        {"private_provider_page": "PRIVATE_PROVIDER_BODY"},
+    ],
+)
+def test_request_bound_reconciliation_source_rejects_malformed_page_contract(
+    monkeypatch, change,
+):
+    from maverick_dashboard import vendor_onboarding_api
+
+    class Service:
+        def list_page(self, context, **kwargs):
+            page = _case_page([], has_more=True, next_cursor="next-page")
+            page.update(change)
+            return page
+
+    binding = SimpleNamespace(service=Service(), context="current-authority")
+    monkeypatch.setattr(vendor_onboarding_api, "_binding", lambda request: binding)
+    with pytest.raises(ValueError, match="source is unavailable"):
+        api._vendor_reconciliation_rows(object())
+
+
 def test_versioned_preferences_survive_reload_and_changed_items_become_unread():
     item = model()["items"][0]
     center.save_preference(CTX, item, expected_revision=0, operation_id="first-operation",
@@ -174,6 +464,7 @@ def test_api_preferences_recheck_current_source_then_paginate_and_keep_snoozed_o
     assert active["items"][0]["read"] is True
     assert client.get("/api/v1/action-center?view=snoozed").json()["total"] == 1
     assert client.get("/api/v1/action-center?kind=approval").json()["total"] == 1
+    assert client.get("/api/v1/action-center?kind=vendor_reconciliation").status_code == 200
     value["items"][0]["source_version"] = "f" * 64
     assert client.put(f"/api/v1/action-center/{item['id']}/preference", json=body).status_code == 409
     value["items"].pop(0)
@@ -194,7 +485,9 @@ def test_api_refuses_changed_context_or_disabled_feature(monkeypatch):
 def test_api_and_page_permission_floor_and_private_caching(monkeypatch):
     from maverick_dashboard import auth
     client, _ = _client_model(monkeypatch)
-    assert client.get("/action-center").status_code == 200
+    page = client.get("/action-center")
+    assert page.status_code == 200
+    assert 'value="vendor_reconciliation"' in page.text
     assert client.get("/static/lightwork-action-center.js").status_code == 200
     assert client.get("/api/v1/action-center").headers["cache-control"] == "private, no-store"
     monkeypatch.setattr(auth, "has_permission", lambda request, permission: False)

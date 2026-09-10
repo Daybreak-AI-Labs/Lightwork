@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import copy
 import json
 import logging
 import os
@@ -49,7 +50,12 @@ from ..file_lock import (
 )
 from ..paths import data_dir
 from ..safety.action_evidence import seal_bracketed
-from ..safety.action_gate import browser_action_risk, gate_browser_action
+from ..safety.action_gate import (
+    ActionPermit,
+    browser_action_risk,
+    consume_action_permit,
+    gate_browser_action,
+)
 from . import Tool
 from .http_fetch import _scan_fetched
 
@@ -70,6 +76,20 @@ _monotonic = time.monotonic
 _MAX_OBSERVE_ELEMENTS = 100
 _MAX_OBSERVE_NAME_LENGTH = 120
 _MAX_OBSERVE_AXTREE_CHARS = 20_000
+
+
+def _redact_browser_text(value: Any) -> str:
+    """Return model/log-visible browser text with capability tokens removed."""
+    try:
+        from ..safety.secret_detector import redact
+
+        safe, _matches = redact(str(value or ""))
+        return safe
+    except Exception:
+        # Browser targets and provider exceptions are untrusted. If the
+        # detector is unavailable, withhold the label instead of reflecting a
+        # selector, URL, DOM fragment, or exception that may contain a token.
+        return "[browser detail withheld: redaction unavailable]"
 
 
 # ---------- session persistence (cookies + localStorage survive restarts) ----------
@@ -160,6 +180,78 @@ class _BrowserSession:
         self._browser = None
         self._context = None
         self._page = None
+        self._approval_dispatch = None
+
+    @staticmethod
+    def _target_snapshot(handle):
+        return handle.evaluate("""element => {
+            let activationContextWithinLimit = true;
+            const bounded = value => {
+              const text = String(value == null ? '' : value);
+              if (text.length > 4096) activationContextWithinLimit = false;
+              return text.slice(0, 4096);
+            };
+            const attribute = (node, name) => node.hasAttribute(name)
+              ? bounded(node.getAttribute(name)) : null;
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            const cssVisible = style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              style.visibility !== 'collapse' &&
+              Number.parseFloat(style.opacity || '1') > 0;
+            const checkVisible = typeof element.checkVisibility !== 'function' ||
+              element.checkVisibility({
+                checkOpacity: true,
+                checkVisibilityCSS: true,
+                contentVisibilityAuto: true
+              });
+            const inViewport = rect.bottom > 0 && rect.right > 0 &&
+              rect.top < window.innerHeight && rect.left < window.innerWidth;
+            const form = element.form || null;
+            const submitter = form && /^(BUTTON|INPUT)$/.test(element.tagName);
+            return {
+              tag: element.tagName,
+              id: element.id || '',
+              name: element.getAttribute('name') || '',
+              role: element.getAttribute('role') || '',
+              type: element.getAttribute('type') || '',
+              ariaLabel: element.getAttribute('aria-label') || '',
+              text: String(element.innerText || element.value || '').slice(0, 1000),
+              disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+              readOnly: Boolean(element.readOnly || element.getAttribute('aria-readonly') === 'true'),
+              visible: Boolean(cssVisible && checkVisible),
+              inViewport: Boolean(inViewport),
+              href: attribute(element, 'href'),
+              resolvedHref: element.hasAttribute('href')
+                ? bounded(element.href) : null,
+              formAttribute: attribute(element, 'form'),
+              owningForm: form ? {
+                id: bounded(form.id),
+                name: bounded(form.getAttribute('name')),
+                actionAttribute: attribute(form, 'action'),
+                resolvedAction: bounded(form.action),
+                method: bounded(form.method),
+                enctype: bounded(form.enctype),
+                target: bounded(form.target),
+                noValidate: Boolean(form.noValidate)
+              } : null,
+              submitterOverrides: submitter ? {
+                actionAttribute: attribute(element, 'formaction'),
+                resolvedAction: bounded(element.formAction),
+                methodAttribute: attribute(element, 'formmethod'),
+                resolvedMethod: bounded(element.formMethod),
+                enctypeAttribute: attribute(element, 'formenctype'),
+                resolvedEnctype: bounded(element.formEnctype),
+                targetAttribute: attribute(element, 'formtarget'),
+                resolvedTarget: bounded(element.formTarget),
+                noValidateAttribute: element.hasAttribute('formnovalidate'),
+                noValidate: Boolean(element.formNoValidate)
+              } : null,
+              inlineHandler: String(element.onclick || '').slice(0, 4000),
+              rect: [rect.x, rect.y, rect.width, rect.height].map(Math.round),
+              activationContextWithinLimit
+            };
+        }""")
 
     def _ensure_started(self):
         if self._page is not None:
@@ -200,6 +292,279 @@ class _BrowserSession:
         self._ensure_started()
         return self._page
 
+    def approval_context(
+        self,
+        action: str = "",
+        args: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        """Commit the live page, DOM target, and credentials without exposing them."""
+        from ..approval_cards import digest
+
+        self._ensure_started()
+        state = self._context.storage_state()
+        supplied = dict(args or {})
+        selectors: list[str] = []
+        if action in {"click", "type"} and supplied.get("selector"):
+            selectors.append(str(supplied["selector"]))
+        elif action == "fill_form" and isinstance(supplied.get("fields"), dict):
+            selectors.extend(str(selector) for selector in supplied["fields"])
+        elif action == "press":
+            selectors.append(str(supplied.get("selector") or ":focus"))
+        targets = []
+        dispatch_targets = []
+        for selector in selectors:
+            try:
+                locator = self._page.locator(selector)
+                count = locator.count()
+                if count != 1:
+                    raise RuntimeError("approval target must resolve to exactly one element")
+                handle_getter = getattr(locator.first, "element_handle", None)
+                handle = handle_getter() if callable(handle_getter) else None
+                first = self._target_snapshot(handle or locator.first)
+                if not isinstance(first, dict) or first.get("disabled") is not False:
+                    raise RuntimeError("approval target is not enabled")
+                if first.get("activationContextWithinLimit", True) is not True:
+                    raise RuntimeError(
+                        "approval activation context exceeds the supported length"
+                    )
+                rectangle = first.get("rect")
+                if (
+                    not isinstance(rectangle, list)
+                    or len(rectangle) != 4
+                    or rectangle[2] <= 0
+                    or rectangle[3] <= 0
+                    or first.get("visible") is not True
+                    or first.get("inViewport") is not True
+                ):
+                    raise RuntimeError("approval target is not currently visible")
+                if action in {"type", "fill_form"} and first.get("readOnly") is True:
+                    raise RuntimeError("approval target is read-only")
+                targets.append({
+                    "selector_sha256": digest(selector),
+                    "count": count,
+                    "first": first,
+                })
+                if handle is not None:
+                    dispatch_targets.append({
+                        "handle": handle,
+                        "snapshot": copy.deepcopy(first),
+                    })
+            except Exception as exc:
+                raise RuntimeError(
+                    "browser approval target is unavailable or ambiguous"
+                ) from exc
+        page_url = str(self._page.url or "")
+        try:
+            parsed = urlparse(page_url)
+            host = parsed.hostname or ""
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            port = parsed.port
+            netloc = f"{host}:{port}" if port is not None else host
+            safe_page = parsed._replace(
+                netloc=netloc, params="", query="", fragment="",
+            ).geturl()
+        except ValueError:
+            safe_page = "[invalid URL]"
+        label = ""
+        if targets:
+            first_target = targets[0].get("first") or {}
+            if isinstance(first_target, dict):
+                label = str(
+                    first_target.get("ariaLabel")
+                    or first_target.get("text")
+                    or first_target.get("name")
+                    or first_target.get("id")
+                    or first_target.get("role")
+                    or first_target.get("tag")
+                    or ""
+                )
+        if not label:
+            try:
+                label = str(self._page.title() or "")
+            except Exception:
+                label = ""
+        try:
+            from ..safety.secret_detector import redact
+
+            target_summary, _matches = redact(
+                " ".join(f"{label[:160]} at {safe_page[:240]}".split())
+            )
+        except Exception:
+            target_summary = "current browser target (details unavailable)"
+        context = {
+            # This value is consumed only as input to the card's target digest;
+            # it is never rendered or persisted in clear text.
+            "page_url": page_url,
+            "page_instance_sha256": digest(id(self._page)),
+            "browser_context_instance_sha256": digest(id(self._context)),
+            "credential_version_sha256": digest(state),
+            "target_state_sha256": digest(targets),
+            "target_summary": target_summary[:400],
+        }
+        self._approval_dispatch = {
+            "action": action,
+            "parameters_sha256": digest(supplied),
+            "page_instance_sha256": digest(id(self._page)),
+            "context_instance_sha256": digest(id(self._context)),
+            "targets": dispatch_targets,
+        }
+        return context
+
+    def dispatch_approved(self, action, args, timeout, allow_hosts) -> str:
+        """Validate pinned DOM handles and actuate in one page task.
+
+        A same-selector replacement cannot inherit approval: the final context
+        capture pins the exact ElementHandle, and the page task validates every
+        pinned element before applying any mutation.
+        """
+        from ..approval_cards import digest
+
+        ticket = self._approval_dispatch
+        self._approval_dispatch = None
+        supplied = dict(args or {})
+        if (
+            not isinstance(ticket, dict)
+            or ticket.get("action") != action
+            or ticket.get("parameters_sha256") != digest(supplied)
+            or ticket.get("page_instance_sha256") != digest(id(self._page))
+            or ticket.get("context_instance_sha256") != digest(id(self._context))
+        ):
+            return "ERROR: browser target dispatch ticket is stale; no action was sent"
+        targets = ticket.get("targets") or []
+        if action not in {"click", "type", "fill_form", "press"}:
+            return _dispatch_browser_action(
+                action, self, self._page, supplied, timeout, allow_hosts,
+            )
+        expected_count = 1 if action in {"click", "type", "press"} else len(
+            supplied.get("fields") or {}
+        )
+        if len(targets) != expected_count or not targets:
+            return "ERROR: browser target could not be pinned; no action was sent"
+        values = []
+        if action == "type":
+            values = [str(supplied.get("text") or "")]
+        elif action == "fill_form":
+            values = [str(value) for value in (supplied.get("fields") or {}).values()]
+        payload = {
+            "action": action,
+            "elements": [target["handle"] for target in targets],
+            "expected": [target["snapshot"] for target in targets],
+            "values": values,
+            "key": str(supplied.get("text") or ""),
+        }
+        result = self._page.evaluate("""payload => {
+          function snapshot(element) {
+            let activationContextWithinLimit = true;
+            const bounded = value => {
+              const text = String(value == null ? '' : value);
+              if (text.length > 4096) activationContextWithinLimit = false;
+              return text.slice(0, 4096);
+            };
+            const attribute = (node, name) => node.hasAttribute(name)
+              ? bounded(node.getAttribute(name)) : null;
+            const rect = element.getBoundingClientRect();
+            const style = window.getComputedStyle(element);
+            const cssVisible = style.display !== 'none' &&
+              style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+              Number.parseFloat(style.opacity || '1') > 0;
+            const checkVisible = typeof element.checkVisibility !== 'function' ||
+              element.checkVisibility({checkOpacity: true, checkVisibilityCSS: true,
+                contentVisibilityAuto: true});
+            const inViewport = rect.bottom > 0 && rect.right > 0 &&
+              rect.top < window.innerHeight && rect.left < window.innerWidth;
+            const form = element.form || null;
+            const submitter = form && /^(BUTTON|INPUT)$/.test(element.tagName);
+            return {tag: element.tagName, id: element.id || '',
+              name: element.getAttribute('name') || '',
+              role: element.getAttribute('role') || '',
+              type: element.getAttribute('type') || '',
+              ariaLabel: element.getAttribute('aria-label') || '',
+              text: String(element.innerText || element.value || '').slice(0, 1000),
+              disabled: Boolean(element.disabled || element.getAttribute('aria-disabled') === 'true'),
+              readOnly: Boolean(element.readOnly || element.getAttribute('aria-readonly') === 'true'),
+              visible: Boolean(cssVisible && checkVisible), inViewport: Boolean(inViewport),
+              href: attribute(element, 'href'),
+              resolvedHref: element.hasAttribute('href')
+                ? bounded(element.href) : null,
+              formAttribute: attribute(element, 'form'),
+              owningForm: form ? {id: bounded(form.id),
+                name: bounded(form.getAttribute('name')),
+                actionAttribute: attribute(form, 'action'),
+                resolvedAction: bounded(form.action), method: bounded(form.method),
+                enctype: bounded(form.enctype), target: bounded(form.target),
+                noValidate: Boolean(form.noValidate)} : null,
+              submitterOverrides: submitter ? {
+                actionAttribute: attribute(element, 'formaction'),
+                resolvedAction: bounded(element.formAction),
+                methodAttribute: attribute(element, 'formmethod'),
+                resolvedMethod: bounded(element.formMethod),
+                enctypeAttribute: attribute(element, 'formenctype'),
+                resolvedEnctype: bounded(element.formEnctype),
+                targetAttribute: attribute(element, 'formtarget'),
+                resolvedTarget: bounded(element.formTarget),
+                noValidateAttribute: element.hasAttribute('formnovalidate'),
+                noValidate: Boolean(element.formNoValidate)} : null,
+              inlineHandler: String(element.onclick || '').slice(0, 4000),
+              rect: [rect.x, rect.y, rect.width, rect.height].map(Math.round),
+              activationContextWithinLimit};
+          }
+          const elements = payload.elements || [];
+          if (!elements.length || elements.length !== payload.expected.length)
+            return 'stale';
+          for (let index = 0; index < elements.length; index += 1) {
+            const element = elements[index];
+            if (!element || !element.isConnected ||
+                JSON.stringify(snapshot(element)) !== JSON.stringify(payload.expected[index]))
+              return 'stale';
+          }
+          function fill(element, value) {
+            element.focus();
+            const prototype = element instanceof HTMLTextAreaElement
+              ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+            if (!descriptor || typeof descriptor.set !== 'function') return false;
+            descriptor.set.call(element, value);
+            element.dispatchEvent(new InputEvent('input', {bubbles: true,
+              inputType: 'insertText', data: value}));
+            element.dispatchEvent(new Event('change', {bubbles: true}));
+            return true;
+          }
+          if (payload.action === 'click') elements[0].click();
+          else if (payload.action === 'type') {
+            if (!fill(elements[0], payload.values[0])) return 'unsupported';
+          } else if (payload.action === 'fill_form') {
+            for (let index = 0; index < elements.length; index += 1)
+              if (!fill(elements[index], payload.values[index])) return 'unsupported';
+          } else if (payload.action === 'press') {
+            const target = elements[0]; const key = payload.key;
+            target.focus();
+            const down = new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+            const allowed = target.dispatchEvent(down);
+            target.dispatchEvent(new KeyboardEvent('keyup', {key, bubbles: true}));
+            if (allowed && /^(Enter|Return|Space| )$/i.test(key)) {
+              if (/^(BUTTON|A)$/.test(target.tagName)) target.click();
+              else if (/^(Enter|Return)$/i.test(key) && target.form)
+                target.form.requestSubmit();
+            }
+          }
+          return 'dispatched';
+        }""", payload)
+        if result == "stale":
+            return "ERROR: browser target changed at dispatch; observe and review it again"
+        if result != "dispatched":
+            return "ERROR: browser target does not support atomic dispatch; no action was sent"
+        denial = _deny_and_close_current_page(self._page, allow_hosts)
+        if denial is not None:
+            return denial
+        if action == "click":
+            return f"clicked {_redact_browser_text(supplied['selector'])!r} on {_redact_browser_text(self._page.url)}"
+        if action == "type":
+            return f"typed {len(values[0])} chars into {_redact_browser_text(supplied['selector'])!r}"
+        if action == "fill_form":
+            return f"filled {len(values)}/{len(values)} field(s)"
+        return f"pressed {_redact_browser_text(supplied.get('text') or '')}"
+
     def save_state(self) -> bool:
         """Persist cookies + localStorage to disk. Returns True if written."""
         with self._lock:
@@ -223,7 +588,7 @@ class _BrowserSession:
                 )
                 return True
             except Exception as e:
-                log.warning("browser save_state: %s", e)
+                log.warning("browser save_state: %s", _redact_browser_text(e))
                 return False
 
     def close(self):
@@ -237,7 +602,11 @@ class _BrowserSession:
                     else:
                         closer.close()
                 except Exception as e:
-                    log.warning("browser close: %s: %s", type(closer).__name__, e)
+                    log.warning(
+                        "browser close: %s: %s",
+                        type(closer).__name__,
+                        _redact_browser_text(e),
+                    )
             self._page = self._context = self._browser = self._playwright = None
 
 
@@ -423,7 +792,7 @@ def _browser_navigate(session, page, args, timeout, allow_hosts) -> str:
     if not _is_safe_browser_url(url):
         return (
             "ERROR: URL must be http(s) and must not target localhost or "
-            f"non-public IP ranges; got {url!r}"
+            f"non-public IP ranges; got {_redact_browser_text(url)!r}"
         )
     # Enterprise/tenant egress checks on the REQUESTED url, before any
     # request is made -- so a denied destination can't leak via DNS, TLS
@@ -433,13 +802,13 @@ def _browser_navigate(session, page, args, timeout, allow_hosts) -> str:
     denial = _egress_denial(url)
     if denial is not None:
         return f"ERROR: {denial}"
-    log.info("browser.navigate %s", url)
+    log.info("browser.navigate %s", _redact_browser_text(url))
     page.goto(url, timeout=timeout, wait_until="domcontentloaded")
     denial = _deny_and_close_current_page(page, allow_hosts)
     if denial is not None:
         return denial
     session.save_state()  # checkpoint cookies after each navigation
-    return f"navigated to {page.url} (status: loaded)"
+    return f"navigated to {_redact_browser_text(page.url)} (status: loaded)"
 
 
 def _browser_go_back(page, args, timeout, allow_hosts) -> str:
@@ -447,7 +816,7 @@ def _browser_go_back(page, args, timeout, allow_hosts) -> str:
     denial = _deny_and_close_current_page(page, allow_hosts)
     if denial is not None:
         return denial
-    return f"back -> {page.url}"
+    return f"back -> {_redact_browser_text(page.url)}"
 
 
 def _browser_go_forward(page, args, timeout, allow_hosts) -> str:
@@ -455,19 +824,22 @@ def _browser_go_forward(page, args, timeout, allow_hosts) -> str:
     denial = _deny_and_close_current_page(page, allow_hosts)
     if denial is not None:
         return denial
-    return f"forward -> {page.url}"
+    return f"forward -> {_redact_browser_text(page.url)}"
 
 
 def _browser_click(page, args, timeout, allow_hosts) -> str:
     selector = args.get("selector")
     if not selector:
         return "ERROR: click requires selector"
-    log.info("browser.click %s", selector)
+    safe_selector = _redact_browser_text(selector)
+    log.info("browser.click %s", safe_selector)
     page.click(selector, timeout=timeout)
     denial = _deny_and_close_current_page(page, allow_hosts)
     if denial is not None:
         return denial
-    return f"clicked {selector!r} on {page.url}"
+    return (
+        f"clicked {safe_selector!r} on {_redact_browser_text(page.url)}"
+    )
 
 
 def _browser_type(page, args, timeout) -> str:
@@ -475,9 +847,10 @@ def _browser_type(page, args, timeout) -> str:
     text = args.get("text") or ""
     if not selector:
         return "ERROR: type requires selector"
-    log.info("browser.type len=%d into %s", len(text), selector)
+    safe_selector = _redact_browser_text(selector)
+    log.info("browser.type len=%d into %s", len(text), safe_selector)
     page.fill(selector, text, timeout=timeout)
-    return f"typed {len(text)} chars into {selector!r}"
+    return f"typed {len(text)} chars into {safe_selector!r}"
 
 
 def _browser_fill_form(page, args, timeout) -> str:
@@ -496,11 +869,14 @@ def _browser_fill_form(page, args, timeout) -> str:
     for selector, value in fields.items():
         selector = str(selector)
         value = str(value)
+        safe_selector = _redact_browser_text(selector)
         if len(selector) > _MAX_FILL_FORM_SELECTOR_LENGTH:
-            errors.append(f"{selector[:80]}: selector too long")
+            errors.append(
+                f"{_redact_browser_text(selector[:80])}: selector too long"
+            )
             continue
         if len(value) > _MAX_FILL_FORM_VALUE_LENGTH:
-            errors.append(f"{selector}: value too long")
+            errors.append(f"{safe_selector}: value too long")
             continue
 
         remaining_ms = int((deadline - _monotonic()) * 1000)
@@ -509,9 +885,9 @@ def _browser_fill_form(page, args, timeout) -> str:
             break
         try:
             page.fill(selector, value, timeout=min(field_timeout, remaining_ms))
-            filled.append(selector)
+            filled.append(safe_selector)
         except Exception as e:
-            errors.append(f"{selector}: {type(e).__name__}")
+            errors.append(f"{safe_selector}: {type(e).__name__}")
     log.info("browser.fill_form filled=%d errors=%d", len(filled), len(errors))
     summary = f"filled {len(filled)}/{len(fields)} field(s)"
     if errors:
@@ -531,7 +907,7 @@ def _browser_press(page, args, timeout, allow_hosts) -> str:
     denial = _deny_and_close_current_page(page, allow_hosts)
     if denial is not None:
         return denial
-    return f"pressed {text!r}"
+    return f"pressed {_redact_browser_text(text)!r}"
 
 
 def _browser_scroll(page, args) -> str:
@@ -543,7 +919,11 @@ def _browser_scroll(page, args) -> str:
 def _browser_screenshot(page) -> str:
     png_bytes = page.screenshot(full_page=False)
     b64 = base64.b64encode(png_bytes).decode("ascii")
-    log.info("browser.screenshot len=%d url=%s", len(b64), page.url)
+    log.info(
+        "browser.screenshot len=%d url=%s",
+        len(b64),
+        _redact_browser_text(page.url),
+    )
     return f"<screenshot mime=image/png base64>{b64}</screenshot>"
 
 
@@ -557,15 +937,15 @@ def _browser_extract_text(page, args) -> str:
         body = page.query_selector("body")
         text = (body.inner_text() or "").strip()[:50_000] if body else ""
     cleaned, warning = _scan_fetched(text)
-    return warning + cleaned
+    return _redact_browser_text(warning + cleaned)
 
 
 def _browser_extract_html(page, args) -> str:
     selector = args.get("selector")
     if selector:
         el = page.query_selector(selector)
-        return (el.inner_html() if el else "")[:100_000]
-    return page.content()[:100_000]
+        return _redact_browser_text((el.inner_html() if el else "")[:100_000])
+    return _redact_browser_text(page.content()[:100_000])
 
 
 def _browser_find_text(page, args) -> str:
@@ -575,7 +955,10 @@ def _browser_find_text(page, args) -> str:
     loc = page.get_by_text(text, exact=False)
     count = loc.count()
     if count == 0:
-        return f"text {text!r} not found on {page.url}"
+        return (
+            f"text {_redact_browser_text(text)!r} not found on "
+            f"{_redact_browser_text(page.url)}"
+        )
     # Return location summary for the first match.
     try:
         box = loc.first.bounding_box()
@@ -587,7 +970,7 @@ def _browser_find_text(page, args) -> str:
             )
     except Exception:
         pass
-    return f"found {count} match(es) for {text!r}"
+    return f"found {count} match(es) for {_redact_browser_text(text)!r}"
 
 
 def _browser_wait_for(page, args, timeout) -> str:
@@ -595,7 +978,7 @@ def _browser_wait_for(page, args, timeout) -> str:
     if not selector:
         return "ERROR: wait_for requires selector"
     page.wait_for_selector(selector, timeout=timeout)
-    return f"selector {selector!r} appeared"
+    return f"selector {_redact_browser_text(selector)!r} appeared"
 
 
 def _browser_list_links(page) -> str:
@@ -605,7 +988,11 @@ def _browser_list_links(page) -> str:
         href = a.get_attribute("href") or ""
         text = (a.inner_text() or "").strip()[:80]
         links.append(f"{text!r} -> {href}")
-    return "\n".join(links) if links else "no links on page"
+    return (
+        _redact_browser_text("\n".join(links))
+        if links
+        else "no links on page"
+    )
 
 
 def _observe_selector_hint(el: Any) -> str | None:
@@ -651,7 +1038,10 @@ def _browser_observe(page) -> str:
         ax = page.accessibility.snapshot()
     except Exception as e:
         ax = None
-        log.debug("browser.observe accessibility snapshot failed: %s", e)
+        log.debug(
+            "browser.observe accessibility snapshot failed: %s",
+            _redact_browser_text(e),
+        )
     try:
         ax_json = json.dumps(ax, ensure_ascii=False, default=str) if ax else ""
     except (TypeError, ValueError):
@@ -669,7 +1059,10 @@ def _browser_observe(page) -> str:
         )
     except Exception as e:
         handles = []
-        log.debug("browser.observe element query failed: %s", e)
+        log.debug(
+            "browser.observe element query failed: %s",
+            _redact_browser_text(e),
+        )
     for el in handles:
         if len(elements) >= _MAX_OBSERVE_ELEMENTS:
             break
@@ -692,7 +1085,11 @@ def _browser_observe(page) -> str:
             entry["selector"] = hint
         elements.append(entry)
 
-    log.info("browser.observe url=%s elements=%d", url, len(elements))
+    log.info(
+        "browser.observe url=%s elements=%d",
+        _redact_browser_text(url),
+        len(elements),
+    )
     snapshot = {
         "title": title,
         "url": url,
@@ -701,7 +1098,7 @@ def _browser_observe(page) -> str:
         "accessibility_tree": ax_json,
         "accessibility_truncated": ax_truncated,
     }
-    return json.dumps(snapshot, ensure_ascii=False, default=str)
+    return _redact_browser_text(json.dumps(snapshot, ensure_ascii=False, default=str))
 
 
 def _browser_save_session(session) -> str:
@@ -726,7 +1123,7 @@ def _dispatch_browser_action(
     if action == "navigate":
         return _browser_navigate(session, page, args, timeout, allow_hosts)
     if action == "current_url":
-        return page.url
+        return _redact_browser_text(page.url)
     if action == "go_back":
         return _browser_go_back(page, args, timeout, allow_hosts)
     if action == "go_forward":
@@ -757,19 +1154,90 @@ def _dispatch_browser_action(
         return _browser_list_links(page)
     if action == "save_session":
         return _browser_save_session(session)
+    if action == "close":
+        close_browser()
+        return "browser closed"
     return f"ERROR: unknown action {action!r}"
 
 
+def _dispatch_approved_browser_action(
+    action: str, session, page, args, timeout, allow_hosts,
+) -> str:
+    """Use the session's target-bound driver for DOM mutations.
+
+    A selector lookup followed by a separate Playwright action has an
+    unavoidable replacement window. Refuse that raw path when an exact action
+    permit was required.
+    """
+    if action in {"click", "type", "fill_form", "press"}:
+        dispatcher = getattr(session, "dispatch_approved", None)
+        if not callable(dispatcher):
+            return (
+                "ERROR: browser target cannot be bound atomically; no action "
+                "was sent; observe it and review again"
+            )
+        return dispatcher(action, args, timeout, allow_hosts)
+    return _dispatch_browser_action(
+        action, session, page, args, timeout, allow_hosts,
+    )
+
+
+def _browser_approval_context(session, page, action, args) -> dict[str, Any]:
+    """Capture approval context while preserving legacy test-driver support.
+
+    Selector-bound input must come from a session that can pin the exact DOM
+    handles it will later dispatch to.  Navigation, history, viewport, and
+    session-lifecycle actions have no DOM target, so a minimal page-instance
+    context is sufficient for older or embedded drivers that do not expose the
+    richer ``approval_context`` hook.
+    """
+    provider = getattr(session, "approval_context", None)
+    if callable(provider):
+        return provider(action, copy.deepcopy(args))
+    if action in {"click", "type", "fill_form", "press"}:
+        raise RuntimeError("target-bound browser driver is unavailable")
+
+    from ..approval_cards import digest
+
+    page_url = str(getattr(page, "url", "") or "")
+    try:
+        parsed = urlparse(page_url)
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        port = parsed.port
+        netloc = f"{host}:{port}" if port is not None else host
+        safe_page = parsed._replace(
+            netloc=netloc, params="", query="", fragment="",
+        ).geturl()
+    except ValueError:
+        safe_page = "[invalid URL]"
+    return {
+        "page_instance_sha256": digest(id(page)),
+        "browser_session_instance_sha256": digest(id(session)),
+        "credential_version_sha256": "not_available",
+        "target_state_sha256": digest({
+            "action": action,
+            "page_url": page_url,
+        }),
+        "target_summary": _redact_browser_text(safe_page)[:400],
+    }
+
+
 def _run_browser_action(args: dict[str, Any]) -> str:
+    # A tool invocation owns an immutable logical input.  Keep one private
+    # snapshot for approval and dispatch so a caller or a context callback
+    # cannot change the selector, URL, or typed value between validation and
+    # the physical effect.
+    try:
+        args = copy.deepcopy(dict(args))
+    except Exception:
+        return "ERROR: browser action input could not be frozen; no action was sent"
     if os.environ.get("MAVERICK_BROWSER_DISABLE") == "1":
         return "ERROR: browser tool disabled by MAVERICK_BROWSER_DISABLE=1"
     action = args.get("action")
     if not action:
         return "ERROR: action is required"
-
-    if action == "close":
-        close_browser()
-        return "browser closed"
 
     try:
         session = _get_session()
@@ -785,25 +1253,52 @@ def _run_browser_action(args: dict[str, Any]) -> str:
         if denial is not None:
             return denial
 
-    # Per-action approval gate (mutating actions only -- navigate/click/type/
-    # fill_form/press). No-op in the default auto-approve consent mode; routes
-    # the action through the approval queue when gating is on. Read actions
-    # (extract_*/screenshot/find_text/...) are never gated.
-    denied = gate_browser_action(action, args)
-    if denied is not None:
-        return denied
+    # Per-action approval gate. Every navigation/session/actuation mutation
+    # needs an exact human decision; silent auto approval and standing grants
+    # are ineligible. Read actions (extract_*/screenshot/find_text/...) are not
+    # gated.
+    authorization = gate_browser_action(
+        action,
+        args,
+        context_provider=lambda: _browser_approval_context(
+            session, page, action, args,
+        ),
+    )
+    if isinstance(authorization, str):
+        return authorization
+
+    def dispatch() -> str:
+        try:
+            if isinstance(authorization, ActionPermit):
+                return consume_action_permit(
+                    authorization,
+                    effect=lambda: _dispatch_approved_browser_action(
+                        action, session, page, args, timeout, allow_hosts,
+                    ),
+                )
+            return _dispatch_browser_action(
+                action, session, page, args, timeout, allow_hosts,
+            )
+        except Exception as exc:
+            # Playwright often includes the selector or URL in its exception.
+            # The action may already have reached the page, so tell the caller
+            # to observe current state instead of presenting it as replay-safe.
+            detail = _redact_browser_text(exc)
+            return (
+                f"ERROR: browser {action} could not be confirmed "
+                f"({type(exc).__name__}: {detail}); observe current state "
+                "before retrying"
+            )
 
     if browser_action_risk(action, args) == "high":
         # Bracket a high-risk action with sealed before/after captures
         # (no-op unless screenshot sealing is configured).
         return seal_bracketed(
             lambda: base64.b64encode(page.screenshot(full_page=False)).decode("ascii"),
-            lambda: _dispatch_browser_action(action, session, page, args, timeout, allow_hosts),
+            dispatch,
             action=f"browser.{action}",
         )
-    return _dispatch_browser_action(
-        action, session, page, args, timeout, allow_hosts,
-    )
+    return dispatch()
 
 
 def browser() -> Tool:

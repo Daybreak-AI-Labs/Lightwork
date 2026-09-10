@@ -59,6 +59,20 @@ def test_unreadable_pdf_is_visible_failure_not_available_evidence(content):
     assert result["extracted"] is None
 
 
+def test_active_markup_is_inert_plain_text_and_html_media_is_unsupported():
+    active = (
+        b'<script>globalThis.lightworkActiveMarkupExecuted=true</script>'
+        b'<img src=x onerror="globalThis.lightworkActiveMarkupExecuted=true">'
+    )
+    result = extracted(active)
+    assert result["status"] == "available"
+    assert result["extracted"]["answers"] == {}
+    assert result["extracted"]["unanswered"]
+    assert active.decode() not in json.dumps(result)
+    with pytest.raises(ValueError, match="unsupported document format"):
+        extracted(active, "text/html")
+
+
 def test_upload_date_is_not_collection_date_and_plaintext_is_strictly_bounded():
     result = extracted(b"Model provenance is documented with provider and version.")
     assert result["date_basis"] == "uploader_asserted_document_date"

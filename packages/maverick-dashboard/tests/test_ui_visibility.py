@@ -78,22 +78,22 @@ def test_store_roundtrip_diffs_and_validation(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     from maverick_dashboard import ui_visibility
     assert ui_visibility.overrides() == {}
-    benchmarks = next(p for p in ui_visibility.PAGES if p["path"] == "/benchmarks")
+    analytics = next(p for p in ui_visibility.PAGES if p["path"] == "/flows/analytics")
     # storing the default is a no-op (diff-only store)...
-    ui_visibility.set_visibility("/benchmarks", "operator", True)
+    ui_visibility.set_visibility("/flows/analytics", "operator", True)
     assert ui_visibility.overrides() == {}
     # ...and a real change persists and resolves.
-    ui_visibility.set_visibility("/benchmarks", "operator", False)
-    assert ui_visibility.overrides() == {"/benchmarks": {"operator": False}}
-    assert ui_visibility.is_visible(benchmarks, "operator") is False
-    assert ui_visibility.is_visible(benchmarks, "admin") is True
+    ui_visibility.set_visibility("/flows/analytics", "operator", False)
+    assert ui_visibility.overrides() == {"/flows/analytics": {"operator": False}}
+    assert ui_visibility.is_visible(analytics, "operator") is False
+    assert ui_visibility.is_visible(analytics, "admin") is True
     # flipping back to the default removes the stored diff entirely.
-    ui_visibility.set_visibility("/benchmarks", "operator", True)
+    ui_visibility.set_visibility("/flows/analytics", "operator", True)
     assert ui_visibility.overrides() == {}
     with pytest.raises(ValueError):
         ui_visibility.set_visibility("/nope", "operator", False)
     with pytest.raises(ValueError):
-        ui_visibility.set_visibility("/benchmarks", "superuser", False)
+        ui_visibility.set_visibility("/flows/analytics", "superuser", False)
 
 
 def test_corrupt_or_foreign_store_entries_are_dropped(monkeypatch, tmp_path):
@@ -102,11 +102,11 @@ def test_corrupt_or_foreign_store_entries_are_dropped(monkeypatch, tmp_path):
     p = ui_visibility.store_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({
-        "/benchmarks": {"operator": False, "superuser": False, "viewer": "yes"},
+        "/flows/analytics": {"operator": False, "superuser": False, "viewer": "yes"},
         "/not-a-page": {"viewer": False},
         "/spend": "broken",
     }))
-    assert ui_visibility.overrides() == {"/benchmarks": {"operator": False}}
+    assert ui_visibility.overrides() == {"/flows/analytics": {"operator": False}}
     p.write_text("{not json")
     assert ui_visibility.overrides() == {}
 
@@ -157,8 +157,9 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # viewer: read-only pages only -- no run/build/admin surfaces, and the
     # groups left empty (Extend, Admin) are dropped whole.
     v = hrefs("viewer")
-    assert {"/goals", "/overview", "/spend", "/safety", "/learning"} <= v
-    assert v.isdisjoint({"/chat", "/ekko", "/automations", "/settings", "/users", "/mcp", "/audit"})
+    assert {"/goals", "/overview", "/spend", "/safety"} <= v
+    assert "/cortex" not in v and "/knowledge-access" not in v
+    assert v.isdisjoint({"/chat", "/ekko", "/automations", "/settings", "/users", "/mcp", "/audit", "/learning", "/benchmarks"})
     # The governance surfaces are split into focused sections (the flat
     # 30-link Govern block read as unorganized); the role still sees no
     # Extend/Admin group.
@@ -203,8 +204,8 @@ def test_auth_off_full_nav_and_no_enforcement(monkeypatch, tmp_path):
     assert c.get("/facts").status_code == 200
     # even an explicit override is inert with auth off (single-user mode).
     from maverick_dashboard import ui_visibility
-    ui_visibility.set_visibility("/benchmarks", "operator", False)
-    assert c.get("/benchmarks").status_code == 200
+    ui_visibility.set_visibility("/flows/analytics", "operator", False)
+    assert c.get("/flows/analytics").status_code == 200
 
 
 def test_viewer_pages_hidden_and_blocked(monkeypatch, tmp_path):
@@ -258,24 +259,24 @@ def test_settings_matrix_save_reset_and_authz(monkeypatch, tmp_path):
         for cell in pg["cells"]
         if cell["visible"] and cell["eligible"] and not cell["locked"]
     ]
-    checked.remove("operator:/benchmarks")
+    checked.remove("operator:/flows/analytics")
     r = c.post("/settings/ui-visibility", data={"cell": checked})
     assert r.status_code == 200  # follows the 303 back to /settings
-    assert ui_visibility.overrides() == {"/benchmarks": {"operator": False}}
+    assert ui_visibility.overrides() == {"/flows/analytics": {"operator": False}}
     rbac.set_role("user:op", "operator")
     _as(monkeypatch, "user:op")
-    assert c.get("/benchmarks").status_code == 403
-    assert 'href="/benchmarks"' not in c.get("/goals").text
+    assert c.get("/flows/analytics").status_code == 403
+    assert 'href="/flows/analytics"' not in c.get("/goals").text
     # a non-admin cannot edit or reset the matrix.
     assert c.post("/settings/ui-visibility", data={"cell": []}).status_code == 403
     assert c.post("/settings/ui-visibility/reset").status_code == 403
     # reset restores the defaults.
     _as(monkeypatch, "user:boss")
-    assert c.get("/benchmarks").status_code == 200
+    assert c.get("/flows/analytics").status_code == 200
     assert c.post("/settings/ui-visibility/reset").status_code == 200
     assert ui_visibility.overrides() == {}
     _as(monkeypatch, "user:op")
-    assert c.get("/benchmarks").status_code == 200
+    assert c.get("/flows/analytics").status_code == 200
 
 
 def test_settings_matrix_requires_global_admin_for_tenant_local_admin(
@@ -326,7 +327,7 @@ def test_settings_page_renders_matrix(monkeypatch, tmp_path):
     body = c.get("/settings").text
     assert "Page visibility by role" in body
     assert 'action="/settings/ui-visibility"' in body
-    assert 'value="operator:/benchmarks"' in body
+    assert 'value="operator:/flows/analytics"' in body
     # locked admin cells render disabled, not as editable inputs.
     assert "Always available to admins" in body
 

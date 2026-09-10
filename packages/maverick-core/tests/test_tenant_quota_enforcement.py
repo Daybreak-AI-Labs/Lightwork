@@ -106,3 +106,38 @@ def test_spend_read_warns_on_unreadable_ledger(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR):
         assert registry.tenant_spend_today("gamma") == float("inf")
     assert any("unreadable usage ledger" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_allowance_exhausted_by_in_flight_holds_is_refused_before_the_run(
+    tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
+):
+    """W2-83: with the cap fully held by runs in flight, the gate used to pass
+    (it compared only recorded spend), reserve_tenant_budget granted $0, and
+    the goal failed on its first model call with 'budget exceeded'. It must be
+    refused up front with the over-quota message and never call the LLM."""
+    from maverick.budget import budget_from_config
+
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    registry.create_tenant("acme", plan="free")
+    registry.set_quota("acme", 5.0)
+    assert registry.reserve_tenant_budget("acme", 5.0, 600.0, "other-run") == 5.0
+
+    # The budget the CLI/dashboard would build: clamped to $0 and carrying why.
+    budget = budget_from_config()
+    assert budget.max_dollars == 0.0
+    assert "held by runs in flight" in budget._tenant_refusal
+
+    fake_llm.scripted = _final_script(make_llm_response)
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("compute the answer", "trivial")
+    out = await run_goal(
+        llm=fake_llm, world=world, budget=budget, goal_id=gid,
+        sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
+    )
+    assert "held by runs in flight" in out
+    assert "budget exceeded" not in out.lower()
+    assert fake_llm.calls == []                       # refused before the LLM ran
+    goal = world.get_goal(gid)
+    assert goal.status == "blocked"
+    assert goal.result.startswith("over quota:")

@@ -220,5 +220,9 @@ def test_provider_cost_cap_uses_shared_store_when_postgres(world, monkeypatch):
     pcc.record("anthropic", 1.0, now=1_750_000_000.0)
     st = pcc.check("anthropic", now=1_750_000_000.0)
     assert st.spent == 3.0  # read back from the shared ledger, not a local file
-    key = pcc.period_key(1_750_000_000.0)
-    assert world.get_provider_spend(key, "anthropic") == 3.0
+    # The shared ledger stamps the period from its own clock inside the
+    # mutation transaction, so read back the period it actually used.
+    period, _total, _receipts = world.read_current_provider_cap(
+        pcc.period_from_config(), "anthropic",
+    )
+    assert world.get_provider_spend(period, "anthropic") == 3.0

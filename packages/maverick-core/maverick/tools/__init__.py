@@ -303,13 +303,24 @@ class Tool:
     # ``to_anthropic()``: it must never alter the tool catalog the model
     # sees (that would bust the prompt cache).
     parallel_safe: bool = False
+    # W1-11: ask the provider to validate tool inputs against input_schema
+    # (Anthropic ``strict: true``; OpenAI function ``strict: true``) so a
+    # malformed-arguments retry is never needed. Off by default: strict mode
+    # constrains the schema (e.g. additionalProperties: false, every property
+    # required on OpenAI), so a tool opts in once its schema is ready. Only
+    # emitted when set, so the catalog the model sees -- and the prompt
+    # cache key -- is unchanged for every other tool.
+    strict: bool = False
 
     def to_anthropic(self) -> dict[str, Any]:
-        return {
+        spec: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
             "input_schema": self.input_schema,
         }
+        if self.strict:
+            spec["strict"] = True
+        return spec
 
 
 class ToolRegistry:
@@ -1422,17 +1433,12 @@ def base_registry(
     )
     _apply_deferred_loading(reg)
 
-    # Route external connector WRITES through durable governed transactions.
-    # Standard mode is opt-in; enterprise mode is a mandatory fail-closed floor.
-    # Done last so it wraps the final tool objects.
-    try:
-        from ..governed_tools import apply_governed_connectors
-        apply_governed_connectors(reg, goal_id=goal_id)
-    except Exception:
-        from ..enterprise import enterprise_enabled
+    # Route every compatible external connector write through the durable,
+    # fresh-human governed transaction boundary. Done last so it wraps the
+    # final tool objects; assembly fails closed if the boundary cannot load.
+    from ..governed_tools import apply_governed_connectors
 
-        if enterprise_enabled():
-            raise
+    apply_governed_connectors(reg, goal_id=goal_id)
 
     return reg
 

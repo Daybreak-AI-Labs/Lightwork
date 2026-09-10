@@ -14,6 +14,7 @@ ops:
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,37 @@ from . import Tool, sandbox_run
 # Docker tag grammar (simplified): name[:tag], lowercase name, optional registry/path.
 _TAG = re.compile(r"^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[A-Za-z0-9._-]+)?$")
 _ARG_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _context_input_versions(context: Path, dockerfile: Path) -> dict[str, str]:
+    """Commit to every build-context file without persisting its contents."""
+
+    from ..approval_cards import digest
+
+    def file_sha256(path: Path) -> str:
+        hasher = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    manifest: list[dict[str, object]] = []
+    for path in sorted(context.rglob("*"), key=lambda item: item.as_posix()):
+        relative = path.relative_to(context).as_posix()
+        if path.is_symlink():
+            manifest.append({"path": relative, "symlink": str(path.readlink())})
+        elif path.is_file():
+            manifest.append(
+                {
+                    "path": relative,
+                    "size": path.stat().st_size,
+                    "sha256": file_sha256(path),
+                }
+            )
+    return {
+        "context_manifest_sha256": digest(manifest),
+        "dockerfile_sha256": file_sha256(dockerfile),
+    }
 
 
 def _confine(base: Path, raw: str, workdir: Path) -> Path | None:
@@ -72,20 +104,86 @@ def _build(sandbox: Any, args: dict[str, Any]) -> str:
         timeout = float(args.get("timeout", 600))
     except (TypeError, ValueError):
         timeout = 600.0
-    from ..safety import ConsentDenied, require_consent
+    target = {
+        "context": str(context),
+        "dockerfile": str(df),
+        "image_tag": tag,
+    }
+    parameters = {"argv": argv, "timeout_seconds": timeout}
+
+    def current_target() -> dict[str, str]:
+        return {
+            "context": str(context.resolve(strict=True)),
+            "dockerfile": str(df.resolve(strict=True)),
+            "image_tag": tag,
+        }
+
+    def current_credentials() -> dict[str, str]:
+        from ..approval_cards import digest
+
+        backend = type(sandbox)
+        return {
+            "kind": "sandbox-runtime",
+            "generation_sha256": digest(
+                {
+                    "backend": f"{backend.__module__}.{backend.__qualname__}",
+                    "workdir": str(getattr(sandbox, "workdir", ".")),
+                }
+            ),
+        }
+
+    from ..approval_cards import ApprovalCardError
+    from ..safety import (
+        ConsentDenied,
+        consume_operation_consent,
+        require_operation_consent,
+    )
 
     try:
-        require_consent(
+        permit = require_operation_consent(
             "container_build",
             risk="high",
             scope=f"{tag} in {context}",
-            detail=f"docker build -t {tag} -f {df} {context}",
-            raise_on_deny=True,
+            detail=f"Build container image {tag} from the reviewed workspace context.",
+            provenance="container_build",
+            target=target,
+            parameters=parameters,
+            parameter_summary=[
+                "Build the reviewed tag from the committed context, Dockerfile, arguments, and timeout."
+            ],
+            known_effects=[
+                "Runs Dockerfile instructions and writes an image to the local container runtime."
+            ],
+            unresolved_assumptions=[
+                "Dockerfile instructions may access services allowed by the sandbox and container runtime."
+            ],
+            before="The reviewed image build has not started.",
+            after="The container runtime may contain the reviewed image and build cache layers.",
+            irreversible=False,
+            target_provider=current_target,
+            parameters_provider=lambda: {"argv": list(argv), "timeout_seconds": timeout},
+            input_versions_provider=lambda: _context_input_versions(context, df),
+            credential_versions_provider=current_credentials,
+            budget_provider=lambda: {"timeout_seconds": timeout},
+            allow_auto_approve=False,
+            consult_ledger=False,
         )
     except ConsentDenied:
-        return "⚠ Container build denied by consent policy (MAVERICK_CONSENT_MODE)."
+        return "ERROR: container build was not approved; no build was started"
+    except (ApprovalCardError, OSError):
+        return (
+            "ERROR: container build target or approval authority changed; "
+            "review it again"
+        )
 
-    code, out, err = sandbox_run(sandbox, argv, timeout=timeout)
+    try:
+        with consume_operation_consent(permit):
+            code, out, err = sandbox_run(sandbox, argv, timeout=timeout)
+    except (ApprovalCardError, OSError):
+        return (
+            "ERROR: container build target or approval authority changed; "
+            "review it again"
+        )
     tail = (out or "")[-1500:]
     if err:
         tail = (tail + "\n" + err[-500:]).strip()

@@ -57,12 +57,14 @@ _RBAC_LOCK = threading.Lock()
 def _locked(path: Path):
     from contextlib import ExitStack
 
+    from maverick.authority_effects import authority_effect_fence
     from maverick.file_lock import cross_process_lock, ensure_private_directory
     from maverick.paths import maverick_home
 
     ensure_private_directory(maverick_home())
     ensure_private_directory(path.parent)
     stack = ExitStack()
+    stack.enter_context(authority_effect_fence())
     stack.enter_context(_RBAC_LOCK)
     stack.enter_context(cross_process_lock(path))
     return stack

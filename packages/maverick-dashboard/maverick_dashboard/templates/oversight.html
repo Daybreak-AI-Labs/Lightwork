@@ -125,26 +125,101 @@
       if (why) why.addEventListener('click', function(ev) {
         if (ev.target.closest('[data-why-close]')) why.innerHTML = '';
       });
+      // Diff-render (W3-74): rows are keyed by goal id and updated in place,
+      // so a keyboard user tabbing through the "why?" buttons -- or a screen
+      // reader mid-row -- is never dropped to <body> by a wholesale
+      // innerHTML rebuild every 5 s. Refreshes are skipped while focus is
+      // inside the table and while the tab is hidden; aria-busy marks the
+      // refresh window so assistive tech does not read a half-updated table.
+      function cell(tag, cls) {
+        const el = document.createElement(tag);
+        if (cls) el.className = cls;
+        return el;
+      }
+      function buildRow(g) {
+        const tr = cell('tr');
+        tr.dataset.goal = String(g.id);
+        const id = cell('td', 'muted'); id.textContent = '#' + g.id;
+        const title = cell('td'); title.textContent = g.title || '';
+        const act = cell('td'); const code = cell('code'); act.appendChild(code);
+        const upd = cell('td', 'muted'); upd.style.whiteSpace = 'nowrap';
+        const why = cell('td');
+        const btn = cell('button', 'btn btn--ghost');
+        btn.type = 'button'; btn.setAttribute('data-why', String(g.id));
+        btn.style.fontSize = 'var(--text-sm)'; btn.style.padding = '0.1rem 0.5rem';
+        btn.textContent = 'why?';
+        why.appendChild(btn);
+        tr.append(id, title, act, upd, why);
+        updateRow(tr, g);
+        return tr;
+      }
+      function updateRow(tr, g) {
+        const cells = tr.children;
+        if (cells[1].textContent !== (g.title || '')) cells[1].textContent = g.title || '';
+        const activity = g.activity || '—';
+        const code = cells[2].firstChild;
+        if (code.textContent !== activity) code.textContent = activity;
+        const when = ago(g.updated_at);
+        if (cells[3].textContent !== when) cells[3].textContent = when;
+      }
+      function render(goals) {
+        if (!goals.length) {
+          if (!box.querySelector('[data-empty]')) {
+            box.textContent = '';
+            const p = cell('p', 'muted'); p.setAttribute('data-empty', '1');
+            p.textContent = 'No agents running right now.';
+            box.appendChild(p);
+          }
+          return;
+        }
+        let tbody = box.querySelector('tbody');
+        if (!tbody) {
+          box.textContent = '';
+          const table = cell('table');
+          const thead = cell('thead'); const hr = cell('tr');
+          ['goal', 'title', 'last activity', 'updated', 'why'].forEach(function (label) {
+            const th = cell('th'); th.scope = 'col'; th.textContent = label; hr.appendChild(th);
+          });
+          thead.appendChild(hr); table.appendChild(thead);
+          tbody = cell('tbody'); table.appendChild(tbody);
+          box.appendChild(table);
+        }
+        const seen = new Set();
+        let cursor = tbody.firstElementChild;
+        for (const g of goals) {
+          const key = String(g.id);
+          seen.add(key);
+          let row = tbody.querySelector('tr[data-goal="' + key.replace(/"/g, '') + '"]');
+          if (row) {
+            updateRow(row, g);
+            if (row !== cursor) tbody.insertBefore(row, cursor);
+          } else {
+            row = buildRow(g);
+            tbody.insertBefore(row, cursor);
+          }
+          cursor = row.nextElementSibling;
+        }
+        Array.from(tbody.children).forEach(function (tr) {
+          if (!seen.has(tr.dataset.goal)) tr.remove();
+        });
+      }
       async function tick() {
+        // Never tear down what the user is interacting with, and don't poll
+        // a tab nobody is looking at (matches board.js / privacy_board).
+        if (document.hidden) return;
+        if (box.contains(document.activeElement) && document.activeElement !== box) return;
+        box.setAttribute('aria-busy', 'true');
         try {
           const r = await fetch('/api/v1/oversight/active');
           if (!r.ok) return;
           const goals = (await r.json()).goals || [];
-          if (!goals.length) { box.innerHTML = '<p class="muted">No agents running right now.</p>'; return; }
-          let h = '<table><thead><tr><th scope="col">goal</th><th scope="col">title</th>'
-                + '<th scope="col">last activity</th><th scope="col">updated</th><th scope="col">why</th></tr></thead><tbody>';
-          for (const g of goals) {
-            h += '<tr><td class="muted">#' + esc(g.id) + '</td><td>' + esc(g.title) + '</td>'
-               + '<td><code>' + esc(g.activity || '—') + '</code></td>'
-               + '<td class="muted" style="white-space:nowrap;">' + esc(ago(g.updated_at)) + '</td>'
-               + '<td><button type="button" class="btn btn--ghost" data-why="' + esc(g.id) + '" '
-               + 'style="font-size:var(--text-sm);padding:0.1rem 0.5rem;">why?</button></td></tr>';
-          }
-          box.innerHTML = h + '</tbody></table>';
+          render(goals);
         } catch (e) { /* keep last render on a transient error */ }
+        finally { box.removeAttribute('aria-busy'); }
       }
       tick();
       setInterval(tick, 5000);
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
     })();
   </script>
 

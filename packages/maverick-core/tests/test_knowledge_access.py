@@ -1,0 +1,1407 @@
+"""APP10 current-rights knowledge access and derivative request coverage."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import time
+
+import pytest
+from maverick import config, governed_records
+from maverick.knowledge_access import (
+    TRAINING_PERMISSION_NOTICE,
+    WEIGHT_INFLUENCE_NOTICE,
+    KnowledgeAccessDenied,
+    KnowledgeAccessService,
+    KnowledgeActorAuthority,
+    KnowledgeDocument,
+    KnowledgeRequestConflict,
+)
+from maverick.paths import tenant_scope
+from maverick.research_registry import (
+    DataUseAuthority,
+    RegistryReviewAuthority,
+    ResearchAssetRef,
+    ResearchRegistry,
+    ResearchRegistryConflict,
+    ResearchRegistryDenied,
+    ResearchRegistryNotFound,
+)
+
+PURPOSE = "product_research"
+FUTURE = 4_102_444_800.0
+
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def test_knowledge_access_feature_gate_is_explicit_and_strict(monkeypatch):
+    monkeypatch.delenv("MAVERICK_KNOWLEDGE_ACCESS", raising=False)
+    assert config.knowledge_access_enabled({}) is True
+    assert config.knowledge_access_enabled({"knowledge_access": {"enable": True}}) is True
+    assert config.knowledge_access_enabled({"knowledge_access": {"enable": False}}) is False
+    assert config.knowledge_access_enabled({"knowledge_access": {"enable": "true"}}) is False
+    assert config.knowledge_access_enabled({"knowledge_access": []}) is False
+    monkeypatch.setenv("MAVERICK_KNOWLEDGE_ACCESS", "0")
+    assert config.knowledge_access_enabled({"knowledge_access": {"enable": True}}) is False
+
+
+@pytest.fixture
+def access(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "local")
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
+    config.reset_config_cache()
+    governed_records._reset_process_authority_pin_for_testing()
+    rights: dict[tuple[str, str], dict] = {}
+    calls: list[tuple[str, str]] = []
+
+    def data_use(tenant, decision_id, decision_sha256):
+        asset_id = decision_id.removeprefix("decision-")
+        state = rights.get((tenant, asset_id))
+        if state is None or not state["allowed"]:
+            raise ResearchRegistryDenied("source rights revoked")
+        if decision_sha256 != _sha(f"{tenant}:{decision_id}"):
+            raise ResearchRegistryDenied("source decision mismatch")
+        return DataUseAuthority(
+            tenant=tenant,
+            decision_id=decision_id,
+            decision_sha256=decision_sha256,
+            asset_id=asset_id,
+            action=state["action"],
+            purpose_codes=(PURPOSE,),
+            expires_at=state["expires_at"],
+            authority_sha256=_sha(f"authority:{tenant}:{asset_id}:{state['epoch']}"),
+        )
+
+    registry = ResearchRegistry(
+        data_use_resolver=data_use,
+        review_authority_resolver=lambda tenant, actor: RegistryReviewAuthority(
+            tenant,
+            actor,
+            _sha(f"review:{tenant}:{actor}"),
+        ),
+    )
+
+    def content(tenant, reference, admission):
+        calls.append((tenant, reference.asset_id))
+        label = reference.asset_id.replace("-", " ").replace("_", " ")
+        return KnowledgeDocument(
+            tenant=tenant,
+            reference=reference,
+            content_sha256=admission.content_sha256,
+            title=f"{tenant} {label} handbook",
+            summary=f"Private {tenant} summary for {reference.asset_id}.",
+            claim_state="verified" if reference.asset_id != "inference" else "inferred",
+            observed_at=1_700_000_000.0,
+            verified_at=1_700_000_100.0,
+        )
+
+    def actor_authority(tenant, actor, action, purpose):
+        return KnowledgeActorAuthority(
+            tenant=tenant,
+            principal=actor,
+            action=action,
+            purpose=purpose,
+            authorization_sha256=_sha(f"actor:{tenant}:{actor}:{action}:{purpose}"),
+        )
+
+    service = KnowledgeAccessService(
+        registry=registry,
+        content_resolver=content,
+        actor_authority_resolver=actor_authority,
+    )
+    yield service, registry, rights, calls
+    governed_records._reset_process_authority_pin_for_testing()
+    config.reset_config_cache()
+
+
+def _dataset(
+    registry: ResearchRegistry,
+    rights: dict,
+    tenant: str,
+    asset_id: str,
+    *,
+    action: str = "export",
+    parent_datasets: tuple[ResearchAssetRef, ...] = (),
+    usage_constraints: tuple[str, ...] = (
+        "tenant_only",
+        "no_training_without_separate_permission",
+    ),
+) -> ResearchAssetRef:
+    rights[(tenant, asset_id)] = {
+        "allowed": True,
+        "action": action,
+        "expires_at": FUTURE,
+        "epoch": "v1",
+    }
+    reference = registry.register_dataset(
+        tenant,
+        "user:source-owner",
+        dataset_id=asset_id,
+        version="v1",
+        source_ref=f"catalog:{tenant}/{asset_id}/v1",
+        content_sha256=_sha(f"content:{tenant}:{asset_id}"),
+        license_id="customer-authorized",
+        license_evidence_sha256=_sha(f"license:{tenant}:{asset_id}"),
+        allowed_purposes=(PURPOSE,),
+        usage_constraints=usage_constraints,
+        data_use_action=action,
+        data_use_decision_id=f"decision-{asset_id}",
+        data_use_decision_sha256=_sha(f"{tenant}:decision-{asset_id}"),
+        parent_datasets=parent_datasets,
+    )
+    return registry.approve(
+        tenant,
+        "user:independent-reviewer",
+        reference,
+        expected_revision=1,
+    )
+
+
+def test_direct_cache_export_and_queued_job_revalidate_revoked_source(access):
+    service, registry, rights, calls = access
+    source = _dataset(registry, rights, "tenant-a", "policy")
+
+    direct = service.detail("tenant-a", "user:reader", source, purpose=PURPOSE, use_cache=False)
+    assert direct["cache"]["hit"] is False
+    assert direct["summary"] == "Private tenant-a summary for policy."
+    cached = service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert cached["cache"] == {
+        "owner": "knowledge_access_process_projection",
+        "hit": True,
+        "content_revalidated_before_return": True,
+    }
+    assert calls == [("tenant-a", "policy"), ("tenant-a", "policy")]
+    exported = service.export("tenant-a", "user:reader", (source,), purpose=PURPOSE)
+    assert exported["complete"] is True
+    assert exported["actor"] == "user:reader"
+    assert exported["items"][0]["eligibility"]["requested_action"] == "export"
+    assert exported["authority_evidence"]["sources"] == [{
+        "reference": exported["items"][0]["reference"],
+        "content_sha256": exported["items"][0]["source"]["content_sha256"],
+        "approval_sha256": exported["items"][0]["eligibility"]["approval_sha256"],
+    }]
+    assert exported["qualification"] == {
+        "local_control_validation": "passed_at_request_time",
+        "external_store_and_customer_qualification": "qualification_pending",
+    }
+    replayed = service.export("tenant-a", "user:reader", (source,), purpose=PURPOSE)
+    assert replayed["authority_evidence"] == exported["authority_evidence"]
+
+    rights[("tenant-a", "policy")]["allowed"] = False
+    for operation in (
+        lambda: service.detail("tenant-a", "user:reader", source, purpose=PURPOSE),
+        lambda: service.export("tenant-a", "user:reader", (source,), purpose=PURPOSE),
+        lambda: service.materialize_at_job_start(
+            "tenant-a",
+            "worker:research",
+            (source,),
+            purpose=PURPOSE,
+            action="export",
+            job_id="queued-export-1",
+        ),
+    ):
+        with pytest.raises(ResearchRegistryDenied, match="rights revoked"):
+            operation()
+    assert calls == [
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+    ]
+
+    rights[("tenant-a", "policy")]["allowed"] = True
+    restored = service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert restored["cache"]["hit"] is False
+    assert calls == [
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+        ("tenant-a", "policy"),
+    ]
+
+
+def test_expired_source_is_absent_from_search_and_cache_is_evicted(access):
+    service, registry, rights, calls = access
+    source = _dataset(registry, rights, "tenant-a", "inference")
+    assert service.search("tenant-a", "user:reader", query="inference", purpose=PURPOSE)["count"] == 1
+    rights[("tenant-a", "inference")]["expires_at"] = 1.0
+
+    result = service.search("tenant-a", "user:reader", query="inference", purpose=PURPOSE)
+
+    assert result["items"] == []
+    assert result["omitted_ineligible"] == 1
+    assert "inference" not in str(result["items"])
+    rights[("tenant-a", "inference")]["expires_at"] = FUTURE
+    service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert calls == [
+        ("tenant-a", "inference"),
+        ("tenant-a", "inference"),
+    ]
+
+
+def test_search_source_selectors_filter_before_projection_and_limit(access):
+    service, registry, rights, calls = access
+    _dataset(registry, rights, "tenant-a", "unrelated")
+    selected = _dataset(registry, rights, "tenant-a", "assessments-memory")
+
+    result = service.search(
+        "tenant-a",
+        "user:reader",
+        query="",
+        purpose=PURPOSE,
+        limit=1,
+        source_selectors=("catalog:tenant-a/assessments-memory",),
+    )
+
+    assert result["count"] == 1
+    assert result["items"][0]["reference"]["asset_id"] == selected.asset_id
+    assert result["items"][0]["reference"]["manifest_sha256"] == selected.manifest_sha256
+    assert calls == [("tenant-a", "assessments-memory")]
+
+
+@pytest.mark.parametrize("selectors", [[], ["same", "same"], "not-a-list"])
+def test_search_rejects_invalid_source_selectors_without_projection(access, selectors):
+    service, registry, rights, calls = access
+    _dataset(registry, rights, "tenant-a", "policy")
+
+    with pytest.raises(ValueError, match="source selectors"):
+        service.search(
+            "tenant-a",
+            "user:reader",
+            query="",
+            purpose=PURPOSE,
+            source_selectors=selectors,
+        )
+
+    assert calls == []
+
+
+def test_same_labels_search_export_and_cache_are_tenant_isolated(access):
+    service, registry, rights, _calls = access
+    source_a = _dataset(registry, rights, "tenant-a", "same-label")
+    source_b = _dataset(registry, rights, "tenant-b", "same-label")
+
+    result_a = service.search("tenant-a", "user:reader", query="same label", purpose=PURPOSE)
+    encoded_a = str(result_a)
+    assert result_a["count"] == 1
+    assert "Private tenant-a summary" in encoded_a
+    assert "tenant-b" not in encoded_a
+    result_b = service.search("tenant-b", "user:reader", query="same label", purpose=PURPOSE)
+    assert "Private tenant-b summary" in str(result_b)
+    assert "tenant-a" not in str(result_b)
+
+    with pytest.raises((ResearchRegistryNotFound, ResearchRegistryConflict)):
+        service.export("tenant-a", "user:reader", (source_b,), purpose=PURPOSE)
+    exported = service.export("tenant-a", "user:reader", (source_a,), purpose=PURPOSE)
+    assert exported["tenant"] == "tenant-a"
+    assert "tenant-b" not in str(exported)
+
+
+def test_exact_vector_projector_keeps_identical_labels_tenant_isolated(access):
+    from maverick.knowledge_content_projection import (
+        ExistingKnowledgeContentProjector,
+        inspect_existing_source,
+        vector_knowledge_source_ref,
+    )
+    from maverick_knowledge import KnowledgeBase, SqliteVectorStore
+
+    service, registry, rights, _calls = access
+    bases = {}
+    references = {}
+    for tenant in ("tenant-a", "tenant-b"):
+        base = KnowledgeBase(store=SqliteVectorStore(":memory:"))
+        body = f"Private exact vector content for {tenant}."
+        base.ingest_text("shared", body, source="same-label.txt")
+        bases[tenant] = base
+        source_ref = vector_knowledge_source_ref("shared", _sha(body))
+        inspected = inspect_existing_source(
+            tenant,
+            source_ref,
+            knowledge_base=base,
+        )
+        rights[(tenant, "same-vector-label")] = {
+            "allowed": True,
+            "action": "export",
+            "expires_at": FUTURE,
+            "epoch": "v1",
+        }
+        draft = registry.register_dataset(
+            tenant,
+            "user:source-owner",
+            dataset_id="same-vector-label",
+            version="v1",
+            source_ref=source_ref,
+            content_sha256=inspected["content_sha256"],
+            license_id="customer-authorized",
+            license_evidence_sha256=_sha(f"license:{tenant}:vector"),
+            allowed_purposes=(PURPOSE,),
+            usage_constraints=("tenant_only",),
+            data_use_action="export",
+            data_use_decision_id="decision-same-vector-label",
+            data_use_decision_sha256=_sha(
+                f"{tenant}:decision-same-vector-label"
+            ),
+        )
+        references[tenant] = registry.approve(
+            tenant,
+            "user:independent-reviewer",
+            draft,
+            expected_revision=1,
+        )
+    service.content_resolver = ExistingKnowledgeContentProjector(
+        knowledge_base_factory=lambda tenant: bases[tenant],
+    )
+
+    detail_a = service.detail(
+        "tenant-a", "user:reader", references["tenant-a"], purpose=PURPOSE
+    )
+    assert "tenant-a" in detail_a["summary"]
+    assert "tenant-b" not in detail_a["summary"]
+    with pytest.raises((ResearchRegistryNotFound, ResearchRegistryConflict)):
+        service.detail(
+            "tenant-a", "user:reader", references["tenant-b"], purpose=PURPOSE
+        )
+
+
+def test_malformed_or_cross_tenant_content_adapter_fails_closed(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "adapter-boundary")
+    service.content_resolver = lambda _tenant, reference, admission: KnowledgeDocument(
+        tenant="tenant-b",
+        reference=reference,
+        content_sha256=admission.content_sha256,
+        title="Crossed",
+        summary="This must never leave the process.",
+        claim_state="verified",
+    )
+
+    with pytest.raises(KnowledgeAccessDenied, match="tenant or version"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE, use_cache=False)
+
+
+def test_cached_projection_is_withheld_when_the_owning_store_disappears(access):
+    service, registry, rights, calls = access
+    source = _dataset(registry, rights, "tenant-a", "removed-from-store")
+    assert service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)[
+        "content_available"
+    ] is True
+    service.content_resolver = lambda *_args: (_ for _ in ()).throw(
+        FileNotFoundError("source removed")
+    )
+
+    with pytest.raises(KnowledgeAccessDenied, match="content is unavailable"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert calls == [("tenant-a", "removed-from-store")]
+
+
+def test_revocation_during_source_projection_is_withheld_and_evicts_cache(access):
+    service, registry, rights, calls = access
+    source = _dataset(registry, rights, "tenant-a", "revoked-during-read")
+    original = service.content_resolver
+
+    def revoke_during_read(tenant, reference, admission):
+        document = original(tenant, reference, admission)
+        rights[(tenant, reference.asset_id)]["allowed"] = False
+        return document
+
+    service.content_resolver = revoke_during_read
+    with pytest.raises(ResearchRegistryDenied, match="rights revoked"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert calls == [("tenant-a", "revoked-during-read")]
+
+    rights[("tenant-a", "revoked-during-read")]["allowed"] = True
+    service.content_resolver = original
+    recovered = service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert recovered["cache"]["hit"] is False
+
+
+def test_export_and_job_catalogues_are_all_or_nothing(access):
+    service, registry, rights, _calls = access
+    first = _dataset(registry, rights, "tenant-a", "first")
+    second = _dataset(registry, rights, "tenant-a", "second")
+    rights[("tenant-a", "second")]["allowed"] = False
+
+    with pytest.raises(ResearchRegistryDenied):
+        service.export("tenant-a", "user:reader", (first, second), purpose=PURPOSE)
+    with pytest.raises(ResearchRegistryDenied):
+        service.materialize_at_job_start(
+            "tenant-a",
+            "worker:research",
+            (first, second),
+            purpose=PURPOSE,
+            action="export",
+            job_id="queued-catalogue",
+        )
+
+
+def test_detail_revalidates_after_rights_history_io(access, monkeypatch):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "history-race")
+
+    def revoke_while_reading_history(_tenant, _reference):
+        rights[("tenant-a", "history-race")]["allowed"] = False
+        return []
+
+    monkeypatch.setattr(service, "_requests_for_reference", revoke_while_reading_history)
+
+    with pytest.raises(ResearchRegistryDenied, match="rights revoked"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+
+
+@pytest.mark.parametrize("operation", ["export", "job"])
+def test_complete_catalogue_rechecks_earlier_source_after_later_projection(
+    access,
+    operation,
+):
+    service, registry, rights, _calls = access
+    first = _dataset(registry, rights, "tenant-a", f"first-{operation}")
+    second = _dataset(registry, rights, "tenant-a", f"second-{operation}")
+    original = service.content_resolver
+
+    def revoke_first_during_second(tenant, reference, admission):
+        document = original(tenant, reference, admission)
+        if reference == second:
+            rights[(tenant, first.asset_id)]["allowed"] = False
+        return document
+
+    service.content_resolver = revoke_first_during_second
+    if operation == "export":
+        call = lambda: service.export(  # noqa: E731
+            "tenant-a", "user:reader", (first, second), purpose=PURPOSE,
+        )
+    else:
+        call = lambda: service.materialize_at_job_start(  # noqa: E731
+            "tenant-a",
+            "worker:research",
+            (first, second),
+            purpose=PURPOSE,
+            action="export",
+            job_id="whole-catalogue-race",
+        )
+
+    with pytest.raises(ResearchRegistryDenied, match="rights revoked"):
+        call()
+
+
+@pytest.mark.parametrize("revoked_authority", ["source", "actor"])
+def test_search_rechecks_prior_results_after_later_projection(
+    access,
+    monkeypatch,
+    revoked_authority,
+):
+    service, registry, rights, _calls = access
+    first = _dataset(registry, rights, "tenant-a", f"search-first-{revoked_authority}")
+    second = _dataset(registry, rights, "tenant-a", f"search-second-{revoked_authority}")
+    rows = [registry.inspect("tenant-a", first), registry.inspect("tenant-a", second)]
+    monkeypatch.setattr(registry, "list", lambda *_args, **_kwargs: rows)
+    actor_current = {"allowed": True}
+    original_content = service.content_resolver
+    original_actor = service.actor_authority_resolver
+
+    def actor_authority(tenant, actor, action, purpose):
+        if not actor_current["allowed"]:
+            raise PermissionError("actor revoked")
+        return original_actor(tenant, actor, action, purpose)
+
+    def revoke_during_second(tenant, reference, admission):
+        document = original_content(tenant, reference, admission)
+        if reference == second:
+            if revoked_authority == "source":
+                rights[(tenant, first.asset_id)]["allowed"] = False
+            else:
+                actor_current["allowed"] = False
+        return document
+
+    service.actor_authority_resolver = actor_authority
+    service.content_resolver = revoke_during_second
+
+    expected = "rights revoked" if revoked_authority == "source" else "authority is unavailable"
+    with pytest.raises((ResearchRegistryDenied, KnowledgeAccessDenied), match=expected):
+        service.search("tenant-a", "user:reader", query="", purpose=PURPOSE)
+
+
+@pytest.mark.parametrize("operation", ["search", "export", "job"])
+def test_complete_catalogue_rejects_registry_revoke_during_final_later_check(
+    access,
+    monkeypatch,
+    operation,
+):
+    service, registry, rights, _calls = access
+    first = _dataset(registry, rights, "tenant-a", f"final-first-{operation}")
+    second = _dataset(registry, rights, "tenant-a", f"final-second-{operation}")
+    rows = [registry.inspect("tenant-a", first), registry.inspect("tenant-a", second)]
+    if operation == "search":
+        monkeypatch.setattr(registry, "list", lambda *_args, **_kwargs: rows)
+    original = registry.resolve_dataset
+    counts = {first.asset_id: 0, second.asset_id: 0}
+
+    def revoke_first_during_final_second(tenant, reference, **kwargs):
+        admission = original(tenant, reference, **kwargs)
+        counts[reference.asset_id] += 1
+        if reference == second and counts[reference.asset_id] == 4:
+            registry.revoke(
+                tenant,
+                "user:independent-reviewer",
+                first,
+                expected_revision=2,
+                reason_code="final_set_race",
+                evidence_sha256=_sha("final set race evidence"),
+            )
+        return admission
+
+    monkeypatch.setattr(registry, "resolve_dataset", revoke_first_during_final_second)
+    if operation == "search":
+        call = lambda: service.search(  # noqa: E731
+            "tenant-a", "user:reader", query="", purpose=PURPOSE,
+        )
+    elif operation == "export":
+        call = lambda: service.export(  # noqa: E731
+            "tenant-a", "user:reader", (first, second), purpose=PURPOSE,
+        )
+    else:
+        call = lambda: service.materialize_at_job_start(  # noqa: E731
+            "tenant-a",
+            "worker:research",
+            (first, second),
+            purpose=PURPOSE,
+            action="export",
+            job_id="final-set-registry-race",
+        )
+
+    with pytest.raises(KnowledgeAccessDenied, match="registry state changed"):
+        call()
+    assert counts == {first.asset_id: 4, second.asset_id: 4}
+    assert registry.inspect("tenant-a", first)["state"] == "revoked"
+
+
+@pytest.mark.parametrize("operation", ["search", "export", "job"])
+def test_complete_catalogue_rejects_earlier_expiry_during_final_later_check(
+    access,
+    monkeypatch,
+    operation,
+):
+    service, registry, rights, _calls = access
+    first = _dataset(registry, rights, "tenant-a", f"expiry-first-{operation}")
+    second = _dataset(registry, rights, "tenant-a", f"expiry-second-{operation}")
+    rows = [registry.inspect("tenant-a", first), registry.inspect("tenant-a", second)]
+    if operation == "search":
+        monkeypatch.setattr(registry, "list", lambda *_args, **_kwargs: rows)
+    rights[("tenant-a", first.asset_id)]["expires_at"] = time.time() + 0.25
+    original = registry.resolve_dataset
+    counts = {first.asset_id: 0, second.asset_id: 0}
+
+    def expire_first_during_final_sweep(tenant, reference, **kwargs):
+        counts[reference.asset_id] += 1
+        admission = original(tenant, reference, **kwargs)
+        if reference == second and counts[reference.asset_id] == 4:
+            time.sleep(0.35)
+        return admission
+
+    monkeypatch.setattr(registry, "resolve_dataset", expire_first_during_final_sweep)
+    if operation == "search":
+        call = lambda: service.search(  # noqa: E731
+            "tenant-a", "user:reader", query="", purpose=PURPOSE,
+        )
+    elif operation == "export":
+        call = lambda: service.export(  # noqa: E731
+            "tenant-a", "user:reader", (first, second), purpose=PURPOSE,
+        )
+    else:
+        call = lambda: service.materialize_at_job_start(  # noqa: E731
+            "tenant-a",
+            "worker:research",
+            (first, second),
+            purpose=PURPOSE,
+            action="export",
+            job_id="final-set-expiry-race",
+        )
+
+    with pytest.raises(KnowledgeAccessDenied, match="expired during knowledge access"):
+        call()
+    assert counts == {first.asset_id: 4, second.asset_id: 4}
+
+
+def test_agent_search_materializes_exact_sources_at_the_tool_start(
+    access,
+    monkeypatch,
+    tmp_path,
+):
+    service, registry, rights, _calls = access
+    source = _dataset(
+        registry,
+        rights,
+        "tenant-a",
+        "finance-policy",
+        action="analyze",
+        usage_constraints=("tenant_only",),
+    )
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    materializations = []
+    original_materialize = KnowledgeAccessService.materialize_at_job_start
+
+    def track_materialization(self, *args, **kwargs):
+        result = original_materialize(self, *args, **kwargs)
+        materializations.append(result)
+        return result
+
+    monkeypatch.setattr(
+        KnowledgeAccessService,
+        "materialize_at_job_start",
+        track_materialization,
+    )
+
+    class LegacyKnowledge:
+        called = False
+
+        def search_formatted(self, *_args, **_kwargs):
+            self.called = True
+            return "LEGACY PRIVATE CONTENT"
+
+    from maverick.agent import Agent
+    from maverick.blackboard import Blackboard
+    from maverick.budget import Budget
+    from maverick.sandbox import LocalBackend
+    from maverick.swarm import SwarmContext
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "agent-world.db")
+    goal_id = world.create_goal("governed knowledge", "")
+    legacy = LegacyKnowledge()
+    context = SwarmContext(
+        llm=None,
+        world=world,
+        budget=Budget(max_dollars=1.0),
+        blackboard=Blackboard(),
+        sandbox=LocalBackend(workdir=tmp_path),
+        goal_id=goal_id,
+        use_skills=False,
+        knowledge=legacy,
+    )
+    context.knowledge_access_service = service
+    agent = Agent(
+        context,
+        "researcher",
+        "Find the current policy",
+        knowledge_sources=[source.asset_id],
+    )
+
+    tool = agent.tools.get("knowledge_search")
+    first = asyncio.run(tool.fn({"query": "policy", "k": 5}))
+    assert "Private tenant-a summary for finance-policy" in first
+    assert "LEGACY PRIVATE CONTENT" not in first
+    assert legacy.called is False
+    assert len(materializations) == 1
+    assert materializations[0]["revalidated_at_job_start"] is True
+    assert materializations[0]["items"][0]["eligibility"]["requested_action"] == (
+        "analyze"
+    )
+
+    exclusion = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="exclusion",
+        reason="Customer withdrew this exact source from all future agent use.",
+        request_key="agent-knowledge-exclusion",
+    )
+    decided = service.decide_request(
+        "tenant-a",
+        "user:admin",
+        exclusion["id"],
+        expected_revision=exclusion["revision"],
+        decision="approve",
+        evidence_sha256=_sha("reviewed agent knowledge exclusion"),
+    )
+    assert decided["source_use_status"] == "revoked_for_new_use"
+    second = asyncio.run(tool.fn({"query": "policy", "k": 5}))
+    assert "Private tenant-a summary" not in second
+    assert "Request fresh access or evidence" in second
+    assert len(materializations) == 1
+    assert legacy.called is False
+
+
+def test_request_replay_cross_tenant_and_changed_material(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "rights-source")
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="exclusion",
+        reason="Customer withdrew this source from future use.",
+        request_key="customer-case-17",
+    )
+    replay = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="exclusion",
+        reason="Customer withdrew this source from future use.",
+        request_key="customer-case-17",
+    )
+    assert replay == request
+    with pytest.raises(KnowledgeRequestConflict, match="different material"):
+        service.submit_request(
+            "tenant-a",
+            "user:admin",
+            source,
+            request_type="deletion",
+            reason="Different effect.",
+            request_key="customer-case-17",
+        )
+    assert service.list_requests("tenant-b") == []
+    with pytest.raises(Exception, match="not found"):
+        service.get_request("tenant-b", request["id"])
+
+
+def test_approved_deletion_retires_source_and_surfaces_all_derivative_work(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "customer-source")
+    derived = _dataset(
+        registry,
+        rights,
+        "tenant-a",
+        "derived-set",
+        parent_datasets=(source,),
+    )
+    model = registry.register_model(
+        "tenant-a",
+        "user:model-owner",
+        model_id="candidate-model",
+        version="v1",
+        source_ref="artifact:tenant-a/candidate-model/v1",
+        artifact_sha256=_sha("candidate weights"),
+        license_id="internal-model-license",
+        license_evidence_sha256=_sha("model license"),
+        allowed_purposes=(PURPOSE,),
+        usage_constraints=("tenant_only",),
+        provider_model_identity="candidate-model-v1",
+        immutable_provider_revision=_sha("provider revision"),
+        dataset_lineage=(derived,),
+        dataset_lineage_purpose=PURPOSE,
+    )
+    model = registry.approve(
+        "tenant-a", "user:model-reviewer", model, expected_revision=1
+    )
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="deletion",
+        reason="Approved customer deletion request.",
+        request_key="deletion-case-9",
+    )
+    assert {row["required_action"] for row in request["derivatives"]} == {
+        "invalidate_dataset",
+        "retire_or_retrain_model",
+    }
+
+    decided = service.decide_request(
+        "tenant-a",
+        "user:admin",
+        request["id"],
+        expected_revision=request["revision"],
+        decision="approve",
+        evidence_sha256=_sha("deletion approval"),
+    )
+
+    assert decided["status"] == "approved"
+    assert decided["source_use_status"] == "revoked_for_new_use"
+    assert decided["raw_record_status"] == "external_source_deletion_unverified"
+    assert decided["weight_influence_notice"] == WEIGHT_INFLUENCE_NOTICE
+    assert decided["training_permission_notice"] == TRAINING_PERMISSION_NOTICE
+    assert any(
+        row["workflow_state"] == "retire_or_retrain_model_required"
+        for row in decided["derivatives"]
+    )
+    with pytest.raises(ResearchRegistryDenied, match="not currently approved"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    with pytest.raises(ResearchRegistryDenied):
+        registry.resolve_model("tenant-a", model, purpose=PURPOSE)
+
+
+def test_crash_after_source_retirement_recovers_by_exact_replay(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "crash-source")
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="exclusion",
+        reason="Exclude this exact source version.",
+        request_key="crash-case",
+    )
+    service.after_source_revoked = lambda _record: (_ for _ in ()).throw(
+        RuntimeError("injected stop")
+    )
+    evidence = _sha("review evidence")
+    with pytest.raises(RuntimeError, match="injected stop"):
+        service.decide_request(
+            "tenant-a",
+            "user:admin",
+            request["id"],
+            expected_revision=request["revision"],
+            decision="approve",
+            evidence_sha256=evidence,
+        )
+    applying = service.get_request("tenant-a", request["id"])
+    assert applying["status"] == "applying"
+    service.after_source_revoked = None
+
+    recovered = service.decide_request(
+        "tenant-a",
+        "user:admin",
+        request["id"],
+        expected_revision=applying["revision"],
+        decision="approve",
+        evidence_sha256=evidence,
+    )
+
+    assert recovered["status"] == "approved"
+    assert registry.inspect("tenant-a", source)["state"] == "revoked"
+
+
+def test_crash_before_source_retirement_recovers_by_exact_replay(access, monkeypatch):
+    service, registry, rights, content_calls = access
+    source = _dataset(registry, rights, "tenant-a", "pre-effect-crash-source")
+    service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    projected_before_retirement = len(content_calls)
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="exclusion",
+        reason="Exclude this exact source version.",
+        request_key="pre-effect-crash-case",
+    )
+    real_revoke = registry.revoke
+    calls = 0
+
+    def interrupt_before_revoke(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("injected pre-effect stop")
+        return real_revoke(*args, **kwargs)
+
+    monkeypatch.setattr(registry, "revoke", interrupt_before_revoke)
+    evidence = _sha("pre-effect review evidence")
+    with pytest.raises(RuntimeError, match="injected pre-effect stop"):
+        service.decide_request(
+            "tenant-a",
+            "user:admin",
+            request["id"],
+            expected_revision=request["revision"],
+            decision="approve",
+            evidence_sha256=evidence,
+        )
+    applying = service.get_request("tenant-a", request["id"])
+    assert applying["status"] == "applying"
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
+    for read in (
+        lambda: service.detail(
+            "tenant-a",
+            "user:reader",
+            source,
+            purpose=PURPOSE,
+            use_cache=False,
+        ),
+        lambda: service.detail("tenant-a", "user:reader", source, purpose=PURPOSE),
+        lambda: service.export(
+            "tenant-a",
+            "user:reader",
+            (source,),
+            purpose=PURPOSE,
+        ),
+        lambda: service.materialize_at_job_start(
+            "tenant-a",
+            "worker:research",
+            (source,),
+            purpose=PURPOSE,
+            action="export",
+            job_id="pre-effect-retirement-job",
+        ),
+    ):
+        with pytest.raises(KnowledgeAccessDenied, match="retirement is in progress"):
+            read()
+    assert len(content_calls) == projected_before_retirement
+
+    recovered = service.decide_request(
+        "tenant-a",
+        "user:admin",
+        request["id"],
+        expected_revision=applying["revision"],
+        decision="approve",
+        evidence_sha256=evidence,
+    )
+
+    assert calls == 2
+    assert recovered["status"] == "approved"
+    assert registry.inspect("tenant-a", source)["state"] == "revoked"
+
+
+def test_training_action_is_separate_from_deployment_or_export_permission(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "export-only", action="export")
+
+    with pytest.raises(ResearchRegistryDenied, match="requested action"):
+        service.materialize_at_job_start(
+            "tenant-a",
+            "worker:research",
+            (source,),
+            purpose=PURPOSE,
+            action="train",
+            job_id="training-job",
+        )
+    assert service.export("tenant-a", "user:reader", (source,), purpose=PURPOSE)[
+        "training_permission_notice"
+    ] == TRAINING_PERMISSION_NOTICE
+
+
+def test_actor_authority_is_required_and_exact_before_content_is_read(access):
+    service, registry, rights, calls = access
+    source = _dataset(registry, rights, "tenant-a", "actor-boundary")
+
+    service.actor_authority_resolver = None
+    with pytest.raises(KnowledgeAccessDenied, match="authority is unavailable"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert calls == []
+
+    service.actor_authority_resolver = lambda tenant, actor, action, purpose: (
+        KnowledgeActorAuthority(
+            tenant="tenant-b",
+            principal=actor,
+            action=action,
+            purpose=purpose,
+            authorization_sha256=_sha("crossed actor authority"),
+        )
+    )
+    with pytest.raises(KnowledgeAccessDenied, match="exact boundary"):
+        service.detail("tenant-a", "user:reader", source, purpose=PURPOSE)
+    assert calls == []
+
+    with pytest.raises(KnowledgeAccessDenied, match="named user"):
+        service.detail("tenant-a", "worker:research", source, purpose=PURPOSE)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("constraint", "operation"),
+    [
+        ("machine_use_only", "read"),
+        ("no_human_display", "read"),
+        ("analysis_only", "export"),
+        ("no redistribution", "export"),
+        ("read_only", "analyze"),
+        ("separate_training_permission_required", "train"),
+    ],
+)
+def test_declared_usage_constraints_block_the_exact_operation(
+    access,
+    constraint,
+    operation,
+):
+    service, registry, rights, calls = access
+    source = _dataset(
+        registry,
+        rights,
+        "tenant-a",
+        f"constraint-{operation}",
+        action="read" if operation == "read" else operation,
+        usage_constraints=("tenant_only", constraint),
+    )
+
+    if operation == "read":
+        call = lambda: service.detail(  # noqa: E731
+            "tenant-a", "user:reader", source, purpose=PURPOSE,
+        )
+    elif operation == "export":
+        call = lambda: service.export(  # noqa: E731
+            "tenant-a", "user:reader", (source,), purpose=PURPOSE,
+        )
+    else:
+        call = lambda: service.materialize_at_job_start(  # noqa: E731
+            "tenant-a",
+            "worker:research",
+            (source,),
+            purpose=PURPOSE,
+            action=operation,
+            job_id=f"job-{operation}",
+        )
+
+    with pytest.raises(KnowledgeAccessDenied, match="constraints"):
+        call()
+    assert calls == []
+
+
+def test_parent_lineage_must_allow_the_same_effective_action(access):
+    _service, registry, rights, calls = access
+    parent = _dataset(
+        registry,
+        rights,
+        "tenant-a",
+        "read-only-parent",
+        action="read",
+        usage_constraints=("tenant_only",),
+    )
+
+    with pytest.raises(
+        ResearchRegistryDenied,
+        match="stale or does not match|requested action",
+    ):
+        _dataset(
+            registry,
+            rights,
+            "tenant-a",
+            "train-child",
+            action="train",
+            parent_datasets=(parent,),
+            usage_constraints=("tenant_only",),
+        )
+    assert all(
+        row["reference"]["asset_id"] != "train-child"
+        for row in registry.list("tenant-a")
+    )
+    assert calls == []
+
+
+def test_parent_action_is_rechecked_before_a_derived_version_is_approved(access):
+    _service, registry, rights, calls = access
+    parent = _dataset(
+        registry,
+        rights,
+        "tenant-a",
+        "training-parent",
+        action="train",
+        usage_constraints=("tenant_only",),
+    )
+    rights[("tenant-a", "training-child")] = {
+        "allowed": True,
+        "action": "train",
+        "expires_at": FUTURE,
+        "epoch": "v1",
+    }
+    child = registry.register_dataset(
+        "tenant-a",
+        "user:source-owner",
+        dataset_id="training-child",
+        version="v1",
+        source_ref="catalog:tenant-a/training-child/v1",
+        content_sha256=_sha("content:tenant-a:training-child"),
+        license_id="customer-authorized",
+        license_evidence_sha256=_sha("license:tenant-a:training-child"),
+        allowed_purposes=(PURPOSE,),
+        usage_constraints=("tenant_only",),
+        data_use_action="train",
+        data_use_decision_id="decision-training-child",
+        data_use_decision_sha256=_sha("tenant-a:decision-training-child"),
+        parent_datasets=(parent,),
+    )
+
+    rights[("tenant-a", "training-parent")].update(action="read", epoch="v2")
+    with pytest.raises(
+        ResearchRegistryDenied,
+        match="stale or does not match|requested action",
+    ):
+        registry.approve(
+            "tenant-a",
+            "user:independent-reviewer",
+            child,
+            expected_revision=1,
+        )
+    assert registry.inspect("tenant-a", child)["state"] == "draft"
+    assert calls == []
+
+
+def test_request_projection_revalidates_later_derivative_retirement(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "lineage-source")
+    derivative = _dataset(
+        registry,
+        rights,
+        "tenant-a",
+        "lineage-derivative",
+        parent_datasets=(source,),
+    )
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="exclusion",
+        reason="Retire this source from new use.",
+        request_key="live-lineage-state",
+    )
+    recorded = request["derivatives_at_request"]
+
+    registry.revoke(
+        "tenant-a",
+        "user:independent-reviewer",
+        derivative,
+        expected_revision=2,
+        reason_code="derivative_retired",
+        evidence_sha256=_sha("derivative retirement"),
+    )
+    refreshed = service.get_request("tenant-a", request["id"])
+
+    assert refreshed["derivatives_at_request"] == recorded
+    assert refreshed["derivatives"][0]["current_state"] == "revoked"
+    assert refreshed["derivatives"][0]["workflow_state"] == (
+        "dataset_invalidation_confirmed"
+    )
+    assert refreshed["lineage_revalidated_before_return"] is True
+
+
+def test_approved_correction_creates_and_approves_a_readable_replacement(access):
+    from maverick.knowledge_content_projection import ExistingKnowledgeContentProjector
+
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "corrected-policy")
+    request = service.submit_request(
+        "tenant-a",
+        "user:requester",
+        source,
+        request_type="correction",
+        reason="The approved policy wording is inaccurate.",
+        request_key="corrected-policy-case",
+        proposed_correction="Controller approval is required before release.",
+    )
+
+    decided = service.decide_request(
+        "tenant-a",
+        "user:correction-reviewer",
+        request["id"],
+        expected_revision=request["revision"],
+        decision="approve",
+        evidence_sha256=_sha("correction review evidence"),
+    )
+
+    assert decided["status"] == "approved"
+    assert decided["replacement_status"] == "approved"
+    assert "replacement_pending" not in str(decided)
+    assert decided["source_use_status"] == (
+        "prior_version_revoked_replacement_approved"
+    )
+    assert registry.inspect("tenant-a", source)["state"] == "revoked"
+    replacement = ResearchAssetRef(**decided["replacement_reference"])
+    assert registry.inspect("tenant-a", replacement)["state"] == "approved"
+    service.content_resolver = ExistingKnowledgeContentProjector(
+        correction_store=service.correction_store,
+    )
+    detail = service.detail(
+        "tenant-a",
+        "user:reader",
+        replacement,
+        purpose=PURPOSE,
+        use_cache=False,
+    )
+    assert detail["summary"] == "Controller approval is required before release."
+    assert detail["source"]["source_ref"].startswith(
+        "catalog:knowledge-correction/knowledge-req-"
+    )
+
+
+def test_correction_requires_an_independent_reviewer_before_any_mutation(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "dual-control-correction")
+    request = service.submit_request(
+        "tenant-a",
+        "user:requester",
+        source,
+        request_type="correction",
+        reason="Correct the source.",
+        request_key="dual-control-correction-case",
+        proposed_correction="Corrected source text.",
+    )
+
+    with pytest.raises(KnowledgeRequestConflict, match="different named reviewer"):
+        service.decide_request(
+            "tenant-a",
+            "user:requester",
+            request["id"],
+            expected_revision=request["revision"],
+            decision="approve",
+            evidence_sha256=_sha("self review"),
+        )
+
+    assert service.get_request("tenant-a", request["id"])["status"] == "submitted"
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
+
+
+def test_correction_recovers_after_replacement_approval_before_prior_retirement(
+    access,
+    monkeypatch,
+):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "recover-correction")
+    request = service.submit_request(
+        "tenant-a",
+        "user:requester",
+        source,
+        request_type="correction",
+        reason="Correct and recover this source.",
+        request_key="recover-correction-case",
+        proposed_correction="Recovered corrected source text.",
+    )
+    real_revoke = registry.revoke
+    attempts = 0
+
+    def interrupt_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("stop after replacement approval")
+        return real_revoke(*args, **kwargs)
+
+    monkeypatch.setattr(registry, "revoke", interrupt_once)
+    evidence = _sha("recover correction evidence")
+    with pytest.raises(RuntimeError, match="after replacement approval"):
+        service.decide_request(
+            "tenant-a",
+            "user:correction-reviewer",
+            request["id"],
+            expected_revision=request["revision"],
+            decision="approve",
+            evidence_sha256=evidence,
+        )
+    applying = service.get_request("tenant-a", request["id"])
+    replacement = ResearchAssetRef(**applying["replacement_reference"])
+    assert applying["status"] == "applying"
+    assert applying["replacement_status"] == "approved"
+    assert registry.inspect("tenant-a", replacement)["state"] == "approved"
+    assert registry.inspect("tenant-a", source)["state"] == "approved"
+
+    recovered = service.decide_request(
+        "tenant-a",
+        "user:correction-reviewer",
+        request["id"],
+        expected_revision=applying["revision"],
+        decision="approve",
+        evidence_sha256=evidence,
+    )
+    assert recovered["status"] == "approved"
+    assert recovered["replacement_status"] == "approved"
+    assert attempts == 2
+
+
+def test_retention_hold_records_basis_expiry_and_release_without_deleting_source(
+    access,
+    monkeypatch,
+):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "held-source")
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="deletion",
+        reason="Delete after preservation duties are resolved.",
+        request_key="held-deletion-case",
+    )
+    held = service.place_retention_hold(
+        "tenant-a",
+        "user:records-counsel",
+        request["id"],
+        expected_revision=request["revision"],
+        hold_id="litigation-2026-17",
+        basis="Pending litigation preservation order.",
+        expires_at=FUTURE,
+        evidence_sha256=_sha("signed preservation order"),
+    )
+    assert held["retention_hold"]["effective_status"] == "active"
+    assert held["retention_hold"]["hold_id"] == "litigation-2026-17"
+    assert held["retention_hold"]["basis"] == (
+        "Pending litigation preservation order."
+    )
+
+    decided = service.decide_request(
+        "tenant-a",
+        "user:admin",
+        request["id"],
+        expected_revision=held["revision"],
+        decision="approve",
+        evidence_sha256=_sha("deletion review under hold"),
+    )
+    assert decided["raw_record_status"] == (
+        "retention_hold_active_external_preservation_unverified"
+    )
+    assert decided["retention_review_status"] == "retention_hold_active"
+    assert registry.inspect("tenant-a", source)["state"] == "revoked"
+
+    with monkeypatch.context() as advanced_clock:
+        advanced_clock.setattr(
+            service.request_store,
+            "authoritative_time",
+            lambda: FUTURE + 1.0,
+        )
+        expired = service.get_request("tenant-a", request["id"])
+    assert expired["retention_hold"]["effective_status"] == "expired"
+    assert expired["raw_record_status"] == (
+        "external_source_deletion_unverified_after_hold_expiry"
+    )
+    assert expired["retention_review_status"] == "retention_hold_expired"
+
+    released = service.release_retention_hold(
+        "tenant-a",
+        "user:records-counsel",
+        request["id"],
+        expected_revision=decided["revision"],
+        reason="Preservation order was lifted.",
+        evidence_sha256=_sha("signed hold release"),
+    )
+    assert released["retention_hold"]["effective_status"] == "released"
+    assert released["retention_hold"]["released_by"] == "user:records-counsel"
+    assert released["retention_hold"]["release_reason"] == (
+        "Preservation order was lifted."
+    )
+    assert released["raw_record_status"] == (
+        "external_source_deletion_unverified_after_hold_release"
+    )
+    with pytest.raises(Exception, match="not found"):
+        service.get_request("tenant-b", request["id"])
+
+
+def test_malformed_retention_hold_fails_closed_before_projection(access):
+    service, registry, rights, _calls = access
+    source = _dataset(registry, rights, "tenant-a", "malformed-hold-source")
+    request = service.submit_request(
+        "tenant-a",
+        "user:admin",
+        source,
+        request_type="deletion",
+        reason="Preserve this exact source while the request is reviewed.",
+        request_key="malformed-hold-case",
+    )
+
+    with tenant_scope(tenant="tenant-a"):
+        saved = service.request_store.update(
+            request["id"],
+            lambda record: record.update(
+                retention_hold={
+                    "schema": "lightwork.knowledge-retention-hold.v1",
+                    "hold_id": "matter-corrupt",
+                    "basis": "A release was injected into an active hold.",
+                    "evidence_sha256": _sha("hold evidence"),
+                    "placed_by": "user:records-counsel",
+                    "placed_at": 1_700_000_000.0,
+                    "expires_at": FUTURE,
+                    "status": "active",
+                    "released_by": "user:attacker",
+                    "released_at": 1_700_000_001.0,
+                    "release_reason": "Forged release",
+                    "release_evidence_sha256": _sha("forged release"),
+                }
+            ),
+            expected_revision=request["revision"],
+            actor="user:synthetic-corruptor",
+            action="knowledge.test.corrupt_hold",
+        )
+    assert saved is not None
+    with pytest.raises(KnowledgeRequestConflict, match="retention hold is malformed"):
+        service.get_request("tenant-a", request["id"])

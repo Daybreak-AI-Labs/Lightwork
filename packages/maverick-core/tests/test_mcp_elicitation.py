@@ -16,6 +16,7 @@ import asyncio
 import json
 import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 from maverick.mcp_client import MCPClient, MCPServerSpec
@@ -147,7 +148,9 @@ async def test_prompt_mode_collects_and_accepts(monkeypatch):
     monkeypatch.setenv("MAVERICK_MCP_ELICITATION", "prompt")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "ask")
     monkeypatch.setattr(sys, "stdin", type("T", (), {"isatty": lambda self: True})())
-    answers = iter(["yes", "main", "42"])
+    # The exact values are collected first, then the final approval card binds
+    # those values before they can cross the MCP transport.
+    answers = iter(["main", "42", "yes"])
     monkeypatch.setattr("builtins.input", lambda *_a: next(answers))
 
     c, proc = _make_client()
@@ -171,6 +174,41 @@ async def test_prompt_mode_collects_and_accepts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_server_generation_change_after_review_sends_only_cancel(monkeypatch):
+    import maverick.safety.consent as consent
+
+    monkeypatch.setenv("MAVERICK_MCP_ELICITATION", "prompt")
+    monkeypatch.setattr(sys, "stdin", type("T", (), {"isatty": lambda self: True})())
+    monkeypatch.setattr("builtins.input", lambda *_args: "reviewed value")
+    c, proc = _make_client()
+
+    def approve(*_args, **_kwargs):
+        c.spec.command = "changed-after-review"
+        return SimpleNamespace(
+            granted=True, source="dashboard", actor="user:reviewer",
+        )
+
+    monkeypatch.setattr(consent, "require_consent", approve)
+    _feed_inbound(
+        proc,
+        111,
+        "elicitation/create",
+        {
+            "message": "Need details",
+            "requestedSchema": {
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+        },
+    )
+
+    reply = await _await_reply(proc, 111)
+    assert reply["result"] == {"action": "cancel"}
+    assert "reviewed value" not in json.dumps(reply)
+    await c.stop()
+
+
+@pytest.mark.asyncio
 async def test_prompt_mode_non_tty_cancels_without_explicit_consent(monkeypatch):
     # Silent auto-approval is not sufficient for MCP elicitation, so a non-TTY
     # default configuration cancels before any form can be accepted.
@@ -189,7 +227,7 @@ async def test_required_field_left_blank_cancels(monkeypatch):
     monkeypatch.setenv("MAVERICK_MCP_ELICITATION", "prompt")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "ask")
     monkeypatch.setattr(sys, "stdin", type("T", (), {"isatty": lambda self: True})())
-    answers = iter(["yes", ""])  # approve consent, then leave field blank
+    answers = iter([""])  # a required value is absent, so no approval is requested
     monkeypatch.setattr("builtins.input", lambda *_a: next(answers))
     c, proc = _make_client()
     schema = {"properties": {"name": {"type": "string"}}, "required": ["name"]}
@@ -230,14 +268,15 @@ async def test_inbound_request_does_not_block_the_reader(monkeypatch):
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "ask")
     monkeypatch.setattr(sys, "stdin", type("T", (), {"isatty": lambda self: True})())
     release = threading.Event()
-    answers = iter(["yes"])
+    calls = 0
 
     def _blocking_input(*_a):
-        try:
-            return next(answers)
-        except StopIteration:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
             release.wait(timeout=5)  # bounded so a forgotten release can't hang CI
             return "done"
+        return "yes"
 
     monkeypatch.setattr("builtins.input", _blocking_input)
     c, proc = _make_client()

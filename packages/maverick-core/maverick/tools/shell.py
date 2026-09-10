@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+from inspect import Signature, signature
 
 from . import Tool
 
@@ -204,6 +205,21 @@ def _is_long_running(cmd: str) -> bool:
 
 
 def shell(sandbox) -> Tool:
+    def _sandbox_target() -> dict[str, str]:
+        backend = type(sandbox)
+        return {
+            "backend": f"{backend.__module__}.{backend.__qualname__}",
+            "workdir": str(getattr(sandbox, "workdir", ".")),
+        }
+
+    def _sandbox_credentials() -> dict[str, str]:
+        from ..approval_cards import digest
+
+        return {
+            "kind": "sandbox-runtime",
+            "generation_sha256": digest(_sandbox_target()),
+        }
+
     def fn(args: dict) -> str:
         cmd = args["cmd"]
         opaque = os.environ.get("MAVERICK_BENCHMARK_OPAQUE", "1") != "0"
@@ -263,27 +279,21 @@ def shell(sandbox) -> Tool:
                     "PYTHONPATH to include the worktree explicitly. "
                     "(Override by setting MAVERICK_BENCHMARK_OPAQUE=0.)"
                 )
-        # Opt-in destructive-action gate. Under the default 'auto-approve'
-        # consent mode this is a no-op (granted + logged), so behavior is
-        # unchanged out of the box. An operator who sets MAVERICK_CONSENT_MODE
-        # to ask / dashboard / auto-deny gets every shell command gated --
-        # parked in the approvals queue for the dashboard, prompted in a tty,
-        # or denied non-interactively. The denial surfaces as a tool result so
-        # the agent can react, exactly like any other tool error.
-        from ..safety import ConsentDenied, require_consent
-        try:
-            require_consent(
-                "shell", risk="high", scope=cmd[:120], detail=cmd,
-                raise_on_deny=True,
-            )
-        except ConsentDenied:
-            return "⚠ Shell command denied by consent policy (MAVERICK_CONSENT_MODE)."
+        # Every shell command requires a fresh human decision. Silent
+        # auto-approval and standing grants are ineligible; interactive modes
+        # park the exact command in the dashboard queue or prompt in a TTY.
+        # A denial surfaces as a tool result so the agent can react like it can
+        # to any other tool error.
+        # Bind the exact command, sandbox target, implementation generation,
+        # current operator authority, and timeout budget to a one-use permit.
+        # The permit is spent under the authority fence at ``sandbox.exec``.
+        from ..approval_cards import ApprovalCardError
+        from ..safety import (
+            ConsentDenied,
+            consume_operation_consent,
+            require_operation_consent,
+        )
 
-        # Wave 11 (D5 follow-up): the shell tool used to always fall back to
-        # `sandbox.timeout` (60 s on LocalBackend) which kills pytest runs
-        # on real SWE-bench repos. Detect long-running commands and pass
-        # a higher per-call timeout. Falls back gracefully when sandbox
-        # backends don't accept the kwarg.
         timeout_override = None
         if _is_long_running(cmd):
             try:
@@ -292,14 +302,73 @@ def shell(sandbox) -> Tool:
                 )
             except ValueError:
                 timeout_override = 600.0
+        parameters = {"command": cmd, "timeout_seconds": timeout_override}
         try:
-            if timeout_override is not None:
-                result = sandbox.exec(cmd, timeout=timeout_override)
-            else:
-                result = sandbox.exec(cmd)
-        except TypeError:
-            # Sandbox backend doesn't support per-call timeout kwarg yet.
-            result = sandbox.exec(cmd)
+            permit = require_operation_consent(
+                "shell",
+                risk="high",
+                scope=f"sandbox:{_sandbox_target()['workdir']}",
+                detail=f"Run one {len(cmd)}-character command in the sandbox.",
+                provenance="shell",
+                target=_sandbox_target(),
+                parameters=parameters,
+                parameter_summary=[
+                    "Execute the exact command committed by SHA-256 with the reviewed timeout."
+                ],
+                known_effects=[
+                    "Runs one command inside the reviewed sandbox workspace."
+                ],
+                unresolved_assumptions=[
+                    "The command may modify files or contact services allowed by the sandbox."
+                ],
+                before="The reviewed command has not run.",
+                after="The reviewed command has run once and its effects may persist.",
+                irreversible=True,
+                target_provider=_sandbox_target,
+                parameters_provider=lambda: {
+                    "command": cmd,
+                    "timeout_seconds": timeout_override,
+                },
+                credential_versions_provider=_sandbox_credentials,
+                budget_provider=lambda: {
+                    "timeout_seconds": timeout_override,
+                },
+                allow_auto_approve=False,
+                consult_ledger=False,
+            )
+        except ConsentDenied:
+            return "ERROR: shell command was not approved; no command was run"
+        except ApprovalCardError:
+            return (
+                "ERROR: shell target, command, or approval authority changed; "
+                "review it again"
+            )
+
+        # Wave 11 (D5 follow-up): the shell tool used to always fall back to
+        # `sandbox.timeout` (60 s on LocalBackend) which kills pytest runs
+        # on real SWE-bench repos. Detect long-running commands and pass
+        # a higher per-call timeout. Falls back gracefully when sandbox
+        # backends don't accept the kwarg.
+        try:
+            with consume_operation_consent(permit):
+                if timeout_override is None:
+                    result = sandbox.exec(cmd)
+                else:
+                    # Determine support before dispatch. Retrying after a
+                    # TypeError could duplicate a command whose backend raised
+                    # after beginning the external effect.
+                    try:
+                        exec_signature: Signature = signature(sandbox.exec)
+                        exec_signature.bind(cmd, timeout=timeout_override)
+                    except (TypeError, ValueError):
+                        result = sandbox.exec(cmd)
+                    else:
+                        result = sandbox.exec(cmd, timeout=timeout_override)
+        except ApprovalCardError:
+            return (
+                "ERROR: shell target, command, or approval authority changed; "
+                "review it again"
+            )
         out = result.stdout
         if result.stderr:
             out += f"\n[stderr]\n{result.stderr}"

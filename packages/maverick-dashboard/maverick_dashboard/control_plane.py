@@ -419,6 +419,15 @@ def discovery_overview() -> dict[str, Any]:
 
 # ---- pre-action simulation (dry-run, no execution) -------------------------
 
+_SIMULATION_BOUNDARY = {
+    "result_class": "simulation",
+    "evidence_class": "simulated",
+    "live_effect": False,
+    "can_accept_business_outcome": False,
+    "authoritative_live_evidence_eligible": False,
+    "business_outcome_acceptance": "prohibited",
+}
+
 def _consent_mode() -> str:
     try:
         from maverick.safety.consent import _resolve_mode
@@ -429,7 +438,12 @@ def _consent_mode() -> str:
 
 def simulate_action(surface: str, action: str, target: str = "") -> dict[str, Any]:
     """Classify a proposed action's risk and report whether it WOULD be gated,
-    without executing anything -- the 'why allowed / why blocked' preview."""
+    without executing anything -- the 'why allowed / why blocked' preview.
+
+    Every non-empty response carries an explicit simulation-only boundary so an
+    app client cannot mistake a favorable preview for a live external effect or
+    evidence that is eligible for business-outcome acceptance.
+    """
     surface = (surface or "").strip().lower()
     action = (action or "").strip()
     mode = _consent_mode()
@@ -444,7 +458,10 @@ def simulate_action(surface: str, action: str, target: str = "") -> dict[str, An
         from maverick.safety.tool_risk import tool_risk
         risk = tool_risk(action) if action else None
     elif surface:
-        return {"error": f"unknown surface {surface!r}; use computer | browser | tool"}
+        return {
+            **_SIMULATION_BOUNDARY,
+            "error": f"unknown surface {surface!r}; use computer | browser | tool",
+        }
     else:
         return {}
 
@@ -464,8 +481,72 @@ def simulate_action(surface: str, action: str, target: str = "") -> dict[str, An
             decision = "exposed"
             why = f"tool risk '{risk}': dropped from the registry under a max_risk ceiling below it"
     return {
+        **_SIMULATION_BOUNDARY,
         "surface": surface, "action": action, "target": target,
         "risk": risk or "n/a", "consent_mode": mode, "decision": decision, "why": why,
+    }
+
+
+def run_isolated_research_simulation(
+    identity: object,
+    *,
+    component_name: str = "tabular",
+) -> dict[str, Any]:
+    """Run the real F09 controller against a built-in synthetic fixture.
+
+    This app path has no connector or provider adapter.  It exists so an
+    operator can inspect the same process boundary, approval, lineage, oracle,
+    and evidence-class result exercised by the research acceptance suite.
+    """
+    from maverick.counterfactual_rollout import Transition
+    from maverick.research_simulator import (
+        AuthenticatedHumanIdentityV1,
+        FeaturePrefixBackoffBaseline,
+        SoftwareWorldFixture,
+        SoftwareWorldScenario,
+        TabularResearchBaseline,
+        run_first_study,
+    )
+
+    if not isinstance(identity, AuthenticatedHumanIdentityV1):
+        raise TypeError("identity must be an authenticated named-human identity")
+    selected = str(component_name or "").strip().lower()
+    components = {
+        "tabular": TabularResearchBaseline,
+        "feature-prefix": FeaturePrefixBackoffBaseline,
+    }
+    component_type = components.get(selected)
+    if component_type is None:
+        raise ValueError("component must be tabular or feature-prefix")
+    state = ("record-sync", "vendor-onboarding", "ready")
+    component = component_type(
+        [Transition(state, "upsert", None, 1.0)] * 4
+    )
+    world = SoftwareWorldFixture(SoftwareWorldScenario(
+        scenario_id="dashboard-synthetic-research-v1",
+        seed=9_082_026,
+        mechanism_family="record-sync",
+        application_family="vendor-onboarding",
+        task={"key": "synthetic-vendor-17", "value": "approved"},
+        records={"synthetic-vendor-17": "pending"},
+        hidden_state={"reference_revision": 1},
+        external_state={"synthetic-vendor-17": "pending"},
+        files={"synthetic-policy.json": '{"version":1}'},
+        queue=({"job": "synthetic-initial"},),
+        credentials={"external_write": True},
+        page_size=2,
+    ))
+    run = run_first_study(
+        component,
+        world,
+        world.open_worker(max_operations=1),
+        approver_identity=identity,
+    )
+    return {
+        **run.to_app_payload(),
+        "synthetic_fixture": True,
+        "fixture_label": "Built-in synthetic software world; no customer or provider data",
+        "cost_receipt_scope": "controller-local simulated-operation receipt",
     }
 
 
@@ -508,5 +589,6 @@ __all__ = [
     "trust_overview",
     "discovery_overview",
     "simulate_action",
+    "run_isolated_research_simulation",
     "compliance_packet",
 ]

@@ -9,9 +9,11 @@ in one never blocks the rest.
 """
 from __future__ import annotations
 
+import hashlib
 import platform
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 # Config keys whose VALUE is a credential — redacted by name regardless of the
@@ -41,6 +43,59 @@ def _redact(obj: Any) -> Any:
         except Exception:  # pragma: no cover - never let scrubbing block the bundle
             return "[unscrubbable]"
     return obj
+
+
+def _config_topology(obj: Any) -> Any:
+    """Describe configuration presence without exporting customer-authored text.
+
+    Config is a general extension surface: harmless-looking fields can contain
+    prompts, document excerpts, URLs, account names, or local paths. Pattern
+    scrubbing cannot establish that the remainder is authorized for support.
+    Preserve only keyed commitments, boolean/numeric controls, and collection
+    sizes. Configuration keys are an extension surface too, so their literal
+    text must never enter a support artifact.
+    """
+    if isinstance(obj, dict):
+        entries = []
+        for raw_key, value in obj.items():
+            name = str(raw_key)
+            key_sha256 = hashlib.sha256(name.encode("utf-8")).hexdigest()
+            if any(hint in name.casefold() for hint in _SECRET_KEY_HINTS):
+                topology = "[REDACTED]" if value not in (None, "", {}, []) else value
+            else:
+                topology = _config_topology(value)
+            entries.append({"key_sha256": key_sha256, "value": topology})
+        entries.sort(key=lambda row: row["key_sha256"])
+        return {"type": "object", "configured_items": len(entries), "entries": entries}
+    if isinstance(obj, list):
+        return {"type": "list", "configured_items": len(obj)}
+    if isinstance(obj, str):
+        return "" if not obj else "[SET]"
+    if obj is None or isinstance(obj, (bool, int, float)):
+        return obj
+    return f"[{type(obj).__name__.upper()}]"
+
+
+def _paths() -> dict[str, Any]:
+    """Return bounded installation-path diagnostics without reading contents."""
+    result: dict[str, Any] = {
+        "python_executable": str(Path(sys.executable).resolve()),
+    }
+    try:
+        from .paths import data_dir
+
+        root = Path(data_dir()).resolve()
+        result["data_root"] = str(root)
+        result["data_root_exists"] = root.exists()
+        result["data_root_is_directory"] = root.is_dir()
+    except Exception:
+        result["data_root"] = "unavailable"
+        result["data_root_exists"] = None
+        result["data_root_is_directory"] = None
+    # The general scrubber catches credentials embedded in a configured path.
+    # These are application/runtime roots only; no directory enumeration or
+    # document filename enters the report.
+    return _redact(result)
 
 
 def _versions() -> dict:
@@ -131,6 +186,33 @@ def _providers() -> dict:
     return out
 
 
+def _failure_category(value: object) -> str:
+    """Reduce an untrusted job error to a small support-safe category.
+
+    Worker exception text may contain customer document excerpts, prompts,
+    provider responses, paths, or identifiers. Credential scrubbing cannot
+    establish authorization for the remaining prose, so none is exported.
+    """
+
+    text = str(value or "").lower()
+    categories = (
+        ("cancelled", ("cancel",)),
+        (
+            "permission_denied",
+            ("permission", "forbidden", "authorization", "unauthor", "denied"),
+        ),
+        ("rate_limited", ("rate limit", "ratelimit", "too many requests")),
+        ("timeout", ("timeout", "timed out", "deadline")),
+        ("connection", ("connection", "network", "dns", "socket")),
+        ("validation", ("validation", "invalid", "malformed", "schema")),
+        ("unavailable", ("unavailable", "not configured", "missing")),
+    )
+    for category, markers in categories:
+        if any(marker in text for marker in markers):
+            return category
+    return "other"
+
+
 def _recent_failures() -> dict:
     out: dict[str, Any] = {}
     try:
@@ -141,11 +223,21 @@ def _recent_failures() -> dict:
     try:
         from .job_queue import JobQueue
         failed = JobQueue().list(status="failed", limit=20)
-        out["failed_jobs"] = [
-            {"id": getattr(j, "id", None), "kind": getattr(j, "kind", None),
-             "last_error": _redact((getattr(j, "last_error", "") or "")[:200])}
-            for j in failed
-        ]
+        categories: dict[str, int] = {}
+        errors_recorded = 0
+        for job in failed:
+            error = getattr(job, "last_error", "")
+            category = _failure_category(error)
+            categories[category] = categories.get(category, 0) + 1
+            errors_recorded += bool(error)
+        # Job ids and kinds are customer/plugin-controlled namespaces. Even a
+        # syntactically tame value may identify a customer, document or custom
+        # workflow, so support receives counts and closed categories only.
+        out["failed_jobs"] = {
+            "count": len(failed),
+            "errors_recorded": errors_recorded,
+            "categories": dict(sorted(categories.items())),
+        }
     except Exception:
         out["failed_jobs"] = "unavailable"
     return out
@@ -175,6 +267,7 @@ def collect() -> dict:
         "entitlement": _entitlement(),
         "versions": _versions(),
         "runtime": _runtime(),
+        "paths": _paths(),
         "readiness": _readiness(),
         "providers": _providers(),
         "recent_failures": _recent_failures(),
@@ -186,7 +279,7 @@ def collect() -> dict:
         bundle["client"] = "unavailable"
     try:
         from .config import load_config
-        bundle["config_redacted"] = _redact(load_config() or {})
+        bundle["config_redacted"] = _config_topology(load_config() or {})
     except Exception:
         bundle["config_redacted"] = "unavailable"
     return bundle
@@ -216,8 +309,13 @@ def ticket_summary(bundle: dict | None = None) -> dict:
         "readiness_failing": failing,
         "healthy": not failing,
         "failure_modes": recent.get("failure_modes"),
-        "failed_job_count": (len(recent["failed_jobs"])
-                             if isinstance(recent.get("failed_jobs"), list) else None),
+        "failed_job_count": (
+            recent["failed_jobs"].get("count")
+            if isinstance(recent.get("failed_jobs"), dict)
+            else len(recent["failed_jobs"])
+            if isinstance(recent.get("failed_jobs"), list)
+            else None
+        ),
     }
 
 

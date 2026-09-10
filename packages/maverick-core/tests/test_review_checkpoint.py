@@ -89,26 +89,30 @@ def test_consent_review_requires_fresh_explicit_approval(monkeypatch):
         calls.append((args, kwargs))
         return types.SimpleNamespace(granted=True)
 
-    import maverick.safety as safety
-    monkeypatch.setattr(safety, "require_consent", fake_require_consent)
+    import maverick.safety.consent as consent
+    monkeypatch.setattr(consent, "require_consent", fake_require_consent)
 
     event = CheckpointEvent("tool_calls", 100, 50)
     assert consent_review(event, goal_id=123) is True
 
-    assert calls == [(
-        ("review-checkpoint",),
-        {
-            "risk": "medium",
-            "scope": "goal:123",
-            "detail": (
-                "Long-horizon review checkpoint reached tool_calls=100 "
-                "(interval 50). Continue the run?"
-            ),
-            "provenance": "review_checkpoint",
-            "allow_auto_approve": False,
-            "consult_ledger": False,
-        },
-    )]
+    assert len(calls) == 1
+    positional, keywords = calls[0]
+    assert positional == ("review-checkpoint",)
+    assert keywords["risk"] == "medium"
+    assert keywords["scope"] == "goal:123"
+    assert keywords["detail"] == (
+        "Long-horizon review checkpoint reached tool_calls=100 "
+        "(interval 50). Continue the run?"
+    )
+    assert keywords["provenance"] == "review_checkpoint"
+    assert keywords["allow_auto_approve"] is False
+    assert keywords["consult_ledger"] is False
+    card = keywords["approval_card"]
+    assert card["action"] == "review-checkpoint"
+    assert card["target"]["label"] == "goal:123"
+    assert card["consequences"]["known_effects"] == [
+        "Allows the current run to continue beyond this checkpoint."
+    ]
 
 
 def test_consent_review_denies_silent_auto_approval(monkeypatch):

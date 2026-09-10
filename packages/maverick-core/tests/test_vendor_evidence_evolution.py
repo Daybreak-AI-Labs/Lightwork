@@ -246,7 +246,12 @@ def accepted_workflow(setup):
     case = service.assess(ctx, case["id"], case["revision"])
     case = service.review(ctx, case["id"], case["revision"], "approved", "Restricted synthetic pilot")
     case = service.prepare_action(ctx, case["id"], case["revision"])
-    case = service.approve_action(ctx, case["id"], case["revision"])
+    case = service.approve_action(
+        ctx,
+        case["id"],
+        case["revision"],
+        case["operation"]["approval_card"]["binding_sha256"],
+    )
     case = service.execute(ctx, case["id"])
     case = service.accept(ctx, case["id"], case["revision"], True, "Synthetic customer acceptance")
     return evolution, ctx, service, case, docs, tickets, now

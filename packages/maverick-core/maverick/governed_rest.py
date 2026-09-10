@@ -188,12 +188,19 @@ def configured_governed_actions() -> tuple[GovernedActions, dict[str, tuple[str,
     -- nothing is registered, so the feature ships inert (kernel rule 1). When
     enabled, every name in ``connectors`` that matches a reference factory is
     registered as read+write governed Actions. Returns ``(ga, registered)``."""
-    from .config import get_governed_connectors
-    from .governed_tools import governance_enabled
+    from .config import env_flag, get_governed_connectors
+    from .governed_tools import _enterprise_mode
 
     cfg = get_governed_connectors()
     ga = GovernedActions()
-    if not governance_enabled():
+    # The mutation boundary itself is always on (``governance_enabled``); the
+    # reference REST connectors are still an operator opt-in so a standard
+    # deployment ships inert. Enterprise mode is a mandatory floor.
+    override = env_flag("MAVERICK_GOVERNED_CONNECTORS")
+    enabled = _enterprise_mode() or (
+        override if override is not None else bool(cfg.get("enable", False))
+    )
+    if not enabled:
         return ga, {}
     return ga, register_rest_connectors(ga, cfg["connectors"])
 

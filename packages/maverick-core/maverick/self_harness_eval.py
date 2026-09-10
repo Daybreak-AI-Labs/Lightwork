@@ -37,6 +37,20 @@ from .budget import BudgetExceeded
 log = logging.getLogger(__name__)
 
 
+def _provider_operation_scope(
+    *, category: str, service: str, work_item_id: str | None,
+):
+    """Bind one logical evaluator call across all of its physical retries."""
+    from .provider_cost_cap import provider_operation_scope
+
+    return provider_operation_scope(
+        operation_id=f"self-harness.{service}:{secrets.token_hex(16)}",
+        category=category,
+        service=f"self-harness-{service}",
+        work_item_id=work_item_id,
+    )
+
+
 def _redact_provider_text(value: object) -> str | None:
     """Return secret-redacted provider payload text, failing closed.
 
@@ -553,7 +567,8 @@ def _strict_judge_payload_safe(goal: str, output: str, expected: str) -> bool:
 
 def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8,
               samples: int = 1, strict: bool = False,
-              evaluator_id: str | None = None) -> Callable[[str, str, str], bool]:
+              evaluator_id: str | None = None,
+              work_item_id: str | None = None) -> Callable[[str, str, str], bool]:
     """An LLM-as-judge ``judge_fn`` for :func:`corpus_ab_scorers`: ask the model
     whether the OUTPUT accomplished the GOAL (yes/no). The model is NOT hard-coded
     (kernel rule 2). Falls open to :func:`_heuristic_judge` on any provider error
@@ -613,8 +628,13 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
                     system = _JUDGE_FRAMINGS[i % len(_JUDGE_FRAMINGS)]
                     user = (f"GOAL:\n{safe_goal}\n\nOUTPUT:\n{safe_output}\n\n"
                             f"Expected (hint): {safe_expected}\n\nyes/no:")
-                resp = llm.complete(system, [{"role": "user", "content": user}],
-                                    budget=budget, max_tokens=max_tokens, model=model)
+                with _provider_operation_scope(
+                    category="evaluation", service="judge",
+                    work_item_id=work_item_id,
+                ):
+                    resp = llm.complete(
+                        system, [{"role": "user", "content": user}],
+                        budget=budget, max_tokens=max_tokens, model=model)
                 text = (getattr(resp, "text", "") or "").strip().lower()
                 is_yes = (text == pass_token.lower()
                           if strict else text.startswith("yes"))
@@ -690,7 +710,8 @@ def _note_judge_verdict(goal: str, output: str, expected: str, verdict: bool, *,
 
 
 def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None = None,
-               max_tokens: int = 512) -> Callable[[str, str], str]:
+               max_tokens: int = 512,
+               work_item_id: str | None = None) -> Callable[[str, str], str]:
     """An LLM-backed ``run_fn`` for :func:`corpus_ab_scorers`: generate an answer
     for the goal with the candidate guidance ``line`` injected into the system
     prompt (``""`` = baseline, no line). The model is NOT hard-coded. Returns
@@ -709,9 +730,14 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
             system = safe_prefix
             if safe_line:
                 system = (system + "\n" if system else "") + safe_line
-            resp = llm.complete(system or "You are a helpful assistant.",
-                                [{"role": "user", "content": safe_goal}],
-                                budget=budget, max_tokens=max_tokens, model=model)
+            with _provider_operation_scope(
+                category="generation", service="candidate",
+                work_item_id=work_item_id,
+            ):
+                resp = llm.complete(
+                    system or "You are a helpful assistant.",
+                    [{"role": "user", "content": safe_goal}],
+                    budget=budget, max_tokens=max_tokens, model=model)
             return getattr(resp, "text", "") or ""
         except BudgetExceeded:
             raise  # exhausted budget is indeterminate, not a scored failure
@@ -734,7 +760,8 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
 
 
 def llm_paraphraser(llm, *, budget=None, model: str | None = None,
-                    max_tokens: int = 256) -> Callable[[list[str]], list[str]]:
+                    max_tokens: int = 256,
+                    work_item_id: str | None = None) -> Callable[[list[str]], list[str]]:
     """An LLM-backed ``metamorphic_fn`` for ``validate_proposal``: rewrite each
     held-out goal in different words, preserving its meaning, so a candidate
     line's lift is tested against wording it was never validated on -- a line
@@ -753,12 +780,16 @@ def llm_paraphraser(llm, *, budget=None, model: str | None = None,
                 safe_goal = _redact_provider_text(g)
                 if safe_goal is None:
                     continue
-                resp = llm.complete(
-                    "Rewrite the task below in different words, preserving its "
-                    "meaning exactly. Return ONLY the rewritten task -- no "
-                    "preamble, no quotes, no markdown.",
-                    [{"role": "user", "content": safe_goal}],
-                    budget=budget, max_tokens=max_tokens, model=model)
+                with _provider_operation_scope(
+                    category="generation", service="paraphraser",
+                    work_item_id=work_item_id,
+                ):
+                    resp = llm.complete(
+                        "Rewrite the task below in different words, preserving its "
+                        "meaning exactly. Return ONLY the rewritten task -- no "
+                        "preamble, no quotes, no markdown.",
+                        [{"role": "user", "content": safe_goal}],
+                        budget=budget, max_tokens=max_tokens, model=model)
                 text = (getattr(resp, "text", "") or "")
                 line = next((s.strip() for s in text.splitlines() if s.strip()), "")
                 if line and line != safe_goal:

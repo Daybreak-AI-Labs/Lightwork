@@ -48,12 +48,12 @@ def _anchor(role="reviewer", n=14, true_every=2):
     return ee.Anchor(role=role, items=items)
 
 
-def test_checksum_ignores_prompt_but_tracks_labels():
+def test_checksum_tracks_every_evaluator_visible_anchor_field():
     a = ee.Anchor("r", (ee.AnchorItem("x", True, "hello"),))
     same_label = ee.Anchor("r", (ee.AnchorItem("x", True, "WORLD"),))
     flipped = ee.Anchor("r", (ee.AnchorItem("x", False, "hello"),))
-    assert a.checksum() == same_label.checksum()   # prompt text is not pinned
-    assert a.checksum() != flipped.checksum()       # a flipped label is
+    assert a.checksum() != same_label.checksum()
+    assert a.checksum() != flipped.checksum()
 
 
 def test_checksum_is_order_independent():
@@ -141,18 +141,29 @@ def test_lock_problems_flags_new_and_removed_anchors():
     assert any("gone from the anchor dir" in p for p in removed)
 
 
-def test_verify_anchor_integrity_fails_open_without_lock_but_closed_on_mismatch():
+def test_verify_anchor_integrity_requires_a_complete_matching_release_lock():
     a = _anchor()
-    assert ee.verify_anchor_integrity(a, lock=None) is True       # ungoverned -> open
+    assert ee.verify_anchor_integrity(a, lock=None) is False
     good = ee.anchor_fingerprint({"reviewer": a})
-    assert ee.verify_anchor_integrity(a, lock=good) is True       # matches lock
-    tampered = ee.Anchor("reviewer", a.items[:-1] + (ee.AnchorItem("reviewer-0013", True),))
-    assert ee.verify_anchor_integrity(tampered, lock=good) is False  # mismatch -> closed
+    assert ee.verify_anchor_integrity(a, lock=good) is True
+    tampered = ee.Anchor(
+        "reviewer", a.items[:-1]
+        + (ee.AnchorItem("reviewer-0013", False, "edited prompt"),))
+    assert ee.verify_anchor_integrity(tampered, lock=good) is False
+    assert ee.verify_anchor_integrity(a, lock={"checksums": {}, "sizes": {}}) is False
+    assert ee.verify_anchor_integrity(a, lock={"checksums": {}}) is False
 
 
-def test_committed_baseline_lock_is_valid_json():
+def test_committed_anchor_is_non_vacuous_reproducible_and_locked():
     lock = ee.load_lock()
     assert isinstance(lock, dict) and "checksums" in lock
+    anchors = ee.discover_anchors()
+    assert set(anchors) == {"self_harness_protocol_v1"}
+    anchor = anchors["self_harness_protocol_v1"]
+    assert len(anchor) == 16
+    assert sum(item.label for item in anchor.items) == 8
+    assert ee.verify_anchor_integrity(anchor, lock=lock) is True
+    assert ee.lock_problems(lock, anchors) == []
 
 
 # -- CLI: --regen must not launder an edited released anchor --------------------
@@ -180,7 +191,7 @@ def test_regen_refuses_to_launder_an_edited_released_anchor(tmp_path, monkeypatc
     assert lock_path.read_text() == original
 
 
-def test_regen_force_explicitly_relocks_an_edited_anchor(tmp_path, monkeypatch):
+def test_regen_force_cannot_relock_an_edited_released_anchor(tmp_path, monkeypatch):
     anchor_dir, lock_path = _cli_env(tmp_path, monkeypatch)
     f = anchor_dir / "reviewer.ndjson"
     f.write_text('{"id": "case1", "label": true}\n')
@@ -188,8 +199,8 @@ def test_regen_force_explicitly_relocks_an_edited_anchor(tmp_path, monkeypatch):
     original = lock_path.read_text()
 
     f.write_text('{"id": "case1", "label": false}\n')
-    assert ee.main(["--regen", "--force"]) == 0
-    assert lock_path.read_text() != original
+    assert ee.main(["--regen", "--force"]) == 1
+    assert lock_path.read_text() == original
 
 
 def test_regen_without_prior_lock_is_unaffected(tmp_path, monkeypatch):
@@ -201,6 +212,34 @@ def test_regen_without_prior_lock_is_unaffected(tmp_path, monkeypatch):
     f.write_text('{"id": "case1", "label": true}\n')
     assert ee.main(["--regen"]) == 0
     assert lock_path.exists()
+
+
+def test_regen_cannot_erase_a_released_anchor_even_with_force(tmp_path, monkeypatch):
+    anchor_dir, lock_path = _cli_env(tmp_path, monkeypatch)
+    f = anchor_dir / "reviewer.ndjson"
+    f.write_text('{"id": "case1", "label": true}\n')
+    assert ee.main(["--regen"]) == 0
+    original = lock_path.read_text()
+
+    f.unlink()
+    assert ee.main(["--regen"]) == 1
+    assert ee.main(["--regen", "--force"]) == 1
+    assert lock_path.read_text() == original
+
+
+@pytest.mark.parametrize("contents", [
+    "",
+    '{"id": "case1", "label": "yes"}\n',
+    '{"id": "case1", "label": true}\nnot-json\n',
+])
+def test_regen_refuses_empty_or_malformed_anchor_files(
+    tmp_path, monkeypatch, contents,
+):
+    anchor_dir, lock_path = _cli_env(tmp_path, monkeypatch)
+    (anchor_dir / "reviewer.ndjson").write_text(contents)
+
+    assert ee.main(["--regen"]) == 1
+    assert not lock_path.exists()
 
 
 # -- end-to-end promotion through the governance spine --------------------------
@@ -250,7 +289,8 @@ def test_consider_promotion_promotes_better_judge_and_erases(tmp_path, monkeypat
         slot,
         _verdicts(anchor, agree=8),               # incumbent: 8/14 agree
         {"new": _verdicts(anchor, agree=14)},     # challenger: 14/14 agree
-        anchor, records, lock=None, controller=ctrl,
+        anchor, records, lock=ee.anchor_fingerprint({"reviewer": anchor}),
+        controller=ctrl,
     )
     assert res.promoted is True
     assert res.challenger_id == "new"
@@ -270,7 +310,8 @@ def test_consider_promotion_blocked_by_calibration_freeze(monkeypatch):
     ctrl = _ctrl(frozen=True, max_auto_rung="evaluator")
     res = ee.consider_promotion(
         slot, _verdicts(anchor, agree=8), {"new": _verdicts(anchor, agree=14)},
-        anchor, [], lock=None, controller=ctrl,
+        anchor, [], lock=ee.anchor_fingerprint({"reviewer": anchor}),
+        controller=ctrl,
     )
     assert res.promoted is False
     assert "frozen" in res.reason or "calibration" in res.reason.lower()
@@ -289,13 +330,15 @@ def test_consider_promotion_needs_human_above_default_ceiling(tmp_path, monkeypa
     )  # max_auto_rung defaults to "policy"
     refused = ee.consider_promotion(
         slot, _verdicts(anchor, agree=8), {"new": _verdicts(anchor, agree=14)},
-        anchor, [], lock=None, controller=ctrl,
+        anchor, [], lock=ee.anchor_fingerprint({"reviewer": anchor}),
+        controller=ctrl,
     )
     assert refused.promoted is False
     # With explicit human approval the same swap goes through.
     approved = ee.consider_promotion(
         slot, _verdicts(anchor, agree=8), {"new": _verdicts(anchor, agree=14)},
-        anchor, [], lock=None, controller=ctrl, approved=True,
+        anchor, [], lock=ee.anchor_fingerprint({"reviewer": anchor}),
+        controller=ctrl, approved=True,
     )
     assert approved.promoted is True
 
@@ -315,3 +358,33 @@ def test_consider_promotion_refuses_tampered_anchor(monkeypatch):
     )
     assert res.promoted is False
     assert "integrity" in res.reason
+
+
+def test_prompt_only_anchor_edit_is_refused_before_any_scoring(monkeypatch):
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
+    monkeypatch.setenv("MAVERICK_EVALUATOR_EVOLUTION", "1")
+    monkeypatch.setattr(ee, "_audit", lambda *a, **k: None)
+    released = _anchor(n=14)
+    changed = ee.Anchor(
+        role=released.role,
+        items=(
+            ee.AnchorItem(
+                released.items[0].id, released.items[0].label,
+                released.items[0].prompt + " changed",
+            ),
+            *released.items[1:],
+        ),
+    )
+    monkeypatch.setattr(
+        ee, "score_on_anchor",
+        lambda *_: pytest.fail("anchor scoring must not start after integrity drift"),
+    )
+
+    result = ee.consider_promotion(
+        ee.EvaluatorSlot(role="reviewer", evaluator_id="old"),
+        {}, {"new": {}}, changed, [],
+        lock=ee.anchor_fingerprint({"reviewer": released}),
+        controller=_ctrl(max_auto_rung="evaluator"),
+    )
+    assert result.promoted is False
+    assert "integrity" in result.reason

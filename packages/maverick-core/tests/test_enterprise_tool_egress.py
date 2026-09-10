@@ -179,12 +179,11 @@ def test_browser_navigate_blocks_egress_under_enterprise(monkeypatch):
     _enterprise(monkeypatch)
     monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # isolate the enterprise gate from DNS
-    # Enterprise mode also flips destructive-action consent to ask-by-default
-    # (a separate, already-covered control) -- auto-approve so this test
-    # isolates the egress gate rather than tripping the consent one.
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     from maverick.tools import browser as browser_mod
     monkeypatch.setattr(browser_mod, "_get_session", lambda: _FakeBrowserSession())
+    # Fresh human consent is covered by test_action_gate. Bypass it here so
+    # this test reaches the enterprise egress boundary it owns.
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     out = browser_mod._run_browser_action(
         {"action": "navigate", "url": "https://exfil.invalid/steal"},
     )
@@ -195,7 +194,6 @@ def test_browser_navigate_allows_allow_listed_host_under_enterprise(monkeypatch)
     _enterprise(monkeypatch, allowed=["api.example.com"])
     monkeypatch.setenv("MAVERICK_BROWSER_DISABLE", "0")
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     from maverick.tools import browser as browser_mod
 
     class _AllowedPage(_FakeBrowserPage):
@@ -207,6 +205,7 @@ def test_browser_navigate_allows_allow_listed_host_under_enterprise(monkeypatch)
             self._page = _AllowedPage()
 
     monkeypatch.setattr(browser_mod, "_get_session", lambda: _AllowedSession())
+    monkeypatch.setattr(browser_mod, "gate_browser_action", lambda *_a, **_kw: None)
     out = browser_mod._run_browser_action(
         {"action": "navigate", "url": "https://api.example.com/x"},
     )

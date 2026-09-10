@@ -10,8 +10,8 @@ self-consistency checks and are never described or treated as authentication.
 Unsigned legacy archives have an intentionally awkward compatibility path:
 callers must pass ``allow_unsigned=True`` to ``read_manifest`` / ``restore_backup``
 (and may create one with the same explicit flag). The CLI has no unsigned
-override. ``force=True`` only overrides client/schema compatibility and never
-bypasses signature verification.
+override. ``force=True`` only overrides client/live-world admission checks and
+never bypasses signature verification or schema compatibility.
 
 Restore scans tar streams without ``getmembers``/``extractall``, enforces hard
 member/path/type/per-file/expanded-size limits, writes only into a private
@@ -36,6 +36,7 @@ import tarfile
 import tempfile
 import time
 import unicodedata
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
@@ -491,8 +492,8 @@ def _manifest_files(
     manifest: dict[str, Any], *, allow_legacy_unsigned: bool,
 ) -> dict[str, tuple[str, int | None]]:
     schema = manifest.get("schema")
-    if schema != SCHEMA and not (allow_legacy_unsigned and schema == 1):
-        raise BackupError(f"unsupported backup manifest schema: {schema!r}")
+    if type(schema) is not int or (schema != SCHEMA and not (allow_legacy_unsigned and schema == 1)):
+        raise BackupError("unsupported backup manifest schema; upgrade Lightwork or use a reviewed migration")
     raw_files = manifest.get("files")
     if not isinstance(raw_files, dict) or len(raw_files) > MAX_ARCHIVE_MEMBERS:
         raise BackupError("backup manifest files map is missing or oversized")
@@ -711,19 +712,92 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _world_schema_version(root: Path) -> int | None:
-    db = root / "world.db"
+def _world_schema_version(db: Path) -> int | None:
+    """Read native SQLite metadata from a private, checkpointed staging copy.
+
+    An absent marker leaves other SQLite stores unclassified; for a known
+    world, an absent/empty table is the supported unversioned legacy form.
+    Nonempty metadata must identify exactly one positive integral version.
+    """
     if not db.exists():
         return None
+    invalid = "backup world schema metadata is invalid; use a compatible backup or a reviewed migration"
     try:
-        connection = sqlite3.connect(str(db))
+        uri = (
+            "file:" + quote(str(_filesystem_path(db)), safe=":")
+            if os.name == "nt" else db.resolve().as_uri()
+        )
+        # _stage uses SQLite's online backup API, so committed WAL pages are
+        # already in the copy. Immutable avoids creating unmanifested sidecars
+        # when a copied database retains its WAL journal-mode header.
+        connection = sqlite3.connect(uri + "?mode=ro&immutable=1", uri=True)
         try:
-            row = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
-            return int(row[0]) if row and row[0] is not None else None
+            table = connection.execute(
+                "SELECT type FROM sqlite_master WHERE name = 'schema_version' COLLATE NOCASE"
+            ).fetchone()
+            if table is None:
+                return None
+            if table[0] != "table":
+                raise BackupError(invalid)
+            rows = connection.execute("SELECT version FROM schema_version LIMIT 2").fetchall()
         finally:
             connection.close()
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        raise BackupError(invalid) from exc
+    if not rows:
         return None
+    if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] < 1:
+        raise BackupError(invalid)
+    return rows[0][0]
+
+
+def _check_supported_world_schema(value: Any) -> None:
+    from .world_model import SCHEMA_VERSION
+
+    if value is not None and (type(value) is not int or value < 1):
+        raise BackupError("backup world schema metadata is invalid; use a compatible backup or a reviewed migration")
+    if value is not None and value > SCHEMA_VERSION:
+        raise BackupError(
+            f"backup world schema v{value} is newer than this binary's v{SCHEMA_VERSION}; "
+            "upgrade Lightwork first or select a compatible backup"
+        )
+
+
+def _validate_restore_schemas(stage: Path, manifest: dict[str, Any]) -> None:
+    """Reject unsupported staged databases before recovery or publication.
+
+    The signed v2 root declaration must match the actual root database. Legacy
+    v1 archives may omit that declaration. Header/extension-discovered SQLite
+    files with the native schema_version marker are checked regardless of
+    filename or tenant path; the root declaration does not describe them.
+    """
+    declared = manifest.get("world_schema_version")
+    _check_supported_world_schema(declared)
+    sidecar_names = {"world.db" + suffix for suffix in _DB_SIDECARS}
+    if any(path.name.casefold() in sidecar_names for path in stage.rglob("*")):
+        raise BackupError(
+            "backup world databases must be checkpointed without SQLite sidecars; "
+            "create a fresh snapshot or use a reviewed migration"
+        )
+    actual = _world_schema_version(stage / "world.db")
+    _check_supported_world_schema(actual)
+    if (manifest.get("schema") == SCHEMA or declared is not None) and actual != declared:
+        raise BackupError(
+            "backup world schema does not match its manifest; use a compatible backup or a reviewed migration"
+        )
+    for db in stage.rglob("*"):
+        if not db.is_file() or not _is_sqlite_file(db):
+            continue
+        # All supported SQLite snapshots are checkpointed copies. Check before
+        # immutable inspection: a custom file's native marker itself could
+        # otherwise be hidden in a WAL. Other component schemas are not given
+        # a world version merely because they have a SQLite header.
+        if any(db.with_name(db.name + suffix).exists() for suffix in _DB_SIDECARS):
+            raise BackupError(
+                "backup SQLite databases must be checkpointed without sidecars; "
+                "create a fresh snapshot or use a reviewed migration"
+            )
+        _check_supported_world_schema(_world_schema_version(db))
 
 
 # The at-rest encryption key (keys/at_rest.key + the keys/at_rest.d/*.key
@@ -885,8 +959,8 @@ def create_backup(
     with _temporary_directory(prefix="mvk-backup-") as temporary:
         temp_root = file_lock.ensure_private_directory(temporary)
         stage = file_lock.ensure_private_directory(temp_root / "data")
-        schema_version = _world_schema_version(root)
         files = _stage(root, stage, include_keys=include_keys)
+        schema_version = _world_schema_version(stage / "world.db")
         if not files:
             raise BackupError(f"no data files to back up at {root}")
         manifest = _authenticate_for_write({
@@ -1337,6 +1411,8 @@ def restore_backup(
     force: bool = False,
     allow_unsigned: bool = False,
     replace_existing: bool = False,
+    _stage_transform: Callable[[Path], set[str] | None] | None = None,
+    _record_decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
 ) -> Path:
     """Authenticate, verify and transactionally restore one backup.
 
@@ -1346,6 +1422,9 @@ def restore_backup(
     carries world.db, or pass ``force=True`` if you are certain nothing has
     it open. ``allow_unsigned`` is the explicit legacy path and provides
     integrity/bounds checks, not provenance.
+    Supported local application references are validated before publication;
+    force never bypasses that check or database schema compatibility. Governed
+    stores require full replacement.
     """
     with _verified_archive(tarball) as stream:
         manifest, key = _read_manifest_stream(stream, allow_unsigned=allow_unsigned)
@@ -1356,33 +1435,58 @@ def restore_backup(
                 f"backup is for client {backup_client!r} but this deployment is "
                 f"{live_client!r}; refusing (pass force=True to override)"
             )
-        from .world_model import SCHEMA_VERSION
-
-        backup_schema = manifest.get("world_schema_version")
-        if (
-            not force
-            and isinstance(backup_schema, int)
-            and backup_schema > SCHEMA_VERSION
-        ):
-            raise BackupError(
-                f"backup world schema v{backup_schema} is newer than this "
-                f"binary's v{SCHEMA_VERSION}; upgrade Lightwork first, or pass "
-                "force=True to override"
-            )
+        _check_supported_world_schema(manifest.get("world_schema_version"))
         expected = _manifest_files(
             manifest,
             allow_legacy_unsigned=allow_unsigned and key is None,
         )
         root = _client_root()
-        file_lock.ensure_private_directory(root)
-        if not force and "world.db" in expected:
-            _refuse_if_world_appears_live(root)
         with _temporary_directory(prefix="mvk-restore-") as temporary:
             stage = file_lock.ensure_private_directory(Path(temporary) / "data")
             stream.seek(0)
             _extract_payload_stream(stream, stage, expected=expected)
+            _validate_restore_schemas(stage, manifest)
+            _validate_application_stage(stage, decryptor=_record_decryptor)
+            if _stage_transform is not None:
+                # Recovery bootstrap may conservatively retire queued work before
+                # any restored byte becomes live.  The signed archive is always
+                # authenticated and application-validated first.  Re-stage the
+                # transformed tree to re-apply the same path/type/size bounds,
+                # require the exact file set, and bind the transaction's
+                # post-write verification to the resulting bytes.
+                allowed_removed = _stage_transform(stage) or set()
+                if (not isinstance(allowed_removed, set)
+                        or any(not isinstance(name, str) for name in allowed_removed)):
+                    raise BackupError("restore reconciliation returned invalid path authority")
+                reconciled = file_lock.ensure_private_directory(
+                    Path(temporary) / "reconciled"
+                )
+                transformed = _stage(stage, reconciled, include_keys=True)
+                removed = set(expected) - set(transformed)
+                added = set(transformed) - set(expected)
+                if added or removed != allowed_removed:
+                    raise BackupError(
+                        "restore reconciliation changed the authenticated file set"
+                    )
+                expected = {
+                    name: (metadata["sha256"], metadata["size"])
+                    for name, metadata in transformed.items()
+                }
+                stage = reconciled
+                _validate_restore_schemas(stage, manifest)
+                _validate_application_stage(stage, decryptor=_record_decryptor)
+            file_lock.ensure_private_directory(root)
+            if not force and "world.db" in expected:
+                _refuse_if_world_appears_live(root)
             lock_target = root / _RESTORE_LOCK_TARGET
             with file_lock.cross_process_lock(lock_target, strict=True):
+                if not replace_existing:
+                    from .restore_validation import RestoreValidationError, guard_additive_restore
+
+                    try:
+                        guard_additive_restore(root, stage, whole_home=_RECOVERY_WHOLE_HOME.get())
+                    except RestoreValidationError as exc:
+                        raise BackupError(str(exc)) from exc
                 _recover_transactions(root, allow_unsigned=allow_unsigned)
                 _apply_transaction(
                     root,
@@ -1413,29 +1517,52 @@ def verify_backup(tarball: str | Path) -> dict[str, Any]:
     return manifest
 
 
+def _validate_application_stage(
+    stage: Path,
+    *,
+    decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
+) -> dict[str, Any]:
+    from .restore_validation import RestoreValidationError, validate_staged_restore
+
+    try:
+        return validate_staged_restore(
+            stage,
+            tenant=_client_id(),
+            whole_home=_RECOVERY_WHOLE_HOME.get(),
+            decryptor=decryptor,
+        )
+    except RestoreValidationError as exc:
+        raise BackupError(str(exc)) from exc
+
+
+def validate_backup_application(
+    tarball: str | Path,
+    *,
+    _record_decryptor: Callable[[bytes, str | None, Path], bytes] | None = None,
+) -> dict[str, Any]:
+    """Authenticate a full-replacement candidate and check supported references.
+
+    This stages bytes privately and never opens or changes live application
+    stores. Success describes only the explicitly returned validation scope.
+    """
+    with _verified_archive(tarball) as stream:
+        manifest, _ = _read_manifest_stream(stream, allow_unsigned=False)
+        if manifest.get("client_id") != _client_id():
+            raise BackupError("Application validation requires the matching recovery workspace.")
+        _check_supported_world_schema(manifest.get("world_schema_version"))
+        expected = _manifest_files(manifest, allow_legacy_unsigned=False)
+        with _temporary_directory(prefix="mvk-application-verify-") as temporary:
+            stage = file_lock.ensure_private_directory(Path(temporary) / "data")
+            stream.seek(0)
+            _extract_payload_stream(stream, stage, expected=expected)
+            _validate_restore_schemas(stage, manifest)
+            return _validate_application_stage(stage, decryptor=_record_decryptor)
+
+
 def _accounting_file(relative: str, path: Path) -> bool:
-    parts = PurePosixPath(relative).parts
-    lowered = tuple(part.casefold() for part in parts)
-    name = lowered[-1]
-    # Custom database names are not a format boundary. Only ordinary lock
-    # sidecars may be ignored, never SQLite payloads whose name ends in .lock.
-    if _is_sqlite_file(path):
-        return True
-    if name.endswith(".lock"):
-        return False
-    return (
-        # Claims and completed/unconfirmed external-action records are replay
-        # authority: a valid older JSON record (or its absence) can permit the
-        # same action again. Cover workspace and whole-home paths.
-        bool({"usage", "llm_gateway_team_budget", "mcp_sidecar", "grc_sync_outbound",
-              "grc_outbound_sync_states", "grc_outbound_sync_events", "vendor_onboarding",
-              "discovery_containment_actions", "provider_accounting_reviews", "pilot_learning_exclusions",
-              "task-file-recovery"}.intersection(lowered[:-1]))
-        or name in {"provider_spend.json", "provider_spend.json.required", "tenant_registry.json", "dashboard-owner.json"}
-        or (name == "retention.index" and "draft-recovery" in lowered)
-        or (name in {"connections.sealed", "oauth-setup.sealed"} and "connections" in lowered)
-        or name.startswith("budget_receipts.")
-    )
+    from .recovery_authorities import protected_authority
+
+    return protected_authority(relative, is_sqlite=_is_sqlite_file(path))
 
 
 def compare_backup(tarball: str | Path) -> dict[str, Any]:

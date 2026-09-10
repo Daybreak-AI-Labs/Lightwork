@@ -279,8 +279,11 @@ TypeScript helpers for the screen-then-act, report-after loop.
 4. **Instructions** — tell the topic to call **screen** (tool name, one-line
    detail, risk) before any consequential action and only proceed on
    `allowed: true`; when `requires_approval` comes back, poll the approval
-   action until a human decides; call **runs** once with title/outcome/cost
-   when the job completes.
+   action until a human decides, sending the returned
+   `approval_binding_sha256` on every poll; call **runs** once with
+   title/outcome/cost when the job completes. This screen-only decision is
+   advisory because the external runtime still owns the effect. Use
+   `/api/v1/external/execute` for a Lightwork-enforced connector effect.
 
 Paste-in packaging (deployable Apex invocable classes + the exact Setup clicks): [`examples/external-agents/agentforce/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/agentforce/).
 
@@ -363,21 +366,29 @@ At or above the approval floor the action parks instead:
 ```json
 {"allowed": false, "rule": "approval_required",
  "reason": "risk high is at/above the high approval floor; awaiting a human decision",
- "requires_approval": true, "approval_id": 42}
+ "requires_approval": true, "approval_id": 42,
+ "approval_binding_sha256": "<sha256-of-the-reviewed-approval-card>"}
 ```
 
 Poll while a human decides in the dashboard queue:
 
 ```bash
 curl -sS https://lightwork.example.com/api/v1/external/approvals/42 \
+  --get --data-urlencode "binding_sha256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" \
   -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE"
 ```
 
 ```json
-{"approval_id": 42, "status": "pending", "risk": "high"}
+{"approval_id": 42, "status": "pending", "risk": "high",
+ "approval_binding_sha256": "<sha256-of-the-reviewed-approval-card>",
+ "target_sha256": "...", "parameters_sha256": "..."}
 ```
 
-`status` moves to `approved` or `denied`. Report a completed run:
+`status` moves to `approved` or `denied`. A stale binding returns 409 and a
+different enrolled agent receives 404. Approval here advises the external
+runtime; it does not make the runtime's later action a Lightwork-enforced
+effect. Use `/api/v1/external/execute` and its commit route for that guarantee.
+Report a completed run:
 
 ```bash
 curl -sS -X POST https://lightwork.example.com/api/v1/external/runs \

@@ -29,6 +29,7 @@ Safety:
 from __future__ import annotations
 
 import base64
+import copy
 import io
 import logging
 import os
@@ -37,7 +38,12 @@ import time
 from typing import Any
 
 from ..safety.action_evidence import seal_bracketed
-from ..safety.action_gate import computer_action_risk, gate_computer_action
+from ..safety.action_gate import (
+    ActionPermit,
+    computer_action_risk,
+    consume_action_permit,
+    gate_computer_action,
+)
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -199,6 +205,17 @@ _VALID_ACTIONS = frozenset({
 })
 
 
+def _redact_computer_text(value: Any) -> str:
+    """Return model/log-visible computer text with capability tokens removed."""
+    try:
+        from ..safety.secret_detector import redact
+
+        safe, _matches = redact(str(value or ""))
+        return safe
+    except Exception:
+        return "[computer detail withheld: redaction unavailable]"
+
+
 def _do_screenshot() -> str:
     """Grab + (optionally) seal + OCR a screenshot. Returns the tool_result
     string or an ``ERROR:`` string if capture deps are missing."""
@@ -316,8 +333,9 @@ def _do_key(pyautogui, coord, args: dict[str, Any]) -> str:
     }
     keys = [norm_map.get(k, k) for k in keys]
     pyautogui.hotkey(*keys)
-    log.info("computer.key %s", "+".join(keys))
-    return f"pressed {'+'.join(keys)}"
+    safe_keys = _redact_computer_text("+".join(keys))
+    log.info("computer.key %s", safe_keys)
+    return f"pressed {safe_keys}"
 
 
 def _do_scroll(pyautogui, coord, args: dict[str, Any]) -> str:
@@ -351,6 +369,29 @@ _PYAUTOGUI_ACTIONS = {
     "key": _do_key,
     "scroll": _do_scroll,
 }
+
+
+def _dispatch_approved_computer_action(
+    pyautogui,
+    action: str,
+    coord,
+    args: dict[str, Any],
+) -> str:
+    """Dispatch only through a driver that binds the exact native target.
+
+    Raw global input has a check/use gap: another window can become foreground
+    after observation and receive the click or keystroke. A compliant desktop
+    bridge must implement ``dispatch_bound`` and atomically validate its own
+    HWND/UIA ticket before sending the frozen input. The pyautogui fallback is
+    therefore intentionally unavailable for approved mutations.
+    """
+    dispatcher = getattr(pyautogui, "dispatch_bound", None)
+    if not callable(dispatcher):
+        return (
+            "ERROR: computer target cannot be bound atomically; no input was "
+            "sent; observe it and complete the action manually"
+        )
+    return str(dispatcher(action, coord, copy.deepcopy(args)))
 
 
 # X11 :0 is the local console -- the operator's real seat.
@@ -415,7 +456,80 @@ def _host_safety_error() -> str | None:
     )
 
 
+def _foreground_window_identity() -> dict[str, Any]:
+    """Observe the current Windows input target; callers persist only its hash."""
+    if os.name != "nt":
+        return {
+            "platform": os.name,
+            "display": os.environ.get("DISPLAY") or "local-primary",
+        }
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    window = user32.GetForegroundWindow()
+    if not window:
+        raise RuntimeError("foreground window is unavailable")
+    process_id = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(window, ctypes.byref(process_id))
+    title_length = min(max(0, int(user32.GetWindowTextLengthW(window))), 4096)
+    title = ctypes.create_unicode_buffer(title_length + 1)
+    user32.GetWindowTextW(window, title, title_length + 1)
+    class_name = ctypes.create_unicode_buffer(512)
+    user32.GetClassNameW(window, class_name, len(class_name))
+    rectangle = wintypes.RECT()
+    if not user32.GetWindowRect(window, ctypes.byref(rectangle)):
+        raise RuntimeError("foreground window geometry is unavailable")
+    return {
+        "window": int(window),
+        "process_id": int(process_id.value),
+        "title": title.value,
+        "class": class_name.value,
+        "rectangle": [
+            rectangle.left, rectangle.top, rectangle.right, rectangle.bottom,
+        ],
+    }
+
+
+def _computer_approval_context(args: dict[str, Any] | None = None) -> dict[str, str]:
+    """Bind the input seat and foreground target; expose only a redacted label."""
+    from ..approval_cards import digest
+
+    material = {
+        "display": (os.environ.get("DISPLAY") or "local-primary").strip(),
+        "configured_display": (
+            os.environ.get("MAVERICK_COMPUTER_DISPLAY") or ""
+        ).strip(),
+        "host_override": (
+            os.environ.get("MAVERICK_COMPUTER_ALLOW_HOST") or ""
+        ).strip().lower(),
+    }
+    identity = _foreground_window_identity()
+    raw_summary = str(
+        identity.get("title")
+        or identity.get("class")
+        or identity.get("display")
+        or identity.get("platform")
+        or "active computer target"
+    )
+    target_summary = _redact_computer_text(" ".join(raw_summary.split())[:400])
+    return {
+        "seat_sha256": digest(material),
+        "foreground_window_sha256": digest(identity),
+        "coordinate_sha256": digest(dict(args or {}).get("coordinate")),
+        "credential_version_sha256": "not_applicable:local-input-seat",
+        "target_summary": target_summary,
+    }
+
+
 def _run_computer_action(args: dict[str, Any]) -> str:
+    # Dispatch from one private copy of the reviewed invocation.  The mutable
+    # dictionary supplied by a model/runtime must never be able to change the
+    # coordinate, key, or text after the consent boundary validated it.
+    try:
+        args = copy.deepcopy(dict(args))
+    except Exception:
+        return "ERROR: computer action input could not be frozen; no input was sent"
     if os.environ.get("MAVERICK_COMPUTER_DISABLE") == "1":
         return "ERROR: computer-use tool disabled by MAVERICK_COMPUTER_DISABLE=1"
     action = args.get("action")
@@ -435,14 +549,16 @@ def _run_computer_action(args: dict[str, Any]) -> str:
     if host_error is not None:
         return host_error
 
-    # Per-action approval gate (mutating actuations only -- clicks/keystrokes/
-    # drag). No-op in the default auto-approve consent mode; routes the action
-    # through the approval queue / TTY prompt when an operator turns gating on
-    # (or enterprise mode flips the default to 'ask'). Read-only actions
-    # (screenshot/cursor_position/wait/mouse_move/scroll) are never gated.
-    denied = gate_computer_action(action, args)
-    if denied is not None:
-        return denied
+    # Per-action approval gate for every input mutation, including pointer moves
+    # and scrolls. Silent auto approval and standing consent grants are
+    # intentionally ineligible. Screenshot/cursor_position/wait remain reads.
+    authorization = gate_computer_action(
+        action,
+        args,
+        context_provider=lambda: _computer_approval_context(copy.deepcopy(args)),
+    )
+    if isinstance(authorization, str):
+        return authorization
 
     # Screenshot is the most common action; handle separately (doesn't
     # need pyautogui, just mss).
@@ -466,15 +582,36 @@ def _run_computer_action(args: dict[str, Any]) -> str:
 
     handler = _PYAUTOGUI_ACTIONS.get(action)
     if handler is not None:
+        def dispatch() -> str:
+            try:
+                if isinstance(authorization, ActionPermit):
+                    return consume_action_permit(
+                        authorization,
+                        effect=lambda: _dispatch_approved_computer_action(
+                            pyautogui, action, coord, args,
+                        ),
+                    )
+                return handler(pyautogui, coord, args)
+            except Exception as exc:
+                # Desktop-driver errors can reflect a key or typed value. The
+                # input may already have reached the application, so require a
+                # fresh observation before any retry.
+                detail = _redact_computer_text(exc)
+                return (
+                    f"ERROR: computer {action} could not be confirmed "
+                    f"({type(exc).__name__}: {detail}); observe current state "
+                    "before retrying"
+                )
+
         if computer_action_risk(action, args) == "high":
             # Bracket a high-risk actuation with sealed before/after captures
             # (no-op unless screenshot sealing is configured).
             return seal_bracketed(
                 _screenshot_png_b64,
-                lambda: handler(pyautogui, coord, args),
+                dispatch,
                 action=f"computer.{action}",
             )
-        return handler(pyautogui, coord, args)
+        return dispatch()
 
     # Defense in depth -- _VALID_ACTIONS guard at the top should make
     # this unreachable.

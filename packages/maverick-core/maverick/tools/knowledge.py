@@ -1,17 +1,32 @@
-"""knowledge_search: let a domain agent query its own uploaded documents.
+"""Governed ``knowledge_search`` for domain agents.
 
-Bound to the agent's ``knowledge_sources`` (the DomainProfile's collections), so
-a finance agent searches only finance documents -- knowledge respects the same
-compartment bulkheads. The KnowledgeBase lives on the shared SwarmContext; this
-tool is a thin, per-agent binding over it. Optional: registered only when a
-knowledge base is configured for the run.
+The tool never calls the legacy vector store directly. Every invocation resolves
+the active tenant and actor, searches exact research-registry source versions for
+one fixed purpose/action, and rematerializes selected content at that job's start
+boundary before any text is returned to the agent.
 """
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable, Sequence
+
+from ..knowledge_access import KnowledgeAccessService
 from . import Tool
 
 
-def knowledge_search_tool(kb, collections: list[str]) -> Tool:
+def knowledge_search_tool(
+    service_resolver: KnowledgeAccessService | Callable[[], KnowledgeAccessService],
+    source_selectors: Sequence[str],
+    *,
+    tenant_resolver: Callable[[], str | None] | None = None,
+    actor_resolver: Callable[[], str] | None = None,
+    purpose: str = "product_research",
+    job_id_resolver: Callable[[], str] | None = None,
+) -> Tool:
+    """Bind an agent lookup to current APP10 authority and exact sources."""
+
+    selectors = tuple(source_selectors)
+
     async def fn(args: dict) -> str:
         query = str(args.get("query", "")).strip()
         if not query:
@@ -20,17 +35,64 @@ def knowledge_search_tool(kb, collections: list[str]) -> Tool:
             k = int(args.get("k", 5))
         except (TypeError, ValueError):
             k = 5
+        k = min(50, max(1, k))
         try:
-            return kb.search_formatted(collections, query, k)
-        except Exception as e:  # never break the agent loop on a KB error
-            return f"knowledge_search unavailable: {type(e).__name__}"
+            service = (
+                service_resolver
+                if isinstance(service_resolver, KnowledgeAccessService)
+                else service_resolver()
+            )
+            if not isinstance(service, KnowledgeAccessService):
+                raise TypeError("governed knowledge service is unavailable")
+            if tenant_resolver is None:
+                from ..paths import current_tenant_id_strict
+
+                tenant = current_tenant_id_strict()
+            else:
+                tenant = tenant_resolver()
+            if not tenant:
+                raise PermissionError("a selected knowledge workspace is required")
+            result = service.search_at_job_start(
+                tenant,
+                (
+                    actor_resolver()
+                    if actor_resolver is not None
+                    else "worker:knowledge-search"
+                ),
+                query=query,
+                purpose=purpose,
+                source_selectors=selectors,
+                limit=k,
+                job_id=(
+                    job_id_resolver()
+                    if job_id_resolver is not None
+                    else f"knowledge-{uuid.uuid4().hex}"
+                ),
+            )
+            blocks = []
+            for item in result["items"]:
+                reference = item["reference"]
+                citation = (
+                    f"{item['source']['source_ref']} · {reference['asset_id']} "
+                    f"· version {reference['version']}"
+                )
+                blocks.append(f"[{citation}]\n{str(item['summary']).strip()}")
+            if not blocks:
+                return (
+                    "No currently eligible governed knowledge matched. "
+                    "Request fresh access or evidence in Knowledge."
+                )
+            return "\n\n".join(blocks)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            return f"knowledge_search unavailable: {type(exc).__name__}"
 
     return Tool(
         name="knowledge_search",
         description=(
-            "Search this domain's uploaded documents for passages relevant to a "
-            "query. Returns the top matches with their source. Ground answers in "
-            "the business's own documents before answering from general knowledge."
+            "Search exact currently eligible source versions assigned to this domain. "
+            "Every result is tenant-, actor-, purpose-, action-, and job-start-bound."
         ),
         input_schema={
             "type": "object",

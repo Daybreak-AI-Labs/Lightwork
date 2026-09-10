@@ -45,7 +45,7 @@ def test_redacts_secret_named_keys():
 
 def test_collect_has_core_sections_and_is_json():
     bundle = support_bundle.collect()
-    for key in ("versions", "runtime", "readiness", "providers",
+    for key in ("versions", "runtime", "paths", "readiness", "providers",
                 "recent_failures", "config_redacted", "generated_at"):
         assert key in bundle
     # The whole bundle must serialize (no stray non-JSON objects).
@@ -58,6 +58,56 @@ def test_collect_config_is_redacted(monkeypatch):
         lambda: {"providers": {"openai": {"api_key": "sk-LEAKME"}}})  # pragma: allowlist secret
     bundle = support_bundle.collect()
     assert "sk-LEAKME" not in json.dumps(bundle["config_redacted"], default=str)
+
+
+def test_collect_never_exports_customer_authored_config_text(monkeypatch):
+    marker = "SYNTHETIC_UNAUTHORIZED_DOCUMENT_EXCERPT_91D4"
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda: {
+            "workflow": {
+                "prompt": marker,
+                "source_urls": ["https://private.example/document/customer-plan"],
+                "enabled": True,
+                "limit": 4,
+            }
+        },
+    )
+
+    config = support_bundle.collect()["config_redacted"]
+    serialized = json.dumps(config)
+
+    assert marker not in serialized
+    assert "private.example" not in serialized
+    assert "workflow" not in serialized
+    assert "prompt" not in serialized
+    assert "source_urls" not in serialized
+    assert config["type"] == "object"
+    assert config["configured_items"] == 1
+    assert '"configured_items": 4' in serialized
+    assert '"configured_items": 1' in serialized
+    assert "true" in serialized
+    assert "4" in serialized
+
+
+def test_config_topology_never_exports_customer_authored_dictionary_keys():
+    needles = [
+        "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "Customer private document sentence 8137",
+        "https://example.invalid/private-document/CASE-991",
+    ]
+    topology = support_bundle._config_topology(
+        {
+            needles[0]: True,
+            needles[1]: {"enabled": True},
+            needles[2]: 1,
+        }
+    )
+    serialized = json.dumps(topology)
+
+    assert all(needle not in serialized for needle in needles)
+    assert topology["configured_items"] == 3
+    assert all(len(row["key_sha256"]) == 64 for row in topology["entries"])
 
 
 def test_cli_support_writes_redacted_file(tmp_path, monkeypatch):
@@ -75,7 +125,7 @@ def test_cli_support_writes_redacted_file(tmp_path, monkeypatch):
     assert json.loads(text)["versions"]  # parseable + populated
 
 
-def test_collect_redacts_failed_job_errors(tmp_path, monkeypatch):
+def test_collect_categorizes_failed_job_errors_without_exporting_raw_text(tmp_path, monkeypatch):
     from maverick import job_queue
 
     monkeypatch.setattr(job_queue, "DEFAULT_DB", tmp_path / "jobs.db")
@@ -95,9 +145,57 @@ def test_collect_redacts_failed_job_errors(tmp_path, monkeypatch):
     assert "sk-live-POCSECRET1234567890" not in text
     assert "SuperSecretPass" not in text
     assert "AKIAABCDEFGHIJKLMNOP" not in text
-    last_error = bundle["recent_failures"]["failed_jobs"][0]["last_error"]
-    assert "[REDACTED:openai_key]" in last_error
-    assert "[REDACTED:url_credentials]" in last_error
+    failed = bundle["recent_failures"]["failed_jobs"]
+    assert failed == {
+        "count": 1,
+        "errors_recorded": 1,
+        "categories": {"permission_denied": 1},
+    }
+
+
+def test_collect_never_exports_customer_controlled_job_identifiers(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick import job_queue
+
+    customer_id = "customer-zephyr-case-72819"
+    customer_kind = "Customer-Zephyr-private-workflow"
+    monkeypatch.setattr(job_queue, "DEFAULT_DB", tmp_path / "jobs.db")
+    monkeypatch.setattr(
+        job_queue.JobQueue,
+        "list",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                id=customer_id,
+                kind=customer_kind,
+                last_error="request timed out",
+            )
+        ],
+    )
+
+    serialized = json.dumps(support_bundle.collect(), default=str)
+
+    assert customer_kind not in serialized
+    assert customer_id not in serialized
+    assert '"categories": {"timeout": 1}' in serialized
+
+
+def test_collect_never_exports_customer_document_excerpt_from_job_error(tmp_path, monkeypatch):
+    from maverick import job_queue
+
+    marker = "SYNTHETIC_UNAUTHORIZED_DOCUMENT_EXCERPT_7F3A"
+    monkeypatch.setattr(job_queue, "DEFAULT_DB", tmp_path / "jobs.db")
+    q = job_queue.JobQueue()
+    job_id = q.enqueue("document_parser", {})
+    claimed = q.claim()
+    assert claimed and claimed.id == job_id
+    q.fail(job_id, f"Parser error near customer document: {marker}", retry_after=None)
+
+    bundle = support_bundle.collect()
+    serialized = json.dumps(bundle, default=str)
+    assert marker not in serialized
+    assert "Parser error" not in serialized
+    assert "last_error" not in serialized
 
 
 def test_cli_support_tightens_existing_output_file_permissions(tmp_path, monkeypatch):

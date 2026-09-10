@@ -76,10 +76,15 @@ class Journey:
         self.downloads.mkdir()
         self.binary = self.install / "maverick-desktop.exe"
         self.runtime = self.install / "maverick.exe"
+        self.recovery_binary = self.install / "maverick-recovery-desktop.exe"
+        self.recovery_runtime = self.install / "maverick-recovery.exe"
+        self.recovery_installer = self.install / "Lightwork-recovery.msi"
+        self.active_binary = self.binary
         self.metadata = json.loads((workspace / "customer-artifacts/runtime-inventory.json").read_text(encoding="utf-8-sig"))
         self.debugger_port, self.driver_port = available_port(), available_port()
         self.view = WebView(self.driver_port)
         self.driver = None
+        self.driver_path = None
         self.app = None
         self.driver_log = None
         self.thumbprint = ""
@@ -129,8 +134,55 @@ class Journey:
         if result.returncode not in allowed:
             raise RuntimeError(f"Native fixture installer failed ({result.returncode}); MSI log retained.")
 
-    def start(self):
-        self.app = subprocess.Popen([str(self.binary)], env=self.env, stdin=subprocess.DEVNULL,
+    def start_driver(self, path: Path, *, append=False):
+        port = available_port() if append else self.driver_port
+        view = WebView(port)
+        log = (self.directory / "driver.log").open("ab" if append else "wb")
+        try:
+            if append:
+                log.write(b"\n--- WebDriver restarted after native relaunch ---\n")
+                log.flush()
+            driver = subprocess.Popen([str(path), f"--port={port}"], env=self.env,
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+        except BaseException:
+            log.close()
+            raise
+        self.driver_path, self.driver_port = path, port
+        self.view, self.driver, self.driver_log = view, driver, log
+
+    def stop_driver(self):
+        driver, log = self.driver, self.driver_log
+        self.driver = self.driver_log = None
+        primary = None
+        try:
+            if driver:
+                with contextlib.suppress(OSError):
+                    driver.kill()
+                driver.wait(timeout=15)
+        except BaseException as error:
+            primary = error
+        finally:
+            if log:
+                log.close()
+        if primary:
+            raise primary
+
+    def restart_driver_after_relaunch(self):
+        if not self.driver_path:
+            raise RuntimeError("The signed WebView driver path is unavailable.")
+        # The previous native process can disappear before WebDriver accepts a
+        # DELETE for its now-dead browser target. Reusing that driver leaves a
+        # stale session which cannot attach to the replacement WebView. End the
+        # local driver process without sending another browser command, then
+        # attach a fresh driver to the same installed app debugging endpoint.
+        self.view.session = ""
+        self.stop_driver()
+        self.start_driver(self.driver_path, append=True)
+        self.attach()
+
+    def start(self, binary: Path | None = None, *arguments: str):
+        self.active_binary = binary or self.binary
+        self.app = subprocess.Popen([str(self.active_binary), *arguments], env=self.env, stdin=subprocess.DEVNULL,
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.attach()
 
@@ -147,14 +199,15 @@ class Journey:
 
     def stop(self):
         primary = False
+        active_binary = getattr(self, "active_binary", self.binary)
         try:
-            windows = app_windows(self.binary)
+            windows = app_windows(active_binary)
             if windows:
-                menu(self.binary, "Quit Lightwork")
+                menu(active_binary, "Quit Lightwork")
                 deadline = time.monotonic() + 20
-                while app_windows(self.binary) and time.monotonic() < deadline:
+                while app_windows(active_binary) and time.monotonic() < deadline:
                     time.sleep(.25)
-                if app_windows(self.binary):
+                if app_windows(active_binary):
                     raise RuntimeError("The owned native app did not stop after Quit Lightwork.")
         except BaseException:
             primary = True
@@ -390,8 +443,8 @@ return {ready: document.readyState === 'complete', path, form_rejected: !!alert,
             observed = self.view.wait(lambda: self.transition_progress(old_pids), timeout=600)
             if observed != "replacement_ready":
                 raise RuntimeError("The native page reported an unsuccessful operation.")
-            self.view.close()
-            self.attach()
+            stage = "driver_reconnect"
+            self.restart_driver_after_relaunch()
             stage = "version_verification"
             self.assert_version(version if rollback else newer)
             stage = "completion_receipt"
@@ -475,6 +528,131 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
         self.view.screenshot(self.directory / "invalid-maintenance-authorization.png")
         self.record("invalid-maintenance-authorization-refused", passed=True)
 
+    def repair_damaged_core(self, marker: Path):
+        self.record("signed-native-core-repair")
+        self.stop()
+        for path in (self.recovery_runtime, self.recovery_binary, self.recovery_installer):
+            if not path.is_file() or path.is_symlink() or path.stat().st_size < 1:
+                raise RuntimeError("The installed package lacks a regular retained recovery artifact.")
+        expected_runtime = digest(self.runtime)
+        expected_native = digest(self.binary)
+        if (digest(self.recovery_runtime) != expected_runtime
+                or digest(self.recovery_binary) != expected_native
+                or digest(self.recovery_installer) != digest(self.base)):
+            raise RuntimeError("The installed recovery set differs from the signed base package and application bytes.")
+        channel = json.loads(command([str(self.recovery_binary), "--maintenance-channel"], env=self.env, timeout=30))
+        if (channel.get("version") != self.metadata["version"]
+                or channel.get("packaged_runtime") is not True):
+            raise RuntimeError("The retained native application could not establish its packaged release channel.")
+        self.runtime.unlink()
+        self.binary.write_bytes(b"synthetic corrupt native shell")
+        self.start(self.recovery_binary, "--maintenance-result")
+        self.view.wait(lambda: self.view.text("#installed-version") == self.metadata["version"], timeout=120)
+        self.view.click("#repair-install")
+        self.view.wait(lambda: "Repair version " + self.metadata["version"] in self.view.text("#update-version"), timeout=60)
+        if self.view.property("#install-update", "disabled") is not False:
+            raise RuntimeError("The reviewed same-version repair was not available without an unrelated upgrade grant.")
+        old_pids = {pid for _hwnd, pid in app_windows(self.recovery_binary)}
+        if not old_pids:
+            raise RuntimeError("The retained native recovery window is unavailable.")
+        self.view.click("#install-update")
+        stage = "process_relaunch"
+        try:
+            observed = self.view.wait(lambda: bool(app_windows(self.binary)), timeout=600)
+            if not observed:
+                raise RuntimeError("The repaired native application did not reopen.")
+            if app_windows(self.recovery_binary):
+                raise RuntimeError("The retained recovery application remained active after repair.")
+            stage = "driver_reconnect"
+            self.restart_driver_after_relaunch()
+            self.active_binary = self.binary
+            stage = "core_byte_verification"
+            self.assert_version(self.metadata["version"])
+            if (digest(self.runtime) != expected_runtime or digest(self.binary) != expected_native
+                    or digest(self.recovery_runtime) != expected_runtime
+                    or digest(self.recovery_binary) != expected_native
+                    or digest(self.recovery_installer) != digest(self.base)):
+                raise RuntimeError("The same-version repair did not restore every exact application and recovery byte.")
+            stage = "completion_receipt"
+            observed = self.view.wait(
+                lambda: self.transition_page_state("repaired " + self.metadata["version"]),
+                timeout=300,
+            )
+            if observed != "completed":
+                raise RuntimeError("The native page did not report the completed repair receipt.")
+            if marker.read_text(encoding="utf-8") != "before signed repair":
+                raise RuntimeError("The application repair changed the protected workspace marker.")
+        except (OSError, RuntimeError, KeyError, json.JSONDecodeError):
+            self.report["repair"] = {"stage": stage, **self.transition_diagnostic(old_pids)}
+            self.record("signed-native-core-repair")
+            raise RuntimeError("Native core repair did not complete; bounded repair diagnostics were retained.") from None
+        self.view.screenshot(self.directory / "signed-native-core-repair.png")
+        self.record("signed-native-core-repair", passed=True)
+
+    def repair_damaged_recovery_set(self, marker: Path):
+        self.record("signed-native-recovery-set-repair")
+        self.stop()
+        expected_runtime = digest(self.runtime)
+        expected_native = digest(self.binary)
+        if (digest(self.recovery_runtime) != expected_runtime
+                or digest(self.recovery_binary) != expected_native
+                or digest(self.recovery_installer) != digest(self.base)):
+            raise RuntimeError("The installed recovery set differs from the signed base package and application bytes.")
+        self.recovery_runtime.unlink()
+        self.recovery_binary.write_bytes(b"synthetic corrupt retained native shell")
+        self.recovery_installer.unlink()
+        self.start()
+        # The primary application opens on the dashboard; its maintenance page
+        # is reached through the real menu, as the signed upgrade journey does.
+        self.menu("Install & updates")
+        self.view.wait(lambda: self.view.text("#installed-version") == self.metadata["version"], timeout=120)
+        self.view.click("#repair-install")
+        self.view.wait(lambda: "Repair version " + self.metadata["version"] in self.view.text("#update-version"), timeout=60)
+        if self.view.property("#install-update", "disabled") is not False:
+            raise RuntimeError("The primary application did not offer its reviewed same-version repair.")
+        old_pids = {pid for _hwnd, pid in app_windows(self.binary)}
+        if not old_pids:
+            raise RuntimeError("The primary native application window is unavailable.")
+        self.view.click("#install-update")
+        stage = "process_relaunch"
+        try:
+            observed = self.view.wait(
+                lambda: any(pid not in old_pids for _hwnd, pid in app_windows(self.binary)),
+                timeout=600,
+            )
+            if not observed:
+                raise RuntimeError("The repaired primary application did not reopen.")
+            stage = "driver_reconnect"
+            self.restart_driver_after_relaunch()
+            self.active_binary = self.binary
+            stage = "recovery_byte_verification"
+            self.assert_version(self.metadata["version"])
+            if (digest(self.runtime) != expected_runtime or digest(self.binary) != expected_native
+                    or digest(self.recovery_runtime) != expected_runtime
+                    or digest(self.recovery_binary) != expected_native
+                    or digest(self.recovery_installer) != digest(self.base)):
+                raise RuntimeError("The primary repair did not restore every exact retained recovery byte.")
+            stage = "completion_receipt"
+            observed = self.view.wait(
+                lambda: self.transition_page_state("repaired " + self.metadata["version"]),
+                timeout=300,
+            )
+            if observed != "completed":
+                raise RuntimeError("The native page did not report the completed recovery-set repair receipt.")
+            if marker.read_text(encoding="utf-8") != "before signed repair":
+                raise RuntimeError("The recovery-set repair changed the protected workspace marker.")
+        except (OSError, RuntimeError, KeyError, json.JSONDecodeError):
+            self.report["recovery_set_repair"] = {
+                "stage": stage,
+                **self.transition_diagnostic(old_pids),
+            }
+            self.record("signed-native-recovery-set-repair")
+            raise RuntimeError(
+                "Native recovery-set repair did not complete; bounded repair diagnostics were retained."
+            ) from None
+        self.view.screenshot(self.directory / "signed-native-recovery-set-repair.png")
+        self.record("signed-native-recovery-set-repair", passed=True)
+
     def startup_failure(self):
         self.record("startup-support-with-missing-packaged-runtime")
         self.stop()
@@ -522,9 +700,7 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
             observed_driver = verified_driver_version(self.directory, version, command([str(driver_path), "--version"], timeout=15))
             self.report.update(driver_version=observed_driver, webview_runtime_version=version, driver_sha256=digest(driver_path),
                                base_msi_sha256=digest(self.base), candidate_msi_sha256=digest(self.candidate))
-            self.driver_log = (self.directory / "driver.log").open("wb")
-            self.driver = subprocess.Popen([str(driver_path), f"--port={self.driver_port}"], env=self.env,
-                stdin=subprocess.DEVNULL, stdout=self.driver_log, stderr=subprocess.STDOUT)
+            self.start_driver(driver_path)
             self.thumbprint = make_tls(self.directory)
             self.trust("trust")
             hosts = Path(os.environ["SystemRoot"]) / "System32/drivers/etc/hosts"
@@ -535,6 +711,9 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
                 tenant = self.state / "tenants/native-acceptance"
                 tenant.mkdir(parents=True, exist_ok=True)
                 marker = tenant / "native-acceptance-state.txt"
+                marker.write_text("before signed repair", encoding="utf-8")
+                self.repair_damaged_recovery_set(marker)
+                self.repair_damaged_core(marker)
                 marker.write_text("before signed upgrade", encoding="utf-8")
                 self.transition()
                 marker.write_text("after signed upgrade", encoding="utf-8")
@@ -542,8 +721,8 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
                 if marker.read_text(encoding="utf-8") != "before signed upgrade":
                     raise RuntimeError("The native rollback did not restore the captured workspace file.")
                 self.record("native-rollback-restored-fixture-state", passed=True)
-                if not {"/base.msi", "/next.msi"}.issubset(requests):
-                    raise RuntimeError("Native installation did not download both signed packages from its compiled HTTPS channel.")
+                if requests.count("/base.msi") < 3 or "/next.msi" not in requests:
+                    raise RuntimeError("Native repair, upgrade and rollback did not download their signed packages from the compiled HTTPS channel.")
                 self.report["https_routes"] = sorted(set(requests))
                 self.startup_failure()
             self.report["passed"] = True
@@ -559,14 +738,8 @@ return arguments[0] && result.includes(arguments[0]) ? 'completed' : 'pending';
                         ("base-uninstall", lambda: self.msi(self.base, "/x"))]
             for name, operation in cleanup:
                 self.cleanup_step(name, operation)
-            if self.driver:
-                def stop_driver():
-                    with contextlib.suppress(OSError):
-                        self.driver.kill()
-                    self.driver.wait(timeout=15)
-                self.cleanup_step("webview-driver", stop_driver)
-            if self.driver_log:
-                self.cleanup_step("driver-log", self.driver_log.close)
+            if self.driver or self.driver_log:
+                self.cleanup_step("webview-driver", self.stop_driver)
             self.password = ""
             self.report["journey_passed"] = self.report["passed"]
             self.report["passed"] = self.report["passed"] and not self.report["cleanup_errors"]

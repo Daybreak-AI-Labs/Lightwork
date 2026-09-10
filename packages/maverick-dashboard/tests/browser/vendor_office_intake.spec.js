@@ -22,6 +22,7 @@ async function freshCase(request,page){
 }
 async function selectPreview(page,name){await page.locator('#vo-upload').setInputFiles(path.join(fixtures,name));await page.locator('#vo-upload-submit').click();await expect(page.locator('#vo-message')).toContainText('Preview ready');}
 async function accept(page){await page.locator('#vo-upload-confirm').check();await page.locator('#vo-upload-accept').press('Enter');await expect(page.locator('#vo-message')).toContainText('Reviewed evidence added');}
+async function step(request,row,name,extra={}){const response=await request.post(`/api/v1/vendor-onboarding/cases/${row.id}/${name}`,{data:{expected_revision:row.revision,...extra}});expect(response.status()).toBe(200);return response.json();}
 
 test('authored Word and Excel evidence requires review, preserves failed work and cites original paragraphs and cells',async({page,request},info)=>{
   await page.setViewportSize({width:320,height:900});const row=await freshCase(request,page);
@@ -29,7 +30,7 @@ test('authored Word and Excel evidence requires review, preserves failed work an
   await expect(page.locator('#vo-upload-text')).toContainText('Model provenance is documented');
   await expect(page.locator('#vo-upload-text')).not.toContainText('Header outside');
   await expect(page.locator('#vo-upload-accept')).toBeDisabled();
-  expect(await page.locator('.vo-upload-confirm-label').evaluate(el=>getComputedStyle(el).display)).toBe('flex');
+  expect(await page.locator('label:has(#vo-upload-confirm)').evaluate(el=>getComputedStyle(el).display)).toBe('flex');
   const unchanged=await(await request.get('/api/v1/vendor-onboarding/cases/'+row.id)).json();
   expect(unchanged.revision).toBe(row.revision);expect(unchanged.uploads).toEqual([]);
   const hash=crypto.createHash('sha256').update(fs.readFileSync(path.join(fixtures,'northstar-policy.docx'))).digest('hex');
@@ -83,4 +84,60 @@ test('malformed Office rejection preserves other work and HTML access denial cle
   await expect(page.locator('#vo-message')).toContainText('Access to evidence upload is unavailable');
   await expect(page.locator('#vo-upload-text')).toHaveText('');await expect(page.locator('#vo-upload')).toHaveValue('');
   await expect(page.locator('#vo-upload-submit')).toBeDisabled();await expect(page.locator('#vo-upload-confirm')).not.toBeChecked();
+});
+
+test('active markup stays inert text and unsupported media never reaches an assessment',async({page,request},info)=>{
+  await page.setViewportSize({width:320,height:900});const row=await freshCase(request,page);
+  const active='<script>window.lightworkActiveMarkupExecuted=true</script><img src=x onerror="window.lightworkActiveMarkupExecuted=true">';
+  await page.locator('#vo-upload').setInputFiles({name:'active-markup.txt',mimeType:'text/plain',buffer:Buffer.from(active)});
+  await page.locator('#vo-upload-submit').click();await expect(page.locator('#vo-message')).toContainText('Preview ready');
+  await expect(page.locator('#vo-upload-text')).toContainText('<script>window.lightworkActiveMarkupExecuted=true</script>');
+  expect(await page.locator('#vo-upload-text script').count()).toBe(0);
+  expect(await page.evaluate(()=>window.lightworkActiveMarkupExecuted)).toBeUndefined();
+  await page.locator('#vo-upload-text').scrollIntoViewIfNeeded();await fits(page);await screenshot(page,info,'active-markup-inert-320.png');
+  await accept(page);await page.locator('#vo-collect').click();await page.locator('#vo-assess').click();
+  await expect(page.locator('#vo-assessment')).toContainText('Gap: no matching source passage');
+  expect(await page.evaluate(()=>window.lightworkActiveMarkupExecuted)).toBeUndefined();
+  const before=(await(await request.get('/api/v1/vendor-onboarding/cases/'+row.id)).json()).revision;
+  await page.locator('#vo-upload').setInputFiles({name:'unsupported.html',mimeType:'text/html',buffer:Buffer.from('<script>alert(1)</script>')});
+  await page.locator('#vo-upload-submit').click();await expect(page.locator('#vo-message')).toContainText('Choose a .txt, .pdf, .docx or .xlsx file');
+  expect((await(await request.get('/api/v1/vendor-onboarding/cases/'+row.id)).json()).revision).toBe(before);
+  expect(await page.evaluate(()=>window.lightworkActiveMarkupExecuted)).toBeUndefined();
+});
+
+test('reviewed evidence export shows bounded manifest at desktop and mobile before download',async({page,request},info)=>{
+  let response=await request.post('/api/v1/vendor-onboarding/cases',{data:{vendor_name:'Synthetic export browser review',document_id:'browser-policy',project:'VEND',purpose:'Synthetic local export review'}});
+  expect(response.status()).toBe(201);let row=await response.json();
+  row=await step(request,row,'collect-evidence');row=await step(request,row,'assess');
+  row=await step(request,row,'review',{decision:'approved',rationale:'Reviewed every available claim and retained gaps as unknown'});
+  row=await step(request,row,'prepare-action');row=await step(request,row,'approve-action',{
+    confirm:true,approval_binding_sha256:row.operation.approval_card.binding_sha256});
+  row=await step(request,row,'execute',{confirm:true});row=await step(request,row,'accept',{accepted:true,rationale:'Accepted bounded synthetic result'});
+  await page.setViewportSize({width:1280,height:900});await page.goto('/third-party/vendor-onboarding?case='+row.id);
+  await expect(page.locator('#vo-message')).toContainText('Linked request loaded');await expect(page.locator('#vo-export-preview')).toBeEnabled();
+  await page.locator('#vo-export-preview').click();await expect(page.locator('#vo-message')).toContainText('export preview ready');
+  await expect(page.locator('#vo-export-status')).toContainText('8 reviewed claims');await expect(page.locator('#vo-export-manifest')).toContainText('Included connected document');
+  await expect(page.locator('#vo-export-download')).toBeDisabled();await page.locator('#vo-export-status').scrollIntoViewIfNeeded();await fits(page);await screenshot(page,info,'evidence-export-1280.png');
+  await page.setViewportSize({width:320,height:900});await page.locator('#vo-export-status').scrollIntoViewIfNeeded();await fits(page);await screenshot(page,info,'evidence-export-320.png');
+  await page.locator('#vo-export-confirm').check();
+  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#vo-export-download').click()]);
+  expect(download.suggestedFilename()).toBe(`lightwork-evidence-${row.id}.json`);
+  const target=info.outputPath('reviewed-evidence-export.json');await download.saveAs(target);await info.attach('reviewed-evidence-export.json',{path:target,contentType:'application/json'});
+  const exported=JSON.parse(fs.readFileSync(target,'utf8'));
+  expect(exported.schema).toBe('lightwork.vendor-onboarding.evidence-export.v1');expect(exported.case.id).toBe(row.id);
+  expect(exported.claims).toHaveLength(8);expect(exported.manifest.included_count).toBe(1);expect(exported.manifest.withheld_count).toBe(0);
+  expect(JSON.stringify(exported)).not.toContain('browser-policy');
+  const reference=exported.manifest.included[0].reference;
+  const withheld={...exported,binding_sha256:'f'.repeat(64),
+    claims:exported.claims.map(claim=>({...claim,evidence_refs:[],citations:[],
+      withheld_evidence_refs:[...new Set([...(claim.withheld_evidence_refs||[]),...claim.evidence_refs])],
+      review_justification:claim.review_justification||'Human review retained the source-access limitation'})),
+    manifest:{schema:'lightwork.vendor-onboarding.evidence-export-manifest.v1',included:[],
+      withheld:[{reference,dependency_type:'external_evidence',disposition:'withheld',reason:'current_source_access_unavailable'}],
+      included_count:0,withheld_count:1,complete:false}};
+  await page.route('**/evidence-export-preview',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(withheld)}));
+  await page.locator('#vo-export-preview').click();await expect(page.locator('#vo-export-status')).toContainText('1 withheld');
+  await expect(page.locator('#vo-export-manifest')).toContainText('Withheld external evidence');
+  await expect(page.locator('#vo-export-manifest')).not.toContainText('browser-policy');
+  await fits(page);await screenshot(page,info,'evidence-export-withheld-320.png');
 });

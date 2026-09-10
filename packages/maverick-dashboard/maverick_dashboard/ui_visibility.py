@@ -39,11 +39,15 @@ from . import rbac
 # ``in_nav: False`` keeps a page governed (enforced + in the Settings matrix)
 # but out of the sidebar -- secondary composers/detail surfaces reached from a
 # primary page's own links, so the nav stays one entry per job.
+# ``scope: global`` uses the installation-wide role and permission in
+# request navigation and HTTP admission, never a tenant-local role grant.
 PAGES: tuple[dict, ...] = (
     {"path": "/workflow-readiness", "label": "Workflow readiness", "group": "Observe",
      "icon": "check", "floor": "view", "default": "view"},
     {"path": "/outcome-pilots", "label": "Workflow pilots", "group": "Operate",
      "icon": "bench", "floor": "operate", "default": "operate", "in_nav": False},
+    {"path": "/research", "label": "Research lab", "aliases": "experiments candidates evaluation",
+     "group": "Operate", "icon": "bench", "floor": "operate", "default": "operate"},
     {"path": "/project-reviews", "label": "Project team reviews", "group": "Operate",
      "icon": "check", "floor": "view", "default": "view", "in_nav": False},
     {
@@ -72,7 +76,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/goals",
-        "label": "Goals",
+        "label": "Tasks",
+        "aliases": "goals work tasks",
         "group": "Operate",
         "icon": "target",
         "floor": "view",
@@ -107,7 +112,8 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/deliverables",
-        "label": "Deliverables",
+        "label": "Results",
+        "aliases": "deliverables outcomes results",
         "group": "Operate",
         "icon": "templates",
         "floor": "view",
@@ -275,8 +281,17 @@ PAGES: tuple[dict, ...] = (
         "label": "Benchmarks",
         "group": "Advanced tools",
         "icon": "bench",
-        "floor": "view",
-        "default": "view",
+        "floor": "admin",
+        "default": "admin",
+        "scope": "global",
+    },
+    # Performance reads the same installation benchmark history and runs
+    # diagnostic measurements; it must not be a less-protected alternate URL.
+    {
+        "path": "/perf", "label": "Performance diagnostics",
+        "group": "Advanced tools", "icon": "bench",
+        "floor": "admin", "default": "admin", "scope": "global",
+        "in_nav": False,
     },
     {
         "path": "/flows/analytics",
@@ -286,25 +301,36 @@ PAGES: tuple[dict, ...] = (
         "floor": "view",
         "default": "view",
     },
-    # Cortex, the company brain: one governed recall surface over knowledge,
-    # skills, lessons, the Operating Record and fleet memory. Read-only at
-    # the page (every read is audited by the kernel); the audit tail it shows
-    # is a separate "audit" grant, and deposits need "operate" at the API.
+    # The legacy multi-source Cortex console remains a governed compatibility
+    # route, but Knowledge access is the single customer-facing navigation
+    # destination. Its document results use the APP10 registry boundary.
     {
         "path": "/cortex",
-        "label": "Cortex",
-        "group": "Observe",
+        "label": "Cortex memory diagnostics",
+        "aliases": "legacy cortex company memory diagnostics",
+        "group": "Advanced tools",
         "icon": "learned",
         "floor": "view",
         "default": "view",
+        "in_nav": False,
+    },
+    {
+        "path": "/knowledge-access",
+        "label": "Knowledge",
+        "aliases": "cortex company source freshness corrections exclusion deletion lineage rights",
+        "group": "Observe",
+        "icon": "learned",
+        "floor": "operate",
+        "default": "operate",
     },
     {
         "path": "/learning",
         "label": "Learning",
         "group": "Observe",
         "icon": "learned",
-        "floor": "view",
-        "default": "view",
+        "floor": "admin",
+        "default": "admin",
+        "scope": "global",
     },
     # The acquired-capabilities record, linked from the Learning page.
     {
@@ -1064,6 +1090,7 @@ PAGES: tuple[dict, ...] = (
     },
     {
         "path": "/settings",
+        "scope": "global",
         "label": "Settings",
         "group": "Admin",
         "icon": "settings",
@@ -1312,38 +1339,46 @@ def page_for(path: str) -> dict | None:
     return best
 
 
-def nav_groups(role: str | None) -> list[dict]:
+def nav_groups(
+    role: str | None, *, scope_roles: dict[str, str | None] | None = None,
+) -> list[dict]:
     """The sidebar nav for ``role``: ``[{label, links: [{href, label, icon}]}]``.
 
     Pages the role doesn't see are dropped; a group with nothing left is
     dropped whole. ``role=None`` (auth off) returns the full nav. Pages marked
     ``in_nav: False`` stay governed but never render a sidebar entry.
     """
-    return _grouped_links(role, include_folded=False)
+    return _grouped_links(role, include_folded=False, scope_roles=scope_roles)
 
 
-def finder_pages(role: str | None) -> list[dict]:
+def finder_pages(
+    role: str | None, *, scope_roles: dict[str, str | None] | None = None,
+) -> list[dict]:
     """The page finder's index for ``role``, shaped exactly like ``nav_groups``.
 
     Same RBAC / lockout / admin-override resolution as the sidebar, but
     ``in_nav`` is ignored: pages folded out of the rail (reached in-page or by
     URL) are still destinations the role may open, so they must be searchable.
     """
-    return _grouped_links(role, include_folded=True)
+    return _grouped_links(role, include_folded=True, scope_roles=scope_roles)
 
 
-def _grouped_links(role: str | None, *, include_folded: bool) -> list[dict]:
-    ov = overrides() if role is not None else {}
+def _grouped_links(
+    role: str | None, *, include_folded: bool,
+    scope_roles: dict[str, str | None] | None = None,
+) -> list[dict]:
+    ov = overrides() if role is not None or scope_roles else {}
     groups: list[dict] = []
     for page in PAGES:
         if not include_folded and not page.get("in_nav", True):
             continue
-        if role is not None:
-            if (page["path"], role) not in LOCKED:
-                if not eligible(page, role):
+        page_role = (scope_roles or {}).get(page.get("scope", "workspace"), role)
+        if page_role is not None:
+            if (page["path"], page_role) not in LOCKED:
+                if not eligible(page, page_role):
                     continue
-                cell = ov.get(page["path"], {}).get(role)
-                shown = cell if cell is not None else default_visible(page, role)
+                cell = ov.get(page["path"], {}).get(page_role)
+                shown = cell if cell is not None else default_visible(page, page_role)
                 if not shown:
                     continue
         # Merge by group label (first-seen order), not adjacency: a page whose

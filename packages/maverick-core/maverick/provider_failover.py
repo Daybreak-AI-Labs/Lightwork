@@ -41,8 +41,11 @@ def should_retry_llm_error(exc: Exception) -> bool:
     """
     non_retryable: list[type[BaseException]] = []
     try:
-        from .budget import BudgetExceeded
+        from .budget import BudgetExceeded, UsageAccountingError
         non_retryable.append(BudgetExceeded)
+        # A gateway that mis-reports usage has already billed the call; another
+        # model cannot repair its accounting, so failover must not mask it.
+        non_retryable.append(UsageAccountingError)
     except Exception:  # pragma: no cover -- import failure should not block retry policy
         pass
     try:
@@ -53,6 +56,11 @@ def should_retry_llm_error(exc: Exception) -> bool:
     try:
         from .preflight import PreflightFailed
         non_retryable.append(PreflightFailed)
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        from .provider_cost_cap import ProviderAccountingUnavailable
+        non_retryable.append(ProviderAccountingUnavailable)
     except Exception:  # pragma: no cover
         pass
     try:

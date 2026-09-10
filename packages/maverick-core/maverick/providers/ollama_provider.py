@@ -24,7 +24,7 @@ class OllamaClient(OpenAIClient):
         )
 
     def _build_kwargs(self, system, messages, tools, max_tokens, model,
-                      thinking_budget=None):
+                      thinking_budget=None, tool_choice=None):
         # A PROMOTED tenant adapter ([adapter_rung]) is a serving detail of THIS
         # provider: resolve base -> tuned model here, at request-build time, so
         # spec parsing, admin allow-lists, pricing, and telemetry upstream all
@@ -37,4 +37,5 @@ class OllamaClient(OpenAIClient):
         except Exception:  # pragma: no cover -- the rung must never break serving
             pass
         return super()._build_kwargs(system, messages, tools, max_tokens, model,
-                                     thinking_budget=thinking_budget)
+                                     thinking_budget=thinking_budget,
+                                     tool_choice=tool_choice)

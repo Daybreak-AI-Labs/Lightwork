@@ -68,6 +68,7 @@ def test_real_loopback_tls_serves_only_reviewed_manifests_and_packages_and_rejec
         assert status == 200 and headers['Content-Type'] == 'application/json'
         manifest = json.loads(body)
         assert manifest['version'] == '1.2.4'
+        assert manifest['installer_sha256'] == hashlib.sha256(candidate.read_bytes()).hexdigest()
         assert manifest['platforms']['windows-x86_64']['url'] == 'https://updates.example.test/next.msi'
         status, headers, body = tls_get(port, root, '/base.msi')
         assert status == 200 and body == base.read_bytes()

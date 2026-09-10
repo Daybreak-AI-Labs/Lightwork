@@ -14,12 +14,11 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _shell_consented(monkeypatch):
+def _shell_consented(fresh_human_decision):
     """These tests exercise git-internals BLOCKING through the shell tool;
-    consent to running the shell is a given, stated explicitly so the
-    secure-by-default posture (consent fail-closed for high-risk actions)
-    tests the same behavior the legacy default did."""
-    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    the shell's exact-approval permit needs a fresh human decision, which
+    the shared fixture supplies so the blocking rules are what is tested."""
+    del fresh_human_decision
 
 
 @pytest.fixture

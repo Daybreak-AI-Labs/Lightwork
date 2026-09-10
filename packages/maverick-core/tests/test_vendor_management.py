@@ -136,9 +136,14 @@ def test_onetrust_import_maps_tiers_and_never_overwrites():
         ",broken,Tier 2,carol\n"
         "Umbrella,security,unheard-of,dave\n"
     )
-    imported = vm.import_onetrust_vendors(csv_text, imported_by="ops")
-    names = {row["name"] for row in imported}
+    result = vm.import_onetrust_vendors(csv_text, imported_by="ops")
+    names = {row["name"] for row in result["imported"]}
     assert names == {"Initech", "Umbrella"}
+    # Every dropped row is reported with why, keyed by its 1-based data row.
+    assert [(s["row"], s["reason"]) for s in result["skipped"]] == [
+        (2, "duplicate"), (3, "missing_name"),
+    ]
+    assert result["skipped"][0]["name"] == "Globex"
     by_name = {row["name"]: row for row in vm.list_vendors()}
     assert by_name["Initech"]["criticality"] == "high"       # Tier 1
     assert by_name["Umbrella"]["criticality"] == "medium"    # unknown tier
@@ -146,6 +151,39 @@ def test_onetrust_import_maps_tiers_and_never_overwrites():
     # The record already here stays the record of truth.
     assert by_name["Globex"]["criticality"] == "critical"
     assert by_name["Globex"]["id"] == existing["id"]
+
+
+def test_onetrust_import_reports_rejected_and_capacity_rows(monkeypatch):
+    """W4-98: a 300-character name, an already-registered vendor and a full
+    register used to vanish identically; each now carries its own reason so
+    a truncated import cannot pass for success."""
+    _register("Globex")
+    long_name = "V" * 300
+    csv_text = (
+        "Vendor Name,Vendor Type,Inherent Risk,Business Owner\n"
+        "Initech,hosting,Tier 1,alice\n"
+        f"{long_name},analytics,Tier 3,bob\n"
+        "Globex,analytics,Tier 3,bob\n"
+    )
+    result = vm.import_onetrust_vendors(csv_text, imported_by="ops")
+    assert [r["name"] for r in result["imported"]] == ["Initech"]
+    assert [(s["row"], s["reason"]) for s in result["skipped"]] == [
+        (2, "invalid"), (3, "duplicate"),
+    ]
+    invalid = result["skipped"][0]
+    assert "name must be 1-256 characters" in invalid["detail"]
+    assert len(invalid["name"]) == 256          # bounded echo of the offending value
+    assert {s["reason"] for s in result["skipped"]} <= set(vm.IMPORT_SKIP_REASONS)
+
+    # Capacity exhaustion is its own reason, not a silent drop.
+    monkeypatch.setattr(vm, "_MAX_RECORDS", 2)
+    result = vm.import_onetrust_vendors(
+        "Vendor Name,Vendor Type\nWayne,security\nStark,defense\n", imported_by="ops",
+    )
+    assert [r["name"] for r in result["imported"]] == []
+    assert [(s["row"], s["reason"]) for s in result["skipped"]] == [
+        (1, "capacity"), (2, "capacity"),
+    ]
 
 
 def test_contracts_track_renewals_for_the_alert_digest():

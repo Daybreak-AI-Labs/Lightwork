@@ -279,7 +279,8 @@ def test_write_config_self_harness_ships_production_floors(tmp_path: Path, monke
               "semantic_mining", "efficacy_review", "promote_as_canary",
               "auto_run", "metamorphic", "relapse_failure_share",
               "calibrate_judge", "transfer_auto", "corpus_harvest", "store",
-              "candidates_per_signature", "retire_after_days"):
+              "candidates_per_signature", "retire_after_days", "holdout_ledger",
+              "holdout_container_image", "holdout_require_independent_custody"):
         assert k not in parsed["self_harness"]
 
 
@@ -290,6 +291,9 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
         "self_harness": True,
         "self_harness_eval_corpus": "/etc/maverick/corpus.json",
         "self_harness_eval_budget": 2.5,
+        "self_harness_holdout_ledger": "/protected/self-harness-holdout.db",
+        "self_harness_holdout_container_image": "sha256:" + "a" * 64,
+        "self_harness_require_independent_custody": True,
         "self_harness_bucket_domain": True,
         "self_harness_semantic_mining": True,
         "self_harness_efficacy_review": True,
@@ -307,6 +311,9 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
     sh = parsed["self_harness"]
     assert sh["eval_corpus"] == "/etc/maverick/corpus.json"
     assert sh["eval_budget_dollars"] == 2.5
+    assert sh["holdout_ledger"] == "/protected/self-harness-holdout.db"
+    assert sh["holdout_container_image"] == "sha256:" + "a" * 64
+    assert sh["holdout_require_independent_custody"] is True
     assert sh["mine_bucket_by"] == ["domain"]
     assert sh["semantic_mining"] is True
     assert sh["efficacy_review"] is True
@@ -326,6 +333,9 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
     resolved = config.get_self_harness()
     assert resolved["eval_corpus"] == "/etc/maverick/corpus.json"
     assert resolved["eval_budget_dollars"] == 2.5
+    assert resolved["holdout_ledger"] == "/protected/self-harness-holdout.db"
+    assert resolved["holdout_container_image"] == "sha256:" + "a" * 64
+    assert resolved["holdout_require_independent_custody"] is True
     assert resolved["mine_bucket_by"] == ("domain",)
     assert resolved["semantic_mining"] is True
     assert resolved["efficacy_review"] is True

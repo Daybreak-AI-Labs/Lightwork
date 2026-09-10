@@ -44,10 +44,35 @@ def test_lang_param_translates_chrome_and_sets_cookie():
     # than repeated on the final ``/start`` response.
     r = client.get("/overview", params={"lang": "fr"})
     assert r.status_code == 200
-    assert 'lang="fr"' in r.text
+    # W3-73: the page body is English, so <html lang> says so; the chrome
+    # strings that ARE translated carry their own lang attribute.
+    assert '<html lang="en" dir="ltr">' in r.text
+    assert '<html lang="fr"' not in r.text
+    assert 'lang="fr">Aller au contenu</a>' in r.text
+    assert 'lang="fr">Police</span>' in r.text
+    assert 'lang="fr">auto-hébergé</span>' in r.text
     assert "mvk_lang=fr" in r.headers.get("set-cookie", "")
     r2 = client.get("/overview", params={"lang": "ja"})
-    assert 'lang="ja"' in r2.text
+    assert '<html lang="en" dir="ltr">' in r2.text
+    assert 'lang="ja">コンテンツへスキップ</a>' in r2.text
+    # English selection: no per-element lang attributes at all.
+    r3 = client.get("/overview", params={"lang": "en"})
+    assert '<html lang="en" dir="ltr">' in r3.text
+    assert 'lang="en">' not in r3.text
+
+
+def test_rtl_selection_keeps_direction_but_declares_the_english_body():
+    r = client.get("/overview", params={"lang": "ar"})
+    assert r.status_code == 200
+    assert '<html lang="en" dir="rtl">' in r.text
+    assert 'lang="ar">تخطي إلى المحتوى</a>' in r.text
+
+
+def test_content_lang_declares_only_translated_bodies():
+    assert i18n.content_lang("en") == "en"
+    for lang in ("fr", "de", "ja", "zh", "ar"):
+        assert i18n.content_lang(lang) == "en"
+    assert frozenset({"en"}) == i18n.CONTENT_LANGS
 
 
 def test_language_selector_is_not_rendered():

@@ -319,11 +319,12 @@ class TestReadFileOpaqueGuard:
 
 class TestShellOpaqueGuard:
     @pytest.fixture(autouse=True)
-    def _shell_consented(self, monkeypatch):
+    def _shell_consented(self, fresh_human_decision):
         # These tests exercise the OPAQUE-mode guard through the shell
-        # tool; consent to running the shell is a given, stated so the
-        # secure posture tests the same guard the legacy default did.
-        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+        # tool; the shell's exact-approval permit needs a fresh human
+        # decision, supplied by the shared fixture so the guard itself is
+        # what is under test.
+        del fresh_human_decision
 
     def _make_sandbox(self, tmp_path):
         class _Sandbox:

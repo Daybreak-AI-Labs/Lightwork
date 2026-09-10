@@ -62,7 +62,12 @@ def complete_case(service, context, row):
         "Synthetic reviewer accepts the restricted pilot and documents unresolved gaps.",
         corrections={qid: {"answer": "unknown", "note": "Require independent verification."}})
     row = service.prepare_action(context, row["id"], row["revision"])
-    row = service.approve_action(context, row["id"], row["revision"])
+    row = service.approve_action(
+        context,
+        row["id"],
+        row["revision"],
+        row["operation"]["approval_card"]["binding_sha256"],
+    )
     row = service.execute(context, row["id"])
     if row["stage"] == "reconciliation_required":
         row = service.reconcile(context, row["id"])

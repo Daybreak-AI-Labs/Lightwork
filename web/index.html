@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Lightwork — the governed, self-hosted AI agent runtime for enterprises</title>
-<meta name="description" content="The governed, self-hosted AI agent runtime for regulated enterprises. Multi-agent swarm with RBAC, a tamper-evident audit trail, encryption-at-rest, and SIEM export. Self-host or air-gap; your models; a hard budget cap." />
+<title>Lightwork — the governed AI workforce platform for regulated enterprises</title>
+<meta name="description" content="Lightwork is a governed, self-improving AI workforce platform for regulated enterprises: specialist agents across 53 business suites, a closed learning lifecycle that proves each improvement before it ships, and an Operating Record built to survive an audit. Self-hosted, on your models, under a hard budget cap." />
 <meta property="og:title" content="Lightwork" />
-<meta property="og:description" content="The governed AI agent runtime for enterprises — self-hosted, tamper-evident audit trail, RBAC, your models, a hard budget cap." />
+<meta property="og:description" content="The governed AI workforce platform for regulated enterprises — provable learning, an audit-grade Operating Record, self-hosted, your models, a hard budget cap." />
 <meta property="og:type" content="website" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a7f37'/%3E%3Ctext x='16' y='22' font-family='Helvetica' font-weight='700' font-size='18' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E" />
+<link rel="icon" href="daybreak-logo.jpg" />
+<link rel="apple-touch-icon" href="daybreak-logo.jpg" />
 <style>
   :root {
     --bg: #ffffff;
@@ -80,7 +81,7 @@
   .btn.primary:hover { background: var(--accent-hover); }
   .btn.secondary { background: transparent; color: var(--text); border-color: var(--border); }
   .btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
-  .platform-note { color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
+  .note { color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
 
   h2 { font-size: 1.5rem; margin: 0 0 1.5rem; font-weight: 700; }
   .feature-grid {
@@ -96,28 +97,10 @@
   }
   .feature h3 { margin: 0 0 0.5rem; font-size: 1.05rem; font-weight: 600; }
   .feature p { margin: 0; color: var(--muted); }
-
-  pre {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1rem 1.25rem;
-    overflow-x: auto;
-    font: 0.9rem ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace;
-  }
-  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--panel); padding: 0.1em 0.35em; border-radius: 3px; }
-
-  .terminal {
-    background: #0d1117;
-    color: #e6edf3;
-    border-radius: 8px;
-    padding: 1.25rem;
-    font: 0.9rem ui-monospace, SFMono-Regular, Menlo, monospace;
-    line-height: 1.6;
-    overflow-x: auto;
-  }
-  .terminal .prompt { color: #3fb950; }
-  .terminal .out { color: #9aa3ad; }
+  .deploy { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+  .deploy > div { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; }
+  .deploy h3 { margin: 0 0 0.35rem; font-size: 1rem; font-weight: 600; }
+  .deploy p { margin: 0; color: var(--muted); font-size: 0.95rem; }
 
   .audience { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
   .audience > div { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
@@ -141,69 +124,63 @@
   <span class="brand">Lightwork</span>
   <nav>
     <a href="#what">What</a>
-    <a href="#install">Install</a>
+    <a href="#deploy">Deploy</a>
     <a href="#audience">Who</a>
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork">GitHub</a>
+    <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Docs</a>
   </nav>
 </header>
 
 <main id="content">
   <section class="hero">
-    <h1>The governed AI agent runtime for regulated enterprises.</h1>
-    <p class="lead">Give it a goal. A swarm of specialist sub-agents plans, runs in parallel, and verifies the result — self-hosted in your environment, every action authorized, every step in a tamper-evident audit log, under a hard budget cap.</p>
+    <h1>The governed AI workforce platform for regulated enterprises.</h1>
+    <p class="lead">Lightwork gives your organization a workforce of specialist AI agents that plan, act and verify inside your governance: every action authorized, every step on an audit-grade Operating Record, and a learning lifecycle that proves each improvement before it ships. Self-hosted, on your models, under a hard budget cap.</p>
     <div class="cta-row">
-      <a id="primary-download" class="btn primary" href="https://github.com/Daybreak-AI-Labs/Lightwork/releases/latest">Download</a>
-      <a class="btn secondary" href="https://github.com/Daybreak-AI-Labs/Lightwork">Request access</a>
+      <!-- Commercial product: access is granted per engagement. Point this at
+           the access-request / demo form when one exists. -->
+      <a class="btn primary" href="https://github.com/Daybreak-AI-Labs/Lightwork">Request access</a>
+      <a class="btn secondary" href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Read the docs</a>
     </div>
-    <p class="platform-note" id="platform-note">Detecting your platform…</p>
+    <p class="note">Licensed per organization. Delivered from a reviewed, signed release — never a public package index.</p>
   </section>
 
   <section id="what">
     <h2>What it does</h2>
     <div class="feature-grid">
       <div class="feature">
-        <h3>Plans before it acts</h3>
-        <p>An orchestrator spawns specialised sub-agents (researcher, coder, writer, verifier) and runs them in parallel where possible.</p>
+        <h3>A workforce, not a chatbot</h3>
+        <p>2,031 specialist agent packs across 53 business suites — finance, legal, privacy, security, GRC and more — each sealed in its own compartment with an explicit tool and knowledge envelope. A breach in one domain never reaches another.</p>
       </div>
       <div class="feature">
-        <h3>You pick the model</h3>
-        <p>12 providers — Anthropic, OpenAI, Gemini, OpenRouter, Ollama, DeepSeek, Bedrock, Azure, xAI, Moonshot, and self-hosted (TGI / vLLM). Per role: orchestrator on Opus, summariser on Haiku.</p>
+        <h3>Governed by default</h3>
+        <p>RBAC, capability tokens, per-tool ACLs, consent gates, human review checkpoints and an emergency stop bound every action. Agent Shield screens every prompt, tool call and output; enterprise mode adds an egress lock so even a successful prompt injection cannot move data out.</p>
       </div>
       <div class="feature">
-        <h3>Governed &amp; access-controlled</h3>
-        <p>RBAC, capability tokens, per-tool ACLs, consent gates, and a kill switch bound every action. In Enterprise mode an egress lock means even a successful prompt-injection can't move data out of your boundary; Agent Shield also screens every prompt, tool call, and output.</p>
+        <h3>Learning you can prove</h3>
+        <p>A closed learning lifecycle — dreaming, hindsight and proof — with snapshot and rollback and a signed learning audit. Every improvement is evidenced before it ships and reversible after, so the workforce gets better without drifting out of policy.</p>
       </div>
       <div class="feature">
-        <h3>Budget is mandatory</h3>
-        <p>Per-run dollar cap, wall-clock cap, tool-call cap. The kernel refuses to bust the budget. No surprise $200 bills.</p>
+        <h3>The Operating Record</h3>
+        <p>A signed, hash-chained, append-only record of what every agent did, with SIEM export, encryption at rest and DSAR support: SOC 2-aligned evidence built to survive a security review, not a log you hope nobody reads.</p>
       </div>
       <div class="feature">
-        <h3>Self-host &amp; air-gap</h3>
-        <p>Runs entirely in your environment — laptop, VPC, Kubernetes, or a disconnected network with no required data egress. Reachable across 12 channels (Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice + WhatsApp, SMS, iMessage).</p>
+        <h3>Your models, your budget</h3>
+        <p>Twelve providers — Anthropic, OpenAI, Gemini, Bedrock, Azure, self-hosted and more — routed per role. Per-run dollar, wall-clock and tool-call caps the kernel refuses to bust. No surprise bills.</p>
       </div>
       <div class="feature">
-        <h3>Audit-ready &amp; compliant</h3>
-        <p>Signed, hash-chained, append-only audit log with SIEM export, encryption-at-rest, and DSAR — SOC2-aligned evidence built to survive a security review. No telemetry; your data never leaves your environment.</p>
+        <h3>Fleet memory for the agents you already run</h3>
+        <p>Agents built on Agentforce, Bedrock Agents, Copilot Studio or LangGraph plug into the same memory, governance and Operating Record, so one platform governs the whole fleet.</p>
       </div>
     </div>
   </section>
 
-  <section id="install">
-    <h2>Install</h2>
-    <pre id="install-cmd">git clone https://github.com/Daybreak-AI-Labs/Lightwork &amp;&amp; cd Lightwork
-git checkout --detach &lt;reviewed-full-40-character-commit-sha&gt;
-pip install -e ./packages/maverick-core -e ./apps/installer-cli
-maverick init</pre>
-    <p class="platform-note">Install from a reviewed source commit. The Lightwork distribution names are not yet reserved on public PyPI, so public-index installation is disabled until those namespaces are secured. Requires Python 3.10+.</p>
-
-    <div class="terminal" aria-label="Terminal session example">
-      <span class="prompt">$</span> git checkout --detach &lt;reviewed-full-40-character-commit-sha&gt;<br>
-      <span class="out">  HEAD is now at the reviewed Lightwork commit</span><br>
-      <span class="prompt">$</span> pip install -e ./packages/maverick-core -e ./apps/installer-cli<br>
-      <span class="prompt">$</span> maverick init<br>
-      <span class="out">  How do you want to set this up?</span><br>
-      <span class="out">    consumer  Four questions, safe defaults. About a minute.</span><br>
-      <span class="out">    advanced  Pick every model, channel, safety level, budget.</span><br>
+  <section id="deploy">
+    <h2>Deploy where you must</h2>
+    <div class="deploy">
+      <div><h3>Desktop</h3><p>Native installers for Windows, macOS and Linux; a guided setup in the app.</p></div>
+      <div><h3>Container</h3><p>A single image for Docker or your existing orchestration.</p></div>
+      <div><h3>Always-on server</h3><p>A VPS bootstrap that installs, configures and runs it as a service.</p></div>
+      <div><h3>Kubernetes</h3><p>A Helm chart, with Postgres and single sign-on for managed, high-availability estates.</p></div>
+      <div><h3>Air-gapped</h3><p>Runs with no required data egress; your data never leaves your environment.</p></div>
     </div>
   </section>
 
@@ -211,21 +188,30 @@ maverick init</pre>
     <h2>Who it's for</h2>
     <div class="audience">
       <div>
-        <h3>Security &amp; compliance teams</h3>
-        <p>Self-host on your own infrastructure with governance on by default: RBAC, capability scoping, a tamper-evident audit trail, encryption-at-rest, and SIEM export.</p>
+        <h3>Compliance &amp; security leaders</h3>
+        <p>Governance on by default and evidence that stands up to an audit.</p>
         <ul>
-          <li>Deployable air-gapped — no required data egress</li>
-          <li>Signed, verifiable audit log for review</li>
-          <li>SOC2-aligned evidence + DSAR built in</li>
+          <li>RBAC, capability scoping, consent gates and an emergency stop</li>
+          <li>Signed, verifiable Operating Record with SIEM export</li>
+          <li>SOC 2-aligned evidence, encryption at rest, DSAR built in</li>
         </ul>
       </div>
       <div>
-        <h3>Engineers + power users</h3>
-        <p>Advanced mode exposes every knob: per-role model assignment, custom MCP servers, plugin allowlist, per-tool rate limits, retention, persona, notifications, full sandbox + channel matrix.</p>
+        <h3>Operations &amp; finance leaders</h3>
+        <p>Specialist agents for the work your departments already do, under budgets you set.</p>
         <ul>
-          <li>Plugin SDK with <code>maverick plugin new</code></li>
-          <li>Programmatic REST API at <code>/api/v1</code></li>
-          <li>MCP server in both directions</li>
+          <li>Ready-made agent packs per department and function</li>
+          <li>Spend, savings and workforce boards for oversight</li>
+          <li>Hard per-run caps and per-workspace daily allowances</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Platform teams</h3>
+        <p>One governed platform for the agents you build and the ones you buy.</p>
+        <ul>
+          <li>REST API, MCP in both directions, plugin SDK</li>
+          <li>Per-role model routing across twelve providers</li>
+          <li>Fleet memory for external agent runtimes</li>
         </ul>
       </div>
     </div>
@@ -234,35 +220,9 @@ maverick init</pre>
 
 <footer>
   <p>
-    Proprietary — commercially licensed.
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork">Source on GitHub</a> ·
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Docs</a> ·
-    <a href="https://github.com/Daybreak-AI-Labs/Lightwork/issues">Issues</a>
+    Lightwork by Daybreak AI Labs · Proprietary — commercially licensed.
+    <a href="https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/getting-started.md">Docs</a>
   </p>
 </footer>
-
-<script>
-  // Lightweight OS detection drives the primary CTA. Falls back to
-  // "all releases" if we can't be sure.
-  (function () {
-    var ua = (navigator.userAgent || "").toLowerCase();
-    var note = document.getElementById("platform-note");
-    var dl = document.getElementById("primary-download");
-    // Native installers live on the latest release; their filenames are
-    // version-stamped, so we link to the release page (the button's href)
-    // and let the visitor grab the file for their OS, rather than guess an
-    // exact asset URL that breaks every release.
-    var os = null;
-    if (ua.indexOf("win") !== -1) os = "Windows";
-    else if (ua.indexOf("mac") !== -1) os = "macOS";
-    else if (ua.indexOf("linux") !== -1) os = "Linux";
-    if (os) {
-      dl.textContent = "Download for " + os;
-      if (note) note.textContent = "Detected " + os + " — grab the " + os + " installer on the release page.";
-    } else if (note) {
-      note.textContent = "Pick the installer for your OS on the latest release page.";
-    }
-  })();
-</script>
 </body>
 </html>
