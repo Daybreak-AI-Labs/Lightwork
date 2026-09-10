@@ -20,15 +20,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **Operator workbenches are held back from customers until they are
-  ready** — 24 tenant-scoped consoles (consent, privacy data discovery and
-  DROP, data-use governance, AI evidence analysis, AI entity tasks, governance
-  agents and inventory, assessment evidence, cloud-agent governance, vendor
-  onboarding, contracts, executive reports, the GRC studio, continuous
-  evidence, the agent control plane, the evolution ledger, the document vault)
-  and the Research lab carry `ready: False` in the page registry: their routes
-  and permission gates stay, but they appear in no sidebar, page finder or
-  Settings visibility matrix. The Autonomous Compliance landing links only
-  offered modules. The AI Governance page no longer shows a CLI hint.
+  ready** — 44 operator consoles (the consent, privacy, data-use, AI
+  oversight, third-party and compliance workbenches of record ids,
+  verification fingerprints and JSON request bodies, plus the agent control
+  plane, the evolution ledger and the document vault) and the Research lab
+  carry `ready: False` in the page registry: their routes and permission
+  gates stay, but they appear in no sidebar, page finder or Settings
+  visibility matrix. The Autonomous Compliance landing links only offered
+  modules and drops a suite with none. The AI Governance page no longer
+  shows a CLI hint.
 - **The first administrator gets a workspace, not a dead end** — a signed-in
   global administrator who reaches a tenant gate on an installation with no
   workspace has the one-click `local` workspace created and selected and is
